@@ -1,6 +1,7 @@
-const win32 = @import("std").os.windows;
-
-extern "user32" fn MessageBoxA(?win32.HWND, [*:0]const u8, [*:0]const u8, u32) callconv(win32.WINAPI) i32;
+const win32 = struct {
+    usingnamespace @import("win32").foundation;
+    usingnamespace @import("win32").ui.windows_and_messaging;
+};
 
 pub export fn wWinMain(hInstance: ?win32.HINSTANCE, hPrevInstance: ?win32.HINSTANCE, lpCmdLine: ?win32.PWSTR, nCmdShow: c_int) c_int {
     _ = hInstance;
@@ -8,7 +9,7 @@ pub export fn wWinMain(hInstance: ?win32.HINSTANCE, hPrevInstance: ?win32.HINSTA
     _ = lpCmdLine;
     _ = nCmdShow;
 
-    _ = MessageBoxA(null, "This is handmade!", "Handmade Zig", 0);
+    _ = win32.MessageBoxA(null, "This is handmade!", "Handmade Zig", win32.MB_ICONINFORMATION);
 
     return 0;
 }
