@@ -3,6 +3,7 @@ const win32 = struct {
     usingnamespace @import("win32").system.diagnostics.debug;
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").ui.windows_and_messaging;
+    usingnamespace @import("win32").graphics.gdi;
 };
 
 pub const UNICODE = true;
@@ -27,6 +28,21 @@ fn Wndproc(
         },
         win32.WM_ACTIVATEAPP => {
             win32.OutputDebugStringA("WM_ACTIVATEAPP\n");
+        },
+        win32.WM_PAINT => {
+            var paint: win32.PAINTSTRUCT = undefined;
+            const deviceContext: ?win32.HDC = win32.BeginPaint(window, &paint);
+            if (deviceContext != null) {
+                _ = win32.PatBlt(
+                    deviceContext,
+                    paint.rcPaint.left,
+                    paint.rcPaint.top,
+                    paint.rcPaint.right - paint.rcPaint.left,
+                    paint.rcPaint.bottom - paint.rcPaint.top,
+                    win32.BLACKNESS,
+                );
+            }
+            _ = win32.EndPaint(window, &paint);
         },
         else => {
             result = win32.DefWindowProc(window, message, wParam, lParam);
