@@ -10,3 +10,8 @@ Dependencies are setup as submodules, after cloning the repo you must fetch them
 git submodule init
 git submodule update
 ```
+
+## Debugging
+The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [CodeLLDB extension](https://github.com/vadimcn/codelldb) in VS Code.
+
+OutputDebugString is ignored by lldb, use [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview) to see those messages.
