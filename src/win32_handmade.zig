@@ -71,7 +71,7 @@ pub export fn wWinMain(
         .cbWndExtra = 0,
         .hInstance = instance,
         .hIcon = null,
-        .hCursor = null,
+        .hCursor = win32.LoadCursorW(null, win32.IDC_ARROW),
         .hbrBackground = null,
         .lpszMenuName = null,
         .lpszClassName = win32.L("HandmadeZigWindowClass"),
