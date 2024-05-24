@@ -65,7 +65,7 @@ pub export fn wWinMain(
     win32.OutputDebugStringA("wWinMain\n");
 
     const windowClass: win32.WNDCLASSW = .{
-        .style = .{ .OWNDC = 1, .HREDRAW = 1, .VREDRAW = 1 },
+        .style = .{},
         .lpfnWndProc = Wndproc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
