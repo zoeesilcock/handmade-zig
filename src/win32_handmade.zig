@@ -9,21 +9,21 @@ const win32 = struct {
 pub const UNICODE = true;
 var running: bool = false;
 
-var bitmapInfo: win32.BITMAPINFO = undefined;
-var bitmapMemory: ?*anyopaque = undefined;
-var bitmapHandle: ?win32.HBITMAP = undefined;
-var bitmapDeviceContext: win32.HDC = undefined;
+var bitmap_infooo: win32.BITMAPINFO = undefined;
+var bitmap_memory: ?*anyopaque = undefined;
+var bitmap_handle: ?win32.HBITMAP = undefined;
+var bitmap_device_context: win32.HDC = undefined;
 
 fn resizeDBISection(width: i32, height: i32) void {
-    if (bitmapHandle) |handle| {
+    if (bitmap_handle) |handle| {
         _ = win32.DeleteObject(handle);
     }
 
-    if (bitmapDeviceContext == undefined) {
-        bitmapDeviceContext = win32.CreateCompatibleDC(undefined);
+    if (bitmap_device_context == undefined) {
+        bitmap_device_context = win32.CreateCompatibleDC(undefined);
     }
 
-    bitmapInfo = win32.BITMAPINFO{
+    bitmap_infooo = win32.BITMAPINFO{
         .bmiHeader = win32.BITMAPINFOHEADER{
             .biSize = @sizeOf(win32.BITMAPINFOHEADER),
             .biWidth = width,
@@ -40,11 +40,11 @@ fn resizeDBISection(width: i32, height: i32) void {
         .bmiColors = undefined,
     };
 
-    bitmapHandle = win32.CreateDIBSection(
-        bitmapDeviceContext,
-        &bitmapInfo,
+    bitmap_handle = win32.CreateDIBSection(
+        bitmap_device_context,
+        &bitmap_infooo,
         win32.DIB_RGB_COLORS,
-        &bitmapMemory,
+        &bitmap_memory,
         null,
         0,
     );
@@ -61,8 +61,8 @@ fn updateWindow(deviceContext: ?win32.HDC, x: i32, y: i32, width: i32, height: i
         y,
         width,
         height,
-        bitmapMemory,
-        &bitmapInfo,
+        bitmap_memory,
+        &bitmap_infooo,
         win32.DIB_RGB_COLORS,
         win32.SRCCOPY,
     );
@@ -78,10 +78,10 @@ fn Wndproc(
 
     switch (message) {
         win32.WM_SIZE => {
-            var clientRect: win32.RECT = undefined;
-            _ = win32.GetClientRect(window, &clientRect);
-            const width = clientRect.right - clientRect.left;
-            const height = clientRect.bottom - clientRect.top;
+            var client_rect: win32.RECT = undefined;
+            _ = win32.GetClientRect(window, &client_rect);
+            const width = client_rect.right - client_rect.left;
+            const height = client_rect.bottom - client_rect.top;
             resizeDBISection(width, height);
         },
         win32.WM_ACTIVATEAPP => {
@@ -89,13 +89,13 @@ fn Wndproc(
         },
         win32.WM_PAINT => {
             var paint: win32.PAINTSTRUCT = undefined;
-            const deviceContext: ?win32.HDC = win32.BeginPaint(window, &paint);
-            if (deviceContext) |hdc| {
+            const opt_device_context: ?win32.HDC = win32.BeginPaint(window, &paint);
+            if (opt_device_context) |device_context| {
                 const x = paint.rcPaint.left;
                 const y = paint.rcPaint.top;
                 const width = paint.rcPaint.right - paint.rcPaint.left;
                 const height = paint.rcPaint.bottom - paint.rcPaint.top;
-                updateWindow(hdc, x, y, width, height);
+                updateWindow(device_context, x, y, width, height);
             }
             _ = win32.EndPaint(window, &paint);
         },
@@ -112,15 +112,15 @@ fn Wndproc(
 
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
-    prevInstance: ?win32.HINSTANCE,
-    cmdLine: ?win32.PWSTR,
-    cmdShow: c_int,
+    prev_instance: ?win32.HINSTANCE,
+    cmd_line: ?win32.PWSTR,
+    cmd_show: c_int,
 ) c_int {
-    _ = prevInstance;
-    _ = cmdLine;
-    _ = cmdShow;
+    _ = prev_instance;
+    _ = cmd_line;
+    _ = cmd_show;
 
-    const windowClass: win32.WNDCLASSW = .{
+    const window_class: win32.WNDCLASSW = .{
         .style = .{},
         .lpfnWndProc = Wndproc,
         .cbClsExtra = 0,
@@ -133,10 +133,10 @@ pub export fn wWinMain(
         .lpszClassName = win32.L("HandmadeZigWindowClass"),
     };
 
-    if (win32.RegisterClassW(&windowClass) != 0) {
-        const windowHandle: ?win32.HWND = win32.CreateWindowExW(
+    if (win32.RegisterClassW(&window_class) != 0) {
+        const opt_window_handle: ?win32.HWND = win32.CreateWindowExW(
             .{},
-            windowClass.lpszClassName,
+            window_class.lpszClassName,
             win32.L("Handmade Zig"),
             win32.WINDOW_STYLE{
                 .VISIBLE = 1,
@@ -157,11 +157,11 @@ pub export fn wWinMain(
             null,
         );
 
-        if (windowHandle) |window| {
+        if (opt_window_handle) |window_handle| {
             running = true;
             while (running) {
                 var message: win32.MSG = undefined;
-                const messageResult: win32.BOOL = win32.GetMessageW(&message, window, 0, 0);
+                const messageResult: win32.BOOL = win32.GetMessageW(&message, window_handle, 0, 0);
                 if (messageResult > 0) {
                     _ = win32.TranslateMessage(&message);
                     _ = win32.DispatchMessageW(&message);
