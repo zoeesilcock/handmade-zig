@@ -20,17 +20,18 @@ fn renderWeirdGradient(x_offset: u32, y_offset: u32) void {
     const pitch: usize = @intCast(bitmap_width * bytes_per_pixel);
     var row: [*]u8 = @ptrCast(bitmap_memory);
     var y: u32 = 0;
+
     while (y < bitmap_height) {
         var x: u32 = 0;
-        var pixel: [*]u8 = @ptrCast(row);
+        var pixel: [*]align(4) u32 = @ptrCast(@alignCast(row));
 
         while (x < bitmap_width) {
-            pixel[0] = @truncate(x + x_offset);
-            pixel[1] = @truncate(y + y_offset);
-            pixel[2] = 0;
+            const blue: u32 = @as(u8, @truncate(x + x_offset));
+            const green: u32 = @as(u8, @truncate(y + y_offset));
 
-            pixel += 4;
+            pixel[0] = (green << 8) | blue;
 
+            pixel += 1;
             x += 1;
         }
 
@@ -66,13 +67,11 @@ fn resizeDBISection(width: i32, height: i32) void {
 
     const bitmap_memory_size: usize = @intCast((bitmap_width * bitmap_height) * bytes_per_pixel);
     bitmap_memory = win32.VirtualAlloc(null, bitmap_memory_size, win32.MEM_COMMIT, win32.PAGE_READWRITE);
-
-    renderWeirdGradient(128, 0);
 }
 
-fn updateWindow(deviceContext: ?win32.HDC, window_rect: win32.RECT) void {
-    const window_width = window_rect.right - window_rect.left;
-    const window_height = window_rect.bottom - window_rect.top;
+fn updateWindow(deviceContext: ?win32.HDC, client_rect: win32.RECT) void {
+    const window_width = client_rect.right - client_rect.left;
+    const window_height = client_rect.bottom - client_rect.top;
 
     _ = win32.StretchDIBits(
         deviceContext,
@@ -180,15 +179,27 @@ pub export fn wWinMain(
 
         if (opt_window_handle) |window_handle| {
             running = true;
+            var x_offset: u32 = 0;
+            const y_offset: u32 = 0;
+
             while (running) {
                 var message: win32.MSG = undefined;
-                const messageResult: win32.BOOL = win32.GetMessageW(&message, window_handle, 0, 0);
-                if (messageResult > 0) {
+                while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
+                    if (message.message == win32.WM_QUIT) {
+                        running = false;
+                    }
                     _ = win32.TranslateMessage(&message);
                     _ = win32.DispatchMessageW(&message);
-                } else {
-                    break;
                 }
+
+                renderWeirdGradient(x_offset, y_offset);
+                x_offset += 1;
+
+                const device_context = win32.GetDC(window_handle);
+                var client_rect: win32.RECT = undefined;
+                _ = win32.GetClientRect(window_handle, &client_rect);
+                updateWindow(device_context, client_rect);
+                _ = win32.ReleaseDC(window_handle, device_context);
             }
         } else {
             win32.OutputDebugStringA("Window handle is null.\n");
