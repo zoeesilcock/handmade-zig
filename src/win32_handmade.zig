@@ -9,6 +9,65 @@ const win32 = struct {
 pub const UNICODE = true;
 var running: bool = false;
 
+var bitmapInfo: win32.BITMAPINFO = undefined;
+var bitmapMemory: ?*anyopaque = undefined;
+var bitmapHandle: ?win32.HBITMAP = undefined;
+var bitmapDeviceContext: win32.HDC = undefined;
+
+fn resizeDBISection(width: i32, height: i32) void {
+    if (bitmapHandle != undefined) {
+        _ = win32.DeleteObject(bitmapHandle);
+    }
+
+    if (bitmapDeviceContext == undefined) {
+        bitmapDeviceContext = win32.CreateCompatibleDC(undefined);
+    }
+
+    bitmapInfo = win32.BITMAPINFO{
+        .bmiHeader = win32.BITMAPINFOHEADER{
+            .biSize = @sizeOf(win32.BITMAPINFOHEADER),
+            .biWidth = width,
+            .biHeight = height,
+            .biPlanes = 1,
+            .biBitCount = 32,
+            .biCompression = win32.BI_RGB,
+            .biSizeImage = 0,
+            .biXPelsPerMeter = 0,
+            .biYPelsPerMeter = 0,
+            .biClrUsed = 0,
+            .biClrImportant = 0,
+        },
+        .bmiColors = undefined,
+    };
+
+    bitmapHandle = win32.CreateDIBSection(
+        bitmapDeviceContext,
+        &bitmapInfo,
+        win32.DIB_RGB_COLORS,
+        &bitmapMemory,
+        null,
+        0,
+    );
+}
+
+fn updateWindow(deviceContext: ?win32.HDC, x: i32, y: i32, width: i32, height: i32) void {
+    _ = win32.StretchDIBits(
+        deviceContext,
+        x,
+        y,
+        width,
+        height,
+        x,
+        y,
+        width,
+        height,
+        bitmapMemory,
+        &bitmapInfo,
+        win32.DIB_RGB_COLORS,
+        win32.SRCCOPY,
+    );
+}
+
 fn Wndproc(
     window: win32.HWND,
     message: u32,
@@ -19,7 +78,11 @@ fn Wndproc(
 
     switch (message) {
         win32.WM_SIZE => {
-            win32.OutputDebugStringA("WM_SIZE\n");
+            var clientRect: win32.RECT = undefined;
+            _ = win32.GetClientRect(window, &clientRect);
+            const width = clientRect.right - clientRect.left;
+            const height = clientRect.bottom - clientRect.top;
+            resizeDBISection(width, height);
         },
         win32.WM_ACTIVATEAPP => {
             win32.OutputDebugStringA("WM_ACTIVATEAPP\n");
@@ -28,14 +91,11 @@ fn Wndproc(
             var paint: win32.PAINTSTRUCT = undefined;
             const deviceContext: ?win32.HDC = win32.BeginPaint(window, &paint);
             if (deviceContext != null) {
-                _ = win32.PatBlt(
-                    deviceContext,
-                    paint.rcPaint.left,
-                    paint.rcPaint.top,
-                    paint.rcPaint.right - paint.rcPaint.left,
-                    paint.rcPaint.bottom - paint.rcPaint.top,
-                    win32.BLACKNESS,
-                );
+                const x = paint.rcPaint.left;
+                const y = paint.rcPaint.top;
+                const width = paint.rcPaint.right - paint.rcPaint.left;
+                const height = paint.rcPaint.bottom - paint.rcPaint.top;
+                updateWindow(deviceContext, x, y, width, height);
             }
             _ = win32.EndPaint(window, &paint);
         },
@@ -59,8 +119,6 @@ pub export fn wWinMain(
     _ = prevInstance;
     _ = cmdLine;
     _ = cmdShow;
-
-    win32.OutputDebugStringA("wWinMain\n");
 
     const windowClass: win32.WNDCLASSW = .{
         .style = .{},
