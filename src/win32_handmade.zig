@@ -1,6 +1,7 @@
 const win32 = struct {
     usingnamespace @import("win32").zig;
     usingnamespace @import("win32").system.diagnostics.debug;
+    usingnamespace @import("win32").system.memory;
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").ui.windows_and_messaging;
     usingnamespace @import("win32").graphics.gdi;
@@ -9,25 +10,48 @@ const win32 = struct {
 pub const UNICODE = true;
 var running: bool = false;
 
-var bitmap_infooo: win32.BITMAPINFO = undefined;
+const bytes_per_pixel: u8 = 4;
+var bitmap_info: win32.BITMAPINFO = undefined;
 var bitmap_memory: ?*anyopaque = undefined;
-var bitmap_handle: ?win32.HBITMAP = undefined;
-var bitmap_device_context: win32.HDC = undefined;
+var bitmap_width: i32 = 0;
+var bitmap_height: i32 = 0;
+
+fn renderWeirdGradient(x_offset: u32, y_offset: u32) void {
+    const pitch: usize = @intCast(bitmap_width * bytes_per_pixel);
+    var row: [*]u8 = @ptrCast(bitmap_memory);
+    var y: u32 = 0;
+    while (y < bitmap_height) {
+        var x: u32 = 0;
+        var pixel: [*]u8 = @ptrCast(row);
+
+        while (x < bitmap_width) {
+            pixel[0] = @truncate(x + x_offset);
+            pixel[1] = @truncate(y + y_offset);
+            pixel[2] = 0;
+
+            pixel += 4;
+
+            x += 1;
+        }
+
+        row += pitch;
+        y += 1;
+    }
+}
 
 fn resizeDBISection(width: i32, height: i32) void {
-    if (bitmap_handle) |handle| {
-        _ = win32.DeleteObject(handle);
+    if (bitmap_memory) |memory| {
+        _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
     }
 
-    if (bitmap_device_context == undefined) {
-        bitmap_device_context = win32.CreateCompatibleDC(undefined);
-    }
+    bitmap_width = width;
+    bitmap_height = height;
 
-    bitmap_infooo = win32.BITMAPINFO{
+    bitmap_info = win32.BITMAPINFO{
         .bmiHeader = win32.BITMAPINFOHEADER{
             .biSize = @sizeOf(win32.BITMAPINFOHEADER),
-            .biWidth = width,
-            .biHeight = height,
+            .biWidth = bitmap_width,
+            .biHeight = -bitmap_height,
             .biPlanes = 1,
             .biBitCount = 32,
             .biCompression = win32.BI_RGB,
@@ -40,35 +64,34 @@ fn resizeDBISection(width: i32, height: i32) void {
         .bmiColors = undefined,
     };
 
-    bitmap_handle = win32.CreateDIBSection(
-        bitmap_device_context,
-        &bitmap_infooo,
-        win32.DIB_RGB_COLORS,
-        &bitmap_memory,
-        null,
-        0,
-    );
+    const bitmap_memory_size: usize = @intCast((bitmap_width * bitmap_height) * bytes_per_pixel);
+    bitmap_memory = win32.VirtualAlloc(null, bitmap_memory_size, win32.MEM_COMMIT, win32.PAGE_READWRITE);
+
+    renderWeirdGradient(128, 0);
 }
 
-fn updateWindow(deviceContext: ?win32.HDC, x: i32, y: i32, width: i32, height: i32) void {
+fn updateWindow(deviceContext: ?win32.HDC, window_rect: win32.RECT) void {
+    const window_width = window_rect.right - window_rect.left;
+    const window_height = window_rect.bottom - window_rect.top;
+
     _ = win32.StretchDIBits(
         deviceContext,
-        x,
-        y,
-        width,
-        height,
-        x,
-        y,
-        width,
-        height,
+        0,
+        0,
+        bitmap_width,
+        bitmap_height,
+        0,
+        0,
+        window_width,
+        window_height,
         bitmap_memory,
-        &bitmap_infooo,
+        &bitmap_info,
         win32.DIB_RGB_COLORS,
         win32.SRCCOPY,
     );
 }
 
-fn Wndproc(
+fn windowProcedure(
     window: win32.HWND,
     message: u32,
     wParam: win32.WPARAM,
@@ -91,11 +114,9 @@ fn Wndproc(
             var paint: win32.PAINTSTRUCT = undefined;
             const opt_device_context: ?win32.HDC = win32.BeginPaint(window, &paint);
             if (opt_device_context) |device_context| {
-                const x = paint.rcPaint.left;
-                const y = paint.rcPaint.top;
-                const width = paint.rcPaint.right - paint.rcPaint.left;
-                const height = paint.rcPaint.bottom - paint.rcPaint.top;
-                updateWindow(device_context, x, y, width, height);
+                var client_rect: win32.RECT = undefined;
+                _ = win32.GetClientRect(window, &client_rect);
+                updateWindow(device_context, client_rect);
             }
             _ = win32.EndPaint(window, &paint);
         },
@@ -122,7 +143,7 @@ pub export fn wWinMain(
 
     const window_class: win32.WNDCLASSW = .{
         .style = .{},
-        .lpfnWndProc = Wndproc,
+        .lpfnWndProc = windowProcedure,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
         .hInstance = instance,
