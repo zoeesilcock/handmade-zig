@@ -15,8 +15,8 @@ var bitmapHandle: ?win32.HBITMAP = undefined;
 var bitmapDeviceContext: win32.HDC = undefined;
 
 fn resizeDBISection(width: i32, height: i32) void {
-    if (bitmapHandle != undefined) {
-        _ = win32.DeleteObject(bitmapHandle);
+    if (bitmapHandle) |handle| {
+        _ = win32.DeleteObject(handle);
     }
 
     if (bitmapDeviceContext == undefined) {
@@ -90,12 +90,12 @@ fn Wndproc(
         win32.WM_PAINT => {
             var paint: win32.PAINTSTRUCT = undefined;
             const deviceContext: ?win32.HDC = win32.BeginPaint(window, &paint);
-            if (deviceContext != null) {
+            if (deviceContext) |hdc| {
                 const x = paint.rcPaint.left;
                 const y = paint.rcPaint.top;
                 const width = paint.rcPaint.right - paint.rcPaint.left;
                 const height = paint.rcPaint.bottom - paint.rcPaint.top;
-                updateWindow(deviceContext, x, y, width, height);
+                updateWindow(hdc, x, y, width, height);
             }
             _ = win32.EndPaint(window, &paint);
         },
@@ -157,11 +157,11 @@ pub export fn wWinMain(
             null,
         );
 
-        if (windowHandle != null) {
+        if (windowHandle) |window| {
             running = true;
             while (running) {
                 var message: win32.MSG = undefined;
-                const messageResult: win32.BOOL = win32.GetMessageW(&message, windowHandle, 0, 0);
+                const messageResult: win32.BOOL = win32.GetMessageW(&message, window, 0, 0);
                 if (messageResult > 0) {
                     _ = win32.TranslateMessage(&message);
                     _ = win32.DispatchMessageW(&message);
