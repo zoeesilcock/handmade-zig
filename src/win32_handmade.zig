@@ -7,6 +7,7 @@ const win32 = struct {
 };
 
 pub const UNICODE = true;
+var running: bool = false;
 
 fn Wndproc(
     window: win32.HWND,
@@ -19,12 +20,6 @@ fn Wndproc(
     switch (message) {
         win32.WM_SIZE => {
             win32.OutputDebugStringA("WM_SIZE\n");
-        },
-        win32.WM_DESTROY => {
-            win32.OutputDebugStringA("WM_DESTROY\n");
-        },
-        win32.WM_CLOSE => {
-            win32.OutputDebugStringA("WM_CLOSE\n");
         },
         win32.WM_ACTIVATEAPP => {
             win32.OutputDebugStringA("WM_ACTIVATEAPP\n");
@@ -43,6 +38,9 @@ fn Wndproc(
                 );
             }
             _ = win32.EndPaint(window, &paint);
+        },
+        win32.WM_CLOSE, win32.WM_DESTROY => {
+            running = false;
         },
         else => {
             result = win32.DefWindowProc(window, message, wParam, lParam);
@@ -102,8 +100,8 @@ pub export fn wWinMain(
         );
 
         if (windowHandle != null) {
-            while (true) {
-                win32.OutputDebugStringA("Handle messges\n");
+            running = true;
+            while (running) {
                 var message: win32.MSG = undefined;
                 const messageResult: win32.BOOL = win32.GetMessageW(&message, windowHandle, 0, 0);
                 if (messageResult > 0) {
