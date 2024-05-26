@@ -141,7 +141,7 @@ pub export fn wWinMain(
     _ = cmd_show;
 
     const window_class: win32.WNDCLASSW = .{
-        .style = .{},
+        .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
         .lpfnWndProc = windowProcedure,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
