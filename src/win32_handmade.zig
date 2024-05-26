@@ -95,12 +95,12 @@ fn displayBufferInWindow(deviceContext: ?win32.HDC, window_width: i32, window_he
         deviceContext,
         0,
         0,
-        buffer.width,
-        buffer.height,
-        0,
-        0,
         window_width,
         window_height,
+        0,
+        0,
+        buffer.width,
+        buffer.height,
         buffer.memory,
         &buffer.info,
         win32.DIB_RGB_COLORS,
@@ -117,10 +117,7 @@ fn windowProcedure(
     var result: win32.LRESULT = 0;
 
     switch (message) {
-        win32.WM_SIZE => {
-            const window_dimension = getWindowDimension(window);
-            resizeDBISection(&back_buffer, window_dimension.width, window_dimension.height);
-        },
+        win32.WM_SIZE => {},
         win32.WM_ACTIVATEAPP => {
             win32.OutputDebugStringA("WM_ACTIVATEAPP\n");
         },
@@ -153,6 +150,8 @@ pub export fn wWinMain(
     _ = prev_instance;
     _ = cmd_line;
     _ = cmd_show;
+
+    resizeDBISection(&back_buffer, 1280, 720);
 
     const window_class: win32.WNDCLASSW = .{
         .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
