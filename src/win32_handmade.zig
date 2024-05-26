@@ -194,7 +194,7 @@ pub export fn wWinMain(
         if (opt_window_handle) |window_handle| {
             running = true;
             var x_offset: u32 = 0;
-            const y_offset: u32 = 0;
+            var y_offset: u32 = 0;
 
             while (running) {
                 var message: win32.MSG = undefined;
@@ -208,6 +208,7 @@ pub export fn wWinMain(
 
                 renderWeirdGradient(back_buffer, x_offset, y_offset);
                 x_offset += 1;
+                y_offset += 2;
 
                 const device_context = win32.GetDC(window_handle);
                 const window_dimension = getWindowDimension(window_handle);
