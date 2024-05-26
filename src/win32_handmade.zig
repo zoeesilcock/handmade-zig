@@ -21,6 +21,21 @@ pub const UNICODE = true;
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
 
+const WindowDimension = struct {
+    width: i32,
+    height: i32,
+};
+
+fn getWindowDimension(window: win32.HWND) WindowDimension {
+    var client_rect: win32.RECT = undefined;
+    _ = win32.GetClientRect(window, &client_rect);
+
+    return WindowDimension{
+        .width = client_rect.right - client_rect.left,
+        .height = client_rect.bottom - client_rect.top,
+    };
+}
+
 fn renderWeirdGradient(buffer: OffscreenBuffer, x_offset: u32, y_offset: u32) void {
     var row: [*]u8 = @ptrCast(buffer.memory);
     var y: u32 = 0;
@@ -75,10 +90,7 @@ fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
     buffer.pitch = @intCast(buffer.width * buffer.bytes_per_pixel);
 }
 
-fn displayBufferInWindow(deviceContext: ?win32.HDC, client_rect: win32.RECT, buffer: OffscreenBuffer) void {
-    const window_width = client_rect.right - client_rect.left;
-    const window_height = client_rect.bottom - client_rect.top;
-
+fn displayBufferInWindow(deviceContext: ?win32.HDC, window_width: i32, window_height: i32, buffer: OffscreenBuffer) void {
     _ = win32.StretchDIBits(
         deviceContext,
         0,
@@ -106,11 +118,8 @@ fn windowProcedure(
 
     switch (message) {
         win32.WM_SIZE => {
-            var client_rect: win32.RECT = undefined;
-            _ = win32.GetClientRect(window, &client_rect);
-            const width = client_rect.right - client_rect.left;
-            const height = client_rect.bottom - client_rect.top;
-            resizeDBISection(&back_buffer, width, height);
+            const window_dimension = getWindowDimension(window);
+            resizeDBISection(&back_buffer, window_dimension.width, window_dimension.height);
         },
         win32.WM_ACTIVATEAPP => {
             win32.OutputDebugStringA("WM_ACTIVATEAPP\n");
@@ -119,9 +128,8 @@ fn windowProcedure(
             var paint: win32.PAINTSTRUCT = undefined;
             const opt_device_context: ?win32.HDC = win32.BeginPaint(window, &paint);
             if (opt_device_context) |device_context| {
-                var client_rect: win32.RECT = undefined;
-                _ = win32.GetClientRect(window, &client_rect);
-                displayBufferInWindow(device_context, client_rect, back_buffer);
+                const window_dimension = getWindowDimension(window);
+                displayBufferInWindow(device_context, window_dimension.width, window_dimension.height, back_buffer);
             }
             _ = win32.EndPaint(window, &paint);
         },
@@ -202,9 +210,8 @@ pub export fn wWinMain(
                 x_offset += 1;
 
                 const device_context = win32.GetDC(window_handle);
-                var client_rect: win32.RECT = undefined;
-                _ = win32.GetClientRect(window_handle, &client_rect);
-                displayBufferInWindow(device_context, client_rect, back_buffer);
+                const window_dimension = getWindowDimension(window_handle);
+                displayBufferInWindow(device_context, window_dimension.width, window_dimension.height, back_buffer);
                 _ = win32.ReleaseDC(window_handle, device_context);
             }
         } else {
