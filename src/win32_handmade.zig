@@ -18,6 +18,12 @@ const OffscreenBuffer = struct {
 };
 
 pub const UNICODE = true;
+
+const WIDTH = 1280;
+const HEIGHT = 720;
+const WINDOW_DECORATION_WIDTH = 16;
+const WINDOW_DECORATION_HEIGHT = 39;
+
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
 
@@ -151,7 +157,7 @@ pub export fn wWinMain(
     _ = cmd_line;
     _ = cmd_show;
 
-    resizeDBISection(&back_buffer, 1280, 720);
+    resizeDBISection(&back_buffer, WIDTH, HEIGHT);
 
     const window_class: win32.WNDCLASSW = .{
         .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
@@ -182,8 +188,8 @@ pub export fn wWinMain(
             },
             win32.CW_USEDEFAULT,
             win32.CW_USEDEFAULT,
-            win32.CW_USEDEFAULT,
-            win32.CW_USEDEFAULT,
+            WIDTH + WINDOW_DECORATION_WIDTH,
+            HEIGHT + WINDOW_DECORATION_HEIGHT,
             null,
             null,
             instance,
