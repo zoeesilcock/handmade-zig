@@ -2,9 +2,12 @@ const std = @import("std");
 const win32 = struct {
     usingnamespace @import("win32").zig;
     usingnamespace @import("win32").system.diagnostics.debug;
+    usingnamespace @import("win32").system.library_loader;
     usingnamespace @import("win32").system.memory;
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").ui.windows_and_messaging;
+    usingnamespace @import("win32").ui.input;
+    usingnamespace @import("win32").ui.input.xbox_controller;
     usingnamespace @import("win32").graphics.gdi;
 };
 
@@ -31,6 +34,26 @@ const WindowDimension = struct {
     width: i32,
     height: i32,
 };
+
+fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(@import("std").os.windows.WINAPI) isize {
+    return 0;
+}
+fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(@import("std").os.windows.WINAPI) isize {
+    return 0;
+}
+var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(@import("std").os.windows.WINAPI) isize = XInputGetStateStub;
+var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(@import("std").os.windows.WINAPI) isize = XInputSetStateStub;
+
+fn loadXInput() void {
+    if (win32.LoadLibraryA("xinput1_4.dll")) |library| {
+        if (win32.GetProcAddress(library, "XInputGetState")) |procedure| {
+            XInputGetState = @as(@TypeOf(XInputGetState), @ptrCast(procedure));
+        }
+        if (win32.GetProcAddress(library, "XInputSetState")) |procedure| {
+            XInputSetState = @as(@TypeOf(XInputSetState), @ptrCast(procedure));
+        }
+    }
+}
 
 fn getWindowDimension(window: win32.HWND) WindowDimension {
     var client_rect: win32.RECT = undefined;
@@ -156,6 +179,7 @@ pub export fn wWinMain(
     _ = cmd_line;
     _ = cmd_show;
 
+    loadXInput();
     resizeDBISection(&back_buffer, WIDTH, HEIGHT);
 
     const window_class: win32.WNDCLASSW = .{
@@ -211,6 +235,59 @@ pub export fn wWinMain(
                     _ = win32.DispatchMessageW(&message);
                 }
 
+                var dwResult: isize = 0;
+                var controller_index: u8 = 0;
+                while (controller_index < win32.XUSER_MAX_COUNT) {
+                    var controller_state: win32.XINPUT_STATE = undefined;
+                    dwResult = XInputGetState(controller_index, &controller_state);
+
+                    if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
+                        // Controller is connected
+                        const pad = &controller_state.Gamepad;
+                        const up: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_UP) > 0;
+                        const down: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_DOWN) > 0;
+                        // const left: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0;
+                        // const right: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0;
+                        //
+                        // const start: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_START) > 0;
+                        // const back: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_BACK) > 0;
+                        //
+                        // const left_shoulder: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_LEFT_SHOULDER) > 0;
+                        // const right_shoulder: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_RIGHT_SHOULDER) > 0;
+                        //
+                        const a_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_A) > 0;
+                        // const b_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_B) > 0;
+                        // const x_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_X) > 0;
+                        // const y_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_Y) > 0;
+                        //
+                        // const stick_x = pad.sThumbLX;
+                        // const stick_y = pad.sThumbLY;
+
+                        if (up) {
+                            y_offset -%= 1;
+                        } else if (down) {
+                            y_offset +%= 1;
+                        }
+
+                        if (a_button) {
+                            var vibration: win32.XINPUT_VIBRATION = win32.XINPUT_VIBRATION{
+                                .wRightMotorSpeed = 9000,
+                                .wLeftMotorSpeed = 9000,
+                            };
+                            _ = XInputSetState(controller_index, &vibration);
+                        } else {
+                            var vibration: win32.XINPUT_VIBRATION = win32.XINPUT_VIBRATION{
+                                .wRightMotorSpeed = 0,
+                                .wLeftMotorSpeed = 0,
+                            };
+                            _ = XInputSetState(controller_index, &vibration);
+                        }
+                    } else {
+                        // Controller is not connected
+                    }
+
+                    controller_index += 1;
+                }
                 renderWeirdGradient(back_buffer, x_offset, y_offset);
                 x_offset += 1;
                 y_offset += 2;
