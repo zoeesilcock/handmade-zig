@@ -160,7 +160,7 @@ pub export fn wWinMain(
     resizeDBISection(&back_buffer, WIDTH, HEIGHT);
 
     const window_class: win32.WNDCLASSW = .{
-        .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
+        .style = .{ .HREDRAW = 1, .VREDRAW = 1, .OWNDC = 1 },
         .lpfnWndProc = windowProcedure,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
@@ -197,10 +197,11 @@ pub export fn wWinMain(
         );
 
         if (opt_window_handle) |window_handle| {
-            running = true;
+            const device_context = win32.GetDC(window_handle);
             var x_offset: u32 = 0;
             var y_offset: u32 = 0;
 
+            running = true;
             while (running) {
                 var message: win32.MSG = undefined;
                 while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
@@ -215,10 +216,8 @@ pub export fn wWinMain(
                 x_offset += 1;
                 y_offset += 2;
 
-                const device_context = win32.GetDC(window_handle);
                 const window_dimension = getWindowDimension(window_handle);
                 displayBufferInWindow(device_context, window_dimension.width, window_dimension.height, back_buffer);
-                _ = win32.ReleaseDC(window_handle, device_context);
             }
         } else {
             win32.OutputDebugStringA("Window handle is null.\n");
