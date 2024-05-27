@@ -119,9 +119,9 @@ fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
     buffer.pitch = @intCast(buffer.width * BYTES_PER_PIXEL);
 }
 
-fn displayBufferInWindow(buffer: *OffscreenBuffer, deviceContext: ?win32.HDC, window_width: i32, window_height: i32) void {
+fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, window_width: i32, window_height: i32) void {
     _ = win32.StretchDIBits(
-        deviceContext,
+        device_context,
         0,
         0,
         window_width,
@@ -140,8 +140,8 @@ fn displayBufferInWindow(buffer: *OffscreenBuffer, deviceContext: ?win32.HDC, wi
 fn windowProcedure(
     window: win32.HWND,
     message: u32,
-    wParam: win32.WPARAM,
-    lParam: win32.LPARAM,
+    w_param: win32.WPARAM,
+    l_param: win32.LPARAM,
 ) callconv(.C) win32.LRESULT {
     var result: win32.LRESULT = 0;
 
@@ -160,9 +160,9 @@ fn windowProcedure(
             _ = win32.EndPaint(window, &paint);
         },
         win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
-            const vk_code = wParam;
-            const was_down: bool = if ((lParam & (1 << 30) != 0)) true else false;
-            const is_down: bool = if ((lParam & (1 << 31) == 0)) true else false;
+            const vk_code = w_param;
+            const was_down: bool = if ((l_param & (1 << 30) != 0)) true else false;
+            const is_down: bool = if ((l_param & (1 << 31) == 0)) true else false;
 
             if (is_down != was_down) {
                 switch (vk_code) {
@@ -193,7 +193,7 @@ fn windowProcedure(
             running = false;
         },
         else => {
-            result = win32.DefWindowProc(window, message, wParam, lParam);
+            result = win32.DefWindowProc(window, message, w_param, l_param);
         },
     }
 
