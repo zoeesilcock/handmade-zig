@@ -8,15 +8,6 @@ const win32 = struct {
     usingnamespace @import("win32").graphics.gdi;
 };
 
-const OffscreenBuffer = struct {
-    info: win32.BITMAPINFO = undefined,
-    memory: ?*anyopaque = undefined,
-    width: i32 = 0,
-    height: i32 = 0,
-    pitch: usize = 0,
-    bytes_per_pixel: u8 = 4,
-};
-
 pub const UNICODE = true;
 
 const WIDTH = 1280;
@@ -26,6 +17,15 @@ const WINDOW_DECORATION_HEIGHT = 39;
 
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
+
+const OffscreenBuffer = struct {
+    info: win32.BITMAPINFO = undefined,
+    memory: ?*anyopaque = undefined,
+    width: i32 = 0,
+    height: i32 = 0,
+    pitch: usize = 0,
+    bytes_per_pixel: u8 = 4,
+};
 
 const WindowDimension = struct {
     width: i32,
