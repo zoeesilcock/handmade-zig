@@ -8,6 +8,7 @@ const win32 = struct {
     usingnamespace @import("win32").ui.windows_and_messaging;
     usingnamespace @import("win32").ui.input;
     usingnamespace @import("win32").ui.input.xbox_controller;
+    usingnamespace @import("win32").ui.input.keyboard_and_mouse;
     usingnamespace @import("win32").graphics.gdi;
 };
 
@@ -157,6 +158,36 @@ fn windowProcedure(
                 displayBufferInWindow(device_context, window_dimension.width, window_dimension.height, back_buffer);
             }
             _ = win32.EndPaint(window, &paint);
+        },
+        win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
+            const vk_code = wParam;
+            const was_down: bool = if ((lParam & (1 << 30) != 0)) true else false;
+            const is_down: bool = if ((lParam & (1 << 31) == 0)) true else false;
+
+            if (is_down != was_down) {
+                switch (vk_code) {
+                    'W' => {},
+                    'A' => {},
+                    'S' => {},
+                    'D' => {},
+                    'Q' => {},
+                    'E' => {},
+                    @intFromEnum(win32.VK_UP) => {},
+                    @intFromEnum(win32.VK_DOWN) => {},
+                    @intFromEnum(win32.VK_LEFT) => {},
+                    @intFromEnum(win32.VK_RIGHT) => {},
+                    @intFromEnum(win32.VK_ESCAPE) => {
+                        if (is_down) {
+                            win32.OutputDebugStringA("ESC is_down\n");
+                        }
+                        if (was_down) {
+                            win32.OutputDebugStringA("ESC was_down\n");
+                        }
+                    },
+                    @intFromEnum(win32.VK_SPACE) => {},
+                    else => {},
+                }
+            }
         },
         win32.WM_CLOSE, win32.WM_DESTROY => {
             running = false;
