@@ -66,7 +66,7 @@ fn getWindowDimension(window: win32.HWND) WindowDimension {
     };
 }
 
-fn renderWeirdGradient(buffer: OffscreenBuffer, x_offset: u32, y_offset: u32) void {
+fn renderWeirdGradient(buffer: *OffscreenBuffer, x_offset: u32, y_offset: u32) void {
     var row: [*]u8 = @ptrCast(buffer.memory);
     var y: u32 = 0;
 
@@ -119,7 +119,7 @@ fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
     buffer.pitch = @intCast(buffer.width * BYTES_PER_PIXEL);
 }
 
-fn displayBufferInWindow(deviceContext: ?win32.HDC, window_width: i32, window_height: i32, buffer: OffscreenBuffer) void {
+fn displayBufferInWindow(buffer: *OffscreenBuffer, deviceContext: ?win32.HDC, window_width: i32, window_height: i32) void {
     _ = win32.StretchDIBits(
         deviceContext,
         0,
@@ -155,7 +155,7 @@ fn windowProcedure(
             const opt_device_context: ?win32.HDC = win32.BeginPaint(window, &paint);
             if (opt_device_context) |device_context| {
                 const window_dimension = getWindowDimension(window);
-                displayBufferInWindow(device_context, window_dimension.width, window_dimension.height, back_buffer);
+                displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
             }
             _ = win32.EndPaint(window, &paint);
         },
@@ -319,12 +319,12 @@ pub export fn wWinMain(
 
                     controller_index += 1;
                 }
-                renderWeirdGradient(back_buffer, x_offset, y_offset);
+                renderWeirdGradient(&back_buffer, x_offset, y_offset);
                 x_offset += 1;
                 y_offset += 2;
 
                 const window_dimension = getWindowDimension(window_handle);
-                displayBufferInWindow(device_context, window_dimension.width, window_dimension.height, back_buffer);
+                displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
             }
         } else {
             win32.OutputDebugStringA("Window handle is null.\n");
