@@ -14,6 +14,7 @@ const WIDTH = 1280;
 const HEIGHT = 720;
 const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
+const BYTES_PER_PIXEL = 4;
 
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
@@ -24,7 +25,6 @@ const OffscreenBuffer = struct {
     width: i32 = 0,
     height: i32 = 0,
     pitch: usize = 0,
-    bytes_per_pixel: u8 = 4,
 };
 
 const WindowDimension = struct {
@@ -72,7 +72,6 @@ fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
 
     buffer.width = width;
     buffer.height = height;
-    buffer.bytes_per_pixel = 4;
 
     buffer.info = win32.BITMAPINFO{
         .bmiHeader = win32.BITMAPINFOHEADER{
@@ -91,9 +90,9 @@ fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
         .bmiColors = undefined,
     };
 
-    const bitmap_memory_size: usize = @intCast((buffer.width * buffer.height) * buffer.bytes_per_pixel);
+    const bitmap_memory_size: usize = @intCast((buffer.width * buffer.height) * BYTES_PER_PIXEL);
     buffer.memory = win32.VirtualAlloc(null, bitmap_memory_size, win32.MEM_COMMIT, win32.PAGE_READWRITE);
-    buffer.pitch = @intCast(buffer.width * buffer.bytes_per_pixel);
+    buffer.pitch = @intCast(buffer.width * BYTES_PER_PIXEL);
 }
 
 fn displayBufferInWindow(deviceContext: ?win32.HDC, window_width: i32, window_height: i32, buffer: OffscreenBuffer) void {
