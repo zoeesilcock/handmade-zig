@@ -339,11 +339,9 @@ pub export fn wWinMain(
             const square_wave_period: i32 = samples_per_second / square_wave_hz;
             const half_square_wave_period: i32 = square_wave_period / 2;
             const square_wave_volume: i32 = 3000;
+            var sound_is_playing: bool = false;
 
             initDirectSound(window_handle, samples_per_second, secondary_buffer_size);
-            if (opt_secondary_buffer) |secondary_buffer| {
-                _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
-            }
 
             running = true;
             while (running) {
@@ -502,6 +500,11 @@ pub export fn wWinMain(
 
                             _ = secondary_buffer.vtable.Unlock(secondary_buffer, region1, region1_size, region2, region2_size);
                         }
+                    }
+
+                    if (!sound_is_playing) {
+                        _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
+                        sound_is_playing = true;
                     }
                 }
             }
