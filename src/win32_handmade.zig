@@ -27,6 +27,7 @@ const STICK_DEAD_ZONE = 1;
 
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
+var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -116,7 +117,6 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
                         .lpwfxFormat = &wave_format,
                         .guid3DAlgorithm = win32.Guid.initString("00000000-0000-0000-0000-000000000000"),
                     };
-                    var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
                     if (win32.SUCCEEDED(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_secondary_buffer, null))) {
                         if (opt_secondary_buffer) |secondary_buffer| {
                             _ = secondary_buffer;
@@ -330,7 +330,20 @@ pub export fn wWinMain(
             var x_offset: u32 = 0;
             var y_offset: u32 = 0;
 
-            initDirectSound(window_handle, 48000, 48000 * @sizeOf(i16) * 2);
+            const samples_per_second = 48000;
+            const bytes_per_sample = @sizeOf(i16) * 2;
+            const secondary_buffer_size = samples_per_second * bytes_per_sample;
+            var running_sample_index: u32 = 0;
+
+            const square_wave_hz: i32 = 256;
+            const square_wave_period: i32 = samples_per_second / square_wave_hz;
+            const half_square_wave_period: i32 = square_wave_period / 2;
+            const square_wave_volume: i32 = 3000;
+
+            initDirectSound(window_handle, samples_per_second, secondary_buffer_size);
+            if (opt_secondary_buffer) |secondary_buffer| {
+                _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
+            }
 
             running = true;
             while (running) {
@@ -422,6 +435,73 @@ pub export fn wWinMain(
 
                 const window_dimension = getWindowDimension(window_handle);
                 displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
+
+                if (opt_secondary_buffer) |secondary_buffer| {
+                    var play_cursor: std.os.windows.DWORD = undefined;
+                    var write_cursor: std.os.windows.DWORD = undefined;
+
+                    if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(secondary_buffer, &play_cursor, &write_cursor))) {
+                        const byte_to_lock: std.os.windows.DWORD = running_sample_index * bytes_per_sample % secondary_buffer_size;
+                        var bytes_to_write: u32 = 0;
+
+                        if (byte_to_lock > play_cursor) {
+                            bytes_to_write = secondary_buffer_size - byte_to_lock;
+                            bytes_to_write += play_cursor;
+                        } else {
+                            bytes_to_write = play_cursor - byte_to_lock;
+                        }
+
+                        var region1: ?*anyopaque = undefined;
+                        var region1_size: std.os.windows.DWORD = 0;
+                        var region2: ?*anyopaque = undefined;
+                        var region2_size: std.os.windows.DWORD = 0;
+
+                        if (win32.SUCCEEDED(secondary_buffer.vtable.Lock(
+                            secondary_buffer,
+                            byte_to_lock,
+                            bytes_to_write,
+                            &region1,
+                            &region1_size,
+                            &region2,
+                            &region2_size,
+                            0,
+                        ))) {
+                            if (region1) |region| {
+                                var sample_out: [*]i16 = @ptrCast(@alignCast(region));
+                                var sample_index: u32 = 0;
+                                const region1_sample_count = region1_size / bytes_per_sample;
+                                while (sample_index < region1_sample_count) {
+                                    const sample_value: i16 = if ((@divFloor(running_sample_index, half_square_wave_period) % 2) == 1) square_wave_volume else -square_wave_volume;
+                                    sample_out += 1;
+                                    sample_out[0] = sample_value;
+                                    sample_out += 1;
+                                    sample_out[0] = sample_value;
+
+                                    sample_index += 1;
+                                    running_sample_index += 1;
+                                }
+                            }
+
+                            if (region2) |region| {
+                                var sample_out: [*]i16 = @ptrCast(@alignCast(region));
+                                var sample_index: u32 = 0;
+                                const region2_sample_count = region2_size / bytes_per_sample;
+                                while (sample_index < region2_sample_count) {
+                                    const sample_value: i16 = if ((@divFloor(running_sample_index, half_square_wave_period) % 2) == 1) square_wave_volume else -square_wave_volume;
+                                    sample_out += 1;
+                                    sample_out[0] = sample_value;
+                                    sample_out += 1;
+                                    sample_out[0] = sample_value;
+
+                                    sample_index += 1;
+                                    running_sample_index += 1;
+                                }
+                            }
+
+                            _ = secondary_buffer.vtable.Unlock(secondary_buffer, region1, region1_size, region2, region2_size);
+                        }
+                    }
+                }
             }
         } else {
             win32.OutputDebugStringA("Window handle is null.\n");
