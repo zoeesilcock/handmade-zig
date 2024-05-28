@@ -39,10 +39,10 @@ const WindowDimension = struct {
 };
 
 fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(@import("std").os.windows.WINAPI) isize {
-    return 0;
+    return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
 fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(@import("std").os.windows.WINAPI) isize {
-    return 0;
+    return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
 var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(@import("std").os.windows.WINAPI) isize = XInputGetStateStub;
 var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(@import("std").os.windows.WINAPI) isize = XInputSetStateStub;
