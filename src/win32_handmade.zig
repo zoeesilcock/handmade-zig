@@ -188,7 +188,9 @@ fn windowProcedure(
                         }
                     },
                     @intFromEnum(win32.VK_SPACE) => {},
-                    else => {},
+                    else => {
+                        result = win32.DefWindowProc(window, message, w_param, l_param);
+                    },
                 }
             }
         },
