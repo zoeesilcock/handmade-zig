@@ -188,7 +188,7 @@ fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
     };
 
     const bitmap_memory_size: usize = @intCast((buffer.width * buffer.height) * BYTES_PER_PIXEL);
-    buffer.memory = win32.VirtualAlloc(null, bitmap_memory_size, win32.MEM_COMMIT, win32.PAGE_READWRITE);
+    buffer.memory = win32.VirtualAlloc(null, bitmap_memory_size, win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 }, win32.PAGE_READWRITE);
     buffer.pitch = @intCast(buffer.width * BYTES_PER_PIXEL);
 }
 
