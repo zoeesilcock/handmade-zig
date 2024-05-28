@@ -75,8 +75,8 @@ fn renderWeirdGradient(buffer: *OffscreenBuffer, x_offset: u32, y_offset: u32) v
         var pixel: [*]align(4) u32 = @ptrCast(@alignCast(row));
 
         while (x < buffer.width) {
-            const blue: u32 = @as(u8, @truncate(x + x_offset));
-            const green: u32 = @as(u8, @truncate(y + y_offset));
+            const blue: u32 = @as(u8, @truncate(x +% x_offset));
+            const green: u32 = @as(u8, @truncate(y +% y_offset));
 
             pixel[0] = (green << 8) | blue;
 
