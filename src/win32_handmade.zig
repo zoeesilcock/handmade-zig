@@ -48,7 +48,8 @@ var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(@import("std"
 var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(@import("std").os.windows.WINAPI) isize = XInputSetStateStub;
 
 fn loadXInput() void {
-    if (win32.LoadLibraryA("xinput1_4.dll")) |library| {
+    const x_input_library = win32.LoadLibraryA("xinput1_4.dll") orelse win32.LoadLibraryA("xinput1_3.dll");
+    if (x_input_library) |library| {
         if (win32.GetProcAddress(library, "XInputGetState")) |procedure| {
             XInputGetState = @as(@TypeOf(XInputGetState), @ptrCast(procedure));
         }
