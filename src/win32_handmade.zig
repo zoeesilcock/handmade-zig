@@ -19,6 +19,8 @@ const HEIGHT = 720;
 const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
+const STICK_DOWN_SHIFT = 12;
+const STICK_DEAD_ZONE = 1;
 
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
@@ -277,8 +279,8 @@ pub export fn wWinMain(
                         const pad = &controller_state.Gamepad;
                         const up: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_UP) > 0;
                         const down: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_DOWN) > 0;
-                        // const left: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0;
-                        // const right: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0;
+                        const left: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0;
+                        const right: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0;
                         //
                         // const start: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_START) > 0;
                         // const back: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_BACK) > 0;
@@ -290,10 +292,32 @@ pub export fn wWinMain(
                         // const b_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_B) > 0;
                         // const x_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_X) > 0;
                         // const y_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_Y) > 0;
-                        //
-                        // const stick_x = pad.sThumbLX;
-                        // const stick_y = pad.sThumbLY;
 
+                        const stick_x = pad.sThumbLX >> STICK_DOWN_SHIFT;
+                        const stick_y = pad.sThumbLY >> STICK_DOWN_SHIFT;
+
+                        // Apply left stick X.
+                        if (stick_x < -STICK_DEAD_ZONE) {
+                            x_offset -%= @abs(stick_x);
+                        } else if (stick_x > STICK_DEAD_ZONE) {
+                            x_offset +%= @abs(stick_x);
+                        }
+
+                        // Apply left stick Y.
+                        if (stick_y > STICK_DEAD_ZONE) {
+                            y_offset -%= @abs(stick_y);
+                        } else if (stick_y < -STICK_DEAD_ZONE) {
+                            y_offset +%= @abs(stick_y);
+                        }
+
+                        // Apply D-Pad X;
+                        if (left) {
+                            x_offset -%= 1;
+                        } else if (right) {
+                            x_offset +%= 1;
+                        }
+
+                        // Apply D-Pad Y;
                         if (up) {
                             y_offset -%= 1;
                         } else if (down) {
@@ -320,8 +344,6 @@ pub export fn wWinMain(
                     controller_index += 1;
                 }
                 renderWeirdGradient(&back_buffer, x_offset, y_offset);
-                x_offset += 1;
-                y_offset += 2;
 
                 const window_dimension = getWindowDimension(window_handle);
                 displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
