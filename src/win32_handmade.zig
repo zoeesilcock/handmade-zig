@@ -4,12 +4,15 @@ const win32 = struct {
     usingnamespace @import("win32").system.diagnostics.debug;
     usingnamespace @import("win32").system.library_loader;
     usingnamespace @import("win32").system.memory;
+    usingnamespace @import("win32").system.com;
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").ui.windows_and_messaging;
     usingnamespace @import("win32").ui.input;
     usingnamespace @import("win32").ui.input.xbox_controller;
     usingnamespace @import("win32").ui.input.keyboard_and_mouse;
     usingnamespace @import("win32").graphics.gdi;
+    usingnamespace @import("win32").media.audio;
+    usingnamespace @import("win32").media.audio.direct_sound;
 };
 
 pub const UNICODE = true;
@@ -55,6 +58,73 @@ fn loadXInput() void {
         }
         if (win32.GetProcAddress(library, "XInputSetState")) |procedure| {
             XInputSetState = @as(@TypeOf(XInputSetState), @ptrCast(procedure));
+        }
+    }
+}
+
+fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32) void {
+    // Load the library.
+    if (win32.LoadLibraryA("dsound.dll")) |library| {
+        if (win32.GetProcAddress(library, "DirectSoundCreate")) |procedure| {
+            var DirectSoundCreate: *const fn (?*const win32.Guid, ?*?*win32.IDirectSound, ?*win32.IUnknown) win32.HRESULT = undefined;
+            DirectSoundCreate = @as(@TypeOf(DirectSoundCreate), @ptrCast(procedure));
+
+            // Create the DirectSound object.
+            var opt_direct_sound: ?*win32.IDirectSound = undefined;
+            if (win32.SUCCEEDED(DirectSoundCreate(null, &opt_direct_sound, null))) {
+                if (opt_direct_sound) |direct_sound| {
+                    var wave_format = win32.WAVEFORMATEX{
+                        .wFormatTag = win32.WAVE_FORMAT_PCM,
+                        .nChannels = 2,
+                        .nSamplesPerSec = samples_per_second,
+                        .nAvgBytesPerSec = 0,
+                        .nBlockAlign = 0,
+                        .wBitsPerSample = 16,
+                        .cbSize = 0,
+                    };
+
+                    wave_format.nBlockAlign = (wave_format.nChannels * wave_format.wBitsPerSample) / 8;
+                    wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
+
+                    if (win32.SUCCEEDED(direct_sound.vtable.SetCooperativeLevel(direct_sound, window, win32.DSSCL_PRIORITY))) {
+                        // Create the primary buffer.
+                        var buffer_description = win32.DSBUFFERDESC{
+                            .dwSize = @sizeOf(win32.DSBUFFERDESC),
+                            .dwFlags = win32.DSBCAPS_PRIMARYBUFFER,
+                            .dwBufferBytes = 0,
+                            .dwReserved = 0,
+                            .lpwfxFormat = null,
+                            .guid3DAlgorithm = win32.Guid.initString("00000000-0000-0000-0000-000000000000"),
+                        };
+                        var opt_primary_buffer: ?*win32.IDirectSoundBuffer = undefined;
+
+                        if (win32.SUCCEEDED(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_primary_buffer, null))) {
+                            if (opt_primary_buffer) |primary_buffer| {
+                                if (win32.SUCCEEDED(primary_buffer.vtable.SetFormat(primary_buffer, &wave_format))) {
+                                    win32.OutputDebugStringA("Primary buffer created!\n");
+                                }
+                            }
+                        }
+                    }
+
+                    // Create the secondary buffer.
+                    var buffer_description = win32.DSBUFFERDESC{
+                        .dwSize = @sizeOf(win32.DSBUFFERDESC),
+                        .dwFlags = 0,
+                        .dwBufferBytes = buffer_size,
+                        .dwReserved = 0,
+                        .lpwfxFormat = &wave_format,
+                        .guid3DAlgorithm = win32.Guid.initString("00000000-0000-0000-0000-000000000000"),
+                    };
+                    var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
+                    if (win32.SUCCEEDED(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_secondary_buffer, null))) {
+                        if (opt_secondary_buffer) |secondary_buffer| {
+                            _ = secondary_buffer;
+                            win32.OutputDebugStringA("Secondary buffer created!\n");
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -259,6 +329,8 @@ pub export fn wWinMain(
             const device_context = win32.GetDC(window_handle);
             var x_offset: u32 = 0;
             var y_offset: u32 = 0;
+
+            initDirectSound(window_handle, 48000, 48000 * @sizeOf(i16) * 2);
 
             running = true;
             while (running) {
