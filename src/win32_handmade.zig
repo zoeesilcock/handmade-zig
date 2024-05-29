@@ -19,6 +19,8 @@ pub const UNICODE = true;
 
 const PI32: f32 = 3.1415926535897932384626433;
 const TAU32: f32 = PI32 * 2.0;
+const MIDDLE_C: u32 = 261;
+const TREBLE_C: u32 = 523;
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -53,6 +55,8 @@ const SoundOutput = struct {
     tone_hz: u32,
     wave_period: u32,
     wave_volume: i32,
+    wave_time: f32,
+    latency_sample_count: u32,
 };
 
 fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(@import("std").os.windows.WINAPI) isize {
@@ -163,8 +167,7 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
             var sample_index: u32 = 0;
             const region1_sample_count = region1_size / sound_output.bytes_per_sample;
             while (sample_index < region1_sample_count) {
-                const t: f32 = TAU32 * @as(f32, @floatFromInt(sound_output.running_sample_index)) / @as(f32, @floatFromInt(sound_output.wave_period));
-                const sine_value: f32 = @sin(t);
+                const sine_value: f32 = @sin(sound_output.wave_time);
                 const sample_value: i16 = @intFromFloat(sine_value * @as(f32, @floatFromInt(sound_output.wave_volume)));
                 sample_out += 1;
                 sample_out[0] = sample_value;
@@ -173,6 +176,7 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
 
                 sample_index += 1;
                 sound_output.running_sample_index += 1;
+                sound_output.wave_time += TAU32 / @as(f32, @floatFromInt(sound_output.wave_period));
             }
         }
 
@@ -181,8 +185,7 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
             var sample_index: u32 = 0;
             const region2_sample_count = region2_size / sound_output.bytes_per_sample;
             while (sample_index < region2_sample_count) {
-                const t: f32 = 2.0 * PI32 * @as(f32, @floatFromInt(sound_output.running_sample_index)) / @as(f32, @floatFromInt(sound_output.wave_period));
-                const sine_value: f32 = @sin(t);
+                const sine_value: f32 = @sin(sound_output.wave_time);
                 const sample_value: i16 = @intFromFloat(sine_value * @as(f32, @floatFromInt(sound_output.wave_volume)));
                 sample_out += 1;
                 sample_out[0] = sample_value;
@@ -191,6 +194,7 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
 
                 sample_index += 1;
                 sound_output.running_sample_index += 1;
+                sound_output.wave_time += TAU32 / @as(f32, @floatFromInt(sound_output.wave_period));
             }
         }
 
@@ -403,17 +407,20 @@ pub export fn wWinMain(
                 .bytes_per_sample = @sizeOf(i16) * 2,
                 .secondary_buffer_size = 0,
                 .running_sample_index = 0,
-                .tone_hz = 256,
+                .tone_hz = MIDDLE_C,
                 .wave_volume = 3000,
                 .wave_period = 0,
+                .wave_time = 0,
+                .latency_sample_count = 0,
             };
 
             sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
             sound_output.wave_period = @divFloor(sound_output.samples_per_second, sound_output.tone_hz);
+            sound_output.latency_sample_count = @divFloor(sound_output.samples_per_second, 15);
 
             initDirectSound(window_handle, sound_output.samples_per_second, sound_output.secondary_buffer_size);
             if (opt_secondary_buffer) |secondary_buffer| {
-                fillSoundBuffer(&sound_output, secondary_buffer, 0, sound_output.secondary_buffer_size);
+                fillSoundBuffer(&sound_output, secondary_buffer, 0, sound_output.latency_sample_count * sound_output.samples_per_second);
                 _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
             }
 
@@ -470,6 +477,14 @@ pub export fn wWinMain(
                             y_offset +%= @abs(stick_y);
                         }
 
+                        const hz: i32 = @as(i32, @intFromFloat(@as(f32,(@floatFromInt(MIDDLE_C))) * (@as(f32, @floatFromInt(pad.sThumbLY)) / 30000.0)));
+                        if (hz > 0) {
+                            sound_output.tone_hz = TREBLE_C + @abs(hz);
+                        } else if (hz < 0) {
+                            sound_output.tone_hz = TREBLE_C - @abs(hz);
+                        }
+                        sound_output.wave_period = @divFloor(sound_output.samples_per_second, sound_output.tone_hz);
+
                         // Apply D-Pad X;
                         if (left) {
                             x_offset -%= 1;
@@ -513,14 +528,15 @@ pub export fn wWinMain(
                     var write_cursor: std.os.windows.DWORD = undefined;
 
                     if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(secondary_buffer, &play_cursor, &write_cursor))) {
-                        const byte_to_lock: std.os.windows.DWORD = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
+                        const target_cursor: u32 = (play_cursor + (sound_output.latency_sample_count * sound_output.bytes_per_sample)) % sound_output.secondary_buffer_size;
+                        const byte_to_lock: u32 = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
                         var bytes_to_write: u32 = 0;
 
-                        if (byte_to_lock > play_cursor) {
+                        if (byte_to_lock > target_cursor) {
                             bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
-                            bytes_to_write += play_cursor;
+                            bytes_to_write += target_cursor;
                         } else {
-                            bytes_to_write = play_cursor - byte_to_lock;
+                            bytes_to_write = target_cursor - byte_to_lock;
                         }
 
                         fillSoundBuffer(&sound_output, secondary_buffer, byte_to_lock, bytes_to_write);
