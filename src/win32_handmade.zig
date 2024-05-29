@@ -18,6 +18,7 @@ const win32 = struct {
 pub const UNICODE = true;
 
 const PI32: f32 = 3.1415926535897932384626433;
+const TAU32: f32 = PI32 * 2.0;
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -162,7 +163,7 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
             var sample_index: u32 = 0;
             const region1_sample_count = region1_size / sound_output.bytes_per_sample;
             while (sample_index < region1_sample_count) {
-                const t: f32 = 2.0 * PI32 * @as(f32, @floatFromInt(sound_output.running_sample_index)) / @as(f32, @floatFromInt(sound_output.wave_period));
+                const t: f32 = TAU32 * @as(f32, @floatFromInt(sound_output.running_sample_index)) / @as(f32, @floatFromInt(sound_output.wave_period));
                 const sine_value: f32 = @sin(t);
                 const sample_value: i16 = @intFromFloat(sine_value * @as(f32, @floatFromInt(sound_output.wave_volume)));
                 sample_out += 1;
