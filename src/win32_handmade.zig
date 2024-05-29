@@ -5,6 +5,7 @@ const win32 = struct {
     usingnamespace @import("win32").system.library_loader;
     usingnamespace @import("win32").system.memory;
     usingnamespace @import("win32").system.com;
+    usingnamespace @import("win32").system.performance;
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").ui.windows_and_messaging;
     usingnamespace @import("win32").ui.input;
@@ -29,9 +30,22 @@ const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
 const STICK_DEAD_ZONE = 1;
 
+const Allocator = std.mem.Allocator;
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
+
+pub inline fn rdtsc() u64 {
+    var hi: u32 = 0;
+    var low: u32 = 0;
+
+    asm (
+        \\rdtsc
+        : [low] "={eax}" (low),
+          [hi] "={edx}" (hi),
+    );
+    return (@as(u64, hi) << 32) | @as(u64, low);
+}
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -360,6 +374,12 @@ pub export fn wWinMain(
     _ = cmd_line;
     _ = cmd_show;
 
+    var performance_frequency: win32.LARGE_INTEGER = undefined;
+    _ = win32.QueryPerformanceFrequency(&performance_frequency);
+    const perf_count_frequency: i64 = performance_frequency.QuadPart;
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // const allocator = gpa.allocator();
+
     loadXInput();
     resizeDBISection(&back_buffer, WIDTH, HEIGHT);
 
@@ -427,6 +447,12 @@ pub export fn wWinMain(
             }
 
             running = true;
+
+            // Initialize timing.
+            var last_cycle_count = rdtsc();
+            var last_counter: win32.LARGE_INTEGER = undefined;
+            _ = win32.QueryPerformanceCounter(&last_counter);
+
             while (running) {
                 var message: win32.MSG = undefined;
                 while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
@@ -544,6 +570,27 @@ pub export fn wWinMain(
                         fillSoundBuffer(&sound_output, secondary_buffer, byte_to_lock, bytes_to_write);
                     }
                 }
+
+                // Capture timing.
+                const end_cycle_count = rdtsc();
+                var end_counter: win32.LARGE_INTEGER = undefined;
+                _ = win32.QueryPerformanceCounter(&end_counter);
+
+                // Calculate timing information.
+                const counter_elapsed: i64 = end_counter.QuadPart - last_counter.QuadPart;
+                const ms_elapsed: i64 = @divFloor((1000 * counter_elapsed), perf_count_frequency);
+                const fps: i32 = @intCast(@divFloor(perf_count_frequency, counter_elapsed));
+                const cycles_elapsed: i32 = @intCast(end_cycle_count - last_cycle_count);
+                const mega_cycles_per_frame: i32 = @divFloor(cycles_elapsed, (1000 * 1000));
+
+                // Output timing information.
+                var buffer: [64]u16 = undefined;
+                var arglist = .{ms_elapsed, fps, mega_cycles_per_frame};
+                _ = win32.wvsprintfW(@ptrCast(&buffer), win32.L("Time/frame: %dms, FPS: %d, MegaCycles/frame: %d \n"), @ptrCast(&arglist));
+                win32.OutputDebugStringW(@ptrCast(&buffer));
+
+                last_counter = end_counter;
+                last_cycle_count = end_cycle_count;
             }
         } else {
             win32.OutputDebugStringA("Window handle is null.\n");
