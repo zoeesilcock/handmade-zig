@@ -516,9 +516,7 @@ pub export fn wWinMain(
                         const byte_to_lock: std.os.windows.DWORD = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
                         var bytes_to_write: u32 = 0;
 
-                        if (byte_to_lock == play_cursor) {
-                            bytes_to_write = 0;
-                        } else if (byte_to_lock > play_cursor) {
+                        if (byte_to_lock > play_cursor) {
                             bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
                             bytes_to_write += play_cursor;
                         } else {
