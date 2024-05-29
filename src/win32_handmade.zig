@@ -27,7 +27,6 @@ const HEIGHT = 720;
 const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
-const STICK_DOWN_SHIFT = 12;
 const STICK_DEAD_ZONE = 1;
 
 var running: bool = false;
@@ -463,8 +462,8 @@ pub export fn wWinMain(
                         // const x_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_X) > 0;
                         // const y_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_Y) > 0;
 
-                        const stick_x = pad.sThumbLX >> STICK_DOWN_SHIFT;
-                        const stick_y = pad.sThumbLY >> STICK_DOWN_SHIFT;
+                        const stick_x = @divFloor(pad.sThumbLX, 4096);
+                        const stick_y = @divFloor(pad.sThumbLY, 4096);
 
                         // Apply left stick X.
                         if (stick_x < -STICK_DEAD_ZONE) {
