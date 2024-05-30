@@ -16,6 +16,20 @@
 /// * Hardware acceleration (OpenGL or Direct3D or BOTH?).
 /// * Get KeyboardLayout (for international keyboards).
 
+pub const UNICODE = true;
+
+const PI32: f32 = 3.1415926535897932384626433;
+const TAU32: f32 = PI32 * 2.0;
+const MIDDLE_C: u32 = 261;
+const TREBLE_C: u32 = 523;
+
+const WIDTH = 1280;
+const HEIGHT = 720;
+const WINDOW_DECORATION_WIDTH = 16;
+const WINDOW_DECORATION_HEIGHT = 39;
+const BYTES_PER_PIXEL = 4;
+const STICK_DEAD_ZONE = 1;
+
 const handmade = @import("handmade.zig");
 
 const std = @import("std");
@@ -36,21 +50,6 @@ const win32 = struct {
     usingnamespace @import("win32").media.audio.direct_sound;
 };
 
-pub const UNICODE = true;
-
-const PI32: f32 = 3.1415926535897932384626433;
-const TAU32: f32 = PI32 * 2.0;
-const MIDDLE_C: u32 = 261;
-const TREBLE_C: u32 = 523;
-
-const WIDTH = 1280;
-const HEIGHT = 720;
-const WINDOW_DECORATION_WIDTH = 16;
-const WINDOW_DECORATION_HEIGHT = 39;
-const BYTES_PER_PIXEL = 4;
-const STICK_DEAD_ZONE = 1;
-
-const Allocator = std.mem.Allocator;
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
