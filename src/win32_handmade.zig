@@ -82,9 +82,7 @@ var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(@import("std"
 var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(@import("std").os.windows.WINAPI) isize = XInputSetStateStub;
 
 fn loadXInput() void {
-    const x_input_library = win32.LoadLibraryA("xinput1_4.dll")
-        orelse win32.LoadLibraryA("xinput1_3.dll")
-        orelse win32.LoadLibraryA("xinput9_1_0.dll");
+    const x_input_library = win32.LoadLibraryA("xinput1_4.dll") orelse win32.LoadLibraryA("xinput1_3.dll") orelse win32.LoadLibraryA("xinput9_1_0.dll");
 
     if (x_input_library) |library| {
         if (win32.GetProcAddress(library, "XInputGetState")) |procedure| {
@@ -169,14 +167,14 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
     var region2_size: std.os.windows.DWORD = 0;
 
     if (win32.SUCCEEDED(secondary_buffer.vtable.Lock(
-                secondary_buffer,
-                byte_to_lock,
-                bytes_to_write,
-                &region1,
-                &region1_size,
-                &region2,
-                &region2_size,
-                0,
+        secondary_buffer,
+        byte_to_lock,
+        bytes_to_write,
+        &region1,
+        &region1_size,
+        &region2,
+        &region2_size,
+        0,
     ))) {
         if (region1) |region| {
             var sample_out: [*]i16 = @ptrCast(@alignCast(region));
@@ -503,7 +501,7 @@ pub export fn wWinMain(
                             y_offset +%= @abs(stick_y);
                         }
 
-                        const hz: i32 = @as(i32, @intFromFloat(@as(f32,(@floatFromInt(MIDDLE_C))) * (@as(f32, @floatFromInt(pad.sThumbLY)) / 30000.0)));
+                        const hz: i32 = @as(i32, @intFromFloat(@as(f32, (@floatFromInt(MIDDLE_C))) * (@as(f32, @floatFromInt(pad.sThumbLY)) / 30000.0)));
                         if (hz > 0) {
                             sound_output.tone_hz = TREBLE_C + @abs(hz);
                         } else if (hz < 0) {
@@ -583,7 +581,7 @@ pub export fn wWinMain(
 
                 // Output timing information.
                 var buffer: [64]u8 = undefined;
-                _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   ", .{ms_elapsed, fps, mega_cycles_per_frame}) catch {};
+                _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   ", .{ ms_elapsed, fps, mega_cycles_per_frame }) catch {};
                 win32.OutputDebugStringA(@ptrCast(&buffer));
 
                 last_counter = end_counter;
