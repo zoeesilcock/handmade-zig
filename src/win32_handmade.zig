@@ -1,3 +1,21 @@
+/// TODO: This is not a final platform layer!
+///
+/// Partial list of missing parts:
+///
+/// * Save game locations.
+/// * Getting a handle to our own executable file.
+/// * Asset loading path.
+/// * Threading (launching a thread).
+/// * Raw Input (support for multiple keyboards).
+/// * Sleep/timeBeginPeriod.
+/// * ClipCursor() (for multi-monitor support).
+/// * WM_SETCURSOR (control cursor visibility).
+/// * QueryCancelAutoplay.
+/// * WM_ACTIVATEAPP (for when we are not the active application).
+/// * Blit speed improvements (BitBlt).
+/// * Hardware acceleration (OpenGL or Direct3D or BOTH?).
+/// * Get KeyboardLayout (for international keyboards).
+
 const std = @import("std");
 const win32 = struct {
     usingnamespace @import("win32").zig;
