@@ -91,14 +91,14 @@ const SoundOutput = struct {
     latency_sample_count: u32,
 };
 
-fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(@import("std").os.windows.WINAPI) isize {
+fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(std.os.windows.WINAPI) isize {
     return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
-fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(@import("std").os.windows.WINAPI) isize {
+fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(std.os.windows.WINAPI) isize {
     return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
-var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(@import("std").os.windows.WINAPI) isize = XInputGetStateStub;
-var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(@import("std").os.windows.WINAPI) isize = XInputSetStateStub;
+var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(std.os.windows.WINAPI) isize = XInputGetStateStub;
+var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(std.os.windows.WINAPI) isize = XInputSetStateStub;
 
 fn loadXInput() void {
     const x_input_library = win32.LoadLibraryA("xinput1_4.dll") orelse win32.LoadLibraryA("xinput1_3.dll") orelse win32.LoadLibraryA("xinput9_1_0.dll");
