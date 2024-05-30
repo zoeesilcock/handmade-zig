@@ -16,6 +16,8 @@
 /// * Hardware acceleration (OpenGL or Direct3D or BOTH?).
 /// * Get KeyboardLayout (for international keyboards).
 
+const handmade = @import("handmade.zig");
+
 const std = @import("std");
 const win32 = struct {
     usingnamespace @import("win32").zig;
@@ -242,29 +244,6 @@ fn getWindowDimension(window: win32.HWND) WindowDimension {
         .width = client_rect.right - client_rect.left,
         .height = client_rect.bottom - client_rect.top,
     };
-}
-
-fn renderWeirdGradient(buffer: *OffscreenBuffer, x_offset: u32, y_offset: u32) void {
-    var row: [*]u8 = @ptrCast(buffer.memory);
-    var y: u32 = 0;
-
-    while (y < buffer.height) {
-        var x: u32 = 0;
-        var pixel: [*]align(4) u32 = @ptrCast(@alignCast(row));
-
-        while (x < buffer.width) {
-            const blue: u32 = @as(u8, @truncate(x +% x_offset));
-            const green: u32 = @as(u8, @truncate(y +% y_offset));
-
-            pixel[0] = (green << 8) | blue;
-
-            pixel += 1;
-            x += 1;
-        }
-
-        row += buffer.pitch;
-        y += 1;
-    }
 }
 
 fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
@@ -560,7 +539,14 @@ pub export fn wWinMain(
 
                     controller_index += 1;
                 }
-                renderWeirdGradient(&back_buffer, x_offset, y_offset);
+
+                var gameBuffer = handmade.GameOffscreenBuffer{
+                    .memory = back_buffer.memory,
+                    .width = back_buffer.width,
+                    .height = back_buffer.height,
+                    .pitch = back_buffer.pitch,
+                };
+                handmade.gameUpdateAndRender(&gameBuffer, x_offset, y_offset);
 
                 const window_dimension = getWindowDimension(window_handle);
                 displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
