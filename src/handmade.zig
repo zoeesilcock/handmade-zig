@@ -1,15 +1,15 @@
-pub const GameOffscreenBuffer = struct {
+pub const OffscreenBuffer = struct {
     memory: ?*anyopaque = undefined,
     width: i32 = 0,
     height: i32 = 0,
     pitch: usize = 0,
 };
 
-pub fn gameUpdateAndRender(buffer: *GameOffscreenBuffer, x_offset: u32, y_offset: u32) void {
+pub fn updateAndRender(buffer: *OffscreenBuffer, x_offset: u32, y_offset: u32) void {
     renderWeirdGradient(buffer, x_offset, y_offset);
 }
 
-fn renderWeirdGradient(buffer: *GameOffscreenBuffer, x_offset: u32, y_offset: u32) void {
+fn renderWeirdGradient(buffer: *OffscreenBuffer, x_offset: u32, y_offset: u32) void {
     var row: [*]u8 = @ptrCast(buffer.memory);
     var y: u32 = 0;
 

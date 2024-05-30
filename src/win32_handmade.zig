@@ -30,7 +30,7 @@ const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
 const STICK_DEAD_ZONE = 1;
 
-const handmade = @import("handmade.zig");
+const game = @import("handmade.zig");
 
 const std = @import("std");
 const win32 = struct {
@@ -539,13 +539,13 @@ pub export fn wWinMain(
                     controller_index += 1;
                 }
 
-                var gameBuffer = handmade.GameOffscreenBuffer{
+                var gameBuffer = game.OffscreenBuffer{
                     .memory = back_buffer.memory,
                     .width = back_buffer.width,
                     .height = back_buffer.height,
                     .pitch = back_buffer.pitch,
                 };
-                handmade.gameUpdateAndRender(&gameBuffer, x_offset, y_offset);
+                game.updateAndRender(&gameBuffer, x_offset, y_offset);
 
                 const window_dimension = getWindowDimension(window_handle);
                 displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
