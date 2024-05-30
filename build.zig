@@ -7,6 +7,11 @@ pub fn build(b: *std.Build) void {
         .target = b.host,
     });
 
+    // Build options.
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "timing", b.option(bool, "timing", "print timing info to debug output") orelse false);
+    exe.root_module.addOptions("build_options", build_options);
+
     // Add the win32 API wrapper.
     const win32api = b.createModule(.{
         .root_source_file = b.path("lib/zigwin32/win32.zig"),

@@ -15,3 +15,6 @@ git submodule update
 The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [CodeLLDB extension](https://github.com/vadimcn/codelldb) in VS Code.
 
 OutputDebugString is ignored by lldb, use [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview) to see those messages.
+
+## Build options
+* Timing: use the `-Dtiming` flag when building to enable printing timing (ms/frame, fps and cycles/frame) to the debug output.

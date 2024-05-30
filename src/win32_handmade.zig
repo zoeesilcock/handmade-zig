@@ -30,6 +30,8 @@ const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
 const STICK_DEAD_ZONE = 1;
 
+const OUTPUT_TIMING = @import("build_options").timing;
+
 const game = @import("handmade.zig");
 
 const std = @import("std");
@@ -440,10 +442,13 @@ pub export fn wWinMain(
 
             running = true;
 
-            // Initialize timing.
-            var last_cycle_count = rdtsc();
+            var last_cycle_count: u64 = 0;
             var last_counter: win32.LARGE_INTEGER = undefined;
-            _ = win32.QueryPerformanceCounter(&last_counter);
+            if (OUTPUT_TIMING) {
+                // Initialize timing.
+                last_cycle_count = rdtsc();
+                _ = win32.QueryPerformanceCounter(&last_counter);
+            }
 
             while (running) {
                 var message: win32.MSG = undefined;
@@ -570,25 +575,27 @@ pub export fn wWinMain(
                     }
                 }
 
-                // Capture timing.
-                const end_cycle_count = rdtsc();
-                var end_counter: win32.LARGE_INTEGER = undefined;
-                _ = win32.QueryPerformanceCounter(&end_counter);
+                if (OUTPUT_TIMING) {
+                    // Capture timing.
+                    const end_cycle_count = rdtsc();
+                    var end_counter: win32.LARGE_INTEGER = undefined;
+                    _ = win32.QueryPerformanceCounter(&end_counter);
 
-                // Calculate timing information.
-                const counter_elapsed: i64 = end_counter.QuadPart - last_counter.QuadPart;
-                const ms_elapsed: f32 = @as(f32, @floatFromInt(1000 * counter_elapsed)) / @as(f32, @floatFromInt(perf_count_frequency));
-                const fps: f32 = @as(f32, @floatFromInt(perf_count_frequency)) / @as(f32, @floatFromInt(counter_elapsed));
-                const cycles_elapsed: i32 = @intCast(end_cycle_count - last_cycle_count);
-                const mega_cycles_per_frame: f32 = @as(f32, @floatFromInt(cycles_elapsed)) / @as(f32, @floatFromInt(1000 * 1000));
+                    // Calculate timing information.
+                    const counter_elapsed: i64 = end_counter.QuadPart - last_counter.QuadPart;
+                    const ms_elapsed: f32 = @as(f32, @floatFromInt(1000 * counter_elapsed)) / @as(f32, @floatFromInt(perf_count_frequency));
+                    const fps: f32 = @as(f32, @floatFromInt(perf_count_frequency)) / @as(f32, @floatFromInt(counter_elapsed));
+                    const cycles_elapsed: i32 = @intCast(end_cycle_count - last_cycle_count);
+                    const mega_cycles_per_frame: f32 = @as(f32, @floatFromInt(cycles_elapsed)) / @as(f32, @floatFromInt(1000 * 1000));
 
-                // Output timing information.
-                var buffer: [64]u8 = undefined;
-                _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   ", .{ ms_elapsed, fps, mega_cycles_per_frame }) catch {};
-                win32.OutputDebugStringA(@ptrCast(&buffer));
+                    // Output timing information.
+                    var buffer: [64]u8 = undefined;
+                    _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   ", .{ ms_elapsed, fps, mega_cycles_per_frame }) catch {};
+                    win32.OutputDebugStringA(@ptrCast(&buffer));
 
-                last_counter = end_counter;
-                last_cycle_count = end_cycle_count;
+                    last_counter = end_counter;
+                    last_cycle_count = end_cycle_count;
+                }
             }
         } else {
             win32.OutputDebugStringA("Window handle is null.\n");
