@@ -578,16 +578,15 @@ pub export fn wWinMain(
 
                 // Calculate timing information.
                 const counter_elapsed: i64 = end_counter.QuadPart - last_counter.QuadPart;
-                const ms_elapsed: i64 = @divFloor((1000 * counter_elapsed), perf_count_frequency);
-                const fps: i32 = @intCast(@divFloor(perf_count_frequency, counter_elapsed));
+                const ms_elapsed: f32 = @as(f32, @floatFromInt(1000 * counter_elapsed)) / @as(f32, @floatFromInt(perf_count_frequency));
+                const fps: f32 = @as(f32, @floatFromInt(perf_count_frequency)) / @as(f32, @floatFromInt(counter_elapsed));
                 const cycles_elapsed: i32 = @intCast(end_cycle_count - last_cycle_count);
-                const mega_cycles_per_frame: i32 = @divFloor(cycles_elapsed, (1000 * 1000));
+                const mega_cycles_per_frame: f32 = @as(f32, @floatFromInt(cycles_elapsed)) / @as(f32, @floatFromInt(1000 * 1000));
 
                 // Output timing information.
-                var buffer: [64]u16 = undefined;
-                var arglist = .{ms_elapsed, fps, mega_cycles_per_frame};
-                _ = win32.wvsprintfW(@ptrCast(&buffer), win32.L("Time/frame: %dms, FPS: %d, MegaCycles/frame: %d \n"), @ptrCast(&arglist));
-                win32.OutputDebugStringW(@ptrCast(&buffer));
+                var buffer: [64]u8 = undefined;
+                _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   ", .{ms_elapsed, fps, mega_cycles_per_frame}) catch {};
+                win32.OutputDebugStringA(@ptrCast(&buffer));
 
                 last_counter = end_counter;
                 last_cycle_count = end_cycle_count;
