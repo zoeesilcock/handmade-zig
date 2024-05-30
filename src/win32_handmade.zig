@@ -377,8 +377,6 @@ pub export fn wWinMain(
     var performance_frequency: win32.LARGE_INTEGER = undefined;
     _ = win32.QueryPerformanceFrequency(&performance_frequency);
     const perf_count_frequency: i64 = performance_frequency.QuadPart;
-    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // const allocator = gpa.allocator();
 
     loadXInput();
     resizeDBISection(&back_buffer, WIDTH, HEIGHT);
@@ -595,8 +593,6 @@ pub export fn wWinMain(
             win32.OutputDebugStringA("Window handle is null.\n");
         }
     } else {
-        // const lastError = win32.GetLastError();
-        // _ = lastError;
         win32.OutputDebugStringA("Register class failed.\n");
     }
 
