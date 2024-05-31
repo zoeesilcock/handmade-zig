@@ -18,8 +18,6 @@
 
 pub const UNICODE = true;
 
-const PI32: f32 = 3.1415926535897932384626433;
-const TAU32: f32 = PI32 * 2.0;
 const MIDDLE_C: u32 = 261;
 const TREBLE_C: u32 = 523;
 
@@ -181,7 +179,47 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
     }
 }
 
-fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectSoundBuffer, byte_to_lock: u32, bytes_to_write: u32) void {
+fn clearSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectSoundBuffer) void {
+    var region1: ?*anyopaque = undefined;
+    var region1_size: std.os.windows.DWORD = 0;
+    var region2: ?*anyopaque = undefined;
+    var region2_size: std.os.windows.DWORD = 0;
+
+    if (win32.SUCCEEDED(secondary_buffer.vtable.Lock(
+        secondary_buffer,
+        0,
+        sound_output.secondary_buffer_size,
+        &region1,
+        &region1_size,
+        &region2,
+        &region2_size,
+        0,
+    ))) {
+        if (region1) |region| {
+            var sample_out: [*]u8 = @ptrCast(@alignCast(region));
+            var byte_index: u32 = 0;
+            while (byte_index < region1_size) {
+                sample_out[0] = 0;
+                sample_out += 1;
+                byte_index += 1;
+            }
+        }
+
+        if (region2) |region| {
+            var sample_out: [*]u8 = @ptrCast(@alignCast(region));
+            var byte_index: u32 = 0;
+            while (byte_index < region2_size) {
+                sample_out[0] = 0;
+                sample_out += 1;
+                byte_index += 1;
+            }
+        }
+
+        _ = secondary_buffer.vtable.Unlock(secondary_buffer, region1, region1_size, region2, region2_size);
+    }
+}
+
+fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectSoundBuffer, byte_to_lock: u32, bytes_to_write: u32, game_output_buffer: *game.SoundOutputBuffer) void {
     var region1: ?*anyopaque = undefined;
     var region1_size: std.os.windows.DWORD = 0;
     var region2: ?*anyopaque = undefined;
@@ -197,21 +235,23 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
         &region2_size,
         0,
     ))) {
+        var source_sample: [*]i16 = game_output_buffer.samples;
+
         if (region1) |region| {
             var sample_out: [*]i16 = @ptrCast(@alignCast(region));
             var sample_index: u32 = 0;
             const region1_sample_count = region1_size / sound_output.bytes_per_sample;
             while (sample_index < region1_sample_count) {
-                const sine_value: f32 = @sin(sound_output.wave_time);
-                const sample_value: i16 = @intFromFloat(sine_value * @as(f32, @floatFromInt(sound_output.wave_volume)));
+                sample_out[0] = source_sample[0];
                 sample_out += 1;
-                sample_out[0] = sample_value;
+                source_sample += 1;
+
+                sample_out[0] = source_sample[0];
                 sample_out += 1;
-                sample_out[0] = sample_value;
+                source_sample += 1;
 
                 sample_index += 1;
                 sound_output.running_sample_index += 1;
-                sound_output.wave_time += TAU32 / @as(f32, @floatFromInt(sound_output.wave_period));
             }
         }
 
@@ -220,16 +260,16 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
             var sample_index: u32 = 0;
             const region2_sample_count = region2_size / sound_output.bytes_per_sample;
             while (sample_index < region2_sample_count) {
-                const sine_value: f32 = @sin(sound_output.wave_time);
-                const sample_value: i16 = @intFromFloat(sine_value * @as(f32, @floatFromInt(sound_output.wave_volume)));
+                sample_out[0] = source_sample[0];
                 sample_out += 1;
-                sample_out[0] = sample_value;
+                source_sample += 1;
+
+                sample_out[0] = source_sample[0];
                 sample_out += 1;
-                sample_out[0] = sample_value;
+                source_sample += 1;
 
                 sample_index += 1;
                 sound_output.running_sample_index += 1;
-                sound_output.wave_time += TAU32 / @as(f32, @floatFromInt(sound_output.wave_period));
             }
         }
 
@@ -433,10 +473,16 @@ pub export fn wWinMain(
             sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
             sound_output.wave_period = @divFloor(sound_output.samples_per_second, sound_output.tone_hz);
             sound_output.latency_sample_count = @divFloor(sound_output.samples_per_second, 15);
+            const samples: [*]i16 = @ptrCast(@alignCast(win32.VirtualAlloc(
+                null,
+                sound_output.secondary_buffer_size,
+                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+                win32.PAGE_READWRITE,
+            )));
 
             initDirectSound(window_handle, sound_output.samples_per_second, sound_output.secondary_buffer_size);
             if (opt_secondary_buffer) |secondary_buffer| {
-                fillSoundBuffer(&sound_output, secondary_buffer, 0, sound_output.latency_sample_count * sound_output.samples_per_second);
+                clearSoundBuffer(&sound_output, secondary_buffer);
                 _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
             }
 
@@ -543,26 +589,16 @@ pub export fn wWinMain(
 
                     controller_index += 1;
                 }
-
-                var gameBuffer = game.OffscreenBuffer{
-                    .memory = back_buffer.memory,
-                    .width = back_buffer.width,
-                    .height = back_buffer.height,
-                    .pitch = back_buffer.pitch,
-                };
-                game.updateAndRender(&gameBuffer, x_offset, y_offset);
-
-                const window_dimension = getWindowDimension(window_handle);
-                displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
-
+                var byte_to_lock: u32 = 0;
+                var bytes_to_write: u32 = 0;
+                var sound_is_valid = false;
                 if (opt_secondary_buffer) |secondary_buffer| {
                     var play_cursor: std.os.windows.DWORD = undefined;
                     var write_cursor: std.os.windows.DWORD = undefined;
 
                     if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(secondary_buffer, &play_cursor, &write_cursor))) {
                         const target_cursor: u32 = (play_cursor + (sound_output.latency_sample_count * sound_output.bytes_per_sample)) % sound_output.secondary_buffer_size;
-                        const byte_to_lock: u32 = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
-                        var bytes_to_write: u32 = 0;
+                        byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
 
                         if (byte_to_lock > target_cursor) {
                             bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
@@ -571,7 +607,29 @@ pub export fn wWinMain(
                             bytes_to_write = target_cursor - byte_to_lock;
                         }
 
-                        fillSoundBuffer(&sound_output, secondary_buffer, byte_to_lock, bytes_to_write);
+                        sound_is_valid = true;
+                    }
+                }
+
+                var game_buffer = game.OffscreenBuffer{
+                    .memory = back_buffer.memory,
+                    .width = back_buffer.width,
+                    .height = back_buffer.height,
+                    .pitch = back_buffer.pitch,
+                };
+                var sound_buffer = game.SoundOutputBuffer{
+                    .samples = samples,
+                    .sample_count = @divFloor(bytes_to_write, sound_output.bytes_per_sample),
+                    .samples_per_second = sound_output.samples_per_second,
+                };
+                game.updateAndRender(&game_buffer, x_offset, y_offset, &sound_buffer, sound_output.tone_hz);
+
+                const window_dimension = getWindowDimension(window_handle);
+                displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
+
+                if (sound_is_valid) {
+                    if (opt_secondary_buffer) |secondary_buffer| {
+                        fillSoundBuffer(&sound_output, secondary_buffer, byte_to_lock, bytes_to_write, &sound_buffer);
                     }
                 }
 
