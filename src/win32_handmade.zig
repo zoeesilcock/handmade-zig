@@ -15,7 +15,6 @@
 /// * Blit speed improvements (BitBlt).
 /// * Hardware acceleration (OpenGL or Direct3D or BOTH?).
 /// * Get KeyboardLayout (for international keyboards).
-
 pub const UNICODE = true;
 
 const MIDDLE_C: u32 = 261;
@@ -84,10 +83,6 @@ const SoundOutput = struct {
     bytes_per_sample: u32,
     secondary_buffer_size: u32,
     running_sample_index: u32,
-    tone_hz: u32,
-    wave_period: u32,
-    wave_volume: i32,
-    wave_time: f32,
     latency_sample_count: u32,
 };
 
@@ -111,6 +106,16 @@ fn loadXInput() void {
             XInputSetState = @as(@TypeOf(XInputSetState), @ptrCast(procedure));
         }
     }
+}
+
+fn processXInputDigitalButton(
+    x_input_button_state: u32,
+    button_bit: u32,
+    old_state: *game.ControllerButtonState,
+    new_state: *game.ControllerButtonState,
+) void {
+    new_state.ended_down = (x_input_button_state & button_bit) > 0;
+    new_state.half_transitions = if (old_state.ended_down != new_state.ended_down) 1 else 0;
 }
 
 fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32) void {
@@ -456,23 +461,17 @@ pub export fn wWinMain(
 
         if (opt_window_handle) |window_handle| {
             const device_context = win32.GetDC(window_handle);
-            var x_offset: u32 = 0;
-            var y_offset: u32 = 0;
             var sound_output = SoundOutput{
                 .samples_per_second = 48000,
                 .bytes_per_sample = @sizeOf(i16) * 2,
                 .secondary_buffer_size = 0,
                 .running_sample_index = 0,
-                .tone_hz = MIDDLE_C,
-                .wave_volume = 3000,
-                .wave_period = 0,
-                .wave_time = 0,
                 .latency_sample_count = 0,
             };
 
             sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
-            sound_output.wave_period = @divFloor(sound_output.samples_per_second, sound_output.tone_hz);
             sound_output.latency_sample_count = @divFloor(sound_output.samples_per_second, 15);
+
             const samples: [*]i16 = @ptrCast(@alignCast(win32.VirtualAlloc(
                 null,
                 sound_output.secondary_buffer_size,
@@ -485,6 +484,13 @@ pub export fn wWinMain(
                 clearSoundBuffer(&sound_output, secondary_buffer);
                 _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
             }
+
+            var game_input = [2]game.ControllerInputs{
+                game.ControllerInputs{},
+                game.ControllerInputs{},
+            };
+            var new_input = &game_input[0];
+            var old_input = &game_input[1];
 
             running = true;
 
@@ -508,87 +514,94 @@ pub export fn wWinMain(
 
                 var dwResult: isize = 0;
                 var controller_index: u8 = 0;
-                while (controller_index < win32.XUSER_MAX_COUNT) {
+
+                var max_controller_count = win32.XUSER_MAX_COUNT;
+                if (max_controller_count > game.MAX_CONTROLLER_COUNT) {
+                    max_controller_count = game.MAX_CONTROLLER_COUNT;
+                }
+
+                while (controller_index < max_controller_count) {
+                    const old_controller = &old_input.controllers[controller_index];
+                    const new_controller = &new_input.controllers[controller_index];
+
                     var controller_state: win32.XINPUT_STATE = undefined;
                     dwResult = XInputGetState(controller_index, &controller_state);
 
                     if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
                         // Controller is connected
                         const pad = &controller_state.Gamepad;
-                        const up: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_UP) > 0;
-                        const down: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_DOWN) > 0;
-                        const left: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0;
-                        const right: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0;
-                        //
-                        // const start: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_START) > 0;
-                        // const back: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_BACK) > 0;
-                        //
-                        // const left_shoulder: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_LEFT_SHOULDER) > 0;
-                        // const right_shoulder: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_RIGHT_SHOULDER) > 0;
-                        //
-                        const a_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_A) > 0;
-                        // const b_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_B) > 0;
-                        // const x_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_X) > 0;
-                        // const y_button: bool = (pad.wButtons & win32.XINPUT_GAMEPAD_Y) > 0;
 
-                        const stick_x = @divFloor(pad.sThumbLX, 4096);
-                        const stick_y = @divFloor(pad.sThumbLY, 4096);
-
-                        // Apply left stick X.
-                        if (stick_x < -STICK_DEAD_ZONE) {
-                            x_offset -%= @abs(stick_x);
-                        } else if (stick_x > STICK_DEAD_ZONE) {
-                            x_offset +%= @abs(stick_x);
-                        }
-
-                        // Apply left stick Y.
-                        if (stick_y > STICK_DEAD_ZONE) {
-                            y_offset -%= @abs(stick_y);
-                        } else if (stick_y < -STICK_DEAD_ZONE) {
-                            y_offset +%= @abs(stick_y);
-                        }
-
-                        const hz: i32 = @as(i32, @intFromFloat(@as(f32, (@floatFromInt(MIDDLE_C))) * (@as(f32, @floatFromInt(pad.sThumbLY)) / 30000.0)));
-                        if (hz > 0) {
-                            sound_output.tone_hz = TREBLE_C + @abs(hz);
-                        } else if (hz < 0) {
-                            sound_output.tone_hz = TREBLE_C - @abs(hz);
-                        }
-                        sound_output.wave_period = @divFloor(sound_output.samples_per_second, sound_output.tone_hz);
-
-                        // Apply D-Pad X;
-                        if (left) {
-                            x_offset -%= 1;
-                        } else if (right) {
-                            x_offset +%= 1;
-                        }
-
-                        // Apply D-Pad Y;
-                        if (up) {
-                            y_offset -%= 1;
-                        } else if (down) {
-                            y_offset +%= 1;
-                        }
-
-                        if (a_button) {
-                            var vibration: win32.XINPUT_VIBRATION = win32.XINPUT_VIBRATION{
-                                .wRightMotorSpeed = 9000,
-                                .wLeftMotorSpeed = 9000,
-                            };
-                            _ = XInputSetState(controller_index, &vibration);
+                        // Left stick X.
+                        var x: f32 = 0;
+                        if (pad.sThumbLX < 0) {
+                            x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32768.0;
                         } else {
-                            var vibration: win32.XINPUT_VIBRATION = win32.XINPUT_VIBRATION{
-                                .wRightMotorSpeed = 0,
-                                .wLeftMotorSpeed = 0,
-                            };
-                            _ = XInputSetState(controller_index, &vibration);
+                            x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32767.0;
                         }
+                        new_controller.start_x = old_controller.start_x;
+                        new_controller.min_x = x;
+                        new_controller.max_x = x;
+                        new_controller.end_x = x;
+
+                        // Left stick Y.
+                        var y: f32 = 0;
+                        if (pad.sThumbLY < 0) {
+                            y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32768.0;
+                        } else {
+                            y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32767.0;
+                        }
+                        new_controller.start_y = old_controller.start_y;
+                        new_controller.min_y = y;
+                        new_controller.max_y = y;
+                        new_controller.end_y = y;
+                        new_controller.is_analog = true;
+
+                        // Main buttons.
+                        processXInputDigitalButton(
+                            pad.wButtons,
+                            win32.XINPUT_GAMEPAD_A,
+                            &old_controller.down_button,
+                            &new_controller.down_button,
+                        );
+                        processXInputDigitalButton(
+                            pad.wButtons,
+                            win32.XINPUT_GAMEPAD_B,
+                            &old_controller.right_button,
+                            &new_controller.right_button,
+                        );
+                        processXInputDigitalButton(
+                            pad.wButtons,
+                            win32.XINPUT_GAMEPAD_X,
+                            &old_controller.left_button,
+                            &new_controller.left_button,
+                        );
+                        processXInputDigitalButton(
+                            pad.wButtons,
+                            win32.XINPUT_GAMEPAD_Y,
+                            &old_controller.up_button,
+                            &new_controller.up_button,
+                        );
+
+                        // Shoulder buttons.
+                        processXInputDigitalButton(
+                            pad.wButtons,
+                            win32.XINPUT_GAMEPAD_LEFT_SHOULDER,
+                            &old_controller.left_shoulder_button,
+                            &new_controller.left_shoulder_button,
+                        );
+                        processXInputDigitalButton(
+                            pad.wButtons,
+                            win32.XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                            &old_controller.right_shoulder_button,
+                            &new_controller.right_shoulder_button,
+                        );
                     } else {
                         // Controller is not connected
                     }
 
                     controller_index += 1;
                 }
+
                 var byte_to_lock: u32 = 0;
                 var bytes_to_write: u32 = 0;
                 var sound_is_valid = false;
@@ -622,7 +635,8 @@ pub export fn wWinMain(
                     .sample_count = @divFloor(bytes_to_write, sound_output.bytes_per_sample),
                     .samples_per_second = sound_output.samples_per_second,
                 };
-                game.updateAndRender(&game_buffer, x_offset, y_offset, &sound_buffer, sound_output.tone_hz);
+
+                game.updateAndRender(new_input.*, &game_buffer, &sound_buffer);
 
                 const window_dimension = getWindowDimension(window_handle);
                 displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
@@ -654,6 +668,10 @@ pub export fn wWinMain(
                     last_counter = end_counter;
                     last_cycle_count = end_cycle_count;
                 }
+
+                const temp: *game.ControllerInputs = new_input;
+                new_input = old_input;
+                old_input = temp;
             }
         } else {
             win32.OutputDebugStringA("Window handle is null.\n");
