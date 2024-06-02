@@ -5,6 +5,8 @@ const TREBLE_C: u32 = 523;
 
 pub const MAX_CONTROLLER_COUNT: u8 = 4;
 
+const std = @import("std");
+
 pub inline fn kilobytes(value: u32) u64 {
     return value * 1024;
 }
@@ -83,6 +85,8 @@ pub fn updateAndRender(
     buffer: *OffscreenBuffer,
     sound_buffer: *SoundOutputBuffer,
 ) void {
+    std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
+
     var state: *State = @ptrCast(@alignCast(memory.permanent_storage));
 
     if (!memory.is_initialized) {
