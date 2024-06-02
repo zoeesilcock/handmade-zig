@@ -458,6 +458,15 @@ fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
     buffer.pitch = @intCast(buffer.width * BYTES_PER_PIXEL);
 }
 
+fn getGameBuffer() game.OffscreenBuffer {
+    return game.OffscreenBuffer{
+        .memory = back_buffer.memory,
+        .width = back_buffer.width,
+        .height = back_buffer.height,
+        .pitch = back_buffer.pitch,
+    };
+}
+
 fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, window_width: i32, window_height: i32) void {
     _ = win32.StretchDIBits(
         device_context,
@@ -668,21 +677,17 @@ pub export fn wWinMain(
                         _ = win32.DispatchMessageW(&message);
                     }
 
+                    // Prepare input to game.
                     var sound_output_info = prepareSoundOutput(sound_output, samples);
+                    var game_buffer = getGameBuffer();
                     processXInput(old_input, new_input);
 
-                    var game_buffer = game.OffscreenBuffer{
-                        .memory = back_buffer.memory,
-                        .width = back_buffer.width,
-                        .height = back_buffer.height,
-                        .pitch = back_buffer.pitch,
-                    };
-
+                    // Send all input to game.
                     game.updateAndRender(&game_memory, new_input.*, &game_buffer, &sound_output_info.output_buffer);
 
+                    // Output game to screen and audio output.
                     const window_dimension = getWindowDimension(window_handle);
                     displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
-
                     if (sound_output_info.is_valid) {
                         if (opt_secondary_buffer) |secondary_buffer| {
                             fillSoundBuffer(&sound_output, secondary_buffer, &sound_output_info);
