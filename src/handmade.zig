@@ -5,6 +5,18 @@ const TREBLE_C: u32 = 523;
 
 pub const MAX_CONTROLLER_COUNT: u8 = 4;
 
+pub inline fn kilobytes(value: u32) u64 {
+    return value * 1024;
+}
+
+pub inline fn megabytes(value: u32) u64 {
+    return kilobytes(value) * 1024;
+}
+
+pub inline fn gigabytes(value: u32) u64 {
+    return megabytes(value) * 1024;
+}
+
 pub const OffscreenBuffer = struct {
     memory: ?*anyopaque = undefined,
     width: i32 = 0,
@@ -50,29 +62,49 @@ pub const ControllerInput = struct {
     right_shoulder_button: ControllerButtonState,
 };
 
-var x_offset: i32 = 0;
-var y_offset: i32 = 0;
+pub const Memory = struct {
+    is_initialized: bool,
+    permanent_storage_size: u64,
+    permanent_storage: *anyopaque,
+    transient_storage_size: u64,
+    transient_storage: *anyopaque,
+};
+
+const State = struct {
+    x_offset: i32 = 0,
+    y_offset: i32 = 0,
+    t_sine: f32 = 0.0,
+    tone_hz: u32 = MIDDLE_C,
+};
 
 pub fn updateAndRender(
+    memory: *Memory,
     input: ControllerInputs,
     buffer: *OffscreenBuffer,
     sound_buffer: *SoundOutputBuffer,
 ) void {
+    var state: *State = @ptrCast(@alignCast(memory.permanent_storage));
+
+    if (!memory.is_initialized) {
+        state.* = State{};
+        memory.is_initialized = true;
+    }
+
     const input0 = &input.controllers[0];
     if (input0.is_analog) {
-        x_offset += @intFromFloat(4.0 * input0.end_x);
-        tone_hz = @intCast(@as(i32, MIDDLE_C) + @as(i32, @intFromFloat(128.0 * input0.end_y)));
+        state.x_offset += @intFromFloat(4.0 * input0.end_x);
+        state.tone_hz = @intCast(@as(i32, MIDDLE_C) + @as(i32, @intFromFloat(128.0 * input0.end_y)));
     }
 
     if (input0.down_button.ended_down) {
-        y_offset += 1;
+        state.y_offset += 1;
     }
 
-    outputSound(sound_buffer);
-    renderWeirdGradient(buffer);
+    renderWeirdGradient(buffer, state.x_offset, state.y_offset);
+    outputSound(sound_buffer, state.tone_hz, &state.t_sine);
 }
 
-fn renderWeirdGradient(buffer: *OffscreenBuffer) void {
+fn renderWeirdGradient(buffer: *OffscreenBuffer, x_offset: i32, y_offset: i32) void {
     var row: [*]u8 = @ptrCast(buffer.memory);
     var y: u32 = 0;
     var wrapped_x_offset: u32 = 0;
@@ -111,17 +143,14 @@ fn renderWeirdGradient(buffer: *OffscreenBuffer) void {
     }
 }
 
-var t_sine: f32 = 0.0;
-var tone_hz: u32 = MIDDLE_C;
-
-fn outputSound(sound_buffer: *SoundOutputBuffer) void {
+fn outputSound(sound_buffer: *SoundOutputBuffer, tone_hz: u32, t_sine: *f32) void {
     const tone_volume = 3000;
     const wave_period = @divFloor(sound_buffer.samples_per_second, tone_hz);
 
     var sample_out: [*]i16 = sound_buffer.samples;
     var sample_index: u32 = 0;
     while (sample_index < sound_buffer.sample_count) {
-        const sine_value: f32 = @sin(t_sine);
+        const sine_value: f32 = @sin(t_sine.*);
         const sample_value: i16 = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
 
         sample_out += 1;
@@ -130,6 +159,6 @@ fn outputSound(sound_buffer: *SoundOutputBuffer) void {
         sample_out[0] = sample_value;
 
         sample_index += 1;
-        t_sine += TAU32 / @as(f32, @floatFromInt(wave_period));
+        t_sine.* += TAU32 / @as(f32, @floatFromInt(wave_period));
     }
 }

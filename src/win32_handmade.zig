@@ -485,193 +485,217 @@ pub export fn wWinMain(
                 _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
             }
 
-            var game_input = [2]game.ControllerInputs{
-                game.ControllerInputs{},
-                game.ControllerInputs{},
+            var game_memory: game.Memory = game.Memory{
+                .is_initialized = false,
+                .permanent_storage_size = game.megabytes(64),
+                .permanent_storage = undefined,
+                .transient_storage_size = game.gigabytes(4),
+                .transient_storage = undefined,
             };
-            var new_input = &game_input[0];
-            var old_input = &game_input[1];
+            game_memory.permanent_storage = win32.VirtualAlloc(
+                null,
+                game_memory.permanent_storage_size,
+                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+                win32.PAGE_READWRITE,
+            ) orelse undefined;
+            game_memory.transient_storage = win32.VirtualAlloc(
+                null,
+                game_memory.transient_storage_size,
+                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+                win32.PAGE_READWRITE,
+            ) orelse undefined;
 
-            running = true;
-
-            var last_cycle_count: u64 = 0;
-            var last_counter: win32.LARGE_INTEGER = undefined;
-            if (OUTPUT_TIMING) {
-                // Initialize timing.
-                last_cycle_count = rdtsc();
-                _ = win32.QueryPerformanceCounter(&last_counter);
-            }
-
-            while (running) {
-                var message: win32.MSG = undefined;
-                while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
-                    if (message.message == win32.WM_QUIT) {
-                        running = false;
-                    }
-                    _ = win32.TranslateMessage(&message);
-                    _ = win32.DispatchMessageW(&message);
-                }
-
-                var dwResult: isize = 0;
-                var controller_index: u8 = 0;
-
-                var max_controller_count = win32.XUSER_MAX_COUNT;
-                if (max_controller_count > game.MAX_CONTROLLER_COUNT) {
-                    max_controller_count = game.MAX_CONTROLLER_COUNT;
-                }
-
-                while (controller_index < max_controller_count) {
-                    const old_controller = &old_input.controllers[controller_index];
-                    const new_controller = &new_input.controllers[controller_index];
-
-                    var controller_state: win32.XINPUT_STATE = undefined;
-                    dwResult = XInputGetState(controller_index, &controller_state);
-
-                    if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
-                        // Controller is connected
-                        const pad = &controller_state.Gamepad;
-
-                        // Left stick X.
-                        var x: f32 = 0;
-                        if (pad.sThumbLX < 0) {
-                            x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32768.0;
-                        } else {
-                            x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32767.0;
-                        }
-                        new_controller.start_x = old_controller.start_x;
-                        new_controller.min_x = x;
-                        new_controller.max_x = x;
-                        new_controller.end_x = x;
-
-                        // Left stick Y.
-                        var y: f32 = 0;
-                        if (pad.sThumbLY < 0) {
-                            y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32768.0;
-                        } else {
-                            y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32767.0;
-                        }
-                        new_controller.start_y = old_controller.start_y;
-                        new_controller.min_y = y;
-                        new_controller.max_y = y;
-                        new_controller.end_y = y;
-                        new_controller.is_analog = true;
-
-                        // Main buttons.
-                        processXInputDigitalButton(
-                            pad.wButtons,
-                            win32.XINPUT_GAMEPAD_A,
-                            &old_controller.down_button,
-                            &new_controller.down_button,
-                        );
-                        processXInputDigitalButton(
-                            pad.wButtons,
-                            win32.XINPUT_GAMEPAD_B,
-                            &old_controller.right_button,
-                            &new_controller.right_button,
-                        );
-                        processXInputDigitalButton(
-                            pad.wButtons,
-                            win32.XINPUT_GAMEPAD_X,
-                            &old_controller.left_button,
-                            &new_controller.left_button,
-                        );
-                        processXInputDigitalButton(
-                            pad.wButtons,
-                            win32.XINPUT_GAMEPAD_Y,
-                            &old_controller.up_button,
-                            &new_controller.up_button,
-                        );
-
-                        // Shoulder buttons.
-                        processXInputDigitalButton(
-                            pad.wButtons,
-                            win32.XINPUT_GAMEPAD_LEFT_SHOULDER,
-                            &old_controller.left_shoulder_button,
-                            &new_controller.left_shoulder_button,
-                        );
-                        processXInputDigitalButton(
-                            pad.wButtons,
-                            win32.XINPUT_GAMEPAD_RIGHT_SHOULDER,
-                            &old_controller.right_shoulder_button,
-                            &new_controller.right_shoulder_button,
-                        );
-                    } else {
-                        // Controller is not connected
-                    }
-
-                    controller_index += 1;
-                }
-
-                var byte_to_lock: u32 = 0;
-                var bytes_to_write: u32 = 0;
-                var sound_is_valid = false;
-                if (opt_secondary_buffer) |secondary_buffer| {
-                    var play_cursor: std.os.windows.DWORD = undefined;
-                    var write_cursor: std.os.windows.DWORD = undefined;
-
-                    if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(secondary_buffer, &play_cursor, &write_cursor))) {
-                        const target_cursor: u32 = (play_cursor + (sound_output.latency_sample_count * sound_output.bytes_per_sample)) % sound_output.secondary_buffer_size;
-                        byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
-
-                        if (byte_to_lock > target_cursor) {
-                            bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
-                            bytes_to_write += target_cursor;
-                        } else {
-                            bytes_to_write = target_cursor - byte_to_lock;
-                        }
-
-                        sound_is_valid = true;
-                    }
-                }
-
-                var game_buffer = game.OffscreenBuffer{
-                    .memory = back_buffer.memory,
-                    .width = back_buffer.width,
-                    .height = back_buffer.height,
-                    .pitch = back_buffer.pitch,
+            if (samples != undefined and game_memory.permanent_storage != undefined and game_memory.transient_storage != undefined) {
+                var game_input = [2]game.ControllerInputs{
+                    game.ControllerInputs{},
+                    game.ControllerInputs{},
                 };
-                var sound_buffer = game.SoundOutputBuffer{
-                    .samples = samples,
-                    .sample_count = @divFloor(bytes_to_write, sound_output.bytes_per_sample),
-                    .samples_per_second = sound_output.samples_per_second,
-                };
+                var new_input = &game_input[0];
+                var old_input = &game_input[1];
 
-                game.updateAndRender(new_input.*, &game_buffer, &sound_buffer);
+                running = true;
 
-                const window_dimension = getWindowDimension(window_handle);
-                displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
-
-                if (sound_is_valid) {
-                    if (opt_secondary_buffer) |secondary_buffer| {
-                        fillSoundBuffer(&sound_output, secondary_buffer, byte_to_lock, bytes_to_write, &sound_buffer);
-                    }
-                }
-
+                var last_cycle_count: u64 = 0;
+                var last_counter: win32.LARGE_INTEGER = undefined;
                 if (OUTPUT_TIMING) {
-                    // Capture timing.
-                    const end_cycle_count = rdtsc();
-                    var end_counter: win32.LARGE_INTEGER = undefined;
-                    _ = win32.QueryPerformanceCounter(&end_counter);
-
-                    // Calculate timing information.
-                    const counter_elapsed: i64 = end_counter.QuadPart - last_counter.QuadPart;
-                    const ms_elapsed: f32 = @as(f32, @floatFromInt(1000 * counter_elapsed)) / @as(f32, @floatFromInt(perf_count_frequency));
-                    const fps: f32 = @as(f32, @floatFromInt(perf_count_frequency)) / @as(f32, @floatFromInt(counter_elapsed));
-                    const cycles_elapsed: i32 = @intCast(end_cycle_count - last_cycle_count);
-                    const mega_cycles_per_frame: f32 = @as(f32, @floatFromInt(cycles_elapsed)) / @as(f32, @floatFromInt(1000 * 1000));
-
-                    // Output timing information.
-                    var buffer: [64]u8 = undefined;
-                    _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   ", .{ ms_elapsed, fps, mega_cycles_per_frame }) catch {};
-                    win32.OutputDebugStringA(@ptrCast(&buffer));
-
-                    last_counter = end_counter;
-                    last_cycle_count = end_cycle_count;
+                    // Initialize timing.
+                    last_cycle_count = rdtsc();
+                    _ = win32.QueryPerformanceCounter(&last_counter);
                 }
 
-                const temp: *game.ControllerInputs = new_input;
-                new_input = old_input;
-                old_input = temp;
+                while (running) {
+                    var message: win32.MSG = undefined;
+                    while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
+                        if (message.message == win32.WM_QUIT) {
+                            running = false;
+                        }
+                        _ = win32.TranslateMessage(&message);
+                        _ = win32.DispatchMessageW(&message);
+                    }
+
+                    var dwResult: isize = 0;
+                    var controller_index: u8 = 0;
+
+                    var max_controller_count = win32.XUSER_MAX_COUNT;
+                    if (max_controller_count > game.MAX_CONTROLLER_COUNT) {
+                        max_controller_count = game.MAX_CONTROLLER_COUNT;
+                    }
+
+                    while (controller_index < max_controller_count) {
+                        const old_controller = &old_input.controllers[controller_index];
+                        const new_controller = &new_input.controllers[controller_index];
+
+                        var controller_state: win32.XINPUT_STATE = undefined;
+                        dwResult = XInputGetState(controller_index, &controller_state);
+
+                        if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
+                            // Controller is connected
+                            const pad = &controller_state.Gamepad;
+
+                            // Left stick X.
+                            var x: f32 = 0;
+                            if (pad.sThumbLX < 0) {
+                                x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32768.0;
+                            } else {
+                                x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32767.0;
+                            }
+                            new_controller.start_x = old_controller.start_x;
+                            new_controller.min_x = x;
+                            new_controller.max_x = x;
+                            new_controller.end_x = x;
+
+                            // Left stick Y.
+                            var y: f32 = 0;
+                            if (pad.sThumbLY < 0) {
+                                y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32768.0;
+                            } else {
+                                y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32767.0;
+                            }
+                            new_controller.start_y = old_controller.start_y;
+                            new_controller.min_y = y;
+                            new_controller.max_y = y;
+                            new_controller.end_y = y;
+                            new_controller.is_analog = true;
+
+                            // Main buttons.
+                            processXInputDigitalButton(
+                                pad.wButtons,
+                                win32.XINPUT_GAMEPAD_A,
+                                &old_controller.down_button,
+                                &new_controller.down_button,
+                            );
+                            processXInputDigitalButton(
+                                pad.wButtons,
+                                win32.XINPUT_GAMEPAD_B,
+                                &old_controller.right_button,
+                                &new_controller.right_button,
+                            );
+                            processXInputDigitalButton(
+                                pad.wButtons,
+                                win32.XINPUT_GAMEPAD_X,
+                                &old_controller.left_button,
+                                &new_controller.left_button,
+                            );
+                            processXInputDigitalButton(
+                                pad.wButtons,
+                                win32.XINPUT_GAMEPAD_Y,
+                                &old_controller.up_button,
+                                &new_controller.up_button,
+                            );
+
+                            // Shoulder buttons.
+                            processXInputDigitalButton(
+                                pad.wButtons,
+                                win32.XINPUT_GAMEPAD_LEFT_SHOULDER,
+                                &old_controller.left_shoulder_button,
+                                &new_controller.left_shoulder_button,
+                            );
+                            processXInputDigitalButton(
+                                pad.wButtons,
+                                win32.XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                                &old_controller.right_shoulder_button,
+                                &new_controller.right_shoulder_button,
+                            );
+                        } else {
+                            // Controller is not connected
+                        }
+
+                        controller_index += 1;
+                    }
+
+                    var byte_to_lock: u32 = 0;
+                    var bytes_to_write: u32 = 0;
+                    var sound_is_valid = false;
+                    if (opt_secondary_buffer) |secondary_buffer| {
+                        var play_cursor: std.os.windows.DWORD = undefined;
+                        var write_cursor: std.os.windows.DWORD = undefined;
+
+                        if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(secondary_buffer, &play_cursor, &write_cursor))) {
+                            const target_cursor: u32 = (play_cursor + (sound_output.latency_sample_count * sound_output.bytes_per_sample)) % sound_output.secondary_buffer_size;
+                            byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
+
+                            if (byte_to_lock > target_cursor) {
+                                bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
+                                bytes_to_write += target_cursor;
+                            } else {
+                                bytes_to_write = target_cursor - byte_to_lock;
+                            }
+
+                            sound_is_valid = true;
+                        }
+                    }
+
+                    var game_buffer = game.OffscreenBuffer{
+                        .memory = back_buffer.memory,
+                        .width = back_buffer.width,
+                        .height = back_buffer.height,
+                        .pitch = back_buffer.pitch,
+                    };
+                    var sound_buffer = game.SoundOutputBuffer{
+                        .samples = samples,
+                        .sample_count = @divFloor(bytes_to_write, sound_output.bytes_per_sample),
+                        .samples_per_second = sound_output.samples_per_second,
+                    };
+
+                    game.updateAndRender(&game_memory, new_input.*, &game_buffer, &sound_buffer);
+
+                    const window_dimension = getWindowDimension(window_handle);
+                    displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
+
+                    if (sound_is_valid) {
+                        if (opt_secondary_buffer) |secondary_buffer| {
+                            fillSoundBuffer(&sound_output, secondary_buffer, byte_to_lock, bytes_to_write, &sound_buffer);
+                        }
+                    }
+
+                    if (OUTPUT_TIMING) {
+                        // Capture timing.
+                        const end_cycle_count = rdtsc();
+                        var end_counter: win32.LARGE_INTEGER = undefined;
+                        _ = win32.QueryPerformanceCounter(&end_counter);
+
+                        // Calculate timing information.
+                        const counter_elapsed: i64 = end_counter.QuadPart - last_counter.QuadPart;
+                        const ms_elapsed: f32 = @as(f32, @floatFromInt(1000 * counter_elapsed)) / @as(f32, @floatFromInt(perf_count_frequency));
+                        const fps: f32 = @as(f32, @floatFromInt(perf_count_frequency)) / @as(f32, @floatFromInt(counter_elapsed));
+                        const cycles_elapsed: i32 = @intCast(end_cycle_count - last_cycle_count);
+                        const mega_cycles_per_frame: f32 = @as(f32, @floatFromInt(cycles_elapsed)) / @as(f32, @floatFromInt(1000 * 1000));
+
+                        // Output timing information.
+                        var buffer: [64]u8 = undefined;
+                        _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   ", .{ ms_elapsed, fps, mega_cycles_per_frame }) catch {};
+                        win32.OutputDebugStringA(@ptrCast(&buffer));
+
+                        last_counter = end_counter;
+                        last_cycle_count = end_cycle_count;
+                    }
+
+                    const temp: *game.ControllerInputs = new_input;
+                    new_input = old_input;
+                    old_input = temp;
+                }
+            } else {
+                win32.OutputDebugStringA("Failed to allocate memory.\n");
             }
         } else {
             win32.OutputDebugStringA("Window handle is null.\n");
