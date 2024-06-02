@@ -19,6 +19,10 @@ pub inline fn gigabytes(value: u32) u64 {
     return megabytes(value) * 1024;
 }
 
+pub inline fn terabytes(value: u32) u64 {
+    return gigabytes(value) * 1024;
+}
+
 pub const OffscreenBuffer = struct {
     memory: ?*anyopaque = undefined,
     width: i32 = 0,

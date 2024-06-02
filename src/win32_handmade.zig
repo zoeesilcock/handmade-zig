@@ -28,6 +28,7 @@ const BYTES_PER_PIXEL = 4;
 const STICK_DEAD_ZONE = 1;
 
 const OUTPUT_TIMING = @import("build_options").timing;
+const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 
 const game = @import("handmade.zig");
 
@@ -492,18 +493,17 @@ pub export fn wWinMain(
                 .transient_storage_size = game.gigabytes(4),
                 .transient_storage = undefined,
             };
+
+            const base_address = if (DEBUG) @as(*u8, @ptrFromInt(game.terabytes(2))) else null;
             game_memory.permanent_storage = win32.VirtualAlloc(
-                null,
-                game_memory.permanent_storage_size,
+                base_address,
+                game_memory.permanent_storage_size + game_memory.transient_storage_size,
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
                 win32.PAGE_READWRITE,
             ) orelse undefined;
-            game_memory.transient_storage = win32.VirtualAlloc(
-                null,
-                game_memory.transient_storage_size,
-                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-                win32.PAGE_READWRITE,
-            ) orelse undefined;
+            if (game_memory.permanent_storage != undefined) {
+                game_memory.transient_storage = @ptrFromInt(@intFromPtr(&game_memory.permanent_storage) + game_memory.permanent_storage_size);
+            }
 
             if (samples != undefined and game_memory.permanent_storage != undefined and game_memory.transient_storage != undefined) {
                 var game_input = [2]game.ControllerInputs{
