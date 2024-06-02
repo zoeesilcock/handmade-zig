@@ -109,6 +109,98 @@ fn loadXInput() void {
     }
 }
 
+fn processXInput(old_input: *game.ControllerInputs, new_input: *game.ControllerInputs) void {
+    var dwResult: isize = 0;
+    var controller_index: u8 = 0;
+
+    var max_controller_count = win32.XUSER_MAX_COUNT;
+    if (max_controller_count > game.MAX_CONTROLLER_COUNT) {
+        max_controller_count = game.MAX_CONTROLLER_COUNT;
+    }
+
+    while (controller_index < max_controller_count) {
+        const old_controller = &old_input.controllers[controller_index];
+        const new_controller = &new_input.controllers[controller_index];
+
+        var controller_state: win32.XINPUT_STATE = undefined;
+        dwResult = XInputGetState(controller_index, &controller_state);
+
+        if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
+            // Controller is connected
+            const pad = &controller_state.Gamepad;
+
+            // Left stick X.
+            var x: f32 = 0;
+            if (pad.sThumbLX < 0) {
+                x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32768.0;
+            } else {
+                x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32767.0;
+            }
+            new_controller.start_x = old_controller.start_x;
+            new_controller.min_x = x;
+            new_controller.max_x = x;
+            new_controller.end_x = x;
+
+            // Left stick Y.
+            var y: f32 = 0;
+            if (pad.sThumbLY < 0) {
+                y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32768.0;
+            } else {
+                y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32767.0;
+            }
+            new_controller.start_y = old_controller.start_y;
+            new_controller.min_y = y;
+            new_controller.max_y = y;
+            new_controller.end_y = y;
+            new_controller.is_analog = true;
+
+            // Main buttons.
+            processXInputDigitalButton(
+                pad.wButtons,
+                win32.XINPUT_GAMEPAD_A,
+                &old_controller.down_button,
+                &new_controller.down_button,
+            );
+            processXInputDigitalButton(
+                pad.wButtons,
+                win32.XINPUT_GAMEPAD_B,
+                &old_controller.right_button,
+                &new_controller.right_button,
+            );
+            processXInputDigitalButton(
+                pad.wButtons,
+                win32.XINPUT_GAMEPAD_X,
+                &old_controller.left_button,
+                &new_controller.left_button,
+            );
+            processXInputDigitalButton(
+                pad.wButtons,
+                win32.XINPUT_GAMEPAD_Y,
+                &old_controller.up_button,
+                &new_controller.up_button,
+            );
+
+            // Shoulder buttons.
+            processXInputDigitalButton(
+                pad.wButtons,
+                win32.XINPUT_GAMEPAD_LEFT_SHOULDER,
+                &old_controller.left_shoulder_button,
+                &new_controller.left_shoulder_button,
+            );
+            processXInputDigitalButton(
+                pad.wButtons,
+                win32.XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                &old_controller.right_shoulder_button,
+                &new_controller.right_shoulder_button,
+            );
+        } else {
+            // Controller is not connected
+        }
+
+        controller_index += 1;
+    }
+}
+
 fn processXInputDigitalButton(
     x_input_button_state: u32,
     button_bit: u32,
@@ -533,96 +625,6 @@ pub export fn wWinMain(
                         _ = win32.DispatchMessageW(&message);
                     }
 
-                    var dwResult: isize = 0;
-                    var controller_index: u8 = 0;
-
-                    var max_controller_count = win32.XUSER_MAX_COUNT;
-                    if (max_controller_count > game.MAX_CONTROLLER_COUNT) {
-                        max_controller_count = game.MAX_CONTROLLER_COUNT;
-                    }
-
-                    while (controller_index < max_controller_count) {
-                        const old_controller = &old_input.controllers[controller_index];
-                        const new_controller = &new_input.controllers[controller_index];
-
-                        var controller_state: win32.XINPUT_STATE = undefined;
-                        dwResult = XInputGetState(controller_index, &controller_state);
-
-                        if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
-                            // Controller is connected
-                            const pad = &controller_state.Gamepad;
-
-                            // Left stick X.
-                            var x: f32 = 0;
-                            if (pad.sThumbLX < 0) {
-                                x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32768.0;
-                            } else {
-                                x = @as(f32, @floatFromInt(pad.sThumbLX)) / 32767.0;
-                            }
-                            new_controller.start_x = old_controller.start_x;
-                            new_controller.min_x = x;
-                            new_controller.max_x = x;
-                            new_controller.end_x = x;
-
-                            // Left stick Y.
-                            var y: f32 = 0;
-                            if (pad.sThumbLY < 0) {
-                                y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32768.0;
-                            } else {
-                                y = @as(f32, @floatFromInt(pad.sThumbLY)) / 32767.0;
-                            }
-                            new_controller.start_y = old_controller.start_y;
-                            new_controller.min_y = y;
-                            new_controller.max_y = y;
-                            new_controller.end_y = y;
-                            new_controller.is_analog = true;
-
-                            // Main buttons.
-                            processXInputDigitalButton(
-                                pad.wButtons,
-                                win32.XINPUT_GAMEPAD_A,
-                                &old_controller.down_button,
-                                &new_controller.down_button,
-                            );
-                            processXInputDigitalButton(
-                                pad.wButtons,
-                                win32.XINPUT_GAMEPAD_B,
-                                &old_controller.right_button,
-                                &new_controller.right_button,
-                            );
-                            processXInputDigitalButton(
-                                pad.wButtons,
-                                win32.XINPUT_GAMEPAD_X,
-                                &old_controller.left_button,
-                                &new_controller.left_button,
-                            );
-                            processXInputDigitalButton(
-                                pad.wButtons,
-                                win32.XINPUT_GAMEPAD_Y,
-                                &old_controller.up_button,
-                                &new_controller.up_button,
-                            );
-
-                            // Shoulder buttons.
-                            processXInputDigitalButton(
-                                pad.wButtons,
-                                win32.XINPUT_GAMEPAD_LEFT_SHOULDER,
-                                &old_controller.left_shoulder_button,
-                                &new_controller.left_shoulder_button,
-                            );
-                            processXInputDigitalButton(
-                                pad.wButtons,
-                                win32.XINPUT_GAMEPAD_RIGHT_SHOULDER,
-                                &old_controller.right_shoulder_button,
-                                &new_controller.right_shoulder_button,
-                            );
-                        } else {
-                            // Controller is not connected
-                        }
-
-                        controller_index += 1;
-                    }
-
                     var byte_to_lock: u32 = 0;
                     var bytes_to_write: u32 = 0;
                     var sound_is_valid = false;
@@ -645,12 +647,15 @@ pub export fn wWinMain(
                         }
                     }
 
+                    processXInput(old_input, new_input);
+
                     var game_buffer = game.OffscreenBuffer{
                         .memory = back_buffer.memory,
                         .width = back_buffer.width,
                         .height = back_buffer.height,
                         .pitch = back_buffer.pitch,
                     };
+
                     var sound_buffer = game.SoundOutputBuffer{
                         .samples = samples,
                         .sample_count = @divFloor(bytes_to_write, sound_output.bytes_per_sample),
