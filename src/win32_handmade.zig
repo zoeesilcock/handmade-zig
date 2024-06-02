@@ -87,6 +87,13 @@ const SoundOutput = struct {
     latency_sample_count: u32,
 };
 
+const SoundOutputInfo = struct {
+    byte_to_lock: u32,
+    bytes_to_write: u32,
+    is_valid: bool,
+    output_buffer: game.SoundOutputBuffer,
+};
+
 fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(std.os.windows.WINAPI) isize {
     return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
@@ -317,7 +324,7 @@ fn clearSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirect
     }
 }
 
-fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectSoundBuffer, byte_to_lock: u32, bytes_to_write: u32, game_output_buffer: *game.SoundOutputBuffer) void {
+fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectSoundBuffer, info: *SoundOutputInfo) void {
     var region1: ?*anyopaque = undefined;
     var region1_size: std.os.windows.DWORD = 0;
     var region2: ?*anyopaque = undefined;
@@ -325,15 +332,15 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
 
     if (win32.SUCCEEDED(secondary_buffer.vtable.Lock(
         secondary_buffer,
-        byte_to_lock,
-        bytes_to_write,
+        info.byte_to_lock,
+        info.bytes_to_write,
         &region1,
         &region1_size,
         &region2,
         &region2_size,
         0,
     ))) {
-        var source_sample: [*]i16 = game_output_buffer.samples;
+        var source_sample: [*]i16 = info.output_buffer.samples;
 
         if (region1) |region| {
             var sample_out: [*]i16 = @ptrCast(@alignCast(region));
@@ -373,6 +380,42 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
 
         _ = secondary_buffer.vtable.Unlock(secondary_buffer, region1, region1_size, region2, region2_size);
     }
+}
+
+fn prepareSoundOutput(sound_output: SoundOutput, samples: [*]i16) SoundOutputInfo {
+    var info = SoundOutputInfo{
+        .byte_to_lock = 0,
+        .bytes_to_write = 0,
+        .is_valid = false, // TODO: Make it an optional return instead?
+        .output_buffer = undefined,
+    };
+
+    if (opt_secondary_buffer) |secondary_buffer| {
+        var play_cursor: std.os.windows.DWORD = undefined;
+        var write_cursor: std.os.windows.DWORD = undefined;
+
+        if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(secondary_buffer, &play_cursor, &write_cursor))) {
+            const target_cursor: u32 = (play_cursor + (sound_output.latency_sample_count * sound_output.bytes_per_sample)) % sound_output.secondary_buffer_size;
+            info.byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
+
+            if (info.byte_to_lock > target_cursor) {
+                info.bytes_to_write = sound_output.secondary_buffer_size - info.byte_to_lock;
+                info.bytes_to_write += target_cursor;
+            } else {
+                info.bytes_to_write = target_cursor - info.byte_to_lock;
+            }
+
+            info.is_valid = true;
+        }
+    }
+
+    info.output_buffer = game.SoundOutputBuffer{
+        .samples = samples,
+        .sample_count = @divFloor(info.bytes_to_write, sound_output.bytes_per_sample),
+        .samples_per_second = sound_output.samples_per_second,
+    };
+
+    return info;
 }
 
 fn getWindowDimension(window: win32.HWND) WindowDimension {
@@ -625,28 +668,7 @@ pub export fn wWinMain(
                         _ = win32.DispatchMessageW(&message);
                     }
 
-                    var byte_to_lock: u32 = 0;
-                    var bytes_to_write: u32 = 0;
-                    var sound_is_valid = false;
-                    if (opt_secondary_buffer) |secondary_buffer| {
-                        var play_cursor: std.os.windows.DWORD = undefined;
-                        var write_cursor: std.os.windows.DWORD = undefined;
-
-                        if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(secondary_buffer, &play_cursor, &write_cursor))) {
-                            const target_cursor: u32 = (play_cursor + (sound_output.latency_sample_count * sound_output.bytes_per_sample)) % sound_output.secondary_buffer_size;
-                            byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
-
-                            if (byte_to_lock > target_cursor) {
-                                bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
-                                bytes_to_write += target_cursor;
-                            } else {
-                                bytes_to_write = target_cursor - byte_to_lock;
-                            }
-
-                            sound_is_valid = true;
-                        }
-                    }
-
+                    var sound_output_info = prepareSoundOutput(sound_output, samples);
                     processXInput(old_input, new_input);
 
                     var game_buffer = game.OffscreenBuffer{
@@ -656,20 +678,14 @@ pub export fn wWinMain(
                         .pitch = back_buffer.pitch,
                     };
 
-                    var sound_buffer = game.SoundOutputBuffer{
-                        .samples = samples,
-                        .sample_count = @divFloor(bytes_to_write, sound_output.bytes_per_sample),
-                        .samples_per_second = sound_output.samples_per_second,
-                    };
-
-                    game.updateAndRender(&game_memory, new_input.*, &game_buffer, &sound_buffer);
+                    game.updateAndRender(&game_memory, new_input.*, &game_buffer, &sound_output_info.output_buffer);
 
                     const window_dimension = getWindowDimension(window_handle);
                     displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
 
-                    if (sound_is_valid) {
+                    if (sound_output_info.is_valid) {
                         if (opt_secondary_buffer) |secondary_buffer| {
-                            fillSoundBuffer(&sound_output, secondary_buffer, byte_to_lock, bytes_to_write, &sound_buffer);
+                            fillSoundBuffer(&sound_output, secondary_buffer, &sound_output_info);
                         }
                     }
 
