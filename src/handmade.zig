@@ -2,6 +2,7 @@ const PI32: f32 = 3.1415926535897932384626433;
 const TAU32: f32 = PI32 * 2.0;
 const MIDDLE_C: u32 = 261;
 const TREBLE_C: u32 = 523;
+const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 
 pub const MAX_CONTROLLER_COUNT: u8 = 4;
 
@@ -22,6 +23,22 @@ pub inline fn gigabytes(value: u32) u64 {
 pub inline fn terabytes(value: u32) u64 {
     return gigabytes(value) * 1024;
 }
+
+pub inline fn safeTruncateI64(value: i64) u32 {
+    std.debug.assert(value <= 0xFFFFFFFF);
+    return @as(u32, @intCast(value));
+}
+
+pub const Platform = struct {
+    debugReadEntireFile: fn (file_name: [*:0]const u8) DebugReadFileResult = undefined,
+    debugWriteEntireFile: fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) bool,
+    debugFreeFileMemory: fn (memory: *anyopaque) void,
+};
+
+pub const DebugReadFileResult = struct {
+    contents: *anyopaque = undefined,
+    content_size: u32 = 0,
+};
 
 pub const OffscreenBuffer = struct {
     memory: ?*anyopaque = undefined,
@@ -84,6 +101,7 @@ const State = struct {
 };
 
 pub fn updateAndRender(
+    platform: Platform,
     memory: *Memory,
     input: ControllerInputs,
     buffer: *OffscreenBuffer,
@@ -96,6 +114,13 @@ pub fn updateAndRender(
     if (!memory.is_initialized) {
         state.* = State{};
         memory.is_initialized = true;
+
+        const file_name = "build.zig";
+        const bitmap_memory = platform.debugReadEntireFile(file_name);
+        if (bitmap_memory.contents != undefined) {
+            _ = platform.debugWriteEntireFile("test_out_file.txt", bitmap_memory.content_size, bitmap_memory.contents);
+            platform.debugFreeFileMemory(bitmap_memory.contents);
+        }
     }
 
     const input0 = &input.controllers[0];

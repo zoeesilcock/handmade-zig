@@ -34,20 +34,21 @@ const game = @import("handmade.zig");
 
 const std = @import("std");
 const win32 = struct {
-    usingnamespace @import("win32").zig;
-    usingnamespace @import("win32").system.diagnostics.debug;
-    usingnamespace @import("win32").system.library_loader;
-    usingnamespace @import("win32").system.memory;
-    usingnamespace @import("win32").system.com;
-    usingnamespace @import("win32").system.performance;
     usingnamespace @import("win32").foundation;
-    usingnamespace @import("win32").ui.windows_and_messaging;
-    usingnamespace @import("win32").ui.input;
-    usingnamespace @import("win32").ui.input.xbox_controller;
-    usingnamespace @import("win32").ui.input.keyboard_and_mouse;
     usingnamespace @import("win32").graphics.gdi;
     usingnamespace @import("win32").media.audio;
     usingnamespace @import("win32").media.audio.direct_sound;
+    usingnamespace @import("win32").storage.file_system;
+    usingnamespace @import("win32").system.com;
+    usingnamespace @import("win32").system.diagnostics.debug;
+    usingnamespace @import("win32").system.library_loader;
+    usingnamespace @import("win32").system.memory;
+    usingnamespace @import("win32").system.performance;
+    usingnamespace @import("win32").ui.input;
+    usingnamespace @import("win32").ui.input.keyboard_and_mouse;
+    usingnamespace @import("win32").ui.input.xbox_controller;
+    usingnamespace @import("win32").ui.windows_and_messaging;
+    usingnamespace @import("win32").zig;
 };
 
 var running: bool = false;
@@ -93,6 +94,86 @@ const SoundOutputInfo = struct {
     is_valid: bool,
     output_buffer: game.SoundOutputBuffer,
 };
+
+fn debugReadEntireFile(file_name: [*:0]const u8) game.DebugReadFileResult {
+    var result = game.DebugReadFileResult{};
+
+    const file_handle: win32.HANDLE = win32.CreateFileA(
+        file_name,
+        win32.FILE_GENERIC_READ,
+        win32.FILE_SHARE_READ,
+        null,
+        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
+
+    if (file_handle != win32.INVALID_HANDLE_VALUE) {
+        var file_size: win32.LARGE_INTEGER = undefined;
+        if (win32.GetFileSizeEx(file_handle, &file_size) != 0) {
+            const file_size32 = game.safeTruncateI64(file_size.QuadPart);
+
+            if (win32.VirtualAlloc(
+                undefined,
+                file_size32,
+                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+                win32.PAGE_READWRITE,
+            )) |file_contents| { 
+                var bytes_read: u32 = undefined;
+
+                if (win32.ReadFile(
+                    file_handle,
+                    file_contents,
+                    file_size32,
+                    &bytes_read,
+                    null,
+                ) != 0 and bytes_read == file_size32) {
+                    // File read successfully.
+                    result.contents = file_contents;
+                    result.content_size = file_size32;
+                } else {
+                    debugFreeFileMemory(result.contents);
+                    result.contents = undefined;
+                }
+            }
+        }
+
+        _ = win32.CloseHandle(file_handle);
+    }
+
+    return result;
+}
+
+fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) bool {
+    var result: bool = false;
+
+    const file_handle: win32.HANDLE = win32.CreateFileA(
+        file_name,
+        win32.FILE_GENERIC_WRITE,
+        win32.FILE_SHARE_NONE,
+        null,
+        win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
+
+    if (file_handle != win32.INVALID_HANDLE_VALUE) {
+        var bytes_written: u32 = undefined;
+
+        if (win32.WriteFile(file_handle, memory, memory_size, &bytes_written, null) != 0) {
+            // File written successfully.
+            result = bytes_written == memory_size;
+        }
+
+        _ = win32.CloseHandle(file_handle);
+    }
+
+    return result;
+}
+
+fn debugFreeFileMemory(memory: *anyopaque) void {
+    _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
+}
 
 fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(std.os.windows.WINAPI) isize {
     return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
@@ -566,6 +647,11 @@ pub export fn wWinMain(
 
     loadXInput();
     resizeDBISection(&back_buffer, WIDTH, HEIGHT);
+    const platform = game.Platform{
+        .debugReadEntireFile = debugReadEntireFile,
+        .debugWriteEntireFile = debugWriteEntireFile,
+        .debugFreeFileMemory = debugFreeFileMemory,
+    };
 
     const window_class: win32.WNDCLASSW = .{
         .style = .{ .HREDRAW = 1, .VREDRAW = 1, .OWNDC = 1 },
@@ -683,7 +769,7 @@ pub export fn wWinMain(
                     processXInput(old_input, new_input);
 
                     // Send all input to game.
-                    game.updateAndRender(&game_memory, new_input.*, &game_buffer, &sound_output_info.output_buffer);
+                    game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer, &sound_output_info.output_buffer);
 
                     // Output game to screen and audio output.
                     const window_dimension = getWindowDimension(window_handle);
