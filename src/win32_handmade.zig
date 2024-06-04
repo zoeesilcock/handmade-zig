@@ -382,10 +382,12 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *game.Controlle
             @intFromEnum(win32.VK_RIGHT) => {
                 processKeyboardInputMessage(&keyboard_controller.action_left, is_down);
             },
-            @intFromEnum(win32.VK_ESCAPE) => {
-                running = false;
+            @intFromEnum(win32.VK_SPACE) => {
+                processKeyboardInputMessage(&keyboard_controller.start_button, is_down);
             },
-            @intFromEnum(win32.VK_SPACE) => {},
+            @intFromEnum(win32.VK_ESCAPE) => {
+                processKeyboardInputMessage(&keyboard_controller.back_button, is_down);
+            },
             else => {},
         }
     }
