@@ -571,7 +571,7 @@ fn windowProcedure(
     message: u32,
     w_param: win32.WPARAM,
     l_param: win32.LPARAM,
-) callconv(.C) win32.LRESULT {
+) callconv(std.os.windows.WINAPI) win32.LRESULT {
     var result: win32.LRESULT = 0;
 
     switch (message) {
