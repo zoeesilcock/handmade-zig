@@ -118,7 +118,7 @@ fn debugReadEntireFile(file_name: [*:0]const u8) game.DebugReadFileResult {
                 file_size32,
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
                 win32.PAGE_READWRITE,
-            )) |file_contents| { 
+            )) |file_contents| {
                 var bytes_read: u32 = undefined;
 
                 if (win32.ReadFile(
