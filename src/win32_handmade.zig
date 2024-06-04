@@ -200,17 +200,13 @@ fn processXInput(old_input: *game.ControllerInputs, new_input: *game.ControllerI
     var dwResult: isize = 0;
     var controller_index: u8 = 0;
 
-    var max_controller_count = 1 + win32.XUSER_MAX_COUNT;
-    if (max_controller_count > game.MAX_CONTROLLER_COUNT) {
+    var max_controller_count = win32.XUSER_MAX_COUNT;
+    if (max_controller_count > (game.MAX_CONTROLLER_COUNT - 1)) {
         max_controller_count = game.MAX_CONTROLLER_COUNT;
     }
 
     while (controller_index < max_controller_count) : (controller_index += 1) {
         const our_controller_index = controller_index + 1;
-        if ((our_controller_index + 1) > old_input.controllers.len) {
-            break;
-        }
-
         const old_controller = &old_input.controllers[our_controller_index];
         const new_controller = &new_input.controllers[our_controller_index];
 
