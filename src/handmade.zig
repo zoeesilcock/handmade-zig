@@ -4,7 +4,7 @@ const MIDDLE_C: u32 = 261;
 const TREBLE_C: u32 = 523;
 const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 
-pub const MAX_CONTROLLER_COUNT: u8 = 4;
+pub const MAX_CONTROLLER_COUNT: u8 = 5;
 
 const std = @import("std");
 
@@ -54,7 +54,13 @@ pub const SoundOutputBuffer = struct {
 };
 
 pub const ControllerInputs = struct {
-    controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [MAX_CONTROLLER_COUNT]ControllerInput{ undefined, undefined, undefined, undefined },
+    controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [MAX_CONTROLLER_COUNT]ControllerInput{
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+    },
 };
 
 pub const ControllerButtonState = struct {
@@ -64,25 +70,26 @@ pub const ControllerButtonState = struct {
 
 pub const ControllerInput = struct {
     is_analog: bool = false,
+    is_connected: bool = false,
 
-    start_x: f32 = 0,
-    start_y: f32 = 0,
+    stick_average_x: f32 = 0,
+    stick_average_y: f32 = 0,
 
-    min_x: f32 = 0,
-    min_y: f32 = 0,
+    move_up: ControllerButtonState,
+    move_down: ControllerButtonState,
+    move_left: ControllerButtonState,
+    move_right: ControllerButtonState,
 
-    max_x: f32 = 0,
-    max_y: f32 = 0,
+    action_up: ControllerButtonState,
+    action_down: ControllerButtonState,
+    action_left: ControllerButtonState,
+    action_right: ControllerButtonState,
 
-    end_x: f32 = 0,
-    end_y: f32 = 0,
+    left_shoulder: ControllerButtonState,
+    right_shoulder: ControllerButtonState,
 
-    up_button: ControllerButtonState,
-    down_button: ControllerButtonState,
-    left_button: ControllerButtonState,
-    right_button: ControllerButtonState,
-    left_shoulder_button: ControllerButtonState,
-    right_shoulder_button: ControllerButtonState,
+    start_button: ControllerButtonState,
+    back_button: ControllerButtonState,
 };
 
 pub const Memory = struct {
@@ -123,14 +130,29 @@ pub fn updateAndRender(
         }
     }
 
-    const input0 = &input.controllers[0];
-    if (input0.is_analog) {
-        state.x_offset += @intFromFloat(4.0 * input0.end_x);
-        state.tone_hz = @intCast(@as(i32, MIDDLE_C) + @as(i32, @intFromFloat(128.0 * input0.end_y)));
-    }
+    for (&input.controllers) |controller| {
+        if (controller.is_analog) {
+            state.x_offset += @intFromFloat(4.0 * controller.stick_average_x);
+            state.y_offset += @intFromFloat(4.0 * controller.stick_average_y);
+            state.tone_hz = @intCast(@as(i32, MIDDLE_C) + @as(i32, @intFromFloat(128.0 * controller.stick_average_y)));
+        } else {
+            if (controller.move_up.ended_down) {
+                state.y_offset -= 1;
+            }
+            if (controller.move_down.ended_down) {
+                state.y_offset += 1;
+            }
+            if (controller.move_left.ended_down) {
+                state.x_offset -= 1;
+            }
+            if (controller.move_right.ended_down) {
+                state.x_offset += 1;
+            }
+        }
 
-    if (input0.down_button.ended_down) {
-        state.y_offset += 1;
+        if (controller.action_down.ended_down) {
+            state.y_offset += 1;
+        }
     }
 
     renderWeirdGradient(buffer, state.x_offset, state.y_offset);
