@@ -228,13 +228,17 @@ fn processXInput(old_input: *game.ControllerInputs, new_input: *game.ControllerI
             // D-pad overrides the stick value.
             if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_UP) > 0) {
                 new_controller.stick_average_y = 1.0;
+                new_controller.is_analog = true;
             } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_DOWN) > 0) {
                 new_controller.stick_average_y = -1.0;
+                new_controller.is_analog = true;
             }
             if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0) {
                 new_controller.stick_average_x = 1.0;
+                new_controller.is_analog = true;
             } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0) {
                 new_controller.stick_average_x = -1.0;
+                new_controller.is_analog = true;
             }
 
             // Movement buttons based on left stick.
