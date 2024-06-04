@@ -337,13 +337,15 @@ fn processXInputDigitalButton(
     new_state.half_transitions = if (old_state.ended_down != new_state.ended_down) 1 else 0;
 }
 
-fn processXInputStick(value: i16, dead_zone: u32) f32 {
+fn processXInputStick(value: i16, dead_zone: i16) f32 {
     var result: f32 = 0;
+    const float_value: f32 = @floatFromInt(value);
+    const float_dead_zone: f32 = @floatFromInt(dead_zone);
 
     if (value < -@as(i16, @intCast(dead_zone))) {
-        result = @as(f32, @floatFromInt(value)) / 32768.0;
+        result = (float_value + float_dead_zone) / (32768.0 - float_dead_zone);
     } else if (value > dead_zone) {
-        result = @as(f32, @floatFromInt(value)) / 32767.0;
+        result = (float_value - float_dead_zone) / (32767.0 + float_dead_zone);
     }
 
     return result;
