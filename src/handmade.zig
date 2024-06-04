@@ -125,7 +125,7 @@ pub fn updateAndRender(
         const file_name = "build.zig";
         const bitmap_memory = platform.debugReadEntireFile(file_name);
         if (bitmap_memory.contents != undefined) {
-            _ = platform.debugWriteEntireFile("test_out_file.txt", bitmap_memory.content_size, bitmap_memory.contents);
+            // _ = platform.debugWriteEntireFile("test_out_file.txt", bitmap_memory.content_size, bitmap_memory.contents);
             platform.debugFreeFileMemory(bitmap_memory.contents);
         }
     }
