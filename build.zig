@@ -4,7 +4,8 @@ pub fn build(b: *std.Build) void {
     const exe = b.addExecutable(.{
         .name = "handmade-zig",
         .root_source_file = b.path("src/win32_handmade.zig"),
-        .target = b.host,
+        .target = b.standardTargetOptions(.{}),
+        .optimize = b.standardOptimizeOption(.{}),
     });
 
     // Build options.
