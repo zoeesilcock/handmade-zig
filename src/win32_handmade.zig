@@ -7,7 +7,6 @@
 /// * Asset loading path.
 /// * Threading (launching a thread).
 /// * Raw Input (support for multiple keyboards).
-/// * Sleep/timeBeginPeriod.
 /// * ClipCursor() (for multi-monitor support).
 /// * WM_SETCURSOR (control cursor visibility).
 /// * QueryCancelAutoplay.
@@ -35,6 +34,7 @@ const std = @import("std");
 const win32 = struct {
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").graphics.gdi;
+    usingnamespace @import("win32").media;
     usingnamespace @import("win32").media.audio;
     usingnamespace @import("win32").media.audio.direct_sound;
     usingnamespace @import("win32").storage.file_system;
@@ -43,6 +43,7 @@ const win32 = struct {
     usingnamespace @import("win32").system.library_loader;
     usingnamespace @import("win32").system.memory;
     usingnamespace @import("win32").system.performance;
+    usingnamespace @import("win32").system.threading;
     usingnamespace @import("win32").ui.input;
     usingnamespace @import("win32").ui.input.keyboard_and_mouse;
     usingnamespace @import("win32").ui.input.xbox_controller;
@@ -50,9 +51,11 @@ const win32 = struct {
     usingnamespace @import("win32").zig;
 };
 
+// Globals.
 var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
+var perf_count_frequency: i64 = 0;
 
 pub inline fn rdtsc() u64 {
     var hi: u32 = 0;
@@ -716,6 +719,16 @@ fn windowProcedure(
     return result;
 }
 
+inline fn getWallClock() win32.LARGE_INTEGER {
+    var result: win32.LARGE_INTEGER = undefined;
+    _ = win32.QueryPerformanceCounter(&result);
+    return result;
+}
+
+inline fn getSecondsElapsed(start: win32.LARGE_INTEGER, end: win32.LARGE_INTEGER) f32 {
+    return @as(f32, @floatFromInt(end.QuadPart - start.QuadPart)) / @as(f32, @floatFromInt(perf_count_frequency));
+}
+
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -728,7 +741,11 @@ pub export fn wWinMain(
 
     var performance_frequency: win32.LARGE_INTEGER = undefined;
     _ = win32.QueryPerformanceFrequency(&performance_frequency);
-    const perf_count_frequency: i64 = performance_frequency.QuadPart;
+    perf_count_frequency = performance_frequency.QuadPart;
+
+    // Set the Windows schedular granularity so that our Sleep() call can be more grannular.
+    const desired_scheduler_ms = 1;
+    const sleep_is_grannular = win32.timeBeginPeriod(desired_scheduler_ms) == win32.TIMERR_NOERROR;
 
     loadXInput();
     resizeDBISection(&back_buffer, WIDTH, HEIGHT);
@@ -750,6 +767,11 @@ pub export fn wWinMain(
         .lpszMenuName = null,
         .lpszClassName = win32.L("HandmadeZigWindowClass"),
     };
+
+    // TODO: Calculate actual screen refresh rate here.
+    const monitor_refresh_hz = 60;
+    const game_update_hz = monitor_refresh_hz / 2;
+    const target_seconds_per_frame: f32 = 1.0 / @as(f32, @floatFromInt(game_update_hz));
 
     if (win32.RegisterClassW(&window_class) != 0) {
         const opt_window_handle: ?win32.HWND = win32.CreateWindowExW(
@@ -832,9 +854,8 @@ pub export fn wWinMain(
 
                 // Initialize timing.
                 var last_cycle_count: u64 = 0;
-                var last_counter: win32.LARGE_INTEGER = undefined;
+                var last_counter: win32.LARGE_INTEGER = getWallClock();
                 last_cycle_count = rdtsc();
-                _ = win32.QueryPerformanceCounter(&last_counter);
 
                 while (running) {
                     var message: win32.MSG = undefined;
@@ -880,9 +901,7 @@ pub export fn wWinMain(
                     // Send all input to game.
                     game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer, &sound_output_info.output_buffer);
 
-                    // Output game to screen and audio output.
-                    const window_dimension = getWindowDimension(window_handle);
-                    displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
+                    // Output sound.
                     if (sound_output_info.is_valid) {
                         if (opt_secondary_buffer) |secondary_buffer| {
                             fillSoundBuffer(&sound_output, secondary_buffer, &sound_output_info);
@@ -891,29 +910,50 @@ pub export fn wWinMain(
 
                     // Capture timing.
                     const end_cycle_count = rdtsc();
-                    var end_counter: win32.LARGE_INTEGER = undefined;
-                    _ = win32.QueryPerformanceCounter(&end_counter);
+                    const work_counter = getWallClock();
+                    const work_seconds_elapsed = getSecondsElapsed(last_counter, work_counter);
 
-                    // Calculate timing information.
-                    const counter_elapsed: i64 = end_counter.QuadPart - last_counter.QuadPart;
-                    const ms_elapsed: f32 = @as(f32, @floatFromInt(1000 * counter_elapsed)) / @as(f32, @floatFromInt(perf_count_frequency));
-                    const fps: f32 = @as(f32, @floatFromInt(perf_count_frequency)) / @as(f32, @floatFromInt(counter_elapsed));
-                    const cycles_elapsed: i32 = @intCast(end_cycle_count - last_cycle_count);
-                    const mega_cycles_per_frame: f32 = @as(f32, @floatFromInt(cycles_elapsed)) / @as(f32, @floatFromInt(1000 * 1000));
+                    // Wait until we reach frame rate target.
+                    var seconds_elapsed_for_frame = work_seconds_elapsed;
+                    if (seconds_elapsed_for_frame < target_seconds_per_frame) {
+                        if (sleep_is_grannular) {
+                            const sleep_ms: u32 = @intFromFloat(1000.0 * (target_seconds_per_frame - seconds_elapsed_for_frame));
+                            if (sleep_ms > 0) {
+                                win32.Sleep(sleep_ms);
+                            }
+                        }
 
-                    // Output timing information.
+                        while (seconds_elapsed_for_frame < target_seconds_per_frame) {
+                            seconds_elapsed_for_frame = getSecondsElapsed(last_counter, getWallClock());
+                        }
+                    } else {
+                        // Target frame rate missed.
+                    }
+
+                    // Output game to screen.
+                    const window_dimension = getWindowDimension(window_handle);
+                    displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
+
                     if (OUTPUT_TIMING) {
+                        // Calculate timing information.
+                        const ms_elapsed: f32 = (1000.0 * work_seconds_elapsed);
+                        const fps: f32 = 1.0 / seconds_elapsed_for_frame;
+                        const cycles_elapsed: u64 = @intCast(end_cycle_count - last_cycle_count);
+                        const mega_cycles_per_frame: f32 = @as(f32, @floatFromInt(cycles_elapsed)) / @as(f32, @floatFromInt(1000 * 1000));
+
+                        // Output timing information.
                         var buffer: [64]u8 = undefined;
                         _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   ", .{ ms_elapsed, fps, mega_cycles_per_frame }) catch {};
                         win32.OutputDebugStringA(@ptrCast(&buffer));
                     }
 
-                    last_counter = end_counter;
-                    last_cycle_count = end_cycle_count;
-
                     const temp: *game.ControllerInputs = new_input;
                     new_input = old_input;
                     old_input = temp;
+
+                    const end_counter = getWallClock();
+                    last_counter = end_counter;
+                    last_cycle_count = end_cycle_count;
                 }
             } else {
                 win32.OutputDebugStringA("Failed to allocate memory.\n");
