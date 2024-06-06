@@ -335,6 +335,24 @@ fn processXInput(old_input: *game.ControllerInputs, new_input: *game.ControllerI
     }
 }
 
+fn copyButtonStates(new_controller: *game.ControllerInput, old_controller: *game.ControllerInput) void {
+    new_controller.move_up.ended_down = old_controller.move_up.ended_down;
+    new_controller.move_down.ended_down = old_controller.move_down.ended_down;
+    new_controller.move_left.ended_down = old_controller.move_left.ended_down;
+    new_controller.move_right.ended_down = old_controller.move_right.ended_down;
+
+    new_controller.action_up.ended_down = old_controller.action_up.ended_down;
+    new_controller.action_down.ended_down = old_controller.action_down.ended_down;
+    new_controller.action_left.ended_down = old_controller.action_left.ended_down;
+    new_controller.action_right.ended_down = old_controller.action_right.ended_down;
+
+    new_controller.left_shoulder.ended_down = old_controller.left_shoulder.ended_down;
+    new_controller.right_shoulder.ended_down = old_controller.right_shoulder.ended_down;
+
+    new_controller.start_button.ended_down = old_controller.start_button.ended_down;
+    new_controller.back_button.ended_down = old_controller.back_button.ended_down;
+}
+
 fn processXInputDigitalButton(
     x_input_button_state: u32,
     button_bit: u32,
@@ -924,21 +942,7 @@ pub export fn wWinMain(
                     new_keyboard_controller.is_connected = true;
 
                     // Transfer buttons state from previous loop to this one.
-                    new_keyboard_controller.move_up.ended_down = old_keyboard_controller.move_up.ended_down;
-                    new_keyboard_controller.move_down.ended_down = old_keyboard_controller.move_down.ended_down;
-                    new_keyboard_controller.move_left.ended_down = old_keyboard_controller.move_left.ended_down;
-                    new_keyboard_controller.move_right.ended_down = old_keyboard_controller.move_right.ended_down;
-
-                    new_keyboard_controller.action_up.ended_down = old_keyboard_controller.action_up.ended_down;
-                    new_keyboard_controller.action_down.ended_down = old_keyboard_controller.action_down.ended_down;
-                    new_keyboard_controller.action_left.ended_down = old_keyboard_controller.action_left.ended_down;
-                    new_keyboard_controller.action_right.ended_down = old_keyboard_controller.action_right.ended_down;
-
-                    new_keyboard_controller.left_shoulder.ended_down = old_keyboard_controller.left_shoulder.ended_down;
-                    new_keyboard_controller.right_shoulder.ended_down = old_keyboard_controller.right_shoulder.ended_down;
-
-                    new_keyboard_controller.start_button.ended_down = old_keyboard_controller.start_button.ended_down;
-                    new_keyboard_controller.back_button.ended_down = old_keyboard_controller.back_button.ended_down;
+                    copyButtonStates(new_keyboard_controller, old_keyboard_controller);
 
                     while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
                         switch (message.message) {
