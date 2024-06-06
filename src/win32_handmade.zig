@@ -97,6 +97,11 @@ const SoundOutputInfo = struct {
     output_buffer: game.SoundOutputBuffer,
 };
 
+const DebugTimeMarker = struct {
+    play_cursor: std.os.windows.DWORD = 0,
+    write_cursor: std.os.windows.DWORD = 0,
+};
+
 fn debugReadEntireFile(file_name: [*:0]const u8) game.DebugReadFileResult {
     var result = game.DebugReadFileResult{};
 
@@ -729,6 +734,54 @@ inline fn getSecondsElapsed(start: win32.LARGE_INTEGER, end: win32.LARGE_INTEGER
     return @as(f32, @floatFromInt(end.QuadPart - start.QuadPart)) / @as(f32, @floatFromInt(perf_count_frequency));
 }
 
+fn debugDrawVertical(buffer: *OffscreenBuffer, x: i32, top: i32, bottom: i32, color: u32) void {
+    var pixel: [*]u8 = @ptrCast(buffer.memory);
+    pixel += @as(u32, @intCast((x * BYTES_PER_PIXEL) + (top * @as(i32, @intCast(buffer.pitch)))));
+
+    var y = top;
+    while (y < bottom) : (y += 1) {
+        const p = @as(*u32, @ptrCast(@alignCast(pixel)));
+        p.* = color;
+        pixel += buffer.pitch;
+    }
+}
+
+fn debugDrawSoundBufferMarker(
+    buffer: *OffscreenBuffer,
+    sound_output: *SoundOutput,
+    value: std.os.windows.DWORD,
+    c: f32,
+    pad_x: i32,
+    top: i32,
+    bottom: i32,
+    color: u32,
+) void {
+    std.debug.assert(value < sound_output.secondary_buffer_size);
+
+    const x: i32 = pad_x + @as(i32, @intFromFloat(c * @as(f32, @floatFromInt(value))));
+    debugDrawVertical(buffer, x, top, bottom, color);
+}
+
+fn debugSyncDisplay(
+    buffer: *OffscreenBuffer,
+    markers: []DebugTimeMarker,
+    sound_output: *SoundOutput,
+    seconds_per_frame: f32,
+) void {
+    _ = seconds_per_frame;
+
+    const pad_x = 16;
+    const pad_y = 16;
+    const top = pad_y;
+    const bottom = buffer.height - pad_y;
+    const c: f32 = @as(f32, @floatFromInt(buffer.width - (2 * pad_x))) / @as(f32, @floatFromInt(sound_output.secondary_buffer_size));
+
+    for (markers) |marker| {
+        debugDrawSoundBufferMarker(buffer, sound_output, marker.play_cursor, c, pad_x, top, bottom, 0xFFFFFFFF);
+        debugDrawSoundBufferMarker(buffer, sound_output, marker.write_cursor, c, pad_x, top, bottom, 0xFFFF0000);
+    }
+}
+
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -816,6 +869,9 @@ pub export fn wWinMain(
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
                 win32.PAGE_READWRITE,
             )));
+
+            var debug_time_marker_index: u32 = 0;
+            var debug_time_markers: [game_update_hz / 2]DebugTimeMarker = [1]DebugTimeMarker{DebugTimeMarker{}} ** (game_update_hz / 2);
 
             initDirectSound(window_handle, sound_output.samples_per_second, sound_output.secondary_buffer_size);
             if (opt_secondary_buffer) |secondary_buffer| {
@@ -930,13 +986,46 @@ pub export fn wWinMain(
                         // Target frame rate missed.
                     }
 
+                    const end_counter = getWallClock();
+                    const time_per_frame = getSecondsElapsed(last_counter, end_counter);
+                    last_counter = end_counter;
+
+                    if (DEBUG) {
+                        debugSyncDisplay(
+                            &back_buffer,
+                            &debug_time_markers,
+                            &sound_output,
+                            target_seconds_per_frame,
+                        );
+                    }
+
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
                     displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
 
+                    if (DEBUG) {
+                        if (opt_secondary_buffer) |secondary_buffer| {
+                            var play_cursor: std.os.windows.DWORD = undefined;
+                            var write_cursor: std.os.windows.DWORD = undefined;
+                            if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
+                                secondary_buffer,
+                                &play_cursor,
+                                &write_cursor,
+                            ))) {
+                                debug_time_marker_index += 1;
+                                if (debug_time_marker_index + 1 > debug_time_markers.len) {
+                                    debug_time_marker_index = 0;
+                                }
+
+                                debug_time_markers[debug_time_marker_index].play_cursor = play_cursor;
+                                debug_time_markers[debug_time_marker_index].write_cursor = write_cursor;
+                            }
+                        }
+                    }
+
                     if (OUTPUT_TIMING) {
                         // Calculate timing information.
-                        const ms_elapsed: f32 = (1000.0 * work_seconds_elapsed);
+                        const ms_elapsed: f32 = (1000.0 * time_per_frame);
                         const fps: f32 = 1.0 / seconds_elapsed_for_frame;
                         const cycles_elapsed: u64 = @intCast(end_cycle_count - last_cycle_count);
                         const mega_cycles_per_frame: f32 = @as(f32, @floatFromInt(cycles_elapsed)) / @as(f32, @floatFromInt(1000 * 1000));
@@ -951,8 +1040,6 @@ pub export fn wWinMain(
                     new_input = old_input;
                     old_input = temp;
 
-                    const end_counter = getWallClock();
-                    last_counter = end_counter;
                     last_cycle_count = end_cycle_count;
                 }
             } else {
