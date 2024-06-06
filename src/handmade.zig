@@ -221,5 +221,8 @@ fn outputSound(sound_buffer: *SoundOutputBuffer, tone_hz: u32, t_sine: *f32) voi
 
         sample_index += 1;
         t_sine.* += TAU32 / @as(f32, @floatFromInt(wave_period));
+        if (t_sine.* > TAU32) {
+            t_sine.* -= TAU32;
+        }
     }
 }
