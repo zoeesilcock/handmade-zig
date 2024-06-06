@@ -98,8 +98,14 @@ const SoundOutputInfo = struct {
 };
 
 const DebugTimeMarker = struct {
-    play_cursor: std.os.windows.DWORD = 0,
-    write_cursor: std.os.windows.DWORD = 0,
+    output_play_cursor: std.os.windows.DWORD = 0,
+    output_write_cursor: std.os.windows.DWORD = 0,
+    output_location: std.os.windows.DWORD = 0,
+    output_byte_count: std.os.windows.DWORD = 0,
+
+    expected_flip_play_coursor: std.os.windows.DWORD = 0,
+    flip_play_cursor: std.os.windows.DWORD = 0,
+    flip_write_cursor: std.os.windows.DWORD = 0,
 };
 
 fn debugReadEntireFile(file_name: [*:0]const u8) game.DebugReadFileResult {
@@ -717,20 +723,24 @@ inline fn getSecondsElapsed(start: win32.LARGE_INTEGER, end: win32.LARGE_INTEGER
 }
 
 fn debugDrawVertical(buffer: *OffscreenBuffer, x: i32, top: i32, bottom: i32, color: u32) void {
-    var pixel: [*]u8 = @ptrCast(buffer.memory);
-    pixel += @as(u32, @intCast((x * BYTES_PER_PIXEL) + (top * @as(i32, @intCast(buffer.pitch)))));
+    const limited_top = if (top <= 0) 0 else top;
+    const limited_bottom = if (bottom > buffer.height) buffer.height else bottom;
 
-    var y = top;
-    while (y < bottom) : (y += 1) {
-        const p = @as(*u32, @ptrCast(@alignCast(pixel)));
-        p.* = color;
-        pixel += buffer.pitch;
+    if (x >= 0 and x < buffer.width) {
+        var pixel: [*]u8 = @ptrCast(buffer.memory);
+        pixel += @as(u32, @intCast((x * BYTES_PER_PIXEL) + (limited_top * @as(i32, @intCast(buffer.pitch)))));
+
+        var y = limited_top;
+        while (y < limited_bottom) : (y += 1) {
+            const p = @as(*u32, @ptrCast(@alignCast(pixel)));
+            p.* = color;
+            pixel += buffer.pitch;
+        }
     }
 }
 
 fn debugDrawSoundBufferMarker(
     buffer: *OffscreenBuffer,
-    sound_output: *SoundOutput,
     value: std.os.windows.DWORD,
     c: f32,
     pad_x: i32,
@@ -738,8 +748,6 @@ fn debugDrawSoundBufferMarker(
     bottom: i32,
     color: u32,
 ) void {
-    std.debug.assert(value < sound_output.secondary_buffer_size);
-
     const x: i32 = pad_x + @as(i32, @intFromFloat(c * @as(f32, @floatFromInt(value))));
     debugDrawVertical(buffer, x, top, bottom, color);
 }
@@ -747,6 +755,7 @@ fn debugDrawSoundBufferMarker(
 fn debugSyncDisplay(
     buffer: *OffscreenBuffer,
     markers: []DebugTimeMarker,
+    current_marker_index: u32,
     sound_output: *SoundOutput,
     seconds_per_frame: f32,
 ) void {
@@ -754,13 +763,52 @@ fn debugSyncDisplay(
 
     const pad_x = 16;
     const pad_y = 16;
-    const top = pad_y;
-    const bottom = buffer.height - pad_y;
-    const c: f32 = @as(f32, @floatFromInt(buffer.width - (2 * pad_x))) / @as(f32, @floatFromInt(sound_output.secondary_buffer_size));
+    const line_height = 32;
+    const c: f32 =
+        @as(f32, @floatFromInt(buffer.width - (2 * pad_x))) /
+        @as(f32, @floatFromInt(sound_output.secondary_buffer_size));
 
-    for (markers) |marker| {
-        debugDrawSoundBufferMarker(buffer, sound_output, marker.play_cursor, c, pad_x, top, bottom, 0xFFFFFFFF);
-        debugDrawSoundBufferMarker(buffer, sound_output, marker.write_cursor, c, pad_x, top, bottom, 0xFFFF0000);
+    for (markers, 0..) |marker, marker_index| {
+        // TODO: How come these two values can be bigger that secondary_buffer_size?
+        // std.debug.assert(marker.output_play_cursor < sound_output.secondary_buffer_size);
+        // std.debug.assert(marker.output_write_cursor < sound_output.secondary_buffer_size);
+        std.debug.assert(marker.output_location < sound_output.secondary_buffer_size);
+        std.debug.assert(marker.output_byte_count < sound_output.secondary_buffer_size);
+        std.debug.assert(marker.flip_play_cursor < sound_output.secondary_buffer_size);
+        std.debug.assert(marker.flip_write_cursor < sound_output.secondary_buffer_size);
+
+        const play_color: u32 = 0xFFFFFFFF;
+        const write_color: u32 = 0xFFFF0000;
+        const expected_flip_color: u32 = 0xFFFFFF00;
+        const play_window_color: u32 = 0xFFFF00FF;
+
+        var top: i32 = pad_y;
+        var bottom: i32 = pad_y + line_height;
+
+        if (marker_index == current_marker_index) {
+            top += line_height + pad_y;
+            bottom += line_height + pad_y;
+
+            const first_top = top;
+
+            debugDrawSoundBufferMarker(buffer, marker.output_play_cursor, c, pad_x, top, bottom, play_color);
+            debugDrawSoundBufferMarker(buffer, marker.output_write_cursor, c, pad_x, top, bottom, write_color);
+
+            top += line_height + pad_y;
+            bottom += line_height + pad_y;
+
+            debugDrawSoundBufferMarker(buffer, marker.output_location, c, pad_x, top, bottom, play_color);
+            debugDrawSoundBufferMarker(buffer, marker.output_location + marker.output_byte_count, c, pad_x, top, bottom, write_color);
+
+            top += line_height + pad_y;
+            bottom += line_height + pad_y;
+
+            debugDrawSoundBufferMarker(buffer, marker.expected_flip_play_coursor, c, pad_x, first_top, bottom, expected_flip_color);
+        }
+
+        debugDrawSoundBufferMarker(buffer, marker.flip_play_cursor, c, pad_x, top, bottom, play_color);
+        debugDrawSoundBufferMarker(buffer, marker.flip_play_cursor + (480 * sound_output.bytes_per_sample), c, pad_x, top, bottom, play_window_color);
+        debugDrawSoundBufferMarker(buffer, marker.flip_write_cursor, c, pad_x, top, bottom, write_color);
     }
 }
 
@@ -894,6 +942,7 @@ pub export fn wWinMain(
                 // Initialize timing.
                 var last_cycle_count: u64 = 0;
                 var last_counter: win32.LARGE_INTEGER = getWallClock();
+                var flip_wall_clock: win32.LARGE_INTEGER = getWallClock();
                 last_cycle_count = rdtsc();
 
                 while (running) {
@@ -930,6 +979,8 @@ pub export fn wWinMain(
                     if (opt_secondary_buffer) |secondary_buffer| {
                         var play_cursor: std.os.windows.DWORD = undefined;
                         var write_cursor: std.os.windows.DWORD = undefined;
+                        const audio_wall_clock = getWallClock();
+                        const from_begin_to_audio_seconds = getSecondsElapsed(flip_wall_clock, audio_wall_clock);
 
                         if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
                             secondary_buffer,
@@ -945,7 +996,6 @@ pub export fn wWinMain(
                             //
                             // High latency: If the write cursor is after that safety valye, we assume we can never
                             // sync perfectly. So we write one frame's worth of audio plus the safety value number of samples.
-                            //
                             if (!sound_output_info.is_valid) {
                                 sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample;
                                 sound_output_info.is_valid = true;
@@ -954,7 +1004,16 @@ pub export fn wWinMain(
                             sound_output_info.byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
 
                             const expected_sound_bytes_per_frame =
-                                (sound_output.samples_per_second * sound_output.bytes_per_sample) * game_update_hz;
+                                (sound_output.samples_per_second * sound_output.bytes_per_sample) / game_update_hz;
+
+                            _ = from_begin_to_audio_seconds;
+
+                            // TODO: Complete these calculations and actually use the resulting value.
+                            // const seconds_left_until_flip = target_seconds_per_frame - from_begin_to_audio_seconds;
+                            // const expected_bytes_until_flip: std.os.windows.DWORD =
+                            //     @intFromFloat((seconds_left_until_flip / target_seconds_per_frame) *
+                            //         @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
+                            // _ = expected_bytes_until_flip;
 
                             const expected_frame_boundary_byte: std.os.windows.DWORD = play_cursor + expected_sound_bytes_per_frame;
 
@@ -989,28 +1048,36 @@ pub export fn wWinMain(
 
                             game.getSoundSamples(&game_memory, &sound_output_info.output_buffer);
 
-                            if (OUTPUT_TIMING) {
-                                var unwrapped_write_cursor = write_cursor;
-                                if (unwrapped_write_cursor < play_cursor) {
-                                    unwrapped_write_cursor += sound_output.secondary_buffer_size;
-                                }
-                                const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
-                                const audio_latency_seconds: f32 =
-                                    (@as(f32, @floatFromInt(audio_latency_bytes)) /
-                                    @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
-                                    @as(f32, @floatFromInt(sound_output.samples_per_second));
+                            if (DEBUG) {
+                                var marker = &debug_time_markers[debug_time_marker_index];
+                                marker.output_play_cursor = play_cursor;
+                                marker.output_write_cursor = write_cursor;
+                                marker.expected_flip_play_coursor = expected_frame_boundary_byte;
+                                marker.output_location = sound_output_info.byte_to_lock;
+                                marker.output_byte_count = sound_output_info.bytes_to_write;
 
-                                var buffer: [64]u8 = undefined;
-                                _ = std.fmt.bufPrint(&buffer, "BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d}   \n", .{
-                                    sound_output_info.byte_to_lock,
-                                    target_cursor,
-                                    sound_output_info.bytes_to_write,
-                                    play_cursor,
-                                    write_cursor,
-                                    audio_latency_bytes,
-                                    audio_latency_seconds,
-                                }) catch {};
-                                win32.OutputDebugStringA(@ptrCast(&buffer));
+                                if (OUTPUT_TIMING) {
+                                    var unwrapped_write_cursor = write_cursor;
+                                    if (unwrapped_write_cursor < play_cursor) {
+                                        unwrapped_write_cursor += sound_output.secondary_buffer_size;
+                                    }
+                                    const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
+                                    const audio_latency_seconds: f32 =
+                                        (@as(f32, @floatFromInt(audio_latency_bytes)) /
+                                        @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
+                                        @as(f32, @floatFromInt(sound_output.samples_per_second));
+                                    var buffer: [64]u8 = undefined;
+                                    _ = std.fmt.bufPrint(&buffer, "BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d}   \n", .{
+                                        sound_output_info.byte_to_lock,
+                                        target_cursor,
+                                        sound_output_info.bytes_to_write,
+                                        play_cursor,
+                                        write_cursor,
+                                        audio_latency_bytes,
+                                        audio_latency_seconds,
+                                    }) catch {};
+                                    win32.OutputDebugStringA(@ptrCast(&buffer));
+                                }
                             }
 
                             fillSoundBuffer(&sound_output, secondary_buffer, &sound_output_info);
@@ -1046,9 +1113,17 @@ pub export fn wWinMain(
                     last_counter = end_counter;
 
                     if (DEBUG) {
+                        var marker_index = debug_time_marker_index;
+                        if (marker_index > 1) {
+                            marker_index -= 1;
+                        } else {
+                            marker_index = debug_time_markers.len - 1;
+                        }
+
                         debugSyncDisplay(
                             &back_buffer,
                             &debug_time_markers,
+                            marker_index,
                             &sound_output,
                             target_seconds_per_frame,
                         );
@@ -1057,6 +1132,8 @@ pub export fn wWinMain(
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
                     displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
+
+                    flip_wall_clock = getWallClock();
 
                     // Output debug markers for the sound cursor positions.
                     if (DEBUG) {
@@ -1070,13 +1147,8 @@ pub export fn wWinMain(
                             ))) {
                                 std.debug.assert(debug_time_marker_index < debug_time_markers.len);
 
-                                debug_time_marker_index += 1;
-                                if (debug_time_marker_index == debug_time_markers.len) {
-                                    debug_time_marker_index = 0;
-                                }
-
-                                debug_time_markers[debug_time_marker_index].play_cursor = play_cursor;
-                                debug_time_markers[debug_time_marker_index].write_cursor = write_cursor;
+                                debug_time_markers[debug_time_marker_index].flip_play_cursor = play_cursor;
+                                debug_time_markers[debug_time_marker_index].flip_write_cursor = write_cursor;
                             }
                         }
                     }
@@ -1106,6 +1178,13 @@ pub export fn wWinMain(
                     old_input = temp;
 
                     last_cycle_count = end_cycle_count;
+
+                    if (DEBUG) {
+                        debug_time_marker_index += 1;
+                        if (debug_time_marker_index == debug_time_markers.len) {
+                            debug_time_marker_index = 0;
+                        }
+                    }
                 }
             } else {
                 win32.OutputDebugStringA("Failed to allocate memory.\n");
