@@ -1042,8 +1042,10 @@ pub export fn wWinMain(
                             }
 
                             if (DEBUG) {
+                                std.debug.assert(debug_time_marker_index < debug_time_markers.len);
+
                                 debug_time_marker_index += 1;
-                                if (debug_time_marker_index + 1 > debug_time_markers.len) {
+                                if (debug_time_marker_index == debug_time_markers.len) {
                                     debug_time_marker_index = 0;
                                 }
 
