@@ -112,7 +112,6 @@ pub fn updateAndRender(
     memory: *Memory,
     input: ControllerInputs,
     buffer: *OffscreenBuffer,
-    sound_buffer: *SoundOutputBuffer,
 ) void {
     std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
 
@@ -156,6 +155,13 @@ pub fn updateAndRender(
     }
 
     renderWeirdGradient(buffer, state.x_offset, state.y_offset);
+}
+
+pub fn getSoundSamples(
+    memory: *Memory,
+    sound_buffer: *SoundOutputBuffer,
+) void {
+    var state: *State = @ptrCast(@alignCast(memory.permanent_storage));
     outputSound(sound_buffer, state.tone_hz, &state.t_sine);
 }
 
