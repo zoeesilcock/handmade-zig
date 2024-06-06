@@ -944,6 +944,7 @@ pub export fn wWinMain(
                     // Transfer buttons state from previous loop to this one.
                     copyButtonStates(new_keyboard_controller, old_keyboard_controller);
 
+                    // Process all messages provided by Windows.
                     while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
                         switch (message.message) {
                             win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
@@ -1024,6 +1025,7 @@ pub export fn wWinMain(
                     const window_dimension = getWindowDimension(window_handle);
                     displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
 
+                    // Calculate play cursor at the end of the frame.
                     if (opt_secondary_buffer) |secondary_buffer| {
                         var play_cursor: std.os.windows.DWORD = undefined;
                         var write_cursor: std.os.windows.DWORD = undefined;
@@ -1066,6 +1068,7 @@ pub export fn wWinMain(
                         win32.OutputDebugStringA(@ptrCast(&buffer));
                     }
 
+                    // Flip the controller inputs for next frame.
                     const temp: *game.ControllerInputs = new_input;
                     new_input = old_input;
                     old_input = temp;
