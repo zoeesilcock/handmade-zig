@@ -91,9 +91,9 @@ const SoundOutput = struct {
 };
 
 const SoundOutputInfo = struct {
-    byte_to_lock: u32,
-    bytes_to_write: u32,
-    is_valid: bool,
+    byte_to_lock: u32 = 0,
+    bytes_to_write: u32 = 0,
+    is_valid: bool = false,
     output_buffer: game.SoundOutputBuffer,
 };
 
@@ -581,30 +581,32 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
     }
 }
 
-fn prepareSoundOutput(sound_output: SoundOutput, samples: [*]i16) SoundOutputInfo {
-    var info = SoundOutputInfo{
-        .byte_to_lock = 0,
-        .bytes_to_write = 0,
-        .is_valid = false, // TODO: Make it an optional return instead?
-        .output_buffer = undefined,
-    };
+fn calculateSoundOutputInfo(
+    sound_output: SoundOutput,
+    info: *SoundOutputInfo,
+    samples: [*]i16,
+    last_play_cursor: std.os.windows.DWORD,
+) void {
+    if (info.is_valid) {
+        const target_cursor: u32 = (last_play_cursor + (sound_output.latency_sample_count * sound_output.bytes_per_sample)) % sound_output.secondary_buffer_size;
+        info.byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
 
-    if (opt_secondary_buffer) |secondary_buffer| {
-        var play_cursor: std.os.windows.DWORD = undefined;
-        var write_cursor: std.os.windows.DWORD = undefined;
+        if (info.byte_to_lock > target_cursor) {
+            info.bytes_to_write = sound_output.secondary_buffer_size - info.byte_to_lock;
+            info.bytes_to_write += target_cursor;
+        } else {
+            info.bytes_to_write = target_cursor - info.byte_to_lock;
+        }
 
-        if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(secondary_buffer, &play_cursor, &write_cursor))) {
-            const target_cursor: u32 = (play_cursor + (sound_output.latency_sample_count * sound_output.bytes_per_sample)) % sound_output.secondary_buffer_size;
-            info.byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
-
-            if (info.byte_to_lock > target_cursor) {
-                info.bytes_to_write = sound_output.secondary_buffer_size - info.byte_to_lock;
-                info.bytes_to_write += target_cursor;
-            } else {
-                info.bytes_to_write = target_cursor - info.byte_to_lock;
-            }
-
-            info.is_valid = true;
+        if (OUTPUT_TIMING) {
+            var buffer: [64]u8 = undefined;
+            _ = std.fmt.bufPrint(&buffer, "LPC:{d} BTL:{d} TC:{d} BTW:{d}    \n", .{
+                last_play_cursor,
+                info.byte_to_lock,
+                target_cursor,
+                info.bytes_to_write,
+            }) catch {};
+            win32.OutputDebugStringA(@ptrCast(&buffer));
         }
     }
 
@@ -613,8 +615,6 @@ fn prepareSoundOutput(sound_output: SoundOutput, samples: [*]i16) SoundOutputInf
         .sample_count = @divFloor(info.bytes_to_write, sound_output.bytes_per_sample),
         .samples_per_second = sound_output.samples_per_second,
     };
-
-    return info;
 }
 
 fn getWindowDimension(window: win32.HWND) WindowDimension {
@@ -822,6 +822,7 @@ pub export fn wWinMain(
     };
 
     // TODO: Calculate actual screen refresh rate here.
+    const frames_of_audio_latency = 3;
     const monitor_refresh_hz = 60;
     const game_update_hz = monitor_refresh_hz / 2;
     const target_seconds_per_frame: f32 = 1.0 / @as(f32, @floatFromInt(game_update_hz));
@@ -861,7 +862,9 @@ pub export fn wWinMain(
             };
 
             sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
-            sound_output.latency_sample_count = @divFloor(sound_output.samples_per_second, 15);
+            sound_output.latency_sample_count = frames_of_audio_latency * @divFloor(sound_output.samples_per_second, game_update_hz);
+            var last_play_cursor: std.os.windows.DWORD = 0;
+            var sound_output_info = SoundOutputInfo{ .output_buffer = undefined };
 
             const samples: [*]i16 = @ptrCast(@alignCast(win32.VirtualAlloc(
                 null,
@@ -950,7 +953,7 @@ pub export fn wWinMain(
                     }
 
                     // Prepare input to game.
-                    var sound_output_info = prepareSoundOutput(sound_output, samples);
+                    calculateSoundOutputInfo(sound_output, &sound_output_info, samples, last_play_cursor);
                     var game_buffer = getGameBuffer();
                     processXInput(old_input, new_input);
 
@@ -961,6 +964,20 @@ pub export fn wWinMain(
                     if (sound_output_info.is_valid) {
                         if (opt_secondary_buffer) |secondary_buffer| {
                             fillSoundBuffer(&sound_output, secondary_buffer, &sound_output_info);
+
+                            if (OUTPUT_TIMING) {
+                                var play_cursor: std.os.windows.DWORD = undefined;
+                                var write_cursor: std.os.windows.DWORD = undefined;
+                                if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
+                                    secondary_buffer,
+                                    &play_cursor,
+                                    &write_cursor,
+                                ))) {
+                                    var buffer: [64]u8 = undefined;
+                                    _ = std.fmt.bufPrint(&buffer, "PC:{d} WC:{d}   \n", .{ play_cursor, write_cursor }) catch {};
+                                    win32.OutputDebugStringA(@ptrCast(&buffer));
+                                }
+                            }
                         }
                     }
 
@@ -1003,15 +1020,22 @@ pub export fn wWinMain(
                     const window_dimension = getWindowDimension(window_handle);
                     displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
 
-                    if (DEBUG) {
-                        if (opt_secondary_buffer) |secondary_buffer| {
-                            var play_cursor: std.os.windows.DWORD = undefined;
-                            var write_cursor: std.os.windows.DWORD = undefined;
-                            if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
-                                secondary_buffer,
-                                &play_cursor,
-                                &write_cursor,
-                            ))) {
+                    if (opt_secondary_buffer) |secondary_buffer| {
+                        var play_cursor: std.os.windows.DWORD = undefined;
+                        var write_cursor: std.os.windows.DWORD = undefined;
+                        if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
+                            secondary_buffer,
+                            &play_cursor,
+                            &write_cursor,
+                        ))) {
+                            last_play_cursor = play_cursor;
+
+                            if (!sound_output_info.is_valid) {
+                                sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample;
+                                sound_output_info.is_valid = true;
+                            }
+
+                            if (DEBUG) {
                                 debug_time_marker_index += 1;
                                 if (debug_time_marker_index + 1 > debug_time_markers.len) {
                                     debug_time_marker_index = 0;
@@ -1020,6 +1044,8 @@ pub export fn wWinMain(
                                 debug_time_markers[debug_time_marker_index].play_cursor = play_cursor;
                                 debug_time_markers[debug_time_marker_index].write_cursor = write_cursor;
                             }
+                        } else {
+                            sound_output_info.is_valid = true;
                         }
                     }
 
