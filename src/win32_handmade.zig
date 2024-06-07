@@ -48,6 +48,7 @@ const win32 = struct {
     usingnamespace @import("win32").ui.input;
     usingnamespace @import("win32").ui.input.keyboard_and_mouse;
     usingnamespace @import("win32").ui.input.xbox_controller;
+    usingnamespace @import("win32").ui.shell;
     usingnamespace @import("win32").ui.windows_and_messaging;
     usingnamespace @import("win32").zig;
 };
@@ -199,8 +200,13 @@ fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
 fn loadGameCode() Game {
     var result = Game{};
 
-    _ = win32.CopyFileA("../lib/handmade.dll", "handmade.dll", win32.FALSE);
-    result.dll = win32.LoadLibraryA("handmade.dll");
+    if (win32.PathFileExistsA("zig-out/lib/handmade.dll") == win32.TRUE) {
+        _ = win32.CopyFileA("zig-out/lib/handmade.dll", "zig-out/bin/handmade.dll", win32.FALSE);
+    } else if (win32.PathFileExistsA("../lib/handmade.dll") == win32.TRUE) {
+        _ = win32.CopyFileA("../lib/handmade.dll", "handmade.dll", win32.FALSE);
+    }
+
+    result.dll = win32.LoadLibraryA("handmade.dll") orelse win32.LoadLibraryA("zig-out/bin/handmade.dll");
 
     if (result.dll) |library| {
         if (win32.GetProcAddress(library, "updateAndRender")) |procedure| {
