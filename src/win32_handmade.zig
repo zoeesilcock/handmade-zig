@@ -25,10 +25,11 @@ const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
 
-const OUTPUT_TIMING = @import("build_options").timing;
-const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
+const shared = @import("shared.zig");
 
-const game = @import("handmade.zig");
+// Build options.
+const OUTPUT_TIMING = @import("build_options").timing;
+const DEBUG = shared.DEBUG;
 
 const std = @import("std");
 const win32 = struct {
@@ -57,18 +58,6 @@ var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
 
-pub inline fn rdtsc() u64 {
-    var hi: u32 = 0;
-    var low: u32 = 0;
-
-    asm (
-        \\rdtsc
-        : [low] "={eax}" (low),
-          [hi] "={edx}" (hi),
-    );
-    return (@as(u64, hi) << 32) | @as(u64, low);
-}
-
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
     memory: ?*anyopaque = undefined,
@@ -94,7 +83,7 @@ const SoundOutputInfo = struct {
     byte_to_lock: u32 = 0,
     bytes_to_write: u32 = 0,
     is_valid: bool = false,
-    output_buffer: game.SoundOutputBuffer,
+    output_buffer: shared.SoundOutputBuffer,
 };
 
 const DebugTimeMarker = struct {
@@ -108,8 +97,27 @@ const DebugTimeMarker = struct {
     flip_write_cursor: std.os.windows.DWORD = 0,
 };
 
-fn debugReadEntireFile(file_name: [*:0]const u8) game.DebugReadFileResult {
-    var result = game.DebugReadFileResult{};
+pub const Game = struct {
+    is_valid: bool = false,
+    dll: ?win32.HINSTANCE = undefined,
+    updateAndRender: *const @TypeOf(shared.updateAndRenderStub) = undefined,
+    getSoundSamples: *const @TypeOf(shared.getSoundSamplesStub) = undefined,
+};
+
+pub inline fn rdtsc() u64 {
+    var hi: u32 = 0;
+    var low: u32 = 0;
+
+    asm (
+        \\rdtsc
+        : [low] "={eax}" (low),
+          [hi] "={edx}" (hi),
+    );
+    return (@as(u64, hi) << 32) | @as(u64, low);
+}
+
+fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
+    var result = shared.DebugReadFileResult{};
 
     const file_handle: win32.HANDLE = win32.CreateFileA(
         file_name,
@@ -124,7 +132,7 @@ fn debugReadEntireFile(file_name: [*:0]const u8) game.DebugReadFileResult {
     if (file_handle != win32.INVALID_HANDLE_VALUE) {
         var file_size: win32.LARGE_INTEGER = undefined;
         if (win32.GetFileSizeEx(file_handle, &file_size) != 0) {
-            const file_size32 = game.safeTruncateI64(file_size.QuadPart);
+            const file_size32 = shared.safeTruncateI64(file_size.QuadPart);
 
             if (win32.VirtualAlloc(
                 undefined,
@@ -157,7 +165,7 @@ fn debugReadEntireFile(file_name: [*:0]const u8) game.DebugReadFileResult {
     return result;
 }
 
-fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) bool {
+fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
     var result: bool = false;
 
     const file_handle: win32.HANDLE = win32.CreateFileA(
@@ -184,8 +192,45 @@ fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *any
     return result;
 }
 
-fn debugFreeFileMemory(memory: *anyopaque) void {
+fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
     _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
+}
+
+fn loadGameCode() Game {
+    var result = Game{};
+
+    _ = win32.CopyFileA("../lib/handmade.dll", "handmade.dll", win32.FALSE);
+    result.dll = win32.LoadLibraryA("handmade.dll");
+
+    if (result.dll) |library| {
+        if (win32.GetProcAddress(library, "updateAndRender")) |procedure| {
+            result.updateAndRender = @as(@TypeOf(result.updateAndRender), @ptrCast(procedure));
+        }
+
+        if (win32.GetProcAddress(library, "getSoundSamples")) |procedure| {
+            result.getSoundSamples = @as(@TypeOf(result.getSoundSamples), @ptrCast(procedure));
+        }
+
+        result.is_valid = (result.updateAndRender != undefined and result.getSoundSamples != undefined);
+    }
+
+    if (!result.is_valid) {
+        result.updateAndRender = shared.updateAndRenderStub;
+        result.getSoundSamples = shared.getSoundSamplesStub;
+    }
+
+    return result;
+}
+
+fn unloadGameCode(game: *Game) void {
+    if (game.dll) |dll| {
+        _ = win32.FreeLibrary(dll);
+        game.dll = undefined;
+    }
+
+    game.is_valid = false;
+    game.updateAndRender = shared.updateAndRenderStub;
+    game.getSoundSamples = shared.getSoundSamplesStub;
 }
 
 fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(std.os.windows.WINAPI) isize {
@@ -210,13 +255,13 @@ fn loadXInput() void {
     }
 }
 
-fn processXInput(old_input: *game.ControllerInputs, new_input: *game.ControllerInputs) void {
+fn processXInput(old_input: *shared.ControllerInputs, new_input: *shared.ControllerInputs) void {
     var dwResult: isize = 0;
     var controller_index: u8 = 0;
 
     var max_controller_count = win32.XUSER_MAX_COUNT;
-    if (max_controller_count > (game.MAX_CONTROLLER_COUNT - 1)) {
-        max_controller_count = game.MAX_CONTROLLER_COUNT;
+    if (max_controller_count > (shared.MAX_CONTROLLER_COUNT - 1)) {
+        max_controller_count = shared.MAX_CONTROLLER_COUNT;
     }
 
     while (controller_index < max_controller_count) : (controller_index += 1) {
@@ -341,7 +386,7 @@ fn processXInput(old_input: *game.ControllerInputs, new_input: *game.ControllerI
     }
 }
 
-fn copyButtonStates(new_controller: *game.ControllerInput, old_controller: *game.ControllerInput) void {
+fn copyButtonStates(new_controller: *shared.ControllerInput, old_controller: *shared.ControllerInput) void {
     new_controller.move_up.ended_down = old_controller.move_up.ended_down;
     new_controller.move_down.ended_down = old_controller.move_down.ended_down;
     new_controller.move_left.ended_down = old_controller.move_left.ended_down;
@@ -362,8 +407,8 @@ fn copyButtonStates(new_controller: *game.ControllerInput, old_controller: *game
 fn processXInputDigitalButton(
     x_input_button_state: u32,
     button_bit: u32,
-    old_state: *game.ControllerButtonState,
-    new_state: *game.ControllerButtonState,
+    old_state: *shared.ControllerButtonState,
+    new_state: *shared.ControllerButtonState,
 ) void {
     new_state.ended_down = (x_input_button_state & button_bit) > 0;
     new_state.half_transitions = if (old_state.ended_down != new_state.ended_down) 1 else 0;
@@ -383,7 +428,7 @@ fn processXInputStick(value: i16, dead_zone: i16) f32 {
     return result;
 }
 
-fn processKeyboardInput(message: win32.MSG, keyboard_controller: *game.ControllerInput) void {
+fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.ControllerInput) void {
     const vk_code = message.wParam;
     const was_down: bool = if ((message.lParam & (1 << 30) != 0)) true else false;
     const is_down: bool = if ((message.lParam & (1 << 31) == 0)) true else false;
@@ -432,7 +477,7 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *game.Controlle
 }
 
 fn processKeyboardInputMessage(
-    new_state: *game.ControllerButtonState,
+    new_state: *shared.ControllerButtonState,
     is_down: bool,
 ) void {
     std.debug.assert(is_down != new_state.ended_down);
@@ -645,8 +690,8 @@ fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
     buffer.pitch = @intCast(buffer.width * BYTES_PER_PIXEL);
 }
 
-fn getGameBuffer() game.OffscreenBuffer {
-    return game.OffscreenBuffer{
+fn getGameBuffer() shared.OffscreenBuffer {
+    return shared.OffscreenBuffer{
         .memory = back_buffer.memory,
         .width = back_buffer.width,
         .height = back_buffer.height,
@@ -832,7 +877,7 @@ pub export fn wWinMain(
 
     loadXInput();
     resizeDBISection(&back_buffer, WIDTH, HEIGHT);
-    const platform = game.Platform{
+    const platform = shared.Platform{
         .debugReadEntireFile = debugReadEntireFile,
         .debugWriteEntireFile = debugWriteEntireFile,
         .debugFreeFileMemory = debugFreeFileMemory,
@@ -910,15 +955,15 @@ pub export fn wWinMain(
                 _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
             }
 
-            var game_memory: game.Memory = game.Memory{
+            var game_memory: shared.Memory = shared.Memory{
                 .is_initialized = false,
-                .permanent_storage_size = game.megabytes(64),
+                .permanent_storage_size = shared.megabytes(64),
                 .permanent_storage = undefined,
-                .transient_storage_size = game.gigabytes(4),
+                .transient_storage_size = shared.gigabytes(4),
                 .transient_storage = undefined,
             };
 
-            const base_address = if (DEBUG) @as(*u8, @ptrFromInt(game.terabytes(2))) else null;
+            const base_address = if (DEBUG) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
             game_memory.permanent_storage = win32.VirtualAlloc(
                 base_address,
                 game_memory.permanent_storage_size + game_memory.transient_storage_size,
@@ -930,9 +975,9 @@ pub export fn wWinMain(
             }
 
             if (samples != undefined and game_memory.permanent_storage != undefined and game_memory.transient_storage != undefined) {
-                var game_input = [2]game.ControllerInputs{
-                    game.ControllerInputs{},
-                    game.ControllerInputs{},
+                var game_input = [2]shared.ControllerInputs{
+                    shared.ControllerInputs{},
+                    shared.ControllerInputs{},
                 };
                 var new_input = &game_input[0];
                 var old_input = &game_input[1];
@@ -945,7 +990,17 @@ pub export fn wWinMain(
                 var flip_wall_clock: win32.LARGE_INTEGER = getWallClock();
                 last_cycle_count = rdtsc();
 
+                var game = loadGameCode();
+                var load_counter: u32 = 0;
+
                 while (running) {
+                    if (load_counter > 120) {
+                        unloadGameCode(&game);
+                        game = loadGameCode();
+                        load_counter = 0;
+                    }
+                    load_counter += 1;
+
                     var message: win32.MSG = undefined;
 
                     const old_keyboard_controller = &old_input.controllers[0];
@@ -1040,7 +1095,7 @@ pub export fn wWinMain(
                                 sound_output_info.bytes_to_write = target_cursor - sound_output_info.byte_to_lock;
                             }
 
-                            sound_output_info.output_buffer = game.SoundOutputBuffer{
+                            sound_output_info.output_buffer = shared.SoundOutputBuffer{
                                 .samples = samples,
                                 .sample_count = @divFloor(sound_output_info.bytes_to_write, sound_output.bytes_per_sample),
                                 .samples_per_second = sound_output.samples_per_second,
@@ -1173,7 +1228,7 @@ pub export fn wWinMain(
                     }
 
                     // Flip the controller inputs for next frame.
-                    const temp: *game.ControllerInputs = new_input;
+                    const temp: *shared.ControllerInputs = new_input;
                     new_input = old_input;
                     old_input = temp;
 

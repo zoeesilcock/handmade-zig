@@ -1,11 +1,13 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
     const exe = b.addExecutable(.{
         .name = "handmade-zig",
         .root_source_file = b.path("src/win32_handmade.zig"),
-        .target = b.standardTargetOptions(.{}),
-        .optimize = b.standardOptimizeOption(.{}),
+        .target = target,
+        .optimize = optimize,
     });
 
     // Build options.
@@ -20,6 +22,17 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("win32", win32api);
 
     b.installArtifact(exe);
+
+    // Build the game library.
+    const lib_handmade = b.addSharedLibrary(.{
+        .name = "handmade",
+        .root_source_file = b.path("src/handmade.zig"),
+        .target = target,
+        .optimize = optimize,
+        .version = .{ .major = 0, .minor = 1, .patch = 0 },
+    });
+
+    b.installArtifact(lib_handmade);
 
     // Allow running from build command.
     const run_exe = b.addRunArtifact(exe);
