@@ -101,6 +101,7 @@ const DebugTimeMarker = struct {
 pub const Game = struct {
     is_valid: bool = false,
     dll: ?win32.HINSTANCE = undefined,
+    last_write_time: win32.FILETIME = undefined,
     updateAndRender: *const @TypeOf(shared.updateAndRenderStub) = undefined,
     getSoundSamples: *const @TypeOf(shared.getSoundSamplesStub) = undefined,
 };
@@ -197,16 +198,29 @@ fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
     _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
 }
 
-fn loadGameCode() Game {
-    var result = Game{};
+inline fn getLastWriteTime(filename: [*:0]const u8) win32.FILETIME {
+    var last_write_time = win32.FILETIME{
+        .dwLowDateTime = 0,
+        .dwHighDateTime = 0,
+    };
 
-    if (win32.PathFileExistsA("zig-out/lib/handmade.dll") == win32.TRUE) {
-        _ = win32.CopyFileA("zig-out/lib/handmade.dll", "zig-out/bin/handmade.dll", win32.FALSE);
-    } else if (win32.PathFileExistsA("../lib/handmade.dll") == win32.TRUE) {
-        _ = win32.CopyFileA("../lib/handmade.dll", "handmade.dll", win32.FALSE);
+    var find_data: win32.WIN32_FIND_DATAA = undefined;
+    const find_handle = win32.FindFirstFileA(filename, &find_data);
+    if (find_handle != 0) {
+        last_write_time = find_data.ftLastWriteTime;
+        _ = win32.FindClose(find_handle);
     }
 
-    result.dll = win32.LoadLibraryA("handmade.dll") orelse win32.LoadLibraryA("zig-out/bin/handmade.dll");
+    return last_write_time;
+}
+
+fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Game {
+    var result = Game{};
+
+    _ = win32.CopyFileA(source_dll_name, temp_dll_name, win32.FALSE);
+
+    result.last_write_time = getLastWriteTime(source_dll_name);
+    result.dll = win32.LoadLibraryA(temp_dll_name);
 
     if (result.dll) |library| {
         if (win32.GetProcAddress(library, "updateAndRender")) |procedure| {
@@ -863,6 +877,23 @@ fn debugSyncDisplay(
     }
 }
 
+fn catStrings(
+    source_a: []const u8,
+    source_b: []const u8,
+    dest: [:0]u8,
+) void {
+    var index: usize = 0;
+    for (source_a) |a| {
+        dest[index] = a;
+        index += 1;
+    }
+
+    for (source_b) |b| {
+        dest[index] = b;
+        index += 1;
+    }
+}
+
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -872,6 +903,30 @@ pub export fn wWinMain(
     _ = prev_instance;
     _ = cmd_line;
     _ = cmd_show;
+
+    var exe_file_name = [_:0]u8{0} ** win32.MAX_PATH;
+    _ = win32.GetModuleFileNameA(null, &exe_file_name, @sizeOf(u8) * win32.MAX_PATH);
+    var one_past_last_slash: usize = 0;
+    for (exe_file_name, 0..) |char, index| {
+        if (char == '\\') {
+            one_past_last_slash = index + 1;
+        }
+    }
+
+    const source_dll_file_name = "handmade.dll";
+    var source_dll_path = [_:0]u8{0} ** win32.MAX_PATH;
+    catStrings(
+        exe_file_name[0..one_past_last_slash],
+        source_dll_file_name,
+        source_dll_path[0..win32.MAX_PATH],
+    );
+    const temp_dll_file_name = "handmade_temp.dll";
+    var temp_dll_path = [_:0]u8{0} ** win32.MAX_PATH;
+    catStrings(
+        exe_file_name[0..one_past_last_slash],
+        temp_dll_file_name,
+        temp_dll_path[0..win32.MAX_PATH],
+    );
 
     var performance_frequency: win32.LARGE_INTEGER = undefined;
     _ = win32.QueryPerformanceFrequency(&performance_frequency);
@@ -996,16 +1051,16 @@ pub export fn wWinMain(
                 var flip_wall_clock: win32.LARGE_INTEGER = getWallClock();
                 last_cycle_count = rdtsc();
 
-                var game = loadGameCode();
-                var load_counter: u32 = 0;
+                // Load the game code.
+                var game = loadGameCode(&source_dll_path, &temp_dll_path);
 
                 while (running) {
-                    if (load_counter > 120) {
+                    // Reload the game code if it has changed.
+                    const last_dll_write_time = getLastWriteTime(&source_dll_path);
+                    if (win32.CompareFileTime(&last_dll_write_time, &game.last_write_time) != 0) {
                         unloadGameCode(&game);
-                        game = loadGameCode();
-                        load_counter = 0;
+                        game = loadGameCode(&source_dll_path, &temp_dll_path);
                     }
-                    load_counter += 1;
 
                     var message: win32.MSG = undefined;
 

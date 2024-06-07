@@ -34,6 +34,11 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib_handmade);
 
+    // Copy the game library to the bin directory where the runtime expects it to be.
+    const dll_copy_path = b.fmt("bin/{s}", .{lib_handmade.out_filename});
+    const install_dll = b.addInstallFileWithDir(lib_handmade.getEmittedBin(), .prefix, dll_copy_path);
+    b.getInstallStep().dependOn(&install_dll.step);
+
     // Allow running from build command.
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the application");
