@@ -99,6 +99,18 @@ const DebugTimeMarker = struct {
     flip_write_cursor: std.os.windows.DWORD = 0,
 };
 
+const RecordedInput = struct {
+    input_stream: [*:0]shared.ControllerInputs,
+};
+
+const Win32State = struct {
+    recording_handle: win32.HANDLE = undefined,
+    input_recording_index: u32 = 0,
+
+    playback_handle: win32.HANDLE = undefined,
+    input_playing_index: u32 = 0,
+};
+
 pub const Game = struct {
     is_valid: bool = false,
     dll: ?win32.HINSTANCE = undefined,
@@ -449,7 +461,7 @@ fn processXInputStick(value: i16, dead_zone: i16) f32 {
     return result;
 }
 
-fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.ControllerInput) void {
+fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.ControllerInput, state: *Win32State) void {
     const vk_code = message.wParam;
     const was_down: bool = if ((message.lParam & (1 << 30) != 0)) true else false;
     const is_down: bool = if ((message.lParam & (1 << 31) == 0)) true else false;
@@ -491,6 +503,18 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
             },
             @intFromEnum(win32.VK_ESCAPE) => {
                 processKeyboardInputMessage(&keyboard_controller.back_button, is_down);
+            },
+            'L' => {
+                if (is_down) {
+                    if (state.input_recording_index == 0 and state.input_playing_index == 0) {
+                        beginRecordingInput(state, 1);
+                    } else if (state.input_recording_index > 0) {
+                        endRecordingInput(state);
+                        beginInputPlayback(state, 1);
+                    } else if (state.input_playing_index > 0) {
+                        endInputPlayback(state);
+                    }
+                }
             },
             else => {},
         }
@@ -896,6 +920,66 @@ fn catStrings(
     }
 }
 
+fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
+    const file_name = "input_recording.hmi";
+    state.recording_handle = win32.CreateFileA(
+        file_name,
+        win32.FILE_GENERIC_WRITE,
+        win32.FILE_SHARE_NONE,
+        null,
+        win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
+
+    if (state.recording_handle != win32.INVALID_HANDLE_VALUE) {
+        state.input_recording_index = input_recording_index;
+    }
+}
+
+fn recordInput(state: *Win32State, new_input: *shared.ControllerInputs) void {
+    var bytes_written: u32 = undefined;
+    _ = win32.WriteFile(state.recording_handle, new_input, @sizeOf(@TypeOf(new_input.*)), &bytes_written, null);
+}
+
+fn endRecordingInput(state: *Win32State) void {
+    _ = win32.CloseHandle(state.recording_handle);
+    state.input_recording_index = 0;
+    state.recording_handle = undefined;
+}
+
+fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
+    const file_name = "input_recording.hmi";
+    state.playback_handle = win32.CreateFileA(
+        file_name,
+        win32.FILE_GENERIC_READ,
+        win32.FILE_SHARE_READ,
+        null,
+        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
+
+    if (state.playback_handle != win32.INVALID_HANDLE_VALUE) {
+        state.input_playing_index = input_playing_index;
+    }
+}
+
+fn playbackInput(state: *Win32State, new_input: *shared.ControllerInputs) void {
+    var bytes_read: u32 = undefined;
+    if (win32.ReadFile(state.playback_handle, new_input, @sizeOf(@TypeOf(new_input.*)), &bytes_read, null) == 0 or bytes_read == 0) {
+        const playing_index = state.input_playing_index;
+        endInputPlayback(state);
+        beginInputPlayback(state, playing_index);
+    }
+}
+
+fn endInputPlayback(state: *Win32State) void {
+    _ = win32.CloseHandle(state.playback_handle);
+    state.input_playing_index = 0;
+    state.playback_handle = undefined;
+}
+
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -1045,8 +1129,6 @@ pub export fn wWinMain(
                 var new_input = &game_input[0];
                 var old_input = &game_input[1];
 
-                running = true;
-
                 // Initialize timing.
                 var last_cycle_count: u64 = 0;
                 var last_counter: win32.LARGE_INTEGER = getWallClock();
@@ -1055,6 +1137,9 @@ pub export fn wWinMain(
 
                 // Load the game code.
                 var game = loadGameCode(&source_dll_path, &temp_dll_path);
+
+                var state = Win32State{};
+                running = true;
 
                 while (running) {
                     // Reload the game code if it has changed.
@@ -1077,7 +1162,7 @@ pub export fn wWinMain(
                     while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
                         switch (message.message) {
                             win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
-                                processKeyboardInput(message, new_keyboard_controller);
+                                processKeyboardInput(message, new_keyboard_controller, &state);
                             },
                             else => {
                                 _ = win32.TranslateMessage(&message);
@@ -1089,6 +1174,12 @@ pub export fn wWinMain(
                     // Prepare input to game.
                     var game_buffer = getGameBuffer();
                     processXInput(old_input, new_input);
+
+                    if (state.input_recording_index > 0) {
+                        recordInput(&state, new_input);
+                    } else if (state.input_playing_index > 0) {
+                        playbackInput(&state, new_input);
+                    }
 
                     // Send all input to game.
                     game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
