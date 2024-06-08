@@ -313,10 +313,10 @@ fn processXInput(old_input: *shared.ControllerInputs, new_input: *shared.Control
                 new_controller.is_analog = true;
             }
             if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0) {
-                new_controller.stick_average_x = 1.0;
+                new_controller.stick_average_x = -1.0;
                 new_controller.is_analog = true;
             } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0) {
-                new_controller.stick_average_x = -1.0;
+                new_controller.stick_average_x = 1.0;
                 new_controller.is_analog = true;
             }
 

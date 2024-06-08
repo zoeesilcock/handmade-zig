@@ -26,7 +26,7 @@ pub export fn updateAndRender(
     for (&input.controllers) |controller| {
         if (controller.is_analog) {
             state.x_offset += @intFromFloat(4.0 * controller.stick_average_x);
-            state.y_offset += @intFromFloat(4.0 * controller.stick_average_y);
+            state.y_offset -= @intFromFloat(4.0 * controller.stick_average_y);
             state.tone_hz = @intCast(@as(i32, shared.MIDDLE_C) + @as(i32, @intFromFloat(128.0 * controller.stick_average_y)));
         } else {
             if (controller.move_up.ended_down) {
