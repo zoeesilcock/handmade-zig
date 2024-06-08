@@ -102,6 +102,9 @@ pub const State = struct {
     y_offset: i32 = 0,
     t_sine: f32 = 0.0,
     tone_hz: u32 = MIDDLE_C,
+    player_x: i32 = 0,
+    player_y: i32 = 0,
+    player_jump_timer: f32 = 0,
 };
 
 pub fn updateAndRenderStub(_: Platform, _: *Memory, _: ControllerInputs, _: *OffscreenBuffer) callconv(.C) void {

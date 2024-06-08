@@ -13,6 +13,10 @@ pub export fn updateAndRender(
 
     if (!memory.is_initialized) {
         state.* = shared.State{};
+
+        state.player_x = 100;
+        state.player_y = 100;
+
         memory.is_initialized = true;
 
         const file_name = "build.zig";
@@ -43,12 +47,20 @@ pub export fn updateAndRender(
             }
         }
 
+        state.player_x += @intFromFloat(4.0 * controller.stick_average_x);
+        state.player_y -= @intFromFloat(4.0 * controller.stick_average_y);
+
         if (controller.action_down.ended_down) {
-            state.y_offset += 1;
+            state.player_jump_timer = 1.0;
         }
+        if (state.player_jump_timer > 0) {
+            state.player_y -= @intFromFloat(10.0 * @sin(state.player_jump_timer));
+        }
+        state.player_jump_timer -= 0.033;
     }
 
     renderWeirdGradient(buffer, state.x_offset, state.y_offset);
+    renderPlayer(buffer, state.player_x, state.player_y);
 }
 
 pub export fn getSoundSamples(
@@ -57,6 +69,29 @@ pub export fn getSoundSamples(
 ) void {
     var state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
     outputSound(sound_buffer, state.tone_hz, &state.t_sine);
+}
+
+fn renderPlayer(buffer: *shared.OffscreenBuffer, player_x: i32, player_y: i32) void {
+    const top = player_y;
+    const bottom = player_y + 10;
+    const limited_top = if (top <= 0) 0 else top;
+    const limited_bottom = if (bottom > buffer.height) buffer.height else bottom;
+    const color: u32 = 0xFFFF0000;
+
+    var x = player_x;
+    while (x < (player_x + 10)) : (x += 1) {
+        if (x >= 0 and x < buffer.width) {
+            var pixel: [*]u8 = @ptrCast(buffer.memory);
+            pixel += @as(u32, @intCast((x * buffer.bytes_per_pixel) + (limited_top * @as(i32, @intCast(buffer.pitch)))));
+
+            var y = limited_top;
+            while (y < limited_bottom) : (y += 1) {
+                const p = @as(*u32, @ptrCast(@alignCast(pixel)));
+                p.* = color;
+                pixel += buffer.pitch;
+            }
+        }
+    }
 }
 
 fn renderWeirdGradient(buffer: *shared.OffscreenBuffer, x_offset: i32, y_offset: i32) void {
