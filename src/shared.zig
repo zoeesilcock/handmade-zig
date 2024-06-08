@@ -47,6 +47,7 @@ pub const OffscreenBuffer = extern struct {
     width: i32 = 0,
     height: i32 = 0,
     pitch: usize = 0,
+    bytes_per_pixel: i32 = 0,
 };
 
 pub const SoundOutputBuffer = extern struct {

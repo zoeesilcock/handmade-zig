@@ -65,6 +65,7 @@ const OffscreenBuffer = struct {
     width: i32 = 0,
     height: i32 = 0,
     pitch: usize = 0,
+    bytes_per_pixel: i32 = BYTES_PER_PIXEL,
 };
 
 const WindowDimension = struct {
@@ -716,6 +717,7 @@ fn getGameBuffer() shared.OffscreenBuffer {
         .width = back_buffer.width,
         .height = back_buffer.height,
         .pitch = back_buffer.pitch,
+        .bytes_per_pixel = back_buffer.bytes_per_pixel,
     };
 }
 
