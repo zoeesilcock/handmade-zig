@@ -25,6 +25,11 @@ const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
 
+const DEBUG_WINDOW_POS_X = -7;
+const DEBUG_WINDOW_POS_Y = 0;
+const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
+const DEBUG_WINDOW_INACTIVE_OPACITY = 64;
+
 const shared = @import("shared.zig");
 
 // Build options.
@@ -780,6 +785,10 @@ fn windowProcedure(
         },
         win32.WM_SIZE => {},
         win32.WM_ACTIVATEAPP => {
+            if (DEBUG) {
+                const active = (w_param != 0);
+                _ = win32.SetLayeredWindowAttributes(window, 0, if (active) DEBUG_WINDOW_ACTIVE_OPACITY else DEBUG_WINDOW_INACTIVE_OPACITY, win32.LWA_ALPHA);
+            }
             win32.OutputDebugStringA("WM_ACTIVATEAPP\n");
         },
         win32.WM_PAINT => {
@@ -1046,7 +1055,7 @@ pub export fn wWinMain(
     };
 
     const window_class: win32.WNDCLASSW = .{
-        .style = .{ .HREDRAW = 1, .VREDRAW = 1, .OWNDC = 1 },
+        .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
         .lpfnWndProc = windowProcedure,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
@@ -1065,7 +1074,10 @@ pub export fn wWinMain(
 
     if (win32.RegisterClassW(&window_class) != 0) {
         const opt_window_handle: ?win32.HWND = win32.CreateWindowExW(
-            .{},
+            .{
+                .TOPMOST = if (DEBUG) 1 else 0,
+                .LAYERED = if (DEBUG) 1 else 0,
+            },
             window_class.lpszClassName,
             win32.L("Handmade Zig"),
             win32.WINDOW_STYLE{
@@ -1077,8 +1089,8 @@ pub export fn wWinMain(
                 .DLGFRAME = 1,
                 .BORDER = 1,
             },
-            win32.CW_USEDEFAULT,
-            win32.CW_USEDEFAULT,
+            if (DEBUG) DEBUG_WINDOW_POS_X else win32.CW_USEDEFAULT,
+            if (DEBUG) DEBUG_WINDOW_POS_Y else win32.CW_USEDEFAULT,
             WIDTH + WINDOW_DECORATION_WIDTH,
             HEIGHT + WINDOW_DECORATION_HEIGHT,
             null,
@@ -1088,7 +1100,10 @@ pub export fn wWinMain(
         );
 
         if (opt_window_handle) |window_handle| {
-            const device_context = win32.GetDC(window_handle);
+            if (DEBUG) {
+                _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);
+            }
+
             var sound_output = SoundOutput{
                 .samples_per_second = 48000,
                 .bytes_per_sample = @sizeOf(i16) * 2,
@@ -1357,6 +1372,7 @@ pub export fn wWinMain(
 
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
+                    const device_context = win32.GetDC(window_handle);
                     displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
 
                     flip_wall_clock = getWallClock();
