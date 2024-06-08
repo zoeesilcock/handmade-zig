@@ -105,8 +105,12 @@ fn outputSound(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, t_sine: *f
     var sample_out: [*]i16 = sound_buffer.samples;
     var sample_index: u32 = 0;
     while (sample_index < sound_buffer.sample_count) {
-        const sine_value: f32 = @sin(t_sine.*);
-        const sample_value: i16 = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
+        var sample_value: i16 = 0;
+
+        if (!shared.DEBUG) {
+            const sine_value: f32 = @sin(t_sine.*);
+            sample_value = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
+        }
 
         sample_out += 1;
         sample_out[0] = sample_value;
