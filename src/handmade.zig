@@ -51,10 +51,10 @@ pub export fn updateAndRender(
         state.player_y -= @intFromFloat(4.0 * controller.stick_average_y);
 
         if (controller.action_down.ended_down) {
-            state.player_jump_timer = 1.0;
+            state.player_jump_timer = 4.0;
         }
         if (state.player_jump_timer > 0) {
-            state.player_y -= @intFromFloat(10.0 * @sin(state.player_jump_timer));
+            state.player_y += @intFromFloat(5.0 * @sin(0.5 * shared.PI32 * state.player_jump_timer));
         }
         state.player_jump_timer -= 0.033;
     }
