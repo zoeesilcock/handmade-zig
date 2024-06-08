@@ -104,6 +104,9 @@ const RecordedInput = struct {
 };
 
 const Win32State = struct {
+    total_size: usize = 0,
+    game_memory_block: *anyopaque = undefined,
+
     recording_handle: win32.HANDLE = undefined,
     input_recording_index: u32 = 0,
 
@@ -932,6 +935,12 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
         null,
     );
 
+    const bytes_to_write: u32 = @intCast(state.total_size);
+    std.debug.assert(state.total_size == bytes_to_write);
+
+    var bytes_written: u32 = undefined;
+    _ = win32.WriteFile(state.recording_handle, state.game_memory_block, bytes_to_write, &bytes_written, null);
+
     if (state.recording_handle != win32.INVALID_HANDLE_VALUE) {
         state.input_recording_index = input_recording_index;
     }
@@ -959,6 +968,12 @@ fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
         win32.FILE_FLAGS_AND_ATTRIBUTES{},
         null,
     );
+
+    const bytes_to_read: u32 = @intCast(state.total_size);
+    std.debug.assert(state.total_size == bytes_to_read);
+
+    var bytes_read: u32 = undefined;
+    _ = win32.ReadFile(state.playback_handle, state.game_memory_block, bytes_to_read, &bytes_read, null);
 
     if (state.playback_handle != win32.INVALID_HANDLE_VALUE) {
         state.input_playing_index = input_playing_index;
@@ -1102,21 +1117,24 @@ pub export fn wWinMain(
                 _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
             }
 
+            var state = Win32State{};
             var game_memory: shared.Memory = shared.Memory{
                 .is_initialized = false,
                 .permanent_storage_size = shared.megabytes(64),
                 .permanent_storage = undefined,
-                .transient_storage_size = shared.gigabytes(4),
+                .transient_storage_size = shared.megabytes(256),
                 .transient_storage = undefined,
             };
 
+            state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
             const base_address = if (DEBUG) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
-            game_memory.permanent_storage = win32.VirtualAlloc(
+            state.game_memory_block = win32.VirtualAlloc(
                 base_address,
-                game_memory.permanent_storage_size + game_memory.transient_storage_size,
+                state.total_size,
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
                 win32.PAGE_READWRITE,
             ) orelse undefined;
+            game_memory.permanent_storage = state.game_memory_block;
             if (game_memory.permanent_storage != undefined) {
                 game_memory.transient_storage = @ptrFromInt(@intFromPtr(&game_memory.permanent_storage) + game_memory.permanent_storage_size);
             }
@@ -1138,7 +1156,6 @@ pub export fn wWinMain(
                 // Load the game code.
                 var game = loadGameCode(&source_dll_path, &temp_dll_path);
 
-                var state = Win32State{};
                 running = true;
 
                 while (running) {
