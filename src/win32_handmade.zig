@@ -29,6 +29,7 @@ const DEBUG_WINDOW_POS_X = -7 + 2560;
 const DEBUG_WINDOW_POS_Y = 0;
 const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 64;
+const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
 const shared = @import("shared.zig");
 
@@ -117,6 +118,9 @@ const Win32State = struct {
 
     playback_handle: win32.HANDLE = undefined,
     input_playing_index: u32 = 0,
+
+    exe_file_name: [STATE_FILE_NAME_COUNT:0]u8 = undefined,
+    one_past_last_exe_file_name_slash: usize = 0,
 };
 
 pub const Game = struct {
@@ -475,7 +479,7 @@ fn processXInputStick(value: i16, dead_zone: i16) f32 {
 
 fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.ControllerInput, state: *Win32State) void {
     const vk_code = message.wParam;
-    const alt_was_down: bool = if((message.lParam & (1 << 29) != 0)) true else false;
+    const alt_was_down: bool = if ((message.lParam & (1 << 29) != 0)) true else false;
     const was_down: bool = if ((message.lParam & (1 << 30) != 0)) true else false;
     const is_down: bool = if ((message.lParam & (1 << 31) == 0)) true else false;
 
@@ -947,10 +951,38 @@ fn catStrings(
     }
 }
 
-fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
-    const file_name = "input_recording.hmi";
-    state.recording_handle = win32.CreateFileA(
+fn getExeFileName(state: *Win32State) void {
+    state.exe_file_name = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+
+    _ = win32.GetModuleFileNameA(null, &state.exe_file_name, @sizeOf(u8) * STATE_FILE_NAME_COUNT);
+
+    state.one_past_last_exe_file_name_slash = 0;
+    for (state.exe_file_name, 0..) |char, index| {
+        if (char == '\\') {
+            state.one_past_last_exe_file_name_slash = index + 1;
+        }
+    }
+}
+
+fn buildExePathFileName(state: *Win32State, file_name: []const u8, dest: [:0]u8) void {
+    catStrings(
+        state.exe_file_name[0..state.one_past_last_exe_file_name_slash],
         file_name,
+        dest,
+    );
+}
+
+fn getInputFileLocation(state: *Win32State, slot_index: u32, dest: [:0]u8) void {
+    std.debug.assert(slot_index == 1);
+
+    buildExePathFileName(state, "loop_edit.hmi", dest);
+}
+
+fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
+    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    getInputFileLocation(state, input_recording_index, &file_path);
+    state.recording_handle = win32.CreateFileA(
+        &file_path,
         win32.FILE_GENERIC_WRITE,
         win32.FILE_SHARE_NONE,
         null,
@@ -982,9 +1014,10 @@ fn endRecordingInput(state: *Win32State) void {
 }
 
 fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
-    const file_name = "input_recording.hmi";
+    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    getInputFileLocation(state, input_playing_index, &file_path);
     state.playback_handle = win32.CreateFileA(
-        file_name,
+        &file_path,
         win32.FILE_GENERIC_READ,
         win32.FILE_SHARE_READ,
         null,
@@ -1031,29 +1064,13 @@ pub export fn wWinMain(
     _ = cmd_line;
     _ = cmd_show;
 
-    var exe_file_name = [_:0]u8{0} ** win32.MAX_PATH;
-    _ = win32.GetModuleFileNameA(null, &exe_file_name, @sizeOf(u8) * win32.MAX_PATH);
-    var one_past_last_slash: usize = 0;
-    for (exe_file_name, 0..) |char, index| {
-        if (char == '\\') {
-            one_past_last_slash = index + 1;
-        }
-    }
+    var state = Win32State{};
+    getExeFileName(&state);
 
-    const source_dll_file_name = "handmade.dll";
-    var source_dll_path = [_:0]u8{0} ** win32.MAX_PATH;
-    catStrings(
-        exe_file_name[0..one_past_last_slash],
-        source_dll_file_name,
-        source_dll_path[0..win32.MAX_PATH],
-    );
-    const temp_dll_file_name = "handmade_temp.dll";
-    var temp_dll_path = [_:0]u8{0} ** win32.MAX_PATH;
-    catStrings(
-        exe_file_name[0..one_past_last_slash],
-        temp_dll_file_name,
-        temp_dll_path[0..win32.MAX_PATH],
-    );
+    var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    buildExePathFileName(&state, "handmade.dll", &source_dll_path);
+    var temp_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    buildExePathFileName(&state, "handmade_temp.dll", &temp_dll_path);
 
     var performance_frequency: win32.LARGE_INTEGER = undefined;
     _ = win32.QueryPerformanceFrequency(&performance_frequency);
@@ -1149,7 +1166,6 @@ pub export fn wWinMain(
                 _ = secondary_buffer.vtable.Play(secondary_buffer, 0, 0, win32.DSBPLAY_LOOPING);
             }
 
-            var state = Win32State{};
             var game_memory: shared.Memory = shared.Memory{
                 .is_initialized = false,
                 .permanent_storage_size = shared.megabytes(64),
