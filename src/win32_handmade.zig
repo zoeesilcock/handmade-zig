@@ -1249,16 +1249,16 @@ pub export fn wWinMain(
                             const expected_sound_bytes_per_frame =
                                 (sound_output.samples_per_second * sound_output.bytes_per_sample) / game_update_hz;
 
-                            _ = from_begin_to_audio_seconds;
+                            const seconds_left_until_flip = target_seconds_per_frame - from_begin_to_audio_seconds;
+                            var expected_bytes_until_flip: std.os.windows.DWORD = expected_sound_bytes_per_frame;
 
-                            // TODO: Complete these calculations and actually use the resulting value.
-                            // const seconds_left_until_flip = target_seconds_per_frame - from_begin_to_audio_seconds;
-                            // const expected_bytes_until_flip: std.os.windows.DWORD =
-                            //     @intFromFloat((seconds_left_until_flip / target_seconds_per_frame) *
-                            //         @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
-                            // _ = expected_bytes_until_flip;
+                            if (seconds_left_until_flip > 0) {
+                                expected_bytes_until_flip =
+                                    @intFromFloat((seconds_left_until_flip / target_seconds_per_frame) *
+                                    @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
+                            }
 
-                            const expected_frame_boundary_byte: std.os.windows.DWORD = play_cursor + expected_sound_bytes_per_frame;
+                            const expected_frame_boundary_byte: std.os.windows.DWORD = play_cursor + expected_bytes_until_flip;
 
                             var safety_write_cursor: std.os.windows.DWORD = write_cursor;
                             if (safety_write_cursor < play_cursor) {
