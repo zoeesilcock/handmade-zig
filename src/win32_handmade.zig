@@ -995,6 +995,8 @@ fn playbackInput(state: *Win32State, new_input: *shared.ControllerInputs) void {
         const playing_index = state.input_playing_index;
         endInputPlayback(state);
         beginInputPlayback(state, playing_index);
+
+        _ = win32.ReadFile(state.playback_handle, new_input, @sizeOf(@TypeOf(new_input.*)), &bytes_read, null);
     }
 }
 
