@@ -471,6 +471,7 @@ fn processXInputStick(value: i16, dead_zone: i16) f32 {
 
 fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.ControllerInput, state: *Win32State) void {
     const vk_code = message.wParam;
+    const alt_was_down: bool = if((message.lParam & (1 << 29) != 0)) true else false;
     const was_down: bool = if ((message.lParam & (1 << 30) != 0)) true else false;
     const is_down: bool = if ((message.lParam & (1 << 31) == 0)) true else false;
 
@@ -511,6 +512,11 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
             },
             @intFromEnum(win32.VK_ESCAPE) => {
                 processKeyboardInputMessage(&keyboard_controller.back_button, is_down);
+            },
+            @intFromEnum(win32.VK_F4) => {
+                if (alt_was_down) {
+                    running = false;
+                }
             },
             'L' => {
                 if (is_down) {
