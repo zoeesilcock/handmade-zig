@@ -223,14 +223,14 @@ fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
     _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
 }
 
-inline fn getLastWriteTime(filename: [*:0]const u8) win32.FILETIME {
+inline fn getLastWriteTime(file_name: [*:0]const u8) win32.FILETIME {
     var last_write_time = win32.FILETIME{
         .dwLowDateTime = 0,
         .dwHighDateTime = 0,
     };
 
     var find_data: win32.WIN32_FIND_DATAA = undefined;
-    const find_handle = win32.FindFirstFileA(filename, &find_data);
+    const find_handle = win32.FindFirstFileA(file_name, &find_data);
     if (find_handle != 0) {
         last_write_time = find_data.ftLastWriteTime;
         _ = win32.FindClose(find_handle);
