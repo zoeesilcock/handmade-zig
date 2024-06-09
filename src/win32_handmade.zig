@@ -316,7 +316,7 @@ fn processXInput(old_input: *shared.ControllerInputs, new_input: *shared.Control
         if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
             // Controller is connected
             const pad = &controller_state.Gamepad;
-            new_controller.is_analog = true;
+            new_controller.is_analog = old_controller.is_analog;
             new_controller.is_connected = true;
 
             // Left stick X.
@@ -325,20 +325,24 @@ fn processXInput(old_input: *shared.ControllerInputs, new_input: *shared.Control
             // Left stick Y.
             new_controller.stick_average_y = processXInputStick(pad.sThumbLY, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
 
+            if (new_controller.stick_average_x != 0.0 or new_controller.stick_average_y != 0.0) {
+                new_controller.is_analog = true;
+            }
+
             // D-pad overrides the stick value.
             if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_UP) > 0) {
                 new_controller.stick_average_y = 1.0;
-                new_controller.is_analog = true;
+                new_controller.is_analog = false;
             } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_DOWN) > 0) {
                 new_controller.stick_average_y = -1.0;
-                new_controller.is_analog = true;
+                new_controller.is_analog = false;
             }
             if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0) {
                 new_controller.stick_average_x = -1.0;
-                new_controller.is_analog = true;
+                new_controller.is_analog = false;
             } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0) {
                 new_controller.stick_average_x = 1.0;
-                new_controller.is_analog = true;
+                new_controller.is_analog = false;
             }
 
             // Movement buttons based on left stick.
