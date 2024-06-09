@@ -316,8 +316,8 @@ fn processXInput(old_input: *shared.ControllerInputs, new_input: *shared.Control
         if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
             // Controller is connected
             const pad = &controller_state.Gamepad;
-            new_controller.is_analog = old_controller.is_analog;
             new_controller.is_connected = true;
+            new_controller.is_analog = old_controller.is_analog;
 
             // Left stick X.
             new_controller.stick_average_x = processXInputStick(pad.sThumbLX, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
@@ -764,12 +764,17 @@ fn getGameBuffer() shared.OffscreenBuffer {
 }
 
 fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, window_width: i32, window_height: i32) void {
+    // For prototyping purposes, we're going to always blit 1-to-1 pixels to make sure we don't introduce artifacts
+    // with stretching while we are learning to code the rederer.
+    _ = window_width;
+    _ = window_height;
+
     _ = win32.StretchDIBits(
         device_context,
         0,
         0,
-        window_width,
-        window_height,
+        buffer.width,
+        buffer.height,
         0,
         0,
         buffer.width,
