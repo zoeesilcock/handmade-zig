@@ -107,7 +107,7 @@ const DebugTimeMarker = struct {
 };
 
 const RecordedInput = struct {
-    input_stream: [*:0]shared.ControllerInputs,
+    input_stream: [*:0]shared.GameInput,
 };
 
 const Win32State = struct {
@@ -304,7 +304,37 @@ fn loadXInput() void {
     }
 }
 
-fn processXInput(old_input: *shared.ControllerInputs, new_input: *shared.ControllerInputs) void {
+fn processMouseInput(new_input: *shared.GameInput, window: win32.HWND) void {
+    var mouse_point: win32.POINT = undefined;
+    if (win32.GetCursorPos(&mouse_point) == win32.TRUE) {
+        _ = win32.ScreenToClient(window, &mouse_point);
+        new_input.mouse_x = mouse_point.x;
+        new_input.mouse_y = mouse_point.y;
+    }
+
+    processKeyboardInputMessage(
+        &new_input.mouse_buttons[0],
+        win32.GetKeyState(@intFromEnum(win32.VK_LBUTTON)) & (1 << 7) != 0,
+    );
+    processKeyboardInputMessage(
+        &new_input.mouse_buttons[1],
+        win32.GetKeyState(@intFromEnum(win32.VK_MBUTTON)) & (1 << 7) != 0,
+    );
+    processKeyboardInputMessage(
+        &new_input.mouse_buttons[2],
+        win32.GetKeyState(@intFromEnum(win32.VK_RBUTTON)) & (1 << 7) != 0,
+    );
+    processKeyboardInputMessage(
+        &new_input.mouse_buttons[3],
+        win32.GetKeyState(@intFromEnum(win32.VK_XBUTTON1)) & (1 << 7) != 0,
+    );
+    processKeyboardInputMessage(
+        &new_input.mouse_buttons[4],
+        win32.GetKeyState(@intFromEnum(win32.VK_XBUTTON2)) & (1 << 7) != 0,
+    );
+}
+
+fn processXInput(old_input: *shared.GameInput, new_input: *shared.GameInput) void {
     var dwResult: isize = 0;
     var controller_index: u8 = 0;
 
@@ -551,10 +581,10 @@ fn processKeyboardInputMessage(
     new_state: *shared.ControllerButtonState,
     is_down: bool,
 ) void {
-    std.debug.assert(is_down != new_state.ended_down);
-
-    new_state.ended_down = is_down;
-    new_state.half_transitions += 1;
+    if (new_state.ended_down != is_down) {
+        new_state.ended_down = is_down;
+        new_state.half_transitions += 1;
+    }
 }
 
 fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32) void {
@@ -1006,7 +1036,7 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
     }
 }
 
-fn recordInput(state: *Win32State, new_input: *shared.ControllerInputs) void {
+fn recordInput(state: *Win32State, new_input: *shared.GameInput) void {
     var bytes_written: u32 = undefined;
     _ = win32.WriteFile(state.recording_handle, new_input, @sizeOf(@TypeOf(new_input.*)), &bytes_written, null);
 }
@@ -1041,7 +1071,7 @@ fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
     }
 }
 
-fn playbackInput(state: *Win32State, new_input: *shared.ControllerInputs) void {
+fn playbackInput(state: *Win32State, new_input: *shared.GameInput) void {
     var bytes_read: u32 = undefined;
     if (win32.ReadFile(state.playback_handle, new_input, @sizeOf(@TypeOf(new_input.*)), &bytes_read, null) == 0 or bytes_read == 0) {
         const playing_index = state.input_playing_index;
@@ -1198,9 +1228,9 @@ pub export fn wWinMain(
             }
 
             if (samples != undefined and game_memory.permanent_storage != undefined and game_memory.transient_storage != undefined) {
-                var game_input = [2]shared.ControllerInputs{
-                    shared.ControllerInputs{},
-                    shared.ControllerInputs{},
+                var game_input = [2]shared.GameInput{
+                    shared.GameInput{},
+                    shared.GameInput{},
                 };
                 var new_input = &game_input[0];
                 var old_input = &game_input[1];
@@ -1248,6 +1278,7 @@ pub export fn wWinMain(
 
                     // Prepare input to game.
                     var game_buffer = getGameBuffer();
+                    processMouseInput(new_input, window_handle);
                     processXInput(old_input, new_input);
 
                     if (state.input_recording_index > 0) {
@@ -1457,7 +1488,7 @@ pub export fn wWinMain(
                     }
 
                     // Flip the controller inputs for next frame.
-                    const temp: *shared.ControllerInputs = new_input;
+                    const temp: *shared.GameInput = new_input;
                     new_input = old_input;
                     old_input = temp;
 

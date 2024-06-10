@@ -5,7 +5,7 @@ pub export fn updateAndRender(
     thread: *shared.ThreadContext,
     platform: shared.Platform,
     memory: *shared.Memory,
-    input: shared.ControllerInputs,
+    input: shared.GameInput,
     buffer: *shared.OffscreenBuffer,
 ) void {
     std.debug.assert(@sizeOf(shared.State) <= memory.permanent_storage_size);
@@ -61,7 +61,14 @@ pub export fn updateAndRender(
     }
 
     renderWeirdGradient(buffer, state.x_offset, state.y_offset);
-    renderPlayer(buffer, state.player_x, state.player_y);
+
+    for (input.mouse_buttons, 0..) |button, index| {
+        if (button.ended_down) {
+            renderPlayer(buffer, 10 + 20 * @as(i32, @intCast(index)), 10);
+        }
+    }
+
+    renderPlayer(buffer, input.mouse_x, input.mouse_y);
 }
 
 pub export fn getSoundSamples(

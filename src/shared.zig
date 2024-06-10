@@ -56,7 +56,11 @@ pub const SoundOutputBuffer = extern struct {
     sample_count: u32,
 };
 
-pub const ControllerInputs = extern struct {
+pub const GameInput = extern struct {
+    mouse_buttons: [5]ControllerButtonState = [1]ControllerButtonState{ControllerButtonState{}} ** 5,
+    mouse_x: i32 = 0,
+    mouse_y: i32 = 0,
+
     controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{undefined} ** MAX_CONTROLLER_COUNT,
 };
 
@@ -111,7 +115,7 @@ pub const State = struct {
     player_jump_timer: f32 = 0,
 };
 
-pub fn updateAndRenderStub(_: *ThreadContext, _: Platform, _: *Memory, _: ControllerInputs, _: *OffscreenBuffer) callconv(.C) void {
+pub fn updateAndRenderStub(_: *ThreadContext, _: Platform, _: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) void {
     return;
 }
 pub fn getSoundSamplesStub(_: *ThreadContext, _: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
