@@ -32,9 +32,9 @@ pub inline fn safeTruncateI64(value: i64) u32 {
 }
 
 pub const Platform = extern struct {
-    debugFreeFileMemory: *const fn (memory: *anyopaque) callconv(.C) void = undefined,
-    debugWriteEntireFile: *const fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool = undefined,
-    debugReadEntireFile: *const fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult = undefined,
+    debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,
+    debugWriteEntireFile: *const fn (thread: *ThreadContext, file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool = undefined,
+    debugReadEntireFile: *const fn (thread: *ThreadContext, file_name: [*:0]const u8) callconv(.C) DebugReadFileResult = undefined,
 };
 
 pub const DebugReadFileResult = extern struct {
@@ -97,6 +97,10 @@ pub const Memory = extern struct {
     transient_storage: *anyopaque,
 };
 
+pub const ThreadContext = extern struct {
+    placeholder: i32 = 0,
+};
+
 pub const State = struct {
     x_offset: i32 = 0,
     y_offset: i32 = 0,
@@ -107,9 +111,9 @@ pub const State = struct {
     player_jump_timer: f32 = 0,
 };
 
-pub fn updateAndRenderStub(_: Platform, _: *Memory, _: ControllerInputs, _: *OffscreenBuffer) callconv(.C) void {
+pub fn updateAndRenderStub(_: *ThreadContext, _: Platform, _: *Memory, _: ControllerInputs, _: *OffscreenBuffer) callconv(.C) void {
     return;
 }
-pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
+pub fn getSoundSamplesStub(_: *ThreadContext, _: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
     return;
 }

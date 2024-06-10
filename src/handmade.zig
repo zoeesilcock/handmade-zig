@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const std = @import("std");
 
 pub export fn updateAndRender(
+    thread: *shared.ThreadContext,
     platform: shared.Platform,
     memory: *shared.Memory,
     input: shared.ControllerInputs,
@@ -20,10 +21,10 @@ pub export fn updateAndRender(
         memory.is_initialized = true;
 
         const file_name = "build.zig";
-        const bitmap_memory = platform.debugReadEntireFile(file_name);
+        const bitmap_memory = platform.debugReadEntireFile(thread, file_name);
         if (bitmap_memory.contents != undefined) {
             // _ = platform.debugWriteEntireFile("test_out_file.txt", bitmap_memory.content_size, bitmap_memory.contents);
-            platform.debugFreeFileMemory(bitmap_memory.contents);
+            platform.debugFreeFileMemory(thread, bitmap_memory.contents);
         }
     }
 
@@ -64,9 +65,12 @@ pub export fn updateAndRender(
 }
 
 pub export fn getSoundSamples(
+    thread: *shared.ThreadContext,
     memory: *shared.Memory,
     sound_buffer: *shared.SoundOutputBuffer,
 ) void {
+    _ = thread;
+
     var state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
     outputSound(sound_buffer, state.tone_hz, &state.t_sine);
 }
