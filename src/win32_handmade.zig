@@ -29,6 +29,7 @@ const DEBUG_WINDOW_POS_X = -7 + 2560;
 const DEBUG_WINDOW_POS_Y = 0;
 const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 64;
+const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
 const shared = @import("shared.zig");
@@ -1101,11 +1102,6 @@ pub export fn wWinMain(
         .lpszClassName = win32.L("HandmadeZigWindowClass"),
     };
 
-    // TODO: Calculate actual screen refresh rate here.
-    const monitor_refresh_hz = 60;
-    const game_update_hz = monitor_refresh_hz / 2;
-    const target_seconds_per_frame: f32 = 1.0 / @as(f32, @floatFromInt(game_update_hz));
-
     if (win32.RegisterClassW(&window_class) != 0) {
         const opt_window_handle: ?win32.HWND = win32.CreateWindowExW(
             .{
@@ -1138,6 +1134,16 @@ pub export fn wWinMain(
                 _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);
             }
 
+            var monitor_refresh_hz: i32 = 60;
+            const device_context = win32.GetDC(window_handle);
+            const device_refresh_rate = win32.GetDeviceCaps(device_context, win32.VREFRESH);
+            if (device_refresh_rate > 0) {
+                monitor_refresh_hz = device_refresh_rate;
+            }
+
+            const game_update_hz: f32 = @as(f32, @floatFromInt(monitor_refresh_hz)) / 2.0;
+            const target_seconds_per_frame: f32 = 1.0 / game_update_hz;
+
             var sound_output = SoundOutput{
                 .samples_per_second = 48000,
                 .bytes_per_sample = @sizeOf(i16) * 2,
@@ -1147,7 +1153,7 @@ pub export fn wWinMain(
             };
 
             sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
-            sound_output.safety_bytes = @divFloor(sound_output.secondary_buffer_size, game_update_hz) / 2;
+            sound_output.safety_bytes = @intFromFloat(@as(f32, @floatFromInt(sound_output.secondary_buffer_size)) / game_update_hz / 2.0);
             var sound_output_info = SoundOutputInfo{ .output_buffer = undefined };
 
             const samples: [*]i16 = @ptrCast(@alignCast(win32.VirtualAlloc(
@@ -1158,7 +1164,7 @@ pub export fn wWinMain(
             )));
 
             var debug_time_marker_index: u32 = 0;
-            var debug_time_markers: [game_update_hz / 2]DebugTimeMarker = [1]DebugTimeMarker{DebugTimeMarker{}} ** (game_update_hz / 2);
+            var debug_time_markers: [DEBUG_TIME_MARKER_COUNT]DebugTimeMarker = [1]DebugTimeMarker{DebugTimeMarker{}} ** DEBUG_TIME_MARKER_COUNT;
 
             initDirectSound(window_handle, sound_output.samples_per_second, sound_output.secondary_buffer_size);
             if (opt_secondary_buffer) |secondary_buffer| {
@@ -1278,7 +1284,7 @@ pub export fn wWinMain(
                             sound_output_info.byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
 
                             const expected_sound_bytes_per_frame =
-                                (sound_output.samples_per_second * sound_output.bytes_per_sample) / game_update_hz;
+                                (sound_output.samples_per_second * sound_output.bytes_per_sample) / @as(u32, @intFromFloat(game_update_hz));
 
                             const seconds_left_until_flip = target_seconds_per_frame - from_begin_to_audio_seconds;
                             var expected_bytes_until_flip: std.os.windows.DWORD = expected_sound_bytes_per_frame;
@@ -1405,7 +1411,6 @@ pub export fn wWinMain(
 
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
-                    const device_context = win32.GetDC(window_handle);
                     displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
 
                     flip_wall_clock = getWallClock();
