@@ -1006,16 +1006,17 @@ fn buildExePathFileName(state: *Win32State, file_name: []const u8, dest: [:0]u8)
     );
 }
 
-fn getInputFileLocation(state: *Win32State, slot_index: u32, dest: [:0]u8) void {
-    std.debug.assert(slot_index == 1);
-
-    buildExePathFileName(state, "loop_edit.hmi", dest);
+fn getInputFileLocation(state: *Win32State, is_input: bool, slot_index: u32, dest: [:0]u8) void {
+    var temp: [64]u8 = undefined;
+    var arglist = .{slot_index, if (is_input) "input" else "state"};
+    _ = win32.wvsprintfA(@ptrCast(&temp), "loop_edit_%d_%s.hmi", @ptrCast(&arglist));
+    buildExePathFileName(state, &temp, dest);
 }
 
-fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
+fn writeGameStateToFile(state: *Win32State, index: u32) void {
     var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    getInputFileLocation(state, input_recording_index, &file_path);
-    state.recording_handle = win32.CreateFileA(
+    getInputFileLocation(state, false, @intCast(index), &file_path);
+    const file_handle = win32.CreateFileA(
         &file_path,
         win32.FILE_GENERIC_WRITE,
         win32.FILE_SHARE_NONE,
@@ -1025,15 +1026,53 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
         null,
     );
 
-    const bytes_to_write: u32 = @intCast(state.total_size);
-    std.debug.assert(state.total_size == bytes_to_write);
+    if (file_handle != win32.INVALID_HANDLE_VALUE) {
+        const bytes_to_write: u32 = @intCast(state.total_size);
+        std.debug.assert(state.total_size == bytes_to_write);
 
-    var bytes_written: u32 = undefined;
-    _ = win32.WriteFile(state.recording_handle, state.game_memory_block, bytes_to_write, &bytes_written, null);
-
-    if (state.recording_handle != win32.INVALID_HANDLE_VALUE) {
-        state.input_recording_index = input_recording_index;
+        var bytes_written: u32 = undefined;
+        _ = win32.WriteFile(file_handle, state.game_memory_block, bytes_to_write, &bytes_written, null);
+        _ = win32.CloseHandle(file_handle);
     }
+}
+
+fn readGameStateFromFile(state: *Win32State, index: u32) void {
+    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    getInputFileLocation(state, false, @intCast(index), &file_path);
+    const file_handle = win32.CreateFileA(
+        &file_path,
+        win32.FILE_GENERIC_READ,
+        win32.FILE_SHARE_NONE,
+        null,
+        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
+
+    if (file_handle != win32.INVALID_HANDLE_VALUE) {
+        const bytes_to_read: u32 = @intCast(state.total_size);
+        std.debug.assert(state.total_size == bytes_to_read);
+
+        var bytes_read: u32 = undefined;
+        _ = win32.ReadFile(file_handle, state.game_memory_block, bytes_to_read, &bytes_read, null);
+        _ = win32.CloseHandle(file_handle);
+    }
+}
+
+fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
+    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    getInputFileLocation(state, true, @intCast(input_recording_index), &file_path);
+    state.recording_handle = win32.CreateFileA(
+        &file_path,
+        win32.FILE_GENERIC_WRITE,
+        win32.FILE_SHARE_NONE,
+        null,
+        win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
+    state.input_recording_index = input_recording_index;
+    writeGameStateToFile(state, input_recording_index);
 }
 
 fn recordInput(state: *Win32State, new_input: *shared.GameInput) void {
@@ -1049,26 +1088,19 @@ fn endRecordingInput(state: *Win32State) void {
 
 fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
     var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    getInputFileLocation(state, input_playing_index, &file_path);
+    getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
     state.playback_handle = win32.CreateFileA(
         &file_path,
         win32.FILE_GENERIC_READ,
-        win32.FILE_SHARE_READ,
+        win32.FILE_SHARE_NONE,
         null,
         win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
         win32.FILE_FLAGS_AND_ATTRIBUTES{},
         null,
     );
 
-    const bytes_to_read: u32 = @intCast(state.total_size);
-    std.debug.assert(state.total_size == bytes_to_read);
-
-    var bytes_read: u32 = undefined;
-    _ = win32.ReadFile(state.playback_handle, state.game_memory_block, bytes_to_read, &bytes_read, null);
-
-    if (state.playback_handle != win32.INVALID_HANDLE_VALUE) {
-        state.input_playing_index = input_playing_index;
-    }
+    state.input_playing_index = input_playing_index;
+    readGameStateFromFile(state, input_playing_index);
 }
 
 fn playbackInput(state: *Win32State, new_input: *shared.GameInput) void {

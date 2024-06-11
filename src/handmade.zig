@@ -68,6 +68,7 @@ pub export fn updateAndRender(
         }
     }
 
+    renderPlayer(buffer, state.player_x, state.player_y);
     renderPlayer(buffer, input.mouse_x, input.mouse_y);
 }
 
