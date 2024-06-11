@@ -110,9 +110,17 @@ const RecordedInput = struct {
     input_stream: [*:0]shared.GameInput,
 };
 
+const ReplayBuffer = struct {
+    memory_map: win32.HANDLE = undefined,
+    file_handle: win32.HANDLE = undefined,
+    replay_file_name: [STATE_FILE_NAME_COUNT:0]u8 = undefined,
+    memory_block: *anyopaque = undefined,
+};
+
 const Win32State = struct {
     total_size: usize = 0,
     game_memory_block: *anyopaque = undefined,
+    replay_buffers: [4]ReplayBuffer = [1]ReplayBuffer{ReplayBuffer{}} ** 4,
 
     recording_handle: win32.HANDLE = undefined,
     input_recording_index: u32 = 0,
@@ -1013,66 +1021,35 @@ fn getInputFileLocation(state: *Win32State, is_input: bool, slot_index: u32, des
     buildExePathFileName(state, &temp, dest);
 }
 
-fn writeGameStateToFile(state: *Win32State, index: u32) void {
-    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    getInputFileLocation(state, false, @intCast(index), &file_path);
-    const file_handle = win32.CreateFileA(
-        &file_path,
-        win32.FILE_GENERIC_WRITE,
-        win32.FILE_SHARE_NONE,
-        null,
-        win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
-        win32.FILE_FLAGS_AND_ATTRIBUTES{},
-        null,
-    );
-
-    if (file_handle != win32.INVALID_HANDLE_VALUE) {
-        const bytes_to_write: u32 = @intCast(state.total_size);
-        std.debug.assert(state.total_size == bytes_to_write);
-
-        var bytes_written: u32 = undefined;
-        _ = win32.WriteFile(file_handle, state.game_memory_block, bytes_to_write, &bytes_written, null);
-        _ = win32.CloseHandle(file_handle);
-    }
-}
-
-fn readGameStateFromFile(state: *Win32State, index: u32) void {
-    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    getInputFileLocation(state, false, @intCast(index), &file_path);
-    const file_handle = win32.CreateFileA(
-        &file_path,
-        win32.FILE_GENERIC_READ,
-        win32.FILE_SHARE_NONE,
-        null,
-        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
-        win32.FILE_FLAGS_AND_ATTRIBUTES{},
-        null,
-    );
-
-    if (file_handle != win32.INVALID_HANDLE_VALUE) {
-        const bytes_to_read: u32 = @intCast(state.total_size);
-        std.debug.assert(state.total_size == bytes_to_read);
-
-        var bytes_read: u32 = undefined;
-        _ = win32.ReadFile(file_handle, state.game_memory_block, bytes_to_read, &bytes_read, null);
-        _ = win32.CloseHandle(file_handle);
-    }
+fn getReplayBuffer(state: *Win32State, index: u32) *ReplayBuffer {
+    std.debug.assert(index < state.replay_buffers.len);
+    return &state.replay_buffers[index];
 }
 
 fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
-    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    getInputFileLocation(state, true, @intCast(input_recording_index), &file_path);
-    state.recording_handle = win32.CreateFileA(
-        &file_path,
-        win32.FILE_GENERIC_WRITE,
-        win32.FILE_SHARE_NONE,
-        null,
-        win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
-        win32.FILE_FLAGS_AND_ATTRIBUTES{},
-        null,
-    );
-    state.input_recording_index = input_recording_index;
-    writeGameStateToFile(state, input_recording_index);
+    const replay_buffer = getReplayBuffer(state, input_recording_index);
+    if (replay_buffer.memory_block != undefined) {
+        var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+        getInputFileLocation(state, true, @intCast(input_recording_index), &file_path);
+        state.recording_handle = win32.CreateFileA(
+            &file_path,
+            win32.FILE_GENERIC_WRITE,
+            win32.FILE_SHARE_NONE,
+            null,
+            win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
+            win32.FILE_FLAGS_AND_ATTRIBUTES{},
+            null,
+        );
+        state.input_recording_index = input_recording_index;
+
+        const bytes_to_write: u32 = @intCast(state.total_size);
+        std.debug.assert(state.total_size == bytes_to_write);
+
+        @memcpy(
+            @as([*]u8, @ptrCast(replay_buffer.memory_block))[0..state.total_size],
+            @as([*]u8, @ptrCast(state.game_memory_block))[0..state.total_size],
+        );
+    }
 }
 
 fn recordInput(state: *Win32State, new_input: *shared.GameInput) void {
@@ -1087,20 +1064,30 @@ fn endRecordingInput(state: *Win32State) void {
 }
 
 fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
-    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
-    state.playback_handle = win32.CreateFileA(
-        &file_path,
-        win32.FILE_GENERIC_READ,
-        win32.FILE_SHARE_NONE,
-        null,
-        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
-        win32.FILE_FLAGS_AND_ATTRIBUTES{},
-        null,
-    );
+    const replay_buffer = getReplayBuffer(state, input_playing_index);
+    if (replay_buffer.memory_block != undefined) {
+        var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+        getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
+        state.playback_handle = win32.CreateFileA(
+            &file_path,
+            win32.FILE_GENERIC_READ,
+            win32.FILE_SHARE_NONE,
+            null,
+            win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+            win32.FILE_FLAGS_AND_ATTRIBUTES{},
+            null,
+        );
 
-    state.input_playing_index = input_playing_index;
-    readGameStateFromFile(state, input_playing_index);
+        state.input_playing_index = input_playing_index;
+
+        const bytes_to_read: u32 = @intCast(state.total_size);
+        std.debug.assert(state.total_size == bytes_to_read);
+
+        @memcpy(
+            @as([*]u8, @ptrCast(state.game_memory_block))[0..state.total_size],
+            @as([*]u8, @ptrCast(replay_buffer.memory_block))[0..state.total_size],
+        );
+    }
 }
 
 fn playbackInput(state: *Win32State, new_input: *shared.GameInput) void {
@@ -1257,6 +1244,54 @@ pub export fn wWinMain(
             game_memory.permanent_storage = state.game_memory_block;
             if (game_memory.permanent_storage != undefined) {
                 game_memory.transient_storage = @ptrFromInt(@intFromPtr(&game_memory.permanent_storage) + game_memory.permanent_storage_size);
+            }
+
+            for (0..state.replay_buffers.len) |index| {
+                var buffer = &state.replay_buffers[index];
+
+                getInputFileLocation(&state, false, @intCast(index + 1), &buffer.replay_file_name);
+                const generic_read_write = win32.FILE_ACCESS_FLAGS{
+                    .FILE_READ_DATA = 1,
+                    .FILE_READ_EA = 1,
+                    .FILE_READ_ATTRIBUTES = 1,
+                    .FILE_WRITE_DATA = 1,
+                    .FILE_APPEND_DATA = 1,
+                    .FILE_WRITE_EA = 1,
+                    .FILE_WRITE_ATTRIBUTES = 1,
+                    .READ_CONTROL = 1,
+                    .SYNCHRONIZE = 1,
+                };
+                buffer.file_handle = win32.CreateFileA(
+                    &buffer.replay_file_name,
+                    generic_read_write,
+                    win32.FILE_SHARE_NONE,
+                    null,
+                    win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
+                    win32.FILE_FLAGS_AND_ATTRIBUTES{},
+                    null,
+                );
+
+                const max_size_high: std.os.windows.DWORD = @intCast(state.total_size >> 32);
+                const max_size_low: std.os.windows.DWORD = @intCast(state.total_size & 0xFFFFFFFF);
+                const opt_memory_map = win32.CreateFileMappingA(
+                    buffer.file_handle,
+                    null,
+                    win32.PAGE_READWRITE,
+                    max_size_high,
+                    max_size_low,
+                    null,
+                );
+                if (opt_memory_map) |memory_map| {
+                    buffer.memory_map = memory_map;
+                    buffer.memory_block = win32.MapViewOfFileEx(
+                        buffer.memory_map,
+                        win32.FILE_MAP_ALL_ACCESS,
+                        0,
+                        0,
+                        state.total_size,
+                        null,
+                    ) orelse undefined;
+                }
             }
 
             if (samples != undefined and game_memory.permanent_storage != undefined and game_memory.transient_storage != undefined) {
