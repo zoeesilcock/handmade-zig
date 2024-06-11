@@ -1460,20 +1460,22 @@ pub export fn wWinMain(
                     last_counter = end_counter;
 
                     if (DEBUG) {
-                        var marker_index = debug_time_marker_index;
-                        if (marker_index > 1) {
-                            marker_index -= 1;
-                        } else {
-                            marker_index = debug_time_markers.len - 1;
-                        }
+                        if (false) {
+                            var marker_index = debug_time_marker_index;
+                            if (marker_index > 1) {
+                                marker_index -= 1;
+                            } else {
+                                marker_index = debug_time_markers.len - 1;
+                            }
 
-                        debugSyncDisplay(
-                            &back_buffer,
-                            &debug_time_markers,
-                            marker_index,
-                            &sound_output,
-                            target_seconds_per_frame,
-                        );
+                            debugSyncDisplay(
+                                &back_buffer,
+                                &debug_time_markers,
+                                marker_index,
+                                &sound_output,
+                                target_seconds_per_frame,
+                            );
+                        }
                     }
 
                     // Output game to screen.
