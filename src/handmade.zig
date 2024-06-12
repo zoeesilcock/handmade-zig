@@ -8,68 +8,24 @@ pub export fn updateAndRender(
     input: shared.GameInput,
     buffer: *shared.OffscreenBuffer,
 ) void {
+    _ = thread;
+    _ = platform;
+    _ = buffer;
+
     std.debug.assert(@sizeOf(shared.State) <= memory.permanent_storage_size);
 
-    var state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
+    const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
 
     if (!memory.is_initialized) {
         state.* = shared.State{};
-
-        state.player_x = 100;
-        state.player_y = 100;
-
         memory.is_initialized = true;
-
-        const file_name = "build.zig";
-        const bitmap_memory = platform.debugReadEntireFile(thread, file_name);
-        if (bitmap_memory.contents != undefined) {
-            // _ = platform.debugWriteEntireFile("test_out_file.txt", bitmap_memory.content_size, bitmap_memory.contents);
-            platform.debugFreeFileMemory(thread, bitmap_memory.contents);
-        }
     }
 
     for (&input.controllers) |controller| {
         if (controller.is_analog) {
-            state.x_offset += @intFromFloat(4.0 * controller.stick_average_x);
-            state.y_offset -= @intFromFloat(4.0 * controller.stick_average_y);
-            state.tone_hz = @intCast(@as(i32, shared.MIDDLE_C) + @as(i32, @intFromFloat(128.0 * controller.stick_average_y)));
         } else {
-            if (controller.move_up.ended_down) {
-                state.y_offset -= 1;
-            }
-            if (controller.move_down.ended_down) {
-                state.y_offset += 1;
-            }
-            if (controller.move_left.ended_down) {
-                state.x_offset -= 1;
-            }
-            if (controller.move_right.ended_down) {
-                state.x_offset += 1;
-            }
-        }
-
-        state.player_x += @intFromFloat(4.0 * controller.stick_average_x);
-        state.player_y -= @intFromFloat(4.0 * controller.stick_average_y);
-
-        if (controller.action_down.ended_down) {
-            state.player_jump_timer = 4.0;
-        }
-        if (state.player_jump_timer > 0) {
-            state.player_y += @intFromFloat(5.0 * @sin(0.5 * shared.PI32 * state.player_jump_timer));
-        }
-        state.player_jump_timer -= 0.033;
-    }
-
-    renderWeirdGradient(buffer, state.x_offset, state.y_offset);
-
-    for (input.mouse_buttons, 0..) |button, index| {
-        if (button.ended_down) {
-            renderPlayer(buffer, 10 + 20 * @as(i32, @intCast(index)), 10);
         }
     }
-
-    renderPlayer(buffer, state.player_x, state.player_y);
-    renderPlayer(buffer, input.mouse_x, input.mouse_y);
 }
 
 pub export fn getSoundSamples(
@@ -79,8 +35,8 @@ pub export fn getSoundSamples(
 ) void {
     _ = thread;
 
-    var state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
-    outputSound(sound_buffer, state.tone_hz, &state.t_sine);
+    const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
+    outputSound(sound_buffer, shared.MIDDLE_C, state);
 }
 
 fn renderPlayer(buffer: *shared.OffscreenBuffer, player_x: i32, player_y: i32) void {
@@ -145,29 +101,33 @@ fn renderWeirdGradient(buffer: *shared.OffscreenBuffer, x_offset: i32, y_offset:
     }
 }
 
-fn outputSound(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, t_sine: *f32) void {
-    const tone_volume = 3000;
-    const wave_period = @divFloor(sound_buffer.samples_per_second, tone_hz);
+fn outputSound(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, state: *shared.State) void {
+    _ = sound_buffer;
+    _ = tone_hz;
+    _ = state;
 
-    var sample_out: [*]i16 = sound_buffer.samples;
-    var sample_index: u32 = 0;
-    while (sample_index < sound_buffer.sample_count) {
-        var sample_value: i16 = 0;
-
-        if (!shared.DEBUG) {
-            const sine_value: f32 = @sin(t_sine.*);
-            sample_value = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
-        }
-
-        sample_out += 1;
-        sample_out[0] = sample_value;
-        sample_out += 1;
-        sample_out[0] = sample_value;
-
-        sample_index += 1;
-        t_sine.* += shared.TAU32 / @as(f32, @floatFromInt(wave_period));
-        if (t_sine.* > shared.TAU32) {
-            t_sine.* -= shared.TAU32;
-        }
-    }
+    // const tone_volume = 3000;
+    // const wave_period = @divFloor(sound_buffer.samples_per_second, tone_hz);
+    //
+    // var sample_out: [*]i16 = sound_buffer.samples;
+    // var sample_index: u32 = 0;
+    // while (sample_index < sound_buffer.sample_count) {
+    //     var sample_value: i16 = 0;
+    //
+    //     if (!shared.DEBUG) {
+    //         const sine_value: f32 = @sin(t_sine.*);
+    //         sample_value = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
+    //     }
+    //
+    //     sample_out += 1;
+    //     sample_out[0] = sample_value;
+    //     sample_out += 1;
+    //     sample_out[0] = sample_value;
+    //
+    //     sample_index += 1;
+    //     t_sine.* += shared.TAU32 / @as(f32, @floatFromInt(wave_period));
+    //     if (t_sine.* > shared.TAU32) {
+    //         t_sine.* -= shared.TAU32;
+    //     }
+    // }
 }
