@@ -1,15 +1,16 @@
+// Constants.
 pub const PI32: f32 = 3.1415926535897932384626433;
 pub const TAU32: f32 = PI32 * 2.0;
 pub const MIDDLE_C: u32 = 261;
 pub const TREBLE_C: u32 = 523;
+pub const MAX_CONTROLLER_COUNT: u8 = 5;
 
 const std = @import("std");
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 
-pub const MAX_CONTROLLER_COUNT: u8 = 5;
-
+// Helper functions.
 pub inline fn kilobytes(value: u32) u64 {
     return value * 1024;
 }
@@ -31,6 +32,7 @@ pub inline fn safeTruncateI64(value: i64) u32 {
     return @as(u32, @intCast(value));
 }
 
+// Platform.
 pub const Platform = extern struct {
     debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,
     debugWriteEntireFile: *const fn (thread: *ThreadContext, file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool = undefined,
@@ -40,6 +42,18 @@ pub const Platform = extern struct {
 pub const DebugReadFileResult = extern struct {
     contents: *anyopaque = undefined,
     content_size: u32 = 0,
+};
+
+// Data from platform.
+pub fn updateAndRenderStub(_: *ThreadContext, _: Platform, _: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) void {
+    return;
+}
+pub fn getSoundSamplesStub(_: *ThreadContext, _: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
+    return;
+}
+
+pub const ThreadContext = extern struct {
+    placeholder: i32 = 0,
 };
 
 pub const OffscreenBuffer = extern struct {
@@ -62,11 +76,6 @@ pub const GameInput = extern struct {
     mouse_y: i32 = 0,
 
     controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{undefined} ** MAX_CONTROLLER_COUNT,
-};
-
-pub const ControllerButtonState = extern struct {
-    ended_down: bool = false,
-    half_transitions: u8 = 0,
 };
 
 pub const ControllerInput = extern struct {
@@ -93,6 +102,11 @@ pub const ControllerInput = extern struct {
     back_button: ControllerButtonState,
 };
 
+pub const ControllerButtonState = extern struct {
+    ended_down: bool = false,
+    half_transitions: u8 = 0,
+};
+
 pub const Memory = extern struct {
     is_initialized: bool,
     permanent_storage_size: u64,
@@ -101,10 +115,7 @@ pub const Memory = extern struct {
     transient_storage: *anyopaque,
 };
 
-pub const ThreadContext = extern struct {
-    placeholder: i32 = 0,
-};
-
+// Game state.
 pub const State = struct {
     x_offset: i32 = 0,
     y_offset: i32 = 0,
@@ -114,10 +125,3 @@ pub const State = struct {
     player_y: i32 = 0,
     player_jump_timer: f32 = 0,
 };
-
-pub fn updateAndRenderStub(_: *ThreadContext, _: Platform, _: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) void {
-    return;
-}
-pub fn getSoundSamplesStub(_: *ThreadContext, _: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
-    return;
-}
