@@ -769,7 +769,7 @@ fn getWindowDimension(window: win32.HWND) WindowDimension {
     };
 }
 
-fn resizeDBISection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
+fn resizeDIBSection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
     if (buffer.memory) |memory| {
         _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
     }
@@ -1135,7 +1135,7 @@ pub export fn wWinMain(
     const sleep_is_grannular = win32.timeBeginPeriod(desired_scheduler_ms) == win32.TIMERR_NOERROR;
 
     loadXInput();
-    resizeDBISection(&back_buffer, WIDTH, HEIGHT);
+    resizeDIBSection(&back_buffer, WIDTH, HEIGHT);
     const platform = shared.Platform{
         .debugReadEntireFile = debugReadEntireFile,
         .debugWriteEntireFile = debugWriteEntireFile,
