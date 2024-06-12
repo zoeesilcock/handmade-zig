@@ -1016,7 +1016,7 @@ fn buildExePathFileName(state: *Win32State, file_name: []const u8, dest: [:0]u8)
 
 fn getInputFileLocation(state: *Win32State, is_input: bool, slot_index: u32, dest: [:0]u8) void {
     var temp: [64]u8 = undefined;
-    var arglist = .{slot_index, if (is_input) "input" else "state"};
+    var arglist = .{ slot_index, if (is_input) "input" else "state" };
     _ = win32.wvsprintfA(@ptrCast(&temp), "loop_edit_%d_%s.hmi", @ptrCast(&arglist));
     buildExePathFileName(state, &temp, dest);
 }
