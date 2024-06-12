@@ -75,6 +75,8 @@ pub const GameInput = extern struct {
     mouse_x: i32 = 0,
     mouse_y: i32 = 0,
 
+    seconds_to_advance_over_update: f32 = 0,
+
     controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{undefined} ** MAX_CONTROLLER_COUNT,
 };
 
