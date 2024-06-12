@@ -10,7 +10,6 @@ pub export fn updateAndRender(
 ) void {
     _ = thread;
     _ = platform;
-    _ = buffer;
 
     std.debug.assert(@sizeOf(shared.State) <= memory.permanent_storage_size);
 
@@ -22,10 +21,11 @@ pub export fn updateAndRender(
     }
 
     for (&input.controllers) |controller| {
-        if (controller.is_analog) {
-        } else {
-        }
+        if (controller.is_analog) {} else {}
     }
+
+    drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), 0xFF000000);
+    drawRectangle(buffer, 10.0, 10.0, 40.0, 40.0, 0xFFFF0000);
 }
 
 pub export fn getSoundSamples(
@@ -39,26 +39,49 @@ pub export fn getSoundSamples(
     outputSound(sound_buffer, shared.MIDDLE_C, state);
 }
 
-fn renderPlayer(buffer: *shared.OffscreenBuffer, player_x: i32, player_y: i32) void {
-    const top = player_y;
-    const bottom = player_y + 10;
-    const limited_top = if (top <= 0) 0 else top;
-    const limited_bottom = if (bottom > buffer.height) buffer.height else bottom;
-    const color: u32 = 0xFFFF0000;
+fn drawRectangle(
+    buffer: *shared.OffscreenBuffer,
+    real_min_x: f32,
+    real_min_y: f32,
+    real_max_x: f32,
+    real_max_y: f32,
+    color: u32,
+) void {
+    // Round input values.
+    var min_x = shared.roundReal32ToInt32(real_min_x);
+    var min_y = shared.roundReal32ToInt32(real_min_y);
+    var max_x = shared.roundReal32ToInt32(real_max_x);
+    var max_y = shared.roundReal32ToInt32(real_max_y);
 
-    var x = player_x;
-    while (x < (player_x + 10)) : (x += 1) {
-        if (x >= 0 and x < buffer.width) {
-            var pixel: [*]u8 = @ptrCast(buffer.memory);
-            pixel += @as(u32, @intCast((x * buffer.bytes_per_pixel) + (limited_top * @as(i32, @intCast(buffer.pitch)))));
+    // Clip input values to buffer.
+    if (min_x < 0) {
+        min_x = 0;
+    }
+    if (min_y < 0) {
+        min_y = 0;
+    }
+    if (max_x > buffer.width) {
+        max_x = buffer.width;
+    }
+    if (max_y > buffer.height) {
+        max_y = buffer.height;
+    }
 
-            var y = limited_top;
-            while (y < limited_bottom) : (y += 1) {
-                const p = @as(*u32, @ptrCast(@alignCast(pixel)));
-                p.* = color;
-                pixel += buffer.pitch;
-            }
+    // Set the pointer to the top left corner of the rectangle.
+    var row: [*]u8 = @ptrCast(buffer.memory);
+    row += @as(u32, @intCast((min_x * buffer.bytes_per_pixel) + (min_y * @as(i32, @intCast(buffer.pitch)))));
+
+    var y = min_y;
+    while (y < max_y) : (y += 1) {
+        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+
+        var x = min_x;
+        while (x < max_x) : (x += 1) {
+            pixel[0] = color;
+            pixel += 1;
         }
+
+        row += buffer.pitch;
     }
 }
 

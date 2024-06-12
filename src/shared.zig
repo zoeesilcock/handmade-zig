@@ -32,6 +32,10 @@ pub inline fn safeTruncateI64(value: i64) u32 {
     return @as(u32, @intCast(value));
 }
 
+pub inline fn roundReal32ToInt32(value: f32) i32 {
+    return @intFromFloat(@round(value));
+}
+
 // Platform.
 pub const Platform = extern struct {
     debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,
@@ -118,5 +122,4 @@ pub const Memory = extern struct {
 };
 
 // Game state.
-pub const State = struct {
-};
+pub const State = struct {};
