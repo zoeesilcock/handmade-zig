@@ -19,8 +19,8 @@ pub const UNICODE = true;
 const MIDDLE_C: u32 = 261;
 const TREBLE_C: u32 = 523;
 
-const WIDTH = 1280;
-const HEIGHT = 720;
+const WIDTH = 960;
+const HEIGHT = 540;
 const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
