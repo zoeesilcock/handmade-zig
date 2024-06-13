@@ -1,6 +1,22 @@
 const shared = @import("shared.zig");
 const std = @import("std");
 
+
+fn isTileMapPointEmpty(tile_map: *shared.TileMap, test_x: f32, test_y: f32) bool {
+    var is_empty = false;
+
+    const tile_x: u32 = shared.truncateReal32ToUInt32((test_x - tile_map.upper_left_x) / tile_map.tile_width);
+    const tile_y: u32 = shared.truncateReal32ToUInt32((test_y - tile_map.upper_left_y) / tile_map.tile_height);
+
+    if ((tile_x >= 0) and (tile_x < tile_map.count_x) and
+        (tile_y >= 0) and (tile_y < tile_map.count_y)) {
+        const tile_map_value = tile_map.tiles[tile_y * tile_map.count_x + tile_x];
+        is_empty = (tile_map_value == 0);
+    }
+
+    return is_empty;
+}
+
 pub export fn updateAndRender(
     thread: *shared.ThreadContext,
     platform: shared.Platform,
@@ -17,13 +33,40 @@ pub export fn updateAndRender(
 
     if (!memory.is_initialized) {
         state.* = shared.State{
-            .player_x = 60,
-            .player_y = 60,
+            .player_x = 150,
+            .player_y = 150,
         };
         memory.is_initialized = true;
     }
 
+    const tile_map_count_x = 17;
+    const tile_map_count_y = 9;
+    var tiles = [tile_map_count_y][tile_map_count_x]u32{
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1 },
+        [_]u32{ 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0 },
+        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+    };
+    var tile_map = shared.TileMap{
+        .tile_height = 60,
+        .tile_width = 60,
+        .upper_left_x = -30,
+        .upper_left_y = 0,
+        .count_x = tile_map_count_x,
+        .count_y = tile_map_count_y,
+        .tiles = @ptrCast(&tiles),
+    };
+
     const player_movement_speed: f32 = 128;
+    const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
+    const player_width: f32 = 0.75 * tile_map.tile_width;
+    const player_height: f32 = 0.75 * tile_map.tile_height;
+
     for (&input.controllers) |controller| {
         if (controller.is_analog) {} else {
             var player_x_delta: f32 = 0;
@@ -42,8 +85,15 @@ pub export fn updateAndRender(
                 player_x_delta = 1;
             }
 
-            state.player_x += player_movement_speed * player_x_delta * input.frame_delta_time;
-            state.player_y += player_movement_speed * player_y_delta * input.frame_delta_time;
+            const new_player_x = state.player_x + player_movement_speed * player_x_delta * input.frame_delta_time;
+            const new_player_y = state.player_y + player_movement_speed * player_y_delta * input.frame_delta_time;
+
+            if (isTileMapPointEmpty(&tile_map, new_player_x - (0.5 * player_width), new_player_y) and
+                isTileMapPointEmpty(&tile_map, new_player_x + (0.5 * player_width), new_player_y) and
+                isTileMapPointEmpty(&tile_map, new_player_x, new_player_y)) {
+                state.player_x = new_player_x;
+                state.player_y = new_player_y;
+            }
         }
     }
 
@@ -52,37 +102,27 @@ pub export fn updateAndRender(
     drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), clear_color);
 
     // Draw tile map.
-    const tile_map = [9][17]u32{
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1 },
-        [_]u32{ 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0 },
-        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
-    };
     const color1 = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
     const color2 = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
-    const upper_left_x: f32 = 12.5;
-    const upper_left_y: f32 = 22.5;
-    const tile_width: f32 = 55;
-    const tile_height: f32 = 55;
-    for (tile_map, 0..) |row, row_index| {
-        for (row, 0..) |cell, column_index| {
-            const min_x = upper_left_x + @as(f32, @floatFromInt(column_index)) * tile_width;
-            const min_y = upper_left_y + @as(f32, @floatFromInt(row_index)) * tile_height;
-            const max_x = min_x + tile_width;
-            const max_y = min_y + tile_height;
-            drawRectangle(buffer, min_x, min_y, max_x, max_y, if (cell == 1) color1 else color2);
+
+    var row_index: u32 = 0;
+    var column_index: u32 = 0;
+
+    while (row_index < tile_map_count_y) : (row_index += 1) {
+        column_index = 0;
+
+        while (column_index < tile_map_count_x) : (column_index += 1) {
+            const tile = tile_map.tiles[row_index * tile_map_count_x + column_index];
+            const min_x = tile_map.upper_left_x + @as(f32, @floatFromInt(column_index)) * tile_map.tile_width;
+            const min_y = tile_map.upper_left_y + @as(f32, @floatFromInt(row_index)) * tile_map.tile_height;
+            const max_x = min_x + tile_map.tile_width;
+            const max_y = min_y + tile_map.tile_height;
+
+            drawRectangle(buffer, min_x, min_y, max_x, max_y, if (tile == 1) color1 else color2);
         }
     }
 
     // Draw player.
-    const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    const player_width: f32 = 0.75 * tile_width;
-    const player_height: f32 = 0.75 * tile_height;
     const player_left: f32 = state.player_x - (0.5 * player_width);
     const player_top: f32 = state.player_y - player_height;
     drawRectangle(

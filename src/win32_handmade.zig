@@ -27,6 +27,8 @@ const BYTES_PER_PIXEL = 4;
 
 const DEBUG_WINDOW_POS_X = -7 + 2560;
 const DEBUG_WINDOW_POS_Y = 0;
+const DEBUG_WINDOW_WIDTH = 1280;
+const DEBUG_WINDOW_HEIGHT = 720;
 const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 64;
 const DEBUG_TIME_MARKER_COUNT = 30;
@@ -812,13 +814,19 @@ fn getGameBuffer() shared.OffscreenBuffer {
 fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, window_width: i32, window_height: i32) void {
     // For prototyping purposes, we're going to always blit 1-to-1 pixels to make sure we don't introduce artifacts
     // with stretching while we are learning to code the rederer.
-    _ = window_width;
-    _ = window_height;
+    const offset_x = 10;
+    const offset_y = 10;
+
+    // Clear areas outside of our drawing area.
+    _ = win32.PatBlt(device_context, 0, 0, window_width, offset_y, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, 0, offset_y + buffer.height, window_width, window_height, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, 0, 0, offset_x, window_height, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, offset_x + buffer.width, 0, window_width, window_height, win32.BLACKNESS);
 
     _ = win32.StretchDIBits(
         device_context,
-        0,
-        0,
+        offset_x,
+        offset_y,
         buffer.width,
         buffer.height,
         0,
@@ -1174,8 +1182,8 @@ pub export fn wWinMain(
             },
             if (DEBUG) DEBUG_WINDOW_POS_X else win32.CW_USEDEFAULT,
             if (DEBUG) DEBUG_WINDOW_POS_Y else win32.CW_USEDEFAULT,
-            WIDTH + WINDOW_DECORATION_WIDTH,
-            HEIGHT + WINDOW_DECORATION_HEIGHT,
+            if (DEBUG) DEBUG_WINDOW_WIDTH else WIDTH + WINDOW_DECORATION_WIDTH,
+            if (DEBUG) DEBUG_WINDOW_HEIGHT else HEIGHT + WINDOW_DECORATION_HEIGHT,
             null,
             null,
             instance,

@@ -40,6 +40,14 @@ pub inline fn roundReal32ToUInt32(value: f32) u32 {
     return @intFromFloat(@round(value));
 }
 
+pub inline fn truncateReal32ToInt32(value: f32) i32 {
+    return @intFromFloat(value);
+}
+
+pub inline fn truncateReal32ToUInt32(value: f32) u32 {
+    return @intFromFloat(value);
+}
+
 // Platform.
 pub const Platform = extern struct {
     debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,
@@ -142,4 +150,17 @@ pub const Color = struct {
             (roundReal32ToUInt32(self.b * 255.0) << 0)
         );
     }
+};
+
+pub const TileMap = struct {
+    upper_left_x: f32,
+    upper_left_y: f32,
+
+    tile_width: f32,
+    tile_height: f32,
+
+    count_x: usize,
+    count_y: usize,
+
+    tiles: [*]const u32,
 };
