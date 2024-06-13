@@ -1297,10 +1297,10 @@ pub export fn wWinMain(
             if (samples != undefined and game_memory.permanent_storage != undefined and game_memory.transient_storage != undefined) {
                 var game_input = [2]shared.GameInput{
                     shared.GameInput{
-                        .seconds_to_advance_over_update = target_seconds_per_frame,
+                        .frame_delta_time = target_seconds_per_frame,
                     },
                     shared.GameInput{
-                        .seconds_to_advance_over_update = target_seconds_per_frame,
+                        .frame_delta_time = target_seconds_per_frame,
                     },
                 };
                 var new_input = &game_input[0];

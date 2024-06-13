@@ -16,19 +16,83 @@ pub export fn updateAndRender(
     const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
 
     if (!memory.is_initialized) {
-        state.* = shared.State{};
+        state.* = shared.State{
+            .player_x = 60,
+            .player_y = 60,
+        };
         memory.is_initialized = true;
     }
 
+    const player_movement_speed: f32 = 128;
     for (&input.controllers) |controller| {
-        if (controller.is_analog) {} else {}
+        if (controller.is_analog) {} else {
+            var player_x_delta: f32 = 0;
+            var player_y_delta: f32 = 0;
+
+            if (controller.move_up.ended_down) {
+                player_y_delta = -1;
+            }
+            if (controller.move_down.ended_down) {
+                player_y_delta = 1;
+            }
+            if (controller.move_left.ended_down) {
+                player_x_delta = -1;
+            }
+            if (controller.move_right.ended_down) {
+                player_x_delta = 1;
+            }
+
+            state.player_x += player_movement_speed * player_x_delta * input.frame_delta_time;
+            state.player_y += player_movement_speed * player_y_delta * input.frame_delta_time;
+        }
     }
 
+    // Clear background.
     const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 1.0 };
     drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), clear_color);
 
-    const test_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    drawRectangle(buffer, 10.0, 10.0, 40.0, 40.0, test_color);
+    // Draw tile map.
+    const tile_map = [9][17]u32{
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1 },
+        [_]u32{ 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0 },
+        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+    };
+    const color1 = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
+    const color2 = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
+    const upper_left_x: f32 = 12.5;
+    const upper_left_y: f32 = 22.5;
+    const tile_width: f32 = 55;
+    const tile_height: f32 = 55;
+    for (tile_map, 0..) |row, row_index| {
+        for (row, 0..) |cell, column_index| {
+            const min_x = upper_left_x + @as(f32, @floatFromInt(column_index)) * tile_width;
+            const min_y = upper_left_y + @as(f32, @floatFromInt(row_index)) * tile_height;
+            const max_x = min_x + tile_width;
+            const max_y = min_y + tile_height;
+            drawRectangle(buffer, min_x, min_y, max_x, max_y, if (cell == 1) color1 else color2);
+        }
+    }
+
+    // Draw player.
+    const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
+    const player_width: f32 = 0.75 * tile_width;
+    const player_height: f32 = 0.75 * tile_height;
+    const player_left: f32 = state.player_x - (0.5 * player_width);
+    const player_top: f32 = state.player_y - player_height;
+    drawRectangle(
+        buffer,
+        player_left,
+        player_top,
+        player_left + player_width,
+        player_top + player_height,
+        player_color,
+    );
 }
 
 pub export fn getSoundSamples(

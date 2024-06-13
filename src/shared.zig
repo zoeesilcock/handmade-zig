@@ -83,7 +83,7 @@ pub const GameInput = extern struct {
     mouse_x: i32 = 0,
     mouse_y: i32 = 0,
 
-    seconds_to_advance_over_update: f32 = 0,
+    frame_delta_time: f32 = 0,
 
     controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{undefined} ** MAX_CONTROLLER_COUNT,
 };
@@ -126,7 +126,10 @@ pub const Memory = extern struct {
 };
 
 // Game state.
-pub const State = struct {};
+pub const State = struct {
+    player_x: f32,
+    player_y: f32,
+};
 
 pub const Color = struct {
     r: f32,
