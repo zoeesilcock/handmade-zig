@@ -1,6 +1,21 @@
 const shared = @import("shared.zig");
 const std = @import("std");
 
+fn getTileMap(world: *shared.World, tile_map_x: u32, tile_map_y: u32) *shared.TileMap {
+    var tile_map: *shared.TileMap = undefined;
+
+
+    if ((tile_map_x >= 0) and (tile_map_x < world.count_x) and
+        (tile_map_y >= 0) and (tile_map_y < world.count_y)) {
+        tile_map = &world.tile_maps[tile_map_y * world.count_x + tile_map_y];
+    }
+
+    return tile_map;
+}
+
+fn getTileValueUnchecked(tile_map: *shared.TileMap, tile_x: u32, tile_y: u32) u32 {
+    return tile_map.tiles[tile_y * tile_map.count_x + tile_x];
+}
 
 fn isTileMapPointEmpty(tile_map: *shared.TileMap, test_x: f32, test_y: f32) bool {
     var is_empty = false;
@@ -10,8 +25,25 @@ fn isTileMapPointEmpty(tile_map: *shared.TileMap, test_x: f32, test_y: f32) bool
 
     if ((tile_x >= 0) and (tile_x < tile_map.count_x) and
         (tile_y >= 0) and (tile_y < tile_map.count_y)) {
-        const tile_map_value = tile_map.tiles[tile_y * tile_map.count_x + tile_x];
-        is_empty = (tile_map_value == 0);
+        is_empty = (getTileValueUnchecked(tile_map, tile_x, tile_y) == 0);
+    }
+
+    return is_empty;
+}
+
+fn isWorldPointEmpty(world: *shared.World, tile_map_x: u32, tile_map_y: u32, test_x: f32, test_y: f32) bool {
+    var is_empty = false;
+
+    const tile_map = getTileMap(world, tile_map_x, tile_map_y);
+
+    if (tile_map != undefined) {
+        const tile_x: u32 = shared.truncateReal32ToUInt32((test_x - tile_map.upper_left_x) / tile_map.tile_width);
+        const tile_y: u32 = shared.truncateReal32ToUInt32((test_y - tile_map.upper_left_y) / tile_map.tile_height);
+
+        if ((tile_x >= 0) and (tile_x < tile_map.count_x) and
+            (tile_y >= 0) and (tile_y < tile_map.count_y)) {
+            is_empty = (getTileValueUnchecked(tile_map, tile_x, tile_y) == 0);
+        }
     }
 
     return is_empty;
@@ -41,31 +73,73 @@ pub export fn updateAndRender(
 
     const tile_map_count_x = 17;
     const tile_map_count_y = 9;
-    var tiles = [tile_map_count_y][tile_map_count_x]u32{
+    var tiles00 = [tile_map_count_y][tile_map_count_x]u32{
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0 },
+        [_]u32{ 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+    };
+    var tiles01 = [tile_map_count_y][tile_map_count_x]u32{
         [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
         [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
         [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
         [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1 },
-        [_]u32{ 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0 },
+        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0 },
         [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1 },
         [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
         [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
+    };
+    var tiles10 = [tile_map_count_y][tile_map_count_x]u32{
         [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1 },
+        [_]u32{ 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
     };
-    var tile_map = shared.TileMap{
-        .tile_height = 60,
-        .tile_width = 60,
-        .upper_left_x = -30,
-        .upper_left_y = 0,
-        .count_x = tile_map_count_x,
-        .count_y = tile_map_count_y,
-        .tiles = @ptrCast(&tiles),
+    var tiles11 = [tile_map_count_y][tile_map_count_x]u32{
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1 },
+        [_]u32{ 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
     };
+    var tile_maps: [2][2]shared.TileMap = .{[1]shared.TileMap{
+        shared.TileMap{
+            .tile_height = 60,
+            .tile_width = 60,
+            .upper_left_x = -30,
+            .upper_left_y = 0,
+            .count_x = tile_map_count_x,
+            .count_y = tile_map_count_y,
+            .tiles = undefined,
+        }
+    } ** 2} ** 2;
+
+    tile_maps[0][0].tiles = @ptrCast(&tiles00);
+    tile_maps[0][1].tiles = @ptrCast(&tiles01);
+    tile_maps[1][0].tiles = @ptrCast(&tiles10);
+    tile_maps[1][1].tiles = @ptrCast(&tiles11);
+
+    const tile_map = &tile_maps[0][0];
 
     const player_movement_speed: f32 = 128;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
     const player_width: f32 = 0.75 * tile_map.tile_width;
-    const player_height: f32 = 0.75 * tile_map.tile_height;
+    const player_height: f32 = tile_map.tile_height;
 
     for (&input.controllers) |controller| {
         if (controller.is_analog) {} else {
@@ -88,9 +162,9 @@ pub export fn updateAndRender(
             const new_player_x = state.player_x + player_movement_speed * player_x_delta * input.frame_delta_time;
             const new_player_y = state.player_y + player_movement_speed * player_y_delta * input.frame_delta_time;
 
-            if (isTileMapPointEmpty(&tile_map, new_player_x - (0.5 * player_width), new_player_y) and
-                isTileMapPointEmpty(&tile_map, new_player_x + (0.5 * player_width), new_player_y) and
-                isTileMapPointEmpty(&tile_map, new_player_x, new_player_y)) {
+            if (isTileMapPointEmpty(tile_map, new_player_x - (0.5 * player_width), new_player_y) and
+                isTileMapPointEmpty(tile_map, new_player_x + (0.5 * player_width), new_player_y) and
+                isTileMapPointEmpty(tile_map, new_player_x, new_player_y)) {
                 state.player_x = new_player_x;
                 state.player_y = new_player_y;
             }
@@ -112,7 +186,7 @@ pub export fn updateAndRender(
         column_index = 0;
 
         while (column_index < tile_map_count_x) : (column_index += 1) {
-            const tile = tile_map.tiles[row_index * tile_map_count_x + column_index];
+            const tile = getTileValueUnchecked(tile_map, column_index, row_index);
             const min_x = tile_map.upper_left_x + @as(f32, @floatFromInt(column_index)) * tile_map.tile_width;
             const min_y = tile_map.upper_left_y + @as(f32, @floatFromInt(row_index)) * tile_map.tile_height;
             const max_x = min_x + tile_map.tile_width;

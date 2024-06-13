@@ -152,6 +152,13 @@ pub const Color = struct {
     }
 };
 
+pub const World = struct {
+    count_x: usize,
+    count_y: usize,
+
+    tile_maps: *TileMap,
+};
+
 pub const TileMap = struct {
     upper_left_x: f32,
     upper_left_y: f32,
