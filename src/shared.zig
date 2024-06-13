@@ -36,6 +36,10 @@ pub inline fn roundReal32ToInt32(value: f32) i32 {
     return @intFromFloat(@round(value));
 }
 
+pub inline fn roundReal32ToUInt32(value: f32) u32 {
+    return @intFromFloat(@round(value));
+}
+
 // Platform.
 pub const Platform = extern struct {
     debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,
@@ -71,7 +75,7 @@ pub const OffscreenBuffer = extern struct {
 pub const SoundOutputBuffer = extern struct {
     samples: [*]i16,
     samples_per_second: u32,
-    sample_count: u32,
+sample_count: u32,
 };
 
 pub const GameInput = extern struct {
@@ -123,3 +127,16 @@ pub const Memory = extern struct {
 
 // Game state.
 pub const State = struct {};
+
+pub const Color = struct {
+    r: f32,
+    g: f32,
+    b: f32,
+    pub fn toInt(self: Color) u32 {
+        return (
+            (roundReal32ToUInt32(self.r * 255.0) << 16) |
+            (roundReal32ToUInt32(self.g * 255.0) << 8) |
+            (roundReal32ToUInt32(self.b * 255.0) << 0)
+        );
+    }
+};

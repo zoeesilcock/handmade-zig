@@ -24,8 +24,11 @@ pub export fn updateAndRender(
         if (controller.is_analog) {} else {}
     }
 
-    drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), 0xFF000000);
-    drawRectangle(buffer, 10.0, 10.0, 40.0, 40.0, 0xFFFF0000);
+    const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 1.0 };
+    drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), clear_color);
+
+    const test_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
+    drawRectangle(buffer, 10.0, 10.0, 40.0, 40.0, test_color);
 }
 
 pub export fn getSoundSamples(
@@ -45,7 +48,7 @@ fn drawRectangle(
     real_min_y: f32,
     real_max_x: f32,
     real_max_y: f32,
-    color: u32,
+    color: shared.Color,
 ) void {
     // Round input values.
     var min_x = shared.roundReal32ToInt32(real_min_x);
@@ -77,7 +80,7 @@ fn drawRectangle(
 
         var x = min_x;
         while (x < max_x) : (x += 1) {
-            pixel[0] = color;
+            pixel[0] = color.toInt();
             pixel += 1;
         }
 
