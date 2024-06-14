@@ -1,9 +1,8 @@
 const shared = @import("shared.zig");
 const std = @import("std");
 
-// TODO: This should return an optional.
-fn getTileMap(world: *shared.World, tile_map_x: i32, tile_map_y: i32) *shared.TileMap {
-    var tile_map: *shared.TileMap = undefined;
+fn getTileMap(world: *shared.World, tile_map_x: i32, tile_map_y: i32) ?*shared.TileMap {
+    var tile_map: ?*shared.TileMap = null;
 
     if ((tile_map_x >= 0) and (tile_map_x < world.tile_map_count_x) and
         (tile_map_y >= 0) and (tile_map_y < world.tile_map_count_y))
@@ -15,8 +14,10 @@ fn getTileMap(world: *shared.World, tile_map_x: i32, tile_map_y: i32) *shared.Ti
 }
 
 fn getTileValueUnchecked(world: *shared.World, tile_map: *shared.TileMap, tile_x: i32, tile_y: i32) u32 {
-    std.debug.assert((tile_x >= 0) and (tile_x < world.tile_count_x) and
-        (tile_y >= 0) and (tile_y < world.tile_count_y));
+    std.debug.assert(
+        (tile_x >= 0) and (tile_x < world.tile_count_x) and
+        (tile_y >= 0) and (tile_y < world.tile_count_y)
+    );
 
     return tile_map.tiles[@intCast(tile_y * world.tile_count_x + tile_x)];
 }
@@ -79,8 +80,10 @@ fn isWorldPointEmpty(world: *shared.World, test_position: shared.RawPosition) bo
     var is_empty = false;
 
     const canonical_position = getCanonicalPosition(world, test_position);
-    const tile_map = getTileMap(world, canonical_position.tile_map_x, canonical_position.tile_map_y);
-    is_empty = isTileMapPointEmpty(world, tile_map, canonical_position.tile_x, canonical_position.tile_y);
+    const opt_tile_map = getTileMap(world, canonical_position.tile_map_x, canonical_position.tile_map_y);
+    if (opt_tile_map) |tile_map| {
+        is_empty = isTileMapPointEmpty(world, tile_map, canonical_position.tile_x, canonical_position.tile_y);
+    }
 
     return is_empty;
 }
@@ -176,8 +179,8 @@ pub export fn updateAndRender(
         .tile_maps = @ptrCast(&tile_maps),
     };
 
-    const tile_map = getTileMap(&world, state.player_tile_map_x, state.player_tile_map_y);
-    std.debug.assert(tile_map != undefined);
+    const opt_tile_map = getTileMap(&world, state.player_tile_map_x, state.player_tile_map_y);
+    std.debug.assert(opt_tile_map != null);
 
     const player_movement_speed: f32 = 128;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
@@ -238,20 +241,22 @@ pub export fn updateAndRender(
     const color1 = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
     const color2 = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
 
-    var row_index: i32 = 0;
-    var column_index: i32 = 0;
+    if (opt_tile_map) |tile_map| {
+        var row_index: i32 = 0;
+        var column_index: i32 = 0;
 
-    while (row_index < world.tile_count_y) : (row_index += 1) {
-        column_index = 0;
+        while (row_index < world.tile_count_y) : (row_index += 1) {
+            column_index = 0;
 
-        while (column_index < world.tile_count_x) : (column_index += 1) {
-            const tile = getTileValueUnchecked(&world, tile_map, column_index, row_index);
-            const min_x = world.upper_left_x + @as(f32, @floatFromInt(column_index)) * world.tile_width;
-            const min_y = world.upper_left_y + @as(f32, @floatFromInt(row_index)) * world.tile_height;
-            const max_x = min_x + world.tile_width;
-            const max_y = min_y + world.tile_height;
+            while (column_index < world.tile_count_x) : (column_index += 1) {
+                const tile = getTileValueUnchecked(&world, tile_map, column_index, row_index);
+                const min_x = world.upper_left_x + @as(f32, @floatFromInt(column_index)) * world.tile_width;
+                const min_y = world.upper_left_y + @as(f32, @floatFromInt(row_index)) * world.tile_height;
+                const max_x = min_x + world.tile_width;
+                const max_y = min_y + world.tile_height;
 
-            drawRectangle(buffer, min_x, min_y, max_x, max_y, if (tile == 1) color1 else color2);
+                drawRectangle(buffer, min_x, min_y, max_x, max_y, if (tile == 1) color1 else color2);
+            }
         }
     }
 
