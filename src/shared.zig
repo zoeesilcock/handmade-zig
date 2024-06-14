@@ -128,9 +128,9 @@ pub const ControllerButtonState = extern struct {
 pub const Memory = extern struct {
     is_initialized: bool,
     permanent_storage_size: u64,
-    permanent_storage: *anyopaque,
+    permanent_storage: ?*anyopaque,
     transient_storage_size: u64,
-    transient_storage: *anyopaque,
+    transient_storage: ?*anyopaque,
 };
 
 // Game state.

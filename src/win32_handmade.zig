@@ -116,12 +116,12 @@ const ReplayBuffer = struct {
     memory_map: win32.HANDLE = undefined,
     file_handle: win32.HANDLE = undefined,
     replay_file_name: [STATE_FILE_NAME_COUNT:0]u8 = undefined,
-    memory_block: *anyopaque = undefined,
+    memory_block: ?*anyopaque = null,
 };
 
 const Win32State = struct {
     total_size: usize = 0,
-    game_memory_block: *anyopaque = undefined,
+    game_memory_block: ?*anyopaque = undefined,
     replay_buffers: [4]ReplayBuffer = [1]ReplayBuffer{ReplayBuffer{}} ** 4,
 
     recording_handle: win32.HANDLE = undefined,
@@ -1236,9 +1236,9 @@ pub export fn wWinMain(
             var game_memory: shared.Memory = shared.Memory{
                 .is_initialized = false,
                 .permanent_storage_size = shared.megabytes(64),
-                .permanent_storage = undefined,
+                .permanent_storage = null,
                 .transient_storage_size = shared.megabytes(256),
-                .transient_storage = undefined,
+                .transient_storage = null,
             };
 
             state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
@@ -1248,9 +1248,10 @@ pub export fn wWinMain(
                 state.total_size,
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
                 win32.PAGE_READWRITE,
-            ) orelse undefined;
-            game_memory.permanent_storage = state.game_memory_block;
-            if (game_memory.permanent_storage != undefined) {
+            );
+
+            if (state.game_memory_block) |memory_block| {
+                game_memory.permanent_storage = memory_block;
                 game_memory.transient_storage = @ptrFromInt(@intFromPtr(&game_memory.permanent_storage) + game_memory.permanent_storage_size);
             }
 
@@ -1298,11 +1299,11 @@ pub export fn wWinMain(
                         0,
                         state.total_size,
                         null,
-                    ) orelse undefined;
+                    );
                 }
             }
 
-            if (samples != undefined and game_memory.permanent_storage != undefined and game_memory.transient_storage != undefined) {
+            if (samples != undefined and game_memory.permanent_storage != null and game_memory.transient_storage != null) {
                 var game_input = [2]shared.GameInput{
                     shared.GameInput{
                         .frame_delta_time = target_seconds_per_frame,
