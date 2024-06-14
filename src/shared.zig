@@ -156,7 +156,7 @@ pub const World = struct {
     count_x: usize,
     count_y: usize,
 
-    tile_maps: *TileMap,
+    tile_maps: [*] TileMap,
 };
 
 pub const TileMap = struct {

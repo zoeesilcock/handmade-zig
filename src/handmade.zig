@@ -134,7 +134,13 @@ pub export fn updateAndRender(
     tile_maps[1][0].tiles = @ptrCast(&tiles10);
     tile_maps[1][1].tiles = @ptrCast(&tiles11);
 
-    const tile_map = &tile_maps[0][0];
+    var world = shared.World{
+        .count_x = 2,
+        .count_y = 2,
+        .tile_maps = @ptrCast(&tile_maps),
+    };
+
+    const tile_map = getTileMap(&world, 0, 0);
 
     const player_movement_speed: f32 = 128;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
