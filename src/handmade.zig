@@ -43,15 +43,15 @@ fn getCanonicalPosition(world: *shared.World, position: shared.RawPosition) shar
         .tile_map_y = position.tile_map_y,
         .tile_x = tile_x,
         .tile_y = tile_y,
-        .x = x - (@as(f32, @floatFromInt(tile_x)) * world.tile_width),
-        .y = y - (@as(f32, @floatFromInt(tile_y)) * world.tile_height),
+        .tile_rel_x = x - (@as(f32, @floatFromInt(tile_x)) * world.tile_width),
+        .tile_rel_y = y - (@as(f32, @floatFromInt(tile_y)) * world.tile_height),
     };
 
     // Check that the relative position is within the tile size.
-    std.debug.assert(result.x >= 0);
-    std.debug.assert(result.y >= 0);
-    std.debug.assert(result.x < world.tile_width);
-    std.debug.assert(result.y < world.tile_width);
+    std.debug.assert(result.tile_rel_x >= 0);
+    std.debug.assert(result.tile_rel_y >= 0);
+    std.debug.assert(result.tile_rel_x < world.tile_width);
+    std.debug.assert(result.tile_rel_y < world.tile_width);
 
     // Go to the adjescent tile map if the position is outside the current tile map.
     if (result.tile_x < 0) {
@@ -225,8 +225,12 @@ pub export fn updateAndRender(
                 state.player_tile_map_x = canonical_position.tile_map_x;
                 state.player_tile_map_y = canonical_position.tile_map_y;
 
-                state.player_x = world.upper_left_x + world.tile_width * @as(f32, @floatFromInt(canonical_position.tile_x)) + canonical_position.x;
-                state.player_y = world.upper_left_y + world.tile_height * @as(f32, @floatFromInt(canonical_position.tile_y)) + canonical_position.y;
+                state.player_x = world.upper_left_x +
+                    world.tile_width * @as(f32, @floatFromInt(canonical_position.tile_x)) +
+                    canonical_position.tile_rel_x;
+                state.player_y = world.upper_left_y +
+                    world.tile_height * @as(f32, @floatFromInt(canonical_position.tile_y)) +
+                    canonical_position.tile_rel_y;
             }
         }
     }

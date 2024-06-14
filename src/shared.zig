@@ -159,8 +159,8 @@ pub const CanonicalPosition = struct {
     tile_map_y: i32,
     tile_x: i32,
     tile_y: i32,
-    x: f32,
-    y: f32,
+    tile_rel_x: f32,
+    tile_rel_y: f32,
 };
 
 pub const RawPosition = struct {
