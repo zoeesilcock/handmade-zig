@@ -14,10 +14,8 @@ fn getTileMap(world: *shared.World, tile_map_x: i32, tile_map_y: i32) ?*shared.T
 }
 
 fn getTileValueUnchecked(world: *shared.World, tile_map: *shared.TileMap, tile_x: i32, tile_y: i32) u32 {
-    std.debug.assert(
-        (tile_x >= 0) and (tile_x < world.tile_count_x) and
-        (tile_y >= 0) and (tile_y < world.tile_count_y)
-    );
+    std.debug.assert((tile_x >= 0) and (tile_x < world.tile_count_x) and
+        (tile_y >= 0) and (tile_y < world.tile_count_y));
 
     return tile_map.tiles[@intCast(tile_y * world.tile_count_x + tile_x)];
 }

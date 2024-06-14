@@ -83,7 +83,7 @@ pub const OffscreenBuffer = extern struct {
 pub const SoundOutputBuffer = extern struct {
     samples: [*]i16,
     samples_per_second: u32,
-sample_count: u32,
+    sample_count: u32,
 };
 
 pub const GameInput = extern struct {
@@ -151,7 +151,7 @@ pub const World = struct {
     tile_count_x: i32,
     tile_count_y: i32,
 
-    tile_maps: [*] TileMap,
+    tile_maps: [*]TileMap,
 };
 
 pub const CanonicalPosition = struct {
@@ -180,10 +180,8 @@ pub const Color = struct {
     g: f32,
     b: f32,
     pub fn toInt(self: Color) u32 {
-        return (
-            (roundReal32ToUInt32(self.r * 255.0) << 16) |
+        return ((roundReal32ToUInt32(self.r * 255.0) << 16) |
             (roundReal32ToUInt32(self.g * 255.0) << 8) |
-            (roundReal32ToUInt32(self.b * 255.0) << 0)
-        );
+            (roundReal32ToUInt32(self.b * 255.0) << 0));
     }
 };
