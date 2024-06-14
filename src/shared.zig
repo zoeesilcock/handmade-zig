@@ -40,12 +40,12 @@ pub inline fn roundReal32ToUInt32(value: f32) u32 {
     return @intFromFloat(@round(value));
 }
 
-pub inline fn truncateReal32ToInt32(value: f32) i32 {
-    return @intFromFloat(value);
+pub inline fn floorReal32ToInt32(value: f32) i32 {
+    return @intFromFloat(@floor(value));
 }
 
-pub inline fn truncateReal32ToUInt32(value: f32) u32 {
-    return @intFromFloat(value);
+pub inline fn floorReal32ToUInt32(value: f32) u32 {
+    return @intFromFloat(@floor(value));
 }
 
 // Platform.
@@ -137,8 +137,44 @@ pub const Memory = extern struct {
 pub const State = struct {
     player_x: f32,
     player_y: f32,
+    player_tile_map_x: i32,
+    player_tile_map_y: i32,
 };
 
+pub const World = struct {
+    tile_map_count_x: i32,
+    tile_map_count_y: i32,
+    upper_left_x: f32,
+    upper_left_y: f32,
+    tile_width: f32,
+    tile_height: f32,
+    tile_count_x: i32,
+    tile_count_y: i32,
+
+    tile_maps: [*] TileMap,
+};
+
+pub const CanonicalPosition = struct {
+    tile_map_x: i32,
+    tile_map_y: i32,
+    tile_x: i32,
+    tile_y: i32,
+    x: f32,
+    y: f32,
+};
+
+pub const RawPosition = struct {
+    tile_map_x: i32,
+    tile_map_y: i32,
+    x: f32,
+    y: f32,
+};
+
+pub const TileMap = struct {
+    tiles: [*]const u32,
+};
+
+// Data structures..
 pub const Color = struct {
     r: f32,
     g: f32,
@@ -150,24 +186,4 @@ pub const Color = struct {
             (roundReal32ToUInt32(self.b * 255.0) << 0)
         );
     }
-};
-
-pub const World = struct {
-    count_x: usize,
-    count_y: usize,
-
-    tile_maps: [*] TileMap,
-};
-
-pub const TileMap = struct {
-    upper_left_x: f32,
-    upper_left_y: f32,
-
-    tile_width: f32,
-    tile_height: f32,
-
-    count_x: usize,
-    count_y: usize,
-
-    tiles: [*]const u32,
 };
