@@ -182,10 +182,10 @@ pub export fn updateAndRender(
     var row_index: u32 = 0;
     var column_index: u32 = 0;
 
-    while (row_index < tile_map_count_y) : (row_index += 1) {
+    while (row_index < tile_map.count_y) : (row_index += 1) {
         column_index = 0;
 
-        while (column_index < tile_map_count_x) : (column_index += 1) {
+        while (column_index < tile_map.count_x) : (column_index += 1) {
             const tile = getTileValueUnchecked(tile_map, column_index, row_index);
             const min_x = tile_map.upper_left_x + @as(f32, @floatFromInt(column_index)) * tile_map.tile_width;
             const min_y = tile_map.upper_left_y + @as(f32, @floatFromInt(row_index)) * tile_map.tile_height;
