@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
 
 fn getTileMap(world: *shared.World, tile_map_x: i32, tile_map_y: i32) ?*shared.TileMap {
@@ -35,8 +36,8 @@ fn isTileMapPointEmpty(world: *shared.World, tile_map: *shared.TileMap, test_x: 
 fn getCanonicalPosition(world: *shared.World, position: shared.RawPosition) shared.CanonicalPosition {
     const x: f32 = position.x - world.upper_left_x;
     const y: f32 = position.y - world.upper_left_y;
-    const tile_x = shared.floorReal32ToInt32(x / world.tile_width);
-    const tile_y = shared.floorReal32ToInt32(y / world.tile_height);
+    const tile_x = intrinsics.floorReal32ToInt32(x / world.tile_width);
+    const tile_y = intrinsics.floorReal32ToInt32(y / world.tile_height);
 
     var result = shared.CanonicalPosition{
         .tile_map_x = position.tile_map_x,
@@ -295,10 +296,10 @@ fn drawRectangle(
     color: shared.Color,
 ) void {
     // Round input values.
-    var min_x = shared.roundReal32ToInt32(real_min_x);
-    var min_y = shared.roundReal32ToInt32(real_min_y);
-    var max_x = shared.roundReal32ToInt32(real_max_x);
-    var max_y = shared.roundReal32ToInt32(real_max_y);
+    var min_x = intrinsics.roundReal32ToInt32(real_min_x);
+    var min_y = intrinsics.roundReal32ToInt32(real_min_y);
+    var max_x = intrinsics.roundReal32ToInt32(real_max_x);
+    var max_y = intrinsics.roundReal32ToInt32(real_max_y);
 
     // Clip input values to buffer.
     if (min_x < 0) {

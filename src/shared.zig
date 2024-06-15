@@ -5,6 +5,7 @@ pub const MIDDLE_C: u32 = 261;
 pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
 
+const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
 
 // Build options.
@@ -25,27 +26,6 @@ pub inline fn gigabytes(value: u32) u64 {
 
 pub inline fn terabytes(value: u32) u64 {
     return gigabytes(value) * 1024;
-}
-
-pub inline fn safeTruncateI64(value: i64) u32 {
-    std.debug.assert(value <= 0xFFFFFFFF);
-    return @as(u32, @intCast(value));
-}
-
-pub inline fn roundReal32ToInt32(value: f32) i32 {
-    return @intFromFloat(@round(value));
-}
-
-pub inline fn roundReal32ToUInt32(value: f32) u32 {
-    return @intFromFloat(@round(value));
-}
-
-pub inline fn floorReal32ToInt32(value: f32) i32 {
-    return @intFromFloat(@floor(value));
-}
-
-pub inline fn floorReal32ToUInt32(value: f32) u32 {
-    return @intFromFloat(@floor(value));
 }
 
 // Platform.
@@ -180,8 +160,8 @@ pub const Color = struct {
     g: f32,
     b: f32,
     pub fn toInt(self: Color) u32 {
-        return ((roundReal32ToUInt32(self.r * 255.0) << 16) |
-            (roundReal32ToUInt32(self.g * 255.0) << 8) |
-            (roundReal32ToUInt32(self.b * 255.0) << 0));
+        return ((intrinsics.roundReal32ToUInt32(self.r * 255.0) << 16) |
+            (intrinsics.roundReal32ToUInt32(self.g * 255.0) << 8) |
+            (intrinsics.roundReal32ToUInt32(self.b * 255.0) << 0));
     }
 };

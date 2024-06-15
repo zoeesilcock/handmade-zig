@@ -154,6 +154,11 @@ pub inline fn rdtsc() u64 {
     return (@as(u64, hi) << 32) | @as(u64, low);
 }
 
+pub inline fn safeTruncateI64(value: i64) u32 {
+    std.debug.assert(value <= 0xFFFFFFFF);
+    return @as(u32, @intCast(value));
+}
+
 fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
     var result = shared.DebugReadFileResult{};
 
@@ -170,7 +175,7 @@ fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) 
     if (file_handle != win32.INVALID_HANDLE_VALUE) {
         var file_size: win32.LARGE_INTEGER = undefined;
         if (win32.GetFileSizeEx(file_handle, &file_size) != 0) {
-            const file_size32 = shared.safeTruncateI64(file_size.QuadPart);
+            const file_size32 = safeTruncateI64(file_size.QuadPart);
 
             if (win32.VirtualAlloc(
                 undefined,
