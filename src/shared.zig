@@ -122,12 +122,13 @@ pub const State = struct {
 };
 
 pub const World = struct {
+    tile_side_in_meters: f32,
+    tile_side_in_pixels: i32,
+
     tile_map_count_x: i32,
     tile_map_count_y: i32,
     upper_left_x: f32,
     upper_left_y: f32,
-    tile_width: f32,
-    tile_height: f32,
     tile_count_x: i32,
     tile_count_y: i32,
 

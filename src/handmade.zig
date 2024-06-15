@@ -36,23 +36,23 @@ fn isTileMapPointEmpty(world: *shared.World, tile_map: *shared.TileMap, test_x: 
 fn getCanonicalPosition(world: *shared.World, position: shared.RawPosition) shared.CanonicalPosition {
     const x: f32 = position.x - world.upper_left_x;
     const y: f32 = position.y - world.upper_left_y;
-    const tile_x = intrinsics.floorReal32ToInt32(x / world.tile_width);
-    const tile_y = intrinsics.floorReal32ToInt32(y / world.tile_height);
+    const tile_x = intrinsics.floorReal32ToInt32(x / @as(f32, @floatFromInt(world.tile_side_in_pixels)));
+    const tile_y = intrinsics.floorReal32ToInt32(y / @as(f32, @floatFromInt(world.tile_side_in_pixels)));
 
     var result = shared.CanonicalPosition{
         .tile_map_x = position.tile_map_x,
         .tile_map_y = position.tile_map_y,
         .tile_x = tile_x,
         .tile_y = tile_y,
-        .tile_rel_x = x - (@as(f32, @floatFromInt(tile_x)) * world.tile_width),
-        .tile_rel_y = y - (@as(f32, @floatFromInt(tile_y)) * world.tile_height),
+        .tile_rel_x = x - (@as(f32, @floatFromInt(tile_x)) * @as(f32, @floatFromInt(world.tile_side_in_pixels))),
+        .tile_rel_y = y - (@as(f32, @floatFromInt(tile_y)) * @as(f32, @floatFromInt(world.tile_side_in_pixels))),
     };
 
     // Check that the relative position is within the tile size.
     std.debug.assert(result.tile_rel_x >= 0);
     std.debug.assert(result.tile_rel_y >= 0);
-    std.debug.assert(result.tile_rel_x < world.tile_width);
-    std.debug.assert(result.tile_rel_y < world.tile_width);
+    std.debug.assert(result.tile_rel_x < @as(f32, @floatFromInt(world.tile_side_in_pixels)));
+    std.debug.assert(result.tile_rel_y < @as(f32, @floatFromInt(world.tile_side_in_pixels)));
 
     // Go to the adjescent tile map if the position is outside the current tile map.
     if (result.tile_x < 0) {
@@ -167,24 +167,26 @@ pub export fn updateAndRender(
     tile_maps[1][1].tiles = @ptrCast(&tiles11);
 
     var world = shared.World{
+        .tile_side_in_meters = 1.4,
+        .tile_side_in_pixels = 60,
+
         .tile_map_count_x = 2,
         .tile_map_count_y = 2,
-        .upper_left_x = -30,
+        .upper_left_x = 0,
         .upper_left_y = 0,
-        .tile_height = 60,
-        .tile_width = 60,
         .tile_count_x = tile_map_count_x,
         .tile_count_y = tile_map_count_y,
         .tile_maps = @ptrCast(&tile_maps),
     };
+    world.upper_left_x = -@as(f32, @floatFromInt(world.tile_side_in_pixels)) / 2.0;
 
     const opt_tile_map = getTileMap(&world, state.player_tile_map_x, state.player_tile_map_y);
     std.debug.assert(opt_tile_map != null);
 
     const player_movement_speed: f32 = 128;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    const player_width: f32 = 0.75 * world.tile_width;
-    const player_height: f32 = world.tile_height;
+    const player_width: f32 = 0.75 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+    const player_height: f32 = @floatFromInt(world.tile_side_in_pixels);
 
     for (&input.controllers) |controller| {
         if (controller.is_analog) {} else {
@@ -227,10 +229,10 @@ pub export fn updateAndRender(
                 state.player_tile_map_y = canonical_position.tile_map_y;
 
                 state.player_x = world.upper_left_x +
-                    world.tile_width * @as(f32, @floatFromInt(canonical_position.tile_x)) +
+                    @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(canonical_position.tile_x)) +
                     canonical_position.tile_rel_x;
                 state.player_y = world.upper_left_y +
-                    world.tile_height * @as(f32, @floatFromInt(canonical_position.tile_y)) +
+                    @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(canonical_position.tile_y)) +
                     canonical_position.tile_rel_y;
             }
         }
@@ -253,10 +255,10 @@ pub export fn updateAndRender(
 
             while (column_index < world.tile_count_x) : (column_index += 1) {
                 const tile = getTileValueUnchecked(&world, tile_map, column_index, row_index);
-                const min_x = world.upper_left_x + @as(f32, @floatFromInt(column_index)) * world.tile_width;
-                const min_y = world.upper_left_y + @as(f32, @floatFromInt(row_index)) * world.tile_height;
-                const max_x = min_x + world.tile_width;
-                const max_y = min_y + world.tile_height;
+                const min_x = world.upper_left_x + @as(f32, @floatFromInt(column_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                const min_y = world.upper_left_y + @as(f32, @floatFromInt(row_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                const max_x = min_x + @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                const max_y = min_y + @as(f32, @floatFromInt(world.tile_side_in_pixels));
 
                 drawRectangle(buffer, min_x, min_y, max_x, max_y, if (tile == 1) color1 else color2);
             }
