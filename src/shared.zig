@@ -119,32 +119,37 @@ pub const State = struct {
 };
 
 pub const World = struct {
+    chunk_shift: u32,
+    chunk_mask: u32,
+    chunk_dim: u32,
+
     tile_side_in_meters: f32,
     tile_side_in_pixels: i32,
     meters_to_pixels: f32,
 
-    lower_left_x: f32,
-    lower_left_y: f32,
+    tile_chunk_count_x: i32,
+    tile_chunk_count_y: i32,
+    tile_chunks: [*]TileChunk,
+};
 
-    tile_count_x: i32,
-    tile_count_y: i32,
-
-    tile_map_count_x: i32,
-    tile_map_count_y: i32,
-    tile_maps: [*]TileMap,
+pub const TileChunkPosition = struct {
+    tile_chunk_x: u32,
+    tile_chunk_y: u32,
+    rel_tile_x: u32,
+    rel_tile_y: u32,
 };
 
 pub const WorldPosition = struct {
     tile_map_x: i32,
     tile_map_y: i32,
 
-    tile_x: i32,
-    tile_y: i32,
-    tile_rel_x: f32,
+    abs_tile_x: u32,
+    abs_tile_y: u32,
     tile_rel_y: f32,
+    tile_rel_x: f32,
 };
 
-pub const TileMap = struct {
+pub const TileChunk = struct {
     tiles: [*]const u32,
 };
 

@@ -2,76 +2,85 @@ const shared = @import("shared.zig");
 const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
 
-fn getTileMap(world: *shared.World, tile_map_x: i32, tile_map_y: i32) ?*shared.TileMap {
-    var tile_map: ?*shared.TileMap = null;
+fn getTileChunk(world: *shared.World, tile_map_x: i32, tile_map_y: i32) ?*shared.TileChunk {
+    var tile_chunk: ?*shared.TileChunk = null;
 
-    if ((tile_map_x >= 0) and (tile_map_x < world.tile_map_count_x) and
-        (tile_map_y >= 0) and (tile_map_y < world.tile_map_count_y))
+    if ((tile_map_x >= 0) and (tile_map_x < world.tile_chunk_count_x) and
+        (tile_map_y >= 0) and (tile_map_y < world.tile_chunk_count_y))
     {
-        tile_map = &world.tile_maps[@intCast(tile_map_y * world.tile_map_count_x + tile_map_x)];
+        tile_chunk = &world.tile_chunks[@intCast(tile_map_y * world.tile_chunk_count_x + tile_map_x)];
     }
 
-    return tile_map;
+    return tile_chunk;
 }
 
-fn getTileValueUnchecked(world: *shared.World, tile_map: *shared.TileMap, tile_x: i32, tile_y: i32) u32 {
-    std.debug.assert((tile_x >= 0) and (tile_x < world.tile_count_x) and
-        (tile_y >= 0) and (tile_y < world.tile_count_y));
+fn getTileValueUnchecked(world: *shared.World, tile_chunk: *shared.TileChunk, tile_x: u32, tile_y: u32) u32 {
+    std.debug.assert((tile_x >= 0) and (tile_x < world.chunk_dim) and
+        (tile_y >= 0) and (tile_y < world.chunk_dim));
 
-    return tile_map.tiles[@intCast(tile_y * world.tile_count_x + tile_x)];
+    return tile_chunk.tiles[@intCast(tile_y * world.chunk_dim + tile_x)];
 }
 
-fn isTileMapPointEmpty(world: *shared.World, tile_map: *shared.TileMap, test_x: i32, test_y: i32) bool {
-    var is_empty = false;
+fn getTileValue(world: *shared.World, opt_tile_chunk: ?*shared.TileChunk, test_x: u32, test_y: u32) u32 {
+    var value: u32 = 0;
 
-    if ((test_x >= 0) and (test_x < world.tile_count_x) and
-        (test_y >= 0) and (test_y < world.tile_count_y))
-    {
-        is_empty = (getTileValueUnchecked(world, tile_map, test_x, test_y) == 0);
+    if (opt_tile_chunk) |tile_chunk| {
+        value = getTileValueUnchecked(world, tile_chunk, test_x, test_y);
     }
 
-    return is_empty;
+    return value;
 }
 
-inline fn recannonicalizeCoordinate(world: *shared.World, tile_count: i32, tile_map: *i32, tile: *i32, tile_rel: *f32) void {
+inline fn recannonicalizeCoordinate(world: *shared.World, tile: *u32, tile_rel: *f32) void {
     // Calculate new tile position pased on the tile relative position.
     // TODO: This can end up rounding back on the tile we just came from.
     // TODO: Add bounds checking to prevent wrapping.
     const offset = intrinsics.floorReal32ToInt32(tile_rel.* / world.tile_side_in_meters);
-    tile.* += offset;
+    if (offset >= 0) {
+        tile.* +%= @as(u32, @intCast(offset));
+    } else {
+        tile.* -%= @as(u32, @intCast(@abs(offset)));
+    }
     tile_rel.* -= @as(f32, @floatFromInt(offset)) * world.tile_side_in_meters;
 
     // Check that the new relative position is within the tile size.
     std.debug.assert(tile_rel.* >= 0);
     std.debug.assert(tile_rel.* < world.tile_side_in_meters);
-
-    // Go to the adjescent tile map if the position is outside the current tile map.
-    if (tile.* < 0) {
-        tile.* = tile_count + tile.*;
-        tile_map.* -= 1;
-    }
-    if (tile.* >= tile_count) {
-        tile.* = tile.* - tile_count;
-        tile_map.* += 1;
-    }
 }
 
 fn recanonicalizePosition(world: *shared.World, position: shared.WorldPosition) shared.WorldPosition {
     var result = position;
 
-    recannonicalizeCoordinate(world, world.tile_count_x, &result.tile_map_x, &result.tile_x, &result.tile_rel_x);
-    recannonicalizeCoordinate(world, world.tile_count_y, &result.tile_map_y, &result.tile_y, &result.tile_rel_y);
+    recannonicalizeCoordinate(world, &result.abs_tile_x, &result.tile_rel_x);
+    recannonicalizeCoordinate(world, &result.abs_tile_y, &result.tile_rel_y);
 
     return result;
+}
+
+inline fn getChunkPositionFor(world: *shared.World, abs_tile_x: u32, abs_tile_y: u32) shared.TileChunkPosition {
+    return shared.TileChunkPosition{
+        .tile_chunk_x = abs_tile_x >> @as(u5, @intCast(world.chunk_shift)),
+        .tile_chunk_y = abs_tile_y >> @as(u5, @intCast(world.chunk_shift)),
+        .rel_tile_x = abs_tile_x & world.chunk_mask,
+        .rel_tile_y = abs_tile_y &  world.chunk_mask,
+    };
+}
+
+fn getChunkTileValue(world: *shared.World, abs_tile_x: u32, abs_tile_y: u32) u32 {
+    var value: u32 = 0;
+
+    const chunk_position = getChunkPositionFor(world, abs_tile_x, abs_tile_y);
+    const opt_tile_chunk = getTileChunk(world, @intCast(chunk_position.tile_chunk_x), @intCast(chunk_position.tile_chunk_y));
+    value = getTileValue(world, opt_tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y);
+
+    return value;
 }
 
 fn isWorldPointEmpty(world: *shared.World, test_position: shared.WorldPosition) bool {
     var is_empty = false;
 
-    const opt_tile_map = getTileMap(world, test_position.tile_map_x, test_position.tile_map_y);
-    if (opt_tile_map) |tile_map| {
-        is_empty = isTileMapPointEmpty(world, tile_map, test_position.tile_x, test_position.tile_y);
-    }
+    const tile_chunk_value = getChunkTileValue(world, test_position.abs_tile_x, test_position.abs_tile_y);
+    is_empty = (tile_chunk_value == 0);
 
     return is_empty;
 }
@@ -94,87 +103,69 @@ pub export fn updateAndRender(
         state.* = shared.State{ .player_position = shared.WorldPosition{
             .tile_map_x = 0,
             .tile_map_y = 0,
-            .tile_x = 3,
-            .tile_y = 3,
+            .abs_tile_x = 3,
+            .abs_tile_y = 3,
             .tile_rel_x = 5.0,
             .tile_rel_y = 5.0,
         } };
         memory.is_initialized = true;
     }
 
-    const tile_map_count_x = 17;
-    const tile_map_count_y = 9;
-    var tiles00 = [tile_map_count_y][tile_map_count_x]u32{
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 },
-        [_]u32{ 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
-    };
-    var tiles01 = [tile_map_count_y][tile_map_count_x]u32{
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1 },
-        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0 },
-        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
-    };
-    var tiles10 = [tile_map_count_y][tile_map_count_x]u32{
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
-        [_]u32{ 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1 },
-        [_]u32{ 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
-    };
-    var tiles11 = [tile_map_count_y][tile_map_count_x]u32{
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
-    };
-    var tile_maps: [2][2]shared.TileMap = .{[1]shared.TileMap{shared.TileMap{
-        .tiles = undefined,
-    }} ** 2} ** 2;
+    // Create an empty chunk.
+    var temp_tiles: [256][256]u32 = .{[1]u32{0} ** 256} ** 256;
 
-    tile_maps[0][0].tiles = @ptrCast(&tiles00);
-    tile_maps[0][1].tiles = @ptrCast(&tiles10);
-    tile_maps[1][0].tiles = @ptrCast(&tiles01);
-    tile_maps[1][1].tiles = @ptrCast(&tiles11);
+    // Build our example section.
+    const tile_map_count_x = 34;
+    const tile_map_count_y = 18;
+    const map = [tile_map_count_y][tile_map_count_x]u32{
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        [_]u32{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
+    };
 
+    // Transfer our example section into the chunk.
+    for (map, 0..) |row, row_index| {
+        for (row, 0..) |col, col_index| {
+            temp_tiles[row_index][col_index] = col;
+        }
+    }
+
+    var tile_chunk1 = shared.TileChunk{
+        .tiles = @ptrCast(&temp_tiles),
+    };
     var world = shared.World{
+        // 256x256 tile chunks.
+        .chunk_shift = 8,
+        .chunk_mask = 0xFF,
+        .chunk_dim = 256,
+
         .tile_side_in_meters = 1.4,
         .tile_side_in_pixels = 60,
         .meters_to_pixels = 0,
 
-        .tile_map_count_x = 2,
-        .tile_map_count_y = 2,
-        .lower_left_x = 0,
-        .lower_left_y = @as(f32, @floatFromInt(buffer.height)),
-        .tile_count_x = tile_map_count_x,
-        .tile_count_y = tile_map_count_y,
-        .tile_maps = @ptrCast(&tile_maps),
+        .tile_chunk_count_x = 1,
+        .tile_chunk_count_y = 1,
+        .tile_chunks = @ptrCast(&tile_chunk1),
     };
-    world.lower_left_x = -@as(f32, @floatFromInt(world.tile_side_in_pixels)) / 2.0;
     world.meters_to_pixels = @as(f32, @floatFromInt(world.tile_side_in_pixels)) / world.tile_side_in_meters;
 
-    const opt_tile_map = getTileMap(&world, state.player_position.tile_map_x, state.player_position.tile_map_y);
-    std.debug.assert(opt_tile_map != null);
+    const opt_tile_chunk = getTileChunk(&world, state.player_position.tile_map_x, state.player_position.tile_map_y);
+    std.debug.assert(opt_tile_chunk != null);
 
     const player_movement_speed: f32 = 2;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
@@ -234,33 +225,38 @@ pub export fn updateAndRender(
         player_tile_color = shared.Color{ .r = 0.25, .g = 0.25, .b = 0.25 };
     }
 
-    if (opt_tile_map) |tile_map| {
-        var row_index: i32 = 0;
-        var column_index: i32 = 0;
+    const center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
+    const center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
 
-        while (row_index < world.tile_count_y) : (row_index += 1) {
-            column_index = 0;
+    var rel_row: i32 = -10;
+    var rel_col: i32 = 0;
 
-            while (column_index < world.tile_count_x) : (column_index += 1) {
-                const tile = getTileValueUnchecked(&world, tile_map, column_index, row_index);
-                const min_x = world.lower_left_x + @as(f32, @floatFromInt(column_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-                const min_y = world.lower_left_y - @as(f32, @floatFromInt(row_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-                const max_x = min_x + @as(f32, @floatFromInt(world.tile_side_in_pixels));
-                const max_y = min_y - @as(f32, @floatFromInt(world.tile_side_in_pixels));
-                const is_player_tile = (column_index == state.player_position.tile_x and row_index == state.player_position.tile_y);
-                const tile_color = if (is_player_tile) player_tile_color else if (tile == 1) wall_color else background_color;
+    while (rel_row < 10) : (rel_row += 1) {
+        rel_col = -20;
 
-                drawRectangle(buffer, min_x, max_y, max_x, min_y, tile_color);
-            }
+        while (rel_col < 20) : (rel_col += 1) {
+            var col: u32 = state.player_position.abs_tile_x;
+            var row: u32 = state.player_position.abs_tile_y;
+            if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
+            if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
+
+            const tile = getChunkTileValue(&world, col, row);
+            const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
+            const tile_color = if (is_player_tile) player_tile_color else if (tile == 1) wall_color else background_color;
+
+            const min_x = center_x + @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const min_y = center_y - @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const max_x = min_x + @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const max_y = min_y - @as(f32, @floatFromInt(world.tile_side_in_pixels));
+
+            drawRectangle(buffer, min_x, max_y, max_x, min_y, tile_color);
         }
     }
 
     // Draw player.
-    const player_left: f32 = world.lower_left_x +
-        @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(state.player_position.tile_x)) +
+    const player_left: f32 = center_x +
         world.meters_to_pixels * state.player_position.tile_rel_x - (0.5 * world.meters_to_pixels * player_width);
-    const player_top: f32 = world.lower_left_y -
-        @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(state.player_position.tile_y)) -
+    const player_top: f32 = center_y -
         world.meters_to_pixels * state.player_position.tile_rel_y - world.meters_to_pixels * player_height;
     drawRectangle(
         buffer,
