@@ -33,55 +33,44 @@ fn isTileMapPointEmpty(world: *shared.World, tile_map: *shared.TileMap, test_x: 
     return is_empty;
 }
 
-fn getCanonicalPosition(world: *shared.World, position: shared.RawPosition) shared.CanonicalPosition {
-    const x: f32 = position.x - world.upper_left_x;
-    const y: f32 = position.y - world.upper_left_y;
-    const tile_x = intrinsics.floorReal32ToInt32(x / @as(f32, @floatFromInt(world.tile_side_in_pixels)));
-    const tile_y = intrinsics.floorReal32ToInt32(y / @as(f32, @floatFromInt(world.tile_side_in_pixels)));
+inline fn recannonicalizeCoordinate(world: *shared.World, tile_count: i32, tile_map: *i32, tile: *i32, tile_rel: *f32) void {
+    // Calculate new tile position pased on the tile relative position.
+    // TODO: This can end up rounding back on the tile we just came from.
+    // TODO: Add bounds checking to prevent wrapping.
+    const offset = intrinsics.floorReal32ToInt32(tile_rel.* / world.tile_side_in_meters);
+    tile.* += offset;
+    tile_rel.* -= @as(f32, @floatFromInt(offset)) * world.tile_side_in_meters;
 
-    var result = shared.CanonicalPosition{
-        .tile_map_x = position.tile_map_x,
-        .tile_map_y = position.tile_map_y,
-        .tile_x = tile_x,
-        .tile_y = tile_y,
-        .tile_rel_x = x - (@as(f32, @floatFromInt(tile_x)) * @as(f32, @floatFromInt(world.tile_side_in_pixels))),
-        .tile_rel_y = y - (@as(f32, @floatFromInt(tile_y)) * @as(f32, @floatFromInt(world.tile_side_in_pixels))),
-    };
-
-    // Check that the relative position is within the tile size.
-    std.debug.assert(result.tile_rel_x >= 0);
-    std.debug.assert(result.tile_rel_y >= 0);
-    std.debug.assert(result.tile_rel_x < @as(f32, @floatFromInt(world.tile_side_in_pixels)));
-    std.debug.assert(result.tile_rel_y < @as(f32, @floatFromInt(world.tile_side_in_pixels)));
+    // Check that the new relative position is within the tile size.
+    std.debug.assert(tile_rel.* >= 0);
+    std.debug.assert(tile_rel.* < world.tile_side_in_meters);
 
     // Go to the adjescent tile map if the position is outside the current tile map.
-    if (result.tile_x < 0) {
-        result.tile_x = world.tile_count_x + result.tile_x;
-        result.tile_map_x -= 1;
+    if (tile.* < 0) {
+        tile.* = tile_count + tile.*;
+        tile_map.* -= 1;
     }
-    if (result.tile_x >= world.tile_count_x) {
-        result.tile_x = result.tile_x - world.tile_count_x;
-        result.tile_map_x += 1;
+    if (tile.* >= tile_count) {
+        tile.* = tile.* - tile_count;
+        tile_map.* += 1;
     }
-    if (result.tile_y < 0) {
-        result.tile_y = world.tile_count_y + result.tile_y;
-        result.tile_map_y -= 1;
-    }
-    if (result.tile_y >= world.tile_count_y) {
-        result.tile_y = result.tile_y - world.tile_count_y;
-        result.tile_map_y += 1;
-    }
+}
+
+fn recanonicalizePosition(world: *shared.World, position: shared.CanonicalPosition) shared.CanonicalPosition {
+    var result = position;
+
+    recannonicalizeCoordinate(world, world.tile_count_x, &result.tile_map_x, &result.tile_x, &result.tile_rel_x);
+    recannonicalizeCoordinate(world, world.tile_count_y, &result.tile_map_y, &result.tile_y, &result.tile_rel_y);
 
     return result;
 }
 
-fn isWorldPointEmpty(world: *shared.World, test_position: shared.RawPosition) bool {
+fn isWorldPointEmpty(world: *shared.World, test_position: shared.CanonicalPosition) bool {
     var is_empty = false;
 
-    const canonical_position = getCanonicalPosition(world, test_position);
-    const opt_tile_map = getTileMap(world, canonical_position.tile_map_x, canonical_position.tile_map_y);
+    const opt_tile_map = getTileMap(world, test_position.tile_map_x, test_position.tile_map_y);
     if (opt_tile_map) |tile_map| {
-        is_empty = isTileMapPointEmpty(world, tile_map, canonical_position.tile_x, canonical_position.tile_y);
+        is_empty = isTileMapPointEmpty(world, tile_map, test_position.tile_x, test_position.tile_y);
     }
 
     return is_empty;
@@ -102,12 +91,14 @@ pub export fn updateAndRender(
     const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
 
     if (!memory.is_initialized) {
-        state.* = shared.State{
-            .player_x = 150,
-            .player_y = 150,
-            .player_tile_map_x = 0,
-            .player_tile_map_y = 0,
-        };
+        state.* = shared.State{ .player_position = shared.CanonicalPosition{
+            .tile_map_x = 0,
+            .tile_map_y = 0,
+            .tile_x = 3,
+            .tile_y = 3,
+            .tile_rel_x = 5.0,
+            .tile_rel_y = 5.0,
+        } };
         memory.is_initialized = true;
     }
 
@@ -169,6 +160,7 @@ pub export fn updateAndRender(
     var world = shared.World{
         .tile_side_in_meters = 1.4,
         .tile_side_in_pixels = 60,
+        .meters_to_pixels = 0,
 
         .tile_map_count_x = 2,
         .tile_map_count_y = 2,
@@ -179,14 +171,15 @@ pub export fn updateAndRender(
         .tile_maps = @ptrCast(&tile_maps),
     };
     world.upper_left_x = -@as(f32, @floatFromInt(world.tile_side_in_pixels)) / 2.0;
+    world.meters_to_pixels = @as(f32, @floatFromInt(world.tile_side_in_pixels)) / world.tile_side_in_meters;
 
-    const opt_tile_map = getTileMap(&world, state.player_tile_map_x, state.player_tile_map_y);
+    const opt_tile_map = getTileMap(&world, state.player_position.tile_map_x, state.player_position.tile_map_y);
     std.debug.assert(opt_tile_map != null);
 
-    const player_movement_speed: f32 = 128;
+    const player_movement_speed: f32 = 2;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    const player_width: f32 = 0.75 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-    const player_height: f32 = @floatFromInt(world.tile_side_in_pixels);
+    const player_height: f32 = 1.4;
+    const player_width: f32 = 0.75 * player_height;
 
     for (&input.controllers) |controller| {
         if (controller.is_analog) {} else {
@@ -206,34 +199,24 @@ pub export fn updateAndRender(
                 player_x_delta = 1;
             }
 
-            const new_player_x = state.player_x + player_movement_speed * player_x_delta * input.frame_delta_time;
-            const new_player_y = state.player_y + player_movement_speed * player_y_delta * input.frame_delta_time;
+            var new_player_position = state.player_position;
+            new_player_position.tile_rel_x += player_movement_speed * player_x_delta * input.frame_delta_time;
+            new_player_position.tile_rel_y += player_movement_speed * player_y_delta * input.frame_delta_time;
+            new_player_position = recanonicalizePosition(&world, new_player_position);
 
-            const player_position = shared.RawPosition{
-                .x = new_player_x,
-                .y = new_player_y,
-                .tile_map_x = state.player_tile_map_x,
-                .tile_map_y = state.player_tile_map_y,
-            };
-            var player_position_left = player_position;
-            player_position_left.x -= 0.5 * player_width;
-            var player_position_right = player_position;
-            player_position_right.x += 0.5 * player_width;
+            var player_position_left = new_player_position;
+            player_position_left.tile_rel_x -= 0.5 * player_width;
+            player_position_left = recanonicalizePosition(&world, player_position_left);
+
+            var player_position_right = new_player_position;
+            player_position_right.tile_rel_x += 0.5 * player_width;
+            player_position_right = recanonicalizePosition(&world, player_position_right);
 
             if (isWorldPointEmpty(&world, player_position_left) and
                 isWorldPointEmpty(&world, player_position_right) and
-                isWorldPointEmpty(&world, player_position))
+                isWorldPointEmpty(&world, new_player_position))
             {
-                const canonical_position = getCanonicalPosition(&world, player_position);
-                state.player_tile_map_x = canonical_position.tile_map_x;
-                state.player_tile_map_y = canonical_position.tile_map_y;
-
-                state.player_x = world.upper_left_x +
-                    @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(canonical_position.tile_x)) +
-                    canonical_position.tile_rel_x;
-                state.player_y = world.upper_left_y +
-                    @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(canonical_position.tile_y)) +
-                    canonical_position.tile_rel_y;
+                state.player_position = new_player_position;
             }
         }
     }
@@ -243,8 +226,13 @@ pub export fn updateAndRender(
     drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), clear_color);
 
     // Draw tile map.
-    const color1 = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
-    const color2 = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
+    const wall_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
+    const background_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
+
+    var player_tile_color = background_color;
+    if (shared.DEBUG) {
+        player_tile_color = shared.Color{ .r = 0.25, .g = 0.25, .b = 0.25 };
+    }
 
     if (opt_tile_map) |tile_map| {
         var row_index: i32 = 0;
@@ -259,21 +247,27 @@ pub export fn updateAndRender(
                 const min_y = world.upper_left_y + @as(f32, @floatFromInt(row_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
                 const max_x = min_x + @as(f32, @floatFromInt(world.tile_side_in_pixels));
                 const max_y = min_y + @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                const is_player_tile = (column_index == state.player_position.tile_x and row_index == state.player_position.tile_y);
+                const tile_color = if (is_player_tile) player_tile_color else if (tile == 1) wall_color else background_color;
 
-                drawRectangle(buffer, min_x, min_y, max_x, max_y, if (tile == 1) color1 else color2);
+                drawRectangle(buffer, min_x, min_y, max_x, max_y, tile_color);
             }
         }
     }
 
     // Draw player.
-    const player_left: f32 = state.player_x - (0.5 * player_width);
-    const player_top: f32 = state.player_y - player_height;
+    const player_left: f32 = world.upper_left_x +
+        @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(state.player_position.tile_x)) +
+        world.meters_to_pixels * state.player_position.tile_rel_x - (0.5 * world.meters_to_pixels * player_width);
+    const player_top: f32 = world.upper_left_y +
+        @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(state.player_position.tile_y)) +
+        world.meters_to_pixels * state.player_position.tile_rel_y - world.meters_to_pixels * player_height;
     drawRectangle(
         buffer,
         player_left,
         player_top,
-        player_left + player_width,
-        player_top + player_height,
+        player_left + world.meters_to_pixels * player_width,
+        player_top + world.meters_to_pixels * player_height,
         player_color,
     );
 }

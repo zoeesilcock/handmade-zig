@@ -115,40 +115,33 @@ pub const Memory = extern struct {
 
 // Game state.
 pub const State = struct {
-    player_x: f32,
-    player_y: f32,
-    player_tile_map_x: i32,
-    player_tile_map_y: i32,
+    player_position: CanonicalPosition,
 };
 
 pub const World = struct {
     tile_side_in_meters: f32,
     tile_side_in_pixels: i32,
+    meters_to_pixels: f32,
 
-    tile_map_count_x: i32,
-    tile_map_count_y: i32,
     upper_left_x: f32,
     upper_left_y: f32,
+
     tile_count_x: i32,
     tile_count_y: i32,
 
+    tile_map_count_x: i32,
+    tile_map_count_y: i32,
     tile_maps: [*]TileMap,
 };
 
 pub const CanonicalPosition = struct {
     tile_map_x: i32,
     tile_map_y: i32,
+
     tile_x: i32,
     tile_y: i32,
     tile_rel_x: f32,
     tile_rel_y: f32,
-};
-
-pub const RawPosition = struct {
-    tile_map_x: i32,
-    tile_map_y: i32,
-    x: f32,
-    y: f32,
 };
 
 pub const TileMap = struct {
