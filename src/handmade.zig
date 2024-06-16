@@ -164,13 +164,13 @@ pub export fn updateAndRender(
 
         .tile_map_count_x = 2,
         .tile_map_count_y = 2,
-        .upper_left_x = 0,
-        .upper_left_y = 0,
+        .lower_left_x = 0,
+        .lower_left_y = @as(f32, @floatFromInt(buffer.height)),
         .tile_count_x = tile_map_count_x,
         .tile_count_y = tile_map_count_y,
         .tile_maps = @ptrCast(&tile_maps),
     };
-    world.upper_left_x = -@as(f32, @floatFromInt(world.tile_side_in_pixels)) / 2.0;
+    world.lower_left_x = -@as(f32, @floatFromInt(world.tile_side_in_pixels)) / 2.0;
     world.meters_to_pixels = @as(f32, @floatFromInt(world.tile_side_in_pixels)) / world.tile_side_in_meters;
 
     const opt_tile_map = getTileMap(&world, state.player_position.tile_map_x, state.player_position.tile_map_y);
@@ -187,10 +187,10 @@ pub export fn updateAndRender(
             var player_y_delta: f32 = 0;
 
             if (controller.move_up.ended_down) {
-                player_y_delta = -1;
+                player_y_delta = 1;
             }
             if (controller.move_down.ended_down) {
-                player_y_delta = 1;
+                player_y_delta = -1;
             }
             if (controller.move_left.ended_down) {
                 player_x_delta = -1;
@@ -243,24 +243,24 @@ pub export fn updateAndRender(
 
             while (column_index < world.tile_count_x) : (column_index += 1) {
                 const tile = getTileValueUnchecked(&world, tile_map, column_index, row_index);
-                const min_x = world.upper_left_x + @as(f32, @floatFromInt(column_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-                const min_y = world.upper_left_y + @as(f32, @floatFromInt(row_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                const min_x = world.lower_left_x + @as(f32, @floatFromInt(column_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                const min_y = world.lower_left_y - @as(f32, @floatFromInt(row_index)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
                 const max_x = min_x + @as(f32, @floatFromInt(world.tile_side_in_pixels));
-                const max_y = min_y + @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                const max_y = min_y - @as(f32, @floatFromInt(world.tile_side_in_pixels));
                 const is_player_tile = (column_index == state.player_position.tile_x and row_index == state.player_position.tile_y);
                 const tile_color = if (is_player_tile) player_tile_color else if (tile == 1) wall_color else background_color;
 
-                drawRectangle(buffer, min_x, min_y, max_x, max_y, tile_color);
+                drawRectangle(buffer, min_x, max_y, max_x, min_y, tile_color);
             }
         }
     }
 
     // Draw player.
-    const player_left: f32 = world.upper_left_x +
+    const player_left: f32 = world.lower_left_x +
         @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(state.player_position.tile_x)) +
         world.meters_to_pixels * state.player_position.tile_rel_x - (0.5 * world.meters_to_pixels * player_width);
-    const player_top: f32 = world.upper_left_y +
-        @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(state.player_position.tile_y)) +
+    const player_top: f32 = world.lower_left_y -
+        @as(f32, @floatFromInt(world.tile_side_in_pixels)) * @as(f32, @floatFromInt(state.player_position.tile_y)) -
         world.meters_to_pixels * state.player_position.tile_rel_y - world.meters_to_pixels * player_height;
     drawRectangle(
         buffer,

@@ -123,8 +123,8 @@ pub const World = struct {
     tile_side_in_pixels: i32,
     meters_to_pixels: f32,
 
-    upper_left_x: f32,
-    upper_left_y: f32,
+    lower_left_x: f32,
+    lower_left_y: f32,
 
     tile_count_x: i32,
     tile_count_y: i32,
