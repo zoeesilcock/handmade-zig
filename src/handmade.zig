@@ -56,7 +56,7 @@ inline fn recannonicalizeCoordinate(world: *shared.World, tile_count: i32, tile_
     }
 }
 
-fn recanonicalizePosition(world: *shared.World, position: shared.CanonicalPosition) shared.CanonicalPosition {
+fn recanonicalizePosition(world: *shared.World, position: shared.WorldPosition) shared.WorldPosition {
     var result = position;
 
     recannonicalizeCoordinate(world, world.tile_count_x, &result.tile_map_x, &result.tile_x, &result.tile_rel_x);
@@ -65,7 +65,7 @@ fn recanonicalizePosition(world: *shared.World, position: shared.CanonicalPositi
     return result;
 }
 
-fn isWorldPointEmpty(world: *shared.World, test_position: shared.CanonicalPosition) bool {
+fn isWorldPointEmpty(world: *shared.World, test_position: shared.WorldPosition) bool {
     var is_empty = false;
 
     const opt_tile_map = getTileMap(world, test_position.tile_map_x, test_position.tile_map_y);
@@ -91,7 +91,7 @@ pub export fn updateAndRender(
     const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
 
     if (!memory.is_initialized) {
-        state.* = shared.State{ .player_position = shared.CanonicalPosition{
+        state.* = shared.State{ .player_position = shared.WorldPosition{
             .tile_map_x = 0,
             .tile_map_y = 0,
             .tile_x = 3,

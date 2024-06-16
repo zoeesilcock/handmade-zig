@@ -115,7 +115,7 @@ pub const Memory = extern struct {
 
 // Game state.
 pub const State = struct {
-    player_position: CanonicalPosition,
+    player_position: WorldPosition,
 };
 
 pub const World = struct {
@@ -134,7 +134,7 @@ pub const World = struct {
     tile_maps: [*]TileMap,
 };
 
-pub const CanonicalPosition = struct {
+pub const WorldPosition = struct {
     tile_map_x: i32,
     tile_map_y: i32,
 
