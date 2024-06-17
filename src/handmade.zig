@@ -35,7 +35,7 @@ inline fn recannonicalizeCoordinate(world: *shared.World, tile: *u32, tile_rel: 
     // Calculate new tile position pased on the tile relative position.
     // TODO: This can end up rounding back on the tile we just came from.
     // TODO: Add bounds checking to prevent wrapping.
-    const offset = intrinsics.floorReal32ToInt32(tile_rel.* / world.tile_side_in_meters);
+    const offset = intrinsics.roundReal32ToInt32(tile_rel.* / world.tile_side_in_meters);
     if (offset >= 0) {
         tile.* +%= @as(u32, @intCast(offset));
     } else {
@@ -44,8 +44,8 @@ inline fn recannonicalizeCoordinate(world: *shared.World, tile: *u32, tile_rel: 
     tile_rel.* -= @as(f32, @floatFromInt(offset)) * world.tile_side_in_meters;
 
     // Check that the new relative position is within the tile size.
-    std.debug.assert(tile_rel.* >= 0);
-    std.debug.assert(tile_rel.* < world.tile_side_in_meters);
+    std.debug.assert(tile_rel.* >= -0.5 * world.tile_side_in_meters);
+    std.debug.assert(tile_rel.* <= 0.5 * world.tile_side_in_meters);
 }
 
 fn recanonicalizePosition(world: *shared.World, position: shared.WorldPosition) shared.WorldPosition {
@@ -221,8 +221,8 @@ pub export fn updateAndRender(
         player_tile_color = shared.Color{ .r = 0.25, .g = 0.25, .b = 0.25 };
     }
 
-    const center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
-    const center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
+    const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
+    const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
 
     var rel_row: i32 = -10;
     var rel_col: i32 = 0;
@@ -240,18 +240,24 @@ pub export fn updateAndRender(
             const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
             const tile_color = if (is_player_tile) player_tile_color else if (tile == 1) wall_color else background_color;
 
-            const min_x = center_x - world.meters_to_pixels * state.player_position.tile_rel_x + @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-            const min_y = center_y + world.meters_to_pixels * state.player_position.tile_rel_y - @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-            const max_x = min_x + @as(f32, @floatFromInt(world.tile_side_in_pixels));
-            const max_y = min_y - @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const center_x = screen_center_x -
+                world.meters_to_pixels * state.player_position.tile_rel_x +
+                @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const center_y = screen_center_y +
+                world.meters_to_pixels * state.player_position.tile_rel_y -
+                @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const min_x = center_x - 0.5 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const min_y = center_y - 0.5 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const max_x = center_x + 0.5 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const max_y = center_y + 0.5 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
 
-            drawRectangle(buffer, min_x, max_y, max_x, min_y, tile_color);
+            drawRectangle(buffer, min_x, min_y, max_x, max_y, tile_color);
         }
     }
 
     // Draw player.
-    const player_left: f32 = center_x - (0.5 * world.meters_to_pixels * player_width);
-    const player_top: f32 = center_y - world.meters_to_pixels * player_height;
+    const player_left: f32 = screen_center_x - (0.5 * world.meters_to_pixels * player_width);
+    const player_top: f32 = screen_center_y - world.meters_to_pixels * player_height;
     drawRectangle(
         buffer,
         player_left,

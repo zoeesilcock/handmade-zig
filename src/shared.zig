@@ -146,6 +146,7 @@ pub const WorldPosition = struct {
     abs_tile_x: u32,
     abs_tile_y: u32,
 
+    // Position relative to the center of the current tile.
     tile_rel_y: f32,
     tile_rel_x: f32,
 };
