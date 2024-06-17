@@ -1,89 +1,7 @@
 const shared = @import("shared.zig");
+const tile = @import("tile.zig");
 const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
-
-fn getTileChunk(world: *shared.World, tile_map_x: i32, tile_map_y: i32) ?*shared.TileChunk {
-    var tile_chunk: ?*shared.TileChunk = null;
-
-    if ((tile_map_x >= 0) and (tile_map_x < world.tile_chunk_count_x) and
-        (tile_map_y >= 0) and (tile_map_y < world.tile_chunk_count_y))
-    {
-        tile_chunk = &world.tile_chunks[@intCast(tile_map_y * world.tile_chunk_count_x + tile_map_x)];
-    }
-
-    return tile_chunk;
-}
-
-fn getTileValueUnchecked(world: *shared.World, tile_chunk: *shared.TileChunk, tile_x: u32, tile_y: u32) u32 {
-    std.debug.assert((tile_x >= 0) and (tile_x < world.chunk_dim) and
-        (tile_y >= 0) and (tile_y < world.chunk_dim));
-
-    return tile_chunk.tiles[@intCast(tile_y * world.chunk_dim + tile_x)];
-}
-
-fn getTileValue(world: *shared.World, opt_tile_chunk: ?*shared.TileChunk, test_x: u32, test_y: u32) u32 {
-    var value: u32 = 0;
-
-    if (opt_tile_chunk) |tile_chunk| {
-        value = getTileValueUnchecked(world, tile_chunk, test_x, test_y);
-    }
-
-    return value;
-}
-
-inline fn recannonicalizeCoordinate(world: *shared.World, tile: *u32, tile_rel: *f32) void {
-    // Calculate new tile position pased on the tile relative position.
-    // TODO: This can end up rounding back on the tile we just came from.
-    // TODO: Add bounds checking to prevent wrapping.
-    const offset = intrinsics.roundReal32ToInt32(tile_rel.* / world.tile_side_in_meters);
-    if (offset >= 0) {
-        tile.* +%= @as(u32, @intCast(offset));
-    } else {
-        tile.* -%= @as(u32, @intCast(@abs(offset)));
-    }
-    tile_rel.* -= @as(f32, @floatFromInt(offset)) * world.tile_side_in_meters;
-
-    // Check that the new relative position is within the tile size.
-    std.debug.assert(tile_rel.* >= -0.5 * world.tile_side_in_meters);
-    std.debug.assert(tile_rel.* <= 0.5 * world.tile_side_in_meters);
-}
-
-fn recanonicalizePosition(world: *shared.World, position: shared.WorldPosition) shared.WorldPosition {
-    var result = position;
-
-    recannonicalizeCoordinate(world, &result.abs_tile_x, &result.tile_rel_x);
-    recannonicalizeCoordinate(world, &result.abs_tile_y, &result.tile_rel_y);
-
-    return result;
-}
-
-inline fn getChunkPositionFor(world: *shared.World, abs_tile_x: u32, abs_tile_y: u32) shared.TileChunkPosition {
-    return shared.TileChunkPosition{
-        .tile_chunk_x = abs_tile_x >> @as(u5, @intCast(world.chunk_shift)),
-        .tile_chunk_y = abs_tile_y >> @as(u5, @intCast(world.chunk_shift)),
-        .rel_tile_x = abs_tile_x & world.chunk_mask,
-        .rel_tile_y = abs_tile_y &  world.chunk_mask,
-    };
-}
-
-fn getChunkTileValue(world: *shared.World, abs_tile_x: u32, abs_tile_y: u32) u32 {
-    var value: u32 = 0;
-
-    const chunk_position = getChunkPositionFor(world, abs_tile_x, abs_tile_y);
-    const opt_tile_chunk = getTileChunk(world, @intCast(chunk_position.tile_chunk_x), @intCast(chunk_position.tile_chunk_y));
-    value = getTileValue(world, opt_tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y);
-
-    return value;
-}
-
-fn isWorldPointEmpty(world: *shared.World, test_position: shared.WorldPosition) bool {
-    var is_empty = false;
-
-    const tile_chunk_value = getChunkTileValue(world, test_position.abs_tile_x, test_position.abs_tile_y);
-    is_empty = (tile_chunk_value == 0);
-
-    return is_empty;
-}
 
 pub export fn updateAndRender(
     thread: *shared.ThreadContext,
@@ -100,7 +18,7 @@ pub export fn updateAndRender(
     const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
 
     if (!memory.is_initialized) {
-        state.* = shared.State{ .player_position = shared.WorldPosition{
+        state.* = shared.State{ .player_position = tile.TileMapPosition{
             .abs_tile_x = 3,
             .abs_tile_y = 3,
             .tile_rel_x = 5.0,
@@ -143,10 +61,10 @@ pub export fn updateAndRender(
         }
     }
 
-    var tile_chunk1 = shared.TileChunk{
+    var tile_chunk1 = tile.TileChunk{
         .tiles = @ptrCast(&temp_tiles),
     };
-    var world = shared.World{
+    var tile_map = tile.TileMap{
         // 256x256 tile chunks.
         .chunk_dim = 256,
         .chunk_shift = 8,
@@ -160,8 +78,8 @@ pub export fn updateAndRender(
         .tile_chunk_count_y = 1,
         .tile_chunks = @ptrCast(&tile_chunk1),
     };
-    world.chunk_mask = (@as(u32, 1) << @as(u5, @intCast(world.chunk_shift))) - 1;
-    world.meters_to_pixels = @as(f32, @floatFromInt(world.tile_side_in_pixels)) / world.tile_side_in_meters;
+    tile_map.chunk_mask = (@as(u32, 1) << @as(u5, @intCast(tile_map.chunk_shift))) - 1;
+    tile_map.meters_to_pixels = @as(f32, @floatFromInt(tile_map.tile_side_in_pixels)) / tile_map.tile_side_in_meters;
 
     var player_movement_speed: f32 = 2.0;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
@@ -193,19 +111,19 @@ pub export fn updateAndRender(
             var new_player_position = state.player_position;
             new_player_position.tile_rel_x += player_movement_speed * player_x_delta * input.frame_delta_time;
             new_player_position.tile_rel_y += player_movement_speed * player_y_delta * input.frame_delta_time;
-            new_player_position = recanonicalizePosition(&world, new_player_position);
+            new_player_position = tile.recanonicalizePosition(&tile_map, new_player_position);
 
             var player_position_left = new_player_position;
             player_position_left.tile_rel_x -= 0.5 * player_width;
-            player_position_left = recanonicalizePosition(&world, player_position_left);
+            player_position_left = tile.recanonicalizePosition(&tile_map, player_position_left);
 
             var player_position_right = new_player_position;
             player_position_right.tile_rel_x += 0.5 * player_width;
-            player_position_right = recanonicalizePosition(&world, player_position_right);
+            player_position_right = tile.recanonicalizePosition(&tile_map, player_position_right);
 
-            if (isWorldPointEmpty(&world, player_position_left) and
-                isWorldPointEmpty(&world, player_position_right) and
-                isWorldPointEmpty(&world, new_player_position))
+            if (tile.isTileMapPointEmpty(&tile_map, player_position_left) and
+                tile.isTileMapPointEmpty(&tile_map, player_position_right) and
+                tile.isTileMapPointEmpty(&tile_map, new_player_position))
             {
                 state.player_position = new_player_position;
             }
@@ -240,34 +158,34 @@ pub export fn updateAndRender(
             if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
             if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
 
-            const tile = getChunkTileValue(&world, col, row);
+            const tile_value = tile.getTileValueFromPosition(&tile_map, col, row);
             const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
-            const tile_color = if (is_player_tile) player_tile_color else if (tile == 1) wall_color else background_color;
+            const tile_color = if (is_player_tile) player_tile_color else if (tile_value == 1) wall_color else background_color;
 
             const center_x = screen_center_x -
-                world.meters_to_pixels * state.player_position.tile_rel_x +
-                @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                tile_map.meters_to_pixels * state.player_position.tile_rel_x +
+                @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
             const center_y = screen_center_y +
-                world.meters_to_pixels * state.player_position.tile_rel_y -
-                @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-            const min_x = center_x - 0.5 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-            const min_y = center_y - 0.5 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-            const max_x = center_x + 0.5 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-            const max_y = center_y + 0.5 * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+                tile_map.meters_to_pixels * state.player_position.tile_rel_y -
+                @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+            const min_x = center_x - 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+            const min_y = center_y - 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+            const max_x = center_x + 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+            const max_y = center_y + 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
 
             drawRectangle(buffer, min_x, min_y, max_x, max_y, tile_color);
         }
     }
 
     // Draw player.
-    const player_left: f32 = screen_center_x - (0.5 * world.meters_to_pixels * player_width);
-    const player_top: f32 = screen_center_y - world.meters_to_pixels * player_height;
+    const player_left: f32 = screen_center_x - (0.5 * tile_map.meters_to_pixels * player_width);
+    const player_top: f32 = screen_center_y - tile_map.meters_to_pixels * player_height;
     drawRectangle(
         buffer,
         player_left,
         player_top,
-        player_left + world.meters_to_pixels * player_width,
-        player_top + world.meters_to_pixels * player_height,
+        player_left + tile_map.meters_to_pixels * player_width,
+        player_top + tile_map.meters_to_pixels * player_height,
         player_color,
     );
 }
