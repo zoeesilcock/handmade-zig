@@ -106,6 +106,9 @@ pub const ControllerButtonState = extern struct {
     half_transitions: u8 = 0,
 };
 
+// Memory.
+pub const MemoryIndex = usize;
+
 pub const Memory = extern struct {
     is_initialized: bool,
     permanent_storage_size: u64,
@@ -114,8 +117,17 @@ pub const Memory = extern struct {
     transient_storage: ?*anyopaque,
 };
 
+pub const MemoryArena = struct {
+    size: MemoryIndex,
+    base: [*]u8,
+    used: MemoryIndex,
+};
+
 // Game state.
+
 pub const State = struct {
+    world_arena: MemoryArena = undefined,
+    world: *World = undefined,
     player_position: tile.TileMapPosition,
 };
 

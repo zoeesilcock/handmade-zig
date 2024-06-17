@@ -10,7 +10,7 @@ const TileChunkPosition = struct {
 };
 
 pub const TileChunk = struct {
-    tiles: [*]const u32,
+    tiles: [*]u32 = undefined,
 };
 
 pub const TileMap = struct {
@@ -22,9 +22,9 @@ pub const TileMap = struct {
     tile_side_in_pixels: i32,
     meters_to_pixels: f32,
 
-    tile_chunk_count_x: i32,
-    tile_chunk_count_y: i32,
-    tile_chunks: [*]TileChunk,
+    tile_chunk_count_x: u32,
+    tile_chunk_count_y: u32,
+    tile_chunks: [*]TileChunk = undefined,
 };
 
 pub const TileMapPosition = struct {
@@ -65,7 +65,7 @@ pub fn recanonicalizePosition(tile_map: *TileMap, position: TileMapPosition) Til
     return result;
 }
 
-inline fn getTileChunk(tile_map: *TileMap, tile_map_x: i32, tile_map_y: i32) ?*TileChunk {
+inline fn getTileChunk(tile_map: *TileMap, tile_map_x: u32, tile_map_y: u32) ?*TileChunk {
     var tile_chunk: ?*TileChunk = null;
 
     if ((tile_map_x >= 0) and (tile_map_x < tile_map.tile_chunk_count_x) and
@@ -84,7 +84,14 @@ inline fn getTileValueUnchecked(tile_map: *TileMap, tile_chunk: *TileChunk, tile
     return tile_chunk.tiles[@intCast(tile_y * tile_map.chunk_dim + tile_x)];
 }
 
-pub inline fn getTileValue(tile_map: *TileMap, opt_tile_chunk: ?*TileChunk, test_x: u32, test_y: u32) u32 {
+inline fn setTileValueUnchecked(tile_map: *TileMap, tile_chunk: *TileChunk, tile_x: u32, tile_y: u32, value: u32) void {
+    std.debug.assert((tile_x >= 0) and (tile_x < tile_map.chunk_dim) and
+        (tile_y >= 0) and (tile_y < tile_map.chunk_dim));
+
+    tile_chunk.tiles[@intCast(tile_y * tile_map.chunk_dim + tile_x)] = value;
+}
+
+fn getTileValue(tile_map: *TileMap, opt_tile_chunk: ?*TileChunk, test_x: u32, test_y: u32) u32 {
     var value: u32 = 0;
 
     if (opt_tile_chunk) |tile_chunk| {
@@ -94,12 +101,18 @@ pub inline fn getTileValue(tile_map: *TileMap, opt_tile_chunk: ?*TileChunk, test
     return value;
 }
 
+fn setTileValue(tile_map: *TileMap, opt_tile_chunk: ?*TileChunk, test_x: u32, test_y: u32, value: u32) void {
+    if (opt_tile_chunk) |tile_chunk| {
+        setTileValueUnchecked(tile_map, tile_chunk, test_x, test_y, value);
+    }
+}
+
 inline fn getChunkPositionFor(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32) TileChunkPosition {
     return TileChunkPosition{
         .tile_chunk_x = abs_tile_x >> @as(u5, @intCast(tile_map.chunk_shift)),
         .tile_chunk_y = abs_tile_y >> @as(u5, @intCast(tile_map.chunk_shift)),
         .rel_tile_x = abs_tile_x & tile_map.chunk_mask,
-        .rel_tile_y = abs_tile_y &  tile_map.chunk_mask,
+        .rel_tile_y = abs_tile_y & tile_map.chunk_mask,
     };
 }
 
@@ -107,10 +120,35 @@ pub fn getTileValueFromPosition(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y:
     var value: u32 = 0;
 
     const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y);
-    const opt_tile_chunk = getTileChunk(tile_map, @intCast(chunk_position.tile_chunk_x), @intCast(chunk_position.tile_chunk_y));
+    const opt_tile_chunk = getTileChunk(
+        tile_map,
+        @intCast(chunk_position.tile_chunk_x),
+        @intCast(chunk_position.tile_chunk_y),
+    );
     value = getTileValue(tile_map, opt_tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y);
 
     return value;
+}
+
+pub fn setTileValueByPosition(
+    world_arena: *shared.MemoryArena,
+    tile_map: *TileMap,
+    abs_tile_x: u32,
+    abs_tile_y: u32,
+    value: u32,
+) void {
+    _ = world_arena;
+
+    const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y);
+    const opt_tile_chunk = getTileChunk(
+        tile_map,
+        @intCast(chunk_position.tile_chunk_x),
+        @intCast(chunk_position.tile_chunk_y),
+    );
+
+    std.debug.assert(opt_tile_chunk != null);
+
+    setTileValue(tile_map, opt_tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y, value);
 }
 
 pub fn isTileMapPointEmpty(tile_map: *TileMap, test_position: TileMapPosition) bool {
@@ -121,4 +159,3 @@ pub fn isTileMapPointEmpty(tile_map: *TileMap, test_position: TileMapPosition) b
 
     return is_empty;
 }
-
