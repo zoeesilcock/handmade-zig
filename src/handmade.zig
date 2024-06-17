@@ -245,8 +245,8 @@ pub export fn updateAndRender(
             const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
             const tile_color = if (is_player_tile) player_tile_color else if (tile == 1) wall_color else background_color;
 
-            const min_x = center_x + @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
-            const min_y = center_y - @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const min_x = center_x - world.meters_to_pixels * state.player_position.tile_rel_x + @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
+            const min_y = center_y + world.meters_to_pixels * state.player_position.tile_rel_y - @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(world.tile_side_in_pixels));
             const max_x = min_x + @as(f32, @floatFromInt(world.tile_side_in_pixels));
             const max_y = min_y - @as(f32, @floatFromInt(world.tile_side_in_pixels));
 
@@ -255,10 +255,8 @@ pub export fn updateAndRender(
     }
 
     // Draw player.
-    const player_left: f32 = center_x +
-        world.meters_to_pixels * state.player_position.tile_rel_x - (0.5 * world.meters_to_pixels * player_width);
-    const player_top: f32 = center_y -
-        world.meters_to_pixels * state.player_position.tile_rel_y - world.meters_to_pixels * player_height;
+    const player_left: f32 = center_x - (0.5 * world.meters_to_pixels * player_width);
+    const player_top: f32 = center_y - world.meters_to_pixels * player_height;
     drawRectangle(
         buffer,
         player_left,
