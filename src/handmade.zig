@@ -163,7 +163,7 @@ pub export fn updateAndRender(
     world.chunk_mask = (@as(u32, 1) << @as(u5, @intCast(world.chunk_shift))) - 1;
     world.meters_to_pixels = @as(f32, @floatFromInt(world.tile_side_in_pixels)) / world.tile_side_in_meters;
 
-    const player_movement_speed: f32 = 2;
+    var player_movement_speed: f32 = 2.0;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
     const player_height: f32 = 1.4;
     const player_width: f32 = 0.75 * player_height;
@@ -184,6 +184,10 @@ pub export fn updateAndRender(
             }
             if (controller.move_right.ended_down) {
                 player_x_delta = 1;
+            }
+
+            if (controller.action_up.ended_down) {
+                player_movement_speed *= 5.0;
             }
 
             var new_player_position = state.player_position;
