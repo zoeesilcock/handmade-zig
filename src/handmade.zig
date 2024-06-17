@@ -150,9 +150,9 @@ pub export fn updateAndRender(
     };
     var world = shared.World{
         // 256x256 tile chunks.
-        .chunk_shift = 8,
-        .chunk_mask = 0xFF,
         .chunk_dim = 256,
+        .chunk_shift = 8,
+        .chunk_mask = undefined,
 
         .tile_side_in_meters = 1.4,
         .tile_side_in_pixels = 60,
@@ -162,6 +162,7 @@ pub export fn updateAndRender(
         .tile_chunk_count_y = 1,
         .tile_chunks = @ptrCast(&tile_chunk1),
     };
+    world.chunk_mask = (@as(u32, 1) << @as(u5, @intCast(world.chunk_shift))) - 1;
     world.meters_to_pixels = @as(f32, @floatFromInt(world.tile_side_in_pixels)) / world.tile_side_in_meters;
 
     const opt_tile_chunk = getTileChunk(&world, state.player_position.tile_map_x, state.player_position.tile_map_y);
