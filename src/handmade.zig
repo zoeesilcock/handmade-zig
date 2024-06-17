@@ -101,8 +101,6 @@ pub export fn updateAndRender(
 
     if (!memory.is_initialized) {
         state.* = shared.State{ .player_position = shared.WorldPosition{
-            .tile_map_x = 0,
-            .tile_map_y = 0,
             .abs_tile_x = 3,
             .abs_tile_y = 3,
             .tile_rel_x = 5.0,
@@ -164,9 +162,6 @@ pub export fn updateAndRender(
     };
     world.chunk_mask = (@as(u32, 1) << @as(u5, @intCast(world.chunk_shift))) - 1;
     world.meters_to_pixels = @as(f32, @floatFromInt(world.tile_side_in_pixels)) / world.tile_side_in_meters;
-
-    const opt_tile_chunk = getTileChunk(&world, state.player_position.tile_map_x, state.player_position.tile_map_y);
-    std.debug.assert(opt_tile_chunk != null);
 
     const player_movement_speed: f32 = 2;
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };

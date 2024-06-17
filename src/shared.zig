@@ -140,11 +140,12 @@ pub const TileChunkPosition = struct {
 };
 
 pub const WorldPosition = struct {
-    tile_map_x: i32,
-    tile_map_y: i32,
-
+    // Fixed point tile locations.
+    // The high bits are the tile chunk index.
+    // The low bits are the tile index in the chunk.
     abs_tile_x: u32,
     abs_tile_y: u32,
+
     tile_rel_y: f32,
     tile_rel_x: f32,
 };
