@@ -19,8 +19,6 @@ pub const TileMap = struct {
     chunk_dim: u32,
 
     tile_side_in_meters: f32,
-    tile_side_in_pixels: i32,
-    meters_to_pixels: f32,
 
     tile_chunk_count_x: u32,
     tile_chunk_count_y: u32,
