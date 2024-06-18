@@ -128,6 +128,10 @@ pub fn getTileValue(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32, abs_ti
     return value;
 }
 
+pub fn getTileValueFromPosition(tile_map: *TileMap, position: TileMapPosition) u32 {
+    return getTileValue(tile_map, position.abs_tile_x, position.abs_tile_y, position.abs_tile_z);
+}
+
 pub fn setTileValue(
     world_arena: *shared.MemoryArena,
     tile_map: *TileMap,
@@ -168,7 +172,13 @@ pub fn isTileMapPointEmpty(tile_map: *TileMap, test_position: TileMapPosition) b
         test_position.abs_tile_y,
         test_position.abs_tile_z,
     );
-    is_empty = (tile_chunk_value == 1);
+    is_empty = (tile_chunk_value == 1 or tile_chunk_value == 3 or tile_chunk_value == 4);
 
     return is_empty;
+}
+
+pub fn areOnSameTile(a: *TileMapPosition, b: *TileMapPosition) bool {
+    return a.abs_tile_x == b.abs_tile_x and
+        a.abs_tile_y == b.abs_tile_y and
+        a.abs_tile_z == b.abs_tile_z;
 }

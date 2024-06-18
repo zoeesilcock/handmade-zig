@@ -78,7 +78,10 @@ pub export fn updateAndRender(
 
             random_number_index += 1;
 
+            var created_z_door = false;
             if (random_choice == 2) {
+                created_z_door = true;
+
                 if (abs_tile_z == 0) {
                     door_up = true;
                 } else {
@@ -125,12 +128,9 @@ pub export fn updateAndRender(
             door_left = door_right;
             door_bottom = door_top;
 
-            if (door_up) {
-                door_down = true;
-                door_up = false;
-            } else if (door_down) {
-                door_up = true;
-                door_down = false;
+            if (created_z_door) {
+                door_up = !door_up;
+                door_down = !door_down;
             } else {
                 door_up = false;
                 door_down = false;
@@ -204,6 +204,16 @@ pub export fn updateAndRender(
                 tile.isTileMapPointEmpty(tile_map, player_position_right) and
                 tile.isTileMapPointEmpty(tile_map, new_player_position))
             {
+                if (!tile.areOnSameTile(&state.player_position, &new_player_position)) {
+                    const new_tile_value = tile.getTileValueFromPosition(tile_map, new_player_position);
+
+                    if (new_tile_value == 3) {
+                        new_player_position.abs_tile_z += 1;
+                    } else if (new_tile_value == 4) {
+                        new_player_position.abs_tile_z -= 1;
+                    }
+                }
+
                 state.player_position = new_player_position;
             }
         }
