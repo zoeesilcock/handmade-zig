@@ -7,7 +7,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/zig-out/bin/${workspaceFolderBasename}.exe",
             "args": [],
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/data",
             "preLaunchTask": "build",
             "console": "integratedTerminal"
         }

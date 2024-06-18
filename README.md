@@ -11,6 +11,9 @@ git submodule init
 git submodule update
 ```
 
+## Assets
+Graphical assets are not included as they are not created by me. They need to be added to the `data/` directory manually. We currently expect the version of assets found in this location of the pre-order data: `handmade_hero_legacy_art.zip/early_data/test`.
+
 ## Debugging
 The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [C/C++ extension](https://github.com/Microsoft/vscode-cpptools) in VS Code.
 

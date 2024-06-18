@@ -152,6 +152,7 @@ pub const State = struct {
     world_arena: MemoryArena = undefined,
     world: *World = undefined,
     player_position: tile.TileMapPosition,
+    pixel_pointer: [*]u32,
 };
 
 pub const World = struct {

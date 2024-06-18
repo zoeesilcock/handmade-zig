@@ -11,21 +11,21 @@ pub export fn updateAndRender(
     input: shared.GameInput,
     buffer: *shared.OffscreenBuffer,
 ) void {
-    _ = thread;
-    _ = platform;
-
     std.debug.assert(@sizeOf(shared.State) <= memory.permanent_storage_size);
 
     const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
 
     if (!memory.is_initialized) {
-        state.* = shared.State{ .player_position = tile.TileMapPosition{
-            .abs_tile_x = 1,
-            .abs_tile_y = 3,
-            .abs_tile_z = 0,
-            .offset_x = 5.0,
-            .offset_y = 5.0,
-        } };
+        state.* = shared.State{
+            .player_position = tile.TileMapPosition{
+                .abs_tile_x = 1,
+                .abs_tile_y = 3,
+                .abs_tile_z = 0,
+                .offset_x = 5.0,
+                .offset_y = 5.0,
+            },
+            .pixel_pointer = debugLoadBMP(thread, platform, "test/test_background.bmp"),
+        };
 
         shared.initializeArena(
             &state.world_arena,
@@ -291,6 +291,17 @@ pub export fn updateAndRender(
         player_top + meters_to_pixels * player_height,
         player_color,
     );
+
+    // Draw bitmap.
+    // var source: [*]u32 = @ptrCast(@alignCast(state.pixel_pointer));
+    // var dest: [*]u32 = @ptrCast(@alignCast(buffer.memory));
+    // for (0..@intCast(buffer.height)) |_| {
+    //     for (0..@intCast(buffer.width)) |_| {
+    //         dest[0] = source[0];
+    //         source += 1;
+    //         dest += 1;
+    //     }
+    // }
 }
 
 pub export fn getSoundSamples(
@@ -348,6 +359,32 @@ fn drawRectangle(
 
         row += buffer.pitch;
     }
+}
+
+const BitmapHeader = packed struct {
+    file_type: u16,
+    file_size: u32,
+    reserved1: u16,
+    reserved2: u16,
+    bitmap_offset: u32,
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bits_per_pxel: u16,
+};
+
+fn debugLoadBMP(thread: *shared.ThreadContext, platform: shared.Platform, file_name: [*:0]const u8) [*]u32 {
+    var result: [*]u32 = undefined;
+    const read_result = platform.debugReadEntireFile(thread, file_name);
+
+    if (read_result.content_size > 0) {
+        const header = @as(*BitmapHeader, @ptrCast(@alignCast(read_result.contents)));
+        const pixels: [*]u32 = @as([*]u32, @ptrCast(@alignCast(read_result.contents))) + header.bitmap_offset;
+        result = pixels;
+    }
+
+    return result;
 }
 
 fn renderWeirdGradient(buffer: *shared.OffscreenBuffer, x_offset: i32, y_offset: i32) void {
