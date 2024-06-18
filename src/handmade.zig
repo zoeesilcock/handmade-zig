@@ -72,7 +72,7 @@ pub export fn updateAndRender(
         tile_map.tile_chunk_count_y = tile_chunk_count_y;
 
         tile_map.tile_side_in_meters = 1.4;
-        tile_map.tile_side_in_pixels = 60;
+        tile_map.tile_side_in_pixels = 6;
         tile_map.meters_to_pixels = @as(f32, @floatFromInt(tile_map.tile_side_in_pixels)) / tile_map.tile_side_in_meters;
 
         tile_map.tile_chunks = pushArray(&state.world_arena, tile_chunk_count_x * tile_chunk_count_y, tile.TileChunk);
@@ -91,20 +91,20 @@ pub export fn updateAndRender(
                     for (0..tiles_per_width) |tile_x| {
                         const abs_tile_x: u32 = @as(u32, @intCast(screen_x)) * tiles_per_width + @as(u32, @intCast(tile_x));
                         const abs_tile_y: u32 = @as(u32, @intCast(screen_y)) * tiles_per_height + @as(u32, @intCast(tile_y));
-                        var tile_value: u32 = 0;
+                        var tile_value: u32 = 1;
 
                         if ((tile_x == 0) or (tile_x == (tiles_per_width - 1))) {
                             if (tile_y == (tiles_per_height / 2)) {
-                                tile_value = 0;
-                            } else {
                                 tile_value = 1;
+                            } else {
+                                tile_value = 2;
                             }
                         }
                         if ((tile_y == 0) or (tile_y == (tiles_per_height - 1))) {
                             if (tile_x == (tiles_per_width / 2)) {
-                                tile_value = 0;
-                            } else {
                                 tile_value = 1;
+                            } else {
+                                tile_value = 2;
                             }
                         }
 
@@ -169,7 +169,7 @@ pub export fn updateAndRender(
     }
 
     // Clear background.
-    const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 1.0 };
+    const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
     drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), clear_color);
 
     // Draw tile map.
@@ -184,34 +184,36 @@ pub export fn updateAndRender(
     const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
     const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
 
-    var rel_row: i32 = -10;
+    var rel_row: i32 = -100;
     var rel_col: i32 = 0;
 
-    while (rel_row < 10) : (rel_row += 1) {
-        rel_col = -20;
+    while (rel_row < 100) : (rel_row += 1) {
+        rel_col = -200;
 
-        while (rel_col < 20) : (rel_col += 1) {
+        while (rel_col < 200) : (rel_col += 1) {
             var col: u32 = state.player_position.abs_tile_x;
             var row: u32 = state.player_position.abs_tile_y;
             if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
             if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
-
             const tile_value = tile.getTileValueFromPosition(tile_map, col, row);
-            const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
-            const tile_color = if (is_player_tile) player_tile_color else if (tile_value == 1) wall_color else background_color;
 
-            const center_x = screen_center_x -
-                tile_map.meters_to_pixels * state.player_position.tile_rel_x +
-                @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
-            const center_y = screen_center_y +
-                tile_map.meters_to_pixels * state.player_position.tile_rel_y -
-                @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
-            const min_x = center_x - 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
-            const min_y = center_y - 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
-            const max_x = center_x + 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
-            const max_y = center_y + 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+            if (tile_value > 0) {
+                const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
+                const tile_color = if (is_player_tile) player_tile_color else if (tile_value == 2) wall_color else background_color;
 
-            drawRectangle(buffer, min_x, min_y, max_x, max_y, tile_color);
+                const center_x = screen_center_x -
+                    tile_map.meters_to_pixels * state.player_position.tile_rel_x +
+                    @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+                const center_y = screen_center_y +
+                    tile_map.meters_to_pixels * state.player_position.tile_rel_y -
+                    @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+                const min_x = center_x - 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+                const min_y = center_y - 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+                const max_x = center_x + 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+                const max_y = center_y + 0.5 * @as(f32, @floatFromInt(tile_map.tile_side_in_pixels));
+
+                drawRectangle(buffer, min_x, min_y, max_x, max_y, tile_color);
+            }
         }
     }
 

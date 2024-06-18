@@ -155,7 +155,7 @@ pub fn isTileMapPointEmpty(tile_map: *TileMap, test_position: TileMapPosition) b
     var is_empty = false;
 
     const tile_chunk_value = getTileValueFromPosition(tile_map, test_position.abs_tile_x, test_position.abs_tile_y);
-    is_empty = (tile_chunk_value == 0);
+    is_empty = (tile_chunk_value == 1);
 
     return is_empty;
 }
