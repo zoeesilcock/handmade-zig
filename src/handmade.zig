@@ -1,6 +1,7 @@
 const shared = @import("shared.zig");
 const tile = @import("tile.zig");
 const intrinsics = @import("intrinsics.zig");
+const random = @import("random.zig");
 const std = @import("std");
 
 fn initializeArena(arena: *shared.MemoryArena, size: shared.MemoryIndex, base: [*]u8) void {
@@ -78,39 +79,57 @@ pub export fn updateAndRender(
         tile_map.tile_chunks = pushArray(&state.world_arena, tile_chunk_count_x * tile_chunk_count_y, tile.TileChunk);
         for (0..@intCast(tile_chunk_count_y)) |y| {
             for (0..@intCast(tile_chunk_count_x)) |x| {
-                tile_map.tile_chunks[y * @as(usize, @intCast(tile_chunk_count_x)) + x].tiles =
-                    pushArray(&state.world_arena, chunk_dim * chunk_dim, u32);
+                const tile_count = chunk_dim * chunk_dim;
+                const tile_chunk_index = y * @as(usize, @intCast(tile_chunk_count_x)) + x;
+
+                tile_map.tile_chunks[tile_chunk_index].tiles =
+                    pushArray(&state.world_arena, tile_count, u32);
+
+                for (0..tile_count) |tile_index| {
+                    tile_map.tile_chunks[tile_chunk_index].tiles[tile_index] = 1;
+                }
             }
         }
 
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
-        for (0..32) |screen_y| {
-            for (0..32) |screen_x| {
-                for (0..tiles_per_height) |tile_y| {
-                    for (0..tiles_per_width) |tile_x| {
-                        const abs_tile_x: u32 = @as(u32, @intCast(screen_x)) * tiles_per_width + @as(u32, @intCast(tile_x));
-                        const abs_tile_y: u32 = @as(u32, @intCast(screen_y)) * tiles_per_height + @as(u32, @intCast(tile_y));
-                        var tile_value: u32 = 1;
+        var screen_x: u32 = 0;
+        var screen_y: u32 = 0;
+        var random_number_index: u32 = 0;
 
-                        if ((tile_x == 0) or (tile_x == (tiles_per_width - 1))) {
-                            if (tile_y == (tiles_per_height / 2)) {
-                                tile_value = 1;
-                            } else {
-                                tile_value = 2;
-                            }
-                        }
-                        if ((tile_y == 0) or (tile_y == (tiles_per_height - 1))) {
-                            if (tile_x == (tiles_per_width / 2)) {
-                                tile_value = 1;
-                            } else {
-                                tile_value = 2;
-                            }
-                        }
+        for (0..100) |_| {
+            for (0..tiles_per_height) |tile_y| {
+                for (0..tiles_per_width) |tile_x| {
+                    const abs_tile_x: u32 = @as(u32, @intCast(screen_x)) * tiles_per_width + @as(u32, @intCast(tile_x));
+                    const abs_tile_y: u32 = @as(u32, @intCast(screen_y)) * tiles_per_height + @as(u32, @intCast(tile_y));
+                    var tile_value: u32 = 1;
 
-                        tile.setTileValueByPosition(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, tile_value);
+                    if ((tile_x == 0) or (tile_x == (tiles_per_width - 1))) {
+                        if (tile_y == (tiles_per_height / 2)) {
+                            tile_value = 1;
+                        } else {
+                            tile_value = 2;
+                        }
                     }
+                    if ((tile_y == 0) or (tile_y == (tiles_per_height - 1))) {
+                        if (tile_x == (tiles_per_width / 2)) {
+                            tile_value = 1;
+                        } else {
+                            tile_value = 2;
+                        }
+                    }
+
+                    tile.setTileValueByPosition(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, tile_value);
                 }
+            }
+
+            std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
+            const random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
+            random_number_index += 1;
+            if (random_choice == 0) {
+                screen_x += 1;
+            } else {
+                screen_y += 1;
             }
         }
         memory.is_initialized = true;
