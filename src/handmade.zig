@@ -23,8 +23,8 @@ pub export fn updateAndRender(
             .abs_tile_x = 1,
             .abs_tile_y = 3,
             .abs_tile_z = 0,
-            .tile_rel_x = 5.0,
-            .tile_rel_y = 5.0,
+            .offset_x = 5.0,
+            .offset_y = 5.0,
         } };
 
         shared.initializeArena(
@@ -188,16 +188,16 @@ pub export fn updateAndRender(
             }
 
             var new_player_position = state.player_position;
-            new_player_position.tile_rel_x += player_movement_speed * player_x_delta * input.frame_delta_time;
-            new_player_position.tile_rel_y += player_movement_speed * player_y_delta * input.frame_delta_time;
+            new_player_position.offset_x += player_movement_speed * player_x_delta * input.frame_delta_time;
+            new_player_position.offset_y += player_movement_speed * player_y_delta * input.frame_delta_time;
             new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
 
             var player_position_left = new_player_position;
-            player_position_left.tile_rel_x -= 0.5 * player_width;
+            player_position_left.offset_x -= 0.5 * player_width;
             player_position_left = tile.recanonicalizePosition(tile_map, player_position_left);
 
             var player_position_right = new_player_position;
-            player_position_right.tile_rel_x += 0.5 * player_width;
+            player_position_right.offset_x += 0.5 * player_width;
             player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
 
             if (tile.isTileMapPointEmpty(tile_map, player_position_left) and
@@ -265,10 +265,10 @@ pub export fn updateAndRender(
                 }
 
                 const center_x = screen_center_x -
-                    meters_to_pixels * state.player_position.tile_rel_x +
+                    meters_to_pixels * state.player_position.offset_x +
                     @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_side_in_pixels));
                 const center_y = screen_center_y +
-                    meters_to_pixels * state.player_position.tile_rel_y -
+                    meters_to_pixels * state.player_position.offset_y -
                     @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_side_in_pixels));
                 const min_x = center_x - 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels));
                 const min_y = center_y - 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels));

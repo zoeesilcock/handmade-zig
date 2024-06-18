@@ -36,8 +36,8 @@ pub const TileMapPosition = struct {
     abs_tile_z: u32,
 
     // Position relative to the center of the current tile.
-    tile_rel_y: f32,
-    tile_rel_x: f32,
+    offset_x: f32,
+    offset_y: f32,
 };
 
 pub inline fn recannonicalizeCoordinate(tile_map: *TileMap, tile_abs: *u32, tile_rel: *f32) void {
@@ -60,8 +60,8 @@ pub inline fn recannonicalizeCoordinate(tile_map: *TileMap, tile_abs: *u32, tile
 pub fn recanonicalizePosition(tile_map: *TileMap, position: TileMapPosition) TileMapPosition {
     var result = position;
 
-    recannonicalizeCoordinate(tile_map, &result.abs_tile_x, &result.tile_rel_x);
-    recannonicalizeCoordinate(tile_map, &result.abs_tile_y, &result.tile_rel_y);
+    recannonicalizeCoordinate(tile_map, &result.abs_tile_x, &result.offset_x);
+    recannonicalizeCoordinate(tile_map, &result.abs_tile_y, &result.offset_y);
 
     return result;
 }
