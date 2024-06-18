@@ -49,7 +49,7 @@ pub export fn updateAndRender(
         tile_map.tile_chunk_count_y = tile_chunk_count_y;
 
         tile_map.tile_side_in_meters = 1.4;
-        tile_map.tile_side_in_pixels = 6;
+        tile_map.tile_side_in_pixels = 60;
         tile_map.meters_to_pixels = @as(f32, @floatFromInt(tile_map.tile_side_in_pixels)) / tile_map.tile_side_in_meters;
 
         tile_map.tile_chunks = shared.pushArray(&state.world_arena, tile_chunk_count_x * tile_chunk_count_y, tile.TileChunk);
@@ -59,36 +59,52 @@ pub export fn updateAndRender(
         var screen_x: u32 = 0;
         var screen_y: u32 = 0;
         var random_number_index: u32 = 0;
+        var door_left = false;
+        var door_right = false;
+        var door_top = false;
+        var door_bottom = false;
 
         for (0..100) |_| {
+            std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
+            const random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
+            random_number_index += 1;
+
+            if (random_choice == 0) {
+                door_right = true;
+            } else {
+                door_top = true;
+            }
+
             for (0..tiles_per_height) |tile_y| {
                 for (0..tiles_per_width) |tile_x| {
                     const abs_tile_x: u32 = @as(u32, @intCast(screen_x)) * tiles_per_width + @as(u32, @intCast(tile_x));
                     const abs_tile_y: u32 = @as(u32, @intCast(screen_y)) * tiles_per_height + @as(u32, @intCast(tile_y));
                     var tile_value: u32 = 1;
 
-                    if ((tile_x == 0) or (tile_x == (tiles_per_width - 1))) {
-                        if (tile_y == (tiles_per_height / 2)) {
-                            tile_value = 1;
-                        } else {
-                            tile_value = 2;
-                        }
+                    // Generate doors.
+                    if ((tile_x == 0) and (!door_left or (tile_y != (tiles_per_height / 2)))) {
+                        tile_value = 2;
                     }
-                    if ((tile_y == 0) or (tile_y == (tiles_per_height - 1))) {
-                        if (tile_x == (tiles_per_width / 2)) {
-                            tile_value = 1;
-                        } else {
-                            tile_value = 2;
-                        }
+                    if ((tile_x == (tiles_per_width - 1)) and (!door_right or (tile_y != (tiles_per_height / 2)))) {
+                        tile_value = 2;
+                    }
+                    if ((tile_y == 0) and (!door_bottom or (tile_x != (tiles_per_width / 2)))) {
+                        tile_value = 2;
+                    }
+                    if ((tile_y == (tiles_per_height - 1)) and (!door_top or (tile_x != (tiles_per_width / 2)))) {
+                        tile_value = 2;
                     }
 
                     tile.setTileValue(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, tile_value);
                 }
             }
 
-            std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
-            const random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
-            random_number_index += 1;
+            door_left = door_right;
+            door_bottom = door_top;
+
+            door_right = false;
+            door_top = false;
+
             if (random_choice == 0) {
                 screen_x += 1;
             } else {
@@ -166,13 +182,13 @@ pub export fn updateAndRender(
     const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
     const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
 
-    var rel_row: i32 = -100;
+    var rel_row: i32 = -10;
     var rel_col: i32 = 0;
 
-    while (rel_row < 100) : (rel_row += 1) {
-        rel_col = -200;
+    while (rel_row < 10) : (rel_row += 1) {
+        rel_col = -20;
 
-        while (rel_col < 200) : (rel_col += 1) {
+        while (rel_col < 20) : (rel_col += 1) {
             var col: u32 = state.player_position.abs_tile_x;
             var row: u32 = state.player_position.abs_tile_y;
             if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
