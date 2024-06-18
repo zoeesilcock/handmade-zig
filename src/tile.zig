@@ -5,6 +5,7 @@ const std = @import("std");
 const TileChunkPosition = struct {
     tile_chunk_x: u32,
     tile_chunk_y: u32,
+    tile_chunk_z: u32,
     rel_tile_x: u32,
     rel_tile_y: u32,
 };
@@ -22,6 +23,7 @@ pub const TileMap = struct {
 
     tile_chunk_count_x: u32,
     tile_chunk_count_y: u32,
+    tile_chunk_count_z: u32,
     tile_chunks: [*]TileChunk = undefined,
 };
 
@@ -31,6 +33,7 @@ pub const TileMapPosition = struct {
     // The low bits are the tile index in the chunk.
     abs_tile_x: u32,
     abs_tile_y: u32,
+    abs_tile_z: u32,
 
     // Position relative to the center of the current tile.
     tile_rel_y: f32,
@@ -63,13 +66,19 @@ pub fn recanonicalizePosition(tile_map: *TileMap, position: TileMapPosition) Til
     return result;
 }
 
-inline fn getTileChunk(tile_map: *TileMap, tile_map_x: u32, tile_map_y: u32) ?*TileChunk {
+inline fn getTileChunk(tile_map: *TileMap, tile_map_x: u32, tile_map_y: u32, tile_map_z: u32) ?*TileChunk {
     var tile_chunk: ?*TileChunk = null;
 
     if ((tile_map_x >= 0) and (tile_map_x < tile_map.tile_chunk_count_x) and
-        (tile_map_y >= 0) and (tile_map_y < tile_map.tile_chunk_count_y))
+        (tile_map_y >= 0) and (tile_map_y < tile_map.tile_chunk_count_y) and
+        (tile_map_z >= 0) and (tile_map_z < tile_map.tile_chunk_count_z))
     {
-        tile_chunk = &tile_map.tile_chunks[@intCast(tile_map_y * tile_map.tile_chunk_count_x + tile_map_x)];
+        const index =
+            tile_map_z * tile_map.tile_chunk_count_y * tile_map.tile_chunk_count_x +
+            tile_map_y * tile_map.tile_chunk_count_x +
+            tile_map_x;
+
+        tile_chunk = &tile_map.tile_chunks[@intCast(index)];
     }
 
     return tile_chunk;
@@ -89,23 +98,25 @@ inline fn setTileValueUnchecked(tile_map: *TileMap, tile_chunk: *TileChunk, tile
     tile_chunk.tiles.?[@intCast(tile_y * tile_map.chunk_dim + tile_x)] = value;
 }
 
-inline fn getChunkPositionFor(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32) TileChunkPosition {
+inline fn getChunkPositionFor(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) TileChunkPosition {
     return TileChunkPosition{
         .tile_chunk_x = abs_tile_x >> @as(u5, @intCast(tile_map.chunk_shift)),
         .tile_chunk_y = abs_tile_y >> @as(u5, @intCast(tile_map.chunk_shift)),
+        .tile_chunk_z = abs_tile_z,
         .rel_tile_x = abs_tile_x & tile_map.chunk_mask,
         .rel_tile_y = abs_tile_y & tile_map.chunk_mask,
     };
 }
 
-pub fn getTileValue(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32) u32 {
+pub fn getTileValue(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) u32 {
     var value: u32 = 0;
 
-    const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y);
+    const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y, abs_tile_z);
     const opt_tile_chunk = getTileChunk(
         tile_map,
         @intCast(chunk_position.tile_chunk_x),
         @intCast(chunk_position.tile_chunk_y),
+        @intCast(chunk_position.tile_chunk_z),
     );
 
     if (opt_tile_chunk) |tile_chunk| {
@@ -122,13 +133,15 @@ pub fn setTileValue(
     tile_map: *TileMap,
     abs_tile_x: u32,
     abs_tile_y: u32,
+    abs_tile_z: u32,
     value: u32,
 ) void {
-    const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y);
+    const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y, abs_tile_z);
     const opt_tile_chunk = getTileChunk(
         tile_map,
         @intCast(chunk_position.tile_chunk_x),
         @intCast(chunk_position.tile_chunk_y),
+        @intCast(chunk_position.tile_chunk_z),
     );
 
     if (opt_tile_chunk) |tile_chunk| {
@@ -149,7 +162,12 @@ pub fn setTileValue(
 pub fn isTileMapPointEmpty(tile_map: *TileMap, test_position: TileMapPosition) bool {
     var is_empty = false;
 
-    const tile_chunk_value = getTileValue(tile_map, test_position.abs_tile_x, test_position.abs_tile_y);
+    const tile_chunk_value = getTileValue(
+        tile_map,
+        test_position.abs_tile_x,
+        test_position.abs_tile_y,
+        test_position.abs_tile_z,
+    );
     is_empty = (tile_chunk_value == 1);
 
     return is_empty;

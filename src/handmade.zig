@@ -22,6 +22,7 @@ pub export fn updateAndRender(
         state.* = shared.State{ .player_position = tile.TileMapPosition{
             .abs_tile_x = 1,
             .abs_tile_y = 3,
+            .abs_tile_z = 0,
             .tile_rel_x = 5.0,
             .tile_rel_y = 5.0,
         } };
@@ -37,19 +38,20 @@ pub export fn updateAndRender(
         world.tile_map = shared.pushStruct(&state.world_arena, tile.TileMap);
         var tile_map = world.tile_map;
 
-        const chunk_shift = 4;
-        const chunk_dim = (@as(u32, 1) << @as(u5, @intCast(chunk_shift)));
-        const tile_chunk_count_x = 128;
-        const tile_chunk_count_y = 128;
-
         tile_map.tile_side_in_meters = 1.4;
 
-        tile_map.chunk_dim = chunk_dim;
-        tile_map.chunk_shift = chunk_shift;
+        tile_map.chunk_shift = 4;
+        tile_map.chunk_dim = (@as(u32, 1) << @as(u5, @intCast(tile_map.chunk_shift)));
         tile_map.chunk_mask = (@as(u32, 1) << @as(u5, @intCast(tile_map.chunk_shift))) - 1;
-        tile_map.tile_chunk_count_x = tile_chunk_count_x;
-        tile_map.tile_chunk_count_y = tile_chunk_count_y;
-        tile_map.tile_chunks = shared.pushArray(&state.world_arena, tile_chunk_count_x * tile_chunk_count_y, tile.TileChunk);
+
+        tile_map.tile_chunk_count_x = 128;
+        tile_map.tile_chunk_count_y = 128;
+        tile_map.tile_chunk_count_z = 2;
+        tile_map.tile_chunks = shared.pushArray(
+            &state.world_arena,
+            tile_map.tile_chunk_count_x * tile_map.tile_chunk_count_y * tile_map.tile_chunk_count_z,
+            tile.TileChunk,
+        );
 
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
@@ -76,6 +78,7 @@ pub export fn updateAndRender(
                 for (0..tiles_per_width) |tile_x| {
                     const abs_tile_x: u32 = @as(u32, @intCast(screen_x)) * tiles_per_width + @as(u32, @intCast(tile_x));
                     const abs_tile_y: u32 = @as(u32, @intCast(screen_y)) * tiles_per_height + @as(u32, @intCast(tile_y));
+                    const abs_tile_z: u32 = 0;
                     var tile_value: u32 = 1;
 
                     // Generate doors.
@@ -92,7 +95,7 @@ pub export fn updateAndRender(
                         tile_value = 2;
                     }
 
-                    tile.setTileValue(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, tile_value);
+                    tile.setTileValue(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, abs_tile_z, tile_value);
                 }
             }
 
@@ -191,9 +194,10 @@ pub export fn updateAndRender(
         while (rel_col < 20) : (rel_col += 1) {
             var col: u32 = state.player_position.abs_tile_x;
             var row: u32 = state.player_position.abs_tile_y;
+            const depth: u32 = state.player_position.abs_tile_z;
             if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
             if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
-            const tile_value = tile.getTileValue(tile_map, col, row);
+            const tile_value = tile.getTileValue(tile_map, col, row, depth);
 
             if (tile_value > 0) {
                 const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
