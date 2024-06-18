@@ -4,30 +4,6 @@ const intrinsics = @import("intrinsics.zig");
 const random = @import("random.zig");
 const std = @import("std");
 
-fn initializeArena(arena: *shared.MemoryArena, size: shared.MemoryIndex, base: [*]u8) void {
-    arena.size = size;
-    arena.base = base;
-    arena.used = 0;
-}
-
-fn pushSize(arena: *shared.MemoryArena, size: comptime_int) [*]u8 {
-    std.debug.assert((arena.used + size) <= arena.size);
-
-    const result = arena.base + arena.used;
-    arena.used += size;
-    return result;
-}
-
-fn pushStruct(arena: *shared.MemoryArena, comptime T: type) *T {
-    const size: shared.MemoryIndex = @sizeOf(T);
-    return @as(*T, @ptrCast(@alignCast(pushSize(arena, size))));
-}
-
-fn pushArray(arena: *shared.MemoryArena, comptime count: shared.MemoryIndex, comptime T: type) *[count]T {
-    const size: shared.MemoryIndex = @sizeOf(T) * count;
-    return @as(*[count]T, @ptrCast(@alignCast(pushSize(arena, size))));
-}
-
 pub export fn updateAndRender(
     thread: *shared.ThreadContext,
     platform: shared.Platform,
@@ -50,15 +26,15 @@ pub export fn updateAndRender(
             .tile_rel_y = 5.0,
         } };
 
-        initializeArena(
+        shared.initializeArena(
             &state.world_arena,
             memory.permanent_storage_size - @sizeOf(shared.State),
             @as([*]u8, @ptrCast(memory.permanent_storage.?)) + @sizeOf(shared.State),
         );
 
-        state.world = pushStruct(&state.world_arena, shared.World);
+        state.world = shared.pushStruct(&state.world_arena, shared.World);
         const world = state.world;
-        world.tile_map = pushStruct(&state.world_arena, tile.TileMap);
+        world.tile_map = shared.pushStruct(&state.world_arena, tile.TileMap);
         var tile_map = world.tile_map;
 
         const chunk_shift = 4;
@@ -76,20 +52,7 @@ pub export fn updateAndRender(
         tile_map.tile_side_in_pixels = 6;
         tile_map.meters_to_pixels = @as(f32, @floatFromInt(tile_map.tile_side_in_pixels)) / tile_map.tile_side_in_meters;
 
-        tile_map.tile_chunks = pushArray(&state.world_arena, tile_chunk_count_x * tile_chunk_count_y, tile.TileChunk);
-        for (0..@intCast(tile_chunk_count_y)) |y| {
-            for (0..@intCast(tile_chunk_count_x)) |x| {
-                const tile_count = chunk_dim * chunk_dim;
-                const tile_chunk_index = y * @as(usize, @intCast(tile_chunk_count_x)) + x;
-
-                tile_map.tile_chunks[tile_chunk_index].tiles =
-                    pushArray(&state.world_arena, tile_count, u32);
-
-                for (0..tile_count) |tile_index| {
-                    tile_map.tile_chunks[tile_chunk_index].tiles[tile_index] = 1;
-                }
-            }
-        }
+        tile_map.tile_chunks = shared.pushArray(&state.world_arena, tile_chunk_count_x * tile_chunk_count_y, tile.TileChunk);
 
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
@@ -119,7 +82,7 @@ pub export fn updateAndRender(
                         }
                     }
 
-                    tile.setTileValueByPosition(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, tile_value);
+                    tile.setTileValue(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, tile_value);
                 }
             }
 
@@ -214,7 +177,7 @@ pub export fn updateAndRender(
             var row: u32 = state.player_position.abs_tile_y;
             if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
             if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
-            const tile_value = tile.getTileValueFromPosition(tile_map, col, row);
+            const tile_value = tile.getTileValue(tile_map, col, row);
 
             if (tile_value > 0) {
                 const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);

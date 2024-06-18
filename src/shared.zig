@@ -123,8 +123,31 @@ pub const MemoryArena = struct {
     used: MemoryIndex,
 };
 
-// Game state.
+pub fn initializeArena(arena: *MemoryArena, size: MemoryIndex, base: [*]u8) void {
+    arena.size = size;
+    arena.base = base;
+    arena.used = 0;
+}
 
+fn pushSize(arena: *MemoryArena, size: MemoryIndex) [*]u8 {
+    std.debug.assert((arena.used + size) <= arena.size);
+
+    const result = arena.base + arena.used;
+    arena.used += size;
+    return result;
+}
+
+pub fn pushStruct(arena: *MemoryArena, comptime T: type) *T {
+    const size: MemoryIndex = @sizeOf(T);
+    return @as(*T, @ptrCast(@alignCast(pushSize(arena, size))));
+}
+
+pub fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
+    const size: MemoryIndex = @sizeOf(T) * count;
+    return @as([*]T, @ptrCast(@alignCast(pushSize(arena, size))));
+}
+
+// Game state.
 pub const State = struct {
     world_arena: MemoryArena = undefined,
     world: *World = undefined,

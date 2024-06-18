@@ -10,7 +10,7 @@ const TileChunkPosition = struct {
 };
 
 pub const TileChunk = struct {
-    tiles: [*]u32 = undefined,
+    tiles: ?[*]u32 = null,
 };
 
 pub const TileMap = struct {
@@ -81,30 +81,14 @@ inline fn getTileValueUnchecked(tile_map: *TileMap, tile_chunk: *TileChunk, tile
     std.debug.assert((tile_x >= 0) and (tile_x < tile_map.chunk_dim) and
         (tile_y >= 0) and (tile_y < tile_map.chunk_dim));
 
-    return tile_chunk.tiles[@intCast(tile_y * tile_map.chunk_dim + tile_x)];
+    return tile_chunk.tiles.?[@intCast(tile_y * tile_map.chunk_dim + tile_x)];
 }
 
 inline fn setTileValueUnchecked(tile_map: *TileMap, tile_chunk: *TileChunk, tile_x: u32, tile_y: u32, value: u32) void {
     std.debug.assert((tile_x >= 0) and (tile_x < tile_map.chunk_dim) and
         (tile_y >= 0) and (tile_y < tile_map.chunk_dim));
 
-    tile_chunk.tiles[@intCast(tile_y * tile_map.chunk_dim + tile_x)] = value;
-}
-
-fn getTileValue(tile_map: *TileMap, opt_tile_chunk: ?*TileChunk, test_x: u32, test_y: u32) u32 {
-    var value: u32 = 0;
-
-    if (opt_tile_chunk) |tile_chunk| {
-        value = getTileValueUnchecked(tile_map, tile_chunk, test_x, test_y);
-    }
-
-    return value;
-}
-
-fn setTileValue(tile_map: *TileMap, opt_tile_chunk: ?*TileChunk, test_x: u32, test_y: u32, value: u32) void {
-    if (opt_tile_chunk) |tile_chunk| {
-        setTileValueUnchecked(tile_map, tile_chunk, test_x, test_y, value);
-    }
+    tile_chunk.tiles.?[@intCast(tile_y * tile_map.chunk_dim + tile_x)] = value;
 }
 
 inline fn getChunkPositionFor(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32) TileChunkPosition {
@@ -116,7 +100,7 @@ inline fn getChunkPositionFor(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u
     };
 }
 
-pub fn getTileValueFromPosition(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32) u32 {
+pub fn getTileValue(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y: u32) u32 {
     var value: u32 = 0;
 
     const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y);
@@ -125,20 +109,23 @@ pub fn getTileValueFromPosition(tile_map: *TileMap, abs_tile_x: u32, abs_tile_y:
         @intCast(chunk_position.tile_chunk_x),
         @intCast(chunk_position.tile_chunk_y),
     );
-    value = getTileValue(tile_map, opt_tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y);
+
+    if (opt_tile_chunk) |tile_chunk| {
+        if (tile_chunk.tiles != null) {
+            value = getTileValueUnchecked(tile_map, tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y);
+        }
+    }
 
     return value;
 }
 
-pub fn setTileValueByPosition(
+pub fn setTileValue(
     world_arena: *shared.MemoryArena,
     tile_map: *TileMap,
     abs_tile_x: u32,
     abs_tile_y: u32,
     value: u32,
 ) void {
-    _ = world_arena;
-
     const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y);
     const opt_tile_chunk = getTileChunk(
         tile_map,
@@ -146,15 +133,25 @@ pub fn setTileValueByPosition(
         @intCast(chunk_position.tile_chunk_y),
     );
 
-    std.debug.assert(opt_tile_chunk != null);
+    if (opt_tile_chunk) |tile_chunk| {
+        // Initialize the chunk if it hasn't been initialized yet.
+        if (tile_chunk.tiles == null) {
+            const tile_count = tile_map.chunk_dim * tile_map.chunk_dim;
+            tile_chunk.tiles = shared.pushArray(world_arena, tile_count, u32);
 
-    setTileValue(tile_map, opt_tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y, value);
+            for (0..tile_count) |tile_index| {
+                tile_chunk.tiles.?[tile_index] = 1;
+            }
+        }
+
+        setTileValueUnchecked(tile_map, tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y, value);
+    }
 }
 
 pub fn isTileMapPointEmpty(tile_map: *TileMap, test_position: TileMapPosition) bool {
     var is_empty = false;
 
-    const tile_chunk_value = getTileValueFromPosition(tile_map, test_position.abs_tile_x, test_position.abs_tile_y);
+    const tile_chunk_value = getTileValue(tile_map, test_position.abs_tile_x, test_position.abs_tile_y);
     is_empty = (tile_chunk_value == 1);
 
     return is_empty;
