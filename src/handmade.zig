@@ -55,20 +55,36 @@ pub export fn updateAndRender(
 
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
+
+        var random_number_index: u32 = 0;
         var screen_x: u32 = 0;
         var screen_y: u32 = 0;
-        var random_number_index: u32 = 0;
+        var abs_tile_z: u32 = 0;
         var door_left = false;
         var door_right = false;
         var door_top = false;
         var door_bottom = false;
+        var door_up = false;
+        var door_down = false;
 
         for (0..100) |_| {
             std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
-            const random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
+            var random_choice: u32 = 0;
+            if (door_up or door_down) {
+                random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
+            } else {
+                random_choice = random.RANDOM_NUMBERS[random_number_index] % 3;
+            }
+
             random_number_index += 1;
 
-            if (random_choice == 0) {
+            if (random_choice == 2) {
+                if (abs_tile_z == 0) {
+                    door_up = true;
+                } else {
+                    door_down = true;
+                }
+            } else if (random_choice == 1) {
                 door_right = true;
             } else {
                 door_top = true;
@@ -78,7 +94,6 @@ pub export fn updateAndRender(
                 for (0..tiles_per_width) |tile_x| {
                     const abs_tile_x: u32 = @as(u32, @intCast(screen_x)) * tiles_per_width + @as(u32, @intCast(tile_x));
                     const abs_tile_y: u32 = @as(u32, @intCast(screen_y)) * tiles_per_height + @as(u32, @intCast(tile_y));
-                    const abs_tile_z: u32 = 0;
                     var tile_value: u32 = 1;
 
                     // Generate doors.
@@ -95,6 +110,14 @@ pub export fn updateAndRender(
                         tile_value = 2;
                     }
 
+                    if (tile_x == 10 and tile_y == 6) {
+                        if (door_up) {
+                            tile_value = 3;
+                        } else if (door_down) {
+                            tile_value = 4;
+                        }
+                    }
+
                     tile.setTileValue(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, abs_tile_z, tile_value);
                 }
             }
@@ -102,10 +125,27 @@ pub export fn updateAndRender(
             door_left = door_right;
             door_bottom = door_top;
 
+            if (door_up) {
+                door_down = true;
+                door_up = false;
+            } else if (door_down) {
+                door_up = true;
+                door_down = false;
+            } else {
+                door_up = false;
+                door_down = false;
+            }
+
             door_right = false;
             door_top = false;
 
-            if (random_choice == 0) {
+            if (random_choice == 2) {
+                if (abs_tile_z == 0) {
+                    abs_tile_z = 1;
+                } else {
+                    abs_tile_z = 0;
+                }
+            } else if (random_choice == 1) {
                 screen_x += 1;
             } else {
                 screen_y += 1;
@@ -176,6 +216,7 @@ pub export fn updateAndRender(
     // Draw tile map.
     const wall_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
     const background_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
+    const vertical_door_color = shared.Color{ .r = 0.5, .g = 0.25, .b = 0 };
 
     var player_tile_color = background_color;
     if (shared.DEBUG) {
@@ -201,7 +242,17 @@ pub export fn updateAndRender(
 
             if (tile_value > 0) {
                 const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
-                const tile_color = if (is_player_tile) player_tile_color else if (tile_value == 2) wall_color else background_color;
+                var tile_color = background_color;
+
+                if (is_player_tile) {
+                    tile_color = player_tile_color;
+                } else if (tile_value > 2) {
+                    tile_color = vertical_door_color;
+                } else if (tile_value == 2) {
+                    tile_color = wall_color;
+                } else {
+                    tile_color = background_color;
+                }
 
                 const center_x = screen_center_x -
                     meters_to_pixels * state.player_position.tile_rel_x +
