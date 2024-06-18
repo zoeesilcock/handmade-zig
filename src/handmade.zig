@@ -85,19 +85,30 @@ pub export fn updateAndRender(
 
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
-        for (0..33) |screen_y| {
-            for (0..33) |screen_x| {
+        for (0..32) |screen_y| {
+            for (0..32) |screen_x| {
                 for (0..tiles_per_height) |tile_y| {
                     for (0..tiles_per_width) |tile_x| {
                         const abs_tile_x: u32 = @as(u32, @intCast(screen_x)) * tiles_per_width + @as(u32, @intCast(tile_x));
                         const abs_tile_y: u32 = @as(u32, @intCast(screen_y)) * tiles_per_height + @as(u32, @intCast(tile_y));
-                        tile.setTileValueByPosition(
-                            &state.world_arena,
-                            world.tile_map,
-                            abs_tile_x,
-                            abs_tile_y,
-                            (if (tile_x == tile_y and (tile_y % 2) != 0) 1 else 0),
-                        );
+                        var tile_value: u32 = 0;
+
+                        if ((tile_x == 0) or (tile_x == (tiles_per_width - 1))) {
+                            if (tile_y == (tiles_per_height / 2)) {
+                                tile_value = 0;
+                            } else {
+                                tile_value = 1;
+                            }
+                        }
+                        if ((tile_y == 0) or (tile_y == (tiles_per_height - 1))) {
+                            if (tile_x == (tiles_per_width / 2)) {
+                                tile_value = 0;
+                            } else {
+                                tile_value = 1;
+                            }
+                        }
+
+                        tile.setTileValueByPosition(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, tile_value);
                     }
                 }
             }
