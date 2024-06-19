@@ -24,7 +24,10 @@ pub export fn updateAndRender(
                 .offset_x = 5.0,
                 .offset_y = 5.0,
             },
-            .pixel_pointer = debugLoadBMP(thread, platform, "test/test_background.bmp"),
+            .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
+            .hero_head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
+            .hero_torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
+            .hero_cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
         };
 
         shared.initializeArena(
@@ -161,7 +164,6 @@ pub export fn updateAndRender(
     const meters_to_pixels = @as(f32, @floatFromInt(tile_side_in_pixels)) / tile_map.tile_side_in_meters;
 
     var player_movement_speed: f32 = 2.0;
-    const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
     const player_height: f32 = 1.4;
     const player_width: f32 = 0.75 * player_height;
 
@@ -219,9 +221,11 @@ pub export fn updateAndRender(
         }
     }
 
+    drawBitmap(buffer, 0, 0, state.backdrop);
+
     // Clear background.
-    const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), clear_color);
+    // const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
+    // drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), clear_color);
 
     // Draw tile map.
     const wall_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
@@ -250,7 +254,7 @@ pub export fn updateAndRender(
             if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
             const tile_value = tile.getTileValue(tile_map, col, row, depth);
 
-            if (tile_value > 0) {
+            if (tile_value > 1) {
                 const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
                 var tile_color = background_color;
 
@@ -283,25 +287,7 @@ pub export fn updateAndRender(
     // Draw player.
     const player_left: f32 = screen_center_x - (0.5 * meters_to_pixels * player_width);
     const player_top: f32 = screen_center_y - meters_to_pixels * player_height;
-    drawRectangle(
-        buffer,
-        player_left,
-        player_top,
-        player_left + meters_to_pixels * player_width,
-        player_top + meters_to_pixels * player_height,
-        player_color,
-    );
-
-    // Draw bitmap.
-    // var source: [*]u32 = @ptrCast(@alignCast(state.pixel_pointer));
-    // var dest: [*]u32 = @ptrCast(@alignCast(buffer.memory));
-    // for (0..@intCast(buffer.height)) |_| {
-    //     for (0..@intCast(buffer.width)) |_| {
-    //         dest[0] = source[0];
-    //         source += 1;
-    //         dest += 1;
-    //     }
-    // }
+    drawBitmap(buffer, player_left, player_top, state.hero_head);
 }
 
 pub export fn getSoundSamples(
@@ -361,6 +347,50 @@ fn drawRectangle(
     }
 }
 
+fn drawBitmap(
+    buffer: *shared.OffscreenBuffer,
+    real_x: f32,
+    real_y: f32,
+    bitmap: shared.LoadedBitmap,
+) void {
+    // Calculate extents.
+    var min_x = intrinsics.roundReal32ToInt32(real_x);
+    var min_y = intrinsics.roundReal32ToInt32(real_y);
+    var max_x = intrinsics.roundReal32ToInt32(real_x + @as(f32, @floatFromInt(bitmap.width)));
+    var max_y = intrinsics.roundReal32ToInt32(real_y + @as(f32, @floatFromInt(bitmap.height)));
+
+    // Clip input values to buffer.
+    if (min_x < 0) {
+        min_x = 0;
+    }
+    if (min_y < 0) {
+        min_y = 0;
+    }
+    if (max_x > buffer.width) {
+        max_x = buffer.width;
+    }
+    if (max_y > buffer.height) {
+        max_y = buffer.height;
+    }
+
+    var source_row = bitmap.pixels + @as(usize, @intCast(bitmap.width * (bitmap.height - 1)));
+    var dest_row: [*]u8 = @ptrCast(buffer.memory);
+    dest_row += @as(u32, @intCast((min_x * buffer.bytes_per_pixel) + (min_y * @as(i32, @intCast(buffer.pitch)))));
+    for (@intCast(min_y)..@intCast(max_y)) |_| {
+        var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
+        var source = source_row;
+
+        for (@intCast(min_x)..@intCast(max_x)) |_| {
+            dest[0] = source[0];
+            source += 1;
+            dest += 1;
+        }
+
+        dest_row += buffer.pitch;
+        source_row -= @as(usize, @intCast(bitmap.width));
+    }
+}
+
 const BitmapHeader = packed struct {
     file_type: u16,
     file_size: u32,
@@ -372,16 +402,40 @@ const BitmapHeader = packed struct {
     height: i32,
     planes: u16,
     bits_per_pxel: u16,
+    compression: u32,
+    size_of_bitmap: u32,
+    horz_resolution: i32,
+    vert_resolution: i32,
+    colors_used: u32,
+    colors_important: u32,
+    red_mask: u32,
+    green_mask: u32,
+    blue_mask: u32,
 };
 
-fn debugLoadBMP(thread: *shared.ThreadContext, platform: shared.Platform, file_name: [*:0]const u8) [*]u32 {
-    var result: [*]u32 = undefined;
+fn debugLoadBMP(
+    thread: *shared.ThreadContext,
+    platform: shared.Platform,
+    file_name: [*:0]const u8,
+) shared.LoadedBitmap {
+    var result = shared.LoadedBitmap{};
     const read_result = platform.debugReadEntireFile(thread, file_name);
 
     if (read_result.content_size > 0) {
         const header = @as(*BitmapHeader, @ptrCast(@alignCast(read_result.contents)));
-        const pixels: [*]u32 = @as([*]u32, @ptrCast(@alignCast(read_result.contents))) + header.bitmap_offset;
-        result = pixels;
+        const pixels: [*]u32 = @as([*]u32, @ptrCast(@alignCast(read_result.contents))) + (header.bitmap_offset / @alignOf(u32));
+
+        result.pixels = pixels;
+        result.width = header.width;
+        result.height = header.height;
+
+        var source_dest = pixels;
+        for (0..@intCast(header.width)) |_| {
+            for (0..@intCast(header.height)) |_| {
+                source_dest[0] = (source_dest[0] << 8) | (source_dest[0] >> 24);
+                source_dest += 1;
+            }
+        }
     }
 
     return result;

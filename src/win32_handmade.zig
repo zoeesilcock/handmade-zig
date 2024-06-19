@@ -178,20 +178,21 @@ fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) 
             const file_size32 = safeTruncateI64(file_size.QuadPart);
 
             if (win32.VirtualAlloc(
-                undefined,
+                null,
                 file_size32,
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
                 win32.PAGE_READWRITE,
             )) |file_contents| {
                 var bytes_read: u32 = undefined;
-
-                if (win32.ReadFile(
+                const read_result = win32.ReadFile(
                     file_handle,
                     file_contents,
                     file_size32,
                     &bytes_read,
                     null,
-                ) != 0 and bytes_read == file_size32) {
+                );
+
+                if (read_result != 0 and bytes_read == file_size32) {
                     // File read successfully.
                     result.contents = file_contents;
                     result.content_size = file_size32;

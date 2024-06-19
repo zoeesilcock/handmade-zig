@@ -152,7 +152,10 @@ pub const State = struct {
     world_arena: MemoryArena = undefined,
     world: *World = undefined,
     player_position: tile.TileMapPosition,
-    pixel_pointer: [*]u32,
+    backdrop: LoadedBitmap,
+    hero_head: LoadedBitmap,
+    hero_torso: LoadedBitmap,
+    hero_cape: LoadedBitmap,
 };
 
 pub const World = struct {
@@ -169,4 +172,10 @@ pub const Color = struct {
             (intrinsics.roundReal32ToUInt32(self.g * 255.0) << 8) |
             (intrinsics.roundReal32ToUInt32(self.b * 255.0) << 0));
     }
+};
+
+pub const LoadedBitmap = struct {
+    width: i32 = 0,
+    height: i32 = 0,
+    pixels: [*]u32 = undefined,
 };
