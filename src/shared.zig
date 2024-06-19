@@ -177,5 +177,30 @@ pub const Color = struct {
 pub const LoadedBitmap = struct {
     width: i32 = 0,
     height: i32 = 0,
-    pixels: [*]u32 = undefined,
+    data: extern union {
+        per_pixel_channel: [*]u8,
+        per_pixel: [*]u32,
+    },
+};
+
+pub const BitmapHeader = packed struct {
+    file_type: u16,
+    file_size: u32,
+    reserved1: u16,
+    reserved2: u16,
+    bitmap_offset: u32,
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bits_per_pxel: u16,
+    compression: u32,
+    size_of_bitmap: u32,
+    horz_resolution: i32,
+    vert_resolution: i32,
+    colors_used: u32,
+    colors_important: u32,
+    red_mask: u32,
+    green_mask: u32,
+    blue_mask: u32,
 };

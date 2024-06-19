@@ -285,8 +285,17 @@ pub export fn updateAndRender(
     }
 
     // Draw player.
+    const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
     const player_left: f32 = screen_center_x - (0.5 * meters_to_pixels * player_width);
     const player_top: f32 = screen_center_y - meters_to_pixels * player_height;
+    drawRectangle(
+        buffer,
+        player_left,
+        player_top,
+        player_left + meters_to_pixels * player_width,
+        player_top + meters_to_pixels * player_height,
+        player_color,
+    );
     drawBitmap(buffer, player_left, player_top, state.hero_head);
 }
 
@@ -373,7 +382,7 @@ fn drawBitmap(
         max_y = buffer.height;
     }
 
-    var source_row = bitmap.pixels + @as(usize, @intCast(bitmap.width * (bitmap.height - 1)));
+    var source_row = bitmap.data.per_pixel + @as(usize, @intCast(bitmap.width * (bitmap.height - 1)));
     var dest_row: [*]u8 = @ptrCast(buffer.memory);
     dest_row += @as(u32, @intCast((min_x * buffer.bytes_per_pixel) + (min_y * @as(i32, @intCast(buffer.pitch)))));
     for (@intCast(min_y)..@intCast(max_y)) |_| {
@@ -381,7 +390,23 @@ fn drawBitmap(
         var source = source_row;
 
         for (@intCast(min_x)..@intCast(max_x)) |_| {
-            dest[0] = source[0];
+            const a: f32 = @as(f32, @floatFromInt((source[0] >> 24) & 0xFF)) / 255.0;
+            const sr: f32 = @floatFromInt((source[0] >> 16) & 0xFF);
+            const sg: f32 = @floatFromInt((source[0] >> 8) & 0xFF);
+            const sb: f32 = @floatFromInt((source[0] >> 0) & 0xFF);
+
+            const dr: f32 = @floatFromInt((dest[0] >> 16) & 0xFF);
+            const dg: f32 = @floatFromInt((dest[0] >> 8) & 0xFF);
+            const db: f32 = @floatFromInt((dest[0] >> 0) & 0xFF);
+
+            const r = (1.0 - a) * dr + a * sr;
+            const g = (1.0 - a) * dg + a * sg;
+            const b = (1.0 - a) * db + a * sb;
+
+            dest[0] = ((@as(u32, @intFromFloat(r + 0.5)) << 16) |
+                (@as(u32, @intFromFloat(g + 0.5)) << 8) |
+                (@as(u32, @intFromFloat(b + 0.5)) << 0));
+
             source += 1;
             dest += 1;
         }
@@ -391,48 +416,42 @@ fn drawBitmap(
     }
 }
 
-const BitmapHeader = packed struct {
-    file_type: u16,
-    file_size: u32,
-    reserved1: u16,
-    reserved2: u16,
-    bitmap_offset: u32,
-    size: u32,
-    width: i32,
-    height: i32,
-    planes: u16,
-    bits_per_pxel: u16,
-    compression: u32,
-    size_of_bitmap: u32,
-    horz_resolution: i32,
-    vert_resolution: i32,
-    colors_used: u32,
-    colors_important: u32,
-    red_mask: u32,
-    green_mask: u32,
-    blue_mask: u32,
-};
-
 fn debugLoadBMP(
     thread: *shared.ThreadContext,
     platform: shared.Platform,
     file_name: [*:0]const u8,
 ) shared.LoadedBitmap {
-    var result = shared.LoadedBitmap{};
+    var result: shared.LoadedBitmap = undefined;
     const read_result = platform.debugReadEntireFile(thread, file_name);
 
     if (read_result.content_size > 0) {
-        const header = @as(*BitmapHeader, @ptrCast(@alignCast(read_result.contents)));
-        const pixels: [*]u32 = @as([*]u32, @ptrCast(@alignCast(read_result.contents))) + (header.bitmap_offset / @alignOf(u32));
+        const header = @as(*shared.BitmapHeader, @ptrCast(@alignCast(read_result.contents)));
 
-        result.pixels = pixels;
+        std.debug.assert(header.compression == 3);
+
+        result.data.per_pixel_channel = @as([*]u8, @ptrCast(read_result.contents)) + header.bitmap_offset;
         result.width = header.width;
         result.height = header.height;
 
-        var source_dest = pixels;
+        const alpha_mask = ~(header.red_mask | header.green_mask | header.blue_mask);
+        const red_shift = intrinsics.findLeastSignificantSetBit(header.red_mask);
+        const green_shift = intrinsics.findLeastSignificantSetBit(header.green_mask);
+        const blue_shift = intrinsics.findLeastSignificantSetBit(header.blue_mask);
+        const alpha_shift = intrinsics.findLeastSignificantSetBit(alpha_mask);
+
+        std.debug.assert(red_shift.found);
+        std.debug.assert(green_shift.found);
+        std.debug.assert(blue_shift.found);
+        std.debug.assert(alpha_shift.found);
+
+        var source_dest = result.data.per_pixel;
         for (0..@intCast(header.width)) |_| {
             for (0..@intCast(header.height)) |_| {
-                source_dest[0] = (source_dest[0] << 8) | (source_dest[0] >> 24);
+                const color = source_dest[0];
+                source_dest[0] = ((((color >> @intCast(alpha_shift.index)) & 0xFF) << 24) |
+                    (((color >> @intCast(red_shift.index)) & 0xFF) << 16) |
+                    (((color >> @intCast(green_shift.index)) & 0xFF) << 8) |
+                    (((color >> @intCast(blue_shift.index)) & 0xFF) << 0));
                 source_dest += 1;
             }
         }

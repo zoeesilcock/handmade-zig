@@ -31,3 +31,29 @@ pub inline fn atan2(y: f32, x: f32) f32 {
 
     return 0.0;
 }
+
+pub const BitScanResult = struct {
+    found: bool = false,
+    index: u32 = undefined,
+};
+
+pub fn findLeastSignificantSetBit(value: u32) BitScanResult {
+    var result = BitScanResult{};
+
+    // for (0..32) |shift_index| {
+    //     if ((value & (@as(u64, @intCast(1)) << @as(u6, @intCast(shift_index)))) != 0) {
+    //         result.index = @intCast(shift_index);
+    //         result.found = true;
+    //         break;
+    //     }
+    // }
+
+    result.index = asm (
+        \\bsf %[value], %[index]
+        : [index] "={eax}" (-> u32),
+        : [value] "{eax}" (value),
+    );
+    result.found = true;
+
+    return result;
+}
