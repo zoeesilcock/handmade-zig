@@ -151,15 +151,25 @@ pub fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T
 pub const State = struct {
     world_arena: MemoryArena = undefined,
     world: *World = undefined,
+
     player_position: tile.TileMapPosition,
+    player_facing_direction: u32,
+
     backdrop: LoadedBitmap,
-    hero_head: LoadedBitmap,
-    hero_torso: LoadedBitmap,
-    hero_cape: LoadedBitmap,
+    hero_bitmaps: [4]HeroBitmaps,
 };
 
 pub const World = struct {
     tile_map: *tile.TileMap,
+};
+
+pub const HeroBitmaps = struct {
+    align_x: i32,
+    align_y: i32,
+
+    head: LoadedBitmap,
+    torso: LoadedBitmap,
+    cape: LoadedBitmap,
 };
 
 // Data structures..

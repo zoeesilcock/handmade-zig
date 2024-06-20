@@ -24,10 +24,38 @@ pub export fn updateAndRender(
                 .offset_x = 5.0,
                 .offset_y = 5.0,
             },
+            .player_facing_direction = 3,
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
-            .hero_head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
-            .hero_torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
-            .hero_cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
+            .hero_bitmaps = .{
+                shared.HeroBitmaps{
+                    .align_x = 72,
+                    .align_y = 182,
+                    .head = debugLoadBMP(thread, platform, "test/test_hero_right_head.bmp"),
+                    .torso = debugLoadBMP(thread, platform, "test/test_hero_right_torso.bmp"),
+                    .cape = debugLoadBMP(thread, platform, "test/test_hero_right_cape.bmp"),
+                },
+                shared.HeroBitmaps{
+                    .align_x = 72,
+                    .align_y = 182,
+                    .head = debugLoadBMP(thread, platform, "test/test_hero_back_head.bmp"),
+                    .torso = debugLoadBMP(thread, platform, "test/test_hero_back_torso.bmp"),
+                    .cape = debugLoadBMP(thread, platform, "test/test_hero_back_cape.bmp"),
+                },
+                shared.HeroBitmaps{
+                    .align_x = 72,
+                    .align_y = 182,
+                    .head = debugLoadBMP(thread, platform, "test/test_hero_left_head.bmp"),
+                    .torso = debugLoadBMP(thread, platform, "test/test_hero_left_torso.bmp"),
+                    .cape = debugLoadBMP(thread, platform, "test/test_hero_left_cape.bmp"),
+                },
+                shared.HeroBitmaps{
+                    .align_x = 72,
+                    .align_y = 182,
+                    .head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
+                    .torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
+                    .cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
+                },
+            },
         };
 
         shared.initializeArena(
@@ -174,15 +202,19 @@ pub export fn updateAndRender(
 
             if (controller.move_up.ended_down) {
                 player_y_delta = 1;
+                state.player_facing_direction = 1;
             }
             if (controller.move_down.ended_down) {
                 player_y_delta = -1;
+                state.player_facing_direction = 3;
             }
             if (controller.move_left.ended_down) {
                 player_x_delta = -1;
+                state.player_facing_direction = 2;
             }
             if (controller.move_right.ended_down) {
                 player_x_delta = 1;
+                state.player_facing_direction = 0;
             }
 
             if (controller.action_up.ended_down) {
@@ -221,7 +253,7 @@ pub export fn updateAndRender(
         }
     }
 
-    drawBitmap(buffer, 0, 0, state.backdrop);
+    drawBitmap(buffer, 0, 0, state.backdrop, 0, 0);
 
     // Clear background.
     // const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
@@ -286,8 +318,10 @@ pub export fn updateAndRender(
 
     // Draw player.
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    const player_left: f32 = screen_center_x - (0.5 * meters_to_pixels * player_width);
-    const player_top: f32 = screen_center_y - meters_to_pixels * player_height;
+    const player_ground_point_x = screen_center_x;
+    const player_ground_point_y = screen_center_y;
+    const player_left: f32 = player_ground_point_x - (0.5 * meters_to_pixels * player_width);
+    const player_top: f32 = player_ground_point_y - meters_to_pixels * player_height;
     drawRectangle(
         buffer,
         player_left,
@@ -296,7 +330,10 @@ pub export fn updateAndRender(
         player_top + meters_to_pixels * player_height,
         player_color,
     );
-    drawBitmap(buffer, player_left, player_top, state.hero_head);
+    const hero_bitmaps = state.hero_bitmaps[state.player_facing_direction];
+    drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.torso, hero_bitmaps.align_x, hero_bitmaps.align_y);
+    drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.cape, hero_bitmaps.align_x, hero_bitmaps.align_y);
+    drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.head, hero_bitmaps.align_x, hero_bitmaps.align_y);
 }
 
 pub export fn getSoundSamples(
@@ -361,12 +398,18 @@ fn drawBitmap(
     real_x: f32,
     real_y: f32,
     bitmap: shared.LoadedBitmap,
+    align_x: i32,
+    align_y: i32,
 ) void {
+    // Consider alignment.
+    const x = real_x - @as(f32, @floatFromInt(align_x));
+    const y = real_y - @as(f32, @floatFromInt(align_y));
+
     // Calculate extents.
-    var min_x = intrinsics.roundReal32ToInt32(real_x);
-    var min_y = intrinsics.roundReal32ToInt32(real_y);
-    var max_x = intrinsics.roundReal32ToInt32(real_x + @as(f32, @floatFromInt(bitmap.width)));
-    var max_y = intrinsics.roundReal32ToInt32(real_y + @as(f32, @floatFromInt(bitmap.height)));
+    var min_x = intrinsics.roundReal32ToInt32(x);
+    var min_y = intrinsics.roundReal32ToInt32(y);
+    var max_x = intrinsics.roundReal32ToInt32(x + @as(f32, @floatFromInt(bitmap.width)));
+    var max_y = intrinsics.roundReal32ToInt32(y + @as(f32, @floatFromInt(bitmap.height)));
 
     // Clip input values to buffer.
     if (min_x < 0) {
