@@ -826,10 +826,12 @@ fn getGameBuffer() shared.OffscreenBuffer {
 }
 
 fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, window_width: i32, window_height: i32) void {
-    // For prototyping purposes, we're going to always blit 1-to-1 pixels to make sure we don't introduce artifacts
-    // with stretching while we are learning to code the rederer.
-    const offset_x = 10;
-    const offset_y = 10;
+    // Double size if we have space for it.
+    const should_double_size = window_width >= buffer.width * 2 and window_height >= buffer.height * 2;
+    const blit_width = if (should_double_size) buffer.width * 2 else buffer.width;
+    const blit_height = if (should_double_size) buffer.height * 2 else buffer.height;
+    const offset_x = @divFloor((window_width - blit_width), 2);
+    const offset_y = @divFloor((window_height - blit_height), 2);
 
     // Clear areas outside of our drawing area.
     _ = win32.PatBlt(device_context, 0, 0, window_width, offset_y, win32.BLACKNESS);
@@ -841,8 +843,8 @@ fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, w
         device_context,
         offset_x,
         offset_y,
-        buffer.width,
-        buffer.height,
+        blit_width,
+        blit_height,
         0,
         0,
         buffer.width,
