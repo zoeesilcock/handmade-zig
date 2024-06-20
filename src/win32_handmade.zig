@@ -8,7 +8,6 @@
 /// * Threading (launching a thread).
 /// * Raw Input (support for multiple keyboards).
 /// * ClipCursor() (for multi-monitor support).
-/// * WM_SETCURSOR (control cursor visibility).
 /// * QueryCancelAutoplay.
 /// * WM_ACTIVATEAPP (for when we are not the active application).
 /// * Blit speed improvements (BitBlt).
@@ -67,6 +66,7 @@ var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
+var show_debug_cursor = DEBUG;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -855,8 +855,15 @@ fn windowProcedure(
     var result: win32.LRESULT = 0;
 
     switch (message) {
-        win32.WM_QUIT => {
+        win32.WM_QUIT, win32.WM_CLOSE, win32.WM_DESTROY => {
             running = false;
+        },
+        win32.WM_SETCURSOR => {
+            if (show_debug_cursor) {
+                result = win32.DefWindowProc(window, message, w_param, l_param);
+            } else {
+                _ = win32.SetCursor(null);
+            }
         },
         win32.WM_SIZE => {},
         win32.WM_ACTIVATEAPP => {
@@ -878,9 +885,6 @@ fn windowProcedure(
         win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
             // No keyboard input should come from anywhere other than the main loop.
             std.debug.assert(false);
-        },
-        win32.WM_CLOSE, win32.WM_DESTROY => {
-            running = false;
         },
         else => {
             result = win32.DefWindowProc(window, message, w_param, l_param);
