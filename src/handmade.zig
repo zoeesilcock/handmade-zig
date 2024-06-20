@@ -435,10 +435,14 @@ fn drawBitmap(
     var max_y = intrinsics.roundReal32ToInt32(y + @as(f32, @floatFromInt(bitmap.height)));
 
     // Clip input values to buffer.
+    var source_offset_x: i32 = 0;
     if (min_x < 0) {
+        source_offset_x = -min_x;
         min_x = 0;
     }
+    var source_offset_y: i32 = 0;
     if (min_y < 0) {
+        source_offset_y = -min_y;
         min_y = 0;
     }
     if (max_x > buffer.width) {
@@ -448,7 +452,8 @@ fn drawBitmap(
         max_y = buffer.height;
     }
 
-    var source_row = bitmap.data.per_pixel + @as(usize, @intCast(bitmap.width * (bitmap.height - 1)));
+    const clipping_offset = (-source_offset_y * bitmap.width) + source_offset_x;
+    var source_row = bitmap.data.per_pixel + @as(u32, @intCast(bitmap.width * (bitmap.height - 1) + clipping_offset));
     var dest_row: [*]u8 = @ptrCast(buffer.memory);
     dest_row += @as(u32, @intCast((min_x * buffer.bytes_per_pixel) + (min_y * @as(i32, @intCast(buffer.pitch)))));
     for (@intCast(min_y)..@intCast(max_y)) |_| {
