@@ -459,14 +459,14 @@ fn drawBitmap(
     align_y: i32,
 ) void {
     // Consider alignment.
-    const x = real_x - @as(f32, @floatFromInt(align_x));
-    const y = real_y - @as(f32, @floatFromInt(align_y));
+    const aligned_x = real_x - @as(f32, @floatFromInt(align_x));
+    const aligned_y = real_y - @as(f32, @floatFromInt(align_y));
 
     // Calculate extents.
-    var min_x = intrinsics.roundReal32ToInt32(x);
-    var min_y = intrinsics.roundReal32ToInt32(y);
-    var max_x = intrinsics.roundReal32ToInt32(x + @as(f32, @floatFromInt(bitmap.width)));
-    var max_y = intrinsics.roundReal32ToInt32(y + @as(f32, @floatFromInt(bitmap.height)));
+    var min_x = intrinsics.roundReal32ToInt32(aligned_x);
+    var min_y = intrinsics.roundReal32ToInt32(aligned_y);
+    var max_x = intrinsics.roundReal32ToInt32(aligned_x + @as(f32, @floatFromInt(bitmap.width)));
+    var max_y = intrinsics.roundReal32ToInt32(aligned_y + @as(f32, @floatFromInt(bitmap.height)));
 
     // Clip input values to buffer.
     var source_offset_x: i32 = 0;
@@ -485,16 +485,18 @@ fn drawBitmap(
     if (max_y > buffer.height) {
         max_y = buffer.height;
     }
-
     const clipping_offset = (-source_offset_y * bitmap.width) + source_offset_x;
     var source_row = bitmap.data.per_pixel + @as(u32, @intCast(bitmap.width * (bitmap.height - 1) + clipping_offset));
     var dest_row: [*]u8 = @ptrCast(buffer.memory);
     dest_row += @as(u32, @intCast((min_x * buffer.bytes_per_pixel) + (min_y * @as(i32, @intCast(buffer.pitch)))));
-    for (@intCast(min_y)..@intCast(max_y)) |_| {
+
+    var y = min_y;
+    while (y < max_y) : (y += 1) {
         var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
         var source = source_row;
 
-        for (@intCast(min_x)..@intCast(max_x)) |_| {
+        var x = min_x;
+        while (x < max_x) : (x += 1) {
             const a: f32 = @as(f32, @floatFromInt((source[0] >> 24) & 0xFF)) / 255.0;
             const sr: f32 = @floatFromInt((source[0] >> 16) & 0xFF);
             const sg: f32 = @floatFromInt((source[0] >> 8) & 0xFF);
@@ -550,8 +552,10 @@ fn debugLoadBMP(
         std.debug.assert(alpha_shift.found);
 
         var source_dest = result.data.per_pixel;
-        for (0..@intCast(header.width)) |_| {
-            for (0..@intCast(header.height)) |_| {
+        var x: u32 = 0;
+        while (x < header.width) : (x += 1) {
+            var y: u32 = 0;
+            while (y < header.height) : (y += 1) {
                 const color = source_dest[0];
                 source_dest[0] = ((((color >> @intCast(alpha_shift.index)) & 0xFF) << 24) |
                     (((color >> @intCast(red_shift.index)) & 0xFF) << 16) |
@@ -567,7 +571,6 @@ fn debugLoadBMP(
 
 fn renderWeirdGradient(buffer: *shared.OffscreenBuffer, x_offset: i32, y_offset: i32) void {
     var row: [*]u8 = @ptrCast(buffer.memory);
-    var y: u32 = 0;
     var wrapped_x_offset: u32 = 0;
     var wrapped_y_offset: u32 = 0;
 
@@ -585,22 +588,21 @@ fn renderWeirdGradient(buffer: *shared.OffscreenBuffer, x_offset: i32, y_offset:
         wrapped_y_offset +%= @as(u32, @intCast(y_offset));
     }
 
-    while (y < buffer.height) {
+    var y: u32 = 0;
+    while (y < buffer.height) : (y += 1) {
         var x: u32 = 0;
         var pixel: [*]u32 = @ptrCast(@alignCast(row));
 
-        while (x < buffer.width) {
+        while (x < buffer.width) : (x += 1) {
             const blue: u32 = @as(u8, @truncate(x +% wrapped_x_offset));
             const green: u32 = @as(u8, @truncate(y +% wrapped_y_offset));
 
             pixel[0] = (green << 8) | blue;
 
             pixel += 1;
-            x += 1;
         }
 
         row += buffer.pitch;
-        y += 1;
     }
 }
 
