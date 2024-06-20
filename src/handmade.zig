@@ -18,8 +18,8 @@ pub export fn updateAndRender(
     if (!memory.is_initialized) {
         state.* = shared.State{
             .camera_position = tile.TileMapPosition{
-                .abs_tile_x = 17/2,
-                .abs_tile_y = 9/2,
+                .abs_tile_x = 17 / 2,
+                .abs_tile_y = 9 / 2,
                 .abs_tile_z = 0,
                 .offset_x = 0.0,
                 .offset_y = 0.0,
@@ -256,6 +256,21 @@ pub export fn updateAndRender(
                 }
 
                 state.player_position = new_player_position;
+            }
+
+            state.camera_position.abs_tile_z = state.player_position.abs_tile_z;
+
+            // Move camera when player leaves the current screen.
+            const diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
+            if (diff.x > 9.0 * tile_map.tile_side_in_meters) {
+                state.camera_position.abs_tile_x += 17;
+            } else if (diff.x < -9.0 * tile_map.tile_side_in_meters) {
+                state.camera_position.abs_tile_x -= 17;
+            }
+            if (diff.y > 5.0 * tile_map.tile_side_in_meters) {
+                state.camera_position.abs_tile_y += 9;
+            } else if (diff.y < -5.0 * tile_map.tile_side_in_meters) {
+                state.camera_position.abs_tile_y -= 9;
             }
         }
     }
