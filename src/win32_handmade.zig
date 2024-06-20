@@ -67,6 +67,7 @@ var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
 var show_debug_cursor = DEBUG;
+var window_placement: win32.WINDOWPLACEMENT = undefined;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -572,8 +573,15 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
                 processKeyboardInputMessage(&keyboard_controller.back_button, is_down);
             },
             @intFromEnum(win32.VK_F4) => {
-                if (alt_was_down) {
+                if (is_down and alt_was_down) {
                     running = false;
+                }
+            },
+            @intFromEnum(win32.VK_RETURN) => {
+                if (is_down and alt_was_down) {
+                    if (message.hwnd) |window| {
+                        toggleFullscreen(window);
+                    }
                 }
             },
             'L' => {
@@ -892,6 +900,44 @@ fn windowProcedure(
     }
 
     return result;
+}
+
+fn toggleFullscreen(window: win32.HWND) void {
+    const style = win32.GetWindowLong(window, win32.GWL_STYLE);
+
+    if ((style & @as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW))) != 0) {
+        var monitor_info: win32.MONITORINFO = undefined;
+        monitor_info.cbSize = @sizeOf(win32.MONITORINFO);
+
+        if (win32.GetWindowPlacement(window, &window_placement) != 0 and
+            win32.GetMonitorInfo(win32.MonitorFromWindow(window, win32.MONITOR_DEFAULTTOPRIMARY), &monitor_info) != 0)
+        {
+            // Set fullscreen.
+            _ = win32.SetWindowLong(window, win32.GWL_STYLE, style & ~@as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
+            _ = win32.SetWindowPos(
+                window,
+                win32.HWND_TOPMOST,
+                monitor_info.rcMonitor.left,
+                monitor_info.rcMonitor.top,
+                monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
+                monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top,
+                win32.SET_WINDOW_POS_FLAGS{.NOOWNERZORDER = 1, .DRAWFRAME = 1 },
+            );
+        }
+    } else {
+        // Set windowed.
+        _ = win32.SetWindowLong(window, win32.GWL_STYLE, style | @as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
+        _ = win32.SetWindowPlacement(window, &window_placement);
+        _ = win32.SetWindowPos(
+            window,
+            null,
+            0,
+            0,
+            0,
+            0,
+            win32.SET_WINDOW_POS_FLAGS{ .NOMOVE = 1, .NOSIZE = 1, .NOZORDER = 1, .NOOWNERZORDER = 1, .DRAWFRAME = 1 },
+        );
+    }
 }
 
 inline fn getWallClock() win32.LARGE_INTEGER {
