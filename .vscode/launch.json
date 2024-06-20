@@ -10,6 +10,16 @@
             "cwd": "${workspaceFolder}/data",
             "preLaunchTask": "build",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug with timing",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/${workspaceFolderBasename}.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}/data",
+            "preLaunchTask": "build with timing",
+            "console": "integratedTerminal"
         }
     ]
 }

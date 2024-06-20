@@ -1467,8 +1467,8 @@ pub export fn wWinMain(
                                         (@as(f32, @floatFromInt(audio_latency_bytes)) /
                                         @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
                                         @as(f32, @floatFromInt(sound_output.samples_per_second));
-                                    var buffer: [64]u8 = undefined;
-                                    _ = std.fmt.bufPrint(&buffer, "BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d}   \n", .{
+                                    var buffer: [128]u8 = undefined;
+                                    const slice = std.fmt.bufPrintZ(&buffer, "Audio: BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d:>3.4}\n", .{
                                         sound_output_info.byte_to_lock,
                                         target_cursor,
                                         sound_output_info.bytes_to_write,
@@ -1476,8 +1476,8 @@ pub export fn wWinMain(
                                         write_cursor,
                                         audio_latency_bytes,
                                         audio_latency_seconds,
-                                    }) catch {};
-                                    win32.OutputDebugStringA(@ptrCast(&buffer));
+                                    }) catch "";
+                                    win32.OutputDebugStringA(@ptrCast(slice.ptr));
                                 }
                             }
 
@@ -1558,6 +1558,7 @@ pub export fn wWinMain(
 
                     if (OUTPUT_TIMING) {
                         // Calculate timing information.
+                        const work_ms_elapsed: f32 = (1000.0 * work_seconds_elapsed);
                         const ms_elapsed: f32 = (1000.0 * time_per_frame);
                         const fps: f32 = 1.0 / seconds_elapsed_for_frame;
                         const cycles_elapsed: u64 = @intCast(end_cycle_count - last_cycle_count);
@@ -1566,13 +1567,14 @@ pub export fn wWinMain(
                             @as(f32, @floatFromInt(1000 * 1000));
 
                         // Output timing information.
-                        var buffer: [64]u8 = undefined;
-                        _ = std.fmt.bufPrint(&buffer, "{d:>3.2}ms/f, {d:>3.2}:f/s, {d:>3.2}:mc/f   \n", .{
-                            ms_elapsed,
+                        var buffer: [128]u8 = undefined;
+                        const slice = std.fmt.bufPrintZ(&buffer, "Visual: FPS: {d:3.2}, Work: {d:3.2}ms - (Actual: {d:3.2}ms/f, {d:3.2}:mc/f)\n", .{
                             fps,
+                            work_ms_elapsed,
+                            ms_elapsed,
                             mega_cycles_per_frame,
-                        }) catch {};
-                        win32.OutputDebugStringA(@ptrCast(&buffer));
+                        }) catch "";
+                        win32.OutputDebugStringA(@ptrCast(slice.ptr));
                     }
 
                     // Flip the controller inputs for next frame.
