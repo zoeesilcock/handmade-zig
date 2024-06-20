@@ -152,6 +152,8 @@ pub const State = struct {
     world_arena: MemoryArena = undefined,
     world: *World = undefined,
 
+    camera_position: tile.TileMapPosition,
+
     player_position: tile.TileMapPosition,
     player_facing_direction: u32,
 

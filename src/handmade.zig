@@ -17,6 +17,13 @@ pub export fn updateAndRender(
 
     if (!memory.is_initialized) {
         state.* = shared.State{
+            .camera_position = tile.TileMapPosition{
+                .abs_tile_x = 17/2,
+                .abs_tile_y = 9/2,
+                .abs_tile_z = 0,
+                .offset_x = 0.0,
+                .offset_y = 0.0,
+            },
             .player_position = tile.TileMapPosition{
                 .abs_tile_x = 1,
                 .abs_tile_y = 3,
@@ -279,15 +286,15 @@ pub export fn updateAndRender(
         rel_col = -20;
 
         while (rel_col < 20) : (rel_col += 1) {
-            var col: u32 = state.player_position.abs_tile_x;
-            var row: u32 = state.player_position.abs_tile_y;
-            const depth: u32 = state.player_position.abs_tile_z;
+            var col: u32 = state.camera_position.abs_tile_x;
+            var row: u32 = state.camera_position.abs_tile_y;
+            const depth: u32 = state.camera_position.abs_tile_z;
             if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
             if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
             const tile_value = tile.getTileValue(tile_map, col, row, depth);
 
             if (tile_value > 1) {
-                const is_player_tile = (col == state.player_position.abs_tile_x and row == state.player_position.abs_tile_y);
+                const is_player_tile = (col == state.camera_position.abs_tile_x and row == state.camera_position.abs_tile_y);
                 var tile_color = background_color;
 
                 if (is_player_tile) {
@@ -301,10 +308,10 @@ pub export fn updateAndRender(
                 }
 
                 const center_x = screen_center_x -
-                    meters_to_pixels * state.player_position.offset_x +
+                    meters_to_pixels * state.camera_position.offset_x +
                     @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_side_in_pixels));
                 const center_y = screen_center_y +
-                    meters_to_pixels * state.player_position.offset_y -
+                    meters_to_pixels * state.camera_position.offset_y -
                     @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_side_in_pixels));
                 const min_x = center_x - 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels));
                 const min_y = center_y - 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels));
@@ -317,9 +324,10 @@ pub export fn updateAndRender(
     }
 
     // Draw player.
+    const diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    const player_ground_point_x = screen_center_x;
-    const player_ground_point_y = screen_center_y;
+    const player_ground_point_x = screen_center_x + meters_to_pixels * diff.x;
+    const player_ground_point_y = screen_center_y - meters_to_pixels * diff.y;
     const player_left: f32 = player_ground_point_x - (0.5 * meters_to_pixels * player_width);
     const player_top: f32 = player_ground_point_y - meters_to_pixels * player_height;
     drawRectangle(
