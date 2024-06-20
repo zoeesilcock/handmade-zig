@@ -153,6 +153,8 @@ pub const State = struct {
     world: *World = undefined,
 
     camera_position: tile.TileMapPosition,
+    camera_target_position: tile.TileMapPosition = undefined,
+    camera_transitioning: bool = false,
 
     player_position: tile.TileMapPosition,
     player_facing_direction: u32,

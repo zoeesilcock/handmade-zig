@@ -261,17 +261,51 @@ pub export fn updateAndRender(
             state.camera_position.abs_tile_z = state.player_position.abs_tile_z;
 
             // Move camera when player leaves the current screen.
-            const diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
-            if (diff.x > 9.0 * tile_map.tile_side_in_meters) {
-                state.camera_position.abs_tile_x += 17;
-            } else if (diff.x < -9.0 * tile_map.tile_side_in_meters) {
-                state.camera_position.abs_tile_x -= 17;
+            if (!state.camera_transitioning) {
+                const diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
+                if (diff.x > 9.0 * tile_map.tile_side_in_meters) {
+                    state.camera_target_position = state.camera_position;
+                    state.camera_target_position.abs_tile_x += 17;
+                    state.camera_transitioning = true;
+                } else if (diff.x < -9.0 * tile_map.tile_side_in_meters) {
+                    state.camera_target_position = state.camera_position;
+                    state.camera_target_position.abs_tile_x -= 17;
+                    state.camera_transitioning = true;
+                }
+                if (diff.y > 5.0 * tile_map.tile_side_in_meters) {
+                    state.camera_target_position = state.camera_position;
+                    state.camera_target_position.abs_tile_y += 9;
+                    state.camera_transitioning = true;
+                } else if (diff.y < -5.0 * tile_map.tile_side_in_meters) {
+                    state.camera_target_position = state.camera_position;
+                    state.camera_target_position.abs_tile_y -= 9;
+                    state.camera_transitioning = true;
+                }
             }
-            if (diff.y > 5.0 * tile_map.tile_side_in_meters) {
-                state.camera_position.abs_tile_y += 9;
-            } else if (diff.y < -5.0 * tile_map.tile_side_in_meters) {
-                state.camera_position.abs_tile_y -= 9;
-            }
+        }
+    }
+
+    if (state.camera_transitioning) {
+        var transition_complete = true;
+
+        if (state.camera_target_position.abs_tile_x < state.camera_position.abs_tile_x) {
+            state.camera_position.abs_tile_x -= 1;
+            transition_complete = false;
+        } else if (state.camera_target_position.abs_tile_x > state.camera_position.abs_tile_x) {
+            state.camera_position.abs_tile_x += 1;
+            transition_complete = false;
+        }
+
+        if (state.camera_target_position.abs_tile_y < state.camera_position.abs_tile_y) {
+            state.camera_position.abs_tile_y -= 1;
+            transition_complete = false;
+        } else if (state.camera_target_position.abs_tile_y > state.camera_position.abs_tile_y) {
+            state.camera_position.abs_tile_y += 1;
+            transition_complete = false;
+        }
+
+        if (transition_complete) {
+            state.camera_transitioning = false;
         }
     }
 
