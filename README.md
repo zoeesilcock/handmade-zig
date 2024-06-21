@@ -3,14 +3,6 @@
 Learning Zig by following along with the [Handmade Hero](https://handmadehero.org/) series of videos by Casey Muratori.
 
 
-## Setup
-Dependencies are setup as submodules, after cloning the repo you must fetch them.
-
-```
-git submodule init
-git submodule update
-```
-
 ## Assets
 Graphical assets are not included as they are not created by me. They need to be added to the `data/` directory manually. We currently expect the version of assets found in this location of the pre-order data: `handmade_hero_legacy_art.zip/early_data/test`.
 

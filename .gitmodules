@@ -1,4 +1,0 @@
-[submodule "lib/zigwin32"]
-	path = lib/zigwin32
-	url = https://github.com/marlersoft/zigwin32
-    ignore = dirty

@@ -17,10 +17,8 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addOptions("build_options", build_options);
 
     // Add the win32 API wrapper.
-    const win32api = b.createModule(.{
-        .root_source_file = b.path("lib/zigwin32/win32.zig"),
-    });
-    exe.root_module.addImport("win32", win32api);
+    const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
+    exe.root_module.addImport("win32", zigwin32);
 
     b.installArtifact(exe);
 
