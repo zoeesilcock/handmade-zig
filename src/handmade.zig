@@ -1,6 +1,7 @@
 const shared = @import("shared.zig");
 const tile = @import("tile.zig");
 const intrinsics = @import("intrinsics.zig");
+const math = @import("math.zig");
 const random = @import("random.zig");
 const std = @import("std");
 
@@ -21,15 +22,13 @@ pub export fn updateAndRender(
                 .abs_tile_x = 17 / 2,
                 .abs_tile_y = 9 / 2,
                 .abs_tile_z = 0,
-                .offset_x = 0.0,
-                .offset_y = 0.0,
+                .offset = math.Vector2{},
             },
             .player_position = tile.TileMapPosition{
                 .abs_tile_x = 1,
                 .abs_tile_y = 3,
                 .abs_tile_z = 0,
-                .offset_x = 5.0,
-                .offset_y = 5.0,
+                .offset = math.Vector2{ .x = 5.0, .y = 5.0 },
             },
             .player_facing_direction = 3,
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
@@ -204,23 +203,22 @@ pub export fn updateAndRender(
 
     for (&input.controllers) |controller| {
         if (controller.is_analog) {} else {
-            var player_x_delta: f32 = 0;
-            var player_y_delta: f32 = 0;
+            var player_delta = math.Vector2{};
 
             if (controller.move_up.ended_down) {
-                player_y_delta = 1;
+                player_delta.y = 1;
                 state.player_facing_direction = 1;
             }
             if (controller.move_down.ended_down) {
-                player_y_delta = -1;
+                player_delta.y = -1;
                 state.player_facing_direction = 3;
             }
             if (controller.move_left.ended_down) {
-                player_x_delta = -1;
+                player_delta.x = -1;
                 state.player_facing_direction = 2;
             }
             if (controller.move_right.ended_down) {
-                player_x_delta = 1;
+                player_delta.x = 1;
                 state.player_facing_direction = 0;
             }
 
@@ -228,17 +226,21 @@ pub export fn updateAndRender(
                 player_movement_speed *= 5.0;
             }
 
+            if (player_delta.x != 0 and player_delta.y != 0) {
+                player_delta = player_delta.scale(0.707106781187);
+            }
+
+            const scaled_delta = player_delta.scale(player_movement_speed * input.frame_delta_time);
             var new_player_position = state.player_position;
-            new_player_position.offset_x += player_movement_speed * player_x_delta * input.frame_delta_time;
-            new_player_position.offset_y += player_movement_speed * player_y_delta * input.frame_delta_time;
+            new_player_position.offset = new_player_position.offset.add(scaled_delta);
             new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
 
             var player_position_left = new_player_position;
-            player_position_left.offset_x -= 0.5 * player_width;
+            player_position_left.offset.x -= 0.5 * player_width;
             player_position_left = tile.recanonicalizePosition(tile_map, player_position_left);
 
             var player_position_right = new_player_position;
-            player_position_right.offset_x += 0.5 * player_width;
+            player_position_right.offset.x += 0.5 * player_width;
             player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
 
             if (tile.isTileMapPointEmpty(tile_map, player_position_left) and
@@ -263,20 +265,20 @@ pub export fn updateAndRender(
             // Move camera when player leaves the current screen.
             if (!state.camera_transitioning) {
                 const diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
-                if (diff.x > 9.0 * tile_map.tile_side_in_meters) {
+                if (diff.xy.x > 9.0 * tile_map.tile_side_in_meters) {
                     state.camera_target_position = state.camera_position;
                     state.camera_target_position.abs_tile_x += 17;
                     state.camera_transitioning = true;
-                } else if (diff.x < -9.0 * tile_map.tile_side_in_meters) {
+                } else if (diff.xy.y < -9.0 * tile_map.tile_side_in_meters) {
                     state.camera_target_position = state.camera_position;
                     state.camera_target_position.abs_tile_x -= 17;
                     state.camera_transitioning = true;
                 }
-                if (diff.y > 5.0 * tile_map.tile_side_in_meters) {
+                if (diff.xy.y > 5.0 * tile_map.tile_side_in_meters) {
                     state.camera_target_position = state.camera_position;
                     state.camera_target_position.abs_tile_y += 9;
                     state.camera_transitioning = true;
-                } else if (diff.y < -5.0 * tile_map.tile_side_in_meters) {
+                } else if (diff.xy.y < -5.0 * tile_map.tile_side_in_meters) {
                     state.camera_target_position = state.camera_position;
                     state.camera_target_position.abs_tile_y -= 9;
                     state.camera_transitioning = true;
@@ -313,7 +315,12 @@ pub export fn updateAndRender(
 
     // Clear background.
     // const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    // drawRectangle(buffer, 0.0, 0.0, @floatFromInt(buffer.width), @floatFromInt(buffer.height), clear_color);
+    // drawRectangle(
+    //     buffer,
+    //     math.Vector2{ .x = 0.0, .y = 0.0 },
+    //     math.Vector2{ .x = @floatFromInt(buffer.width), .y = @floatFromInt(buffer.height) },
+    //     clear_color,
+    // );
 
     // Draw tile map.
     const wall_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
@@ -356,18 +363,22 @@ pub export fn updateAndRender(
                     tile_color = background_color;
                 }
 
-                const center_x = screen_center_x -
-                    meters_to_pixels * state.camera_position.offset_x +
-                    @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_side_in_pixels));
-                const center_y = screen_center_y +
-                    meters_to_pixels * state.camera_position.offset_y -
-                    @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_side_in_pixels));
-                const min_x = center_x - 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels));
-                const min_y = center_y - 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels));
-                const max_x = center_x + 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels));
-                const max_y = center_y + 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels));
+                const center = math.Vector2{
+                    .x = screen_center_x -
+                        meters_to_pixels * state.camera_position.offset.x +
+                        @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_side_in_pixels)),
+                    .y = screen_center_y +
+                        meters_to_pixels * state.camera_position.offset.y -
+                        @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_side_in_pixels)),
+                };
+                const tile_side = math.Vector2{
+                    .x = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
+                    .y = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
+                };
+                const min = center.subtract(tile_side);
+                const max = center.add(tile_side);
 
-                drawRectangle(buffer, min_x, min_y, max_x, max_y, tile_color);
+                drawRectangle(buffer, min, max, tile_color);
             }
         }
     }
@@ -375,16 +386,20 @@ pub export fn updateAndRender(
     // Draw player.
     const diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    const player_ground_point_x = screen_center_x + meters_to_pixels * diff.x;
-    const player_ground_point_y = screen_center_y - meters_to_pixels * diff.y;
-    const player_left: f32 = player_ground_point_x - (0.5 * meters_to_pixels * player_width);
-    const player_top: f32 = player_ground_point_y - meters_to_pixels * player_height;
+    const player_ground_point_x = screen_center_x + meters_to_pixels * diff.xy.x;
+    const player_ground_point_y = screen_center_y - meters_to_pixels * diff.xy.y;
+    const player_left_top = math.Vector2{
+        .x = player_ground_point_x - (0.5 * meters_to_pixels * player_width),
+        .y = player_ground_point_y - meters_to_pixels * player_height,
+    };
+    const player_width_height = math.Vector2{
+        .x = player_width,
+        .y = player_height,
+    };
     drawRectangle(
         buffer,
-        player_left,
-        player_top,
-        player_left + meters_to_pixels * player_width,
-        player_top + meters_to_pixels * player_height,
+        player_left_top,
+        player_left_top.add(player_width_height.scale(meters_to_pixels)),
         player_color,
     );
     const hero_bitmaps = state.hero_bitmaps[state.player_facing_direction];
@@ -406,17 +421,15 @@ pub export fn getSoundSamples(
 
 fn drawRectangle(
     buffer: *shared.OffscreenBuffer,
-    real_min_x: f32,
-    real_min_y: f32,
-    real_max_x: f32,
-    real_max_y: f32,
+    vector_min: math.Vector2,
+    vector_max: math.Vector2,
     color: shared.Color,
 ) void {
     // Round input values.
-    var min_x = intrinsics.roundReal32ToInt32(real_min_x);
-    var min_y = intrinsics.roundReal32ToInt32(real_min_y);
-    var max_x = intrinsics.roundReal32ToInt32(real_max_x);
-    var max_y = intrinsics.roundReal32ToInt32(real_max_y);
+    var min_x = intrinsics.roundReal32ToInt32(vector_min.x);
+    var min_y = intrinsics.roundReal32ToInt32(vector_min.y);
+    var max_x = intrinsics.roundReal32ToInt32(vector_max.x);
+    var max_y = intrinsics.roundReal32ToInt32(vector_max.y);
 
     // Clip input values to buffer.
     if (min_x < 0) {

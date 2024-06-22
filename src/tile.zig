@@ -1,5 +1,6 @@
 const shared = @import("shared.zig");
 const intrinsics = @import("intrinsics.zig");
+const math = @import("math.zig");
 const std = @import("std");
 
 const TileChunkPosition = struct {
@@ -27,10 +28,8 @@ pub const TileMap = struct {
     tile_chunks: [*]TileChunk = undefined,
 };
 
-
 pub const TileMapDifference = struct {
-    x: f32 = 0,
-    y: f32 = 0,
+    xy: math.Vector2 = math.Vector2{},
     z: f32 = 0,
 };
 
@@ -43,24 +42,23 @@ pub const TileMapPosition = struct {
     abs_tile_z: u32,
 
     // Position relative to the center of the current tile.
-    offset_x: f32,
-    offset_y: f32,
+    offset: math.Vector2,
 };
 
 pub fn subtractPositions(tile_map: *TileMap, a: TileMapPosition, b: TileMapPosition) TileMapDifference {
     var result = TileMapDifference{};
 
-    const tile_diff_x = @as(f32, @floatFromInt(a.abs_tile_x)) - @as(f32, @floatFromInt(b.abs_tile_x));
-    const tile_diff_y = @as(f32, @floatFromInt(a.abs_tile_y)) - @as(f32, @floatFromInt(b.abs_tile_y));
+    var tile_diff_xy = math.Vector2{
+        .x = @as(f32, @floatFromInt(a.abs_tile_x)) - @as(f32, @floatFromInt(b.abs_tile_x)),
+        .y = @as(f32, @floatFromInt(a.abs_tile_y)) - @as(f32, @floatFromInt(b.abs_tile_y)),
+    };
     const tile_diff_z = @as(f32, @floatFromInt(a.abs_tile_z)) - @as(f32, @floatFromInt(b.abs_tile_z));
 
-    result.x = tile_map.tile_side_in_meters * tile_diff_x + (a.offset_x - b.offset_x);
-    result.y = tile_map.tile_side_in_meters * tile_diff_y + (a.offset_y - b.offset_y);
+    result.xy = tile_diff_xy.scale(tile_map.tile_side_in_meters).add(a.offset.subtract(b.offset));
     result.z = tile_map.tile_side_in_meters * tile_diff_z;
 
     return result;
 }
-
 
 pub inline fn recannonicalizeCoordinate(tile_map: *TileMap, tile_abs: *u32, tile_rel: *f32) void {
     // Calculate new tile position pased on the tile relative position.
@@ -82,8 +80,8 @@ pub inline fn recannonicalizeCoordinate(tile_map: *TileMap, tile_abs: *u32, tile
 pub fn recanonicalizePosition(tile_map: *TileMap, position: TileMapPosition) TileMapPosition {
     var result = position;
 
-    recannonicalizeCoordinate(tile_map, &result.abs_tile_x, &result.offset_x);
-    recannonicalizeCoordinate(tile_map, &result.abs_tile_y, &result.offset_y);
+    recannonicalizeCoordinate(tile_map, &result.abs_tile_x, &result.offset.x);
+    recannonicalizeCoordinate(tile_map, &result.abs_tile_y, &result.offset.y);
 
     return result;
 }
