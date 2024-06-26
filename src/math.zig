@@ -28,11 +28,43 @@ pub const Vector2 = struct {
         };
     }
 
+    pub fn add_set(self: *Vector2, b: Vector2) *Vector2 {
+        self.x += b.x;
+        self.y += b.y;
+        return self;
+    }
+
     pub fn subtract(self: Vector2, b: Vector2) Vector2 {
         return Vector2{
             .x = self.x - b.x,
             .y = self.y - b.y,
         };
+    }
+
+    pub fn multiply(self: Vector2, b: Vector2) Vector2 {
+        return Vector2{
+            .x = self.x * b.x,
+            .y = self.y * b.y,
+        };
+    }
+
+    pub fn multiply_set(self: *Vector2, b: Vector2) *Vector2 {
+        self.x *= b.x;
+        self.y *= b.y;
+        return self;
+    }
+
+    pub fn divide(self: Vector2, b: Vector2) Vector2 {
+        return Vector2{
+            .x = self.x / b.x,
+            .y = self.y / b.y,
+        };
+    }
+
+    pub fn divide_set(self: *Vector2, b: Vector2) *Vector2 {
+        self.x /= b.x;
+        self.y /= b.y;
+        return self;
     }
 
     pub fn negate(self: Vector2) Vector2 {
