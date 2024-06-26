@@ -197,28 +197,28 @@ pub export fn updateAndRender(
     const tile_side_in_pixels = 60;
     const meters_to_pixels = @as(f32, @floatFromInt(tile_side_in_pixels)) / tile_map.tile_side_in_meters;
 
-    var player_movement_speed: f32 = 2.0;
+    var player_movement_speed: f32 = 10.0;
     const player_height: f32 = 1.4;
     const player_width: f32 = 0.75 * player_height;
 
     for (&input.controllers) |controller| {
         if (controller.is_analog) {} else {
-            var player_delta = math.Vector2{};
+            var player_acceleration = math.Vector2{};
 
             if (controller.move_up.ended_down) {
-                player_delta.y = 1;
+                player_acceleration.y = 1;
                 state.player_facing_direction = 1;
             }
             if (controller.move_down.ended_down) {
-                player_delta.y = -1;
+                player_acceleration.y = -1;
                 state.player_facing_direction = 3;
             }
             if (controller.move_left.ended_down) {
-                player_delta.x = -1;
+                player_acceleration.x = -1;
                 state.player_facing_direction = 2;
             }
             if (controller.move_right.ended_down) {
-                player_delta.x = 1;
+                player_acceleration.x = 1;
                 state.player_facing_direction = 0;
             }
 
@@ -226,13 +226,18 @@ pub export fn updateAndRender(
                 player_movement_speed *= 5.0;
             }
 
-            if (player_delta.x != 0 and player_delta.y != 0) {
-                player_delta = player_delta.scale(0.707106781187);
+            if (player_acceleration.x != 0 and player_acceleration.y != 0) {
+                player_acceleration = player_acceleration.scale(0.707106781187);
             }
 
-            const scaled_delta = player_delta.scale(player_movement_speed * input.frame_delta_time);
+            player_acceleration = player_acceleration.scale(player_movement_speed);
+
+            _ = player_acceleration.add_set(state.player_velocity.scale(1.5).negate());
+
             var new_player_position = state.player_position;
-            new_player_position.offset = new_player_position.offset.add(scaled_delta);
+            _ = new_player_position.offset.add_set(player_acceleration.scale(0.5 * math.square(input.frame_delta_time)))
+                .add_set(state.player_velocity.scale(input.frame_delta_time));
+            state.player_velocity = player_acceleration.scale(input.frame_delta_time).add(state.player_velocity);
             new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
 
             var player_position_left = new_player_position;
@@ -269,7 +274,7 @@ pub export fn updateAndRender(
                     state.camera_target_position = state.camera_position;
                     state.camera_target_position.abs_tile_x += 17;
                     state.camera_transitioning = true;
-                } else if (diff.xy.y < -9.0 * tile_map.tile_side_in_meters) {
+                } else if (diff.xy.x < -9.0 * tile_map.tile_side_in_meters) {
                     state.camera_target_position = state.camera_position;
                     state.camera_target_position.abs_tile_x -= 17;
                     state.camera_transitioning = true;

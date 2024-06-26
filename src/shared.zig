@@ -6,6 +6,7 @@ pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
 
 const intrinsics = @import("intrinsics.zig");
+const math = @import("math.zig");
 const tile = @import("tile.zig");
 const std = @import("std");
 
@@ -158,6 +159,7 @@ pub const State = struct {
 
     player_position: tile.TileMapPosition,
     player_facing_direction: u32,
+    player_velocity: math.Vector2 = math.Vector2{},
 
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,

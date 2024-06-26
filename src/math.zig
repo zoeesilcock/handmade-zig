@@ -82,3 +82,7 @@ pub const Vector2 = struct {
     }
 };
 
+pub fn square(a: f32) f32 {
+    return a * a;
+}
+
