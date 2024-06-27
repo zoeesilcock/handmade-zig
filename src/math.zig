@@ -41,6 +41,12 @@ pub const Vector2 = struct {
         };
     }
 
+    pub fn subtract_set(self: *Vector2, b: Vector2) *Vector2 {
+        self.x -= b.x;
+        self.y -= b.y;
+        return self;
+    }
+
     pub fn multiply(self: Vector2, b: Vector2) Vector2 {
         return Vector2{
             .x = self.x * b.x,
@@ -79,6 +85,10 @@ pub const Vector2 = struct {
             .x = b * self.x,
             .y = b * self.y
         };
+    }
+
+    pub fn dot(self: Vector2, b: Vector2) f32 {
+        return (self.x * b.x) + (self.y * b.y);
     }
 };
 

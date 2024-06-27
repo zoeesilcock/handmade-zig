@@ -248,10 +248,38 @@ pub export fn updateAndRender(
             player_position_right.offset.x += 0.5 * player_width;
             player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
 
-            if (tile.isTileMapPointEmpty(tile_map, player_position_left) and
-                tile.isTileMapPointEmpty(tile_map, player_position_right) and
-                tile.isTileMapPointEmpty(tile_map, new_player_position))
-            {
+            var collided = false;
+            var collision_position: tile.TileMapPosition = undefined;
+            if (!tile.isTileMapPointEmpty(tile_map, new_player_position)) {
+                collided = true;
+                collision_position = new_player_position;
+            }
+            if (!tile.isTileMapPointEmpty(tile_map, player_position_left)) {
+                collided = true;
+                collision_position = player_position_left;
+            }
+            if (!tile.isTileMapPointEmpty(tile_map, player_position_right)) {
+                collided = true;
+                collision_position = player_position_right;
+            }
+
+            if (collided) {
+                var r = math.Vector2{};
+                if (collision_position.abs_tile_x < state.player_position.abs_tile_x) {
+                    r = math.Vector2{ .x = 1, .y = 0 };
+                }
+                if (collision_position.abs_tile_x > state.player_position.abs_tile_x) {
+                    r = math.Vector2{ .x = -1, .y = 0 };
+                }
+                if (collision_position.abs_tile_y < state.player_position.abs_tile_y) {
+                    r = math.Vector2{ .x = 0, .y = 1 };
+                }
+                if (collision_position.abs_tile_y > state.player_position.abs_tile_y) {
+                    r = math.Vector2{ .x = 0, .y = -1 };
+                }
+
+                _ = state.player_velocity.subtract_set(r.scale(state.player_velocity.dot(r)));
+            } else {
                 if (!tile.areOnSameTile(&state.player_position, &new_player_position)) {
                     const new_tile_value = tile.getTileValueFromPosition(tile_map, new_player_position);
 
