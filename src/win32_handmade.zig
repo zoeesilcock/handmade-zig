@@ -835,9 +835,9 @@ fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, w
 
     // Clear areas outside of our drawing area.
     _ = win32.PatBlt(device_context, 0, 0, window_width, offset_y, win32.BLACKNESS);
-    _ = win32.PatBlt(device_context, 0, offset_y + buffer.height, window_width, window_height, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, 0, offset_y + blit_height, window_width, window_height, win32.BLACKNESS);
     _ = win32.PatBlt(device_context, 0, 0, offset_x, window_height, win32.BLACKNESS);
-    _ = win32.PatBlt(device_context, offset_x + buffer.width, 0, window_width, window_height, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, offset_x + blit_width, 0, window_width, window_height, win32.BLACKNESS);
 
     _ = win32.StretchDIBits(
         device_context,
