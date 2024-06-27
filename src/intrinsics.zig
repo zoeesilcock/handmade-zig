@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub inline fn absoluteValue(value: f32) f32 {
+    return @abs(value);
+}
+
 pub inline fn roundReal32ToInt32(value: f32) i32 {
     return @intFromFloat(@round(value));
 }

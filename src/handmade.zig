@@ -24,13 +24,6 @@ pub export fn updateAndRender(
                 .abs_tile_z = 0,
                 .offset = math.Vector2{},
             },
-            .player_position = tile.TileMapPosition{
-                .abs_tile_x = 1,
-                .abs_tile_y = 3,
-                .abs_tile_z = 0,
-                .offset = math.Vector2{ .x = 5.0, .y = 5.0 },
-            },
-            .player_facing_direction = 3,
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
             .hero_bitmaps = .{
                 shared.HeroBitmaps{
@@ -69,6 +62,9 @@ pub export fn updateAndRender(
             memory.permanent_storage_size - @sizeOf(shared.State),
             @as([*]u8, @ptrCast(memory.permanent_storage.?)) + @sizeOf(shared.State),
         );
+
+        const null_entity = addEntity(state);
+        _ = null_entity;
 
         state.world = shared.pushStruct(&state.world_arena, shared.World);
         const world = state.world;
@@ -197,179 +193,69 @@ pub export fn updateAndRender(
     const tile_side_in_pixels = 60;
     const meters_to_pixels = @as(f32, @floatFromInt(tile_side_in_pixels)) / tile_map.tile_side_in_meters;
 
-    var player_movement_speed: f32 = 10.0;
-    const player_height: f32 = 1.4;
-    const player_width: f32 = 0.75 * player_height;
-    var old_player_position = state.player_position;
 
     // Handle input.
-    for (&input.controllers) |controller| {
-        if (controller.is_analog) {} else {
-            var player_acceleration = math.Vector2{};
+    for (&input.controllers, 0..) |controller, controller_index| {
+        const controlling_entity = getEntity(state, state.player_index_for_controller[controller_index]);
 
-            if (controller.move_up.ended_down) {
-                player_acceleration.y = 1;
-                state.player_facing_direction = 1;
-            }
-            if (controller.move_down.ended_down) {
-                player_acceleration.y = -1;
-                state.player_facing_direction = 3;
-            }
-            if (controller.move_left.ended_down) {
-                player_acceleration.x = -1;
-                state.player_facing_direction = 2;
-            }
-            if (controller.move_right.ended_down) {
-                player_acceleration.x = 1;
-                state.player_facing_direction = 0;
-            }
+        if (controlling_entity) |entity| {
+            var input_direction = math.Vector2{};
 
-            if (controller.action_up.ended_down) {
-                player_movement_speed *= 5.0;
-            }
-
-            if (player_acceleration.x != 0 and player_acceleration.y != 0) {
-                player_acceleration = player_acceleration.scale(0.707106781187);
-            }
-
-            player_acceleration = player_acceleration.scale(player_movement_speed);
-            _ = player_acceleration.add_set(state.player_velocity.scale(1.5).negate());
-
-            var new_player_position = state.player_position;
-            const player_delta = player_acceleration.scale(0.5 * math.square(input.frame_delta_time))
-                .add(state.player_velocity.scale(input.frame_delta_time));
-            _ = new_player_position.offset.add_set(player_delta);
-            state.player_velocity = player_acceleration.scale(input.frame_delta_time).add(state.player_velocity);
-            new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
-
-
-
-            var player_position_left = new_player_position;
-            player_position_left.offset.x -= 0.5 * player_width;
-            player_position_left = tile.recanonicalizePosition(tile_map, player_position_left);
-
-            var player_position_right = new_player_position;
-            player_position_right.offset.x += 0.5 * player_width;
-            player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
-
-            var collided = false;
-            var collision_position: tile.TileMapPosition = undefined;
-            if (!tile.isTileMapPointEmpty(tile_map, new_player_position)) {
-                collided = true;
-                collision_position = new_player_position;
-            }
-            if (!tile.isTileMapPointEmpty(tile_map, player_position_left)) {
-                collided = true;
-                collision_position = player_position_left;
-            }
-            if (!tile.isTileMapPointEmpty(tile_map, player_position_right)) {
-                collided = true;
-                collision_position = player_position_right;
-            }
-
-            if (collided) {
-                var r = math.Vector2{};
-                if (collision_position.abs_tile_x < state.player_position.abs_tile_x) {
-                    r = math.Vector2{ .x = 1, .y = 0 };
-                }
-                if (collision_position.abs_tile_x > state.player_position.abs_tile_x) {
-                    r = math.Vector2{ .x = -1, .y = 0 };
-                }
-                if (collision_position.abs_tile_y < state.player_position.abs_tile_y) {
-                    r = math.Vector2{ .x = 0, .y = 1 };
-                }
-                if (collision_position.abs_tile_y > state.player_position.abs_tile_y) {
-                    r = math.Vector2{ .x = 0, .y = -1 };
-                }
-
-                _ = state.player_velocity.subtract_set(r.scale(state.player_velocity.dot(r)));
+            if (controller.is_analog) {
+                input_direction = math.Vector2{
+                    .x = controller.stick_average_x,
+                    .y = controller.stick_average_y,
+                };
             } else {
-                state.player_position = new_player_position;
+                if (controller.move_up.ended_down) {
+                    input_direction.y = 1;
+                }
+                if (controller.move_down.ended_down) {
+                    input_direction.y = -1;
+                }
+                if (controller.move_left.ended_down) {
+                    input_direction.x = -1;
+                }
+                if (controller.move_right.ended_down) {
+                    input_direction.x = 1;
+                }
             }
 
-
-
-            // const min_tile_x: u32 = 0;
-            // const min_tile_y: u32 = 0;
-            // const one_past_max_tile_y: u32 = 0;
-            // const one_past_max_tile_x: u32 = 0;
-            // const abs_tile_z = state.player_position.abs_tile_z;
-            // var best_player_position = state.player_position;
-            // var best_distance_squared = player_delta.lengthSquared();
-            //
-            // var abs_tile_y = min_tile_y;
-            // while (abs_tile_y != one_past_max_tile_y) : (abs_tile_y += 1) {
-            //     var abs_tile_x = min_tile_x;
-            //     while (abs_tile_x != one_past_max_tile_x) : (abs_tile_x += 1) {
-            //         const test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
-            //         const tile_value = tile.getTileValue(tile_map, abs_tile_x, abs_tile_y, abs_tile_z);
-            //         if (tile.isTileValueEmpty(tile_value)) {
-            //             var min_corner = math.Vector2{
-            //                 .x = tile_map.tile_side_in_meters,
-            //                 .y = tile_map.tile_side_in_meters,
-            //             };
-            //             _ = min_corner.scale_set(-0.5);
-            //             var max_corner = math.Vector2{
-            //                 .x = tile_map.tile_side_in_meters,
-            //                 .y = tile_map.tile_side_in_meters,
-            //             };
-            //             _ = max_corner.scale_set(0.5);
-            //
-            //             const relative_new_player_position = tile.subtractPositions(
-            //                 tile_map,
-            //                 test_tile_position,
-            //                 new_player_position,
-            //             );
-            //             const test_position = tile.closestPointInRectangle(
-            //                 min_corner,
-            //                 max_corner,
-            //                 relative_new_player_position,
-            //             );
-            //             const test_distance_squared = test_position.lengthSquared();
-            //
-            //             if (best_distance_squared > test_distance_squared) {
-            //                 best_player_position = test_position;
-            //                 best_distance_squared = test_distance_squared;
-            //             }
-            //         }
-            //     }
-            // }
+            movePlayer(state, entity, input.frame_delta_time, input_direction);
+        } else {
+            if (controller.start_button.ended_down) {
+                const entity_index = addEntity(state);
+                initializePlayer(state, entity_index);
+                state.player_index_for_controller[controller_index] = entity_index;
+            }
         }
     }
 
-    // Update player Z when hitting a ladder.
-    if (!tile.areOnSameTile(&old_player_position, &state.player_position)) {
-        const new_tile_value = tile.getTileValueFromPosition(tile_map, state.player_position);
+    const camera_following_entity = getEntity(state, state.camera_following_entity_index);
+    if (camera_following_entity) |entity| {
+        state.camera_position.abs_tile_z = entity.position.abs_tile_z;
 
-        if (new_tile_value == 3) {
-            state.player_position.abs_tile_z += 1;
-        } else if (new_tile_value == 4) {
-            state.player_position.abs_tile_z -= 1;
-        }
-    }
-
-    state.camera_position.abs_tile_z = state.player_position.abs_tile_z;
-
-    // Move camera when player leaves the current screen.
-    var diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
-    if (!state.camera_transitioning) {
-        if (diff.xy.x > 9.0 * tile_map.tile_side_in_meters) {
-            state.camera_target_position = state.camera_position;
-            state.camera_target_position.abs_tile_x += 17;
-            state.camera_transitioning = true;
-        } else if (diff.xy.x < -9.0 * tile_map.tile_side_in_meters) {
-            state.camera_target_position = state.camera_position;
-            state.camera_target_position.abs_tile_x -= 17;
-            state.camera_transitioning = true;
-        }
-        if (diff.xy.y > 5.0 * tile_map.tile_side_in_meters) {
-            state.camera_target_position = state.camera_position;
-            state.camera_target_position.abs_tile_y += 9;
-            state.camera_transitioning = true;
-        } else if (diff.xy.y < -5.0 * tile_map.tile_side_in_meters) {
-            state.camera_target_position = state.camera_position;
-            state.camera_target_position.abs_tile_y -= 9;
-            state.camera_transitioning = true;
+        // Move camera when player leaves the current screen.
+        const diff = tile.subtractPositions(tile_map, entity.position, state.camera_position);
+        if (!state.camera_transitioning) {
+            if (diff.xy.x > 9.0 * tile_map.tile_side_in_meters) {
+                state.camera_target_position = state.camera_position;
+                state.camera_target_position.abs_tile_x += 17;
+                state.camera_transitioning = true;
+            } else if (diff.xy.x < -9.0 * tile_map.tile_side_in_meters) {
+                state.camera_target_position = state.camera_position;
+                state.camera_target_position.abs_tile_x -= 17;
+                state.camera_transitioning = true;
+            }
+            if (diff.xy.y > 5.0 * tile_map.tile_side_in_meters) {
+                state.camera_target_position = state.camera_position;
+                state.camera_target_position.abs_tile_y += 9;
+                state.camera_transitioning = true;
+            } else if (diff.xy.y < -5.0 * tile_map.tile_side_in_meters) {
+                state.camera_target_position = state.camera_position;
+                state.camera_target_position.abs_tile_y -= 9;
+                state.camera_transitioning = true;
+            }
         }
     }
 
@@ -471,28 +357,222 @@ pub export fn updateAndRender(
     }
 
     // Draw player.
-    diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
-    const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    const player_ground_point_x = screen_center_x + meters_to_pixels * diff.xy.x;
-    const player_ground_point_y = screen_center_y - meters_to_pixels * diff.xy.y;
-    const player_left_top = math.Vector2{
-        .x = player_ground_point_x - (0.5 * meters_to_pixels * player_width),
-        .y = player_ground_point_y - meters_to_pixels * player_height,
-    };
-    const player_width_height = math.Vector2{
-        .x = player_width,
-        .y = player_height,
-    };
-    drawRectangle(
-        buffer,
-        player_left_top,
-        player_left_top.add(player_width_height.scale(meters_to_pixels)),
-        player_color,
-    );
-    const hero_bitmaps = state.hero_bitmaps[state.player_facing_direction];
-    drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.torso, hero_bitmaps.align_x, hero_bitmaps.align_y);
-    drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.cape, hero_bitmaps.align_x, hero_bitmaps.align_y);
-    drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.head, hero_bitmaps.align_x, hero_bitmaps.align_y);
+    var entity: [*]shared.Entity = &state.entities;
+    var entity_index: u32 = 0;
+    while (entity_index < state.entity_count) : (entity_index += 1) {
+        if (entity[0].exists and state.camera_position.abs_tile_z == entity[0].position.abs_tile_z) {
+            const diff = tile.subtractPositions(tile_map, entity[0].position, state.camera_position);
+            const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
+            const player_ground_point_x = screen_center_x + meters_to_pixels * diff.xy.x;
+            const player_ground_point_y = screen_center_y - meters_to_pixels * diff.xy.y;
+            const player_left_top = math.Vector2{
+                .x = player_ground_point_x - (0.5 * meters_to_pixels * entity[0].width),
+                .y = player_ground_point_y - meters_to_pixels * entity[0].height,
+            };
+            const player_width_height = math.Vector2{
+                .x = entity[0].width,
+                .y = entity[0].height,
+            };
+            drawRectangle(
+                buffer,
+                player_left_top,
+                player_left_top.add(player_width_height.scale(meters_to_pixels)),
+                player_color,
+            );
+            const hero_bitmaps = state.hero_bitmaps[entity[0].facing_direction];
+            drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.torso, hero_bitmaps.align_x, hero_bitmaps.align_y);
+            drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.cape, hero_bitmaps.align_x, hero_bitmaps.align_y);
+            drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.head, hero_bitmaps.align_x, hero_bitmaps.align_y);
+        }
+
+        entity += 1;
+    }
+}
+
+fn addEntity(state: *shared.State) u32 {
+    std.debug.assert(state.entity_count < state.entities.len);
+
+    const entity_index = state.entity_count;
+    const entity = &state.entities[entity_index];
+    entity.* = shared.Entity{};
+
+    state.entity_count += 1;
+
+    return entity_index;
+}
+
+fn getEntity(state: *shared.State, index: u32) ?*shared.Entity {
+    var entity: ?*shared.Entity = null;
+
+    if (index > 0 and index < state.entities.len) {
+        entity = &state.entities[index];
+    }
+
+    return entity;
+}
+
+fn initializePlayer(state: *shared.State, entity_index: u32) void {
+    const opt_entity = getEntity(state, entity_index);
+
+    if (opt_entity) |entity| {
+        entity.exists = true;
+        entity.facing_direction = 3;
+        entity.position = tile.TileMapPosition{
+            .abs_tile_x = 1,
+            .abs_tile_y = 3,
+            .abs_tile_z = 0,
+            .offset = math.Vector2{ .x = 5.0, .y = 5.0 },
+        };
+        entity.height = 1.4;
+        entity.width = 0.75 * entity.height;
+
+        if (getEntity(state, state.camera_following_entity_index) == null) {
+            state.camera_following_entity_index = entity_index;
+        }
+    }
+}
+
+fn movePlayer(
+    state: *shared.State,
+    entity: *shared.Entity,
+    delta_time: f32,
+    direction: math.Vector2,
+) void {
+    const tile_map = state.world.tile_map;
+    var old_player_position = entity.position;
+    var new_player_position = entity.position;
+    var player_acceleration = direction;
+    const player_movement_speed: f32 = 50.0;
+
+    if (player_acceleration.x != 0 and player_acceleration.y != 0) {
+        _ = player_acceleration.scale_set(0.707106781187);
+    }
+
+    _ = player_acceleration.scale_set(player_movement_speed);
+    _ = player_acceleration.add_set(entity.velocity.scale(8.0).negate());
+
+    const player_delta = player_acceleration.scale(0.5 * math.square(delta_time))
+        .add(entity.velocity.scale(delta_time));
+    _ = new_player_position.offset.add_set(player_delta);
+    entity.velocity = player_acceleration.scale(delta_time).add(entity.velocity);
+    new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
+
+    var player_position_left = new_player_position;
+    player_position_left.offset.x -= 0.5 * entity.width;
+    player_position_left = tile.recanonicalizePosition(tile_map, player_position_left);
+
+    var player_position_right = new_player_position;
+    player_position_right.offset.x += 0.5 * entity.width;
+    player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
+
+    var collided = false;
+    var collision_position: tile.TileMapPosition = undefined;
+    if (!tile.isTileMapPointEmpty(tile_map, new_player_position)) {
+        collided = true;
+        collision_position = new_player_position;
+    }
+    if (!tile.isTileMapPointEmpty(tile_map, player_position_left)) {
+        collided = true;
+        collision_position = player_position_left;
+    }
+    if (!tile.isTileMapPointEmpty(tile_map, player_position_right)) {
+        collided = true;
+        collision_position = player_position_right;
+    }
+
+    if (collided) {
+        var r = math.Vector2{};
+        if (collision_position.abs_tile_x < entity.position.abs_tile_x) {
+            r = math.Vector2{ .x = 1, .y = 0 };
+        }
+        if (collision_position.abs_tile_x > entity.position.abs_tile_x) {
+            r = math.Vector2{ .x = -1, .y = 0 };
+        }
+        if (collision_position.abs_tile_y < entity.position.abs_tile_y) {
+            r = math.Vector2{ .x = 0, .y = 1 };
+        }
+        if (collision_position.abs_tile_y > entity.position.abs_tile_y) {
+            r = math.Vector2{ .x = 0, .y = -1 };
+        }
+
+        _ = entity.velocity.subtract_set(r.scale(entity.velocity.dot(r)));
+    } else {
+        entity.position = new_player_position;
+    }
+
+    // const min_tile_x: u32 = 0;
+    // const min_tile_y: u32 = 0;
+    // const one_past_max_tile_y: u32 = 0;
+    // const one_past_max_tile_x: u32 = 0;
+    // const abs_tile_z = entity.position.abs_tile_z;
+    // var best_player_position = entity.position;
+    // var best_distance_squared = player_delta.lengthSquared();
+    //
+    // var abs_tile_y = min_tile_y;
+    // while (abs_tile_y != one_past_max_tile_y) : (abs_tile_y += 1) {
+    //     var abs_tile_x = min_tile_x;
+    //     while (abs_tile_x != one_past_max_tile_x) : (abs_tile_x += 1) {
+    //         const test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
+    //         const tile_value = tile.getTileValue(tile_map, abs_tile_x, abs_tile_y, abs_tile_z);
+    //         if (tile.isTileValueEmpty(tile_value)) {
+    //             var min_corner = math.Vector2{
+    //                 .x = tile_map.tile_side_in_meters,
+    //                 .y = tile_map.tile_side_in_meters,
+    //             };
+    //             _ = min_corner.scale_set(-0.5);
+    //             var max_corner = math.Vector2{
+    //                 .x = tile_map.tile_side_in_meters,
+    //                 .y = tile_map.tile_side_in_meters,
+    //             };
+    //             _ = max_corner.scale_set(0.5);
+    //
+    //             const relative_new_player_position = tile.subtractPositions(
+    //                 tile_map,
+    //                 test_tile_position,
+    //                 new_player_position,
+    //             );
+    //             const test_position = tile.closestPointInRectangle(
+    //                 min_corner,
+    //                 max_corner,
+    //                 relative_new_player_position,
+    //             );
+    //             const test_distance_squared = test_position.lengthSquared();
+    //
+    //             if (best_distance_squared > test_distance_squared) {
+    //                 best_player_position = test_position;
+    //                 best_distance_squared = test_distance_squared;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // Update player Z when hitting a ladder.
+    if (!tile.areOnSameTile(&old_player_position, &entity.position)) {
+        const new_tile_value = tile.getTileValueFromPosition(tile_map, entity.position);
+
+        if (new_tile_value == 3) {
+            entity.position.abs_tile_z += 1;
+        } else if (new_tile_value == 4) {
+            entity.position.abs_tile_z -= 1;
+        }
+    }
+
+    // Update facing direction based on velocity.
+    if (entity.velocity.x == 0 and entity.velocity.y == 0) {
+        // Keep existing facing direction when velocity is zero.
+    } else if (intrinsics.absoluteValue(entity.velocity.x) > intrinsics.absoluteValue(entity.velocity.y)) {
+        if (entity.velocity.x > 0) {
+            entity.facing_direction = 0;
+        } else {
+            entity.facing_direction = 2;
+        }
+    } else if (intrinsics.absoluteValue(entity.velocity.x) < intrinsics.absoluteValue(entity.velocity.y)) {
+        if (entity.velocity.y > 0) {
+            entity.facing_direction = 1;
+        } else {
+            entity.facing_direction = 3;
+        }
+    }
 }
 
 pub export fn getSoundSamples(

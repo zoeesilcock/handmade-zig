@@ -153,13 +153,14 @@ pub const State = struct {
     world_arena: MemoryArena = undefined,
     world: *World = undefined,
 
+    camera_following_entity_index: u32 = 0,
     camera_position: tile.TileMapPosition,
     camera_target_position: tile.TileMapPosition = undefined,
     camera_transitioning: bool = false,
 
-    player_position: tile.TileMapPosition,
-    player_facing_direction: u32,
-    player_velocity: math.Vector2 = math.Vector2{},
+    player_index_for_controller: [MAX_CONTROLLER_COUNT]u32 = [1]u32{undefined} ** MAX_CONTROLLER_COUNT,
+    entity_count: u32 = 0,
+    entities: [256]Entity = [1]Entity{undefined} ** 256,
 
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
@@ -167,6 +168,15 @@ pub const State = struct {
 
 pub const World = struct {
     tile_map: *tile.TileMap,
+};
+
+pub const Entity = struct {
+    exists: bool = false,
+    position: tile.TileMapPosition = undefined,
+    width: f32 = 0,
+    height: f32 = 0,
+    facing_direction: u32 = undefined,
+    velocity: math.Vector2 = math.Vector2{},
 };
 
 pub const HeroBitmaps = struct {
