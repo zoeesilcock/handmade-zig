@@ -67,7 +67,7 @@ pub fn closestPointInRectangle(
     return result;
 }
 
-pub fn subtractPositions(tile_map: *TileMap, a: TileMapPosition, b: TileMapPosition) TileMapDifference {
+pub fn subtractPositions(tile_map: *TileMap, a: *TileMapPosition, b: *TileMapPosition) TileMapDifference {
     var result = TileMapDifference{};
 
     var tile_diff_xy = math.Vector2{

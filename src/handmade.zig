@@ -236,7 +236,7 @@ pub export fn updateAndRender(
         state.camera_position.abs_tile_z = entity.position.abs_tile_z;
 
         // Move camera when player leaves the current screen.
-        const diff = tile.subtractPositions(tile_map, entity.position, state.camera_position);
+        const diff = tile.subtractPositions(tile_map, &entity.position, &state.camera_position);
         if (!state.camera_transitioning) {
             if (diff.xy.x > 9.0 * tile_map.tile_side_in_meters) {
                 state.camera_target_position = state.camera_position;
@@ -361,7 +361,7 @@ pub export fn updateAndRender(
     var entity_index: u32 = 0;
     while (entity_index < state.entity_count) : (entity_index += 1) {
         if (entity[0].exists and state.camera_position.abs_tile_z == entity[0].position.abs_tile_z) {
-            const diff = tile.subtractPositions(tile_map, entity[0].position, state.camera_position);
+            const diff = tile.subtractPositions(tile_map, &entity[0].position, &state.camera_position);
             const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
             const player_ground_point_x = screen_center_x + meters_to_pixels * diff.xy.x;
             const player_ground_point_y = screen_center_y - meters_to_pixels * diff.xy.y;
@@ -528,8 +528,8 @@ fn movePlayer(
     //
     //             const relative_new_player_position = tile.subtractPositions(
     //                 tile_map,
-    //                 test_tile_position,
-    //                 new_player_position,
+    //                 &test_tile_position,
+    //                 &new_player_position,
     //             );
     //             const test_position = tile.closestPointInRectangle(
     //                 min_corner,
