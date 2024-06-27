@@ -87,8 +87,18 @@ pub const Vector2 = struct {
         };
     }
 
+    pub fn scale_set(self: *Vector2, b: f32) *Vector2 {
+        self.x = b * self.x;
+        self.y = b * self.y;
+        return self;
+    }
+
     pub fn dot(self: Vector2, b: Vector2) f32 {
         return (self.x * b.x) + (self.y * b.y);
+    }
+
+    pub fn lengthSquared(self: Vector2) f32 {
+        return self.dot(self);
     }
 };
 

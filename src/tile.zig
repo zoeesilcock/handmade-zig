@@ -45,6 +45,28 @@ pub const TileMapPosition = struct {
     offset: math.Vector2,
 };
 
+pub fn centeredTilePoint(abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) TileMapPosition {
+    return TileMapPosition{
+        .abs_tile_x = abs_tile_x,
+        .abs_tile_y = abs_tile_y,
+        .abs_tile_z = abs_tile_z,
+    };
+}
+
+pub fn closestPointInRectangle(
+    min_corner: math.Vector2,
+    max_corner: math.Vector2,
+    position: TileMapDifference,
+) math.Vector2 {
+    _ = min_corner;
+    _ = max_corner;
+    _ = position;
+
+    const result = math.Vector2{};
+
+    return result;
+}
+
 pub fn subtractPositions(tile_map: *TileMap, a: TileMapPosition, b: TileMapPosition) TileMapDifference {
     var result = TileMapDifference{};
 
@@ -183,16 +205,20 @@ pub fn setTileValue(
     }
 }
 
+pub fn isTileValueEmpty(tile_value: u32) bool {
+    return (tile_value == 1 or tile_value == 3 or tile_value == 4);
+}
+
 pub fn isTileMapPointEmpty(tile_map: *TileMap, test_position: TileMapPosition) bool {
     var is_empty = false;
 
-    const tile_chunk_value = getTileValue(
+    const tile_value = getTileValue(
         tile_map,
         test_position.abs_tile_x,
         test_position.abs_tile_y,
         test_position.abs_tile_z,
     );
-    is_empty = (tile_chunk_value == 1 or tile_chunk_value == 3 or tile_chunk_value == 4);
+    is_empty = isTileValueEmpty(tile_value);
 
     return is_empty;
 }

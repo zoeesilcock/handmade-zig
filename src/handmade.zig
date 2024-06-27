@@ -200,7 +200,9 @@ pub export fn updateAndRender(
     var player_movement_speed: f32 = 10.0;
     const player_height: f32 = 1.4;
     const player_width: f32 = 0.75 * player_height;
+    var old_player_position = state.player_position;
 
+    // Handle input.
     for (&input.controllers) |controller| {
         if (controller.is_analog) {} else {
             var player_acceleration = math.Vector2{};
@@ -231,14 +233,16 @@ pub export fn updateAndRender(
             }
 
             player_acceleration = player_acceleration.scale(player_movement_speed);
-
             _ = player_acceleration.add_set(state.player_velocity.scale(1.5).negate());
 
             var new_player_position = state.player_position;
-            _ = new_player_position.offset.add_set(player_acceleration.scale(0.5 * math.square(input.frame_delta_time)))
-                .add_set(state.player_velocity.scale(input.frame_delta_time));
+            const player_delta = player_acceleration.scale(0.5 * math.square(input.frame_delta_time))
+                .add(state.player_velocity.scale(input.frame_delta_time));
+            _ = new_player_position.offset.add_set(player_delta);
             state.player_velocity = player_acceleration.scale(input.frame_delta_time).add(state.player_velocity);
             new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
+
+
 
             var player_position_left = new_player_position;
             player_position_left.offset.x -= 0.5 * player_width;
@@ -280,46 +284,96 @@ pub export fn updateAndRender(
 
                 _ = state.player_velocity.subtract_set(r.scale(state.player_velocity.dot(r)));
             } else {
-                if (!tile.areOnSameTile(&state.player_position, &new_player_position)) {
-                    const new_tile_value = tile.getTileValueFromPosition(tile_map, new_player_position);
-
-                    if (new_tile_value == 3) {
-                        new_player_position.abs_tile_z += 1;
-                    } else if (new_tile_value == 4) {
-                        new_player_position.abs_tile_z -= 1;
-                    }
-                }
-
                 state.player_position = new_player_position;
             }
 
-            state.camera_position.abs_tile_z = state.player_position.abs_tile_z;
 
-            // Move camera when player leaves the current screen.
-            if (!state.camera_transitioning) {
-                const diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
-                if (diff.xy.x > 9.0 * tile_map.tile_side_in_meters) {
-                    state.camera_target_position = state.camera_position;
-                    state.camera_target_position.abs_tile_x += 17;
-                    state.camera_transitioning = true;
-                } else if (diff.xy.x < -9.0 * tile_map.tile_side_in_meters) {
-                    state.camera_target_position = state.camera_position;
-                    state.camera_target_position.abs_tile_x -= 17;
-                    state.camera_transitioning = true;
-                }
-                if (diff.xy.y > 5.0 * tile_map.tile_side_in_meters) {
-                    state.camera_target_position = state.camera_position;
-                    state.camera_target_position.abs_tile_y += 9;
-                    state.camera_transitioning = true;
-                } else if (diff.xy.y < -5.0 * tile_map.tile_side_in_meters) {
-                    state.camera_target_position = state.camera_position;
-                    state.camera_target_position.abs_tile_y -= 9;
-                    state.camera_transitioning = true;
-                }
-            }
+
+            // const min_tile_x: u32 = 0;
+            // const min_tile_y: u32 = 0;
+            // const one_past_max_tile_y: u32 = 0;
+            // const one_past_max_tile_x: u32 = 0;
+            // const abs_tile_z = state.player_position.abs_tile_z;
+            // var best_player_position = state.player_position;
+            // var best_distance_squared = player_delta.lengthSquared();
+            //
+            // var abs_tile_y = min_tile_y;
+            // while (abs_tile_y != one_past_max_tile_y) : (abs_tile_y += 1) {
+            //     var abs_tile_x = min_tile_x;
+            //     while (abs_tile_x != one_past_max_tile_x) : (abs_tile_x += 1) {
+            //         const test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
+            //         const tile_value = tile.getTileValue(tile_map, abs_tile_x, abs_tile_y, abs_tile_z);
+            //         if (tile.isTileValueEmpty(tile_value)) {
+            //             var min_corner = math.Vector2{
+            //                 .x = tile_map.tile_side_in_meters,
+            //                 .y = tile_map.tile_side_in_meters,
+            //             };
+            //             _ = min_corner.scale_set(-0.5);
+            //             var max_corner = math.Vector2{
+            //                 .x = tile_map.tile_side_in_meters,
+            //                 .y = tile_map.tile_side_in_meters,
+            //             };
+            //             _ = max_corner.scale_set(0.5);
+            //
+            //             const relative_new_player_position = tile.subtractPositions(
+            //                 tile_map,
+            //                 test_tile_position,
+            //                 new_player_position,
+            //             );
+            //             const test_position = tile.closestPointInRectangle(
+            //                 min_corner,
+            //                 max_corner,
+            //                 relative_new_player_position,
+            //             );
+            //             const test_distance_squared = test_position.lengthSquared();
+            //
+            //             if (best_distance_squared > test_distance_squared) {
+            //                 best_player_position = test_position;
+            //                 best_distance_squared = test_distance_squared;
+            //             }
+            //         }
+            //     }
+            // }
         }
     }
 
+    // Update player Z when hitting a ladder.
+    if (!tile.areOnSameTile(&old_player_position, &state.player_position)) {
+        const new_tile_value = tile.getTileValueFromPosition(tile_map, state.player_position);
+
+        if (new_tile_value == 3) {
+            state.player_position.abs_tile_z += 1;
+        } else if (new_tile_value == 4) {
+            state.player_position.abs_tile_z -= 1;
+        }
+    }
+
+    state.camera_position.abs_tile_z = state.player_position.abs_tile_z;
+
+    // Move camera when player leaves the current screen.
+    var diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
+    if (!state.camera_transitioning) {
+        if (diff.xy.x > 9.0 * tile_map.tile_side_in_meters) {
+            state.camera_target_position = state.camera_position;
+            state.camera_target_position.abs_tile_x += 17;
+            state.camera_transitioning = true;
+        } else if (diff.xy.x < -9.0 * tile_map.tile_side_in_meters) {
+            state.camera_target_position = state.camera_position;
+            state.camera_target_position.abs_tile_x -= 17;
+            state.camera_transitioning = true;
+        }
+        if (diff.xy.y > 5.0 * tile_map.tile_side_in_meters) {
+            state.camera_target_position = state.camera_position;
+            state.camera_target_position.abs_tile_y += 9;
+            state.camera_transitioning = true;
+        } else if (diff.xy.y < -5.0 * tile_map.tile_side_in_meters) {
+            state.camera_target_position = state.camera_position;
+            state.camera_target_position.abs_tile_y -= 9;
+            state.camera_transitioning = true;
+        }
+    }
+
+    // Transition camera position.
     if (state.camera_transitioning) {
         var transition_complete = true;
 
@@ -417,7 +471,7 @@ pub export fn updateAndRender(
     }
 
     // Draw player.
-    const diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
+    diff = tile.subtractPositions(tile_map, state.player_position, state.camera_position);
     const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
     const player_ground_point_x = screen_center_x + meters_to_pixels * diff.xy.x;
     const player_ground_point_y = screen_center_y - meters_to_pixels * diff.xy.y;
