@@ -721,15 +721,20 @@ fn debugLoadBMP(
         result.height = header.height;
 
         const alpha_mask = ~(header.red_mask | header.green_mask | header.blue_mask);
-        const red_shift = intrinsics.findLeastSignificantSetBit(header.red_mask);
-        const green_shift = intrinsics.findLeastSignificantSetBit(header.green_mask);
-        const blue_shift = intrinsics.findLeastSignificantSetBit(header.blue_mask);
-        const alpha_shift = intrinsics.findLeastSignificantSetBit(alpha_mask);
+        const alpha_scan = intrinsics.findLeastSignificantSetBit(alpha_mask);
+        const red_scan = intrinsics.findLeastSignificantSetBit(header.red_mask);
+        const green_scan = intrinsics.findLeastSignificantSetBit(header.green_mask);
+        const blue_scan = intrinsics.findLeastSignificantSetBit(header.blue_mask);
 
-        std.debug.assert(red_shift.found);
-        std.debug.assert(green_shift.found);
-        std.debug.assert(blue_shift.found);
-        std.debug.assert(alpha_shift.found);
+        std.debug.assert(alpha_scan.found);
+        std.debug.assert(red_scan.found);
+        std.debug.assert(green_scan.found);
+        std.debug.assert(blue_scan.found);
+
+        const alpha_shift = 24 - @as(i32, @intCast(alpha_scan.index));
+        const red_shift = 16 - @as(i32, @intCast(red_scan.index));
+        const green_shift = 8 - @as(i32, @intCast(green_scan.index));
+        const blue_shift = 0 - @as(i32, @intCast(blue_scan.index));
 
         var source_dest = result.data.per_pixel;
         var x: u32 = 0;
@@ -737,10 +742,12 @@ fn debugLoadBMP(
             var y: u32 = 0;
             while (y < header.height) : (y += 1) {
                 const color = source_dest[0];
-                source_dest[0] = ((((color >> @intCast(alpha_shift.index)) & 0xFF) << 24) |
-                    (((color >> @intCast(red_shift.index)) & 0xFF) << 16) |
-                    (((color >> @intCast(green_shift.index)) & 0xFF) << 8) |
-                    (((color >> @intCast(blue_shift.index)) & 0xFF) << 0));
+                source_dest[0] = (
+                    intrinsics.rotateLeft(color & header.red_mask, red_shift) |
+                    intrinsics.rotateLeft(color & header.green_mask, green_shift) |
+                    intrinsics.rotateLeft(color & header.blue_mask, blue_shift) |
+                    intrinsics.rotateLeft(color & alpha_mask, alpha_shift)
+                );
                 source_dest += 1;
             }
         }

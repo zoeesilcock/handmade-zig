@@ -4,6 +4,14 @@ pub inline fn absoluteValue(value: f32) f32 {
     return @abs(value);
 }
 
+pub inline fn rotateLeft(value: u32, amount: i32) u32 {
+    return std.math.rotl(u32, value, amount);
+}
+
+pub inline fn rotateRight(value: u32, amount: i32) u32 {
+    return std.math.rotr(u32, value, amount);
+}
+
 pub inline fn roundReal32ToInt32(value: f32) i32 {
     return @intFromFloat(@round(value));
 }
