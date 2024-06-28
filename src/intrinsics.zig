@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub inline fn signOf(value: i32) i32 {
+    return if (value >= 0) 1 else -1;
+}
+
 pub inline fn squareRoot(value: f32) f32 {
     return @sqrt(value);
 }

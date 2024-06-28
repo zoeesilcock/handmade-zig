@@ -45,6 +45,15 @@ pub const TileMapPosition = struct {
     offset: math.Vector2,
 };
 
+pub fn offsetPosition(tile_map: *TileMap, position: TileMapPosition, offset: math.Vector2) TileMapPosition {
+    var result = position;
+
+    _ = result.offset.add_set(offset);
+    result = recanonicalizePosition(tile_map, result);
+
+    return result;
+}
+
 pub fn centeredTilePoint(abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) TileMapPosition {
     return TileMapPosition{
         .abs_tile_x = abs_tile_x,

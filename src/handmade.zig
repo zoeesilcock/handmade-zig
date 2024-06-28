@@ -90,6 +90,9 @@ pub export fn updateAndRender(
         const tiles_per_height: u32 = 9;
 
         var random_number_index: u32 = 0;
+        // TODO: Waiting for full sparseness.
+        // var screen_x: u32 = std.math.maxInt(u32) / 2;
+        // var screen_y: u32 = std.math.maxInt(u32) / 2;
         var screen_x: u32 = 0;
         var screen_y: u32 = 0;
         var abs_tile_z: u32 = 0;
@@ -347,8 +350,8 @@ pub export fn updateAndRender(
                     .x = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
                     .y = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
                 };
-                const min = center.subtract(tile_side);
-                const max = center.add(tile_side);
+                const min = center.subtract(tile_side.scale(0.9));
+                const max = center.add(tile_side.scale(0.9));
 
                 drawRectangle(buffer, min, max, tile_color);
             }
@@ -420,7 +423,7 @@ fn initializePlayer(state: *shared.State, entity_index: u32) void {
             .abs_tile_x = 1,
             .abs_tile_y = 3,
             .abs_tile_z = 0,
-            .offset = math.Vector2{ .x = 5.0, .y = 5.0 },
+            .offset = math.Vector2{ .x = 0, .y = 0 },
         };
         entity.height = 1.4;
         entity.width = 0.75 * entity.height;
@@ -458,9 +461,7 @@ fn movePlayer(
     entity.velocity = player_acceleration.scale(delta_time).add(entity.velocity);
 
     // Apply the full delta.
-    var new_player_position = entity.position;
-    _ = new_player_position.offset.add_set(player_delta);
-    new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
+    const new_player_position = tile.offsetPosition(tile_map, entity.position, player_delta);
 
     if (false) {
         var player_position_left = new_player_position;
@@ -506,19 +507,19 @@ fn movePlayer(
             entity.position = new_player_position;
         }
     } else {
-        // Calculate how much of the delta to apply based on walls in our path.
-        const min_tile_x: u32 = @min(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
-        const min_tile_y: u32 = @min(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
-        const one_past_max_tile_x: u32 = @max(old_player_position.abs_tile_x, new_player_position.abs_tile_x) +% 1;
-        const one_past_max_tile_y: u32 = @max(old_player_position.abs_tile_y, new_player_position.abs_tile_y) +% 1;
-
+        const start_tile_x = old_player_position.abs_tile_x;
+        const start_tile_y = old_player_position.abs_tile_y;
+        const end_tile_x = new_player_position.abs_tile_x;
+        const end_tile_y = new_player_position.abs_tile_y;
+        const delta_x: i32 = intrinsics.signOf(@as(i32, @intCast(end_tile_x)) -% @as(i32, @intCast(start_tile_x)));
+        const delta_y: i32 = intrinsics.signOf(@as(i32, @intCast(end_tile_y)) -% @as(i32, @intCast(start_tile_y)));
         const abs_tile_z = entity.position.abs_tile_z;
         var min_time: f32 = 1.0;
 
-        var abs_tile_y = min_tile_y;
-        while (abs_tile_y != one_past_max_tile_y) : (abs_tile_y +%= 1) {
-            var abs_tile_x = min_tile_x;
-            while (abs_tile_x != one_past_max_tile_x) : (abs_tile_x +%= 1) {
+        var abs_tile_y = start_tile_y;
+        while (true) {
+            var abs_tile_x = start_tile_x;
+            while (true) {
                 var test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
                 const tile_value = tile.getTileValueFromPosition(tile_map, test_tile_position);
 
@@ -582,14 +583,31 @@ fn movePlayer(
                         &min_time,
                     );
                 }
+
+                if (abs_tile_x == end_tile_x) {
+                    break;
+                } else {
+                    if (delta_x >= 0) {
+                        abs_tile_x +%= @intCast(delta_x);
+                    } else {
+                        abs_tile_x -%= @intCast(@abs(delta_x));
+                    }
+                }
+            }
+
+            if (abs_tile_y == end_tile_y) {
+                break;
+            } else {
+                if (delta_y >= 0) {
+                    abs_tile_y +%= @intCast(delta_y);
+                } else {
+                    abs_tile_y -%= @intCast(@abs(delta_y));
+                }
             }
         }
 
         // Update player position taking walls into account.
-        new_player_position = entity.position;
-        _ = new_player_position.offset.add_set(player_delta.scale(min_time));
-        new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
-        entity.position = new_player_position;
+        entity.position = tile.offsetPosition(tile_map, entity.position, player_delta.scale(min_time));
     }
 
     // Update player Z when hitting a ladder.
