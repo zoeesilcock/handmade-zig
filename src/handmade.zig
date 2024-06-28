@@ -444,8 +444,9 @@ fn movePlayer(
     var player_acceleration = direction;
     const player_movement_speed: f32 = 50.0;
 
-    if (player_acceleration.x != 0 and player_acceleration.y != 0) {
-        _ = player_acceleration.scale_set(0.707106781187);
+    const direction_length = direction.lengthSquared();
+    if (direction_length > 1.0) {
+        _ = player_acceleration.scale_set(1.0 / intrinsics.squareRoot(direction_length));
     }
 
     _ = player_acceleration.scale_set(player_movement_speed);

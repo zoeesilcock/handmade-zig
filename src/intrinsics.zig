@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub inline fn squareRoot(value: f32) f32 {
+    return @sqrt(value);
+}
+
 pub inline fn absoluteValue(value: f32) f32 {
     return @abs(value);
 }
