@@ -223,7 +223,7 @@ pub export fn updateAndRender(
                 }
             }
 
-            movePlayer(state, entity, input.frame_delta_time, input_direction);
+            movePlayer(state, entity, input.frame_delta_time, input_direction, controller.action_up.ended_down);
         } else {
             if (controller.start_button.ended_down) {
                 const entity_index = addEntity(state);
@@ -439,11 +439,12 @@ fn movePlayer(
     entity: *shared.Entity,
     delta_time: f32,
     direction: math.Vector2,
+    is_running: bool,
 ) void {
     const tile_map = state.world.tile_map;
+    const player_movement_speed: f32 = if (is_running) 200.0 else 50.0;
     var old_player_position = entity.position;
     var player_acceleration = direction;
-    const player_movement_speed: f32 = 50.0;
 
     // Correct speed when multiple axes are contributing to the direction.
     const direction_length = direction.lengthSquared();
