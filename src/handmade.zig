@@ -448,12 +448,12 @@ fn movePlayer(
     // Correct speed when multiple axes are contributing to the direction.
     const direction_length = direction.lengthSquared();
     if (direction_length > 1.0) {
-        _ = player_acceleration.scale_set(1.0 / intrinsics.squareRoot(direction_length));
+        _ = player_acceleration.scaleSet(1.0 / intrinsics.squareRoot(direction_length));
     }
 
     // Calculate acceleration.
-    _ = player_acceleration.scale_set(player_movement_speed);
-    _ = player_acceleration.add_set(entity.velocity.scale(8.0).negate());
+    _ = player_acceleration.scaleSet(player_movement_speed);
+    _ = player_acceleration.addSet(entity.velocity.scale(8.0).negate());
 
     // Calculate player delta.
     const player_delta = player_acceleration.scale(0.5 * math.square(delta_time))
@@ -502,7 +502,7 @@ fn movePlayer(
                 r = math.Vector2{ .x = 0, .y = -1 };
             }
 
-            _ = entity.velocity.subtract_set(r.scale(entity.velocity.dot(r)));
+            _ = entity.velocity.subtractSet(r.scale(entity.velocity.dot(r)));
         } else {
             entity.position = new_player_position;
         }
@@ -528,12 +528,12 @@ fn movePlayer(
                         .x = tile_map.tile_side_in_meters,
                         .y = tile_map.tile_side_in_meters,
                     };
-                    _ = min_corner.scale_set(-0.5);
+                    _ = min_corner.scaleSet(-0.5);
                     var max_corner = math.Vector2{
                         .x = tile_map.tile_side_in_meters,
                         .y = tile_map.tile_side_in_meters,
                     };
-                    _ = max_corner.scale_set(0.5);
+                    _ = max_corner.scaleSet(0.5);
 
                     const relative_old_player_position = tile.subtractPositions(
                         tile_map,

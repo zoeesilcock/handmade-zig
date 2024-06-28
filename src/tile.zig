@@ -48,7 +48,7 @@ pub const TileMapPosition = struct {
 pub fn offsetPosition(tile_map: *TileMap, position: TileMapPosition, offset: math.Vector2) TileMapPosition {
     var result = position;
 
-    _ = result.offset.add_set(offset);
+    _ = result.offset.addSet(offset);
     result = recanonicalizePosition(tile_map, result);
 
     return result;

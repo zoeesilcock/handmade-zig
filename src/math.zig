@@ -28,7 +28,7 @@ pub const Vector2 = struct {
         };
     }
 
-    pub fn add_set(self: *Vector2, b: Vector2) *Vector2 {
+    pub fn addSet(self: *Vector2, b: Vector2) *Vector2 {
         self.x += b.x;
         self.y += b.y;
         return self;
@@ -41,7 +41,7 @@ pub const Vector2 = struct {
         };
     }
 
-    pub fn subtract_set(self: *Vector2, b: Vector2) *Vector2 {
+    pub fn subtractSet(self: *Vector2, b: Vector2) *Vector2 {
         self.x -= b.x;
         self.y -= b.y;
         return self;
@@ -54,7 +54,7 @@ pub const Vector2 = struct {
         };
     }
 
-    pub fn multiply_set(self: *Vector2, b: Vector2) *Vector2 {
+    pub fn multiplySet(self: *Vector2, b: Vector2) *Vector2 {
         self.x *= b.x;
         self.y *= b.y;
         return self;
@@ -67,7 +67,7 @@ pub const Vector2 = struct {
         };
     }
 
-    pub fn divide_set(self: *Vector2, b: Vector2) *Vector2 {
+    pub fn divideSet(self: *Vector2, b: Vector2) *Vector2 {
         self.x /= b.x;
         self.y /= b.y;
         return self;
@@ -87,7 +87,7 @@ pub const Vector2 = struct {
         };
     }
 
-    pub fn scale_set(self: *Vector2, b: f32) *Vector2 {
+    pub fn scaleSet(self: *Vector2, b: f32) *Vector2 {
         self.x = b * self.x;
         self.y = b * self.y;
         return self;
