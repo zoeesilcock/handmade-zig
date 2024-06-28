@@ -840,43 +840,6 @@ fn debugLoadBMP(
     return result;
 }
 
-fn renderWeirdGradient(buffer: *shared.OffscreenBuffer, x_offset: i32, y_offset: i32) void {
-    var row: [*]u8 = @ptrCast(buffer.memory);
-    var wrapped_x_offset: u32 = 0;
-    var wrapped_y_offset: u32 = 0;
-
-    // Wrap the x offset.
-    if (x_offset < 0) {
-        wrapped_x_offset -%= @as(u32, @intCast(@abs(x_offset)));
-    } else {
-        wrapped_x_offset +%= @as(u32, @intCast(x_offset));
-    }
-
-    // Wrap the y offset.
-    if (y_offset < 0) {
-        wrapped_y_offset -%= @as(u32, @intCast(@abs(y_offset)));
-    } else {
-        wrapped_y_offset +%= @as(u32, @intCast(y_offset));
-    }
-
-    var y: u32 = 0;
-    while (y < buffer.height) : (y += 1) {
-        var x: u32 = 0;
-        var pixel: [*]u32 = @ptrCast(@alignCast(row));
-
-        while (x < buffer.width) : (x += 1) {
-            const blue: u32 = @as(u8, @truncate(x +% wrapped_x_offset));
-            const green: u32 = @as(u8, @truncate(y +% wrapped_y_offset));
-
-            pixel[0] = (green << 8) | blue;
-
-            pixel += 1;
-        }
-
-        row += buffer.pitch;
-    }
-}
-
 fn outputSound(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, state: *shared.State) void {
     _ = sound_buffer;
     _ = tone_hz;
