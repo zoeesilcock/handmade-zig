@@ -193,7 +193,6 @@ pub export fn updateAndRender(
     const tile_side_in_pixels = 60;
     const meters_to_pixels = @as(f32, @floatFromInt(tile_side_in_pixels)) / tile_map.tile_side_in_meters;
 
-
     // Handle input.
     for (&input.controllers, 0..) |controller, controller_index| {
         const controlling_entity = getEntity(state, state.player_index_for_controller[controller_index]);
@@ -440,104 +439,158 @@ fn movePlayer(
 ) void {
     const tile_map = state.world.tile_map;
     var old_player_position = entity.position;
-    var new_player_position = entity.position;
     var player_acceleration = direction;
     const player_movement_speed: f32 = 50.0;
 
+    // Correct speed when multiple axes are contributing to the direction.
     const direction_length = direction.lengthSquared();
     if (direction_length > 1.0) {
         _ = player_acceleration.scale_set(1.0 / intrinsics.squareRoot(direction_length));
     }
 
+    // Calculate acceleration.
     _ = player_acceleration.scale_set(player_movement_speed);
     _ = player_acceleration.add_set(entity.velocity.scale(8.0).negate());
 
+    // Calculate player delta.
     const player_delta = player_acceleration.scale(0.5 * math.square(delta_time))
         .add(entity.velocity.scale(delta_time));
-    _ = new_player_position.offset.add_set(player_delta);
     entity.velocity = player_acceleration.scale(delta_time).add(entity.velocity);
+
+    // Apply the full delta.
+    var new_player_position = entity.position;
+    _ = new_player_position.offset.add_set(player_delta);
     new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
 
-    var player_position_left = new_player_position;
-    player_position_left.offset.x -= 0.5 * entity.width;
-    player_position_left = tile.recanonicalizePosition(tile_map, player_position_left);
+    if (false) {
+        var player_position_left = new_player_position;
+        player_position_left.offset.x -= 0.5 * entity.width;
+        player_position_left = tile.recanonicalizePosition(tile_map, player_position_left);
 
-    var player_position_right = new_player_position;
-    player_position_right.offset.x += 0.5 * entity.width;
-    player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
+        var player_position_right = new_player_position;
+        player_position_right.offset.x += 0.5 * entity.width;
+        player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
 
-    var collided = false;
-    var collision_position: tile.TileMapPosition = undefined;
-    if (!tile.isTileMapPointEmpty(tile_map, new_player_position)) {
-        collided = true;
-        collision_position = new_player_position;
-    }
-    if (!tile.isTileMapPointEmpty(tile_map, player_position_left)) {
-        collided = true;
-        collision_position = player_position_left;
-    }
-    if (!tile.isTileMapPointEmpty(tile_map, player_position_right)) {
-        collided = true;
-        collision_position = player_position_right;
-    }
-
-    if (collided) {
-        var r = math.Vector2{};
-        if (collision_position.abs_tile_x < entity.position.abs_tile_x) {
-            r = math.Vector2{ .x = 1, .y = 0 };
+        var collided = false;
+        var collision_position: tile.TileMapPosition = undefined;
+        if (!tile.isTileMapPointEmpty(tile_map, new_player_position)) {
+            collided = true;
+            collision_position = new_player_position;
         }
-        if (collision_position.abs_tile_x > entity.position.abs_tile_x) {
-            r = math.Vector2{ .x = -1, .y = 0 };
+        if (!tile.isTileMapPointEmpty(tile_map, player_position_left)) {
+            collided = true;
+            collision_position = player_position_left;
         }
-        if (collision_position.abs_tile_y < entity.position.abs_tile_y) {
-            r = math.Vector2{ .x = 0, .y = 1 };
-        }
-        if (collision_position.abs_tile_y > entity.position.abs_tile_y) {
-            r = math.Vector2{ .x = 0, .y = -1 };
+        if (!tile.isTileMapPointEmpty(tile_map, player_position_right)) {
+            collided = true;
+            collision_position = player_position_right;
         }
 
-        _ = entity.velocity.subtract_set(r.scale(entity.velocity.dot(r)));
+        if (collided) {
+            var r = math.Vector2{};
+            if (collision_position.abs_tile_x < entity.position.abs_tile_x) {
+                r = math.Vector2{ .x = 1, .y = 0 };
+            }
+            if (collision_position.abs_tile_x > entity.position.abs_tile_x) {
+                r = math.Vector2{ .x = -1, .y = 0 };
+            }
+            if (collision_position.abs_tile_y < entity.position.abs_tile_y) {
+                r = math.Vector2{ .x = 0, .y = 1 };
+            }
+            if (collision_position.abs_tile_y > entity.position.abs_tile_y) {
+                r = math.Vector2{ .x = 0, .y = -1 };
+            }
+
+            _ = entity.velocity.subtract_set(r.scale(entity.velocity.dot(r)));
+        } else {
+            entity.position = new_player_position;
+        }
     } else {
+        // Calculate how much of the delta to apply based on walls in our path.
+        const min_tile_x: u32 = @min(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
+        const min_tile_y: u32 = @min(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
+        const one_past_max_tile_x: u32 = @max(old_player_position.abs_tile_x, new_player_position.abs_tile_x) +% 1;
+        const one_past_max_tile_y: u32 = @max(old_player_position.abs_tile_y, new_player_position.abs_tile_y) +% 1;
+
+        const abs_tile_z = entity.position.abs_tile_z;
+        var min_time: f32 = 1.0;
+
+        var abs_tile_y = min_tile_y;
+        while (abs_tile_y != one_past_max_tile_y) : (abs_tile_y +%= 1) {
+            var abs_tile_x = min_tile_x;
+            while (abs_tile_x != one_past_max_tile_x) : (abs_tile_x +%= 1) {
+                var test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
+                const tile_value = tile.getTileValueFromPosition(tile_map, test_tile_position);
+
+                if (!tile.isTileValueEmpty(tile_value)) {
+                    var min_corner = math.Vector2{
+                        .x = tile_map.tile_side_in_meters,
+                        .y = tile_map.tile_side_in_meters,
+                    };
+                    _ = min_corner.scale_set(-0.5);
+                    var max_corner = math.Vector2{
+                        .x = tile_map.tile_side_in_meters,
+                        .y = tile_map.tile_side_in_meters,
+                    };
+                    _ = max_corner.scale_set(0.5);
+
+                    const relative_old_player_position = tile.subtractPositions(
+                        tile_map,
+                        &old_player_position,
+                        &test_tile_position,
+                    );
+                    const relative = relative_old_player_position.xy;
+
+                    testWall(
+                        min_corner.x,
+                        relative.x,
+                        relative.y,
+                        player_delta.x,
+                        player_delta.y,
+                        min_corner.y,
+                        max_corner.y,
+                        &min_time,
+                    );
+                    testWall(
+                        max_corner.x,
+                        relative.x,
+                        relative.y,
+                        player_delta.x,
+                        player_delta.y,
+                        min_corner.y,
+                        max_corner.y,
+                        &min_time,
+                    );
+                    testWall(
+                        min_corner.y,
+                        relative.y,
+                        relative.x,
+                        player_delta.y,
+                        player_delta.x,
+                        min_corner.x,
+                        max_corner.x,
+                        &min_time,
+                    );
+                    testWall(
+                        max_corner.y,
+                        relative.y,
+                        relative.x,
+                        player_delta.y,
+                        player_delta.x,
+                        min_corner.x,
+                        max_corner.x,
+                        &min_time,
+                    );
+                }
+            }
+        }
+
+        // Update player position taking walls into account.
+        new_player_position = entity.position;
+        _ = new_player_position.offset.add_set(player_delta.scale(min_time));
+        new_player_position = tile.recanonicalizePosition(tile_map, new_player_position);
         entity.position = new_player_position;
     }
-
-    // const min_tile_x: u32 = @min(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
-    // const min_tile_y: u32 = @min(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
-    // const one_past_max_tile_y: u32 = @max(old_player_position.abs_tile_x, new_player_position.abs_tile_x) + 1;
-    // const one_past_max_tile_x: u32 = @max(old_player_position.abs_tile_y, new_player_position.abs_tile_y) + 1;
-    // const abs_tile_z = entity.position.abs_tile_z;
-    // var min_time = 1.0;
-    //
-    // var abs_tile_y = min_tile_y;
-    // while (abs_tile_y != one_past_max_tile_y) : (abs_tile_y += 1) {
-    //     var abs_tile_x = min_tile_x;
-    //     while (abs_tile_x != one_past_max_tile_x) : (abs_tile_x += 1) {
-    //         var test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
-    //         const tile_value = tile.getTileValue(tile_map, abs_tile_x, abs_tile_y, abs_tile_z);
-    //
-    //         if (tile.isTileValueEmpty(tile_value)) {
-    //             var min_corner = math.Vector2{
-    //                 .x = tile_map.tile_side_in_meters,
-    //                 .y = tile_map.tile_side_in_meters,
-    //             };
-    //             _ = min_corner.scale_set(-0.5);
-    //             var max_corner = math.Vector2{
-    //                 .x = tile_map.tile_side_in_meters,
-    //                 .y = tile_map.tile_side_in_meters,
-    //             };
-    //             _ = max_corner.scale_set(0.5);
-    //
-    //             const relative_new_player_position = tile.subtractPositions(
-    //                 tile_map,
-    //                 &test_tile_position,
-    //                 &new_player_position,
-    //             );
-    //             const relative = relative_new_player_position.xy;
-    //             // result = (wall_x - player_x) / delta:x;
-    //             testWall(min_corner.x, min_corner.y, max_corner.y, relative_new_player_position.x);
-    //         }
-    //     }
-    // }
 
     // Update player Z when hitting a ladder.
     if (!tile.areOnSameTile(&old_player_position, &entity.position)) {
@@ -564,6 +617,28 @@ fn movePlayer(
             entity.facing_direction = 1;
         } else {
             entity.facing_direction = 3;
+        }
+    }
+}
+
+pub fn testWall(
+    wall_x: f32,
+    relative_x: f32,
+    relative_y: f32,
+    delta_x: f32,
+    delta_y: f32,
+    min_y: f32,
+    max_y: f32,
+    min_time: *f32,
+) void {
+    if (delta_x != 0.0) {
+        const epsilon_time = 0.001;
+        const result_time = (wall_x - relative_x) / delta_x;
+        const y = relative_y + (result_time * delta_y);
+        if (result_time >= 0 and min_time.* > result_time) {
+            if (y >= min_y and y <= max_y) {
+                min_time.* = @max(0.0, result_time - epsilon_time);
+            }
         }
     }
 }
@@ -735,12 +810,10 @@ fn debugLoadBMP(
             var y: u32 = 0;
             while (y < header.height) : (y += 1) {
                 const color = source_dest[0];
-                source_dest[0] = (
-                    intrinsics.rotateLeft(color & header.red_mask, red_shift) |
+                source_dest[0] = (intrinsics.rotateLeft(color & header.red_mask, red_shift) |
                     intrinsics.rotateLeft(color & header.green_mask, green_shift) |
                     intrinsics.rotateLeft(color & header.blue_mask, blue_shift) |
-                    intrinsics.rotateLeft(color & alpha_mask, alpha_shift)
-                );
+                    intrinsics.rotateLeft(color & alpha_mask, alpha_shift));
                 source_dest += 1;
             }
         }

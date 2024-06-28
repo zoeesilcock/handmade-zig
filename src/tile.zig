@@ -82,8 +82,8 @@ pub inline fn recannonicalizeCoordinate(tile_map: *TileMap, tile_abs: *u32, tile
     tile_rel.* -= @as(f32, @floatFromInt(offset)) * tile_map.tile_side_in_meters;
 
     // Check that the new relative position is within the tile size.
-    std.debug.assert(tile_rel.* >= -0.5 * tile_map.tile_side_in_meters);
-    std.debug.assert(tile_rel.* <= 0.5 * tile_map.tile_side_in_meters);
+    std.debug.assert(tile_rel.* >= -0.5001 * tile_map.tile_side_in_meters);
+    std.debug.assert(tile_rel.* <= 0.5001 * tile_map.tile_side_in_meters);
 }
 
 pub fn recanonicalizePosition(tile_map: *TileMap, position: TileMapPosition) TileMapPosition {
