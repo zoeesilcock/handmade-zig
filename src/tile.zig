@@ -50,21 +50,8 @@ pub fn centeredTilePoint(abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) Tile
         .abs_tile_x = abs_tile_x,
         .abs_tile_y = abs_tile_y,
         .abs_tile_z = abs_tile_z,
+        .offset = math.Vector2{},
     };
-}
-
-pub fn closestPointInRectangle(
-    min_corner: math.Vector2,
-    max_corner: math.Vector2,
-    position: TileMapDifference,
-) math.Vector2 {
-    _ = min_corner;
-    _ = max_corner;
-    _ = position;
-
-    const result = math.Vector2{};
-
-    return result;
 }
 
 pub fn subtractPositions(tile_map: *TileMap, a: *TileMapPosition, b: *TileMapPosition) TileMapDifference {

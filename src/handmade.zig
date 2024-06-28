@@ -501,20 +501,20 @@ fn movePlayer(
         entity.position = new_player_position;
     }
 
-    // const min_tile_x: u32 = 0;
-    // const min_tile_y: u32 = 0;
-    // const one_past_max_tile_y: u32 = 0;
-    // const one_past_max_tile_x: u32 = 0;
+    // const min_tile_x: u32 = @min(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
+    // const min_tile_y: u32 = @min(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
+    // const one_past_max_tile_y: u32 = @max(old_player_position.abs_tile_x, new_player_position.abs_tile_x) + 1;
+    // const one_past_max_tile_x: u32 = @max(old_player_position.abs_tile_y, new_player_position.abs_tile_y) + 1;
     // const abs_tile_z = entity.position.abs_tile_z;
-    // var best_player_position = entity.position;
-    // var best_distance_squared = player_delta.lengthSquared();
+    // var min_time = 1.0;
     //
     // var abs_tile_y = min_tile_y;
     // while (abs_tile_y != one_past_max_tile_y) : (abs_tile_y += 1) {
     //     var abs_tile_x = min_tile_x;
     //     while (abs_tile_x != one_past_max_tile_x) : (abs_tile_x += 1) {
-    //         const test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
+    //         var test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
     //         const tile_value = tile.getTileValue(tile_map, abs_tile_x, abs_tile_y, abs_tile_z);
+    //
     //         if (tile.isTileValueEmpty(tile_value)) {
     //             var min_corner = math.Vector2{
     //                 .x = tile_map.tile_side_in_meters,
@@ -532,17 +532,9 @@ fn movePlayer(
     //                 &test_tile_position,
     //                 &new_player_position,
     //             );
-    //             const test_position = tile.closestPointInRectangle(
-    //                 min_corner,
-    //                 max_corner,
-    //                 relative_new_player_position,
-    //             );
-    //             const test_distance_squared = test_position.lengthSquared();
-    //
-    //             if (best_distance_squared > test_distance_squared) {
-    //                 best_player_position = test_position;
-    //                 best_distance_squared = test_distance_squared;
-    //             }
+    //             const relative = relative_new_player_position.xy;
+    //             // result = (wall_x - player_x) / delta:x;
+    //             testWall(min_corner.x, min_corner.y, max_corner.y, relative_new_player_position.x);
     //         }
     //     }
     // }
