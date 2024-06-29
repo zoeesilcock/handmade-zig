@@ -198,32 +198,34 @@ pub export fn updateAndRender(
 
     // Handle input.
     for (&input.controllers, 0..) |controller, controller_index| {
-        const controlling_entity = getEntity(state, state.player_index_for_controller[controller_index]);
+        const controlling_entity = getEntity(state, shared.EntityResidence.High, state.player_index_for_controller[controller_index]);
 
         if (controlling_entity) |entity| {
-            var input_direction = math.Vector2{};
+            if (entity.residence != shared.EntityResidence.NonExistent) {
+                var input_direction = math.Vector2{};
 
-            if (controller.is_analog) {
-                input_direction = math.Vector2{
-                    .x = controller.stick_average_x,
-                    .y = controller.stick_average_y,
-                };
-            } else {
-                if (controller.move_up.ended_down) {
-                    input_direction.y = 1;
+                if (controller.is_analog) {
+                    input_direction = math.Vector2{
+                        .x = controller.stick_average_x,
+                        .y = controller.stick_average_y,
+                    };
+                } else {
+                    if (controller.move_up.ended_down) {
+                        input_direction.y = 1;
+                    }
+                    if (controller.move_down.ended_down) {
+                        input_direction.y = -1;
+                    }
+                    if (controller.move_left.ended_down) {
+                        input_direction.x = -1;
+                    }
+                    if (controller.move_right.ended_down) {
+                        input_direction.x = 1;
+                    }
                 }
-                if (controller.move_down.ended_down) {
-                    input_direction.y = -1;
-                }
-                if (controller.move_left.ended_down) {
-                    input_direction.x = -1;
-                }
-                if (controller.move_right.ended_down) {
-                    input_direction.x = 1;
-                }
+
+                movePlayer(state, entity, input.frame_delta_time, input_direction, controller.action_up.ended_down);
             }
-
-            movePlayer(state, entity, input.frame_delta_time, input_direction, controller.action_up.ended_down);
         } else {
             if (controller.start_button.ended_down) {
                 const entity_index = addEntity(state);
@@ -233,30 +235,32 @@ pub export fn updateAndRender(
         }
     }
 
-    const camera_following_entity = getEntity(state, state.camera_following_entity_index);
+    const camera_following_entity = getEntity(state, shared.EntityResidence.High, state.camera_following_entity_index);
     if (camera_following_entity) |entity| {
-        state.camera_position.abs_tile_z = entity.position.abs_tile_z;
+        if (entity.residence != shared.EntityResidence.NonExistent) {
+            state.camera_position.abs_tile_z = entity.dormant.position.abs_tile_z;
 
-        // Move camera when player leaves the current screen.
-        const diff = tile.subtractPositions(tile_map, &entity.position, &state.camera_position);
-        if (!state.camera_transitioning) {
-            if (diff.xy.x > 9.0 * tile_map.tile_side_in_meters) {
-                state.camera_target_position = state.camera_position;
-                state.camera_target_position.abs_tile_x += 17;
-                state.camera_transitioning = true;
-            } else if (diff.xy.x < -9.0 * tile_map.tile_side_in_meters) {
-                state.camera_target_position = state.camera_position;
-                state.camera_target_position.abs_tile_x -= 17;
-                state.camera_transitioning = true;
-            }
-            if (diff.xy.y > 5.0 * tile_map.tile_side_in_meters) {
-                state.camera_target_position = state.camera_position;
-                state.camera_target_position.abs_tile_y += 9;
-                state.camera_transitioning = true;
-            } else if (diff.xy.y < -5.0 * tile_map.tile_side_in_meters) {
-                state.camera_target_position = state.camera_position;
-                state.camera_target_position.abs_tile_y -= 9;
-                state.camera_transitioning = true;
+            // Move camera when player leaves the current screen.
+            const diff = tile.subtractPositions(tile_map, &entity.dormant.position, &state.camera_position);
+            if (!state.camera_transitioning) {
+                if (diff.xy.x > 9.0 * tile_map.tile_side_in_meters) {
+                    state.camera_target_position = state.camera_position;
+                    state.camera_target_position.abs_tile_x += 17;
+                    state.camera_transitioning = true;
+                } else if (diff.xy.x < -9.0 * tile_map.tile_side_in_meters) {
+                    state.camera_target_position = state.camera_position;
+                    state.camera_target_position.abs_tile_x -= 17;
+                    state.camera_transitioning = true;
+                }
+                if (diff.xy.y > 5.0 * tile_map.tile_side_in_meters) {
+                    state.camera_target_position = state.camera_position;
+                    state.camera_target_position.abs_tile_y += 9;
+                    state.camera_transitioning = true;
+                } else if (diff.xy.y < -5.0 * tile_map.tile_side_in_meters) {
+                    state.camera_target_position = state.camera_position;
+                    state.camera_target_position.abs_tile_y -= 9;
+                    state.camera_transitioning = true;
+                }
             }
         }
     }
@@ -359,21 +363,22 @@ pub export fn updateAndRender(
     }
 
     // Draw player.
-    var entity: [*]shared.Entity = &state.entities;
     var entity_index: u32 = 0;
     while (entity_index < state.entity_count) : (entity_index += 1) {
-        if (entity[0].exists and state.camera_position.abs_tile_z == entity[0].position.abs_tile_z) {
-            const diff = tile.subtractPositions(tile_map, &entity[0].position, &state.camera_position);
+        const residence = state.entity_residence[entity_index];
+        if (residence == shared.EntityResidence.High) {
+            const high_entity = state.high_entities[entity_index];
+            const dormant_entity = state.dormant_entities[entity_index];
             const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-            const player_ground_point_x = screen_center_x + meters_to_pixels * diff.xy.x;
-            const player_ground_point_y = screen_center_y - meters_to_pixels * diff.xy.y;
+            const player_ground_point_x = screen_center_x + meters_to_pixels * high_entity.position.x;
+            const player_ground_point_y = screen_center_y - meters_to_pixels * high_entity.position.y;
             const player_left_top = math.Vector2{
-                .x = player_ground_point_x - (0.5 * meters_to_pixels * entity[0].width),
-                .y = player_ground_point_y - (0.5 * meters_to_pixels * entity[0].height),
+                .x = player_ground_point_x - (0.5 * meters_to_pixels * dormant_entity.width),
+                .y = player_ground_point_y - (0.5 * meters_to_pixels * dormant_entity.height),
             };
             const player_width_height = math.Vector2{
-                .x = entity[0].width,
-                .y = entity[0].height,
+                .x = dormant_entity.width,
+                .y = dormant_entity.height,
             };
             drawRectangle(
                 buffer,
@@ -381,69 +386,86 @@ pub export fn updateAndRender(
                 player_left_top.add(player_width_height.scale(meters_to_pixels)),
                 player_color,
             );
-            const hero_bitmaps = state.hero_bitmaps[entity[0].facing_direction];
+            const hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
             drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.torso, hero_bitmaps.align_x, hero_bitmaps.align_y);
             drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.cape, hero_bitmaps.align_x, hero_bitmaps.align_y);
             drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.head, hero_bitmaps.align_x, hero_bitmaps.align_y);
         }
-
-        entity += 1;
     }
 }
 
 fn addEntity(state: *shared.State) u32 {
-    std.debug.assert(state.entity_count < state.entities.len);
-
     const entity_index = state.entity_count;
-    const entity = &state.entities[entity_index];
-    entity.* = shared.Entity{};
-
     state.entity_count += 1;
+
+    std.debug.assert(state.entity_count < state.dormant_entities.len);
+    std.debug.assert(state.entity_count < state.low_entities.len);
+    std.debug.assert(state.entity_count < state.high_entities.len);
+
+    state.entity_residence[entity_index] = shared.EntityResidence.Dormant;
+    state.dormant_entities[entity_index] = shared.DormantEntity{};
+    state.low_entities[entity_index] = shared.LowEntity{};
+    state.high_entities[entity_index] = shared.HighEntity{};
 
     return entity_index;
 }
 
-fn getEntity(state: *shared.State, index: u32) ?*shared.Entity {
-    var entity: ?*shared.Entity = null;
+fn getEntity(state: *shared.State, residence: shared.EntityResidence, index: u32) ?shared.Entity {
+    var entity: ?shared.Entity = null;
 
-    if (index > 0 and index < state.entities.len) {
-        entity = &state.entities[index];
+    if (index > 0 and index < state.entity_count) {
+        entity = shared.Entity{
+            .residence = residence,
+            .dormant = &state.dormant_entities[index],
+            .low = &state.low_entities[index],
+            .high = &state.high_entities[index],
+        };
     }
 
     return entity;
 }
 
+fn changeEntityResidence(state: *shared.State, entity: shared.Entity, residence: shared.EntityResidence) void {
+    _ = state;
+    _ = entity;
+    _ = residence;
+}
+
 fn initializePlayer(state: *shared.State, entity_index: u32) void {
-    const opt_entity = getEntity(state, entity_index);
+    const opt_entity = getEntity(state, shared.EntityResidence.Dormant, entity_index);
 
     if (opt_entity) |entity| {
-        entity.exists = true;
-        entity.facing_direction = 3;
-        entity.position = tile.TileMapPosition{
+        entity.high.facing_direction = 3;
+        entity.dormant.position = tile.TileMapPosition{
             .abs_tile_x = 1,
             .abs_tile_y = 3,
             .abs_tile_z = 0,
             .offset = math.Vector2{ .x = 0, .y = 0 },
         };
-        entity.height = 0.5; // 1.4;
-        entity.width = 1.0;
+        entity.dormant.height = 0.5; // 1.4;
+        entity.dormant.width = 1.0;
 
-        if (getEntity(state, state.camera_following_entity_index) == null) {
-            state.camera_following_entity_index = entity_index;
+        changeEntityResidence(state, entity, shared.EntityResidence.High);
+
+        const opt_camera_following_entity = getEntity(state, shared.EntityResidence.Dormant, state.camera_following_entity_index);
+        if (opt_camera_following_entity) |following_entity| {
+            if (following_entity.residence == shared.EntityResidence.NonExistent) {
+                state.camera_following_entity_index = entity_index;
+            }
         }
     }
 }
 
 fn movePlayer(
     state: *shared.State,
-    entity: *shared.Entity,
+    entity: shared.Entity,
     delta_time: f32,
     direction: math.Vector2,
     is_running: bool,
 ) void {
     const tile_map = state.world.tile_map;
     const player_movement_speed: f32 = if (is_running) 200.0 else 50.0;
-    var old_player_position = entity.position;
+    const old_player_position = entity.high.position;
     var player_acceleration = direction;
 
     // Correct speed when multiple axes are contributing to the direction.
@@ -454,199 +476,157 @@ fn movePlayer(
 
     // Calculate acceleration.
     _ = player_acceleration.scaleSet(player_movement_speed);
-    _ = player_acceleration.addSet(entity.velocity.scale(8.0).negate());
+    _ = player_acceleration.addSet(entity.high.velocity.scale(8.0).negate());
 
     // Calculate player delta.
-    var player_delta = player_acceleration.scale(0.5 * math.square(delta_time))
-        .add(entity.velocity.scale(delta_time));
-    entity.velocity = player_acceleration.scale(delta_time).add(entity.velocity);
+    const player_delta = player_acceleration.scale(0.5 * math.square(delta_time))
+        .add(entity.high.velocity.scale(delta_time));
+    entity.high.velocity = player_acceleration.scale(delta_time).add(entity.high.velocity);
 
-    // Apply the full delta.
-    const new_player_position = tile.offsetPosition(tile_map, entity.position, player_delta);
-
-    if (false) {
-        var player_position_left = new_player_position;
-        player_position_left.offset.x -= 0.5 * entity.width;
-        player_position_left = tile.recanonicalizePosition(tile_map, player_position_left);
-
-        var player_position_right = new_player_position;
-        player_position_right.offset.x += 0.5 * entity.width;
-        player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
-
-        var hit = false;
-        var collision_position: tile.TileMapPosition = undefined;
-        if (!tile.isTileMapPointEmpty(tile_map, new_player_position)) {
-            hit = true;
-            collision_position = new_player_position;
-        }
-        if (!tile.isTileMapPointEmpty(tile_map, player_position_left)) {
-            hit = true;
-            collision_position = player_position_left;
-        }
-        if (!tile.isTileMapPointEmpty(tile_map, player_position_right)) {
-            hit = true;
-            collision_position = player_position_right;
-        }
-
-        if (hit) {
-            var r = math.Vector2{};
-            if (collision_position.abs_tile_x < entity.position.abs_tile_x) {
-                r = math.Vector2{ .x = 1, .y = 0 };
-            }
-            if (collision_position.abs_tile_x > entity.position.abs_tile_x) {
-                r = math.Vector2{ .x = -1, .y = 0 };
-            }
-            if (collision_position.abs_tile_y < entity.position.abs_tile_y) {
-                r = math.Vector2{ .x = 0, .y = 1 };
-            }
-            if (collision_position.abs_tile_y > entity.position.abs_tile_y) {
-                r = math.Vector2{ .x = 0, .y = -1 };
-            }
-
-            _ = entity.velocity.subtractSet(r.scale(entity.velocity.dot(r)));
-        } else {
-            entity.position = new_player_position;
-        }
-    } else {
-        const abs_tile_z = entity.position.abs_tile_z;
-        const entity_tile_width = intrinsics.ceilReal32ToUInt32(entity.width / tile_map.tile_side_in_meters);
-        const entity_tile_height = intrinsics.ceilReal32ToUInt32(entity.height / tile_map.tile_side_in_meters);
-
-        var min_tile_x = @min(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
-        var min_tile_y = @min(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
-        var max_tile_x = @max(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
-        var max_tile_y = @max(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
-
-        // Take the player size into account.
-        min_tile_x -= entity_tile_width;
-        min_tile_y -= entity_tile_height;
-        max_tile_x += entity_tile_width;
-        max_tile_y += entity_tile_height;
-
-        std.debug.assert((max_tile_x - min_tile_x) < 32);
-        std.debug.assert((max_tile_y - min_tile_y) < 32);
-
-        var remaining_time: f32 = 1.0;
-        var iterations: u32 = 0;
-        while (iterations < 4 and remaining_time > 0.0) : (iterations += 1) {
-            var min_time: f32 = 1.0;
-            var wall_normal = math.Vector2.zero();
-            const collision_diameter = math.Vector2{
-                .x = tile_map.tile_side_in_meters + entity.width,
-                .y = tile_map.tile_side_in_meters + entity.height,
-            };
-
-            var abs_tile_y = min_tile_y;
-            while (abs_tile_y <= max_tile_y) : (abs_tile_y += 1) {
-                var abs_tile_x = min_tile_x;
-                while (abs_tile_x <= max_tile_x) : (abs_tile_x += 1) {
-                    var test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
-                    const tile_value = tile.getTileValueFromPosition(tile_map, test_tile_position);
-
-                    if (!tile.isTileValueEmpty(tile_value)) {
-                        const min_corner = collision_diameter.scale(-0.5);
-                        const max_corner = collision_diameter.scale(0.5);
-                        const relative_old_player_position = tile.subtractPositions(
-                            tile_map,
-                            &entity.position,
-                            &test_tile_position,
-                        );
-                        const relative = relative_old_player_position.xy;
-
-                        if (testWall(
-                            min_corner.x,
-                            relative.x,
-                            relative.y,
-                            player_delta.x,
-                            player_delta.y,
-                            min_corner.y,
-                            max_corner.y,
-                            &min_time,
-                        )) {
-                            wall_normal = math.Vector2{ .x = -1, .y = 0 };
-                        }
-
-                        if (testWall(
-                            max_corner.x,
-                            relative.x,
-                            relative.y,
-                            player_delta.x,
-                            player_delta.y,
-                            min_corner.y,
-                            max_corner.y,
-                            &min_time,
-                        )) {
-                            wall_normal = math.Vector2{ .x = 1, .y = 0 };
-                        }
-
-                        if (testWall(
-                            min_corner.y,
-                            relative.y,
-                            relative.x,
-                            player_delta.y,
-                            player_delta.x,
-                            min_corner.x,
-                            max_corner.x,
-                            &min_time,
-                        )) {
-                            wall_normal = math.Vector2{ .x = 0, .y = -1 };
-                        }
-
-                        if (testWall(
-                            max_corner.y,
-                            relative.y,
-                            relative.x,
-                            player_delta.y,
-                            player_delta.x,
-                            min_corner.x,
-                            max_corner.x,
-                            &min_time,
-                        )) {
-                            wall_normal = math.Vector2{ .x = 0, .y = 1 };
-                        }
-                    }
-                }
-            }
-
-            // Apply the amount of delta allowed by collision detection.
-            entity.position = tile.offsetPosition(tile_map, entity.position, player_delta.scale(min_time));
-
-            // Remove velocity that is facing into the wall.
-            _ = entity.velocity.subtractSet(wall_normal.scale(entity.velocity.dot(wall_normal)));
-
-            // Remove the applied delta.
-            _ = player_delta.subtractSet(wall_normal.scale(player_delta.dot(wall_normal)));
-            remaining_time -= min_time * remaining_time;
-        }
-    }
-
-    // Update player Z when hitting a ladder.
-    if (!tile.areOnSameTile(&old_player_position, &entity.position)) {
-        const new_tile_value = tile.getTileValueFromPosition(tile_map, entity.position);
-
-        if (new_tile_value == 3) {
-            entity.position.abs_tile_z += 1;
-        } else if (new_tile_value == 4) {
-            entity.position.abs_tile_z -= 1;
-        }
-    }
-
-    // Update facing direction based on velocity.
-    if (entity.velocity.x == 0 and entity.velocity.y == 0) {
-        // Keep existing facing direction when velocity is zero.
-    } else if (intrinsics.absoluteValue(entity.velocity.x) > intrinsics.absoluteValue(entity.velocity.y)) {
-        if (entity.velocity.x > 0) {
-            entity.facing_direction = 0;
-        } else {
-            entity.facing_direction = 2;
-        }
-    } else if (intrinsics.absoluteValue(entity.velocity.x) < intrinsics.absoluteValue(entity.velocity.y)) {
-        if (entity.velocity.y > 0) {
-            entity.facing_direction = 1;
-        } else {
-            entity.facing_direction = 3;
-        }
-    }
+    _ = tile_map;
+    _ = old_player_position;
+    _ = player_delta;
+    // // Apply the full delta.
+    // const new_player_position = entity.high.position.add(player_delta);
+    //
+    // const abs_tile_z = entity.position.abs_tile_z;
+    // const entity_tile_width = intrinsics.ceilReal32ToUInt32(entity.dormant.width / tile_map.tile_side_in_meters);
+    // const entity_tile_height = intrinsics.ceilReal32ToUInt32(entity.dormant.height / tile_map.tile_side_in_meters);
+    //
+    // var min_tile_x = @min(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
+    // var min_tile_y = @min(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
+    // var max_tile_x = @max(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
+    // var max_tile_y = @max(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
+    //
+    // // Take the player size into account.
+    // min_tile_x -= entity_tile_width;
+    // min_tile_y -= entity_tile_height;
+    // max_tile_x += entity_tile_width;
+    // max_tile_y += entity_tile_height;
+    //
+    // std.debug.assert((max_tile_x - min_tile_x) < 32);
+    // std.debug.assert((max_tile_y - min_tile_y) < 32);
+    //
+    // var remaining_time: f32 = 1.0;
+    // var iterations: u32 = 0;
+    // while (iterations < 4 and remaining_time > 0.0) : (iterations += 1) {
+    //     var min_time: f32 = 1.0;
+    //     var wall_normal = math.Vector2.zero();
+    //     const collision_diameter = math.Vector2{
+    //         .x = tile_map.tile_side_in_meters + entity.width,
+    //         .y = tile_map.tile_side_in_meters + entity.height,
+    //     };
+    //
+    //     var abs_tile_y = min_tile_y;
+    //     while (abs_tile_y <= max_tile_y) : (abs_tile_y += 1) {
+    //         var abs_tile_x = min_tile_x;
+    //         while (abs_tile_x <= max_tile_x) : (abs_tile_x += 1) {
+    //             var test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
+    //             const tile_value = tile.getTileValueFromPosition(tile_map, test_tile_position);
+    //
+    //             if (!tile.isTileValueEmpty(tile_value)) {
+    //                 const min_corner = collision_diameter.scale(-0.5);
+    //                 const max_corner = collision_diameter.scale(0.5);
+    //                 const relative_old_player_position = tile.subtractPositions(
+    //                     tile_map,
+    //                     &entity.position,
+    //                     &test_tile_position,
+    //                 );
+    //                 const relative = relative_old_player_position.xy;
+    //
+    //                 if (testWall(
+    //                     min_corner.x,
+    //                     relative.x,
+    //                     relative.y,
+    //                     player_delta.x,
+    //                     player_delta.y,
+    //                     min_corner.y,
+    //                     max_corner.y,
+    //                     &min_time,
+    //                 )) {
+    //                     wall_normal = math.Vector2{ .x = -1, .y = 0 };
+    //                 }
+    //
+    //                 if (testWall(
+    //                     max_corner.x,
+    //                     relative.x,
+    //                     relative.y,
+    //                     player_delta.x,
+    //                     player_delta.y,
+    //                     min_corner.y,
+    //                     max_corner.y,
+    //                     &min_time,
+    //                 )) {
+    //                     wall_normal = math.Vector2{ .x = 1, .y = 0 };
+    //                 }
+    //
+    //                 if (testWall(
+    //                     min_corner.y,
+    //                     relative.y,
+    //                     relative.x,
+    //                     player_delta.y,
+    //                     player_delta.x,
+    //                     min_corner.x,
+    //                     max_corner.x,
+    //                     &min_time,
+    //                 )) {
+    //                     wall_normal = math.Vector2{ .x = 0, .y = -1 };
+    //                 }
+    //
+    //                 if (testWall(
+    //                     max_corner.y,
+    //                     relative.y,
+    //                     relative.x,
+    //                     player_delta.y,
+    //                     player_delta.x,
+    //                     min_corner.x,
+    //                     max_corner.x,
+    //                     &min_time,
+    //                 )) {
+    //                     wall_normal = math.Vector2{ .x = 0, .y = 1 };
+    //                 }
+    //             }
+    //         }
+    //     }
+    //
+    //     // Apply the amount of delta allowed by collision detection.
+    //     entity.position = tile.offsetPosition(tile_map, entity.position, player_delta.scale(min_time));
+    //
+    //     // Remove velocity that is facing into the wall.
+    //     _ = entity.velocity.subtractSet(wall_normal.scale(entity.velocity.dot(wall_normal)));
+    //
+    //     // Remove the applied delta.
+    //     _ = player_delta.subtractSet(wall_normal.scale(player_delta.dot(wall_normal)));
+    //     remaining_time -= min_time * remaining_time;
+    // }
+    //
+    // // Update player Z when hitting a ladder.
+    // if (!tile.areOnSameTile(&old_player_position, &entity.position)) {
+    //     const new_tile_value = tile.getTileValueFromPosition(tile_map, entity.position);
+    //
+    //     if (new_tile_value == 3) {
+    //         entity.position.abs_tile_z += 1;
+    //     } else if (new_tile_value == 4) {
+    //         entity.position.abs_tile_z -= 1;
+    //     }
+    // }
+    //
+    // // Update facing direction based on velocity.
+    // if (entity.velocity.x == 0 and entity.velocity.y == 0) {
+    //     // Keep existing facing direction when velocity is zero.
+    // } else if (intrinsics.absoluteValue(entity.velocity.x) > intrinsics.absoluteValue(entity.velocity.y)) {
+    //     if (entity.velocity.x > 0) {
+    //         entity.facing_direction = 0;
+    //     } else {
+    //         entity.facing_direction = 2;
+    //     }
+    // } else if (intrinsics.absoluteValue(entity.velocity.x) < intrinsics.absoluteValue(entity.velocity.y)) {
+    //     if (entity.velocity.y > 0) {
+    //         entity.facing_direction = 1;
+    //     } else {
+    //         entity.facing_direction = 3;
+    //     }
+    // }
 }
 
 pub fn testWall(

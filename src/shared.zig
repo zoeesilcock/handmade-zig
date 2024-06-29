@@ -159,8 +159,12 @@ pub const State = struct {
     camera_transitioning: bool = false,
 
     player_index_for_controller: [MAX_CONTROLLER_COUNT]u32 = [1]u32{undefined} ** MAX_CONTROLLER_COUNT,
+
     entity_count: u32 = 0,
-    entities: [256]Entity = [1]Entity{undefined} ** 256,
+    entity_residence: [256]EntityResidence = [1]EntityResidence{EntityResidence.High} ** 256,
+    dormant_entities: [256]DormantEntity = [1]DormantEntity{undefined} ** 256,
+    low_entities: [256]LowEntity = [1]LowEntity{undefined} ** 256,
+    high_entities: [256]HighEntity = [1]HighEntity{undefined} ** 256,
 
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
@@ -170,13 +174,33 @@ pub const World = struct {
     tile_map: *tile.TileMap,
 };
 
+pub const EntityResidence = enum(u32) {
+    NonExistent,
+    Dormant,
+    Low,
+    High,
+};
+
 pub const Entity = struct {
-    exists: bool = false,
-    position: tile.TileMapPosition = undefined,
+    residence: EntityResidence,
+    dormant: *DormantEntity,
+    low: *LowEntity,
+    high: *HighEntity,
+};
+
+pub const DormantEntity = struct {
     width: f32 = 0,
     height: f32 = 0,
-    facing_direction: u32 = undefined,
+    position: tile.TileMapPosition = undefined,
+};
+
+pub const LowEntity = struct {
+};
+
+pub const HighEntity = struct {
+    position: math.Vector2 = math.Vector2{},
     velocity: math.Vector2 = math.Vector2{},
+    facing_direction: u32 = undefined,
 };
 
 pub const HeroBitmaps = struct {
