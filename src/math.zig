@@ -21,6 +21,10 @@ pub const Vector2 = struct {
     x: f32 = 0,
     y: f32 = 0,
 
+    pub fn zero() Vector2 {
+        return Vector2{};
+    }
+
     pub fn add(self: Vector2, b: Vector2) Vector2 {
         return Vector2{
             .x = self.x + b.x,

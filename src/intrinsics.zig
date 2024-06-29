@@ -36,6 +36,14 @@ pub inline fn floorReal32ToUInt32(value: f32) u32 {
     return @intFromFloat(@floor(value));
 }
 
+pub inline fn ceilReal32ToInt32(value: f32) i32 {
+    return @intFromFloat(@ceil(value));
+}
+
+pub inline fn ceilReal32ToUInt32(value: f32) u32 {
+    return @intFromFloat(@ceil(value));
+}
+
 pub inline fn sin(angle: f32) f32 {
     return @sin(angle);
 }

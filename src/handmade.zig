@@ -350,8 +350,8 @@ pub export fn updateAndRender(
                     .x = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
                     .y = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
                 };
-                const min = center.subtract(tile_side.scale(0.9));
-                const max = center.add(tile_side.scale(0.9));
+                const min = center.subtract(tile_side);
+                const max = center.add(tile_side);
 
                 drawRectangle(buffer, min, max, tile_color);
             }
@@ -369,7 +369,7 @@ pub export fn updateAndRender(
             const player_ground_point_y = screen_center_y - meters_to_pixels * diff.xy.y;
             const player_left_top = math.Vector2{
                 .x = player_ground_point_x - (0.5 * meters_to_pixels * entity[0].width),
-                .y = player_ground_point_y - meters_to_pixels * entity[0].height,
+                .y = player_ground_point_y - (0.5 * meters_to_pixels * entity[0].height),
             };
             const player_width_height = math.Vector2{
                 .x = entity[0].width,
@@ -425,8 +425,8 @@ fn initializePlayer(state: *shared.State, entity_index: u32) void {
             .abs_tile_z = 0,
             .offset = math.Vector2{ .x = 0, .y = 0 },
         };
-        entity.height = 1.4;
-        entity.width = 0.75 * entity.height;
+        entity.height = 0.5; // 1.4;
+        entity.width = 1.0;
 
         if (getEntity(state, state.camera_following_entity_index) == null) {
             state.camera_following_entity_index = entity_index;
@@ -457,7 +457,7 @@ fn movePlayer(
     _ = player_acceleration.addSet(entity.velocity.scale(8.0).negate());
 
     // Calculate player delta.
-    const player_delta = player_acceleration.scale(0.5 * math.square(delta_time))
+    var player_delta = player_acceleration.scale(0.5 * math.square(delta_time))
         .add(entity.velocity.scale(delta_time));
     entity.velocity = player_acceleration.scale(delta_time).add(entity.velocity);
 
@@ -473,22 +473,22 @@ fn movePlayer(
         player_position_right.offset.x += 0.5 * entity.width;
         player_position_right = tile.recanonicalizePosition(tile_map, player_position_right);
 
-        var collided = false;
+        var hit = false;
         var collision_position: tile.TileMapPosition = undefined;
         if (!tile.isTileMapPointEmpty(tile_map, new_player_position)) {
-            collided = true;
+            hit = true;
             collision_position = new_player_position;
         }
         if (!tile.isTileMapPointEmpty(tile_map, player_position_left)) {
-            collided = true;
+            hit = true;
             collision_position = player_position_left;
         }
         if (!tile.isTileMapPointEmpty(tile_map, player_position_right)) {
-            collided = true;
+            hit = true;
             collision_position = player_position_right;
         }
 
-        if (collided) {
+        if (hit) {
             var r = math.Vector2{};
             if (collision_position.abs_tile_x < entity.position.abs_tile_x) {
                 r = math.Vector2{ .x = 1, .y = 0 };
@@ -508,107 +508,116 @@ fn movePlayer(
             entity.position = new_player_position;
         }
     } else {
-        const start_tile_x = old_player_position.abs_tile_x;
-        const start_tile_y = old_player_position.abs_tile_y;
-        const end_tile_x = new_player_position.abs_tile_x;
-        const end_tile_y = new_player_position.abs_tile_y;
-        const delta_x: i32 = intrinsics.signOf(@as(i32, @intCast(end_tile_x)) -% @as(i32, @intCast(start_tile_x)));
-        const delta_y: i32 = intrinsics.signOf(@as(i32, @intCast(end_tile_y)) -% @as(i32, @intCast(start_tile_y)));
         const abs_tile_z = entity.position.abs_tile_z;
-        var min_time: f32 = 1.0;
+        const entity_tile_width = intrinsics.ceilReal32ToUInt32(entity.width / tile_map.tile_side_in_meters);
+        const entity_tile_height = intrinsics.ceilReal32ToUInt32(entity.height / tile_map.tile_side_in_meters);
 
-        var abs_tile_y = start_tile_y;
-        while (true) {
-            var abs_tile_x = start_tile_x;
-            while (true) {
-                var test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
-                const tile_value = tile.getTileValueFromPosition(tile_map, test_tile_position);
+        var min_tile_x = @min(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
+        var min_tile_y = @min(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
+        var max_tile_x = @max(old_player_position.abs_tile_x, new_player_position.abs_tile_x);
+        var max_tile_y = @max(old_player_position.abs_tile_y, new_player_position.abs_tile_y);
 
-                if (!tile.isTileValueEmpty(tile_value)) {
-                    var min_corner = math.Vector2{
-                        .x = tile_map.tile_side_in_meters,
-                        .y = tile_map.tile_side_in_meters,
-                    };
-                    _ = min_corner.scaleSet(-0.5);
-                    var max_corner = math.Vector2{
-                        .x = tile_map.tile_side_in_meters,
-                        .y = tile_map.tile_side_in_meters,
-                    };
-                    _ = max_corner.scaleSet(0.5);
+        // Take the player size into account.
+        min_tile_x -= entity_tile_width;
+        min_tile_y -= entity_tile_height;
+        max_tile_x += entity_tile_width;
+        max_tile_y += entity_tile_height;
 
-                    const relative_old_player_position = tile.subtractPositions(
-                        tile_map,
-                        &old_player_position,
-                        &test_tile_position,
-                    );
-                    const relative = relative_old_player_position.xy;
+        std.debug.assert((max_tile_x - min_tile_x) < 32);
+        std.debug.assert((max_tile_y - min_tile_y) < 32);
 
-                    testWall(
-                        min_corner.x,
-                        relative.x,
-                        relative.y,
-                        player_delta.x,
-                        player_delta.y,
-                        min_corner.y,
-                        max_corner.y,
-                        &min_time,
-                    );
-                    testWall(
-                        max_corner.x,
-                        relative.x,
-                        relative.y,
-                        player_delta.x,
-                        player_delta.y,
-                        min_corner.y,
-                        max_corner.y,
-                        &min_time,
-                    );
-                    testWall(
-                        min_corner.y,
-                        relative.y,
-                        relative.x,
-                        player_delta.y,
-                        player_delta.x,
-                        min_corner.x,
-                        max_corner.x,
-                        &min_time,
-                    );
-                    testWall(
-                        max_corner.y,
-                        relative.y,
-                        relative.x,
-                        player_delta.y,
-                        player_delta.x,
-                        min_corner.x,
-                        max_corner.x,
-                        &min_time,
-                    );
-                }
+        var remaining_time: f32 = 1.0;
+        var iterations: u32 = 0;
+        while (iterations < 4 and remaining_time > 0.0) : (iterations += 1) {
+            var min_time: f32 = 1.0;
+            var wall_normal = math.Vector2.zero();
+            const collision_diameter = math.Vector2{
+                .x = tile_map.tile_side_in_meters + entity.width,
+                .y = tile_map.tile_side_in_meters + entity.height,
+            };
 
-                if (abs_tile_x == end_tile_x) {
-                    break;
-                } else {
-                    if (delta_x >= 0) {
-                        abs_tile_x +%= @intCast(delta_x);
-                    } else {
-                        abs_tile_x -%= @intCast(@abs(delta_x));
+            var abs_tile_y = min_tile_y;
+            while (abs_tile_y <= max_tile_y) : (abs_tile_y += 1) {
+                var abs_tile_x = min_tile_x;
+                while (abs_tile_x <= max_tile_x) : (abs_tile_x += 1) {
+                    var test_tile_position = tile.centeredTilePoint(abs_tile_x, abs_tile_y, abs_tile_z);
+                    const tile_value = tile.getTileValueFromPosition(tile_map, test_tile_position);
+
+                    if (!tile.isTileValueEmpty(tile_value)) {
+                        const min_corner = collision_diameter.scale(-0.5);
+                        const max_corner = collision_diameter.scale(0.5);
+                        const relative_old_player_position = tile.subtractPositions(
+                            tile_map,
+                            &entity.position,
+                            &test_tile_position,
+                        );
+                        const relative = relative_old_player_position.xy;
+
+                        if (testWall(
+                            min_corner.x,
+                            relative.x,
+                            relative.y,
+                            player_delta.x,
+                            player_delta.y,
+                            min_corner.y,
+                            max_corner.y,
+                            &min_time,
+                        )) {
+                            wall_normal = math.Vector2{ .x = -1, .y = 0 };
+                        }
+
+                        if (testWall(
+                            max_corner.x,
+                            relative.x,
+                            relative.y,
+                            player_delta.x,
+                            player_delta.y,
+                            min_corner.y,
+                            max_corner.y,
+                            &min_time,
+                        )) {
+                            wall_normal = math.Vector2{ .x = 1, .y = 0 };
+                        }
+
+                        if (testWall(
+                            min_corner.y,
+                            relative.y,
+                            relative.x,
+                            player_delta.y,
+                            player_delta.x,
+                            min_corner.x,
+                            max_corner.x,
+                            &min_time,
+                        )) {
+                            wall_normal = math.Vector2{ .x = 0, .y = -1 };
+                        }
+
+                        if (testWall(
+                            max_corner.y,
+                            relative.y,
+                            relative.x,
+                            player_delta.y,
+                            player_delta.x,
+                            min_corner.x,
+                            max_corner.x,
+                            &min_time,
+                        )) {
+                            wall_normal = math.Vector2{ .x = 0, .y = 1 };
+                        }
                     }
                 }
             }
 
-            if (abs_tile_y == end_tile_y) {
-                break;
-            } else {
-                if (delta_y >= 0) {
-                    abs_tile_y +%= @intCast(delta_y);
-                } else {
-                    abs_tile_y -%= @intCast(@abs(delta_y));
-                }
-            }
-        }
+            // Apply the amount of delta allowed by collision detection.
+            entity.position = tile.offsetPosition(tile_map, entity.position, player_delta.scale(min_time));
 
-        // Update player position taking walls into account.
-        entity.position = tile.offsetPosition(tile_map, entity.position, player_delta.scale(min_time));
+            // Remove velocity that is facing into the wall.
+            _ = entity.velocity.subtractSet(wall_normal.scale(entity.velocity.dot(wall_normal)));
+
+            // Remove the applied delta.
+            _ = player_delta.subtractSet(wall_normal.scale(player_delta.dot(wall_normal)));
+            remaining_time -= min_time * remaining_time;
+        }
     }
 
     // Update player Z when hitting a ladder.
@@ -649,17 +658,22 @@ pub fn testWall(
     min_y: f32,
     max_y: f32,
     min_time: *f32,
-) void {
+) bool {
+    var hit = false;
+
     if (delta_x != 0.0) {
-        const epsilon_time = 0.001;
+        const epsilon_time = 0.00001;
         const result_time = (wall_x - relative_x) / delta_x;
         const y = relative_y + (result_time * delta_y);
         if (result_time >= 0 and min_time.* > result_time) {
             if (y >= min_y and y <= max_y) {
                 min_time.* = @max(0.0, result_time - epsilon_time);
+                hit = true;
             }
         }
     }
+
+    return hit;
 }
 
 pub export fn getSoundSamples(
