@@ -213,6 +213,7 @@ pub const HeroBitmaps = struct {
     head: LoadedBitmap,
     torso: LoadedBitmap,
     cape: LoadedBitmap,
+    shadow: LoadedBitmap,
 };
 
 // Data structures..
