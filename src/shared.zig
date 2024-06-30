@@ -155,8 +155,6 @@ pub const State = struct {
 
     camera_following_entity_index: u32 = 0,
     camera_position: tile.TileMapPosition,
-    camera_target_position: tile.TileMapPosition = undefined,
-    camera_transitioning: bool = false,
 
     player_index_for_controller: [MAX_CONTROLLER_COUNT]u32 = [1]u32{undefined} ** MAX_CONTROLLER_COUNT,
 
@@ -192,13 +190,15 @@ pub const DormantEntity = struct {
     width: f32 = 0,
     height: f32 = 0,
     position: tile.TileMapPosition = undefined,
+    collides: bool = false,
+    abs_tile_z_delta: u32 = 0,
 };
 
-pub const LowEntity = struct {
-};
+pub const LowEntity = struct {};
 
 pub const HighEntity = struct {
     position: math.Vector2 = math.Vector2{},
+    abs_tile_z: u32 = 0,
     velocity: math.Vector2 = math.Vector2{},
     facing_direction: u32 = undefined,
 };

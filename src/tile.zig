@@ -45,15 +45,6 @@ pub const TileMapPosition = struct {
     offset: math.Vector2,
 };
 
-pub fn offsetPosition(tile_map: *TileMap, position: TileMapPosition, offset: math.Vector2) TileMapPosition {
-    var result = position;
-
-    _ = result.offset.addSet(offset);
-    result = recanonicalizePosition(tile_map, result);
-
-    return result;
-}
-
 pub fn centeredTilePoint(abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) TileMapPosition {
     return TileMapPosition{
         .abs_tile_x = abs_tile_x,
@@ -91,13 +82,14 @@ pub inline fn recannonicalizeCoordinate(tile_map: *TileMap, tile_abs: *u32, tile
     tile_rel.* -= @as(f32, @floatFromInt(offset)) * tile_map.tile_side_in_meters;
 
     // Check that the new relative position is within the tile size.
-    std.debug.assert(tile_rel.* >= -0.5001 * tile_map.tile_side_in_meters);
-    std.debug.assert(tile_rel.* <= 0.5001 * tile_map.tile_side_in_meters);
+    std.debug.assert(tile_rel.* >= -0.5 * tile_map.tile_side_in_meters);
+    std.debug.assert(tile_rel.* <= 0.5 * tile_map.tile_side_in_meters);
 }
 
-pub fn recanonicalizePosition(tile_map: *TileMap, position: TileMapPosition) TileMapPosition {
-    var result = position;
+pub fn mapIntoTileSpace(tile_map: *TileMap, base_position: TileMapPosition, offset: math.Vector2) TileMapPosition {
+    var result = base_position;
 
+    _ = result.offset.addSet(offset);
     recannonicalizeCoordinate(tile_map, &result.abs_tile_x, &result.offset.x);
     recannonicalizeCoordinate(tile_map, &result.abs_tile_y, &result.offset.y);
 
