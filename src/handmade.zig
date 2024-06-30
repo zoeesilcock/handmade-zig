@@ -198,10 +198,9 @@ pub export fn updateAndRender(
 
     // Handle input.
     for (&input.controllers, 0..) |controller, controller_index| {
-        const controlling_entity = getEntity(state, shared.EntityResidence.High, state.player_index_for_controller[controller_index]);
-
-        if (controlling_entity) |entity| {
-            if (entity.residence != shared.EntityResidence.NonExistent) {
+        const controlling_entity_index = state.player_index_for_controller[controller_index];
+        if (getEntity(state, shared.EntityResidence.High, controlling_entity_index)) |controlling_entity| {
+            if (controlling_entity.residence != shared.EntityResidence.NonExistent) {
                 var input_direction = math.Vector2{};
 
                 if (controller.is_analog) {
@@ -224,7 +223,17 @@ pub export fn updateAndRender(
                     }
                 }
 
-                movePlayer(state, entity, input.frame_delta_time, input_direction, controller.action_up.ended_down);
+                if (controller.action_down.ended_down) {
+                    controlling_entity.high.z_velocity = 3;
+                }
+
+                movePlayer(
+                    state,
+                    controlling_entity,
+                    input.frame_delta_time,
+                    input_direction,
+                    controller.action_up.ended_down,
+                );
             }
         } else {
             if (controller.start_button.ended_down) {
@@ -339,9 +348,20 @@ pub export fn updateAndRender(
 
             _ = high_entity.position.addSet(entity_offset_for_frame);
 
+            // Jump.
+            const delta_time = input.frame_delta_time;
+            const z_acceleration = -9.8;
+            high_entity.z = (0.5 * z_acceleration * math.square(delta_time)) +
+                high_entity.z_velocity * delta_time + high_entity.z;
+            high_entity.z_velocity = z_acceleration * delta_time + high_entity.z_velocity;
+            if (high_entity.z < 0) {
+                high_entity.z = 0;
+            }
+
             const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
             const player_ground_point_x = screen_center_x + meters_to_pixels * high_entity.position.x;
             const player_ground_point_y = screen_center_y - meters_to_pixels * high_entity.position.y;
+            const z = -meters_to_pixels * high_entity.z;
             const player_left_top = math.Vector2{
                 .x = player_ground_point_x - (0.5 * meters_to_pixels * dormant_entity.width),
                 .y = player_ground_point_y - (0.5 * meters_to_pixels * dormant_entity.height),
@@ -357,9 +377,9 @@ pub export fn updateAndRender(
                 player_color,
             );
             const hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-            drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.torso, hero_bitmaps.align_x, hero_bitmaps.align_y);
-            drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.cape, hero_bitmaps.align_x, hero_bitmaps.align_y);
-            drawBitmap(buffer, player_ground_point_x, player_ground_point_y, hero_bitmaps.head, hero_bitmaps.align_x, hero_bitmaps.align_y);
+            drawBitmap(buffer, player_ground_point_x, player_ground_point_y + z, hero_bitmaps.torso, hero_bitmaps.align_x, hero_bitmaps.align_y);
+            drawBitmap(buffer, player_ground_point_x, player_ground_point_y + z, hero_bitmaps.cape, hero_bitmaps.align_x, hero_bitmaps.align_y);
+            drawBitmap(buffer, player_ground_point_x, player_ground_point_y + z, hero_bitmaps.head, hero_bitmaps.align_x, hero_bitmaps.align_y);
         }
     }
 }

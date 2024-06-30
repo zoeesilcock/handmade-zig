@@ -201,6 +201,9 @@ pub const HighEntity = struct {
     abs_tile_z: u32 = 0,
     velocity: math.Vector2 = math.Vector2{},
     facing_direction: u32 = undefined,
+
+    z: f32 = 0,
+    z_velocity: f32 = 0,
 };
 
 pub const HeroBitmaps = struct {
