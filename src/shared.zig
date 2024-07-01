@@ -158,9 +158,10 @@ pub const State = struct {
 
     player_index_for_controller: [MAX_CONTROLLER_COUNT]u32 = [1]u32{undefined} ** MAX_CONTROLLER_COUNT,
 
-    entity_count: u32 = 0,
-    entity_residence: [256]EntityResidence = [1]EntityResidence{EntityResidence.High} ** 256,
-    low_entities: [256]LowEntity = [1]LowEntity{undefined} ** 256,
+    low_entity_count: u32 = 0,
+    low_entities: [4096]LowEntity = [1]LowEntity{undefined} ** 4096,
+
+    high_entity_count: u32 = 0,
     high_entities: [256]HighEntity = [1]HighEntity{undefined} ** 256,
 
     backdrop: LoadedBitmap,
@@ -184,29 +185,35 @@ pub const EntityType = enum(u8) {
 };
 
 pub const Entity = struct {
-    residence: EntityResidence,
-
+    low_index: u32,
     low: *LowEntity,
-    high: *HighEntity,
+
+    high: ?*HighEntity,
 };
 
 pub const LowEntity = struct {
     type: EntityType = .Null,
+
     width: f32 = 0,
     height: f32 = 0,
     position: tile.TileMapPosition = undefined,
+
     collides: bool = false,
     abs_tile_z_delta: u32 = 0,
+
+    high_entity_index: u32 = 0,
 };
 
 pub const HighEntity = struct {
     position: math.Vector2 = math.Vector2{},
-    abs_tile_z: u32 = 0,
     velocity: math.Vector2 = math.Vector2{},
+    abs_tile_z: u32 = 0,
     facing_direction: u32 = undefined,
 
     z: f32 = 0,
     z_velocity: f32 = 0,
+
+    low_entity_index: u32 = 0,
 };
 
 pub const HeroBitmaps = struct {
