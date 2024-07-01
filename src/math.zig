@@ -104,6 +104,45 @@ pub const Vector2 = struct {
     pub fn lengthSquared(self: Vector2) f32 {
         return self.dot(self);
     }
+
+    pub fn isInRectangle(self: *Vector2, rectangle: Rectangle2) bool {
+        const result = ((self.x >= rectangle.min.x) and
+             (self.y >= rectangle.min.y) and
+             (self.x < rectangle.max.x) and
+             (self.y < rectangle.max.y));
+
+        return result;
+    }
+};
+
+pub const Rectangle2 = struct {
+    min: Vector2 = Vector2{},
+    max: Vector2 = Vector2{},
+
+    pub fn fromMinMax(min: Vector2, max: Vector2) Rectangle2 {
+        return Rectangle2{
+            .min = min,
+            .max = max,
+        };
+    }
+
+    pub fn fromMinDimension(min: Vector2, dimension: Vector2) Rectangle2 {
+        return Rectangle2{
+            .min = min,
+            .max = min.add(dimension),
+        };
+    }
+
+    pub fn fromCenterHalfDimension(center: Vector2, half_dimension: Vector2) Rectangle2 {
+        return Rectangle2{
+            .min = center.subtract(half_dimension),
+            .max = center.add(half_dimension),
+        };
+    }
+
+    pub fn fromCenterDimension(center: Vector2, dimension: Vector2) Rectangle2 {
+        return fromCenterHalfDimension(center, dimension.scale(0.5));
+    }
 };
 
 pub fn square(a: f32) f32 {

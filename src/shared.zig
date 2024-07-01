@@ -172,11 +172,17 @@ pub const World = struct {
     tile_map: *tile.TileMap,
 };
 
-pub const EntityResidence = enum(u32) {
+pub const EntityResidence = enum(u8) {
     NonExistent,
     Dormant,
     Low,
     High,
+};
+
+pub const EntityType = enum(u8) {
+    Null,
+    Hero,
+    Wall,
 };
 
 pub const Entity = struct {
@@ -187,6 +193,7 @@ pub const Entity = struct {
 };
 
 pub const DormantEntity = struct {
+    type: EntityType = .Null,
     width: f32 = 0,
     height: f32 = 0,
     position: tile.TileMapPosition = undefined,

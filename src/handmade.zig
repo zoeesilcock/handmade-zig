@@ -18,12 +18,7 @@ pub export fn updateAndRender(
 
     if (!memory.is_initialized) {
         state.* = shared.State{
-            .camera_position = tile.TileMapPosition{
-                .abs_tile_x = 17 / 2,
-                .abs_tile_y = 9 / 2,
-                .abs_tile_z = 0,
-                .offset = math.Vector2{},
-            },
+            .camera_position = tile.TileMapPosition.zero(),
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
             .hero_bitmaps = .{
                 shared.HeroBitmaps{
@@ -67,7 +62,7 @@ pub export fn updateAndRender(
             @as([*]u8, @ptrCast(memory.permanent_storage.?)) + @sizeOf(shared.State),
         );
 
-        const null_entity = addEntity(state);
+        const null_entity = addEntity(state, .Null);
         _ = null_entity;
 
         state.world = shared.pushStruct(&state.world_arena, shared.World);
@@ -107,7 +102,7 @@ pub export fn updateAndRender(
         var door_up = false;
         var door_down = false;
 
-        for (0..100) |_| {
+        for (0..2) |_| {
             std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
             var random_choice: u32 = 0;
             if (door_up or door_down) {
@@ -162,6 +157,10 @@ pub export fn updateAndRender(
                     }
 
                     tile.setTileValue(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, abs_tile_z, tile_value);
+
+                    if (tile_value == 2) {
+                        _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
+                    }
                 }
             }
 
@@ -191,6 +190,14 @@ pub export fn updateAndRender(
                 screen_y += 1;
             }
         }
+
+        setCameraPosition(state, tile.TileMapPosition{
+            .abs_tile_x = 17 / 2,
+            .abs_tile_y = 9 / 2,
+            .abs_tile_z = 0,
+            .offset = math.Vector2{},
+        });
+
         memory.is_initialized = true;
     }
 
@@ -203,8 +210,8 @@ pub export fn updateAndRender(
     // Handle input.
     for (&input.controllers, 0..) |controller, controller_index| {
         const controlling_entity_index = state.player_index_for_controller[controller_index];
-        if (getEntity(state, shared.EntityResidence.High, controlling_entity_index)) |controlling_entity| {
-            if (controlling_entity.residence != shared.EntityResidence.NonExistent) {
+        if (getEntity(state, .High, controlling_entity_index)) |controlling_entity| {
+            if (controlling_entity.residence != .NonExistent) {
                 var input_direction = math.Vector2{};
 
                 if (controller.is_analog) {
@@ -241,32 +248,29 @@ pub export fn updateAndRender(
             }
         } else {
             if (controller.start_button.ended_down) {
-                const entity_index = addEntity(state);
-                initializePlayer(state, entity_index);
+                const entity_index = addPlayer(state);
                 state.player_index_for_controller[controller_index] = entity_index;
             }
         }
     }
-    var entity_offset_for_frame = math.Vector2.zero();
-    if (getEntity(state, shared.EntityResidence.High, state.camera_following_entity_index)) |camera_following_entity| {
-        if (camera_following_entity.residence != shared.EntityResidence.NonExistent) {
-            var old_camera_position = state.camera_position;
-            state.camera_position.abs_tile_z = camera_following_entity.dormant.position.abs_tile_z;
+    if (getEntity(state, .High, state.camera_following_entity_index)) |camera_following_entity| {
+        if (camera_following_entity.residence != .NonExistent) {
+            var new_camera_position = state.camera_position;
+            new_camera_position.abs_tile_z = camera_following_entity.dormant.position.abs_tile_z;
 
             // Move camera when player leaves the current screen.
             if (camera_following_entity.high.position.x > 9.0 * tile_map.tile_side_in_meters) {
-                state.camera_position.abs_tile_x += 17;
+                new_camera_position.abs_tile_x += 17;
             } else if (camera_following_entity.high.position.x < -9.0 * tile_map.tile_side_in_meters) {
-                state.camera_position.abs_tile_x -= 17;
+                new_camera_position.abs_tile_x -= 17;
             }
             if (camera_following_entity.high.position.y > 5.0 * tile_map.tile_side_in_meters) {
-                state.camera_position.abs_tile_y += 9;
+                new_camera_position.abs_tile_y += 9;
             } else if (camera_following_entity.high.position.y < -5.0 * tile_map.tile_side_in_meters) {
-                state.camera_position.abs_tile_y -= 9;
+                new_camera_position.abs_tile_y -= 9;
             }
 
-            const camera_delta = tile.subtractPositions(tile_map, &state.camera_position, &old_camera_position);
-            entity_offset_for_frame = camera_delta.xy.negate();
+            setCameraPosition(state, new_camera_position);
         }
     }
 
@@ -282,73 +286,73 @@ pub export fn updateAndRender(
     // );
 
     // Draw tile map.
-    const wall_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
-    const background_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
-    const vertical_door_color = shared.Color{ .r = 0.5, .g = 0.25, .b = 0 };
-
-    var player_tile_color = background_color;
-    if (shared.DEBUG) {
-        player_tile_color = shared.Color{ .r = 0.25, .g = 0.25, .b = 0.25 };
-    }
-
+    // const wall_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
+    // const background_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
+    // const vertical_door_color = shared.Color{ .r = 0.5, .g = 0.25, .b = 0 };
+    //
+    // var player_tile_color = background_color;
+    // if (shared.DEBUG) {
+    //     player_tile_color = shared.Color{ .r = 0.25, .g = 0.25, .b = 0.25 };
+    // }
+    //
     const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
     const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
-
-    var rel_row: i32 = -10;
-    var rel_col: i32 = 0;
-
-    while (rel_row < 10) : (rel_row += 1) {
-        rel_col = -20;
-
-        while (rel_col < 20) : (rel_col += 1) {
-            var col: u32 = state.camera_position.abs_tile_x;
-            var row: u32 = state.camera_position.abs_tile_y;
-            const depth: u32 = state.camera_position.abs_tile_z;
-            if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
-            if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
-            const tile_value = tile.getTileValue(tile_map, col, row, depth);
-
-            if (tile_value > 1) {
-                const is_player_tile = (col == state.camera_position.abs_tile_x and row == state.camera_position.abs_tile_y);
-                var tile_color = background_color;
-
-                if (is_player_tile) {
-                    tile_color = player_tile_color;
-                } else if (tile_value > 2) {
-                    tile_color = vertical_door_color;
-                } else if (tile_value == 2) {
-                    tile_color = wall_color;
-                } else {
-                    tile_color = background_color;
-                }
-
-                const center = math.Vector2{
-                    .x = screen_center_x -
-                        meters_to_pixels * state.camera_position.offset.x +
-                        @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_side_in_pixels)),
-                    .y = screen_center_y +
-                        meters_to_pixels * state.camera_position.offset.y -
-                        @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_side_in_pixels)),
-                };
-                const tile_side = math.Vector2{
-                    .x = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
-                    .y = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
-                };
-                const min = center.subtract(tile_side);
-                const max = center.add(tile_side);
-
-                drawRectangle(buffer, min, max, tile_color);
-            }
-        }
-    }
+    //
+    // var rel_row: i32 = -10;
+    // var rel_col: i32 = 0;
+    //
+    // while (rel_row < 10) : (rel_row += 1) {
+    //     rel_col = -20;
+    //
+    //     while (rel_col < 20) : (rel_col += 1) {
+    //         var col: u32 = state.camera_position.abs_tile_x;
+    //         var row: u32 = state.camera_position.abs_tile_y;
+    //         const depth: u32 = state.camera_position.abs_tile_z;
+    //         if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
+    //         if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
+    //         const tile_value = tile.getTileValue(tile_map, col, row, depth);
+    //
+    //         if (tile_value > 1) {
+    //             const is_player_tile = (col == state.camera_position.abs_tile_x and row == state.camera_position.abs_tile_y);
+    //             var tile_color = background_color;
+    //
+    //             if (is_player_tile) {
+    //                 tile_color = player_tile_color;
+    //             } else if (tile_value > 2) {
+    //                 tile_color = vertical_door_color;
+    //             } else if (tile_value == 2) {
+    //                 tile_color = wall_color;
+    //             } else {
+    //                 tile_color = background_color;
+    //             }
+    //
+    //             const center = math.Vector2{
+    //                 .x = screen_center_x -
+    //                     meters_to_pixels * state.camera_position.offset.x +
+    //                     @as(f32, @floatFromInt(rel_col)) * @as(f32, @floatFromInt(tile_side_in_pixels)),
+    //                 .y = screen_center_y +
+    //                     meters_to_pixels * state.camera_position.offset.y -
+    //                     @as(f32, @floatFromInt(rel_row)) * @as(f32, @floatFromInt(tile_side_in_pixels)),
+    //             };
+    //             const tile_side = math.Vector2{
+    //                 .x = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
+    //                 .y = 0.5 * @as(f32, @floatFromInt(tile_side_in_pixels)),
+    //             };
+    //             const min = center.subtract(tile_side);
+    //             const max = center.add(tile_side);
+    //
+    //             drawRectangle(buffer, min, max, tile_color);
+    //         }
+    //     }
+    // }
 
     // Draw player.
-    var entity_index: u32 = 0;
+    var entity_index: u32 = 1;
     while (entity_index < state.entity_count) : (entity_index += 1) {
         const residence = state.entity_residence[entity_index];
-        if (residence == shared.EntityResidence.High) {
+        if (residence == .High) {
             var high_entity = &state.high_entities[entity_index];
-            _ = high_entity.position.addSet(entity_offset_for_frame);
+            const dormant_entity = &state.dormant_entities[entity_index];
 
             // Jump.
             const delta_time = input.frame_delta_time;
@@ -364,69 +368,118 @@ pub export fn updateAndRender(
                 shadow_alpha = 0;
             }
 
-            const player_ground_point_x = screen_center_x + meters_to_pixels * high_entity.position.x;
-            const player_ground_point_y = screen_center_y - meters_to_pixels * high_entity.position.y;
+            const entity_ground_point_x = screen_center_x + meters_to_pixels * high_entity.position.x;
+            const entity_ground_point_y = screen_center_y - meters_to_pixels * high_entity.position.y;
             const z = -meters_to_pixels * high_entity.z;
 
-            // const dormant_entity = &state.dormant_entities[entity_index];
-            // const player_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-            // const player_left_top = math.Vector2{
-            //     .x = player_ground_point_x - (0.5 * meters_to_pixels * dormant_entity.width),
-            //     .y = player_ground_point_y - (0.5 * meters_to_pixels * dormant_entity.height),
-            // };
-            // const player_width_height = math.Vector2{
-            //     .x = dormant_entity.width,
-            //     .y = dormant_entity.height,
-            // };
-            // drawRectangle(
-            //     buffer,
-            //     player_left_top,
-            //     player_left_top.add(player_width_height.scale(meters_to_pixels)),
-            //     player_color,
-            // );
+            if (dormant_entity.type == .Hero) {
+                const hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
+                drawBitmap(
+                    buffer,
+                    entity_ground_point_x,
+                    entity_ground_point_y,
+                    hero_bitmaps.shadow,
+                    hero_bitmaps.align_x,
+                    hero_bitmaps.align_y,
+                    shadow_alpha,
+                );
+                drawBitmap(
+                    buffer,
+                    entity_ground_point_x,
+                    entity_ground_point_y + z,
+                    hero_bitmaps.torso,
+                    hero_bitmaps.align_x,
+                    hero_bitmaps.align_y,
+                    1,
+                );
+                drawBitmap(
+                    buffer,
+                    entity_ground_point_x,
+                    entity_ground_point_y + z,
+                    hero_bitmaps.cape,
+                    hero_bitmaps.align_x,
+                    hero_bitmaps.align_y,
+                    1,
+                );
+                drawBitmap(
+                    buffer,
+                    entity_ground_point_x,
+                    entity_ground_point_y + z,
+                    hero_bitmaps.head,
+                    hero_bitmaps.align_x,
+                    hero_bitmaps.align_y,
+                    1,
+                );
+            } else {
+                const tile_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
+                const entity_left_top = math.Vector2{
+                    .x = entity_ground_point_x - (0.5 * meters_to_pixels * dormant_entity.width),
+                    .y = entity_ground_point_y - (0.5 * meters_to_pixels * dormant_entity.height),
+                };
+                const entity_width_height = math.Vector2{
+                    .x = dormant_entity.width,
+                    .y = dormant_entity.height,
+                };
 
-            const hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-            drawBitmap(
-                buffer,
-                player_ground_point_x,
-                player_ground_point_y,
-                hero_bitmaps.shadow,
-                hero_bitmaps.align_x,
-                hero_bitmaps.align_y,
-                shadow_alpha,
-            );
-            drawBitmap(
-                buffer,
-                player_ground_point_x,
-                player_ground_point_y + z,
-                hero_bitmaps.torso,
-                hero_bitmaps.align_x,
-                hero_bitmaps.align_y,
-                1,
-            );
-            drawBitmap(
-                buffer,
-                player_ground_point_x,
-                player_ground_point_y + z,
-                hero_bitmaps.cape,
-                hero_bitmaps.align_x,
-                hero_bitmaps.align_y,
-                1,
-            );
-            drawBitmap(
-                buffer,
-                player_ground_point_x,
-                player_ground_point_y + z,
-                hero_bitmaps.head,
-                hero_bitmaps.align_x,
-                hero_bitmaps.align_y,
-                1,
-            );
+                drawRectangle(
+                    buffer,
+                    entity_left_top,
+                    entity_left_top.add(entity_width_height.scale(meters_to_pixels)),
+                    tile_color,
+                );
+            }
         }
     }
 }
 
-fn addEntity(state: *shared.State) u32 {
+fn setCameraPosition(state: *shared.State, new_camera_position: tile.TileMapPosition) void {
+    const tile_map = state.world.tile_map;
+
+    const camera_delta = tile.subtractPositions(tile_map, @constCast(&new_camera_position), &state.camera_position);
+    state.camera_position = new_camera_position;
+
+    const tile_span_x = 17 * 3;
+    const tile_span_y = 9 * 3;
+    const bounds_in_tiles = math.Vector2{ .x = tile_span_x, .y = tile_span_y };
+    const camera_in_bounds = math.Rectangle2.fromCenterDimension(
+        math.Vector2.zero(),
+        bounds_in_tiles.scale(tile_map.tile_side_in_meters),
+    );
+
+    const entity_offset_for_frame = camera_delta.xy.negate();
+    var entity_index: u32 = 1;
+    while (entity_index < state.high_entities.len) : (entity_index += 1) {
+        if (state.entity_residence[entity_index] == .High) {
+            const high_entity = &state.high_entities[entity_index];
+            _ = high_entity.position.addSet(entity_offset_for_frame);
+
+            if (!high_entity.position.isInRectangle(camera_in_bounds)) {
+                changeEntityResidence(state, entity_index, .Dormant);
+            }
+        }
+    }
+
+    entity_index = 1;
+    while (entity_index < state.dormant_entities.len) : (entity_index += 1) {
+        if (state.entity_residence[entity_index] == .Dormant) {
+            const dormant_entity = &state.dormant_entities[entity_index];
+
+            const min_tile_x: u32 = new_camera_position.abs_tile_x -% (tile_span_x / 2);
+            const max_tile_x: u32 = new_camera_position.abs_tile_x +% (tile_span_x / 2);
+            const min_tile_y: u32 = new_camera_position.abs_tile_y -% (tile_span_y / 2);
+            const max_tile_y: u32 = new_camera_position.abs_tile_y +% (tile_span_y / 2);
+            if ((dormant_entity.position.abs_tile_z == new_camera_position.abs_tile_z) and
+                (dormant_entity.position.abs_tile_x >= min_tile_x) and
+                (dormant_entity.position.abs_tile_x <= max_tile_x) and
+                (dormant_entity.position.abs_tile_y >= min_tile_y) and
+                (dormant_entity.position.abs_tile_y <= max_tile_y)) {
+                changeEntityResidence(state, entity_index, .High);
+            }
+        }
+    }
+}
+
+fn addEntity(state: *shared.State, entity_type: shared.EntityType) u32 {
     const entity_index = state.entity_count;
     state.entity_count += 1;
 
@@ -434,8 +487,10 @@ fn addEntity(state: *shared.State) u32 {
     std.debug.assert(state.entity_count < state.low_entities.len);
     std.debug.assert(state.entity_count < state.high_entities.len);
 
-    state.entity_residence[entity_index] = shared.EntityResidence.Dormant;
-    state.dormant_entities[entity_index] = shared.DormantEntity{};
+    state.entity_residence[entity_index] = .Dormant;
+    state.dormant_entities[entity_index] = shared.DormantEntity{
+        .type = entity_type,
+    };
     state.low_entities[entity_index] = shared.LowEntity{};
     state.high_entities[entity_index] = shared.HighEntity{};
 
@@ -463,10 +518,10 @@ fn getEntity(state: *shared.State, residence: shared.EntityResidence, index: u32
 }
 
 fn changeEntityResidence(state: *shared.State, entity_index: u32, residence: shared.EntityResidence) void {
-    if (residence == shared.EntityResidence.High) {
-        if (state.entity_residence[entity_index] != shared.EntityResidence.High) {
-            var high_entity = state.high_entities[entity_index];
-            var dormant_entity = state.dormant_entities[entity_index];
+    if (residence == .High) {
+        if (state.entity_residence[entity_index] != .High) {
+            var high_entity = &state.high_entities[entity_index];
+            var dormant_entity = &state.dormant_entities[entity_index];
 
             const diff = tile.subtractPositions(state.world.tile_map, &dormant_entity.position, &state.camera_position);
             high_entity.position = diff.xy;
@@ -479,8 +534,9 @@ fn changeEntityResidence(state: *shared.State, entity_index: u32, residence: sha
     state.entity_residence[entity_index] = residence;
 }
 
-fn initializePlayer(state: *shared.State, entity_index: u32) void {
-    const opt_entity = getEntity(state, shared.EntityResidence.Dormant, entity_index);
+fn addPlayer(state: *shared.State) u32 {
+    const entity_index = addEntity(state, .Hero);
+    const opt_entity = getEntity(state, .Dormant, entity_index);
 
     if (opt_entity) |entity| {
         entity.high.facing_direction = 3;
@@ -494,17 +550,39 @@ fn initializePlayer(state: *shared.State, entity_index: u32) void {
         entity.dormant.width = 1.0;
         entity.dormant.collides = true;
 
-        changeEntityResidence(state, entity_index, shared.EntityResidence.High);
+        changeEntityResidence(state, entity_index, .High);
 
-        const opt_camera_following_entity = getEntity(state, shared.EntityResidence.Dormant, state.camera_following_entity_index);
+        const opt_camera_following_entity = getEntity(state, .Dormant, state.camera_following_entity_index);
         if (opt_camera_following_entity) |following_entity| {
-            if (following_entity.residence == shared.EntityResidence.NonExistent) {
+            if (following_entity.residence == .NonExistent) {
                 state.camera_following_entity_index = entity_index;
             }
         } else {
             state.camera_following_entity_index = entity_index;
         }
     }
+
+    return entity_index;
+}
+
+fn addWall(state: *shared.State, abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) u32 {
+    const entity_index = addEntity(state, .Wall);
+    const opt_entity = getEntity(state, .Dormant, entity_index);
+
+    if (opt_entity) |entity| {
+        entity.high.facing_direction = 3;
+        entity.dormant.position = tile.TileMapPosition{
+            .abs_tile_x = abs_tile_x,
+            .abs_tile_y = abs_tile_y,
+            .abs_tile_z = abs_tile_z,
+            .offset = math.Vector2{ .x = 0, .y = 0 },
+        };
+        entity.dormant.height = state.world.tile_map.tile_side_in_meters;
+        entity.dormant.width = state.world.tile_map.tile_side_in_meters;
+        entity.dormant.collides = true;
+    }
+
+    return entity_index;
 }
 
 fn movePlayer(
@@ -541,7 +619,7 @@ fn movePlayer(
 
         var entity_index: u32 = 0;
         while (entity_index < state.entity_count) : (entity_index += 1) {
-            const opt_test_entity = getEntity(state, shared.EntityResidence.High, entity_index);
+            const opt_test_entity = getEntity(state, .High, entity_index);
             if (opt_test_entity) |test_entity| {
                 if (entity.high != test_entity.high and test_entity.dormant.collides) {
                     const collision_diameter = math.Vector2{
@@ -622,7 +700,7 @@ fn movePlayer(
             _ = player_delta.subtractSet(wall_normal.scale(player_delta.dot(wall_normal)));
             remaining_time -= min_time * remaining_time;
 
-            if (getEntity(state, shared.EntityResidence.Dormant, hit_entity_index)) |hit_entity| {
+            if (getEntity(state, .Dormant, hit_entity_index)) |hit_entity| {
                 // Update player Z when hitting a ladder.
                 entity.high.abs_tile_z += hit_entity.dormant.abs_tile_z_delta;
             }

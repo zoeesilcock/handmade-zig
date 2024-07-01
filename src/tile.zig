@@ -43,6 +43,15 @@ pub const TileMapPosition = struct {
 
     // Position relative to the center of the current tile.
     offset: math.Vector2,
+
+    pub fn zero() TileMapPosition {
+        return TileMapPosition{
+            .abs_tile_x = 0,
+            .abs_tile_y = 0,
+            .abs_tile_z = 0,
+            .offset = math.Vector2.zero(),
+        };
+    }
 };
 
 pub fn centeredTilePoint(abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) TileMapPosition {
