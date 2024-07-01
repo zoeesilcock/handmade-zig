@@ -610,12 +610,13 @@ fn movePlayer(
         .add(entity.high.velocity.scale(delta_time));
     entity.high.velocity = player_acceleration.scale(delta_time).add(entity.high.velocity);
 
-    var remaining_time: f32 = 1.0;
     var iterations: u32 = 0;
-    while (iterations < 4 and remaining_time > 0.0) : (iterations += 1) {
+    while (iterations < 4) : (iterations += 1) {
         var min_time: f32 = 1.0;
         var wall_normal = math.Vector2.zero();
         var hit_entity_index: u32 = 0;
+
+        const desired_position = entity.high.position.add(player_delta);
 
         var entity_index: u32 = 0;
         while (entity_index < state.entity_count) : (entity_index += 1) {
@@ -697,8 +698,8 @@ fn movePlayer(
             _ = entity.high.velocity.subtractSet(wall_normal.scale(entity.high.velocity.dot(wall_normal)));
 
             // Remove the applied delta.
+            player_delta = desired_position.subtract(entity.high.position);
             _ = player_delta.subtractSet(wall_normal.scale(player_delta.dot(wall_normal)));
-            remaining_time -= min_time * remaining_time;
 
             if (getEntity(state, .Dormant, hit_entity_index)) |hit_entity| {
                 // Update player Z when hitting a ladder.
