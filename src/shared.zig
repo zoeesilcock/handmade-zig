@@ -160,7 +160,6 @@ pub const State = struct {
 
     entity_count: u32 = 0,
     entity_residence: [256]EntityResidence = [1]EntityResidence{EntityResidence.High} ** 256,
-    dormant_entities: [256]DormantEntity = [1]DormantEntity{undefined} ** 256,
     low_entities: [256]LowEntity = [1]LowEntity{undefined} ** 256,
     high_entities: [256]HighEntity = [1]HighEntity{undefined} ** 256,
 
@@ -174,7 +173,6 @@ pub const World = struct {
 
 pub const EntityResidence = enum(u8) {
     NonExistent,
-    Dormant,
     Low,
     High,
 };
@@ -187,12 +185,12 @@ pub const EntityType = enum(u8) {
 
 pub const Entity = struct {
     residence: EntityResidence,
-    dormant: *DormantEntity,
+
     low: *LowEntity,
     high: *HighEntity,
 };
 
-pub const DormantEntity = struct {
+pub const LowEntity = struct {
     type: EntityType = .Null,
     width: f32 = 0,
     height: f32 = 0,
@@ -200,8 +198,6 @@ pub const DormantEntity = struct {
     collides: bool = false,
     abs_tile_z_delta: u32 = 0,
 };
-
-pub const LowEntity = struct {};
 
 pub const HighEntity = struct {
     position: math.Vector2 = math.Vector2{},

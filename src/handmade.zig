@@ -256,7 +256,7 @@ pub export fn updateAndRender(
     if (getEntity(state, .High, state.camera_following_entity_index)) |camera_following_entity| {
         if (camera_following_entity.residence != .NonExistent) {
             var new_camera_position = state.camera_position;
-            new_camera_position.abs_tile_z = camera_following_entity.dormant.position.abs_tile_z;
+            new_camera_position.abs_tile_z = camera_following_entity.low.position.abs_tile_z;
 
             // Move camera when player leaves the current screen.
             if (camera_following_entity.high.position.x > 9.0 * tile_map.tile_side_in_meters) {
@@ -352,7 +352,7 @@ pub export fn updateAndRender(
         const residence = state.entity_residence[entity_index];
         if (residence == .High) {
             var high_entity = &state.high_entities[entity_index];
-            const dormant_entity = &state.dormant_entities[entity_index];
+            const low_entity = &state.low_entities[entity_index];
 
             // Jump.
             const delta_time = input.frame_delta_time;
@@ -372,7 +372,7 @@ pub export fn updateAndRender(
             const entity_ground_point_y = screen_center_y - meters_to_pixels * high_entity.position.y;
             const z = -meters_to_pixels * high_entity.z;
 
-            if (dormant_entity.type == .Hero) {
+            if (low_entity.type == .Hero) {
                 const hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
                 drawBitmap(
                     buffer,
@@ -413,12 +413,12 @@ pub export fn updateAndRender(
             } else {
                 const tile_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
                 const entity_left_top = math.Vector2{
-                    .x = entity_ground_point_x - (0.5 * meters_to_pixels * dormant_entity.width),
-                    .y = entity_ground_point_y - (0.5 * meters_to_pixels * dormant_entity.height),
+                    .x = entity_ground_point_x - (0.5 * meters_to_pixels * low_entity.width),
+                    .y = entity_ground_point_y - (0.5 * meters_to_pixels * low_entity.height),
                 };
                 const entity_width_height = math.Vector2{
-                    .x = dormant_entity.width,
-                    .y = dormant_entity.height,
+                    .x = low_entity.width,
+                    .y = low_entity.height,
                 };
 
                 drawRectangle(
@@ -454,25 +454,25 @@ fn setCameraPosition(state: *shared.State, new_camera_position: tile.TileMapPosi
             _ = high_entity.position.addSet(entity_offset_for_frame);
 
             if (!high_entity.position.isInRectangle(camera_in_bounds)) {
-                changeEntityResidence(state, entity_index, .Dormant);
+                changeEntityResidence(state, entity_index, .Low);
             }
         }
     }
 
     entity_index = 1;
-    while (entity_index < state.dormant_entities.len) : (entity_index += 1) {
-        if (state.entity_residence[entity_index] == .Dormant) {
-            const dormant_entity = &state.dormant_entities[entity_index];
+    while (entity_index < state.low_entities.len) : (entity_index += 1) {
+        if (state.entity_residence[entity_index] == .Low) {
+            const low_entity = &state.low_entities[entity_index];
 
             const min_tile_x: u32 = new_camera_position.abs_tile_x -% (tile_span_x / 2);
             const max_tile_x: u32 = new_camera_position.abs_tile_x +% (tile_span_x / 2);
             const min_tile_y: u32 = new_camera_position.abs_tile_y -% (tile_span_y / 2);
             const max_tile_y: u32 = new_camera_position.abs_tile_y +% (tile_span_y / 2);
-            if ((dormant_entity.position.abs_tile_z == new_camera_position.abs_tile_z) and
-                (dormant_entity.position.abs_tile_x >= min_tile_x) and
-                (dormant_entity.position.abs_tile_x <= max_tile_x) and
-                (dormant_entity.position.abs_tile_y >= min_tile_y) and
-                (dormant_entity.position.abs_tile_y <= max_tile_y)) {
+            if ((low_entity.position.abs_tile_z == new_camera_position.abs_tile_z) and
+                (low_entity.position.abs_tile_x >= min_tile_x) and
+                (low_entity.position.abs_tile_x <= max_tile_x) and
+                (low_entity.position.abs_tile_y >= min_tile_y) and
+                (low_entity.position.abs_tile_y <= max_tile_y)) {
                 changeEntityResidence(state, entity_index, .High);
             }
         }
@@ -483,15 +483,14 @@ fn addEntity(state: *shared.State, entity_type: shared.EntityType) u32 {
     const entity_index = state.entity_count;
     state.entity_count += 1;
 
-    std.debug.assert(state.entity_count < state.dormant_entities.len);
+    std.debug.assert(state.entity_count < state.low_entities.len);
     std.debug.assert(state.entity_count < state.low_entities.len);
     std.debug.assert(state.entity_count < state.high_entities.len);
 
-    state.entity_residence[entity_index] = .Dormant;
-    state.dormant_entities[entity_index] = shared.DormantEntity{
+    state.entity_residence[entity_index] = .Low;
+    state.low_entities[entity_index] = shared.LowEntity{
         .type = entity_type,
     };
-    state.low_entities[entity_index] = shared.LowEntity{};
     state.high_entities[entity_index] = shared.HighEntity{};
 
     return entity_index;
@@ -508,7 +507,6 @@ fn getEntity(state: *shared.State, residence: shared.EntityResidence, index: u32
 
         entity = shared.Entity{
             .residence = residence,
-            .dormant = &state.dormant_entities[index],
             .low = &state.low_entities[index],
             .high = &state.high_entities[index],
         };
@@ -521,11 +519,11 @@ fn changeEntityResidence(state: *shared.State, entity_index: u32, residence: sha
     if (residence == .High) {
         if (state.entity_residence[entity_index] != .High) {
             var high_entity = &state.high_entities[entity_index];
-            var dormant_entity = &state.dormant_entities[entity_index];
+            var low_entity = &state.low_entities[entity_index];
 
-            const diff = tile.subtractPositions(state.world.tile_map, &dormant_entity.position, &state.camera_position);
+            const diff = tile.subtractPositions(state.world.tile_map, &low_entity.position, &state.camera_position);
             high_entity.position = diff.xy;
-            high_entity.abs_tile_z = dormant_entity.position.abs_tile_z;
+            high_entity.abs_tile_z = low_entity.position.abs_tile_z;
             high_entity.velocity = math.Vector2.zero();
             high_entity.facing_direction = 0;
         }
@@ -536,23 +534,23 @@ fn changeEntityResidence(state: *shared.State, entity_index: u32, residence: sha
 
 fn addPlayer(state: *shared.State) u32 {
     const entity_index = addEntity(state, .Hero);
-    const opt_entity = getEntity(state, .Dormant, entity_index);
+    const opt_entity = getEntity(state, .Low, entity_index);
 
     if (opt_entity) |entity| {
         entity.high.facing_direction = 3;
-        entity.dormant.position = tile.TileMapPosition{
+        entity.low.position = tile.TileMapPosition{
             .abs_tile_x = 1,
             .abs_tile_y = 3,
             .abs_tile_z = 0,
             .offset = math.Vector2{ .x = 0, .y = 0 },
         };
-        entity.dormant.height = 0.5; // 1.4;
-        entity.dormant.width = 1.0;
-        entity.dormant.collides = true;
+        entity.low.height = 0.5; // 1.4;
+        entity.low.width = 1.0;
+        entity.low.collides = true;
 
         changeEntityResidence(state, entity_index, .High);
 
-        const opt_camera_following_entity = getEntity(state, .Dormant, state.camera_following_entity_index);
+        const opt_camera_following_entity = getEntity(state, .Low, state.camera_following_entity_index);
         if (opt_camera_following_entity) |following_entity| {
             if (following_entity.residence == .NonExistent) {
                 state.camera_following_entity_index = entity_index;
@@ -567,19 +565,19 @@ fn addPlayer(state: *shared.State) u32 {
 
 fn addWall(state: *shared.State, abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) u32 {
     const entity_index = addEntity(state, .Wall);
-    const opt_entity = getEntity(state, .Dormant, entity_index);
+    const opt_entity = getEntity(state, .Low, entity_index);
 
     if (opt_entity) |entity| {
         entity.high.facing_direction = 3;
-        entity.dormant.position = tile.TileMapPosition{
+        entity.low.position = tile.TileMapPosition{
             .abs_tile_x = abs_tile_x,
             .abs_tile_y = abs_tile_y,
             .abs_tile_z = abs_tile_z,
             .offset = math.Vector2{ .x = 0, .y = 0 },
         };
-        entity.dormant.height = state.world.tile_map.tile_side_in_meters;
-        entity.dormant.width = state.world.tile_map.tile_side_in_meters;
-        entity.dormant.collides = true;
+        entity.low.height = state.world.tile_map.tile_side_in_meters;
+        entity.low.width = state.world.tile_map.tile_side_in_meters;
+        entity.low.collides = true;
     }
 
     return entity_index;
@@ -622,10 +620,10 @@ fn movePlayer(
         while (entity_index < state.entity_count) : (entity_index += 1) {
             const opt_test_entity = getEntity(state, .High, entity_index);
             if (opt_test_entity) |test_entity| {
-                if (entity.high != test_entity.high and test_entity.dormant.collides) {
+                if (entity.high != test_entity.high and test_entity.low.collides) {
                     const collision_diameter = math.Vector2{
-                        .x = test_entity.dormant.width + entity.dormant.width,
-                        .y = test_entity.dormant.height + entity.dormant.height,
+                        .x = test_entity.low.width + entity.low.width,
+                        .y = test_entity.low.height + entity.low.height,
                     };
                     const min_corner = collision_diameter.scale(-0.5);
                     const max_corner = collision_diameter.scale(0.5);
@@ -701,9 +699,9 @@ fn movePlayer(
             player_delta = desired_position.subtract(entity.high.position);
             _ = player_delta.subtractSet(wall_normal.scale(player_delta.dot(wall_normal)));
 
-            if (getEntity(state, .Dormant, hit_entity_index)) |hit_entity| {
+            if (getEntity(state, .Low, hit_entity_index)) |hit_entity| {
                 // Update player Z when hitting a ladder.
-                entity.high.abs_tile_z += hit_entity.dormant.abs_tile_z_delta;
+                entity.high.abs_tile_z += hit_entity.low.abs_tile_z_delta;
             }
         } else {
             break;
@@ -727,7 +725,7 @@ fn movePlayer(
         }
     }
 
-    entity.dormant.position = tile.mapIntoTileSpace(state.world.tile_map, state.camera_position, entity.high.position);
+    entity.low.position = tile.mapIntoTileSpace(state.world.tile_map, state.camera_position, entity.high.position);
 }
 
 pub fn testWall(
