@@ -749,8 +749,8 @@ fn drawBitmap(
     // Calculate extents.
     var min_x = intrinsics.roundReal32ToInt32(aligned_x);
     var min_y = intrinsics.roundReal32ToInt32(aligned_y);
-    var max_x = intrinsics.roundReal32ToInt32(aligned_x + @as(f32, @floatFromInt(bitmap.width)));
-    var max_y = intrinsics.roundReal32ToInt32(aligned_y + @as(f32, @floatFromInt(bitmap.height)));
+    var max_x: i32 = @intFromFloat(aligned_x + @as(f32, @floatFromInt(bitmap.width)));
+    var max_y: i32 = @intFromFloat(aligned_y + @as(f32, @floatFromInt(bitmap.height)));
 
     // Clip input values to buffer.
     var source_offset_x: i32 = 0;
