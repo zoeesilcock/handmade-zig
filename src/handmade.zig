@@ -1,5 +1,5 @@
 const shared = @import("shared.zig");
-const tile = @import("tile.zig");
+const world = @import("world.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
@@ -18,7 +18,7 @@ pub export fn updateAndRender(
 
     if (!memory.is_initialized) {
         state.* = shared.State{
-            .camera_position = tile.TileMapPosition.zero(),
+            .camera_position = world.WorldPosition.zero(),
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
             .hero_bitmaps = .{
                 shared.HeroBitmaps{
@@ -66,11 +66,8 @@ pub export fn updateAndRender(
         state.high_entity_count = 1;
         _ = null_entity;
 
-        state.world = shared.pushStruct(&state.world_arena, shared.World);
-        const world = state.world;
-        world.tile_map = shared.pushStruct(&state.world_arena, tile.TileMap);
-        const tile_map = world.tile_map;
-        tile.initializeTileMap(tile_map, 1.4);
+        state.world = shared.pushStruct(&state.world_arena, world.World);
+        world.initializeWorld(state.world, 1.4);
 
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
@@ -143,8 +140,6 @@ pub export fn updateAndRender(
                         }
                     }
 
-                    tile.setTileValue(&state.world_arena, world.tile_map, abs_tile_x, abs_tile_y, abs_tile_z, tile_value);
-
                     if (tile_value == 2) {
                         _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
                     }
@@ -180,13 +175,13 @@ pub export fn updateAndRender(
 
         if (false) {
             // Fill the low entity storage with walls.
-            while(state.low_entity_count < (state.low_entities.len - 16)) {
+            while (state.low_entity_count < (state.low_entities.len - 16)) {
                 const coordinate: i32 = @intCast(1024 + state.low_entity_count);
                 _ = addWall(state, coordinate, coordinate, 0);
             }
         }
 
-        setCameraPosition(state, tile.TileMapPosition{
+        setCameraPosition(state, world.WorldPosition{
             .abs_tile_x = screen_base_x * tiles_per_width + (17 / 2),
             .abs_tile_y = screen_base_y * tiles_per_height + (9 / 2),
             .abs_tile_z = screen_base_z,
@@ -196,11 +191,8 @@ pub export fn updateAndRender(
         memory.is_initialized = true;
     }
 
-    const world = state.world;
-    const tile_map = world.tile_map;
-
     const tile_side_in_pixels = 60;
-    const meters_to_pixels = @as(f32, @floatFromInt(tile_side_in_pixels)) / tile_map.tile_side_in_meters;
+    const meters_to_pixels = @as(f32, @floatFromInt(tile_side_in_pixels)) / state.world.tile_side_in_meters;
 
     // Handle input.
     for (&input.controllers, 0..) |controller, controller_index| {
@@ -257,14 +249,14 @@ pub export fn updateAndRender(
             new_camera_position.abs_tile_z = camera_following_entity.low.position.abs_tile_z;
 
             // Move camera when player leaves the current screen.
-            if (high_entity.position.x > 9.0 * tile_map.tile_side_in_meters) {
+            if (high_entity.position.x > 9.0 * state.world.tile_side_in_meters) {
                 new_camera_position.abs_tile_x += 17;
-            } else if (high_entity.position.x < -9.0 * tile_map.tile_side_in_meters) {
+            } else if (high_entity.position.x < -9.0 * state.world.tile_side_in_meters) {
                 new_camera_position.abs_tile_x -= 17;
             }
-            if (high_entity.position.y > 5.0 * tile_map.tile_side_in_meters) {
+            if (high_entity.position.y > 5.0 * state.world.tile_side_in_meters) {
                 new_camera_position.abs_tile_y += 9;
-            } else if (high_entity.position.y < -5.0 * tile_map.tile_side_in_meters) {
+            } else if (high_entity.position.y < -5.0 * state.world.tile_side_in_meters) {
                 new_camera_position.abs_tile_y -= 9;
             }
 
@@ -313,7 +305,7 @@ pub export fn updateAndRender(
     //         const depth: u32 = state.camera_position.abs_tile_z;
     //         if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
     //         if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
-    //         const tile_value = tile.getTileValue(tile_map, col, row, depth);
+    //         const tile_value = world.getTileValue(state.world, col, row, depth);
     //
     //         if (tile_value > 1) {
     //             const is_player_tile = (col == state.camera_position.abs_tile_x and row == state.camera_position.abs_tile_y);
@@ -432,10 +424,8 @@ pub export fn updateAndRender(
     }
 }
 
-fn setCameraPosition(state: *shared.State, new_camera_position: tile.TileMapPosition) void {
-    const tile_map = state.world.tile_map;
-
-    const camera_delta = tile.subtractPositions(tile_map, @constCast(&new_camera_position), &state.camera_position);
+fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosition) void {
+    const camera_delta = world.subtractPositions(state.world, @constCast(&new_camera_position), &state.camera_position);
     state.camera_position = new_camera_position;
 
     const tile_span_x = 17 * 3;
@@ -443,7 +433,7 @@ fn setCameraPosition(state: *shared.State, new_camera_position: tile.TileMapPosi
     const bounds_in_tiles = math.Vector2{ .x = tile_span_x, .y = tile_span_y };
     const camera_bounds = math.Rectangle2.fromCenterDimension(
         math.Vector2.zero(),
-        bounds_in_tiles.scale(tile_map.tile_side_in_meters),
+        bounds_in_tiles.scale(state.world.tile_side_in_meters),
     );
     const entity_offset_for_frame = camera_delta.xy.negate();
     offsetAndCheckFrequencyByArea(state, entity_offset_for_frame, camera_bounds);
@@ -532,7 +522,7 @@ inline fn makeEntityHighFrequency(state: *shared.State, low_index: u32) ?*shared
             var high_entity = &state.high_entities[high_index];
             result = high_entity;
 
-            const diff = tile.subtractPositions(state.world.tile_map, &low_entity.position, &state.camera_position);
+            const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
             high_entity.position = diff.xy;
             high_entity.abs_tile_z = low_entity.position.abs_tile_z;
             high_entity.velocity = math.Vector2.zero();
@@ -570,14 +560,14 @@ fn addWall(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i
     const opt_entity = getLowEntity(state, entity_index);
 
     if (opt_entity) |low_entity| {
-        low_entity.position = tile.TileMapPosition{
+        low_entity.position = world.WorldPosition{
             .abs_tile_x = abs_tile_x,
             .abs_tile_y = abs_tile_y,
             .abs_tile_z = abs_tile_z,
             .offset = math.Vector2{ .x = 0, .y = 0 },
         };
-        low_entity.height = state.world.tile_map.tile_side_in_meters;
-        low_entity.width = state.world.tile_map.tile_side_in_meters;
+        low_entity.height = state.world.tile_side_in_meters;
+        low_entity.width = state.world.tile_side_in_meters;
         low_entity.collides = true;
     }
 
@@ -754,7 +744,7 @@ fn movePlayer(
             }
         }
 
-        entity.low.position = tile.mapIntoTileSpace(state.world.tile_map, state.camera_position, high_entity.position);
+        entity.low.position = world.mapIntoTileSpace(state.world, state.camera_position, high_entity.position);
     }
 }
 

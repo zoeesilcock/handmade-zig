@@ -7,7 +7,7 @@ pub const MAX_CONTROLLER_COUNT: u8 = 5;
 
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
-const tile = @import("tile.zig");
+const world = @import("world.zig");
 const std = @import("std");
 
 // Build options.
@@ -151,10 +151,10 @@ pub fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T
 // Game state.
 pub const State = struct {
     world_arena: MemoryArena = undefined,
-    world: *World = undefined,
+    world: *world.World = undefined,
 
     camera_following_entity_index: u32 = 0,
-    camera_position: tile.TileMapPosition,
+    camera_position: world.WorldPosition,
 
     player_index_for_controller: [MAX_CONTROLLER_COUNT]u32 = [1]u32{undefined} ** MAX_CONTROLLER_COUNT,
 
@@ -168,8 +168,9 @@ pub const State = struct {
     hero_bitmaps: [4]HeroBitmaps,
 };
 
-pub const World = struct {
-    tile_map: *tile.TileMap,
+pub const LowEntityChunkReference = struct {
+    tile_chunk: world.TileChunk,
+    entity_index_in_chunk: u32,
 };
 
 pub const EntityResidence = enum(u8) {
@@ -196,7 +197,7 @@ pub const LowEntity = struct {
 
     width: f32 = 0,
     height: f32 = 0,
-    position: tile.TileMapPosition = undefined,
+    position: world.WorldPosition = undefined,
 
     collides: bool = false,
     abs_tile_z_delta: i32 = 0,
