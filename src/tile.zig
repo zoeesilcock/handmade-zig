@@ -146,8 +146,8 @@ fn getTileChunk(
         if (opt_memory_arena) |memory_arena| {
             if (chunk.tile_chunk_x != TILE_CHUNK_UNINITIALIZED and chunk.next_in_hash == null) {
                 chunk.next_in_hash = shared.pushStruct(memory_arena, TileChunk);
-                chunk.tile_chunk_x = TILE_CHUNK_UNINITIALIZED;
                 tile_chunk = chunk.next_in_hash;
+                tile_chunk.?.tile_chunk_x = TILE_CHUNK_UNINITIALIZED;
 
                 continue;
             }
