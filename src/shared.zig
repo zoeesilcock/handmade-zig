@@ -159,7 +159,7 @@ pub const State = struct {
     player_index_for_controller: [MAX_CONTROLLER_COUNT]u32 = [1]u32{undefined} ** MAX_CONTROLLER_COUNT,
 
     low_entity_count: u32 = 0,
-    low_entities: [4096]LowEntity = [1]LowEntity{undefined} ** 4096,
+    low_entities: [100000]LowEntity = [1]LowEntity{undefined} ** 100000,
 
     high_entity_count: u32 = 0,
     high_entities: [256]HighEntity = [1]HighEntity{undefined} ** 256,

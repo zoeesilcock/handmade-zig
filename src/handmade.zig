@@ -178,6 +178,14 @@ pub export fn updateAndRender(
             }
         }
 
+        if (false) {
+            // Fill the low entity storage with walls.
+            while(state.low_entity_count < (state.low_entities.len - 16)) {
+                const coordinate: i32 = @intCast(1024 + state.low_entity_count);
+                _ = addWall(state, coordinate, coordinate, 0);
+            }
+        }
+
         setCameraPosition(state, tile.TileMapPosition{
             .abs_tile_x = screen_base_x * tiles_per_width + (17 / 2),
             .abs_tile_y = screen_base_y * tiles_per_height + (9 / 2),
@@ -260,7 +268,12 @@ pub export fn updateAndRender(
                 new_camera_position.abs_tile_y -= 9;
             }
 
-            setCameraPosition(state, new_camera_position);
+            if (false) {
+                setCameraPosition(state, new_camera_position);
+            } else {
+                // Follow player position.
+                setCameraPosition(state, camera_following_entity.low.position);
+            }
         }
     }
 

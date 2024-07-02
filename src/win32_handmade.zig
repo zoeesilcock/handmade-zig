@@ -1293,7 +1293,7 @@ pub export fn wWinMain(
 
             var game_memory: shared.Memory = shared.Memory{
                 .is_initialized = false,
-                .permanent_storage_size = shared.megabytes(64),
+                .permanent_storage_size = shared.megabytes(256),
                 .permanent_storage = null,
                 .transient_storage_size = shared.megabytes(256),
                 .transient_storage = null,
