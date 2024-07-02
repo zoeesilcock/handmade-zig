@@ -76,12 +76,12 @@ pub export fn updateAndRender(
         const tiles_per_height: u32 = 9;
 
         var random_number_index: u32 = 0;
-        const screen_base_x: u32 = (std.math.maxInt(i16) / tiles_per_width) / 2;
-        const screen_base_y: u32 = (std.math.maxInt(i16) / tiles_per_height) / 2;
-        const screen_base_z: u32 = std.math.maxInt(i16) / 2;
+        const screen_base_x: i32 = 0;
+        const screen_base_y: i32 = 0;
+        const screen_base_z: i32 = 0;
         var screen_x = screen_base_x;
         var screen_y = screen_base_y;
-        var abs_tile_z: u32 = screen_base_z;
+        var abs_tile_z: i32 = screen_base_z;
         var door_left = false;
         var door_right = false;
         var door_top = false;
@@ -117,8 +117,8 @@ pub export fn updateAndRender(
 
             for (0..tiles_per_height) |tile_y| {
                 for (0..tiles_per_width) |tile_x| {
-                    const abs_tile_x: u32 = @as(u32, @intCast(screen_x)) * tiles_per_width + @as(u32, @intCast(tile_x));
-                    const abs_tile_y: u32 = @as(u32, @intCast(screen_y)) * tiles_per_height + @as(u32, @intCast(tile_y));
+                    const abs_tile_x: i32 = screen_x * tiles_per_width + @as(i32, @intCast(tile_x));
+                    const abs_tile_y: i32 = screen_y * tiles_per_height + @as(i32, @intCast(tile_y));
                     var tile_value: u32 = 1;
 
                     // Generate doors.
@@ -439,10 +439,10 @@ fn setCameraPosition(state: *shared.State, new_camera_position: tile.TileMapPosi
     while (entity_index < state.low_entity_count) : (entity_index += 1) {
         const low_entity = state.low_entities[entity_index];
         if (low_entity.high_entity_index == 0) {
-            const min_tile_x: u32 = new_camera_position.abs_tile_x -% (tile_span_x / 2);
-            const max_tile_x: u32 = new_camera_position.abs_tile_x +% (tile_span_x / 2);
-            const min_tile_y: u32 = new_camera_position.abs_tile_y -% (tile_span_y / 2);
-            const max_tile_y: u32 = new_camera_position.abs_tile_y +% (tile_span_y / 2);
+            const min_tile_x: i32 = new_camera_position.abs_tile_x -% (tile_span_x / 2);
+            const max_tile_x: i32 = new_camera_position.abs_tile_x +% (tile_span_x / 2);
+            const min_tile_y: i32 = new_camera_position.abs_tile_y -% (tile_span_y / 2);
+            const max_tile_y: i32 = new_camera_position.abs_tile_y +% (tile_span_y / 2);
             if ((low_entity.position.abs_tile_z == new_camera_position.abs_tile_z) and
                 (low_entity.position.abs_tile_x >= min_tile_x) and
                 (low_entity.position.abs_tile_x <= max_tile_x) and
@@ -552,7 +552,7 @@ inline fn makeEntityLowFrequency(state: *shared.State, low_index: u32) void {
     }
 }
 
-fn addWall(state: *shared.State, abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) u32 {
+fn addWall(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) u32 {
     const entity_index = addLowEntity(state, .Wall);
     const opt_entity = getLowEntity(state, entity_index);
 
