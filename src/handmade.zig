@@ -69,33 +69,19 @@ pub export fn updateAndRender(
         state.world = shared.pushStruct(&state.world_arena, shared.World);
         const world = state.world;
         world.tile_map = shared.pushStruct(&state.world_arena, tile.TileMap);
-        var tile_map = world.tile_map;
-
-        tile_map.tile_side_in_meters = 1.4;
-
-        tile_map.chunk_shift = 4;
-        tile_map.chunk_dim = (@as(u32, 1) << @as(u5, @intCast(tile_map.chunk_shift)));
-        tile_map.chunk_mask = (@as(u32, 1) << @as(u5, @intCast(tile_map.chunk_shift))) - 1;
-
-        tile_map.tile_chunk_count_x = 128;
-        tile_map.tile_chunk_count_y = 128;
-        tile_map.tile_chunk_count_z = 2;
-        tile_map.tile_chunks = shared.pushArray(
-            &state.world_arena,
-            tile_map.tile_chunk_count_x * tile_map.tile_chunk_count_y * tile_map.tile_chunk_count_z,
-            tile.TileChunk,
-        );
+        const tile_map = world.tile_map;
+        tile.initializeTileMap(tile_map, 1.4);
 
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
 
         var random_number_index: u32 = 0;
-        // TODO: Waiting for full sparseness.
-        // var screen_x: u32 = std.math.maxInt(u32) / 2;
-        // var screen_y: u32 = std.math.maxInt(u32) / 2;
-        var screen_x: u32 = 0;
-        var screen_y: u32 = 0;
-        var abs_tile_z: u32 = 0;
+        const screen_base_x: u32 = (std.math.maxInt(i16) / tiles_per_width) / 2;
+        const screen_base_y: u32 = (std.math.maxInt(i16) / tiles_per_height) / 2;
+        const screen_base_z: u32 = std.math.maxInt(i16) / 2;
+        var screen_x = screen_base_x;
+        var screen_y = screen_base_y;
+        var abs_tile_z: u32 = screen_base_z;
         var door_left = false;
         var door_right = false;
         var door_top = false;
@@ -118,7 +104,7 @@ pub export fn updateAndRender(
             if (random_choice == 2) {
                 created_z_door = true;
 
-                if (abs_tile_z == 0) {
+                if (abs_tile_z == screen_base_z) {
                     door_up = true;
                 } else {
                     door_down = true;
@@ -180,10 +166,10 @@ pub export fn updateAndRender(
             door_top = false;
 
             if (random_choice == 2) {
-                if (abs_tile_z == 0) {
-                    abs_tile_z = 1;
+                if (abs_tile_z == screen_base_z) {
+                    abs_tile_z = screen_base_z + 1;
                 } else {
-                    abs_tile_z = 0;
+                    abs_tile_z = screen_base_z;
                 }
             } else if (random_choice == 1) {
                 screen_x += 1;
@@ -193,9 +179,9 @@ pub export fn updateAndRender(
         }
 
         setCameraPosition(state, tile.TileMapPosition{
-            .abs_tile_x = 17 / 2,
-            .abs_tile_y = 9 / 2,
-            .abs_tile_z = 0,
+            .abs_tile_x = screen_base_x * tiles_per_width + (17 / 2),
+            .abs_tile_y = screen_base_y * tiles_per_height + (9 / 2),
+            .abs_tile_z = screen_base_z,
             .offset = math.Vector2{},
         });
 
@@ -590,12 +576,7 @@ fn addPlayer(state: *shared.State) u32 {
     const opt_entity = getLowEntity(state, entity_index);
 
     if (opt_entity) |low_entity| {
-        low_entity.position = tile.TileMapPosition{
-            .abs_tile_x = 1,
-            .abs_tile_y = 3,
-            .abs_tile_z = 0,
-            .offset = math.Vector2{ .x = 0, .y = 0 },
-        };
+        low_entity.position = state.camera_position;
         low_entity.height = 0.5; // 1.4;
         low_entity.width = 1.0;
         low_entity.collides = true;

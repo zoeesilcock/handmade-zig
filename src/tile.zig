@@ -3,6 +3,8 @@ const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const std = @import("std");
 
+const TILE_CHUNK_SAFE_MARGIN = 16;
+
 const TileChunkPosition = struct {
     tile_chunk_x: u32,
     tile_chunk_y: u32,
@@ -12,7 +14,12 @@ const TileChunkPosition = struct {
 };
 
 pub const TileChunk = struct {
+    tile_chunk_x: u32,
+    tile_chunk_y: u32,
+    tile_chunk_z: u32,
+
     tiles: ?[*]u32 = null,
+    next_in_hash: ?*TileChunk = null,
 };
 
 pub const TileMap = struct {
@@ -22,10 +29,7 @@ pub const TileMap = struct {
 
     tile_side_in_meters: f32,
 
-    tile_chunk_count_x: u32,
-    tile_chunk_count_y: u32,
-    tile_chunk_count_z: u32,
-    tile_chunks: [*]TileChunk = undefined,
+    tile_chunk_hash: [4096]TileChunk,
 };
 
 pub const TileMapDifference = struct {
@@ -53,6 +57,17 @@ pub const TileMapPosition = struct {
         };
     }
 };
+
+pub fn initializeTileMap(tile_map: *TileMap, tile_side_in_meters: f32) void {
+    tile_map.chunk_shift = 4;
+    tile_map.chunk_dim = (@as(u32, 1) << @as(u5, @intCast(tile_map.chunk_shift)));
+    tile_map.chunk_mask = (@as(u32, 1) << @as(u5, @intCast(tile_map.chunk_shift))) - 1;
+    tile_map.tile_side_in_meters = tile_side_in_meters;
+
+    for (&tile_map.tile_chunk_hash) |*chunk| {
+        chunk.tile_chunk_x = 0;
+    }
+}
 
 pub fn centeredTilePoint(abs_tile_x: u32, abs_tile_y: u32, abs_tile_z: u32) TileMapPosition {
     return TileMapPosition{
@@ -105,19 +120,62 @@ pub fn mapIntoTileSpace(tile_map: *TileMap, base_position: TileMapPosition, offs
     return result;
 }
 
-inline fn getTileChunk(tile_map: *TileMap, tile_map_x: u32, tile_map_y: u32, tile_map_z: u32) ?*TileChunk {
-    var tile_chunk: ?*TileChunk = null;
+inline fn getTileChunk(
+    tile_map: *TileMap,
+    tile_chunk_x: u32,
+    tile_chunk_y: u32,
+    tile_chunk_z: u32,
+    opt_memory_arena: ?*shared.MemoryArena,
+) ?*TileChunk {
+    std.debug.assert(tile_chunk_x > TILE_CHUNK_SAFE_MARGIN);
+    std.debug.assert(tile_chunk_x < (std.math.maxInt(u32) - TILE_CHUNK_SAFE_MARGIN));
+    std.debug.assert(tile_chunk_y > TILE_CHUNK_SAFE_MARGIN);
+    std.debug.assert(tile_chunk_y < (std.math.maxInt(u32) - TILE_CHUNK_SAFE_MARGIN));
+    std.debug.assert(tile_chunk_z > TILE_CHUNK_SAFE_MARGIN);
+    std.debug.assert(tile_chunk_z < (std.math.maxInt(u32) - TILE_CHUNK_SAFE_MARGIN));
 
-    if ((tile_map_x >= 0) and (tile_map_x < tile_map.tile_chunk_count_x) and
-        (tile_map_y >= 0) and (tile_map_y < tile_map.tile_chunk_count_y) and
-        (tile_map_z >= 0) and (tile_map_z < tile_map.tile_chunk_count_z))
-    {
-        const index =
-            tile_map_z * tile_map.tile_chunk_count_y * tile_map.tile_chunk_count_x +
-            tile_map_y * tile_map.tile_chunk_count_x +
-            tile_map_x;
+    const hash_value = 19 *% tile_chunk_x +% 7 *% tile_chunk_y +% 3 *% tile_chunk_z;
+    const hash_slot = hash_value & (tile_map.tile_chunk_hash.len - 1);
+    std.debug.assert(hash_slot < tile_map.tile_chunk_hash.len);
 
-        tile_chunk = &tile_map.tile_chunks[@intCast(index)];
+    var tile_chunk: ?*TileChunk = &tile_map.tile_chunk_hash[hash_slot];
+    while (tile_chunk) |chunk| {
+        if ((tile_chunk_x == chunk.tile_chunk_x) and
+            (tile_chunk_y == chunk.tile_chunk_y) and
+            (tile_chunk_z == chunk.tile_chunk_z))
+        {
+            break;
+        }
+
+        if (opt_memory_arena) |memory_arena| {
+            if (chunk.tile_chunk_x != 0 and chunk.next_in_hash == null) {
+                chunk.next_in_hash = shared.pushStruct(memory_arena, TileChunk);
+                chunk.tile_chunk_x = 0;
+                tile_chunk = chunk.next_in_hash;
+
+                continue;
+            }
+        }
+
+        if (opt_memory_arena) |memory_arena| {
+            if (chunk.tile_chunk_x == 0) {
+                chunk.tile_chunk_x = tile_chunk_x;
+                chunk.tile_chunk_y = tile_chunk_y;
+                chunk.tile_chunk_z = tile_chunk_z;
+
+                const tile_count = tile_map.chunk_dim * tile_map.chunk_dim;
+                chunk.tiles = shared.pushArray(memory_arena, tile_count, u32);
+                for (0..tile_count) |tile_index| {
+                    chunk.tiles.?[tile_index] = 1;
+                }
+
+                chunk.next_in_hash = null;
+
+                break;
+            }
+        }
+
+        tile_chunk = chunk.next_in_hash;
     }
 
     return tile_chunk;
@@ -182,22 +240,13 @@ pub fn setTileValue(
     const chunk_position = getChunkPositionFor(tile_map, abs_tile_x, abs_tile_y, abs_tile_z);
     const opt_tile_chunk = getTileChunk(
         tile_map,
-        @intCast(chunk_position.tile_chunk_x),
-        @intCast(chunk_position.tile_chunk_y),
-        @intCast(chunk_position.tile_chunk_z),
+        chunk_position.tile_chunk_x,
+        chunk_position.tile_chunk_y,
+        chunk_position.tile_chunk_z,
+        world_arena,
     );
 
     if (opt_tile_chunk) |tile_chunk| {
-        // Initialize the chunk if it hasn't been initialized yet.
-        if (tile_chunk.tiles == null) {
-            const tile_count = tile_map.chunk_dim * tile_map.chunk_dim;
-            tile_chunk.tiles = shared.pushArray(world_arena, tile_count, u32);
-
-            for (0..tile_count) |tile_index| {
-                tile_chunk.tiles.?[tile_index] = 1;
-            }
-        }
-
         setTileValueUnchecked(tile_map, tile_chunk, chunk_position.rel_tile_x, chunk_position.rel_tile_y, value);
     }
 }
