@@ -208,7 +208,7 @@ pub const LowEntity = struct {
 pub const HighEntity = struct {
     position: math.Vector2 = math.Vector2{},
     velocity: math.Vector2 = math.Vector2{},
-    abs_tile_z: i32 = 0,
+    chunk_z: i32 = 0,
     facing_direction: u32 = undefined,
 
     z: f32 = 0,

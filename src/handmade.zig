@@ -78,7 +78,7 @@ pub export fn updateAndRender(
         const screen_base_z: i32 = 0;
         var screen_x = screen_base_x;
         var screen_y = screen_base_y;
-        var abs_tile_z: i32 = screen_base_z;
+        var chunk_z: i32 = screen_base_z;
         var door_left = false;
         var door_right = false;
         var door_top = false;
@@ -86,14 +86,14 @@ pub export fn updateAndRender(
         var door_up = false;
         var door_down = false;
 
-        for (0..2) |_| {
+        for (0..2000) |_| {
             std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
             var random_choice: u32 = 0;
-            if (door_up or door_down) {
-                random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
-            } else {
-                random_choice = random.RANDOM_NUMBERS[random_number_index] % 3;
-            }
+            // if (door_up or door_down) {
+            random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
+            // } else {
+            //     random_choice = random.RANDOM_NUMBERS[random_number_index] % 3;
+            // }
 
             random_number_index += 1;
 
@@ -101,7 +101,7 @@ pub export fn updateAndRender(
             if (random_choice == 2) {
                 created_z_door = true;
 
-                if (abs_tile_z == screen_base_z) {
+                if (chunk_z == screen_base_z) {
                     door_up = true;
                 } else {
                     door_down = true;
@@ -141,7 +141,7 @@ pub export fn updateAndRender(
                     }
 
                     if (tile_value == 2) {
-                        _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
+                        _ = addWall(state, abs_tile_x, abs_tile_y, chunk_z);
                     }
                 }
             }
@@ -161,10 +161,10 @@ pub export fn updateAndRender(
             door_top = false;
 
             if (random_choice == 2) {
-                if (abs_tile_z == screen_base_z) {
-                    abs_tile_z = screen_base_z + 1;
+                if (chunk_z == screen_base_z) {
+                    chunk_z = screen_base_z + 1;
                 } else {
-                    abs_tile_z = screen_base_z;
+                    chunk_z = screen_base_z;
                 }
             } else if (random_choice == 1) {
                 screen_x += 1;
@@ -181,12 +181,12 @@ pub export fn updateAndRender(
             }
         }
 
-        setCameraPosition(state, world.WorldPosition{
-            .abs_tile_x = screen_base_x * tiles_per_width + (17 / 2),
-            .abs_tile_y = screen_base_y * tiles_per_height + (9 / 2),
-            .abs_tile_z = screen_base_z,
-            .offset = math.Vector2{},
-        });
+        setCameraPosition(state, world.chunkPositionFromTilePosition(
+            state.world,
+            screen_base_x * tiles_per_width + (17 / 2),
+            screen_base_y * tiles_per_height + (9 / 2),
+            screen_base_z,
+        ));
 
         memory.is_initialized = true;
     }
@@ -246,18 +246,18 @@ pub export fn updateAndRender(
     if (getHighEntity(state, state.camera_following_entity_index)) |camera_following_entity| {
         if (camera_following_entity.high) |high_entity| {
             var new_camera_position = state.camera_position;
-            new_camera_position.abs_tile_z = camera_following_entity.low.position.abs_tile_z;
+            new_camera_position.chunk_z = camera_following_entity.low.position.chunk_z;
 
             // Move camera when player leaves the current screen.
             if (high_entity.position.x > 9.0 * state.world.tile_side_in_meters) {
-                new_camera_position.abs_tile_x += 17;
+                new_camera_position.chunk_x += 17;
             } else if (high_entity.position.x < -9.0 * state.world.tile_side_in_meters) {
-                new_camera_position.abs_tile_x -= 17;
+                new_camera_position.chunk_x -= 17;
             }
             if (high_entity.position.y > 5.0 * state.world.tile_side_in_meters) {
-                new_camera_position.abs_tile_y += 9;
+                new_camera_position.chunk_y += 9;
             } else if (high_entity.position.y < -5.0 * state.world.tile_side_in_meters) {
-                new_camera_position.abs_tile_y -= 9;
+                new_camera_position.chunk_y -= 9;
             }
 
             if (false) {
@@ -300,15 +300,15 @@ pub export fn updateAndRender(
     //     rel_col = -20;
     //
     //     while (rel_col < 20) : (rel_col += 1) {
-    //         var col: u32 = state.camera_position.abs_tile_x;
-    //         var row: u32 = state.camera_position.abs_tile_y;
-    //         const depth: u32 = state.camera_position.abs_tile_z;
+    //         var col: u32 = state.camera_position.chunk_x;
+    //         var row: u32 = state.camera_position.chunk_y;
+    //         const depth: u32 = state.camera_position.chunk_z;
     //         if (rel_col >= 0) col +%= @intCast(rel_col) else col -%= @abs(rel_col);
     //         if (rel_row >= 0) row +%= @intCast(rel_row) else row -%= @abs(rel_row);
     //         const tile_value = world.getTileValue(state.world, col, row, depth);
     //
     //         if (tile_value > 1) {
-    //             const is_player_tile = (col == state.camera_position.abs_tile_x and row == state.camera_position.abs_tile_y);
+    //             const is_player_tile = (col == state.camera_position.chunk_x and row == state.camera_position.chunk_y);
     //             var tile_color = background_color;
     //
     //             if (is_player_tile) {
@@ -438,24 +438,24 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
     const entity_offset_for_frame = camera_delta.xy.negate();
     offsetAndCheckFrequencyByArea(state, entity_offset_for_frame, camera_bounds);
 
-    var entity_index: u32 = 1;
-    while (entity_index < state.low_entity_count) : (entity_index += 1) {
-        const low_entity = state.low_entities[entity_index];
-        if (low_entity.high_entity_index == 0) {
-            const min_tile_x: i32 = new_camera_position.abs_tile_x -% (tile_span_x / 2);
-            const max_tile_x: i32 = new_camera_position.abs_tile_x +% (tile_span_x / 2);
-            const min_tile_y: i32 = new_camera_position.abs_tile_y -% (tile_span_y / 2);
-            const max_tile_y: i32 = new_camera_position.abs_tile_y +% (tile_span_y / 2);
-            if ((low_entity.position.abs_tile_z == new_camera_position.abs_tile_z) and
-                (low_entity.position.abs_tile_x >= min_tile_x) and
-                (low_entity.position.abs_tile_x <= max_tile_x) and
-                (low_entity.position.abs_tile_y >= min_tile_y) and
-                (low_entity.position.abs_tile_y <= max_tile_y))
-            {
-                _ = makeEntityHighFrequency(state, entity_index);
-            }
-        }
-    }
+    // var entity_index: u32 = 1;
+    // while (entity_index < state.low_entity_count) : (entity_index += 1) {
+    //     const low_entity = state.low_entities[entity_index];
+    //     if (low_entity.high_entity_index == 0) {
+    //         const min_tile_x: i32 = new_camera_position.abs_tile_x -% (tile_span_x / 2);
+    //         const max_tile_x: i32 = new_camera_position.abs_tile_x +% (tile_span_x / 2);
+    //         const min_tile_y: i32 = new_camera_position.abs_tile_y -% (tile_span_y / 2);
+    //         const max_tile_y: i32 = new_camera_position.abs_tile_y +% (tile_span_y / 2);
+    //         if ((low_entity.position.abs_tile_z == new_camera_position.abs_tile_z) and
+    //             (low_entity.position.abs_tile_x >= min_tile_x) and
+    //             (low_entity.position.abs_tile_x <= max_tile_x) and
+    //             (low_entity.position.abs_tile_y >= min_tile_y) and
+    //             (low_entity.position.abs_tile_y <= max_tile_y))
+    //         {
+    //             _ = makeEntityHighFrequency(state, entity_index);
+    //         }
+    //     }
+    // }
 }
 
 fn addLowEntity(state: *shared.State, entity_type: shared.EntityType) u32 {
@@ -524,7 +524,7 @@ inline fn makeEntityHighFrequency(state: *shared.State, low_index: u32) ?*shared
 
             const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
             high_entity.position = diff.xy;
-            high_entity.abs_tile_z = low_entity.position.abs_tile_z;
+            high_entity.chunk_z = low_entity.position.chunk_z;
             high_entity.velocity = math.Vector2.zero();
             high_entity.facing_direction = 0;
             high_entity.low_entity_index = low_index;
@@ -560,12 +560,13 @@ fn addWall(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i
     const opt_entity = getLowEntity(state, entity_index);
 
     if (opt_entity) |low_entity| {
-        low_entity.position = world.WorldPosition{
-            .abs_tile_x = abs_tile_x,
-            .abs_tile_y = abs_tile_y,
-            .abs_tile_z = abs_tile_z,
-            .offset = math.Vector2{ .x = 0, .y = 0 },
-        };
+        low_entity.position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
+        // low_entity.position = world.WorldPosition{
+        //     .chunk_x = chunk_x,
+        //     .chunk_y = chunk_y,
+        //     .chunk_z = chunk_z,
+        //     .offset = math.Vector2{ .x = 0, .y = 0 },
+        // };
         low_entity.height = state.world.tile_side_in_meters;
         low_entity.width = state.world.tile_side_in_meters;
         low_entity.collides = true;
@@ -721,7 +722,7 @@ fn movePlayer(
                 // Update player Z when hitting a ladder.
                 const hit_high_entity = &state.high_entities[hit_high_entity_index];
                 const hit_low_entity = &state.low_entities[hit_high_entity.low_entity_index];
-                high_entity.abs_tile_z += hit_low_entity.abs_tile_z_delta;
+                high_entity.chunk_z += hit_low_entity.abs_tile_z_delta;
             } else {
                 break;
             }
@@ -744,7 +745,7 @@ fn movePlayer(
             }
         }
 
-        entity.low.position = world.mapIntoTileSpace(state.world, state.camera_position, high_entity.position);
+        entity.low.position = world.mapIntoWorldSpace(state.world, state.camera_position, high_entity.position);
     }
 }
 
@@ -761,7 +762,7 @@ pub fn testWall(
     var hit = false;
 
     if (delta_x != 0.0) {
-        const epsilon_time = 0.00001;
+        const epsilon_time = 0.001;
         const result_time = (wall_x - relative_x) / delta_x;
         const y = relative_y + (result_time * delta_y);
         if (result_time >= 0 and min_time.* > result_time) {
