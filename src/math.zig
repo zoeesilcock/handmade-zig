@@ -105,7 +105,7 @@ pub const Vector2 = struct {
         return self.dot(self);
     }
 
-    pub fn isInRectangle(self: *Vector2, rectangle: Rectangle2) bool {
+    pub fn isInRectangle(self: Vector2, rectangle: Rectangle2) bool {
         const result = ((self.x >= rectangle.min.x) and
              (self.y >= rectangle.min.y) and
              (self.x < rectangle.max.x) and
@@ -142,6 +142,16 @@ pub const Rectangle2 = struct {
 
     pub fn fromCenterDimension(center: Vector2, dimension: Vector2) Rectangle2 {
         return fromCenterHalfDimension(center, dimension.scale(0.5));
+    }
+
+    pub fn getMinCorner(self: Rectangle2) Vector2 {
+        return self.min;
+    }
+    pub fn getMaxCorner(self: Rectangle2) Vector2 {
+        return self.max;
+    }
+    pub fn getCenter(self: Rectangle2) Vector2 {
+        return self.min.add(self.max).scale(0.5);
     }
 };
 

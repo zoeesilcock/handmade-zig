@@ -62,6 +62,8 @@ pub fn initializeWorld(world: *World, tile_side_in_meters: f32) void {
 
     for (&world.chunk_hash) |*chunk| {
         chunk.x = TILE_CHUNK_UNINITIALIZED;
+        chunk.y = TILE_CHUNK_UNINITIALIZED;
+        chunk.z = TILE_CHUNK_UNINITIALIZED;
         chunk.first_block.entity_count = 0;
     }
 }
@@ -76,15 +78,15 @@ inline fn isVector2Canonical(world: *World, offset: math.Vector2) bool {
 }
 
 pub fn areInSameChunk(world: *World, a: *WorldPosition, b: *WorldPosition) bool {
-    std.debug.assert(isVector2Canonical(world, a));
-    std.debug.assert(isVector2Canonical(world, b));
+    std.debug.assert(isVector2Canonical(world, a.offset));
+    std.debug.assert(isVector2Canonical(world, b.offset));
 
     return a.chunk_x == b.chunk_x and
         a.chunk_y == b.chunk_y and
         a.chunk_z == b.chunk_z;
 }
 
-fn getWorldChunk(
+pub fn getWorldChunk(
     world: *World,
     chunk_x: i32,
     chunk_y: i32,
@@ -98,7 +100,7 @@ fn getWorldChunk(
     std.debug.assert(chunk_y < TILE_CHUNK_SAFE_MARGIN);
     std.debug.assert(chunk_z < TILE_CHUNK_SAFE_MARGIN);
 
-    const hash_value = 19 *% chunk_x +% 7 *% chunk_y +% 3 *% chunk_z;
+    const hash_value: u32 = @bitCast(19 *% chunk_x +% 7 *% chunk_y +% 3 *% chunk_z);
     const hash_slot = @as(usize, @intCast(hash_value)) & (world.chunk_hash.len - 1);
     std.debug.assert(hash_slot < world.chunk_hash.len);
 
@@ -147,7 +149,7 @@ pub fn changeEntityLocation(
     new_position: *WorldPosition,
 ) void {
     if (opt_old_position) |old_position| {
-        if (!areInSameChunk(world, old_position.*, new_position.*)) {
+        if (!areInSameChunk(world, old_position, new_position)) {
             // Pull the entity out of it's current block.
             const opt_chunk = getWorldChunk(
                 world,
@@ -157,16 +159,16 @@ pub fn changeEntityLocation(
                 memory_arena,
             );
 
-            std.debug.assert(opt_chunk);
+            std.debug.assert(opt_chunk != null);
 
             if (opt_chunk) |old_chunk| {
                 const first_block = &old_chunk.first_block;
 
                 // Look through all the blocks.
                 var opt_block: ?*WorldEntityBlock = &old_chunk.first_block;
-                while (opt_block) |block| : (opt_block = block.next) {
+                outer: while (opt_block) |block| : (opt_block = block.next) {
                     // Look through the entity indices in the block.
-                    for (block.low_entity_indices) |index| {
+                    for (block.low_entity_indices, 0..) |_, index| {
                         if (low_entity_index == index) {
                             std.debug.assert(first_block.entity_count > 0);
 
@@ -187,8 +189,7 @@ pub fn changeEntityLocation(
                                 }
                             }
 
-                            opt_block = null;
-                            break;
+                            break :outer;
                         }
                     }
                 }
@@ -222,7 +223,7 @@ pub fn changeEntityLocation(
             }
 
             // Copy the existing block into the old block position.
-            old_block.* = block.*;
+            old_block.?.* = block.*;
             block.next = old_block;
             block.entity_count = 0;
         }
@@ -243,7 +244,7 @@ pub inline fn recannonicalizeCoordinate(world: *World, tile_abs: *i32, tile_rel:
     std.debug.assert(isCanonical(world, tile_rel.*));
 }
 
-pub fn mapIntoWorldSpace(world: *World, base_position: WorldPosition, offset: math.Vector2) WorldPosition {
+pub fn mapIntoChunkSpace(world: *World, base_position: WorldPosition, offset: math.Vector2) WorldPosition {
     var result = base_position;
 
     _ = result.offset.addSet(offset);

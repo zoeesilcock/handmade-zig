@@ -62,7 +62,7 @@ pub export fn updateAndRender(
             @as([*]u8, @ptrCast(memory.permanent_storage.?)) + @sizeOf(shared.State),
         );
 
-        const null_entity = addLowEntity(state, .Null);
+        const null_entity = addLowEntity(state, .Null, null);
         state.high_entity_count = 1;
         _ = null_entity;
 
@@ -86,7 +86,7 @@ pub export fn updateAndRender(
         var door_up = false;
         var door_down = false;
 
-        for (0..2000) |_| {
+        for (0..200) |_| {
             std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
             var random_choice: u32 = 0;
             // if (door_up or door_down) {
@@ -425,6 +425,8 @@ pub export fn updateAndRender(
 }
 
 fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosition) void {
+    std.debug.assert(validateEntityPairs(state));
+
     const camera_delta = world.subtractPositions(state.world, @constCast(&new_camera_position), &state.camera_position);
     state.camera_position = new_camera_position;
 
@@ -438,35 +440,54 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
     const entity_offset_for_frame = camera_delta.xy.negate();
     offsetAndCheckFrequencyByArea(state, entity_offset_for_frame, camera_bounds);
 
-    // var entity_index: u32 = 1;
-    // while (entity_index < state.low_entity_count) : (entity_index += 1) {
-    //     const low_entity = state.low_entities[entity_index];
-    //     if (low_entity.high_entity_index == 0) {
-    //         const min_tile_x: i32 = new_camera_position.abs_tile_x -% (tile_span_x / 2);
-    //         const max_tile_x: i32 = new_camera_position.abs_tile_x +% (tile_span_x / 2);
-    //         const min_tile_y: i32 = new_camera_position.abs_tile_y -% (tile_span_y / 2);
-    //         const max_tile_y: i32 = new_camera_position.abs_tile_y +% (tile_span_y / 2);
-    //         if ((low_entity.position.abs_tile_z == new_camera_position.abs_tile_z) and
-    //             (low_entity.position.abs_tile_x >= min_tile_x) and
-    //             (low_entity.position.abs_tile_x <= max_tile_x) and
-    //             (low_entity.position.abs_tile_y >= min_tile_y) and
-    //             (low_entity.position.abs_tile_y <= max_tile_y))
-    //         {
-    //             _ = makeEntityHighFrequency(state, entity_index);
-    //         }
-    //     }
-    // }
+    std.debug.assert(validateEntityPairs(state));
+
+    const min_chunk_position = world.mapIntoChunkSpace(state.world, new_camera_position, camera_bounds.getMinCorner());
+    const max_chunk_position = world.mapIntoChunkSpace(state.world, new_camera_position, camera_bounds.getMaxCorner());
+
+    var chunk_y = min_chunk_position.chunk_y;
+    while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
+        var chunk_x = min_chunk_position.chunk_x;
+        while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
+            const opt_chunk = world.getWorldChunk(state.world, chunk_x, chunk_y, new_camera_position.chunk_z, null);
+
+            if (opt_chunk) |chunk| {
+                var opt_block: ?*world.WorldEntityBlock = &chunk.first_block;
+                while (opt_block) |block| : (opt_block = block.next) {
+                    var block_entity_index: u32 = 0;
+                    while (block_entity_index < block.entity_count) : (block_entity_index += 1) {
+                        const low_entity_index = block.low_entity_indices[block_entity_index];
+                        var low_entity = state.low_entities[low_entity_index];
+
+                        if (low_entity.high_entity_index == 0) {
+                            const camera_space_position = getCameraSpacePosition(state, &low_entity);
+
+                            if (camera_space_position.isInRectangle(camera_bounds)) {
+                                _ = makeEntityHighFrequency(state, low_entity_index, camera_space_position);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    std.debug.assert(validateEntityPairs(state));
 }
 
-fn addLowEntity(state: *shared.State, entity_type: shared.EntityType) u32 {
+fn addLowEntity(state: *shared.State, entity_type: shared.EntityType, opt_world_position: ?world.WorldPosition) u32 {
     std.debug.assert(state.low_entity_count < state.low_entities.len);
 
     const entity_index = state.low_entity_count;
     state.low_entity_count += 1;
 
-    state.low_entities[entity_index] = shared.LowEntity{
-        .type = entity_type,
-    };
+    var low_entity = &state.low_entities[entity_index];
+    low_entity.type = entity_type;
+
+    if (opt_world_position) |world_position| {
+        low_entity.position = world_position;
+        world.changeEntityLocation(state.world, &state.world_arena, entity_index, null, @constCast(@ptrCast(&opt_world_position)));
+    }
 
     return entity_index;
 }
@@ -488,28 +509,51 @@ fn getHighEntity(state: *shared.State, low_index: u32) ?shared.Entity {
         result = shared.Entity{
             .low_index = low_index,
             .low = &state.low_entities[low_index],
-            .high = makeEntityHighFrequency(state, low_index),
+            .high = makeEntityHighFrequency(state, low_index, null),
         };
     }
 
     return result;
 }
 
+inline fn validateEntityPairs(state: *shared.State) bool {
+    var valid = true;
+
+    var high_entity_index: u32 = 1;
+    while (high_entity_index < state.high_entity_count) : (high_entity_index += 1) {
+        const high_entity = &state.high_entities[high_entity_index];
+        valid = valid and (state.low_entities[high_entity.low_entity_index].high_entity_index == high_entity_index);
+    }
+
+    return valid;
+}
+
 inline fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: math.Vector2, camera_bounds: math.Rectangle2) void {
-    var entity_index: u32 = 1;
-    while (entity_index < state.high_entity_count) {
-        const high_entity = &state.high_entities[entity_index];
+    var high_entity_index: u32 = 1;
+    while (high_entity_index < state.high_entity_count) {
+        const high_entity = &state.high_entities[high_entity_index];
+
         _ = high_entity.position.addSet(offset);
 
         if (high_entity.position.isInRectangle(camera_bounds)) {
-            entity_index += 1;
+            high_entity_index += 1;
         } else {
+            std.debug.assert(state.low_entities[high_entity.low_entity_index].high_entity_index == high_entity_index);
             _ = makeEntityLowFrequency(state, high_entity.low_entity_index);
         }
     }
 }
 
-inline fn makeEntityHighFrequency(state: *shared.State, low_index: u32) ?*shared.HighEntity {
+inline fn getCameraSpacePosition(state: *shared.State, low_entity: *shared.LowEntity) math.Vector2 {
+    const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
+    return diff.xy;
+}
+
+fn makeEntityHighFrequency(
+    state: *shared.State,
+    low_index: u32,
+    camera_space_position: ?math.Vector2,
+) ?*shared.HighEntity {
     var result: ?*shared.HighEntity = null;
     var low_entity = &state.low_entities[low_index];
 
@@ -520,16 +564,20 @@ inline fn makeEntityHighFrequency(state: *shared.State, low_index: u32) ?*shared
             const high_index = state.high_entity_count;
             state.high_entity_count += 1;
             var high_entity = &state.high_entities[high_index];
-            result = high_entity;
 
-            const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
-            high_entity.position = diff.xy;
+            if (camera_space_position) |position| {
+                high_entity.position = position;
+            } else {
+                high_entity.position = getCameraSpacePosition(state, low_entity);
+            }
+
             high_entity.chunk_z = low_entity.position.chunk_z;
             high_entity.velocity = math.Vector2.zero();
             high_entity.facing_direction = 0;
             high_entity.low_entity_index = low_index;
 
             low_entity.high_entity_index = high_index;
+            result = high_entity;
         } else {
             unreachable;
         }
@@ -556,17 +604,11 @@ inline fn makeEntityLowFrequency(state: *shared.State, low_index: u32) void {
 }
 
 fn addWall(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) u32 {
-    const entity_index = addLowEntity(state, .Wall);
+    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
+    const entity_index = addLowEntity(state, .Wall, world_position);
     const opt_entity = getLowEntity(state, entity_index);
 
     if (opt_entity) |low_entity| {
-        low_entity.position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
-        // low_entity.position = world.WorldPosition{
-        //     .chunk_x = chunk_x,
-        //     .chunk_y = chunk_y,
-        //     .chunk_z = chunk_z,
-        //     .offset = math.Vector2{ .x = 0, .y = 0 },
-        // };
         low_entity.height = state.world.tile_side_in_meters;
         low_entity.width = state.world.tile_side_in_meters;
         low_entity.collides = true;
@@ -576,11 +618,10 @@ fn addWall(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i
 }
 
 fn addPlayer(state: *shared.State) u32 {
-    const entity_index = addLowEntity(state, .Hero);
+    const entity_index = addLowEntity(state, .Hero, state.camera_position);
     const opt_entity = getLowEntity(state, entity_index);
 
     if (opt_entity) |low_entity| {
-        low_entity.position = state.camera_position;
         low_entity.height = 0.5; // 1.4;
         low_entity.width = 1.0;
         low_entity.collides = true;
@@ -745,7 +786,9 @@ fn movePlayer(
             }
         }
 
-        entity.low.position = world.mapIntoWorldSpace(state.world, state.camera_position, high_entity.position);
+        var new_position = world.mapIntoChunkSpace(state.world, state.camera_position, high_entity.position);
+        world.changeEntityLocation(state.world, &state.world_arena, entity.low_index, &entity.low.position, &new_position);
+        entity.low.position = new_position;
     }
 }
 
