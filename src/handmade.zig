@@ -54,6 +54,7 @@ pub export fn updateAndRender(
                     .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
             },
+            .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
         };
 
         shared.initializeArena(
@@ -269,16 +270,15 @@ pub export fn updateAndRender(
         }
     }
 
-    drawBitmap(buffer, 0, 0, state.backdrop, 0, 0, 1);
-
     // Clear background.
-    // const clear_color = shared.Color{ .r = 1.0, .g = 0.0, .b = 0.0 };
-    // drawRectangle(
-    //     buffer,
-    //     math.Vector2{ .x = 0.0, .y = 0.0 },
-    //     math.Vector2{ .x = @floatFromInt(buffer.width), .y = @floatFromInt(buffer.height) },
-    //     clear_color,
-    // );
+    const clear_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
+    drawRectangle(
+        buffer,
+        math.Vector2{ .x = 0.0, .y = 0.0 },
+        math.Vector2{ .x = @floatFromInt(buffer.width), .y = @floatFromInt(buffer.height) },
+        clear_color,
+    );
+    // drawBitmap(buffer, 0, 0, state.backdrop, 0, 0, 1);
 
     const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
     const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
@@ -341,7 +341,6 @@ pub export fn updateAndRender(
     //     }
     // }
 
-    // Draw player.
     var high_entity_index: u32 = 1;
     while (high_entity_index < state.high_entity_count) : (high_entity_index += 1) {
         var high_entity = &state.high_entities[high_entity_index];
@@ -366,6 +365,7 @@ pub export fn updateAndRender(
         const z = -meters_to_pixels * high_entity.z;
 
         if (low_entity.type == .Hero) {
+            // Draw player.
             const hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
             drawBitmap(
                 buffer,
@@ -404,21 +404,34 @@ pub export fn updateAndRender(
                 1,
             );
         } else {
-            const tile_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 1.0 };
-            const entity_left_top = math.Vector2{
-                .x = entity_ground_point_x - (0.5 * meters_to_pixels * low_entity.width),
-                .y = entity_ground_point_y - (0.5 * meters_to_pixels * low_entity.height),
-            };
-            const entity_width_height = math.Vector2{
-                .x = low_entity.width,
-                .y = low_entity.height,
-            };
+            // Draw world.
+            if (false) {
+                const tile_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 0.0 };
+                const entity_left_top = math.Vector2{
+                    .x = entity_ground_point_x - (0.5 * meters_to_pixels * low_entity.width),
+                    .y = entity_ground_point_y - (0.5 * meters_to_pixels * low_entity.height),
+                };
+                const entity_width_height = math.Vector2{
+                    .x = low_entity.width,
+                    .y = low_entity.height,
+                };
 
-            drawRectangle(
+                drawRectangle(
+                    buffer,
+                    entity_left_top,
+                    entity_left_top.add(entity_width_height.scale(meters_to_pixels).scale(0.9)),
+                    tile_color,
+                );
+            }
+
+            drawBitmap(
                 buffer,
-                entity_left_top,
-                entity_left_top.add(entity_width_height.scale(meters_to_pixels)),
-                tile_color,
+                entity_ground_point_x,
+                entity_ground_point_y + z,
+                state.tree,
+                40,
+                80,
+                1,
             );
         }
     }
@@ -910,8 +923,20 @@ fn drawBitmap(
     if (max_y > buffer.height) {
         max_y = buffer.height;
     }
-    const clipping_offset = (-source_offset_y * bitmap.width) + source_offset_x;
-    var source_row = bitmap.data.per_pixel + @as(u32, @intCast(bitmap.width * (bitmap.height - 1) + clipping_offset));
+
+    // Calculate offset in data.
+    const clipping_offset: i32 = -source_offset_y * bitmap.width + source_offset_x;
+    const offset: i32 = bitmap.width * (bitmap.height - 1) + clipping_offset;
+
+    // Move to the correct spot in the data.
+    var source_row = bitmap.data.per_pixel;
+    if (offset >= 0) {
+        source_row += @as(u32, @intCast(offset));
+    } else {
+        source_row += @abs(offset);
+    }
+
+    // Move to the correct spot in the destination.
     var dest_row: [*]u8 = @ptrCast(buffer.memory);
     dest_row += @as(u32, @intCast((min_x * buffer.bytes_per_pixel) + (min_y * @as(i32, @intCast(buffer.pitch)))));
 

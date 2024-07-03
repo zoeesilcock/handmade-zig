@@ -166,6 +166,7 @@ pub const State = struct {
 
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
+    tree: LoadedBitmap,
 };
 
 pub const LowEntityChunkReference = struct {
