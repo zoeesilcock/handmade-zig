@@ -184,6 +184,8 @@ pub const EntityType = enum(u8) {
     Null,
     Hero,
     Wall,
+    Familiar,
+    Monster,
 };
 
 pub const Entity = struct {
@@ -191,6 +193,38 @@ pub const Entity = struct {
     low: *LowEntity,
 
     high: ?*HighEntity,
+};
+
+
+pub const EntityVisiblePieceGroup = struct {
+    piece_count: u32 = 0,
+    pieces: [8]EntityVisiblePiece = [1]EntityVisiblePiece{undefined} ** 8,
+
+    pub fn pushPiece(
+        self: *EntityVisiblePieceGroup,
+        bitmap: *LoadedBitmap,
+        offset: math.Vector2,
+        offset_z: f32,
+        alignment: math.Vector2,
+        alpha: f32,
+    ) void {
+        std.debug.assert(self.piece_count < self.pieces.len);
+
+        var piece = &self.pieces[self.piece_count];
+        self.piece_count += 1;
+
+        piece.bitmap = bitmap;
+        piece.offset = offset.subtract(alignment);
+        piece.offset_z = offset_z;
+        piece.alpha = alpha;
+    }
+};
+
+pub const EntityVisiblePiece = struct {
+    bitmap: *LoadedBitmap,
+    offset: math.Vector2,
+    offset_z: f32,
+    alpha: f32,
 };
 
 pub const LowEntity = struct {
@@ -219,8 +253,7 @@ pub const HighEntity = struct {
 };
 
 pub const HeroBitmaps = struct {
-    align_x: i32,
-    align_y: i32,
+    alignment: math.Vector2,
 
     head: LoadedBitmap,
     torso: LoadedBitmap,
@@ -233,7 +266,7 @@ pub const Color = struct {
     r: f32,
     g: f32,
     b: f32,
-    pub fn toInt(self: Color) u32 {
+    pub fn to_int(self: Color) u32 {
         return ((intrinsics.roundReal32ToUInt32(self.r * 255.0) << 16) |
             (intrinsics.roundReal32ToUInt32(self.g * 255.0) << 8) |
             (intrinsics.roundReal32ToUInt32(self.b * 255.0) << 0));
