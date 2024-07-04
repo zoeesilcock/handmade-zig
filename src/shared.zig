@@ -195,6 +195,32 @@ pub const Entity = struct {
     high: ?*HighEntity,
 };
 
+pub const LowEntity = struct {
+    type: EntityType = .Null,
+
+    width: f32 = 0,
+    height: f32 = 0,
+    position: world.WorldPosition = undefined,
+
+    collides: bool = false,
+    abs_tile_z_delta: i32 = 0,
+
+    high_entity_index: u32 = 0,
+};
+
+pub const HighEntity = struct {
+    low_entity_index: u32 = 0,
+
+    position: math.Vector2 = math.Vector2{},
+    velocity: math.Vector2 = math.Vector2{},
+    chunk_z: i32 = 0,
+    facing_direction: u32 = undefined,
+
+    z: f32 = 0,
+    z_velocity: f32 = 0,
+
+    head_bob_time: f32 = 0,
+};
 
 pub const EntityVisiblePieceGroup = struct {
     piece_count: u32 = 0,
@@ -225,31 +251,6 @@ pub const EntityVisiblePiece = struct {
     offset: math.Vector2,
     offset_z: f32,
     alpha: f32,
-};
-
-pub const LowEntity = struct {
-    type: EntityType = .Null,
-
-    width: f32 = 0,
-    height: f32 = 0,
-    position: world.WorldPosition = undefined,
-
-    collides: bool = false,
-    abs_tile_z_delta: i32 = 0,
-
-    high_entity_index: u32 = 0,
-};
-
-pub const HighEntity = struct {
-    position: math.Vector2 = math.Vector2{},
-    velocity: math.Vector2 = math.Vector2{},
-    chunk_z: i32 = 0,
-    facing_direction: u32 = undefined,
-
-    z: f32 = 0,
-    z_velocity: f32 = 0,
-
-    low_entity_index: u32 = 0,
 };
 
 pub const HeroBitmaps = struct {

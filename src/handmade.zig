@@ -325,9 +325,16 @@ pub export fn updateAndRender(
             .Familiar => {
                 updateFamiliar(state, entity, delta_time);
 
+                // Update head bob.
+                high_entity.head_bob_time += (delta_time * 8);
+                if (high_entity.head_bob_time > shared.TAU32) {
+                    high_entity.head_bob_time = -shared.TAU32;
+                }
+
+                const head_z = 10 * @sin(high_entity.head_bob_time);
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
                 piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha);
-                piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1);
+                piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), head_z, hero_bitmaps.alignment, 1);
             },
             else => {
                 unreachable;
