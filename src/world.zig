@@ -33,7 +33,7 @@ pub const WorldEntityBlock = struct {
 };
 
 pub const WorldDifference = struct {
-    xy: math.Vector2 = math.Vector2{},
+    xy: math.Vector2 = math.Vector2.zero(),
     z: f32 = 0,
 };
 
@@ -296,6 +296,6 @@ pub fn centeredChunkPoint(chunk_x: i32, chunk_y: i32, chunk_z: i32) WorldPositio
         .chunk_x = chunk_x,
         .chunk_y = chunk_y,
         .chunk_z = chunk_z,
-        .offset = math.Vector2{},
+        .offset = math.Vector2.zero(),
     };
 }

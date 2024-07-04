@@ -22,28 +22,28 @@ pub export fn updateAndRender(
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
             .hero_bitmaps = .{
                 shared.HeroBitmaps{
-                    .alignment = math.Vector2{ .x = 72, .y = 182 },
+                    .alignment = math.Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_right_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_right_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_right_cape.bmp"),
                     .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = math.Vector2{ .x = 72, .y = 182 },
+                    .alignment = math.Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_back_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_back_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_back_cape.bmp"),
                     .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = math.Vector2{ .x = 72, .y = 182 },
+                    .alignment = math.Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_left_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_left_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_left_cape.bmp"),
                     .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = math.Vector2{ .x = 72, .y = 182 },
+                    .alignment = math.Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
@@ -216,7 +216,7 @@ pub export fn updateAndRender(
             }
         } else {
             if (forceEntityIntoHigh(state, low_index)) |controlling_entity| {
-                var input_direction = math.Vector2{};
+                var input_direction = math.Vector2.zero();
 
                 if (controller.is_analog) {
                     input_direction = math.Vector2{
@@ -284,8 +284,8 @@ pub export fn updateAndRender(
     const clear_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
     drawRectangle(
         buffer,
-        math.Vector2{ .x = 0.0, .y = 0.0 },
-        math.Vector2{ .x = @floatFromInt(buffer.width), .y = @floatFromInt(buffer.height) },
+        math.Vector2.zero(),
+        math.Vector2.new(@floatFromInt(buffer.width), @floatFromInt(buffer.height)),
         clear_color,
     );
     // drawBitmap(buffer, state.backdrop, 0, 0, 0, 0, 1);
@@ -321,7 +321,7 @@ pub export fn updateAndRender(
                 piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1);
             },
             .Wall => {
-                piece_group.pushPiece(&state.tree, math.Vector2.zero(), 0, math.Vector2{ .x = 40, .y = 80 }, 1);
+                piece_group.pushPiece(&state.tree, math.Vector2.zero(), 0, math.Vector2.new(40, 80), 1);
             },
             .Monster => {
                 updateMonster(state, entity, delta_time);
@@ -404,7 +404,7 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
 
     const tile_span_x = 17 * 3;
     const tile_span_y = 9 * 3;
-    const bounds_in_tiles = math.Vector2{ .x = tile_span_x, .y = tile_span_y };
+    const bounds_in_tiles = math.Vector2.new(tile_span_x, tile_span_y);
     const camera_bounds = math.Rectangle2.fromCenterDimension(
         math.Vector2.zero(),
         bounds_in_tiles.scale(state.world.tile_side_in_meters),
@@ -744,7 +744,7 @@ fn moveEntity(
                                 max_corner.y,
                                 &min_time,
                             )) {
-                                wall_normal = math.Vector2{ .x = -1, .y = 0 };
+                                wall_normal = math.Vector2.new(-1, 0);
                                 hit_high_entity_index = test_high_entity_index;
                             }
 
@@ -758,7 +758,7 @@ fn moveEntity(
                                 max_corner.y,
                                 &min_time,
                             )) {
-                                wall_normal = math.Vector2{ .x = 1, .y = 0 };
+                                wall_normal = math.Vector2.new(1, 0);
                                 hit_high_entity_index = test_high_entity_index;
                             }
 
@@ -772,7 +772,7 @@ fn moveEntity(
                                 max_corner.x,
                                 &min_time,
                             )) {
-                                wall_normal = math.Vector2{ .x = 0, .y = -1 };
+                                wall_normal = math.Vector2.new(0, -1);
                                 hit_high_entity_index = test_high_entity_index;
                             }
 
@@ -786,7 +786,7 @@ fn moveEntity(
                                 max_corner.x,
                                 &min_time,
                             )) {
-                                wall_normal = math.Vector2{ .x = 0, .y = 1 };
+                                wall_normal = math.Vector2.new(0, 1);
                                 hit_high_entity_index = test_high_entity_index;
                             }
                         }
