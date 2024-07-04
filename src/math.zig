@@ -1,127 +1,156 @@
-pub const Vector2 = struct {
-    // TODO: Casey uses a union here, but in Zig this requires an extra level. What would be the use case
-    // for having an array accessor for this and is it worth extra typing on every single usage?
-    //
-    // pub const Vector2 = struct {
-    //     map: extern struct {
-    //         x: f32 = 0,
-    //         y: f32 = 0,
-    //     },
-    //     arr: [2]f32,
-    // ...
-    // }
-    //
-    // Another alternative may be to use @Vector, but it appears that they have drawbacks also:
-    // * https://github.com/ziglang/zig/issues/4961#issuecomment-610050227
-    //
-    // Other examples of vector implementation in Zig:
-    // * https://github.com/ryupold/raylib.zig/blob/bd561b3689bc4e703f46bf1908633abb09680b4b/raylib.zig#L251
-    // * https://github.com/godot-zig/godot-zig/blob/70e156b429610dcd2dfc0b5837e2feccdea0a0ad/src/api/Vector.zig#L91
+pub const Vector2 = Vector(2);
+pub const Vector3 = Vector(3);
+pub const Color = Vector(4);
 
-    x: f32 = 0,
-    y: f32 = 0,
+fn Vector(comptime in_dimensions: comptime_int) type {
+    return struct{
+        data: @Vector(in_dimensions, f32),
+        pub const dimensions = in_dimensions;
 
-    pub fn new(x: f32, y: f32) Vector2 {
-        return Vector2{ .x = x, .y = y };
-    }
+        const Self = @This();
 
-    pub fn zero() Vector2 {
-        return Vector2{};
-    }
+        pub usingnamespace switch (Self.dimensions) {
+            inline 2 => struct {
+                pub inline fn new(x_value: f32, y_value: f32) Self {
+                    return Self{ .data = .{ x_value, y_value } };
+                }
+                pub inline fn zero() Self {
+                    return Self{ .data = .{ 0, 0 } };
+                }
 
-    pub fn add(self: Vector2, b: Vector2) Vector2 {
-        return Vector2{
-            .x = self.x + b.x,
-            .y = self.y + b.y,
+                pub inline fn x(self: *const Self) f32 {
+                    return self.data[0];
+                }
+                pub inline fn y(self: *const Self) f32 {
+                    return self.data[1];
+                }
+                pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle2) bool {
+                    const result = ((self.x() >= rectangle.min.x()) and
+                        (self.y() >= rectangle.min.y()) and
+                        (self.x() < rectangle.max.x()) and
+                        (self.y() < rectangle.max.y()));
+
+                    return result;
+                }
+            },
+            inline 3 => struct {
+                pub inline fn new(x_value: f32, y_value: f32, z_value: f32) Self {
+                    return Self{ .data = .{ x_value, y_value, z_value } };
+                }
+                pub inline fn zero() Self {
+                    return Self{ .data = .{ 0, 0, 0 } };
+                }
+
+                pub inline fn x(self: *const Self) f32 {
+                    return self.data[0];
+                }
+                pub inline fn y(self: *const Self) f32 {
+                    return self.data[1];
+                }
+                pub inline fn z(self: *const Self) f32 {
+                    return self.data[2];
+                }
+            },
+            inline 4 => struct {
+                pub inline fn new(x_value: f32, y_value: f32, z_value: f32, w_value: f32) Self {
+                    return Self{ .data = .{ x_value, y_value, z_value, w_value } };
+                }
+                pub inline fn zero() Self {
+                    return Self{ .data = .{ 0, 0, 0, 0 } };
+                }
+
+                pub inline fn x(self: *const Self) f32 {
+                    return self.data[0];
+                }
+                pub inline fn y(self: *const Self) f32 {
+                    return self.data[1];
+                }
+                pub inline fn z(self: *const Self) f32 {
+                    return self.data[2];
+                }
+                pub inline fn w(self: *const Self) f32 {
+                    return self.data[3];
+                }
+
+                pub inline fn r(self: *const Self) f32 {
+                    return self.data[0];
+                }
+                pub inline fn g(self: *const Self) f32 {
+                    return self.data[1];
+                }
+                pub inline fn b(self: *const Self) f32 {
+                    return self.data[2];
+                }
+                pub inline fn a(self: *const Self) f32 {
+                    return self.data[3];
+                }
+            },
+            else => {
+                unreachable;
+            },
         };
-    }
 
-    pub fn addSet(self: *Vector2, b: Vector2) *Vector2 {
-        self.x += b.x;
-        self.y += b.y;
-        return self;
-    }
+        pub fn add(self: *const Self, b: Self) Self {
+            return Self{
+                .data = self.data + b.data
+            };
+        }
 
-    pub fn subtract(self: Vector2, b: Vector2) Vector2 {
-        return Vector2{
-            .x = self.x - b.x,
-            .y = self.y - b.y,
-        };
-    }
+        pub fn sub(self: *const Self, b: Self) Self {
+            return Self{
+                .data = self.data - b.data
+            };
+        }
 
-    pub fn subtractSet(self: *Vector2, b: Vector2) *Vector2 {
-        self.x -= b.x;
-        self.y -= b.y;
-        return self;
-    }
+        pub fn mul(self: *const Self, b: Self) Self {
+            return Self{
+                .data = self.data * b.data
+            };
+        }
 
-    pub fn multiply(self: Vector2, b: Vector2) Vector2 {
-        return Vector2{
-            .x = self.x * b.x,
-            .y = self.y * b.y,
-        };
-    }
+        pub fn div(self: *const Self, b: Self) Self {
+            return Self{
+                .data = self.data / b.data
+            };
+        }
 
-    pub fn multiplySet(self: *Vector2, b: Vector2) *Vector2 {
-        self.x *= b.x;
-        self.y *= b.y;
-        return self;
-    }
+        pub fn scale(self: *const Self, scalar: f32) Self {
+            var result = Self{
+                .data = self.data
+            };
 
-    pub fn divide(self: Vector2, b: Vector2) Vector2 {
-        return Vector2{
-            .x = self.x / b.x,
-            .y = self.y / b.y,
-        };
-    }
+            for (0..dimensions) |index| {
+                result.data[index] *= scalar;
+            }
 
-    pub fn divideSet(self: *Vector2, b: Vector2) *Vector2 {
-        self.x /= b.x;
-        self.y /= b.y;
-        return self;
-    }
+            return result;
+        }
 
-    pub fn negate(self: Vector2) Vector2 {
-        return Vector2{
-            .x = -self.x,
-            .y = -self.y,
-        };
-    }
+        pub fn negate(self: *const Self) Self {
+            return Self{
+                .data = -self.data
+            };
+        }
 
-    pub fn scale(self: Vector2, b: f32) Vector2 {
-        return Vector2{
-            .x = b * self.x,
-            .y = b * self.y
-        };
-    }
+        pub fn dot(self: *const Self, b: Self) f32 {
+            var result: f32 = 0;
 
-    pub fn scaleSet(self: *Vector2, b: f32) *Vector2 {
-        self.x = b * self.x;
-        self.y = b * self.y;
-        return self;
-    }
+            for (0..dimensions) |index| {
+                result += self.data[index] * b.data[index];
+            }
 
-    pub fn dot(self: Vector2, b: Vector2) f32 {
-        return (self.x * b.x) + (self.y * b.y);
-    }
+            return result;
+        }
 
-    pub fn lengthSquared(self: Vector2) f32 {
-        return self.dot(self);
-    }
-
-    pub fn isInRectangle(self: Vector2, rectangle: Rectangle2) bool {
-        const result = ((self.x >= rectangle.min.x) and
-             (self.y >= rectangle.min.y) and
-             (self.x < rectangle.max.x) and
-             (self.y < rectangle.max.y));
-
-        return result;
-    }
-};
+        pub fn lengthSquared(self: *const Self) f32 {
+            return self.dot(@constCast(self).*);
+        }
+    };
+}
 
 pub const Rectangle2 = struct {
-    min: Vector2 = Vector2{},
-    max: Vector2 = Vector2{},
+    min: Vector2 = Vector2.zero(),
+    max: Vector2 = Vector2.zero(),
 
     pub fn fromMinMax(min: Vector2, max: Vector2) Rectangle2 {
         return Rectangle2{
@@ -139,7 +168,7 @@ pub const Rectangle2 = struct {
 
     pub fn fromCenterHalfDimension(center: Vector2, half_dimension: Vector2) Rectangle2 {
         return Rectangle2{
-            .min = center.subtract(half_dimension),
+            .min = center.sub(half_dimension),
             .max = center.add(half_dimension),
         };
     }

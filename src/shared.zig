@@ -243,7 +243,7 @@ pub const EntityVisiblePieceGroup = struct {
         offset_z: f32,
         entity_z_amount: f32,
         alignment: math.Vector2,
-        color: Color,
+        color: math.Color,
         dimension: math.Vector2,
     ) void {
         std.debug.assert(self.piece_count < self.pieces.len);
@@ -252,7 +252,7 @@ pub const EntityVisiblePieceGroup = struct {
         self.piece_count += 1;
 
         piece.bitmap = bitmap;
-        piece.offset = math.Vector2.new(offset.x, -offset.y).scale(self.state.meters_to_pixels).subtract(alignment);
+        piece.offset = math.Vector2.new(offset.x(), -offset.y()).scale(self.state.meters_to_pixels).sub(alignment);
         piece.offset_z = offset_z * self.state.meters_to_pixels;
         piece.entity_z_amount = entity_z_amount;
 
@@ -269,7 +269,7 @@ pub const EntityVisiblePieceGroup = struct {
         alpha: f32,
         entity_z_amount: f32,
     ) void {
-        const color = Color{ .r = 0, .g = 0, .b = 0, .a = alpha };
+        const color = math.Color.new(0, 0, 0, alpha);
         self.pushPiece(bitmap, offset, offset_z, entity_z_amount, alignment, color, math.Vector2.zero());
     }
 
@@ -278,7 +278,7 @@ pub const EntityVisiblePieceGroup = struct {
         dimension: math.Vector2,
         offset: math.Vector2,
         offset_z: f32,
-        color: Color,
+        color: math.Color,
         entity_z_amount: f32,
     ) void {
         self.pushPiece(null, offset, offset_z, entity_z_amount, math.Vector2.zero(), color, dimension);
@@ -291,7 +291,7 @@ pub const EntityVisiblePiece = struct {
     offset_z: f32,
     entity_z_amount: f32,
 
-    color: Color,
+    color: math.Color,
     dimension: math.Vector2 = math.Vector2.zero(),
 };
 
@@ -305,19 +305,6 @@ pub const HeroBitmaps = struct {
 };
 
 // Data structures..
-pub const Color = struct {
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
-
-    pub fn toInt(self: Color) u32 {
-        return ((intrinsics.roundReal32ToUInt32(self.r * 255.0) << 16) |
-            (intrinsics.roundReal32ToUInt32(self.g * 255.0) << 8) |
-            (intrinsics.roundReal32ToUInt32(self.b * 255.0) << 0));
-    }
-};
-
 pub const LoadedBitmap = struct {
     width: i32 = 0,
     height: i32 = 0,
@@ -348,3 +335,9 @@ pub const BitmapHeader = packed struct {
     green_mask: u32,
     blue_mask: u32,
 };
+
+pub fn colorToInt(color: math.Color) u32 {
+    return ((intrinsics.roundReal32ToUInt32(color.r() * 255.0) << 16) |
+        (intrinsics.roundReal32ToUInt32(color.g() * 255.0) << 8) |
+        (intrinsics.roundReal32ToUInt32(color.b() * 255.0) << 0));
+}

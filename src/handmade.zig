@@ -221,22 +221,19 @@ pub export fn updateAndRender(
                 var input_direction = math.Vector2.zero();
 
                 if (controller.is_analog) {
-                    input_direction = math.Vector2{
-                        .x = controller.stick_average_x,
-                        .y = controller.stick_average_y,
-                    };
+                    input_direction = math.Vector2.new(controller.stick_average_x, controller.stick_average_y);
                 } else {
                     if (controller.move_up.ended_down) {
-                        input_direction.y = 1;
+                        input_direction.data[1] = 1;
                     }
                     if (controller.move_down.ended_down) {
-                        input_direction.y = -1;
+                        input_direction.data[1] = -1;
                     }
                     if (controller.move_left.ended_down) {
-                        input_direction.x = -1;
+                        input_direction.data[0] = -1;
                     }
                     if (controller.move_right.ended_down) {
-                        input_direction.x = 1;
+                        input_direction.data[0] = 1;
                     }
                 }
 
@@ -262,14 +259,14 @@ pub export fn updateAndRender(
             new_camera_position.chunk_z = camera_following_entity.low.position.chunk_z;
 
             // Move camera when player leaves the current screen.
-            if (high_entity.position.x > 9.0 * state.world.tile_side_in_meters) {
+            if (high_entity.position.x() > 9.0 * state.world.tile_side_in_meters) {
                 new_camera_position.chunk_x += 17;
-            } else if (high_entity.position.x < -9.0 * state.world.tile_side_in_meters) {
+            } else if (high_entity.position.x() < -9.0 * state.world.tile_side_in_meters) {
                 new_camera_position.chunk_x -= 17;
             }
-            if (high_entity.position.y > 5.0 * state.world.tile_side_in_meters) {
+            if (high_entity.position.y() > 5.0 * state.world.tile_side_in_meters) {
                 new_camera_position.chunk_y += 9;
-            } else if (high_entity.position.y < -5.0 * state.world.tile_side_in_meters) {
+            } else if (high_entity.position.y() < -5.0 * state.world.tile_side_in_meters) {
                 new_camera_position.chunk_y -= 9;
             }
 
@@ -283,7 +280,7 @@ pub export fn updateAndRender(
     }
 
     // Clear background.
-    const clear_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1 };
+    const clear_color = math.Color.new(0.5, 0.5, 0.5, 1);
     drawRectangle(
         buffer,
         math.Vector2.zero(),
@@ -324,26 +321,22 @@ pub export fn updateAndRender(
                 piece_group.pushBitmap(&hero_bitmaps.cape, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
                 piece_group.pushBitmap(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
-
                 if (low_entity.hit_point_max >= 1) {
                     const hit_point_dimension = math.Vector2.new(0.2, 0.2);
-                    const hit_point_spacing_x = hit_point_dimension.x * 2;
+                    const hit_point_spacing_x = hit_point_dimension.x() * 2;
 
-                    var hit_position = math.Vector2{
-                        .x = -0.5 * @as(f32, @floatFromInt(low_entity.hit_point_max - 1)) * hit_point_spacing_x,
-                        .y = -0.25
-                    };
+                    var hit_position = math.Vector2.new(-0.5 * @as(f32, @floatFromInt(low_entity.hit_point_max - 1)) * hit_point_spacing_x, -0.25);
                     const hit_position_delta = math.Vector2.new(hit_point_spacing_x, 0);
                     for (0..@intCast(low_entity.hit_point_max)) |hit_point_index| {
                         const hit_point = low_entity.hit_points[hit_point_index];
-                        var hit_point_color = shared.Color{ .r = 1, .g = 0, .b = 0, .a = 1 };
+                        var hit_point_color = math.Color.new(1, 0, 0, 1);
 
                         if (hit_point.filled_amount == 0) {
-                            hit_point_color = shared.Color{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 1 };
+                            hit_point_color = math.Color.new(0.2, 0.2, 0.2, 1);
                         }
 
                         piece_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
-                        _ = hit_position.addSet(hit_position_delta);
+                        hit_position = hit_position.add(hit_position_delta);
                     }
                 }
             },
@@ -388,12 +381,12 @@ pub export fn updateAndRender(
             high_entity.z = 0;
         }
 
-        const entity_ground_point_x = screen_center_x + meters_to_pixels * high_entity.position.x;
-        const entity_ground_point_y = screen_center_y - meters_to_pixels * high_entity.position.y;
+        const entity_ground_point_x = screen_center_x + meters_to_pixels * high_entity.position.x();
+        const entity_ground_point_y = screen_center_y - meters_to_pixels * high_entity.position.y();
         const entity_z = -meters_to_pixels * high_entity.z;
 
         if (false) {
-            const tile_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 0.0, .a = 1 };
+            const tile_color = math.Color.new(1.0, 1.0, 0.0, 1);
             const entity_left_top = math.Vector2{
                 .x = entity_ground_point_x - (0.5 * meters_to_pixels * low_entity.width),
                 .y = entity_ground_point_y - (0.5 * meters_to_pixels * low_entity.height),
@@ -414,19 +407,19 @@ pub export fn updateAndRender(
         var piece_group_index: u32 = 0;
         while (piece_group_index < piece_group.piece_count) : (piece_group_index += 1) {
             const piece = piece_group.pieces[piece_group_index];
-            const center = math.Vector2{
-                .x = piece.offset.x + entity_ground_point_x,
-                .y = piece.offset.y + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
-            };
+            const center = math.Vector2.new(
+                piece.offset.x() + entity_ground_point_x,
+                piece.offset.y() + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
+            );
 
             if (piece.bitmap) |bitmap| {
-                drawBitmap(buffer, bitmap, center.x, center.y, piece.color.a);
+                drawBitmap(buffer, bitmap, center.x(), center.y(), piece.color.a());
             } else {
                 const dimension = piece.dimension.scale(meters_to_pixels);
 
                 drawRectangle(
                     buffer,
-                    center.subtract(dimension.scale(0.5)),
+                    center.sub(dimension.scale(0.5)),
                     center.add(dimension.scale(0.5)),
                     piece.color,
                 );
@@ -564,7 +557,7 @@ inline fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: math.Vecto
     while (high_entity_index < state.high_entity_count) {
         const high_entity = &state.high_entities[high_entity_index];
 
-        _ = high_entity.position.addSet(offset);
+        high_entity.position = high_entity.position.add(offset);
 
         if (high_entity.position.isInRectangle(camera_bounds)) {
             high_entity_index += 1;
@@ -575,7 +568,7 @@ inline fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: math.Vecto
     }
 }
 
-inline fn getCameraSpacePosition(state: *shared.State, low_entity: *shared.LowEntity) math.Vector2 {
+fn getCameraSpacePosition(state: *shared.State, low_entity: *shared.LowEntity) math.Vector2 {
     const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
     return diff.xy;
 }
@@ -683,7 +676,7 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
 
         if (opt_test_entity) |test_entity| {
             if (test_entity.low.type == .Hero) {
-                const distance = test_entity.high.?.position.subtract(entity.high.?.position).lengthSquared();
+                const distance = test_entity.high.?.position.sub(entity.high.?.position).lengthSquared();
 
                 if (distance < closest_hero_squared) {
                     closest_hero = test_entity;
@@ -699,7 +692,7 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
         if (closest_hero_squared > math.square(3.0)) {
             const acceleration: f32 = 1.0;
             const one_over_length = acceleration / @sqrt(closest_hero_squared);
-            direction = hero.high.?.position.subtract(entity.high.?.position).scale(one_over_length);
+            direction = hero.high.?.position.sub(entity.high.?.position).scale(one_over_length);
         }
     }
     moveEntity(state, entity, delta_time, direction, movement_speed);
@@ -737,12 +730,12 @@ fn moveEntity(
         // Correct speed when multiple axes are contributing to the direction.
         const direction_length = direction.lengthSquared();
         if (direction_length > 1.0) {
-            _ = acceleration.scaleSet(1.0 / intrinsics.squareRoot(direction_length));
+            acceleration = acceleration.scale(1.0 / intrinsics.squareRoot(direction_length));
         }
 
         // Calculate acceleration.
-        _ = acceleration.scaleSet(movement_speed);
-        _ = acceleration.addSet(high_entity.velocity.scale(8.0).negate());
+        acceleration = acceleration.scale(movement_speed);
+        acceleration = acceleration.add(high_entity.velocity.scale(8.0).negate());
 
         // Calculate player delta.
         var player_delta = acceleration.scale(0.5 * math.square(delta_time))
@@ -770,22 +763,22 @@ fn moveEntity(
                         test_entity.low = &state.low_entities[test_high_entity.low_entity_index];
 
                         if (test_entity.low.collides) {
-                            const collision_diameter = math.Vector2{
-                                .x = test_entity.low.width + entity.low.width,
-                                .y = test_entity.low.height + entity.low.height,
-                            };
+                            const collision_diameter = math.Vector2.new(
+                                test_entity.low.width + entity.low.width,
+                                test_entity.low.height + entity.low.height,
+                            );
                             const min_corner = collision_diameter.scale(-0.5);
                             const max_corner = collision_diameter.scale(0.5);
-                            const relative = high_entity.position.subtract(test_high_entity.position);
+                            const relative = high_entity.position.sub(test_high_entity.position);
 
                             if (testWall(
-                                min_corner.x,
-                                relative.x,
-                                relative.y,
-                                player_delta.x,
-                                player_delta.y,
-                                min_corner.y,
-                                max_corner.y,
+                                min_corner.x(),
+                                relative.x(),
+                                relative.y(),
+                                player_delta.x(),
+                                player_delta.y(),
+                                min_corner.y(),
+                                max_corner.y(),
                                 &min_time,
                             )) {
                                 wall_normal = math.Vector2.new(-1, 0);
@@ -793,13 +786,13 @@ fn moveEntity(
                             }
 
                             if (testWall(
-                                max_corner.x,
-                                relative.x,
-                                relative.y,
-                                player_delta.x,
-                                player_delta.y,
-                                min_corner.y,
-                                max_corner.y,
+                                max_corner.x(),
+                                relative.x(),
+                                relative.y(),
+                                player_delta.x(),
+                                player_delta.y(),
+                                min_corner.y(),
+                                max_corner.y(),
                                 &min_time,
                             )) {
                                 wall_normal = math.Vector2.new(1, 0);
@@ -807,13 +800,13 @@ fn moveEntity(
                             }
 
                             if (testWall(
-                                min_corner.y,
-                                relative.y,
-                                relative.x,
-                                player_delta.y,
-                                player_delta.x,
-                                min_corner.x,
-                                max_corner.x,
+                                min_corner.y(),
+                                relative.y(),
+                                relative.x(),
+                                player_delta.y(),
+                                player_delta.x(),
+                                min_corner.x(),
+                                max_corner.x(),
                                 &min_time,
                             )) {
                                 wall_normal = math.Vector2.new(0, -1);
@@ -821,13 +814,13 @@ fn moveEntity(
                             }
 
                             if (testWall(
-                                max_corner.y,
-                                relative.y,
-                                relative.x,
-                                player_delta.y,
-                                player_delta.x,
-                                min_corner.x,
-                                max_corner.x,
+                                max_corner.y(),
+                                relative.y(),
+                                relative.x(),
+                                player_delta.y(),
+                                player_delta.x(),
+                                min_corner.x(),
+                                max_corner.x(),
                                 &min_time,
                             )) {
                                 wall_normal = math.Vector2.new(0, 1);
@@ -839,15 +832,15 @@ fn moveEntity(
             }
 
             // Apply the amount of delta allowed by collision detection.
-            _ = high_entity.position.addSet(player_delta.scale(min_time));
+            high_entity.position = high_entity.position.add(player_delta.scale(min_time));
 
             if (hit_high_entity_index > 0) {
                 // Remove velocity that is facing into the wall.
-                _ = high_entity.velocity.subtractSet(wall_normal.scale(high_entity.velocity.dot(wall_normal)));
+                high_entity.velocity = high_entity.velocity.sub(wall_normal.scale(high_entity.velocity.dot(wall_normal)));
 
                 // Remove the applied delta.
-                player_delta = desired_position.subtract(high_entity.position);
-                _ = player_delta.subtractSet(wall_normal.scale(player_delta.dot(wall_normal)));
+                player_delta = desired_position.sub(high_entity.position);
+                player_delta = player_delta.sub(wall_normal.scale(player_delta.dot(wall_normal)));
 
                 // Update player Z when hitting a ladder.
                 const hit_high_entity = &state.high_entities[hit_high_entity_index];
@@ -859,16 +852,16 @@ fn moveEntity(
         }
 
         // Update facing direction based on velocity.
-        if (high_entity.velocity.x == 0 and high_entity.velocity.y == 0) {
+        if (high_entity.velocity.x() == 0 and high_entity.velocity.y() == 0) {
             // Keep existing facing direction when velocity is zero.
-        } else if (intrinsics.absoluteValue(high_entity.velocity.x) > intrinsics.absoluteValue(high_entity.velocity.y)) {
-            if (high_entity.velocity.x > 0) {
+        } else if (intrinsics.absoluteValue(high_entity.velocity.x()) > intrinsics.absoluteValue(high_entity.velocity.y())) {
+            if (high_entity.velocity.x() > 0) {
                 high_entity.facing_direction = 0;
             } else {
                 high_entity.facing_direction = 2;
             }
-        } else if (intrinsics.absoluteValue(high_entity.velocity.x) < intrinsics.absoluteValue(high_entity.velocity.y)) {
-            if (high_entity.velocity.y > 0) {
+        } else if (intrinsics.absoluteValue(high_entity.velocity.x()) < intrinsics.absoluteValue(high_entity.velocity.y())) {
+            if (high_entity.velocity.y() > 0) {
                 high_entity.facing_direction = 1;
             } else {
                 high_entity.facing_direction = 3;
@@ -923,13 +916,13 @@ fn drawRectangle(
     buffer: *shared.OffscreenBuffer,
     vector_min: math.Vector2,
     vector_max: math.Vector2,
-    color: shared.Color,
+    color: math.Color,
 ) void {
     // Round input values.
-    var min_x = intrinsics.roundReal32ToInt32(vector_min.x);
-    var min_y = intrinsics.roundReal32ToInt32(vector_min.y);
-    var max_x = intrinsics.roundReal32ToInt32(vector_max.x);
-    var max_y = intrinsics.roundReal32ToInt32(vector_max.y);
+    var min_x = intrinsics.roundReal32ToInt32(vector_min.x());
+    var min_y = intrinsics.roundReal32ToInt32(vector_min.y());
+    var max_x = intrinsics.roundReal32ToInt32(vector_max.x());
+    var max_y = intrinsics.roundReal32ToInt32(vector_max.y());
 
     // Clip input values to buffer.
     if (min_x < 0) {
@@ -955,7 +948,7 @@ fn drawRectangle(
 
         var x = min_x;
         while (x < max_x) : (x += 1) {
-            pixel[0] = color.toInt();
+            pixel[0] = shared.colorToInt(color);
             pixel += 1;
         }
 

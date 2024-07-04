@@ -74,7 +74,7 @@ inline fn isCanonical(world: *World, relative: f32) bool {
 }
 
 inline fn isVector2Canonical(world: *World, offset: math.Vector2) bool {
-    return (isCanonical(world, offset.x) and isCanonical(world, offset.y));
+    return (isCanonical(world, offset.x()) and isCanonical(world, offset.y()));
 }
 
 pub fn areInSameChunk(world: *World, a: *WorldPosition, b: *WorldPosition) bool {
@@ -235,21 +235,25 @@ pub fn changeEntityLocation(
     }
 }
 
-pub inline fn recannonicalizeCoordinate(world: *World, tile_abs: *i32, tile_rel: *f32) void {
+pub inline fn recannonicalizeCoordinate(world: *World, tile_abs: *i32, tile_rel: *const f32) f32 {
     const offset = intrinsics.roundReal32ToInt32(tile_rel.* / world.chunk_side_in_meters);
 
     tile_abs.* +%= offset;
-    tile_rel.* -= @as(f32, @floatFromInt(offset)) * world.chunk_side_in_meters;
+    const result = tile_rel.* - @as(f32, @floatFromInt(offset)) * world.chunk_side_in_meters;
 
-    std.debug.assert(isCanonical(world, tile_rel.*));
+    std.debug.assert(isCanonical(world, result));
+
+    return result;
 }
 
 pub fn mapIntoChunkSpace(world: *World, base_position: WorldPosition, offset: math.Vector2) WorldPosition {
     var result = base_position;
 
-    _ = result.offset.addSet(offset);
-    recannonicalizeCoordinate(world, &result.chunk_x, &result.offset.x);
-    recannonicalizeCoordinate(world, &result.chunk_y, &result.offset.y);
+    result.offset = result.offset.add(offset);
+    result.offset = math.Vector2.new(
+        recannonicalizeCoordinate(world, &result.chunk_x, &result.offset.x()),
+        recannonicalizeCoordinate(world, &result.chunk_y, &result.offset.y()),
+    );
 
     return result;
 }
@@ -266,10 +270,12 @@ pub inline fn chunkPositionFromTilePosition(
     result.chunk_y = @divFloor(abs_tile_y, TILES_PER_CHUNK);
     result.chunk_z = @divFloor(abs_tile_z, TILES_PER_CHUNK);
 
-    result.offset.x = @as(f32, @floatFromInt((abs_tile_x - TILES_PER_CHUNK / 2) -
-        (result.chunk_x * TILES_PER_CHUNK))) * world.tile_side_in_meters;
-    result.offset.y = @as(f32, @floatFromInt((abs_tile_y - TILES_PER_CHUNK / 2) -
-        (result.chunk_y * TILES_PER_CHUNK))) * world.tile_side_in_meters;
+    result.offset = math.Vector2.new(
+        @as(f32, @floatFromInt((abs_tile_x - TILES_PER_CHUNK / 2) -
+                (result.chunk_x * TILES_PER_CHUNK))) * world.tile_side_in_meters,
+        @as(f32, @floatFromInt((abs_tile_y - TILES_PER_CHUNK / 2) -
+                (result.chunk_y * TILES_PER_CHUNK))) * world.tile_side_in_meters,
+    );
 
     std.debug.assert(isVector2Canonical(world, result.offset));
 
@@ -279,13 +285,13 @@ pub inline fn chunkPositionFromTilePosition(
 pub fn subtractPositions(world: *World, a: *WorldPosition, b: *WorldPosition) WorldDifference {
     var result = WorldDifference{};
 
-    var tile_diff_xy = math.Vector2{
-        .x = @as(f32, @floatFromInt(a.chunk_x)) - @as(f32, @floatFromInt(b.chunk_x)),
-        .y = @as(f32, @floatFromInt(a.chunk_y)) - @as(f32, @floatFromInt(b.chunk_y)),
-    };
+    var tile_diff_xy = math.Vector2.new(
+        @as(f32, @floatFromInt(a.chunk_x)) - @as(f32, @floatFromInt(b.chunk_x)),
+        @as(f32, @floatFromInt(a.chunk_y)) - @as(f32, @floatFromInt(b.chunk_y)),
+    );
     const tile_diff_z = @as(f32, @floatFromInt(a.chunk_z)) - @as(f32, @floatFromInt(b.chunk_z));
 
-    result.xy = tile_diff_xy.scale(world.chunk_side_in_meters).add(a.offset.subtract(b.offset));
+    result.xy = tile_diff_xy.scale(world.chunk_side_in_meters).add(a.offset.sub(b.offset));
     result.z = world.chunk_side_in_meters * tile_diff_z;
 
     return result;
