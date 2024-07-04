@@ -4,6 +4,7 @@ pub const TAU32: f32 = PI32 * 2.0;
 pub const MIDDLE_C: u32 = 261;
 pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
+pub const HIT_POINT_SUB_COUNT = 4;
 
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
@@ -152,6 +153,7 @@ pub fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T
 pub const State = struct {
     world_arena: MemoryArena = undefined,
     world: *world.World = undefined,
+    meters_to_pixels: f32 = 0,
 
     camera_following_entity_index: u32 = 0,
     camera_position: world.WorldPosition,
@@ -196,6 +198,7 @@ pub const Entity = struct {
 };
 
 pub const LowEntity = struct {
+    high_entity_index: u32 = 0,
     type: EntityType = .Null,
 
     width: f32 = 0,
@@ -205,7 +208,13 @@ pub const LowEntity = struct {
     collides: bool = false,
     abs_tile_z_delta: i32 = 0,
 
-    high_entity_index: u32 = 0,
+    hit_point_max: u32,
+    hit_points: [16]HitPoint,
+};
+
+pub const HitPoint = struct {
+    flags: u8,
+    filled_amount: u8,
 };
 
 pub const HighEntity = struct {
@@ -223,10 +232,35 @@ pub const HighEntity = struct {
 };
 
 pub const EntityVisiblePieceGroup = struct {
+    state: *State,
     piece_count: u32 = 0,
-    pieces: [8]EntityVisiblePiece = [1]EntityVisiblePiece{undefined} ** 8,
+    pieces: [32]EntityVisiblePiece = [1]EntityVisiblePiece{undefined} ** 32,
 
-    pub fn pushPiece(
+    fn pushPiece(
+        self: *EntityVisiblePieceGroup,
+        bitmap: ?*LoadedBitmap,
+        offset: math.Vector2,
+        offset_z: f32,
+        entity_z_amount: f32,
+        alignment: math.Vector2,
+        color: Color,
+        dimension: math.Vector2,
+    ) void {
+        std.debug.assert(self.piece_count < self.pieces.len);
+
+        var piece = &self.pieces[self.piece_count];
+        self.piece_count += 1;
+
+        piece.bitmap = bitmap;
+        piece.offset = math.Vector2.new(offset.x, -offset.y).scale(self.state.meters_to_pixels).subtract(alignment);
+        piece.offset_z = offset_z * self.state.meters_to_pixels;
+        piece.entity_z_amount = entity_z_amount;
+
+        piece.color = color;
+        piece.dimension = dimension;
+    }
+
+    pub fn pushBitmap(
         self: *EntityVisiblePieceGroup,
         bitmap: *LoadedBitmap,
         offset: math.Vector2,
@@ -235,25 +269,30 @@ pub const EntityVisiblePieceGroup = struct {
         alpha: f32,
         entity_z_amount: f32,
     ) void {
-        std.debug.assert(self.piece_count < self.pieces.len);
+        const color = Color{ .r = 0, .g = 0, .b = 0, .a = alpha };
+        self.pushPiece(bitmap, offset, offset_z, entity_z_amount, alignment, color, math.Vector2.zero());
+    }
 
-        var piece = &self.pieces[self.piece_count];
-        self.piece_count += 1;
-
-        piece.bitmap = bitmap;
-        piece.offset = offset.subtract(alignment);
-        piece.offset_z = offset_z;
-        piece.entity_z_amount = entity_z_amount;
-        piece.alpha = alpha;
+    pub fn pushRectangle(
+        self: *EntityVisiblePieceGroup,
+        dimension: math.Vector2,
+        offset: math.Vector2,
+        offset_z: f32,
+        color: Color,
+        entity_z_amount: f32,
+    ) void {
+        self.pushPiece(null, offset, offset_z, entity_z_amount, math.Vector2.zero(), color, dimension);
     }
 };
 
 pub const EntityVisiblePiece = struct {
-    bitmap: *LoadedBitmap,
+    bitmap: ?*LoadedBitmap,
     offset: math.Vector2,
     offset_z: f32,
     entity_z_amount: f32,
-    alpha: f32,
+
+    color: Color,
+    dimension: math.Vector2 = math.Vector2.zero(),
 };
 
 pub const HeroBitmaps = struct {
@@ -270,7 +309,9 @@ pub const Color = struct {
     r: f32,
     g: f32,
     b: f32,
-    pub fn to_int(self: Color) u32 {
+    a: f32,
+
+    pub fn toInt(self: Color) u32 {
         return ((intrinsics.roundReal32ToUInt32(self.r * 255.0) << 16) |
             (intrinsics.roundReal32ToUInt32(self.g * 255.0) << 8) |
             (intrinsics.roundReal32ToUInt32(self.b * 255.0) << 0));

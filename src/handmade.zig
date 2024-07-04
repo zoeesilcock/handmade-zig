@@ -65,6 +65,9 @@ pub export fn updateAndRender(
         state.world = shared.pushStruct(&state.world_arena, world.World);
         world.initializeWorld(state.world, 1.4);
 
+        const tile_side_in_pixels = 60;
+        state.meters_to_pixels = @as(f32, @floatFromInt(tile_side_in_pixels)) / state.world.tile_side_in_meters;
+
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
 
@@ -202,8 +205,7 @@ pub export fn updateAndRender(
         memory.is_initialized = true;
     }
 
-    const tile_side_in_pixels = 60;
-    const meters_to_pixels = @as(f32, @floatFromInt(tile_side_in_pixels)) / state.world.tile_side_in_meters;
+    const meters_to_pixels = state.meters_to_pixels;
 
     // Handle input.
     for (&input.controllers, 0..) |controller, controller_index| {
@@ -281,7 +283,7 @@ pub export fn updateAndRender(
     }
 
     // Clear background.
-    const clear_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
+    const clear_color = shared.Color{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1 };
     drawRectangle(
         buffer,
         math.Vector2.zero(),
@@ -293,7 +295,9 @@ pub export fn updateAndRender(
     const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
     const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
 
-    var piece_group = shared.EntityVisiblePieceGroup{};
+    var piece_group = shared.EntityVisiblePieceGroup{
+        .state = state,
+    };
     var high_entity_index: u32 = 1;
     while (high_entity_index < state.high_entity_count) : (high_entity_index += 1) {
         piece_group.piece_count = 0;
@@ -315,41 +319,64 @@ pub export fn updateAndRender(
         switch (low_entity.type) {
             .Hero => {
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                piece_group.pushPiece(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                piece_group.pushPiece(&hero_bitmaps.cape, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                piece_group.pushBitmap(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.cape, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+
+
+                if (low_entity.hit_point_max >= 1) {
+                    const hit_point_dimension = math.Vector2.new(0.2, 0.2);
+                    const hit_point_spacing_x = hit_point_dimension.x * 2;
+
+                    var hit_position = math.Vector2{
+                        .x = -0.5 * @as(f32, @floatFromInt(low_entity.hit_point_max - 1)) * hit_point_spacing_x,
+                        .y = -0.25
+                    };
+                    const hit_position_delta = math.Vector2.new(hit_point_spacing_x, 0);
+                    for (0..@intCast(low_entity.hit_point_max)) |hit_point_index| {
+                        const hit_point = low_entity.hit_points[hit_point_index];
+                        var hit_point_color = shared.Color{ .r = 1, .g = 0, .b = 0, .a = 1 };
+
+                        if (hit_point.filled_amount == 0) {
+                            hit_point_color = shared.Color{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 1 };
+                        }
+
+                        piece_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
+                        _ = hit_position.addSet(hit_position_delta);
+                    }
+                }
             },
             .Wall => {
-                piece_group.pushPiece(&state.tree, math.Vector2.zero(), 0, math.Vector2.new(40, 80), 1, 1);
+                piece_group.pushBitmap(&state.tree, math.Vector2.zero(), 0, math.Vector2.new(40, 80), 1, 1);
             },
             .Monster => {
                 updateMonster(state, entity, delta_time);
 
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
-                piece_group.pushPiece(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
+                piece_group.pushBitmap(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
             },
             .Familiar => {
                 updateFamiliar(state, entity, delta_time);
 
                 // Update head bob.
-                high_entity.head_bob_time += (delta_time * 2);
+                high_entity.head_bob_time += delta_time * 2;
                 if (high_entity.head_bob_time > shared.TAU32) {
                     high_entity.head_bob_time = -shared.TAU32;
                 }
 
-                const head_bob_sine = @sin(high_entity.head_bob_time);
-                const head_z = 8 * head_bob_sine;
+                const head_bob_sine = @sin(2 * high_entity.head_bob_time);
+                const head_z = 0.25 * head_bob_sine;
                 const head_shadow_alpha = (0.5 * shadow_alpha) + (0.2 * head_bob_sine);
 
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
-                piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
+                piece_group.pushBitmap(&hero_bitmaps.head, math.Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
             },
             else => {
                 unreachable;
-            }
+            },
         }
 
         // Jump.
@@ -366,7 +393,7 @@ pub export fn updateAndRender(
         const entity_z = -meters_to_pixels * high_entity.z;
 
         if (false) {
-            const tile_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 0.0 };
+            const tile_color = shared.Color{ .r = 1.0, .g = 1.0, .b = 0.0, .a = 1 };
             const entity_left_top = math.Vector2{
                 .x = entity_ground_point_x - (0.5 * meters_to_pixels * low_entity.width),
                 .y = entity_ground_point_y - (0.5 * meters_to_pixels * low_entity.height),
@@ -387,14 +414,23 @@ pub export fn updateAndRender(
         var piece_group_index: u32 = 0;
         while (piece_group_index < piece_group.piece_count) : (piece_group_index += 1) {
             const piece = piece_group.pieces[piece_group_index];
+            const center = math.Vector2{
+                .x = piece.offset.x + entity_ground_point_x,
+                .y = piece.offset.y + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
+            };
 
-            drawBitmap(
-                buffer,
-                piece.bitmap,
-                piece.offset.x + entity_ground_point_x,
-                piece.offset.y + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
-                piece.alpha,
-            );
+            if (piece.bitmap) |bitmap| {
+                drawBitmap(buffer, bitmap, center.x, center.y, piece.color.a);
+            } else {
+                const dimension = piece.dimension.scale(meters_to_pixels);
+
+                drawRectangle(
+                    buffer,
+                    center.subtract(dimension.scale(0.5)),
+                    center.add(dimension.scale(0.5)),
+                    piece.color,
+                );
+            }
         }
     }
 }
@@ -672,6 +708,11 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
 fn addPlayer(state: *shared.State) shared.Entity {
     const entity = addLowEntity(state, .Hero, state.camera_position);
 
+    entity.low.hit_point_max = 3;
+    entity.low.hit_points[2].filled_amount = shared.HIT_POINT_SUB_COUNT;
+    entity.low.hit_points[1] = entity.low.hit_points[2];
+    entity.low.hit_points[0] = entity.low.hit_points[1];
+
     entity.low.height = 0.5; // 1.4;
     entity.low.width = 1.0;
     entity.low.collides = true;
@@ -914,7 +955,7 @@ fn drawRectangle(
 
         var x = min_x;
         while (x < max_x) : (x += 1) {
-            pixel[0] = color.to_int();
+            pixel[0] = color.toInt();
             pixel += 1;
         }
 
