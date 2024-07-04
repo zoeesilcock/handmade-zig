@@ -315,34 +315,37 @@ pub export fn updateAndRender(
         switch (low_entity.type) {
             .Hero => {
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha);
-                piece_group.pushPiece(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1);
-                piece_group.pushPiece(&hero_bitmaps.cape, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1);
-                piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1);
+                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                piece_group.pushPiece(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushPiece(&hero_bitmaps.cape, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
             },
             .Wall => {
-                piece_group.pushPiece(&state.tree, math.Vector2.zero(), 0, math.Vector2.new(40, 80), 1);
+                piece_group.pushPiece(&state.tree, math.Vector2.zero(), 0, math.Vector2.new(40, 80), 1, 1);
             },
             .Monster => {
                 updateMonster(state, entity, delta_time);
 
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha);
-                piece_group.pushPiece(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1);
+                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
+                piece_group.pushPiece(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
             },
             .Familiar => {
                 updateFamiliar(state, entity, delta_time);
 
                 // Update head bob.
-                high_entity.head_bob_time += (delta_time * 8);
+                high_entity.head_bob_time += (delta_time * 2);
                 if (high_entity.head_bob_time > shared.TAU32) {
                     high_entity.head_bob_time = -shared.TAU32;
                 }
 
-                const head_z = 10 * @sin(high_entity.head_bob_time);
+                const head_bob_sine = @sin(high_entity.head_bob_time);
+                const head_z = 8 * head_bob_sine;
+                const head_shadow_alpha = (0.5 * shadow_alpha) + (0.2 * head_bob_sine);
+
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha);
-                piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), head_z, hero_bitmaps.alignment, 1);
+                piece_group.pushPiece(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
+                piece_group.pushPiece(&hero_bitmaps.head, math.Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
             },
             else => {
                 unreachable;
@@ -389,7 +392,7 @@ pub export fn updateAndRender(
                 buffer,
                 piece.bitmap,
                 piece.offset.x + entity_ground_point_x,
-                piece.offset.y + piece.offset_z + entity_ground_point_y + entity_z,
+                piece.offset.y + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
                 piece.alpha,
             );
         }
@@ -657,7 +660,7 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
     const movement_speed = 25;
     var direction = math.Vector2.zero();
     if (closest_hero) |hero| {
-        if (closest_hero_squared > 0.1) {
+        if (closest_hero_squared > math.square(3.0)) {
             const acceleration: f32 = 1.0;
             const one_over_length = acceleration / @sqrt(closest_hero_squared);
             direction = hero.high.?.position.subtract(entity.high.?.position).scale(one_over_length);

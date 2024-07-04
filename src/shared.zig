@@ -233,6 +233,7 @@ pub const EntityVisiblePieceGroup = struct {
         offset_z: f32,
         alignment: math.Vector2,
         alpha: f32,
+        entity_z_amount: f32,
     ) void {
         std.debug.assert(self.piece_count < self.pieces.len);
 
@@ -242,6 +243,7 @@ pub const EntityVisiblePieceGroup = struct {
         piece.bitmap = bitmap;
         piece.offset = offset.subtract(alignment);
         piece.offset_z = offset_z;
+        piece.entity_z_amount = entity_z_amount;
         piece.alpha = alpha;
     }
 };
@@ -250,6 +252,7 @@ pub const EntityVisiblePiece = struct {
     bitmap: *LoadedBitmap,
     offset: math.Vector2,
     offset_z: f32,
+    entity_z_amount: f32,
     alpha: f32,
 };
 
