@@ -266,8 +266,12 @@ pub inline fn chunkPositionFromTilePosition(
     result.chunk_y = @divFloor(abs_tile_y, TILES_PER_CHUNK);
     result.chunk_z = @divFloor(abs_tile_z, TILES_PER_CHUNK);
 
-    result.offset.x = @as(f32, @floatFromInt(abs_tile_x - (result.chunk_x * TILES_PER_CHUNK))) * world.tile_side_in_meters;
-    result.offset.y = @as(f32, @floatFromInt(abs_tile_y - (result.chunk_y * TILES_PER_CHUNK))) * world.tile_side_in_meters;
+    result.offset.x = @as(f32, @floatFromInt((abs_tile_x - TILES_PER_CHUNK / 2) -
+        (result.chunk_x * TILES_PER_CHUNK))) * world.tile_side_in_meters;
+    result.offset.y = @as(f32, @floatFromInt((abs_tile_y - TILES_PER_CHUNK / 2) -
+        (result.chunk_y * TILES_PER_CHUNK))) * world.tile_side_in_meters;
+
+    std.debug.assert(isVector2Canonical(world, result.offset));
 
     return result;
 }

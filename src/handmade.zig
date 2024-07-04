@@ -182,7 +182,15 @@ pub export fn updateAndRender(
         const camera_tile_z = screen_base_z;
 
         _ = addMonster(state, camera_tile_x + 2, camera_tile_y + 2, camera_tile_z);
-        _ = addFamiliar(state, camera_tile_x - 2, camera_tile_y + 2, camera_tile_z);
+
+        for (0..1) |_| {
+            const familiar_offset_x: i32 = @mod(@as(i32, @intCast(random.RANDOM_NUMBERS[random_number_index])), 10) - 7;
+            random_number_index += 1;
+            const familiar_offset_y: i32 = @mod(@as(i32, @intCast(random.RANDOM_NUMBERS[random_number_index])), 6) - 3;
+            random_number_index += 1;
+
+            _ = addFamiliar(state, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
+        }
 
         setCameraPosition(state, world.chunkPositionFromTilePosition(
             state.world,
@@ -646,14 +654,16 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
         }
     }
 
+    const movement_speed = 25;
+    var direction = math.Vector2.zero();
     if (closest_hero) |hero| {
-        const movement_speed = 25;
-        const acceleration: f32 = 1.0;
-        const one_over_length = acceleration / @sqrt(closest_hero_squared);
-        const direction = hero.high.?.position.subtract(entity.high.?.position).scale(one_over_length);
-
-        moveEntity(state, entity, delta_time, direction, movement_speed);
+        if (closest_hero_squared > 0.1) {
+            const acceleration: f32 = 1.0;
+            const one_over_length = acceleration / @sqrt(closest_hero_squared);
+            direction = hero.high.?.position.subtract(entity.high.?.position).scale(one_over_length);
+        }
     }
+    moveEntity(state, entity, delta_time, direction, movement_speed);
 }
 
 fn addPlayer(state: *shared.State) shared.Entity {
