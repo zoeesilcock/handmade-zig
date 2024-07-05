@@ -14,9 +14,6 @@ fn Vector(comptime dimension_count: comptime_int) type {
                 pub inline fn new(x_value: f32, y_value: f32) Self {
                     return Self{ .values = .{ x_value, y_value } };
                 }
-                pub inline fn zero() Self {
-                    return Self{ .values = .{ 0, 0 } };
-                }
 
                 pub inline fn x(self: *const Self) f32 {
                     return self.values[0];
@@ -37,9 +34,6 @@ fn Vector(comptime dimension_count: comptime_int) type {
                 pub inline fn new(x_value: f32, y_value: f32, z_value: f32) Self {
                     return Self{ .values = .{ x_value, y_value, z_value } };
                 }
-                pub inline fn zero() Self {
-                    return Self{ .values = .{ 0, 0, 0 } };
-                }
 
                 pub inline fn x(self: *const Self) f32 {
                     return self.values[0];
@@ -54,9 +48,6 @@ fn Vector(comptime dimension_count: comptime_int) type {
             inline 4 => struct {
                 pub inline fn new(x_value: f32, y_value: f32, z_value: f32, w_value: f32) Self {
                     return Self{ .values = .{ x_value, y_value, z_value, w_value } };
-                }
-                pub inline fn zero() Self {
-                    return Self{ .values = .{ 0, 0, 0, 0 } };
                 }
 
                 pub inline fn x(self: *const Self) f32 {
@@ -89,6 +80,10 @@ fn Vector(comptime dimension_count: comptime_int) type {
                 unreachable;
             },
         };
+
+        pub inline fn zero() Self {
+            return Self{ .values = @splat(0) };
+        }
 
         pub fn plus(self: *const Self, b: Self) Self {
             return Self{
