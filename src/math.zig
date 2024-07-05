@@ -8,7 +8,7 @@ const VectorAccessorStyle = enum {
 };
 
 fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: VectorAccessorStyle ) type {
-    return struct{
+    return struct {
         values: @Vector(dimension_count, f32),
         pub const dimensions = dimension_count;
 

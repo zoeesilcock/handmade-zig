@@ -5,6 +5,9 @@ const math = @import("math.zig");
 const random = @import("random.zig");
 const std = @import("std");
 
+const Vector2 = math.Vector2;
+const Color = math.Color;
+
 pub export fn updateAndRender(
     thread: *shared.ThreadContext,
     platform: shared.Platform,
@@ -22,28 +25,28 @@ pub export fn updateAndRender(
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
             .hero_bitmaps = .{
                 shared.HeroBitmaps{
-                    .alignment = math.Vector2.new(72, 182),
+                    .alignment = Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_right_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_right_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_right_cape.bmp"),
                     .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = math.Vector2.new(72, 182),
+                    .alignment = Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_back_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_back_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_back_cape.bmp"),
                     .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = math.Vector2.new(72, 182),
+                    .alignment = Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_left_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_left_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_left_cape.bmp"),
                     .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = math.Vector2.new(72, 182),
+                    .alignment = Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
@@ -219,22 +222,22 @@ pub export fn updateAndRender(
             }
         } else {
             if (forceEntityIntoHigh(state, low_index)) |controlling_entity| {
-                var input_direction = math.Vector2.zero();
+                var input_direction = Vector2.zero();
 
                 if (controller.is_analog) {
-                    input_direction = math.Vector2.new(controller.stick_average_x, controller.stick_average_y);
+                    input_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
                 } else {
                     if (controller.move_up.ended_down) {
-                        input_direction = input_direction.plus(math.Vector2.new(0, 1));
+                        input_direction = input_direction.plus(Vector2.new(0, 1));
                     }
                     if (controller.move_down.ended_down) {
-                        input_direction = input_direction.plus(math.Vector2.new(0, -1));
+                        input_direction = input_direction.plus(Vector2.new(0, -1));
                     }
                     if (controller.move_left.ended_down) {
-                        input_direction = input_direction.plus(math.Vector2.new(-1, 0));
+                        input_direction = input_direction.plus(Vector2.new(-1, 0));
                     }
                     if (controller.move_right.ended_down) {
-                        input_direction = input_direction.plus(math.Vector2.new(1, 0));
+                        input_direction = input_direction.plus(Vector2.new(1, 0));
                     }
                 }
 
@@ -243,18 +246,18 @@ pub export fn updateAndRender(
                         high_entity.z_velocity = 3;
                     }
 
-                    var sword_direction = math.Vector2.zero();
+                    var sword_direction = Vector2.zero();
                     if (controller.action_up.ended_down) {
-                        sword_direction = sword_direction.plus(math.Vector2.new(0, 1));
+                        sword_direction = sword_direction.plus(Vector2.new(0, 1));
                     }
                     if (controller.action_down.ended_down) {
-                        sword_direction = sword_direction.plus(math.Vector2.new(0, -1));
+                        sword_direction = sword_direction.plus(Vector2.new(0, -1));
                     }
                     if (controller.action_left.ended_down) {
-                        sword_direction = sword_direction.plus(math.Vector2.new(-1, 0));
+                        sword_direction = sword_direction.plus(Vector2.new(-1, 0));
                     }
                     if (controller.action_right.ended_down) {
-                        sword_direction = sword_direction.plus(math.Vector2.new(1, 0));
+                        sword_direction = sword_direction.plus(Vector2.new(1, 0));
                     }
 
                     if (sword_direction.x() != 0 or sword_direction.y() != 0) {
@@ -315,11 +318,11 @@ pub export fn updateAndRender(
     }
 
     // Clear background.
-    const clear_color = math.Color.new(0.5, 0.5, 0.5, 1);
+    const clear_color = Color.new(0.5, 0.5, 0.5, 1);
     drawRectangle(
         buffer,
-        math.Vector2.zero(),
-        math.Vector2.new(@floatFromInt(buffer.width), @floatFromInt(buffer.height)),
+        Vector2.zero(),
+        Vector2.new(@floatFromInt(buffer.width), @floatFromInt(buffer.height)),
         clear_color,
     );
     // drawBitmap(buffer, state.backdrop, 0, 0, 0, 0, 1);
@@ -351,27 +354,27 @@ pub export fn updateAndRender(
         switch (low_entity.type) {
             .Hero => {
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                piece_group.pushBitmap(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                piece_group.pushBitmap(&hero_bitmaps.cape, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                piece_group.pushBitmap(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.cape, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
                 drawHitPoints(low_entity, &piece_group);
             },
             .Sword => {
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                piece_group.pushBitmap(&state.sword, math.Vector2.zero(), 0, math.Vector2.new(29, 10), 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                piece_group.pushBitmap(&state.sword, Vector2.zero(), 0, Vector2.new(29, 10), 1, 1);
             },
             .Wall => {
-                piece_group.pushBitmap(&state.tree, math.Vector2.zero(), 0, math.Vector2.new(40, 80), 1, 1);
+                piece_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
             },
             .Monster => {
                 updateMonster(state, entity, delta_time);
 
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
-                piece_group.pushBitmap(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
+                piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
                 drawHitPoints(low_entity, &piece_group);
             },
@@ -389,8 +392,8 @@ pub export fn updateAndRender(
                 const head_shadow_alpha = (0.5 * shadow_alpha) + (0.2 * head_bob_sine);
 
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
-                piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
-                piece_group.pushBitmap(&hero_bitmaps.head, math.Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
+                piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
+                piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
             },
             else => {
                 unreachable;
@@ -411,12 +414,12 @@ pub export fn updateAndRender(
         const entity_z = -meters_to_pixels * high_entity.z;
 
         if (false) {
-            const tile_color = math.Color.new(1.0, 1.0, 0.0, 1);
-            const entity_left_top = math.Vector2{
+            const tile_color = Color.new(1.0, 1.0, 0.0, 1);
+            const entity_left_top = Vector2{
                 .x = entity_ground_point_x - (0.5 * meters_to_pixels * low_entity.width),
                 .y = entity_ground_point_y - (0.5 * meters_to_pixels * low_entity.height),
             };
-            const entity_width_height = math.Vector2{
+            const entity_width_height = Vector2{
                 .x = low_entity.width,
                 .y = low_entity.height,
             };
@@ -432,7 +435,7 @@ pub export fn updateAndRender(
         var piece_group_index: u32 = 0;
         while (piece_group_index < piece_group.piece_count) : (piece_group_index += 1) {
             const piece = piece_group.pieces[piece_group_index];
-            const center = math.Vector2.new(
+            const center = Vector2.new(
                 piece.offset.x() + entity_ground_point_x,
                 piece.offset.y() + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
             );
@@ -461,9 +464,9 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
 
     const tile_span_x = 17 * 3;
     const tile_span_y = 9 * 3;
-    const bounds_in_tiles = math.Vector2.new(tile_span_x, tile_span_y);
+    const bounds_in_tiles = Vector2.new(tile_span_x, tile_span_y);
     const camera_bounds = math.Rectangle2.fromCenterDimension(
-        math.Vector2.zero(),
+        Vector2.zero(),
         bounds_in_tiles.scaledTo(state.world.tile_side_in_meters),
     );
     const entity_offset_for_frame = camera_delta.xy.negated();
@@ -591,7 +594,7 @@ inline fn validateEntityPairs(state: *shared.State) bool {
     return valid;
 }
 
-inline fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: math.Vector2, camera_bounds: math.Rectangle2) void {
+inline fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: Vector2, camera_bounds: math.Rectangle2) void {
     var high_entity_index: u32 = 1;
     while (high_entity_index < state.high_entity_count) {
         const high_entity = &state.high_entities[high_entity_index];
@@ -607,7 +610,7 @@ inline fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: math.Vecto
     }
 }
 
-fn getCameraSpacePosition(state: *shared.State, low_entity: *shared.LowEntity) math.Vector2 {
+fn getCameraSpacePosition(state: *shared.State, low_entity: *shared.LowEntity) Vector2 {
     const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
     return diff.xy;
 }
@@ -615,7 +618,7 @@ fn getCameraSpacePosition(state: *shared.State, low_entity: *shared.LowEntity) m
 fn makeEntityHighFrequency(
     state: *shared.State,
     low_index: u32,
-    camera_space_position: ?math.Vector2,
+    camera_space_position: ?Vector2,
 ) ?*shared.HighEntity {
     var result: ?*shared.HighEntity = null;
     var low_entity = &state.low_entities[low_index];
@@ -635,7 +638,7 @@ fn makeEntityHighFrequency(
             }
 
             high_entity.chunk_z = low_entity.position.chunk_z;
-            high_entity.velocity = math.Vector2.zero();
+            high_entity.velocity = Vector2.zero();
             high_entity.facing_direction = 0;
             high_entity.low_entity_index = low_index;
 
@@ -693,17 +696,17 @@ fn initHitPoints(low_entity: *shared.LowEntity, count: u32) void {
 
 fn drawHitPoints(low_entity: *shared.LowEntity, piece_group: *shared.EntityVisiblePieceGroup) void {
     if (low_entity.hit_point_max >= 1) {
-        const hit_point_dimension = math.Vector2.new(0.2, 0.2);
+        const hit_point_dimension = Vector2.new(0.2, 0.2);
         const hit_point_spacing_x = hit_point_dimension.x() * 2;
 
-        var hit_position = math.Vector2.new(-0.5 * @as(f32, @floatFromInt(low_entity.hit_point_max - 1)) * hit_point_spacing_x, -0.25);
-        const hit_position_delta = math.Vector2.new(hit_point_spacing_x, 0);
+        var hit_position = Vector2.new(-0.5 * @as(f32, @floatFromInt(low_entity.hit_point_max - 1)) * hit_point_spacing_x, -0.25);
+        const hit_position_delta = Vector2.new(hit_point_spacing_x, 0);
         for (0..@intCast(low_entity.hit_point_max)) |hit_point_index| {
             const hit_point = low_entity.hit_points[hit_point_index];
-            var hit_point_color = math.Color.new(1, 0, 0, 1);
+            var hit_point_color = Color.new(1, 0, 0, 1);
 
             if (hit_point.filled_amount == 0) {
-                hit_point_color = math.Color.new(0.2, 0.2, 0.2, 1);
+                hit_point_color = Color.new(0.2, 0.2, 0.2, 1);
             }
 
             piece_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
@@ -792,7 +795,7 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
     }
 
     const movement_speed = 25;
-    var direction = math.Vector2.zero();
+    var direction = Vector2.zero();
     if (closest_hero) |hero| {
         if (closest_hero_squared > math.square(3.0)) {
             const acceleration: f32 = 1.0;
@@ -807,7 +810,7 @@ fn moveEntity(
     state: *shared.State,
     entity: shared.Entity,
     delta_time: f32,
-    direction: math.Vector2,
+    direction: Vector2,
     movement_speed: f32,
 ) void {
     if (entity.high) |high_entity| {
@@ -831,7 +834,7 @@ fn moveEntity(
         var iterations: u32 = 0;
         while (iterations < 4) : (iterations += 1) {
             var min_time: f32 = 1.0;
-            var wall_normal = math.Vector2.zero();
+            var wall_normal = Vector2.zero();
             var hit_high_entity_index: u32 = 0;
 
             const desired_position = high_entity.position.plus(player_delta);
@@ -849,7 +852,7 @@ fn moveEntity(
                         test_entity.low = &state.low_entities[test_high_entity.low_entity_index];
 
                         if (test_entity.low.collides) {
-                            const collision_diameter = math.Vector2.new(
+                            const collision_diameter = Vector2.new(
                                 test_entity.low.width + entity.low.width,
                                 test_entity.low.height + entity.low.height,
                             );
@@ -867,7 +870,7 @@ fn moveEntity(
                                 max_corner.y(),
                                 &min_time,
                             )) {
-                                wall_normal = math.Vector2.new(-1, 0);
+                                wall_normal = Vector2.new(-1, 0);
                                 hit_high_entity_index = test_high_entity_index;
                             }
 
@@ -881,7 +884,7 @@ fn moveEntity(
                                 max_corner.y(),
                                 &min_time,
                             )) {
-                                wall_normal = math.Vector2.new(1, 0);
+                                wall_normal = Vector2.new(1, 0);
                                 hit_high_entity_index = test_high_entity_index;
                             }
 
@@ -895,7 +898,7 @@ fn moveEntity(
                                 max_corner.x(),
                                 &min_time,
                             )) {
-                                wall_normal = math.Vector2.new(0, -1);
+                                wall_normal = Vector2.new(0, -1);
                                 hit_high_entity_index = test_high_entity_index;
                             }
 
@@ -909,7 +912,7 @@ fn moveEntity(
                                 max_corner.x(),
                                 &min_time,
                             )) {
-                                wall_normal = math.Vector2.new(0, 1);
+                                wall_normal = Vector2.new(0, 1);
                                 hit_high_entity_index = test_high_entity_index;
                             }
                         }
@@ -999,9 +1002,9 @@ pub export fn getSoundSamples(
 
 fn drawRectangle(
     buffer: *shared.OffscreenBuffer,
-    vector_min: math.Vector2,
-    vector_max: math.Vector2,
-    color: math.Color,
+    vector_min: Vector2,
+    vector_max: Vector2,
+    color: Color,
 ) void {
     // Round input values.
     var min_x = intrinsics.roundReal32ToInt32(vector_min.x());
