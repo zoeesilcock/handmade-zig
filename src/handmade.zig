@@ -321,24 +321,7 @@ pub export fn updateAndRender(
                 piece_group.pushBitmap(&hero_bitmaps.cape, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
                 piece_group.pushBitmap(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
-                if (low_entity.hit_point_max >= 1) {
-                    const hit_point_dimension = math.Vector2.new(0.2, 0.2);
-                    const hit_point_spacing_x = hit_point_dimension.x() * 2;
-
-                    var hit_position = math.Vector2.new(-0.5 * @as(f32, @floatFromInt(low_entity.hit_point_max - 1)) * hit_point_spacing_x, -0.25);
-                    const hit_position_delta = math.Vector2.new(hit_point_spacing_x, 0);
-                    for (0..@intCast(low_entity.hit_point_max)) |hit_point_index| {
-                        const hit_point = low_entity.hit_points[hit_point_index];
-                        var hit_point_color = math.Color.new(1, 0, 0, 1);
-
-                        if (hit_point.filled_amount == 0) {
-                            hit_point_color = math.Color.new(0.2, 0.2, 0.2, 1);
-                        }
-
-                        piece_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
-                        hit_position = hit_position.plus(hit_position_delta);
-                    }
-                }
+                drawHitPoints(low_entity, &piece_group);
             },
             .Wall => {
                 piece_group.pushBitmap(&state.tree, math.Vector2.zero(), 0, math.Vector2.new(40, 80), 1, 1);
@@ -349,6 +332,8 @@ pub export fn updateAndRender(
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
                 piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
                 piece_group.pushBitmap(&hero_bitmaps.torso, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+
+                drawHitPoints(low_entity, &piece_group);
             },
             .Familiar => {
                 updateFamiliar(state, entity, delta_time);
@@ -638,9 +623,63 @@ fn addWall(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i
     return entity;
 }
 
+fn initHitPoints(low_entity: *shared.LowEntity, count: u32) void {
+    std.debug.assert(count <= low_entity.hit_points.len);
+
+    low_entity.hit_point_max = count;
+
+    var hit_point_index: u32 = 0;
+    while (hit_point_index < low_entity.hit_point_max) : (hit_point_index += 1) {
+        const hit_point = &low_entity.hit_points[hit_point_index];
+
+        hit_point.flags = 0;
+        hit_point.filled_amount = shared.HIT_POINT_SUB_COUNT;
+    }
+}
+
+fn drawHitPoints(low_entity: *shared.LowEntity, piece_group: *shared.EntityVisiblePieceGroup) void {
+    if (low_entity.hit_point_max >= 1) {
+        const hit_point_dimension = math.Vector2.new(0.2, 0.2);
+        const hit_point_spacing_x = hit_point_dimension.x() * 2;
+
+        var hit_position = math.Vector2.new(-0.5 * @as(f32, @floatFromInt(low_entity.hit_point_max - 1)) * hit_point_spacing_x, -0.25);
+        const hit_position_delta = math.Vector2.new(hit_point_spacing_x, 0);
+        for (0..@intCast(low_entity.hit_point_max)) |hit_point_index| {
+            const hit_point = low_entity.hit_points[hit_point_index];
+            var hit_point_color = math.Color.new(1, 0, 0, 1);
+
+            if (hit_point.filled_amount == 0) {
+                hit_point_color = math.Color.new(0.2, 0.2, 0.2, 1);
+            }
+
+            piece_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
+            hit_position = hit_position.plus(hit_position_delta);
+        }
+    }
+}
+
+
+fn addPlayer(state: *shared.State) shared.Entity {
+    const entity = addLowEntity(state, .Hero, state.camera_position);
+
+    initHitPoints(entity.low, 3);
+
+    entity.low.height = 0.5; // 1.4;
+    entity.low.width = 1.0;
+    entity.low.collides = true;
+
+    if (state.camera_following_entity_index == 0) {
+        state.camera_following_entity_index = entity.low_index;
+    }
+
+    return entity;
+}
+
 fn addMonster(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) shared.Entity {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Monster, world_position);
+
+    initHitPoints(entity.low, 3);
 
     entity.low.height = 0.5;
     entity.low.width = 1.0;
@@ -696,25 +735,6 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
         }
     }
     moveEntity(state, entity, delta_time, direction, movement_speed);
-}
-
-fn addPlayer(state: *shared.State) shared.Entity {
-    const entity = addLowEntity(state, .Hero, state.camera_position);
-
-    entity.low.hit_point_max = 3;
-    entity.low.hit_points[2].filled_amount = shared.HIT_POINT_SUB_COUNT;
-    entity.low.hit_points[1] = entity.low.hit_points[2];
-    entity.low.hit_points[0] = entity.low.hit_points[1];
-
-    entity.low.height = 0.5; // 1.4;
-    entity.low.width = 1.0;
-    entity.low.collides = true;
-
-    if (state.camera_following_entity_index == 0) {
-        state.camera_following_entity_index = entity.low_index;
-    }
-
-    return entity;
 }
 
 fn moveEntity(
