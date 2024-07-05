@@ -252,7 +252,7 @@ pub const EntityVisiblePieceGroup = struct {
         self.piece_count += 1;
 
         piece.bitmap = bitmap;
-        piece.offset = math.Vector2.new(offset.x(), -offset.y()).scale(self.state.meters_to_pixels).sub(alignment);
+        piece.offset = math.Vector2.new(offset.x(), -offset.y()).scaledTo(self.state.meters_to_pixels).minus(alignment);
         piece.offset_z = offset_z * self.state.meters_to_pixels;
         piece.entity_z_amount = entity_z_amount;
 

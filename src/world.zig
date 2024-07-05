@@ -249,7 +249,7 @@ pub inline fn recannonicalizeCoordinate(world: *World, tile_abs: *i32, tile_rel:
 pub fn mapIntoChunkSpace(world: *World, base_position: WorldPosition, offset: math.Vector2) WorldPosition {
     var result = base_position;
 
-    result.offset = result.offset.add(offset);
+    result.offset = result.offset.plus(offset);
     result.offset = math.Vector2.new(
         recannonicalizeCoordinate(world, &result.chunk_x, &result.offset.x()),
         recannonicalizeCoordinate(world, &result.chunk_y, &result.offset.y()),
@@ -291,7 +291,7 @@ pub fn subtractPositions(world: *World, a: *WorldPosition, b: *WorldPosition) Wo
     );
     const tile_diff_z = @as(f32, @floatFromInt(a.chunk_z)) - @as(f32, @floatFromInt(b.chunk_z));
 
-    result.xy = tile_diff_xy.scale(world.chunk_side_in_meters).add(a.offset.sub(b.offset));
+    result.xy = tile_diff_xy.scaledTo(world.chunk_side_in_meters).plus(a.offset.minus(b.offset));
     result.z = world.chunk_side_in_meters * tile_diff_z;
 
     return result;

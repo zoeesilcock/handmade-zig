@@ -90,31 +90,31 @@ fn Vector(comptime dimension_count: comptime_int) type {
             },
         };
 
-        pub fn add(self: *const Self, b: Self) Self {
+        pub fn plus(self: *const Self, b: Self) Self {
             return Self{
                 .values = self.values + b.values
             };
         }
 
-        pub fn sub(self: *const Self, b: Self) Self {
+        pub fn minus(self: *const Self, b: Self) Self {
             return Self{
                 .values = self.values - b.values
             };
         }
 
-        pub fn mul(self: *const Self, b: Self) Self {
+        pub fn times(self: *const Self, b: Self) Self {
             return Self{
                 .values = self.values * b.values
             };
         }
 
-        pub fn div(self: *const Self, b: Self) Self {
+        pub fn dividedBy(self: *const Self, b: Self) Self {
             return Self{
                 .values = self.values / b.values
             };
         }
 
-        pub fn scale(self: *const Self, scalar: f32) Self {
+        pub fn scaledTo(self: *const Self, scalar: f32) Self {
             var result = Self{
                 .values = self.values
             };
@@ -126,13 +126,13 @@ fn Vector(comptime dimension_count: comptime_int) type {
             return result;
         }
 
-        pub fn negate(self: *const Self) Self {
+        pub fn negated(self: *const Self) Self {
             return Self{
                 .values = -self.values
             };
         }
 
-        pub fn dot(self: *const Self, b: Self) f32 {
+        pub fn dotProduct(self: *const Self, b: Self) f32 {
             var result: f32 = 0;
 
             for (0..dimensions) |index| {
@@ -143,7 +143,7 @@ fn Vector(comptime dimension_count: comptime_int) type {
         }
 
         pub fn lengthSquared(self: *const Self) f32 {
-            return self.dot(@constCast(self).*);
+            return self.dotProduct(@constCast(self).*);
         }
     };
 }
@@ -162,19 +162,19 @@ pub const Rectangle2 = struct {
     pub fn fromMinDimension(min: Vector2, dimension: Vector2) Rectangle2 {
         return Rectangle2{
             .min = min,
-            .max = min.add(dimension),
+            .max = min.plus(dimension),
         };
     }
 
     pub fn fromCenterHalfDimension(center: Vector2, half_dimension: Vector2) Rectangle2 {
         return Rectangle2{
-            .min = center.sub(half_dimension),
-            .max = center.add(half_dimension),
+            .min = center.minus(half_dimension),
+            .max = center.plus(half_dimension),
         };
     }
 
     pub fn fromCenterDimension(center: Vector2, dimension: Vector2) Rectangle2 {
-        return fromCenterHalfDimension(center, dimension.scale(0.5));
+        return fromCenterHalfDimension(center, dimension.scaledTo(0.5));
     }
 
     pub fn getMinCorner(self: Rectangle2) Vector2 {
@@ -184,7 +184,7 @@ pub const Rectangle2 = struct {
         return self.max;
     }
     pub fn getCenter(self: Rectangle2) Vector2 {
-        return self.min.add(self.max).scale(0.5);
+        return self.min.plus(self.max).scale(0.5);
     }
 };
 

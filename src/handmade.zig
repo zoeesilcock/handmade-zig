@@ -224,16 +224,16 @@ pub export fn updateAndRender(
                     input_direction = math.Vector2.new(controller.stick_average_x, controller.stick_average_y);
                 } else {
                     if (controller.move_up.ended_down) {
-                        input_direction = input_direction.add(math.Vector2.new(0, 1));
+                        input_direction = input_direction.plus(math.Vector2.new(0, 1));
                     }
                     if (controller.move_down.ended_down) {
-                        input_direction = input_direction.add(math.Vector2.new(0, -1));
+                        input_direction = input_direction.plus(math.Vector2.new(0, -1));
                     }
                     if (controller.move_left.ended_down) {
-                        input_direction = input_direction.add(math.Vector2.new(-1, 0));
+                        input_direction = input_direction.plus(math.Vector2.new(-1, 0));
                     }
                     if (controller.move_right.ended_down) {
-                        input_direction = input_direction.add(math.Vector2.new(1, 0));
+                        input_direction = input_direction.plus(math.Vector2.new(1, 0));
                     }
                 }
 
@@ -336,7 +336,7 @@ pub export fn updateAndRender(
                         }
 
                         piece_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
-                        hit_position = hit_position.add(hit_position_delta);
+                        hit_position = hit_position.plus(hit_position_delta);
                     }
                 }
             },
@@ -399,7 +399,7 @@ pub export fn updateAndRender(
             drawRectangle(
                 buffer,
                 entity_left_top,
-                entity_left_top.add(entity_width_height.scale(meters_to_pixels).scale(0.9)),
+                entity_left_top.plus(entity_width_height.scaledTo(meters_to_pixels).scaledTo(0.9)),
                 tile_color,
             );
         }
@@ -415,12 +415,12 @@ pub export fn updateAndRender(
             if (piece.bitmap) |bitmap| {
                 drawBitmap(buffer, bitmap, center.x(), center.y(), piece.color.a());
             } else {
-                const dimension = piece.dimension.scale(meters_to_pixels);
+                const dimension = piece.dimension.scaledTo(meters_to_pixels);
 
                 drawRectangle(
                     buffer,
-                    center.sub(dimension.scale(0.5)),
-                    center.add(dimension.scale(0.5)),
+                    center.minus(dimension.scaledTo(0.5)),
+                    center.plus(dimension.scaledTo(0.5)),
                     piece.color,
                 );
             }
@@ -439,9 +439,9 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
     const bounds_in_tiles = math.Vector2.new(tile_span_x, tile_span_y);
     const camera_bounds = math.Rectangle2.fromCenterDimension(
         math.Vector2.zero(),
-        bounds_in_tiles.scale(state.world.tile_side_in_meters),
+        bounds_in_tiles.scaledTo(state.world.tile_side_in_meters),
     );
-    const entity_offset_for_frame = camera_delta.xy.negate();
+    const entity_offset_for_frame = camera_delta.xy.negated();
     offsetAndCheckFrequencyByArea(state, entity_offset_for_frame, camera_bounds);
 
     std.debug.assert(validateEntityPairs(state));
@@ -557,7 +557,7 @@ inline fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: math.Vecto
     while (high_entity_index < state.high_entity_count) {
         const high_entity = &state.high_entities[high_entity_index];
 
-        high_entity.position = high_entity.position.add(offset);
+        high_entity.position = high_entity.position.plus(offset);
 
         if (high_entity.position.isInRectangle(camera_bounds)) {
             high_entity_index += 1;
@@ -676,7 +676,7 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
 
         if (opt_test_entity) |test_entity| {
             if (test_entity.low.type == .Hero) {
-                const distance = test_entity.high.?.position.sub(entity.high.?.position).lengthSquared();
+                const distance = test_entity.high.?.position.minus(entity.high.?.position).lengthSquared();
 
                 if (distance < closest_hero_squared) {
                     closest_hero = test_entity;
@@ -692,7 +692,7 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
         if (closest_hero_squared > math.square(3.0)) {
             const acceleration: f32 = 1.0;
             const one_over_length = acceleration / @sqrt(closest_hero_squared);
-            direction = hero.high.?.position.sub(entity.high.?.position).scale(one_over_length);
+            direction = hero.high.?.position.minus(entity.high.?.position).scaledTo(one_over_length);
         }
     }
     moveEntity(state, entity, delta_time, direction, movement_speed);
@@ -730,17 +730,17 @@ fn moveEntity(
         // Correct speed when multiple axes are contributing to the direction.
         const direction_length = direction.lengthSquared();
         if (direction_length > 1.0) {
-            acceleration = acceleration.scale(1.0 / intrinsics.squareRoot(direction_length));
+            acceleration = acceleration.scaledTo(1.0 / intrinsics.squareRoot(direction_length));
         }
 
         // Calculate acceleration.
-        acceleration = acceleration.scale(movement_speed);
-        acceleration = acceleration.add(high_entity.velocity.scale(8.0).negate());
+        acceleration = acceleration.scaledTo(movement_speed);
+        acceleration = acceleration.plus(high_entity.velocity.scaledTo(8.0).negated());
 
         // Calculate player delta.
-        var player_delta = acceleration.scale(0.5 * math.square(delta_time))
-            .add(high_entity.velocity.scale(delta_time));
-        high_entity.velocity = acceleration.scale(delta_time).add(high_entity.velocity);
+        var player_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
+            .plus(high_entity.velocity.scaledTo(delta_time));
+        high_entity.velocity = acceleration.scaledTo(delta_time).plus(high_entity.velocity);
 
         var iterations: u32 = 0;
         while (iterations < 4) : (iterations += 1) {
@@ -748,7 +748,7 @@ fn moveEntity(
             var wall_normal = math.Vector2.zero();
             var hit_high_entity_index: u32 = 0;
 
-            const desired_position = high_entity.position.add(player_delta);
+            const desired_position = high_entity.position.plus(player_delta);
 
             var test_high_entity_index: u32 = 0;
             while (test_high_entity_index < state.high_entity_count) : (test_high_entity_index += 1) {
@@ -767,9 +767,9 @@ fn moveEntity(
                                 test_entity.low.width + entity.low.width,
                                 test_entity.low.height + entity.low.height,
                             );
-                            const min_corner = collision_diameter.scale(-0.5);
-                            const max_corner = collision_diameter.scale(0.5);
-                            const relative = high_entity.position.sub(test_high_entity.position);
+                            const min_corner = collision_diameter.scaledTo(-0.5);
+                            const max_corner = collision_diameter.scaledTo(0.5);
+                            const relative = high_entity.position.minus(test_high_entity.position);
 
                             if (testWall(
                                 min_corner.x(),
@@ -832,15 +832,15 @@ fn moveEntity(
             }
 
             // Apply the amount of delta allowed by collision detection.
-            high_entity.position = high_entity.position.add(player_delta.scale(min_time));
+            high_entity.position = high_entity.position.plus(player_delta.scaledTo(min_time));
 
             if (hit_high_entity_index > 0) {
                 // Remove velocity that is facing into the wall.
-                high_entity.velocity = high_entity.velocity.sub(wall_normal.scale(high_entity.velocity.dot(wall_normal)));
+                high_entity.velocity = high_entity.velocity.minus(wall_normal.scaledTo(high_entity.velocity.dotProduct(wall_normal)));
 
                 // Remove the applied delta.
-                player_delta = desired_position.sub(high_entity.position);
-                player_delta = player_delta.sub(wall_normal.scale(player_delta.dot(wall_normal)));
+                player_delta = desired_position.minus(high_entity.position);
+                player_delta = player_delta.minus(wall_normal.scaledTo(player_delta.dotProduct(wall_normal)));
 
                 // Update player Z when hitting a ladder.
                 const hit_high_entity = &state.high_entities[hit_high_entity_index];
