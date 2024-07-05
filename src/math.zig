@@ -172,6 +172,10 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
         pub fn lengthSquared(self: *const Self) f32 {
             return self.dotProduct(@constCast(self).*);
         }
+
+        pub fn length(self: *const Self) f32 {
+            return @sqrt(self.lengthSquared());
+        }
     };
 }
 

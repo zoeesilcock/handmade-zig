@@ -261,36 +261,42 @@ pub export fn updateAndRender(
                     }
 
                     if (sword_direction.x() != 0 or sword_direction.y() != 0) {
-                        const opt_sword = getLowEntity(state, controlling_entity.low.sword_low_index);
+                        const sword_low_index = controlling_entity.low.sword_low_index;
+                        const opt_sword_low = getLowEntity(state, sword_low_index);
 
-                        if (opt_sword) |sword| {
-                            if (!sword.position.isValid()) {
+                        if (opt_sword_low) |sword_low| {
+                            if (!sword_low.position.isValid()) {
                                 var sword_position = controlling_entity.low.position;
-
                                 world.changeEntityLocation(
                                     &state.world_arena,
                                     state.world,
-                                    sword,
-                                    controlling_entity.low.sword_low_index,
+                                    sword_low,
+                                    sword_low_index,
                                     null,
                                     &sword_position,
                                 );
+
+                                const opt_sword = forceEntityIntoHigh(state, sword_low_index);
+                                if (opt_sword) |sword| {
+                                    sword.low.distance_remaining = 5.0;
+                                    sword.high.?.velocity = sword_direction.scaledTo(5.0);
+                                }
                             }
                         }
                     }
                 }
 
-                moveEntity(
-                    state,
-                    controlling_entity,
-                    input.frame_delta_time,
-                    input_direction,
-                    50.0,
-                    // if (controller.left_trigger.ended_down) 200.0 else 50.0,
-                );
+                const move_spec = shared.MoveSpec{
+                    .speed = 50,
+                    .drag = 8,
+                    .unit_max_acceleration = true,
+                };
+                moveEntity(state, controlling_entity, input.frame_delta_time, input_direction, &move_spec);
             }
         }
     }
+
+    // Update camera position.
     if (forceEntityIntoHigh(state, state.camera_following_entity_index)) |camera_following_entity| {
         if (camera_following_entity.high) |high_entity| {
             var new_camera_position = state.camera_position;
@@ -362,6 +368,8 @@ pub export fn updateAndRender(
                 drawHitPoints(low_entity, &piece_group);
             },
             .Sword => {
+                updateSword(state, entity, delta_time);
+
                 var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
                 piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
                 piece_group.pushBitmap(&state.sword, Vector2.zero(), 0, Vector2.new(29, 10), 1, 1);
@@ -491,11 +499,6 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
                         const low_entity_index = block.low_entity_indices[block_entity_index];
                         var low_entity = state.low_entities[low_entity_index];
 
-                        if (low_entity.type == .Sword) {
-                            const foo = "bar";
-                            _ = foo;
-                        }
-
                         if (low_entity.high_entity_index == 0) {
                             const camera_space_position = getCameraSpacePosition(state, &low_entity);
 
@@ -582,7 +585,7 @@ fn getEntityFromHighIndex(state: *shared.State, high_entity_index: u32) ?shared.
     return result;
 }
 
-inline fn validateEntityPairs(state: *shared.State) bool {
+fn validateEntityPairs(state: *shared.State) bool {
     var valid = true;
 
     var high_entity_index: u32 = 1;
@@ -594,17 +597,18 @@ inline fn validateEntityPairs(state: *shared.State) bool {
     return valid;
 }
 
-inline fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: Vector2, camera_bounds: math.Rectangle2) void {
+fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: Vector2, camera_bounds: math.Rectangle2) void {
     var high_entity_index: u32 = 1;
     while (high_entity_index < state.high_entity_count) {
         const high_entity = &state.high_entities[high_entity_index];
+        const low_entity = &state.low_entities[high_entity.low_entity_index];
 
         high_entity.position = high_entity.position.plus(offset);
 
-        if (high_entity.position.isInRectangle(camera_bounds)) {
+        if (low_entity.position.isValid() and high_entity.position.isInRectangle(camera_bounds)) {
             high_entity_index += 1;
         } else {
-            std.debug.assert(state.low_entities[high_entity.low_entity_index].high_entity_index == high_entity_index);
+            std.debug.assert(low_entity.high_entity_index == high_entity_index);
             _ = makeEntityLowFrequency(state, high_entity.low_entity_index);
         }
     }
@@ -640,9 +644,10 @@ fn makeEntityHighFrequency(
             high_entity.chunk_z = low_entity.position.chunk_z;
             high_entity.velocity = Vector2.zero();
             high_entity.facing_direction = 0;
-            high_entity.low_entity_index = low_index;
 
+            high_entity.low_entity_index = low_index;
             low_entity.high_entity_index = high_index;
+
             result = high_entity;
         } else {
             unreachable;
@@ -652,7 +657,7 @@ fn makeEntityHighFrequency(
     return result;
 }
 
-inline fn makeEntityLowFrequency(state: *shared.State, low_index: u32) void {
+fn makeEntityLowFrequency(state: *shared.State, low_index: u32) void {
     const low_entity = &state.low_entities[low_index];
     const high_index = low_entity.high_entity_index;
 
@@ -744,6 +749,28 @@ fn addSword(state: *shared.State) shared.Entity {
     return entity;
 }
 
+fn updateSword(state: *shared.State, entity: shared.Entity, delta_time: f32) void {
+    const move_spec = shared.MoveSpec{};
+
+    const old_position = entity.high.?.position;
+
+    moveEntity(state, entity, delta_time, Vector2.zero(), &move_spec);
+
+    const distance_traveled = entity.high.?.position.minus(old_position).length();
+    entity.low.distance_remaining -= distance_traveled;
+
+    if (entity.low.distance_remaining < 0) {
+        world.changeEntityLocation(
+            &state.world_arena,
+            state.world,
+            entity.low,
+            entity.low_index,
+            &entity.low.position,
+            null,
+        );
+    }
+}
+
 fn addMonster(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) shared.Entity {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Monster, world_position);
@@ -794,7 +821,6 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
         }
     }
 
-    const movement_speed = 25;
     var direction = Vector2.zero();
     if (closest_hero) |hero| {
         if (closest_hero_squared > math.square(3.0)) {
@@ -803,7 +829,13 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
             direction = hero.high.?.position.minus(entity.high.?.position).scaledTo(one_over_length);
         }
     }
-    moveEntity(state, entity, delta_time, direction, movement_speed);
+
+    const move_spec = shared.MoveSpec{
+        .speed = 25,
+        .drag = 8,
+        .unit_max_acceleration = true,
+    };
+    moveEntity(state, entity, delta_time, direction, &move_spec);
 }
 
 fn moveEntity(
@@ -811,20 +843,25 @@ fn moveEntity(
     entity: shared.Entity,
     delta_time: f32,
     direction: Vector2,
-    movement_speed: f32,
+    move_spec: *const shared.MoveSpec,
 ) void {
     if (entity.high) |high_entity| {
         var acceleration = direction;
 
         // Correct speed when multiple axes are contributing to the direction.
-        const direction_length = direction.lengthSquared();
-        if (direction_length > 1.0) {
-            acceleration = acceleration.scaledTo(1.0 / intrinsics.squareRoot(direction_length));
+        if (move_spec.unit_max_acceleration) {
+            const direction_length = direction.lengthSquared();
+            if (direction_length > 1.0) {
+                acceleration = acceleration.scaledTo(1.0 / intrinsics.squareRoot(direction_length));
+            }
         }
 
         // Calculate acceleration.
-        acceleration = acceleration.scaledTo(movement_speed);
-        acceleration = acceleration.plus(high_entity.velocity.scaledTo(8.0).negated());
+        acceleration = acceleration.scaledTo(move_spec.speed);
+
+        // Apply drag.
+        acceleration = acceleration.plus(high_entity.velocity.scaledTo(move_spec.drag).negated());
+        // acceleration = acceleration.minus(high_entity.velocity.scaledTo(move_spec.drag));
 
         // Calculate player delta.
         var player_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
@@ -839,81 +876,83 @@ fn moveEntity(
 
             const desired_position = high_entity.position.plus(player_delta);
 
-            var test_high_entity_index: u32 = 0;
-            while (test_high_entity_index < state.high_entity_count) : (test_high_entity_index += 1) {
-                if (test_high_entity_index != entity.low.high_entity_index) {
-                    var test_entity = shared.Entity{
-                        .high = &state.high_entities[test_high_entity_index],
-                        .low = undefined,
-                        .low_index = 0,
-                    };
-                    if (test_entity.high) |test_high_entity| {
-                        test_entity.low_index = test_high_entity.low_entity_index;
-                        test_entity.low = &state.low_entities[test_high_entity.low_entity_index];
+            if (entity.low.collides) {
+                var test_high_entity_index: u32 = 0;
+                while (test_high_entity_index < state.high_entity_count) : (test_high_entity_index += 1) {
+                    if (test_high_entity_index != entity.low.high_entity_index) {
+                        var test_entity = shared.Entity{
+                            .high = &state.high_entities[test_high_entity_index],
+                            .low = undefined,
+                            .low_index = 0,
+                        };
+                        if (test_entity.high) |test_high_entity| {
+                            test_entity.low_index = test_high_entity.low_entity_index;
+                            test_entity.low = &state.low_entities[test_high_entity.low_entity_index];
 
-                        if (test_entity.low.collides) {
-                            const collision_diameter = Vector2.new(
-                                test_entity.low.width + entity.low.width,
-                                test_entity.low.height + entity.low.height,
-                            );
-                            const min_corner = collision_diameter.scaledTo(-0.5);
-                            const max_corner = collision_diameter.scaledTo(0.5);
-                            const relative = high_entity.position.minus(test_high_entity.position);
+                            if (test_entity.low.collides) {
+                                const collision_diameter = Vector2.new(
+                                    test_entity.low.width + entity.low.width,
+                                    test_entity.low.height + entity.low.height,
+                                );
+                                const min_corner = collision_diameter.scaledTo(-0.5);
+                                const max_corner = collision_diameter.scaledTo(0.5);
+                                const relative = high_entity.position.minus(test_high_entity.position);
 
-                            if (testWall(
-                                min_corner.x(),
-                                relative.x(),
-                                relative.y(),
-                                player_delta.x(),
-                                player_delta.y(),
-                                min_corner.y(),
-                                max_corner.y(),
-                                &min_time,
-                            )) {
-                                wall_normal = Vector2.new(-1, 0);
-                                hit_high_entity_index = test_high_entity_index;
-                            }
+                                if (testWall(
+                                    min_corner.x(),
+                                    relative.x(),
+                                    relative.y(),
+                                    player_delta.x(),
+                                    player_delta.y(),
+                                    min_corner.y(),
+                                    max_corner.y(),
+                                    &min_time,
+                                )) {
+                                    wall_normal = Vector2.new(-1, 0);
+                                    hit_high_entity_index = test_high_entity_index;
+                                }
 
-                            if (testWall(
-                                max_corner.x(),
-                                relative.x(),
-                                relative.y(),
-                                player_delta.x(),
-                                player_delta.y(),
-                                min_corner.y(),
-                                max_corner.y(),
-                                &min_time,
-                            )) {
-                                wall_normal = Vector2.new(1, 0);
-                                hit_high_entity_index = test_high_entity_index;
-                            }
+                                if (testWall(
+                                    max_corner.x(),
+                                    relative.x(),
+                                    relative.y(),
+                                    player_delta.x(),
+                                    player_delta.y(),
+                                    min_corner.y(),
+                                    max_corner.y(),
+                                    &min_time,
+                                )) {
+                                    wall_normal = Vector2.new(1, 0);
+                                    hit_high_entity_index = test_high_entity_index;
+                                }
 
-                            if (testWall(
-                                min_corner.y(),
-                                relative.y(),
-                                relative.x(),
-                                player_delta.y(),
-                                player_delta.x(),
-                                min_corner.x(),
-                                max_corner.x(),
-                                &min_time,
-                            )) {
-                                wall_normal = Vector2.new(0, -1);
-                                hit_high_entity_index = test_high_entity_index;
-                            }
+                                if (testWall(
+                                    min_corner.y(),
+                                    relative.y(),
+                                    relative.x(),
+                                    player_delta.y(),
+                                    player_delta.x(),
+                                    min_corner.x(),
+                                    max_corner.x(),
+                                    &min_time,
+                                )) {
+                                    wall_normal = Vector2.new(0, -1);
+                                    hit_high_entity_index = test_high_entity_index;
+                                }
 
-                            if (testWall(
-                                max_corner.y(),
-                                relative.y(),
-                                relative.x(),
-                                player_delta.y(),
-                                player_delta.x(),
-                                min_corner.x(),
-                                max_corner.x(),
-                                &min_time,
-                            )) {
-                                wall_normal = Vector2.new(0, 1);
-                                hit_high_entity_index = test_high_entity_index;
+                                if (testWall(
+                                    max_corner.y(),
+                                    relative.y(),
+                                    relative.x(),
+                                    player_delta.y(),
+                                    player_delta.x(),
+                                    min_corner.x(),
+                                    max_corner.x(),
+                                    &min_time,
+                                )) {
+                                    wall_normal = Vector2.new(0, 1);
+                                    hit_high_entity_index = test_high_entity_index;
+                                }
                             }
                         }
                     }

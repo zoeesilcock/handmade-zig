@@ -83,12 +83,12 @@ pub fn initializeWorld(world: *World, tile_side_in_meters: f32) void {
     }
 }
 
-inline fn isCanonical(world: *World, relative: f32) bool {
+fn isCanonical(world: *World, relative: f32) bool {
     return ((relative >= -0.5 * world.chunk_side_in_meters) and
         (relative <= 0.5 * world.chunk_side_in_meters));
 }
 
-inline fn isVector2Canonical(world: *World, offset: Vector2) bool {
+fn isVector2Canonical(world: *World, offset: Vector2) bool {
     return (isCanonical(world, offset.x()) and isCanonical(world, offset.y()));
 }
 
@@ -161,17 +161,21 @@ pub fn changeEntityLocation(
     low_entity: *shared.LowEntity,
     low_entity_index: u32,
     opt_old_position: ?*WorldPosition,
-    new_position: *WorldPosition,
+    opt_new_position: ?*WorldPosition,
 ) void {
     changeEntityLocationRaw(
         memory_arena,
         world,
         low_entity_index,
         opt_old_position,
-        new_position,
+        opt_new_position,
     );
 
-    low_entity.position = new_position.*;
+    if (opt_new_position) |new_position| {
+        low_entity.position = new_position.*;
+    } else {
+        low_entity.position = WorldPosition.nullPosition();
+    }
 }
 
 pub fn changeEntityLocationRaw(
@@ -179,13 +183,20 @@ pub fn changeEntityLocationRaw(
     world: *World,
     low_entity_index: u32,
     opt_old_position: ?*WorldPosition,
-    new_position: *WorldPosition,
+    opt_new_position: ?*WorldPosition,
 ) void {
     std.debug.assert(opt_old_position == null or opt_old_position.?.isValid());
-    std.debug.assert(new_position.isValid());
+    std.debug.assert(opt_new_position == null or opt_new_position.?.isValid());
 
-    if (opt_old_position) |old_position| {
-        if (!areInSameChunk(world, old_position, new_position)) {
+    var in_same_chunk = false;
+    if (opt_new_position) |new_position| {
+        if (opt_old_position) |old_position| {
+            in_same_chunk = areInSameChunk(world, old_position, new_position);
+        }
+    }
+
+    if (!in_same_chunk) {
+        if (opt_old_position) |old_position| {
             // Pull the entity out of it's current block.
             const opt_chunk = getWorldChunk(
                 world,
@@ -231,47 +242,49 @@ pub fn changeEntityLocationRaw(
                 }
             }
         }
-    }
 
-    // Insert the entity into it's new entity block.
-    const opt_chunk = getWorldChunk(
-        world,
-        new_position.chunk_x,
-        new_position.chunk_y,
-        new_position.chunk_z,
-        memory_arena,
-    );
-    if (opt_chunk) |new_chunk| {
-        const block = &new_chunk.first_block;
+        if (opt_new_position) |new_position| {
+            // Insert the entity into it's new entity block.
+            const opt_chunk = getWorldChunk(
+                world,
+                new_position.chunk_x,
+                new_position.chunk_y,
+                new_position.chunk_z,
+                memory_arena,
+            );
+            if (opt_chunk) |new_chunk| {
+                const block = &new_chunk.first_block;
 
-        if (block.entity_count == block.low_entity_indices.len) {
-            // Out of space, get a new block.
-            var old_block: ?*WorldEntityBlock = null;
-            const opt_free_block = world.first_free;
+                if (block.entity_count == block.low_entity_indices.len) {
+                    // Out of space, get a new block.
+                    var old_block: ?*WorldEntityBlock = null;
+                    const opt_free_block = world.first_free;
 
-            if (opt_free_block) |free_block| {
-                // Use the free block.
-                world.first_free = free_block.next;
-                old_block = free_block;
-            } else {
-                // No free blocks, create a new block.
-                old_block = shared.pushStruct(memory_arena, WorldEntityBlock);
+                    if (opt_free_block) |free_block| {
+                        // Use the free block.
+                        world.first_free = free_block.next;
+                        old_block = free_block;
+                    } else {
+                        // No free blocks, create a new block.
+                        old_block = shared.pushStruct(memory_arena, WorldEntityBlock);
+                    }
+
+                    // Copy the existing block into the old block position.
+                    old_block.?.* = block.*;
+                    block.next = old_block;
+                    block.entity_count = 0;
+                }
+
+                // Add the entity to the block.
+                std.debug.assert(block.entity_count < block.low_entity_indices.len);
+                block.low_entity_indices[block.entity_count] = low_entity_index;
+                block.entity_count += 1;
             }
-
-            // Copy the existing block into the old block position.
-            old_block.?.* = block.*;
-            block.next = old_block;
-            block.entity_count = 0;
         }
-
-        // Add the entity to the block.
-        std.debug.assert(block.entity_count < block.low_entity_indices.len);
-        block.low_entity_indices[block.entity_count] = low_entity_index;
-        block.entity_count += 1;
     }
 }
 
-pub inline fn recannonicalizeCoordinate(world: *World, tile_abs: *i32, tile_rel: *const f32) f32 {
+pub fn recannonicalizeCoordinate(world: *World, tile_abs: *i32, tile_rel: *const f32) f32 {
     const offset = intrinsics.roundReal32ToInt32(tile_rel.* / world.chunk_side_in_meters);
 
     tile_abs.* +%= offset;
@@ -294,7 +307,7 @@ pub fn mapIntoChunkSpace(world: *World, base_position: WorldPosition, offset: Ve
     return result;
 }
 
-pub inline fn chunkPositionFromTilePosition(
+pub fn chunkPositionFromTilePosition(
     world: *World,
     abs_tile_x: i32,
     abs_tile_y: i32,
@@ -308,9 +321,9 @@ pub inline fn chunkPositionFromTilePosition(
 
     result.offset = Vector2.new(
         @as(f32, @floatFromInt((abs_tile_x - TILES_PER_CHUNK / 2) -
-                (result.chunk_x * TILES_PER_CHUNK))) * world.tile_side_in_meters,
+            (result.chunk_x * TILES_PER_CHUNK))) * world.tile_side_in_meters,
         @as(f32, @floatFromInt((abs_tile_y - TILES_PER_CHUNK / 2) -
-                (result.chunk_y * TILES_PER_CHUNK))) * world.tile_side_in_meters,
+            (result.chunk_y * TILES_PER_CHUNK))) * world.tile_side_in_meters,
     );
 
     std.debug.assert(isVector2Canonical(world, result.offset));

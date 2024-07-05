@@ -312,7 +312,7 @@ pub const HeroBitmaps = struct {
     shadow: LoadedBitmap,
 };
 
-// Data structures..
+// Data structures.
 pub const LoadedBitmap = struct {
     width: i32 = 0,
     height: i32 = 0,
@@ -342,6 +342,12 @@ pub const BitmapHeader = packed struct {
     red_mask: u32,
     green_mask: u32,
     blue_mask: u32,
+};
+
+pub const MoveSpec = struct {
+    speed: f32 = 1.0,
+    drag: f32 = 0.0,
+    unit_max_acceleration: bool = false,
 };
 
 pub fn colorToInt(color: Color) u32 {
