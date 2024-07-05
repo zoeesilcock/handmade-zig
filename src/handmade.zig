@@ -224,16 +224,16 @@ pub export fn updateAndRender(
                     input_direction = math.Vector2.new(controller.stick_average_x, controller.stick_average_y);
                 } else {
                     if (controller.move_up.ended_down) {
-                        input_direction.data[1] = 1;
+                        input_direction = input_direction.add(math.Vector2.new(0, 1));
                     }
                     if (controller.move_down.ended_down) {
-                        input_direction.data[1] = -1;
+                        input_direction = input_direction.add(math.Vector2.new(0, -1));
                     }
                     if (controller.move_left.ended_down) {
-                        input_direction.data[0] = -1;
+                        input_direction = input_direction.add(math.Vector2.new(-1, 0));
                     }
                     if (controller.move_right.ended_down) {
-                        input_direction.data[0] = 1;
+                        input_direction = input_direction.add(math.Vector2.new(1, 0));
                     }
                 }
 

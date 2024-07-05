@@ -2,27 +2,27 @@ pub const Vector2 = Vector(2);
 pub const Vector3 = Vector(3);
 pub const Color = Vector(4);
 
-fn Vector(comptime in_dimensions: comptime_int) type {
+fn Vector(comptime dimension_count: comptime_int) type {
     return struct{
-        data: @Vector(in_dimensions, f32),
-        pub const dimensions = in_dimensions;
+        values: @Vector(dimension_count, f32),
+        pub const dimensions = dimension_count;
 
         const Self = @This();
 
         pub usingnamespace switch (Self.dimensions) {
             inline 2 => struct {
                 pub inline fn new(x_value: f32, y_value: f32) Self {
-                    return Self{ .data = .{ x_value, y_value } };
+                    return Self{ .values = .{ x_value, y_value } };
                 }
                 pub inline fn zero() Self {
-                    return Self{ .data = .{ 0, 0 } };
+                    return Self{ .values = .{ 0, 0 } };
                 }
 
                 pub inline fn x(self: *const Self) f32 {
-                    return self.data[0];
+                    return self.values[0];
                 }
                 pub inline fn y(self: *const Self) f32 {
-                    return self.data[1];
+                    return self.values[1];
                 }
                 pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle2) bool {
                     const result = ((self.x() >= rectangle.min.x()) and
@@ -35,54 +35,54 @@ fn Vector(comptime in_dimensions: comptime_int) type {
             },
             inline 3 => struct {
                 pub inline fn new(x_value: f32, y_value: f32, z_value: f32) Self {
-                    return Self{ .data = .{ x_value, y_value, z_value } };
+                    return Self{ .values = .{ x_value, y_value, z_value } };
                 }
                 pub inline fn zero() Self {
-                    return Self{ .data = .{ 0, 0, 0 } };
+                    return Self{ .values = .{ 0, 0, 0 } };
                 }
 
                 pub inline fn x(self: *const Self) f32 {
-                    return self.data[0];
+                    return self.values[0];
                 }
                 pub inline fn y(self: *const Self) f32 {
-                    return self.data[1];
+                    return self.values[1];
                 }
                 pub inline fn z(self: *const Self) f32 {
-                    return self.data[2];
+                    return self.values[2];
                 }
             },
             inline 4 => struct {
                 pub inline fn new(x_value: f32, y_value: f32, z_value: f32, w_value: f32) Self {
-                    return Self{ .data = .{ x_value, y_value, z_value, w_value } };
+                    return Self{ .values = .{ x_value, y_value, z_value, w_value } };
                 }
                 pub inline fn zero() Self {
-                    return Self{ .data = .{ 0, 0, 0, 0 } };
+                    return Self{ .values = .{ 0, 0, 0, 0 } };
                 }
 
                 pub inline fn x(self: *const Self) f32 {
-                    return self.data[0];
+                    return self.values[0];
                 }
                 pub inline fn y(self: *const Self) f32 {
-                    return self.data[1];
+                    return self.values[1];
                 }
                 pub inline fn z(self: *const Self) f32 {
-                    return self.data[2];
+                    return self.values[2];
                 }
                 pub inline fn w(self: *const Self) f32 {
-                    return self.data[3];
+                    return self.values[3];
                 }
 
                 pub inline fn r(self: *const Self) f32 {
-                    return self.data[0];
+                    return self.values[0];
                 }
                 pub inline fn g(self: *const Self) f32 {
-                    return self.data[1];
+                    return self.values[1];
                 }
                 pub inline fn b(self: *const Self) f32 {
-                    return self.data[2];
+                    return self.values[2];
                 }
                 pub inline fn a(self: *const Self) f32 {
-                    return self.data[3];
+                    return self.values[3];
                 }
             },
             else => {
@@ -92,35 +92,35 @@ fn Vector(comptime in_dimensions: comptime_int) type {
 
         pub fn add(self: *const Self, b: Self) Self {
             return Self{
-                .data = self.data + b.data
+                .values = self.values + b.values
             };
         }
 
         pub fn sub(self: *const Self, b: Self) Self {
             return Self{
-                .data = self.data - b.data
+                .values = self.values - b.values
             };
         }
 
         pub fn mul(self: *const Self, b: Self) Self {
             return Self{
-                .data = self.data * b.data
+                .values = self.values * b.values
             };
         }
 
         pub fn div(self: *const Self, b: Self) Self {
             return Self{
-                .data = self.data / b.data
+                .values = self.values / b.values
             };
         }
 
         pub fn scale(self: *const Self, scalar: f32) Self {
             var result = Self{
-                .data = self.data
+                .values = self.values
             };
 
             for (0..dimensions) |index| {
-                result.data[index] *= scalar;
+                result.values[index] *= scalar;
             }
 
             return result;
@@ -128,7 +128,7 @@ fn Vector(comptime in_dimensions: comptime_int) type {
 
         pub fn negate(self: *const Self) Self {
             return Self{
-                .data = -self.data
+                .values = -self.values
             };
         }
 
@@ -136,7 +136,7 @@ fn Vector(comptime in_dimensions: comptime_int) type {
             var result: f32 = 0;
 
             for (0..dimensions) |index| {
-                result += self.data[index] * b.data[index];
+                result += self.values[index] * b.values[index];
             }
 
             return result;
