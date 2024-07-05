@@ -51,6 +51,7 @@ pub export fn updateAndRender(
                 },
             },
             .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
+            .sword = debugLoadBMP(thread, platform, "test2/rock03.bmp"),
         };
 
         shared.initializeArena(
@@ -238,8 +239,41 @@ pub export fn updateAndRender(
                 }
 
                 if (controlling_entity.high) |high_entity| {
-                    if (controller.action_down.ended_down) {
+                    if (controller.start_button.ended_down) {
                         high_entity.z_velocity = 3;
+                    }
+
+                    var sword_direction = math.Vector2.zero();
+                    if (controller.action_up.ended_down) {
+                        sword_direction = sword_direction.plus(math.Vector2.new(0, 1));
+                    }
+                    if (controller.action_down.ended_down) {
+                        sword_direction = sword_direction.plus(math.Vector2.new(0, -1));
+                    }
+                    if (controller.action_left.ended_down) {
+                        sword_direction = sword_direction.plus(math.Vector2.new(-1, 0));
+                    }
+                    if (controller.action_right.ended_down) {
+                        sword_direction = sword_direction.plus(math.Vector2.new(1, 0));
+                    }
+
+                    if (sword_direction.x() != 0 or sword_direction.y() != 0) {
+                        const opt_sword = getLowEntity(state, controlling_entity.low.sword_low_index);
+
+                        if (opt_sword) |sword| {
+                            if (!sword.position.isValid()) {
+                                var sword_position = controlling_entity.low.position;
+
+                                world.changeEntityLocation(
+                                    &state.world_arena,
+                                    state.world,
+                                    sword,
+                                    controlling_entity.low.sword_low_index,
+                                    null,
+                                    &sword_position,
+                                );
+                            }
+                        }
                     }
                 }
 
@@ -248,7 +282,8 @@ pub export fn updateAndRender(
                     controlling_entity,
                     input.frame_delta_time,
                     input_direction,
-                    if (controller.action_up.ended_down) 200.0 else 50.0,
+                    50.0,
+                    // if (controller.left_trigger.ended_down) 200.0 else 50.0,
                 );
             }
         }
@@ -322,6 +357,11 @@ pub export fn updateAndRender(
                 piece_group.pushBitmap(&hero_bitmaps.head, math.Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
                 drawHitPoints(low_entity, &piece_group);
+            },
+            .Sword => {
+                var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
+                piece_group.pushBitmap(&hero_bitmaps.shadow, math.Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                piece_group.pushBitmap(&state.sword, math.Vector2.zero(), 0, math.Vector2.new(29, 10), 1, 1);
             },
             .Wall => {
                 piece_group.pushBitmap(&state.tree, math.Vector2.zero(), 0, math.Vector2.new(40, 80), 1, 1);
@@ -448,6 +488,11 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
                         const low_entity_index = block.low_entity_indices[block_entity_index];
                         var low_entity = state.low_entities[low_entity_index];
 
+                        if (low_entity.type == .Sword) {
+                            const foo = "bar";
+                            _ = foo;
+                        }
+
                         if (low_entity.high_entity_index == 0) {
                             const camera_space_position = getCameraSpacePosition(state, &low_entity);
 
@@ -467,19 +512,28 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
 fn addLowEntity(state: *shared.State, entity_type: shared.EntityType, opt_world_position: ?world.WorldPosition) shared.Entity {
     std.debug.assert(state.low_entity_count < state.low_entities.len);
 
-    const entity_index = state.low_entity_count;
+    const low_entity_index = state.low_entity_count;
     state.low_entity_count += 1;
 
-    var low_entity = &state.low_entities[entity_index];
+    var low_entity = &state.low_entities[low_entity_index];
     low_entity.type = entity_type;
 
     if (opt_world_position) |world_position| {
         low_entity.position = world_position;
-        world.changeEntityLocation(state.world, &state.world_arena, entity_index, null, @constCast(@ptrCast(&opt_world_position)));
+        world.changeEntityLocation(
+            &state.world_arena,
+            state.world,
+            low_entity,
+            low_entity_index,
+            null,
+            @constCast(@ptrCast(&opt_world_position)),
+        );
+    } else {
+        low_entity.position = world.WorldPosition.nullPosition();
     }
 
     return shared.Entity{
-        .low_index = entity_index,
+        .low_index = low_entity_index,
         .low = low_entity,
         .high = null,
     };
@@ -658,15 +712,17 @@ fn drawHitPoints(low_entity: *shared.LowEntity, piece_group: *shared.EntityVisib
     }
 }
 
-
 fn addPlayer(state: *shared.State) shared.Entity {
     const entity = addLowEntity(state, .Hero, state.camera_position);
-
-    initHitPoints(entity.low, 3);
 
     entity.low.height = 0.5; // 1.4;
     entity.low.width = 1.0;
     entity.low.collides = true;
+
+    initHitPoints(entity.low, 3);
+
+    const sword = addSword(state);
+    entity.low.sword_low_index = sword.low_index;
 
     if (state.camera_following_entity_index == 0) {
         state.camera_following_entity_index = entity.low_index;
@@ -675,15 +731,25 @@ fn addPlayer(state: *shared.State) shared.Entity {
     return entity;
 }
 
+fn addSword(state: *shared.State) shared.Entity {
+    const entity = addLowEntity(state, .Sword, null);
+
+    entity.low.height = 0.5;
+    entity.low.width = 1.0;
+    entity.low.collides = false;
+
+    return entity;
+}
+
 fn addMonster(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) shared.Entity {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Monster, world_position);
 
-    initHitPoints(entity.low, 3);
-
     entity.low.height = 0.5;
     entity.low.width = 1.0;
     entity.low.collides = true;
+
+    initHitPoints(entity.low, 3);
 
     return entity;
 }
@@ -889,8 +955,7 @@ fn moveEntity(
         }
 
         var new_position = world.mapIntoChunkSpace(state.world, state.camera_position, high_entity.position);
-        world.changeEntityLocation(state.world, &state.world_arena, entity.low_index, &entity.low.position, &new_position);
-        entity.low.position = new_position;
+        world.changeEntityLocation(&state.world_arena, state.world, entity.low, entity.low_index, &entity.low.position, &new_position);
     }
 }
 

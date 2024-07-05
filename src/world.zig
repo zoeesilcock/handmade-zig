@@ -53,6 +53,19 @@ pub const WorldPosition = struct {
             .offset = math.Vector2.zero(),
         };
     }
+
+    pub fn nullPosition() WorldPosition {
+        return WorldPosition{
+            .chunk_x = TILE_CHUNK_UNINITIALIZED,
+            .chunk_y = 0,
+            .chunk_z = 0,
+            .offset = math.Vector2.zero(),
+        };
+    }
+
+    pub fn isValid(self: *WorldPosition) bool {
+        return self.chunk_x != TILE_CHUNK_UNINITIALIZED;
+    }
 };
 
 pub fn initializeWorld(world: *World, tile_side_in_meters: f32) void {
@@ -140,14 +153,35 @@ pub fn getWorldChunk(
 
     return tile_chunk;
 }
-
 pub fn changeEntityLocation(
-    world: *World,
     memory_arena: *shared.MemoryArena,
+    world: *World,
+    low_entity: *shared.LowEntity,
     low_entity_index: u32,
     opt_old_position: ?*WorldPosition,
     new_position: *WorldPosition,
 ) void {
+    changeEntityLocationRaw(
+        memory_arena,
+        world,
+        low_entity_index,
+        opt_old_position,
+        new_position,
+    );
+
+    low_entity.position = new_position.*;
+}
+
+pub fn changeEntityLocationRaw(
+    memory_arena: *shared.MemoryArena,
+    world: *World,
+    low_entity_index: u32,
+    opt_old_position: ?*WorldPosition,
+    new_position: *WorldPosition,
+) void {
+    std.debug.assert(opt_old_position == null or opt_old_position.?.isValid());
+    std.debug.assert(new_position.isValid());
+
     if (opt_old_position) |old_position| {
         if (!areInSameChunk(world, old_position, new_position)) {
             // Pull the entity out of it's current block.

@@ -169,6 +169,7 @@ pub const State = struct {
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
     tree: LoadedBitmap,
+    sword: LoadedBitmap,
 };
 
 pub const LowEntityChunkReference = struct {
@@ -188,6 +189,7 @@ pub const EntityType = enum(u8) {
     Wall,
     Familiar,
     Monster,
+    Sword,
 };
 
 pub const Entity = struct {
@@ -210,6 +212,9 @@ pub const LowEntity = struct {
 
     hit_point_max: u32,
     hit_points: [16]HitPoint,
+
+    sword_low_index: u32 = 0,
+    distance_remaining: f32 = 0,
 };
 
 pub const HitPoint = struct {
