@@ -1,8 +1,13 @@
-pub const Vector2 = Vector(2);
-pub const Vector3 = Vector(3);
-pub const Color = Vector(4);
+pub const Vector2 = Vector(2, .Position);
+pub const Vector3 = Vector(3, .Position);
+pub const Color = Vector(4, .Color);
 
-fn Vector(comptime dimension_count: comptime_int) type {
+const VectorAccessorStyle = enum {
+    Position,
+    Color,
+};
+
+fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: VectorAccessorStyle ) type {
     return struct{
         values: @Vector(dimension_count, f32),
         pub const dimensions = dimension_count;
@@ -15,66 +20,93 @@ fn Vector(comptime dimension_count: comptime_int) type {
                     return Self{ .values = .{ x_value, y_value } };
                 }
 
-                pub inline fn x(self: *const Self) f32 {
-                    return self.values[0];
-                }
-                pub inline fn y(self: *const Self) f32 {
-                    return self.values[1];
-                }
-                pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle2) bool {
-                    const result = ((self.x() >= rectangle.min.x()) and
-                        (self.y() >= rectangle.min.y()) and
-                        (self.x() < rectangle.max.x()) and
-                        (self.y() < rectangle.max.y()));
+                pub usingnamespace switch (accessor_style) {
+                    inline .Position => struct {
+                        pub inline fn x(self: *const Self) f32 {
+                            return self.values[0];
+                        }
+                        pub inline fn y(self: *const Self) f32 {
+                            return self.values[1];
+                        }
+                        pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle2) bool {
+                            const result = ((self.x() >= rectangle.min.x()) and
+                                (self.y() >= rectangle.min.y()) and
+                                (self.x() < rectangle.max.x()) and
+                                (self.y() < rectangle.max.y()));
 
-                    return result;
-                }
+                            return result;
+                        }
+                    },
+                    else => {
+                        unreachable;
+                    }
+                };
             },
             inline 3 => struct {
                 pub inline fn new(x_value: f32, y_value: f32, z_value: f32) Self {
                     return Self{ .values = .{ x_value, y_value, z_value } };
                 }
 
-                pub inline fn x(self: *const Self) f32 {
-                    return self.values[0];
-                }
-                pub inline fn y(self: *const Self) f32 {
-                    return self.values[1];
-                }
-                pub inline fn z(self: *const Self) f32 {
-                    return self.values[2];
-                }
+                pub usingnamespace switch (accessor_style) {
+                    inline .Position => struct {
+                        pub inline fn x(self: *const Self) f32 {
+                            return self.values[0];
+                        }
+                        pub inline fn y(self: *const Self) f32 {
+                            return self.values[1];
+                        }
+                        pub inline fn z(self: *const Self) f32 {
+                            return self.values[2];
+                        }
+                    },
+                    inline .Color => struct {
+                        pub inline fn r(self: *const Self) f32 {
+                            return self.values[0];
+                        }
+                        pub inline fn g(self: *const Self) f32 {
+                            return self.values[1];
+                        }
+                        pub inline fn b(self: *const Self) f32 {
+                            return self.values[2];
+                        }
+                    },
+                };
             },
             inline 4 => struct {
                 pub inline fn new(x_value: f32, y_value: f32, z_value: f32, w_value: f32) Self {
                     return Self{ .values = .{ x_value, y_value, z_value, w_value } };
                 }
 
-                pub inline fn x(self: *const Self) f32 {
-                    return self.values[0];
-                }
-                pub inline fn y(self: *const Self) f32 {
-                    return self.values[1];
-                }
-                pub inline fn z(self: *const Self) f32 {
-                    return self.values[2];
-                }
-                pub inline fn w(self: *const Self) f32 {
-                    return self.values[3];
-                }
-
-                pub inline fn r(self: *const Self) f32 {
-                    return self.values[0];
-                }
-                pub inline fn g(self: *const Self) f32 {
-                    return self.values[1];
-                }
-                pub inline fn b(self: *const Self) f32 {
-                    return self.values[2];
-                }
-                pub inline fn a(self: *const Self) f32 {
-                    return self.values[3];
-                }
+                pub usingnamespace switch (accessor_style) {
+                    inline .Position => struct {
+                        pub inline fn x(self: *const Self) f32 {
+                            return self.values[0];
+                        }
+                        pub inline fn y(self: *const Self) f32 {
+                            return self.values[1];
+                        }
+                        pub inline fn z(self: *const Self) f32 {
+                            return self.values[2];
+                        }
+                        pub inline fn w(self: *const Self) f32 {
+                            return self.values[3];
+                        }
+                    },
+                    inline .Color => struct {
+                        pub inline fn r(self: *const Self) f32 {
+                            return self.values[0];
+                        }
+                        pub inline fn g(self: *const Self) f32 {
+                            return self.values[1];
+                        }
+                        pub inline fn b(self: *const Self) f32 {
+                            return self.values[2];
+                        }
+                        pub inline fn a(self: *const Self) f32 {
+                            return self.values[3];
+                        }
+                    },
+                };
             },
             else => {
                 unreachable;
