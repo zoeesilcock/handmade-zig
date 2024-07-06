@@ -7,6 +7,8 @@ const std = @import("std");
 
 const Vector2 = math.Vector2;
 const Color = math.Color;
+const State = shared.State;
+const Entity = shared.Entity;
 
 pub export fn updateAndRender(
     thread: *shared.ThreadContext,
@@ -15,12 +17,12 @@ pub export fn updateAndRender(
     input: shared.GameInput,
     buffer: *shared.OffscreenBuffer,
 ) void {
-    std.debug.assert(@sizeOf(shared.State) <= memory.permanent_storage_size);
+    std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
 
-    const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
+    const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
 
     if (!memory.is_initialized) {
-        state.* = shared.State{
+        state.* = State{
             .camera_position = world.WorldPosition.zero(),
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
             .hero_bitmaps = .{
@@ -59,8 +61,8 @@ pub export fn updateAndRender(
 
         shared.initializeArena(
             &state.world_arena,
-            memory.permanent_storage_size - @sizeOf(shared.State),
-            @as([*]u8, @ptrCast(memory.permanent_storage.?)) + @sizeOf(shared.State),
+            memory.permanent_storage_size - @sizeOf(State),
+            @as([*]u8, @ptrCast(memory.permanent_storage.?)) + @sizeOf(State),
         );
 
         _ = addLowEntity(state, .Null, null);
@@ -345,7 +347,7 @@ pub export fn updateAndRender(
 
         var high_entity = &state.high_entities[high_entity_index];
         const low_entity = &state.low_entities[high_entity.low_entity_index];
-        const entity = shared.Entity{
+        const entity = Entity{
             .low_index = high_entity.low_entity_index,
             .low = low_entity,
             .high = high_entity,
@@ -464,7 +466,7 @@ pub export fn updateAndRender(
     }
 }
 
-fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosition) void {
+fn setCameraPosition(state: *State, new_camera_position: world.WorldPosition) void {
     std.debug.assert(validateEntityPairs(state));
 
     const camera_delta = world.subtractPositions(state.world, @constCast(&new_camera_position), &state.camera_position);
@@ -515,7 +517,7 @@ fn setCameraPosition(state: *shared.State, new_camera_position: world.WorldPosit
     std.debug.assert(validateEntityPairs(state));
 }
 
-fn addLowEntity(state: *shared.State, entity_type: shared.EntityType, opt_world_position: ?world.WorldPosition) shared.Entity {
+fn addLowEntity(state: *State, entity_type: shared.EntityType, opt_world_position: ?world.WorldPosition) Entity {
     std.debug.assert(state.low_entity_count < state.low_entities.len);
 
     const low_entity_index = state.low_entity_count;
@@ -538,14 +540,14 @@ fn addLowEntity(state: *shared.State, entity_type: shared.EntityType, opt_world_
         low_entity.position = world.WorldPosition.nullPosition();
     }
 
-    return shared.Entity{
+    return Entity{
         .low_index = low_entity_index,
         .low = low_entity,
         .high = null,
     };
 }
 
-fn getLowEntity(state: *shared.State, index: u32) ?*shared.LowEntity {
+fn getLowEntity(state: *State, index: u32) ?*shared.LowEntity {
     var entity: ?*shared.LowEntity = null;
 
     if (index > 0 and index < state.low_entity_count) {
@@ -555,11 +557,11 @@ fn getLowEntity(state: *shared.State, index: u32) ?*shared.LowEntity {
     return entity;
 }
 
-fn forceEntityIntoHigh(state: *shared.State, low_index: u32) ?shared.Entity {
-    var result: ?shared.Entity = null;
+fn forceEntityIntoHigh(state: *State, low_index: u32) ?Entity {
+    var result: ?Entity = null;
 
     if (low_index > 0 and low_index < state.low_entity_count) {
-        result = shared.Entity{
+        result = Entity{
             .low_index = low_index,
             .low = &state.low_entities[low_index],
             .high = makeEntityHighFrequency(state, low_index, null),
@@ -569,13 +571,13 @@ fn forceEntityIntoHigh(state: *shared.State, low_index: u32) ?shared.Entity {
     return result;
 }
 
-fn getEntityFromHighIndex(state: *shared.State, high_entity_index: u32) ?shared.Entity {
-    var result: ?shared.Entity = null;
+fn getEntityFromHighIndex(state: *State, high_entity_index: u32) ?Entity {
+    var result: ?Entity = null;
 
     if (high_entity_index > 0) {
         const high_entity = &state.high_entities[high_entity_index];
         const low_entity = &state.low_entities[high_entity.low_entity_index];
-        result = shared.Entity{
+        result = Entity{
             .low_index = high_entity.low_entity_index,
             .low = low_entity,
             .high = high_entity,
@@ -585,7 +587,7 @@ fn getEntityFromHighIndex(state: *shared.State, high_entity_index: u32) ?shared.
     return result;
 }
 
-fn validateEntityPairs(state: *shared.State) bool {
+fn validateEntityPairs(state: *State) bool {
     var valid = true;
 
     var high_entity_index: u32 = 1;
@@ -597,7 +599,7 @@ fn validateEntityPairs(state: *shared.State) bool {
     return valid;
 }
 
-fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: Vector2, camera_bounds: math.Rectangle2) void {
+fn offsetAndCheckFrequencyByArea(state: *State, offset: Vector2, camera_bounds: math.Rectangle2) void {
     var high_entity_index: u32 = 1;
     while (high_entity_index < state.high_entity_count) {
         const high_entity = &state.high_entities[high_entity_index];
@@ -614,13 +616,13 @@ fn offsetAndCheckFrequencyByArea(state: *shared.State, offset: Vector2, camera_b
     }
 }
 
-fn getCameraSpacePosition(state: *shared.State, low_entity: *shared.LowEntity) Vector2 {
+fn getCameraSpacePosition(state: *State, low_entity: *shared.LowEntity) Vector2 {
     const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
     return diff.xy;
 }
 
 fn makeEntityHighFrequency(
-    state: *shared.State,
+    state: *State,
     low_index: u32,
     camera_space_position: ?Vector2,
 ) ?*shared.HighEntity {
@@ -657,7 +659,7 @@ fn makeEntityHighFrequency(
     return result;
 }
 
-fn makeEntityLowFrequency(state: *shared.State, low_index: u32) void {
+fn makeEntityLowFrequency(state: *State, low_index: u32) void {
     const low_entity = &state.low_entities[low_index];
     const high_index = low_entity.high_entity_index;
 
@@ -674,7 +676,7 @@ fn makeEntityLowFrequency(state: *shared.State, low_index: u32) void {
     }
 }
 
-fn addWall(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) shared.Entity {
+fn addWall(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Entity {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Wall, world_position);
 
@@ -720,7 +722,7 @@ fn drawHitPoints(low_entity: *shared.LowEntity, piece_group: *shared.EntityVisib
     }
 }
 
-fn addPlayer(state: *shared.State) shared.Entity {
+fn addPlayer(state: *State) Entity {
     const entity = addLowEntity(state, .Hero, state.camera_position);
 
     entity.low.height = 0.5; // 1.4;
@@ -739,7 +741,7 @@ fn addPlayer(state: *shared.State) shared.Entity {
     return entity;
 }
 
-fn addSword(state: *shared.State) shared.Entity {
+fn addSword(state: *State) Entity {
     const entity = addLowEntity(state, .Sword, null);
 
     entity.low.height = 0.5;
@@ -749,7 +751,7 @@ fn addSword(state: *shared.State) shared.Entity {
     return entity;
 }
 
-fn updateSword(state: *shared.State, entity: shared.Entity, delta_time: f32) void {
+fn updateSword(state: *State, entity: Entity, delta_time: f32) void {
     const move_spec = shared.MoveSpec{};
 
     const old_position = entity.high.?.position;
@@ -771,7 +773,7 @@ fn updateSword(state: *shared.State, entity: shared.Entity, delta_time: f32) voi
     }
 }
 
-fn addMonster(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) shared.Entity {
+fn addMonster(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Entity {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Monster, world_position);
 
@@ -784,13 +786,13 @@ fn addMonster(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z
     return entity;
 }
 
-fn updateMonster(state: *shared.State, entity: shared.Entity, delta_time: f32) void {
+fn updateMonster(state: *State, entity: Entity, delta_time: f32) void {
     _ = state;
     _ = entity;
     _ = delta_time;
 }
 
-fn addFamiliar(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) shared.Entity {
+fn addFamiliar(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Entity {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Familiar, world_position);
 
@@ -801,8 +803,8 @@ fn addFamiliar(state: *shared.State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_
     return entity;
 }
 
-fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) void {
-    var closest_hero: ?shared.Entity = null;
+fn updateFamiliar(state: *State, entity: Entity, delta_time: f32) void {
+    var closest_hero: ?Entity = null;
     var closest_hero_squared: f32 = math.square(10.0);
 
     var high_entity_index: u32 = 1;
@@ -839,8 +841,8 @@ fn updateFamiliar(state: *shared.State, entity: shared.Entity, delta_time: f32) 
 }
 
 fn moveEntity(
-    state: *shared.State,
-    entity: shared.Entity,
+    state: *State,
+    entity: Entity,
     delta_time: f32,
     direction: Vector2,
     move_spec: *const shared.MoveSpec,
@@ -880,7 +882,7 @@ fn moveEntity(
                 var test_high_entity_index: u32 = 0;
                 while (test_high_entity_index < state.high_entity_count) : (test_high_entity_index += 1) {
                     if (test_high_entity_index != entity.low.high_entity_index) {
-                        var test_entity = shared.Entity{
+                        var test_entity = Entity{
                             .high = &state.high_entities[test_high_entity_index],
                             .low = undefined,
                             .low_index = 0,
@@ -1035,7 +1037,7 @@ pub export fn getSoundSamples(
 ) void {
     _ = thread;
 
-    const state: *shared.State = @ptrCast(@alignCast(memory.permanent_storage));
+    const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
     outputSound(sound_buffer, shared.MIDDLE_C, state);
 }
 
@@ -1216,7 +1218,7 @@ fn debugLoadBMP(
     return result;
 }
 
-fn outputSound(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, state: *shared.State) void {
+fn outputSound(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, state: *State) void {
     _ = sound_buffer;
     _ = tone_hz;
     _ = state;
