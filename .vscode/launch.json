@@ -12,6 +12,16 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "Debug for raylib",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/${workspaceFolderBasename}.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}/data",
+            "preLaunchTask": "build for raylib",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Debug with timing",
             "type": "cppvsdbg",
             "request": "launch",
