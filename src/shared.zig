@@ -9,6 +9,7 @@ pub const HIT_POINT_SUB_COUNT = 4;
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const world = @import("world.zig");
+const sim = @import("sim.zig");
 const std = @import("std");
 
 const Vector2 = math.Vector2;
@@ -183,39 +184,14 @@ pub const EntityResidence = enum(u8) {
     High,
 };
 
-pub const EntityType = enum(u8) {
-    Null,
-    Hero,
-    Wall,
-    Familiar,
-    Monster,
-    Sword,
-};
-
 pub const LowEntity = struct {
-    type: EntityType = .Null,
-
-    width: f32 = 0,
-    height: f32 = 0,
+    sim_entity: sim.SimEntity,
     position: world.WorldPosition = undefined,
-    velocity: Vector2 = Vector2.zero(),
-
-    facing_direction: u32 = undefined,
-    head_bob_time: f32 = 0,
-
-    collides: bool = false,
-    abs_tile_z_delta: i32 = 0,
-
-    hit_point_max: u32,
-    hit_points: [16]HitPoint,
-
-    sword_low_index: u32 = 0,
-    distance_remaining: f32 = 0,
 };
 
-pub const HitPoint = struct {
-    flags: u8,
-    filled_amount: u8,
+pub const AddLowEntityResult = struct {
+    low_entity: *LowEntity,
+    low_index: u32,
 };
 
 pub const EntityVisiblePieceGroup = struct {
@@ -321,12 +297,6 @@ pub const BitmapHeader = packed struct {
     red_mask: u32,
     green_mask: u32,
     blue_mask: u32,
-};
-
-pub const MoveSpec = struct {
-    speed: f32 = 1.0,
-    drag: f32 = 0.0,
-    unit_max_acceleration: bool = false,
 };
 
 pub fn colorToInt(color: Color) u32 {

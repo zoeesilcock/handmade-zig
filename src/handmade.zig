@@ -9,7 +9,7 @@ const std = @import("std");
 const Vector2 = math.Vector2;
 const Color = math.Color;
 const State = shared.State;
-const Entity = shared.Entity;
+const AddLowEntityResult = shared.AddLowEntityResult;
 
 pub export fn updateAndRender(
     thread: *shared.ThreadContext,
@@ -202,13 +202,6 @@ pub export fn updateAndRender(
             _ = addFamiliar(state, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
         }
 
-        setCameraPosition(state, world.chunkPositionFromTilePosition(
-            state.world,
-            camera_tile_x,
-            camera_tile_y,
-            camera_tile_z,
-        ));
-
         memory.is_initialized = true;
     }
 
@@ -294,7 +287,7 @@ pub export fn updateAndRender(
                     .drag = 8,
                     .unit_max_acceleration = true,
                 };
-                moveEntity(state, controlling_entity, input.frame_delta_time, input_direction, &move_spec);
+                sim.moveEntity(state, controlling_entity, input.frame_delta_time, input_direction, &move_spec);
             }
         }
     }
@@ -355,7 +348,7 @@ pub export fn updateAndRender(
                 drawHitPoints(low_entity, &piece_group);
             },
             .Sword => {
-                updateSword(state, entity, delta_time);
+                updateSword(state, screen_sim_region, entity, delta_time);
 
                 var hero_bitmaps = state.hero_bitmaps[low_entity.facing_direction];
                 piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
@@ -458,7 +451,7 @@ fn getCameraSpacePosition(state: *State, low_entity: *shared.LowEntity) Vector2 
     return diff.xy;
 }
 
-fn addLowEntity(state: *State, entity_type: shared.EntityType, opt_world_position: ?world.WorldPosition) Entity {
+fn addLowEntity(state: *State, entity_type: shared.EntityType, opt_world_position: ?world.WorldPosition) AddLowEntityResult {
     std.debug.assert(state.low_entity_count < state.low_entities.len);
 
     const low_entity_index = state.low_entity_count;
@@ -481,24 +474,13 @@ fn addLowEntity(state: *State, entity_type: shared.EntityType, opt_world_positio
         low_entity.position = world.WorldPosition.nullPosition();
     }
 
-    return Entity{
+    return AddLowEntityResult{
         .low_index = low_entity_index,
         .low = low_entity,
-        .high = null,
     };
 }
 
-fn getLowEntity(state: *State, index: u32) ?*shared.LowEntity {
-    var entity: ?*shared.LowEntity = null;
-
-    if (index > 0 and index < state.low_entity_count) {
-        entity = &state.low_entities[index];
-    }
-
-    return entity;
-}
-
-fn addWall(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Entity {
+fn addWall(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Wall, world_position);
 
@@ -544,7 +526,7 @@ fn drawHitPoints(low_entity: *shared.LowEntity, piece_group: *shared.EntityVisib
     }
 }
 
-fn addPlayer(state: *State) Entity {
+fn addPlayer(state: *State) AddLowEntityResult {
     const entity = addLowEntity(state, .Hero, state.camera_position);
 
     entity.low.height = 0.5; // 1.4;
@@ -554,7 +536,7 @@ fn addPlayer(state: *State) Entity {
     initHitPoints(entity.low, 3);
 
     const sword = addSword(state);
-    entity.low.sword_low_index = sword.low_index;
+    entity.low.sim_entity.sword.index = sword.low_index;
 
     if (state.camera_following_entity_index == 0) {
         state.camera_following_entity_index = entity.low_index;
@@ -563,7 +545,7 @@ fn addPlayer(state: *State) Entity {
     return entity;
 }
 
-fn addSword(state: *State) Entity {
+fn addSword(state: *State) AddLowEntityResult {
     const entity = addLowEntity(state, .Sword, null);
 
     entity.low.height = 0.5;
@@ -573,12 +555,12 @@ fn addSword(state: *State) Entity {
     return entity;
 }
 
-fn updateSword(state: *State, entity: Entity, delta_time: f32) void {
+fn updateSword(state: *State, sim_region: *sim.SimRegion, entity: Entity, delta_time: f32) void {
     const move_spec = shared.MoveSpec{};
 
     const old_position = entity.high.?.position;
 
-    moveEntity(state, entity, delta_time, Vector2.zero(), &move_spec);
+    sim.moveEntity(sim_region, entity, delta_time, Vector2.zero(), &move_spec);
 
     const distance_traveled = entity.high.?.position.minus(old_position).length();
     entity.low.distance_remaining -= distance_traveled;
@@ -595,7 +577,7 @@ fn updateSword(state: *State, entity: Entity, delta_time: f32) void {
     }
 }
 
-fn addMonster(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Entity {
+fn addMonster(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Monster, world_position);
 
@@ -614,7 +596,7 @@ fn updateMonster(state: *State, entity: Entity, delta_time: f32) void {
     _ = delta_time;
 }
 
-fn addFamiliar(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Entity {
+fn addFamiliar(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Familiar, world_position);
 
@@ -625,7 +607,7 @@ fn addFamiliar(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32)
     return entity;
 }
 
-fn updateFamiliar(state: *State, entity: Entity, delta_time: f32) void {
+fn updateFamiliar(state: *State, sim_region: *sim.SimRegion, entity: Entity, delta_time: f32) void {
     var closest_hero: ?Entity = null;
     var closest_hero_squared: f32 = math.square(10.0);
 
@@ -659,197 +641,7 @@ fn updateFamiliar(state: *State, entity: Entity, delta_time: f32) void {
         .drag = 8,
         .unit_max_acceleration = true,
     };
-    moveEntity(state, entity, delta_time, direction, &move_spec);
-}
-
-fn moveEntity(
-    state: *State,
-    entity: Entity,
-    delta_time: f32,
-    direction: Vector2,
-    move_spec: *const shared.MoveSpec,
-) void {
-    if (entity.high) |high_entity| {
-        var acceleration = direction;
-
-        // Correct speed when multiple axes are contributing to the direction.
-        if (move_spec.unit_max_acceleration) {
-            const direction_length = direction.lengthSquared();
-            if (direction_length > 1.0) {
-                acceleration = acceleration.scaledTo(1.0 / intrinsics.squareRoot(direction_length));
-            }
-        }
-
-        // Calculate acceleration.
-        acceleration = acceleration.scaledTo(move_spec.speed);
-
-        // Apply drag.
-        acceleration = acceleration.plus(high_entity.velocity.scaledTo(move_spec.drag).negated());
-        // acceleration = acceleration.minus(high_entity.velocity.scaledTo(move_spec.drag));
-
-        // Calculate player delta.
-        var player_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
-            .plus(high_entity.velocity.scaledTo(delta_time));
-        high_entity.velocity = acceleration.scaledTo(delta_time).plus(high_entity.velocity);
-
-        var iterations: u32 = 0;
-        while (iterations < 4) : (iterations += 1) {
-            var min_time: f32 = 1.0;
-            var wall_normal = Vector2.zero();
-            var hit_high_entity_index: u32 = 0;
-
-            const desired_position = high_entity.position.plus(player_delta);
-
-            if (entity.low.collides) {
-                var test_high_entity_index: u32 = 0;
-                while (test_high_entity_index < state.high_entity_count) : (test_high_entity_index += 1) {
-                    if (test_high_entity_index != entity.low.high_entity_index) {
-                        var test_entity = Entity{
-                            .high = &state.high_entities[test_high_entity_index],
-                            .low = undefined,
-                            .low_index = 0,
-                        };
-                        if (test_entity.high) |test_high_entity| {
-                            test_entity.low_index = test_high_entity.low_entity_index;
-                            test_entity.low = &state.low_entities[test_high_entity.low_entity_index];
-
-                            if (test_entity.low.collides) {
-                                const collision_diameter = Vector2.new(
-                                    test_entity.low.width + entity.low.width,
-                                    test_entity.low.height + entity.low.height,
-                                );
-                                const min_corner = collision_diameter.scaledTo(-0.5);
-                                const max_corner = collision_diameter.scaledTo(0.5);
-                                const relative = high_entity.position.minus(test_high_entity.position);
-
-                                if (testWall(
-                                    min_corner.x(),
-                                    relative.x(),
-                                    relative.y(),
-                                    player_delta.x(),
-                                    player_delta.y(),
-                                    min_corner.y(),
-                                    max_corner.y(),
-                                    &min_time,
-                                )) {
-                                    wall_normal = Vector2.new(-1, 0);
-                                    hit_high_entity_index = test_high_entity_index;
-                                }
-
-                                if (testWall(
-                                    max_corner.x(),
-                                    relative.x(),
-                                    relative.y(),
-                                    player_delta.x(),
-                                    player_delta.y(),
-                                    min_corner.y(),
-                                    max_corner.y(),
-                                    &min_time,
-                                )) {
-                                    wall_normal = Vector2.new(1, 0);
-                                    hit_high_entity_index = test_high_entity_index;
-                                }
-
-                                if (testWall(
-                                    min_corner.y(),
-                                    relative.y(),
-                                    relative.x(),
-                                    player_delta.y(),
-                                    player_delta.x(),
-                                    min_corner.x(),
-                                    max_corner.x(),
-                                    &min_time,
-                                )) {
-                                    wall_normal = Vector2.new(0, -1);
-                                    hit_high_entity_index = test_high_entity_index;
-                                }
-
-                                if (testWall(
-                                    max_corner.y(),
-                                    relative.y(),
-                                    relative.x(),
-                                    player_delta.y(),
-                                    player_delta.x(),
-                                    min_corner.x(),
-                                    max_corner.x(),
-                                    &min_time,
-                                )) {
-                                    wall_normal = Vector2.new(0, 1);
-                                    hit_high_entity_index = test_high_entity_index;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Apply the amount of delta allowed by collision detection.
-            high_entity.position = high_entity.position.plus(player_delta.scaledTo(min_time));
-
-            if (hit_high_entity_index > 0) {
-                // Remove velocity that is facing into the wall.
-                high_entity.velocity = high_entity.velocity.minus(wall_normal.scaledTo(high_entity.velocity.dotProduct(wall_normal)));
-
-                // Remove the applied delta.
-                player_delta = desired_position.minus(high_entity.position);
-                player_delta = player_delta.minus(wall_normal.scaledTo(player_delta.dotProduct(wall_normal)));
-
-                // Update player Z when hitting a ladder.
-                const hit_high_entity = &state.high_entities[hit_high_entity_index];
-                const hit_low_entity = &state.low_entities[hit_high_entity.low_entity_index];
-                high_entity.chunk_z += hit_low_entity.abs_tile_z_delta;
-            } else {
-                break;
-            }
-        }
-
-        // Update facing direction based on velocity.
-        if (high_entity.velocity.x() == 0 and high_entity.velocity.y() == 0) {
-            // Keep existing facing direction when velocity is zero.
-        } else if (intrinsics.absoluteValue(high_entity.velocity.x()) > intrinsics.absoluteValue(high_entity.velocity.y())) {
-            if (high_entity.velocity.x() > 0) {
-                high_entity.facing_direction = 0;
-            } else {
-                high_entity.facing_direction = 2;
-            }
-        } else if (intrinsics.absoluteValue(high_entity.velocity.x()) < intrinsics.absoluteValue(high_entity.velocity.y())) {
-            if (high_entity.velocity.y() > 0) {
-                high_entity.facing_direction = 1;
-            } else {
-                high_entity.facing_direction = 3;
-            }
-        }
-
-        var new_position = world.mapIntoChunkSpace(state.world, state.camera_position, high_entity.position);
-        world.changeEntityLocation(&state.world_arena, state.world, entity.low, entity.low_index, &entity.low.position, &new_position);
-    }
-}
-
-pub fn testWall(
-    wall_x: f32,
-    relative_x: f32,
-    relative_y: f32,
-    delta_x: f32,
-    delta_y: f32,
-    min_y: f32,
-    max_y: f32,
-    min_time: *f32,
-) bool {
-    var hit = false;
-
-    if (delta_x != 0.0) {
-        const epsilon_time = 0.001;
-        const result_time = (wall_x - relative_x) / delta_x;
-        const y = relative_y + (result_time * delta_y);
-        if (result_time >= 0 and min_time.* > result_time) {
-            if (y >= min_y and y <= max_y) {
-                min_time.* = @max(0.0, result_time - epsilon_time);
-                hit = true;
-            }
-        }
-    }
-
-    return hit;
+    sim.moveEntity(sim_region, entity, delta_time, direction, &move_spec);
 }
 
 pub export fn getSoundSamples(
