@@ -1,5 +1,6 @@
 const shared = @import("shared.zig");
 const world = @import("world.zig");
+const sim = @import("sim_region.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
@@ -298,32 +299,21 @@ pub export fn updateAndRender(
         }
     }
 
-    // Update camera position.
-    if (forceEntityIntoHigh(state, state.camera_following_entity_index)) |camera_following_entity| {
-        if (camera_following_entity.high) |high_entity| {
-            var new_camera_position = state.camera_position;
-            new_camera_position.chunk_z = camera_following_entity.low.position.chunk_z;
+    // Calculate the camera bounds.
+    const tile_span_x = 17 * 3;
+    const tile_span_y = 9 * 3;
+    const bounds_in_tiles = Vector2.new(tile_span_x, tile_span_y);
+    const camera_bounds = math.Rectangle2.fromCenterDimension(
+        Vector2.zero(),
+        bounds_in_tiles.scaledTo(state.world.tile_side_in_meters),
+    );
 
-            // Move camera when player leaves the current screen.
-            if (high_entity.position.x() > 9.0 * state.world.tile_side_in_meters) {
-                new_camera_position.chunk_x += 17;
-            } else if (high_entity.position.x() < -9.0 * state.world.tile_side_in_meters) {
-                new_camera_position.chunk_x -= 17;
-            }
-            if (high_entity.position.y() > 5.0 * state.world.tile_side_in_meters) {
-                new_camera_position.chunk_y += 9;
-            } else if (high_entity.position.y() < -5.0 * state.world.tile_side_in_meters) {
-                new_camera_position.chunk_y -= 9;
-            }
-
-            if (false) {
-                setCameraPosition(state, new_camera_position);
-            } else {
-                // Follow player position.
-                setCameraPosition(state, camera_following_entity.low.position);
-            }
-        }
-    }
+    const screen_sim_region = sim.beginSimulation(
+        &state.world,
+        &state.world_arena,
+        state.camera_position,
+        camera_bounds,
+    );
 
     // Clear background.
     const clear_color = Color.new(0.5, 0.5, 0.5, 1);
@@ -341,27 +331,22 @@ pub export fn updateAndRender(
     var piece_group = shared.EntityVisiblePieceGroup{
         .state = state,
     };
-    var high_entity_index: u32 = 1;
-    while (high_entity_index < state.high_entity_count) : (high_entity_index += 1) {
+    var sim_entity_index: u32 = 1;
+    while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
         piece_group.piece_count = 0;
 
-        var high_entity = &state.high_entities[high_entity_index];
-        const low_entity = &state.low_entities[high_entity.low_entity_index];
-        const entity = Entity{
-            .low_index = high_entity.low_entity_index,
-            .low = low_entity,
-            .high = high_entity,
-        };
+        var entity = &sim_region.entities[sim_entity_index];
+        const low_entity = &state.low_entities[entity.storage_index];
 
         const delta_time = input.frame_delta_time;
-        var shadow_alpha: f32 = 1 - high_entity.z;
+        var shadow_alpha: f32 = 1 - entity.z;
         if (shadow_alpha < 0) {
             shadow_alpha = 0;
         }
 
         switch (low_entity.type) {
             .Hero => {
-                var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
+                var hero_bitmaps = state.hero_bitmaps[low_entity.facing_direction];
                 piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
                 piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
                 piece_group.pushBitmap(&hero_bitmaps.cape, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
@@ -372,7 +357,7 @@ pub export fn updateAndRender(
             .Sword => {
                 updateSword(state, entity, delta_time);
 
-                var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
+                var hero_bitmaps = state.hero_bitmaps[low_entity.facing_direction];
                 piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
                 piece_group.pushBitmap(&state.sword, Vector2.zero(), 0, Vector2.new(29, 10), 1, 1);
             },
@@ -382,7 +367,7 @@ pub export fn updateAndRender(
             .Monster => {
                 updateMonster(state, entity, delta_time);
 
-                var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
+                var hero_bitmaps = state.hero_bitmaps[low_entity.facing_direction];
                 piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
                 piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
@@ -392,16 +377,16 @@ pub export fn updateAndRender(
                 updateFamiliar(state, entity, delta_time);
 
                 // Update head bob.
-                high_entity.head_bob_time += delta_time * 2;
-                if (high_entity.head_bob_time > shared.TAU32) {
-                    high_entity.head_bob_time = -shared.TAU32;
+                low_entity.head_bob_time += delta_time * 2;
+                if (low_entity.head_bob_time > shared.TAU32) {
+                    low_entity.head_bob_time = -shared.TAU32;
                 }
 
-                const head_bob_sine = @sin(2 * high_entity.head_bob_time);
+                const head_bob_sine = @sin(2 * low_entity.head_bob_time);
                 const head_z = 0.25 * head_bob_sine;
                 const head_shadow_alpha = (0.5 * shadow_alpha) + (0.2 * head_bob_sine);
 
-                var hero_bitmaps = state.hero_bitmaps[high_entity.facing_direction];
+                var hero_bitmaps = state.hero_bitmaps[low_entity.facing_direction];
                 piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
                 piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
             },
@@ -412,16 +397,16 @@ pub export fn updateAndRender(
 
         // Jump.
         const z_acceleration = -9.8;
-        high_entity.z = (0.5 * z_acceleration * math.square(delta_time)) +
-            high_entity.z_velocity * delta_time + high_entity.z;
-        high_entity.z_velocity = z_acceleration * delta_time + high_entity.z_velocity;
-        if (high_entity.z < 0) {
-            high_entity.z = 0;
+        entity.z = (0.5 * z_acceleration * math.square(delta_time)) +
+            entity.z_velocity * delta_time + entity.z;
+        entity.z_velocity = z_acceleration * delta_time + entity.z_velocity;
+        if (entity.z < 0) {
+            entity.z = 0;
         }
 
-        const entity_ground_point_x = screen_center_x + meters_to_pixels * high_entity.position.x();
-        const entity_ground_point_y = screen_center_y - meters_to_pixels * high_entity.position.y();
-        const entity_z = -meters_to_pixels * high_entity.z;
+        const entity_ground_point_x = screen_center_x + meters_to_pixels * entity.position.x();
+        const entity_ground_point_y = screen_center_y - meters_to_pixels * entity.position.y();
+        const entity_z = -meters_to_pixels * entity.z;
 
         if (false) {
             const tile_color = Color.new(1.0, 1.0, 0.0, 1);
@@ -464,57 +449,13 @@ pub export fn updateAndRender(
             }
         }
     }
+
+    sim.endSimulation(state, screen_sim_region);
 }
 
-fn setCameraPosition(state: *State, new_camera_position: world.WorldPosition) void {
-    std.debug.assert(validateEntityPairs(state));
-
-    const camera_delta = world.subtractPositions(state.world, @constCast(&new_camera_position), &state.camera_position);
-    state.camera_position = new_camera_position;
-
-    const tile_span_x = 17 * 3;
-    const tile_span_y = 9 * 3;
-    const bounds_in_tiles = Vector2.new(tile_span_x, tile_span_y);
-    const camera_bounds = math.Rectangle2.fromCenterDimension(
-        Vector2.zero(),
-        bounds_in_tiles.scaledTo(state.world.tile_side_in_meters),
-    );
-    const entity_offset_for_frame = camera_delta.xy.negated();
-    offsetAndCheckFrequencyByArea(state, entity_offset_for_frame, camera_bounds);
-
-    std.debug.assert(validateEntityPairs(state));
-
-    const min_chunk_position = world.mapIntoChunkSpace(state.world, new_camera_position, camera_bounds.getMinCorner());
-    const max_chunk_position = world.mapIntoChunkSpace(state.world, new_camera_position, camera_bounds.getMaxCorner());
-
-    var chunk_y = min_chunk_position.chunk_y;
-    while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
-        var chunk_x = min_chunk_position.chunk_x;
-        while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
-            const opt_chunk = world.getWorldChunk(state.world, chunk_x, chunk_y, new_camera_position.chunk_z, null);
-
-            if (opt_chunk) |chunk| {
-                var opt_block: ?*world.WorldEntityBlock = &chunk.first_block;
-                while (opt_block) |block| : (opt_block = block.next) {
-                    var block_entity_index: u32 = 0;
-                    while (block_entity_index < block.entity_count) : (block_entity_index += 1) {
-                        const low_entity_index = block.low_entity_indices[block_entity_index];
-                        var low_entity = state.low_entities[low_entity_index];
-
-                        if (low_entity.high_entity_index == 0) {
-                            const camera_space_position = getCameraSpacePosition(state, &low_entity);
-
-                            if (camera_space_position.isInRectangle(camera_bounds)) {
-                                _ = makeEntityHighFrequency(state, low_entity_index, camera_space_position);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    std.debug.assert(validateEntityPairs(state));
+fn getCameraSpacePosition(state: *State, low_entity: *shared.LowEntity) Vector2 {
+    const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
+    return diff.xy;
 }
 
 fn addLowEntity(state: *State, entity_type: shared.EntityType, opt_world_position: ?world.WorldPosition) Entity {
@@ -555,125 +496,6 @@ fn getLowEntity(state: *State, index: u32) ?*shared.LowEntity {
     }
 
     return entity;
-}
-
-fn forceEntityIntoHigh(state: *State, low_index: u32) ?Entity {
-    var result: ?Entity = null;
-
-    if (low_index > 0 and low_index < state.low_entity_count) {
-        result = Entity{
-            .low_index = low_index,
-            .low = &state.low_entities[low_index],
-            .high = makeEntityHighFrequency(state, low_index, null),
-        };
-    }
-
-    return result;
-}
-
-fn getEntityFromHighIndex(state: *State, high_entity_index: u32) ?Entity {
-    var result: ?Entity = null;
-
-    if (high_entity_index > 0) {
-        const high_entity = &state.high_entities[high_entity_index];
-        const low_entity = &state.low_entities[high_entity.low_entity_index];
-        result = Entity{
-            .low_index = high_entity.low_entity_index,
-            .low = low_entity,
-            .high = high_entity,
-        };
-    }
-
-    return result;
-}
-
-fn validateEntityPairs(state: *State) bool {
-    var valid = true;
-
-    var high_entity_index: u32 = 1;
-    while (high_entity_index < state.high_entity_count) : (high_entity_index += 1) {
-        const high_entity = &state.high_entities[high_entity_index];
-        valid = valid and (state.low_entities[high_entity.low_entity_index].high_entity_index == high_entity_index);
-    }
-
-    return valid;
-}
-
-fn offsetAndCheckFrequencyByArea(state: *State, offset: Vector2, camera_bounds: math.Rectangle2) void {
-    var high_entity_index: u32 = 1;
-    while (high_entity_index < state.high_entity_count) {
-        const high_entity = &state.high_entities[high_entity_index];
-        const low_entity = &state.low_entities[high_entity.low_entity_index];
-
-        high_entity.position = high_entity.position.plus(offset);
-
-        if (low_entity.position.isValid() and high_entity.position.isInRectangle(camera_bounds)) {
-            high_entity_index += 1;
-        } else {
-            std.debug.assert(low_entity.high_entity_index == high_entity_index);
-            _ = makeEntityLowFrequency(state, high_entity.low_entity_index);
-        }
-    }
-}
-
-fn getCameraSpacePosition(state: *State, low_entity: *shared.LowEntity) Vector2 {
-    const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
-    return diff.xy;
-}
-
-fn makeEntityHighFrequency(
-    state: *State,
-    low_index: u32,
-    camera_space_position: ?Vector2,
-) ?*shared.HighEntity {
-    var result: ?*shared.HighEntity = null;
-    var low_entity = &state.low_entities[low_index];
-
-    if (low_entity.high_entity_index != 0) {
-        result = &state.high_entities[low_entity.high_entity_index];
-    } else {
-        if (state.high_entity_count < state.high_entities.len) {
-            const high_index = state.high_entity_count;
-            state.high_entity_count += 1;
-            var high_entity = &state.high_entities[high_index];
-
-            if (camera_space_position) |position| {
-                high_entity.position = position;
-            } else {
-                high_entity.position = getCameraSpacePosition(state, low_entity);
-            }
-
-            high_entity.chunk_z = low_entity.position.chunk_z;
-            high_entity.velocity = Vector2.zero();
-            high_entity.facing_direction = 0;
-
-            high_entity.low_entity_index = low_index;
-            low_entity.high_entity_index = high_index;
-
-            result = high_entity;
-        } else {
-            unreachable;
-        }
-    }
-
-    return result;
-}
-
-fn makeEntityLowFrequency(state: *State, low_index: u32) void {
-    const low_entity = &state.low_entities[low_index];
-    const high_index = low_entity.high_entity_index;
-
-    if (high_index != 0) {
-        const last_high_index = state.high_entity_count - 1;
-        if (high_index != last_high_index) {
-            const last_entity = state.high_entities[last_high_index];
-            state.high_entities[high_index] = last_entity;
-            state.low_entities[last_entity.low_entity_index].high_entity_index = high_index;
-        }
-
-        state.high_entity_count -= 1;
-        low_entity.high_entity_index = 0;
-    }
 }
 
 fn addWall(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Entity {

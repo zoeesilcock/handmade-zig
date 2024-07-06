@@ -166,9 +166,6 @@ pub const State = struct {
     low_entity_count: u32 = 0,
     low_entities: [100000]LowEntity = [1]LowEntity{undefined} ** 100000,
 
-    high_entity_count: u32 = 0,
-    high_entities: [256]HighEntity = [1]HighEntity{undefined} ** 256,
-
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
     tree: LoadedBitmap,
@@ -195,20 +192,16 @@ pub const EntityType = enum(u8) {
     Sword,
 };
 
-pub const Entity = struct {
-    low_index: u32,
-    low: *LowEntity,
-
-    high: ?*HighEntity,
-};
-
 pub const LowEntity = struct {
-    high_entity_index: u32 = 0,
     type: EntityType = .Null,
 
     width: f32 = 0,
     height: f32 = 0,
     position: world.WorldPosition = undefined,
+    velocity: Vector2 = Vector2.zero(),
+
+    facing_direction: u32 = undefined,
+    head_bob_time: f32 = 0,
 
     collides: bool = false,
     abs_tile_z_delta: i32 = 0,
@@ -223,20 +216,6 @@ pub const LowEntity = struct {
 pub const HitPoint = struct {
     flags: u8,
     filled_amount: u8,
-};
-
-pub const HighEntity = struct {
-    low_entity_index: u32 = 0,
-
-    position: Vector2 = Vector2.zero(),
-    velocity: Vector2 = Vector2.zero(),
-    chunk_z: i32 = 0,
-    facing_direction: u32 = undefined,
-
-    z: f32 = 0,
-    z_velocity: f32 = 0,
-
-    head_bob_time: f32 = 0,
 };
 
 pub const EntityVisiblePieceGroup = struct {
