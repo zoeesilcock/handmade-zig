@@ -923,7 +923,7 @@ fn toggleFullscreen(window: win32.HWND) void {
                 monitor_info.rcMonitor.top,
                 monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
                 monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top,
-                win32.SET_WINDOW_POS_FLAGS{.NOOWNERZORDER = 1, .DRAWFRAME = 1 },
+                win32.SET_WINDOW_POS_FLAGS{ .NOOWNERZORDER = 1, .DRAWFRAME = 1 },
             );
         }
     } else {
@@ -1309,8 +1309,8 @@ pub export fn wWinMain(
             );
 
             if (state.game_memory_block) |memory_block| {
-                game_memory.permanent_storage = memory_block;
-                game_memory.transient_storage = @ptrFromInt(@intFromPtr(&game_memory.permanent_storage) + game_memory.permanent_storage_size);
+                game_memory.permanent_storage = @ptrCast(memory_block);
+                game_memory.transient_storage = @as([*]void, @ptrCast(memory_block)) + game_memory.permanent_storage_size;
             }
 
             for (0..state.replay_buffers.len) |index| {

@@ -118,9 +118,9 @@ pub const MemoryIndex = usize;
 pub const Memory = extern struct {
     is_initialized: bool,
     permanent_storage_size: u64,
-    permanent_storage: ?*anyopaque,
+    permanent_storage: ?[*]void,
     transient_storage_size: u64,
-    transient_storage: ?*anyopaque,
+    transient_storage: ?[*]void,
 };
 
 pub const MemoryArena = struct {
@@ -129,13 +129,13 @@ pub const MemoryArena = struct {
     used: MemoryIndex,
 };
 
-pub fn initializeArena(arena: *MemoryArena, size: MemoryIndex, base: [*]u8) void {
+pub inline fn initializeArena(arena: *MemoryArena, size: MemoryIndex, base: [*]void) void {
     arena.size = size;
-    arena.base = base;
+    arena.base = @ptrCast(base);
     arena.used = 0;
 }
 
-fn pushSize(arena: *MemoryArena, size: MemoryIndex) [*]u8 {
+inline fn pushSize(arena: *MemoryArena, size: MemoryIndex) [*]u8 {
     std.debug.assert((arena.used + size) <= arena.size);
 
     const result = arena.base + arena.used;
@@ -143,14 +143,27 @@ fn pushSize(arena: *MemoryArena, size: MemoryIndex) [*]u8 {
     return result;
 }
 
-pub fn pushStruct(arena: *MemoryArena, comptime T: type) *T {
+pub inline fn pushStruct(arena: *MemoryArena, comptime T: type) *T {
     const size: MemoryIndex = @sizeOf(T);
     return @as(*T, @ptrCast(@alignCast(pushSize(arena, size))));
 }
 
-pub fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
+pub inline fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
     const size: MemoryIndex = @sizeOf(T) * count;
     return @as([*]T, @ptrCast(@alignCast(pushSize(arena, size))));
+}
+
+inline fn zeroSize(size: MemoryIndex, ptr: [*]void) void {
+    var byte: [*]u8 = @ptrCast(ptr);
+    var index = size;
+    while (index > 0) : (index -= 1) {
+        byte[0] = 0;
+        byte += 1;
+    }
+}
+
+pub inline fn zeroStruct(comptime T: type, ptr: *T) void {
+    zeroSize(@sizeOf(T), @ptrCast(ptr));
 }
 
 // Game state.
@@ -162,7 +175,7 @@ pub const State = struct {
     camera_following_entity_index: u32 = 0,
     camera_position: world.WorldPosition,
 
-    player_index_for_controller: [MAX_CONTROLLER_COUNT]u32 = [1]u32{undefined} ** MAX_CONTROLLER_COUNT,
+    controlled_heroes: [MAX_CONTROLLER_COUNT]ControlledHero = [1]ControlledHero{undefined} ** MAX_CONTROLLER_COUNT,
 
     low_entity_count: u32 = 0,
     low_entities: [100000]LowEntity = [1]LowEntity{undefined} ** 100000,
@@ -171,6 +184,13 @@ pub const State = struct {
     hero_bitmaps: [4]HeroBitmaps,
     tree: LoadedBitmap,
     sword: LoadedBitmap,
+};
+
+pub const ControlledHero = struct {
+    entity_index: u32 = 0,
+    movement_direction: Vector2 = Vector2.zero(),
+    vertical_direction: f32 = 0,
+    sword_direction: Vector2 = Vector2.zero(),
 };
 
 pub const LowEntityChunkReference = struct {
@@ -185,12 +205,12 @@ pub const EntityResidence = enum(u8) {
 };
 
 pub const LowEntity = struct {
-    sim_entity: sim.SimEntity,
+    sim: sim.SimEntity,
     position: world.WorldPosition = undefined,
 };
 
 pub const AddLowEntityResult = struct {
-    low_entity: *LowEntity,
+    low: *LowEntity,
     low_index: u32,
 };
 

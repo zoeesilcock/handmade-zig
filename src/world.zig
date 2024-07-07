@@ -84,8 +84,9 @@ pub fn initializeWorld(world: *World, tile_side_in_meters: f32) void {
 }
 
 fn isCanonical(world: *World, relative: f32) bool {
-    return ((relative >= -0.5 * world.chunk_side_in_meters) and
-        (relative <= 0.5 * world.chunk_side_in_meters));
+    const epsilon = 0.0001;
+    return ((relative >= -(0.5 * world.chunk_side_in_meters + epsilon)) and
+        (relative <= (0.5 * world.chunk_side_in_meters + epsilon)));
 }
 
 fn isVector2Canonical(world: *World, offset: Vector2) bool {

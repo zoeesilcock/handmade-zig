@@ -23,7 +23,8 @@ pub const SimRegion = struct {
     sim_entity_hash: [4096]SimEntityHash = [1]SimEntityHash{undefined} ** 4096,
 };
 
-pub const EntityReference = union {
+const EntityReferenceTag = enum { ptr, index };
+pub const EntityReference = union(EntityReferenceTag) {
     ptr: ?*SimEntity,
     index: u32,
 };
@@ -35,7 +36,7 @@ pub const SimEntityHash = struct {
 
 pub const SimEntity = struct {
     storage_index: u32 = 0,
-    type: shared.EntityType = .Null,
+    type: EntityType = .Null,
 
     position: Vector2 = Vector2.zero(),
     chunk_z: i32 = 0,
@@ -54,7 +55,7 @@ pub const SimEntity = struct {
     abs_tile_z_delta: i32 = 0,
 
     hit_point_max: u32,
-    hit_points: [16]shared.HitPoint,
+    hit_points: [16]HitPoint,
 
     sword: EntityReference = null,
     distance_remaining: f32 = 0,
@@ -96,10 +97,12 @@ pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: u32) *SimE
     var result: *SimEntityHash = undefined;
 
     const hash_value = storage_index;
-    var offset = 0;
+    var offset: u32 = 0;
 
-    while(offset < sim_region.sim_entity_hash.len) : (offset += 1) {
-        const entry = sim_region.sim_entity_hash[(hash_value + offset) & (sim_region.sim_entity_hash.len - 1)];
+    while (offset < sim_region.sim_entity_hash.len) : (offset += 1) {
+        const hash_mask = sim_region.sim_entity_hash.len - 1;
+        const hash_index = (hash_value + offset) & hash_mask;
+        const entry = &sim_region.sim_entity_hash[hash_index];
 
         if (entry.index == 0 or entry.index == storage_index) {
             result = entry;
@@ -125,36 +128,53 @@ pub fn getEntityByStorageIndex(sim_region: *SimRegion, storage_index: u32) ?*Sim
 }
 
 pub fn loadEntityReference(state: *State, sim_region: *SimRegion, reference: *EntityReference) void {
-    if (reference.index != 0) {
-        const entry = getHashFromStorageIndex(sim_region, reference.index);
+    switch (reference.*) {
+        .index => |index| {
+            if (index != 0) {
+                const entry = getHashFromStorageIndex(sim_region, reference.index);
 
-        if (entry.ptr == null) {
-            entry.index = reference.index;
-            entry.ptr = addEntity(state, sim_region, reference.index, getLowEntity(state, reference.index));
-        }
+                if (entry.ptr == null) {
+                    entry.index = reference.index;
+                    if (getLowEntity(state, reference.index)) |low_entity| {
+                        entry.ptr = addEntity(state, sim_region, reference.index, low_entity, null);
+                    }
+                }
 
-        reference.ptr = entry.ptr;
+                reference.* = EntityReference{ .ptr = entry.ptr };
+            }
+        },
+        else => {},
     }
 }
 
 pub fn storeEntityReference(reference: *EntityReference) void {
-    if (reference.ptr) |ptr| {
-        reference.index = ptr.storage_index;
+    switch (reference.*) {
+        .ptr => |opt_ptr| {
+            if (opt_ptr) |ptr| {
+                reference.* = EntityReference{ .index = ptr.storage_index };
+            }
+        },
+        else => {},
     }
 }
 
-pub fn createEntity(state: *State, sim_region: *SimRegion, storage_index: u32, opt_source: ?*shared.LowEntity,) ?*SimEntity {
+pub fn createEntity(
+    state: *State,
+    sim_region: *SimRegion,
+    storage_index: u32,
+    opt_source: ?*shared.LowEntity,
+) ?*SimEntity {
     std.debug.assert(storage_index != 0);
 
     var entity: ?*SimEntity = null;
 
     if (sim_region.entity_count < sim_region.max_entity_count) {
         sim_region.entity_count += 1;
-        entity = sim_region.entities[sim_region.entity_count];
+        entity = &sim_region.entities[sim_region.entity_count];
         mapStorageIndexToEntity(sim_region, storage_index, entity.?);
 
         if (opt_source) |source| {
-            entity.* = source.sim_entity;
+            entity.?.* = source.sim;
             loadEntityReference(state, sim_region, &entity.?.sword);
         }
 
@@ -171,10 +191,23 @@ fn getSimSpacePosition(sim_region: *SimRegion, low_entity: *shared.LowEntity) Ve
     return diff.xy;
 }
 
-pub fn addEntity(state: *State, sim_region: *SimRegion, storage_index: u32, source: *shared.LowEntity, opt_sim_position: ?*Vector2,) ?*SimEntity {
-    var opt_entity = createEntity(state, sim_region, storage_index, source);
+pub fn addEntity(
+    state: *State,
+    sim_region: *SimRegion,
+    storage_index: u32,
+    source: *shared.LowEntity,
+    opt_sim_position: ?*Vector2,
+) ?*SimEntity {
+    if (source.sim.type == .Null) {
+        var a: u32 = 1;
 
-    if (opt_entity) |*sim_entity| {
+        a += 1;
+        a += 1;
+    }
+
+    const opt_entity = createEntity(state, sim_region, storage_index, source);
+
+    if (opt_entity) |sim_entity| {
         if (opt_sim_position) |sim_position| {
             sim_entity.position = sim_position.*;
         } else {
@@ -185,8 +218,16 @@ pub fn addEntity(state: *State, sim_region: *SimRegion, storage_index: u32, sour
     return opt_entity;
 }
 
-pub fn beginSimulation(state: *State, sim_arena: *shared.MemoryArena, game_world: *World, origin: world.WorldPosition, bounds: Rectangle2,) *SimRegion {
-    const sim_region: SimRegion = shared.pushStruct(sim_arena, SimRegion);
+pub fn beginSimulation(
+    state: *State,
+    sim_arena: *shared.MemoryArena,
+    game_world: *World,
+    origin: world.WorldPosition,
+    bounds: Rectangle2,
+) *SimRegion {
+    var sim_region: *SimRegion = shared.pushStruct(sim_arena, SimRegion);
+    shared.zeroStruct([4096]SimEntityHash, &sim_region.sim_entity_hash);
+
     sim_region.world = game_world;
     sim_region.origin = origin;
     sim_region.bounds = bounds;
@@ -201,7 +242,7 @@ pub fn beginSimulation(state: *State, sim_arena: *shared.MemoryArena, game_world
     while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
         var chunk_x = min_chunk_position.chunk_x;
         while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
-            const opt_chunk = world.getWorldChunk(sim_region, chunk_x, chunk_y, sim_region.origin.chunk_z, null);
+            const opt_chunk = world.getWorldChunk(sim_region.world, chunk_x, chunk_y, sim_region.origin.chunk_z, null);
 
             if (opt_chunk) |chunk| {
                 var opt_block: ?*world.WorldEntityBlock = &chunk.first_block;
@@ -210,19 +251,23 @@ pub fn beginSimulation(state: *State, sim_arena: *shared.MemoryArena, game_world
                     while (block_entity_index < block.entity_count) : (block_entity_index += 1) {
                         const low_entity_index = block.low_entity_indices[block_entity_index];
                         var low_entity = state.low_entities[low_entity_index];
-                        const sim_space_position = getSimSpacePosition(sim_region, &low_entity);
+                        var sim_space_position = getSimSpacePosition(sim_region, &low_entity);
 
                         if (sim_space_position.isInRectangle(sim_region.bounds)) {
-                            addEntity(sim_region, low_entity_index, low_entity, sim_space_position);
+                            if (low_entity.sim.type != .Null) {
+                                _ = addEntity(state, sim_region, low_entity_index, &low_entity, &sim_space_position);
+                            }
                         }
                     }
                 }
             }
         }
     }
+
+    return sim_region;
 }
 
-fn moveEntity(
+pub fn moveEntity(
     sim_region: *SimRegion,
     entity: *SimEntity,
     delta_time: f32,
@@ -259,77 +304,77 @@ fn moveEntity(
 
         const desired_position = entity.position.plus(entity_delta);
 
-        if (entity.low.collides) {
+        if (entity.collides) {
             var test_entity_index: u32 = 0;
             while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
-                const test_entity = sim_region.entities[test_entity_index];
+                const test_entity = &sim_region.entities[test_entity_index];
 
                 if (entity != test_entity) {
-                        if (test_entity.collides) {
-                            const collision_diameter = Vector2.new(
-                                test_entity.width + entity.low.width,
-                                test_entity.height + entity.low.height,
-                            );
-                            const min_corner = collision_diameter.scaledTo(-0.5);
-                            const max_corner = collision_diameter.scaledTo(0.5);
-                            const relative = entity.position.minus(test_entity.position);
+                    if (test_entity.collides) {
+                        const collision_diameter = Vector2.new(
+                            test_entity.width + entity.width,
+                            test_entity.height + entity.height,
+                        );
+                        const min_corner = collision_diameter.scaledTo(-0.5);
+                        const max_corner = collision_diameter.scaledTo(0.5);
+                        const relative = entity.position.minus(test_entity.position);
 
-                            if (testWall(
-                                    min_corner.x(),
-                                    relative.x(),
-                                    relative.y(),
-                                    entity_delta.x(),
-                                    entity_delta.y(),
-                                    min_corner.y(),
-                                    max_corner.y(),
-                                    &min_time,
-                            )) {
-                                wall_normal = Vector2.new(-1, 0);
-                                opt_hit_entity = test_entity;
-                            }
-
-                            if (testWall(
-                                    max_corner.x(),
-                                    relative.x(),
-                                    relative.y(),
-                                    entity_delta.x(),
-                                    entity_delta.y(),
-                                    min_corner.y(),
-                                    max_corner.y(),
-                                    &min_time,
-                            )) {
-                                wall_normal = Vector2.new(1, 0);
-                                opt_hit_entity = test_entity;
-                            }
-
-                            if (testWall(
-                                    min_corner.y(),
-                                    relative.y(),
-                                    relative.x(),
-                                    entity_delta.y(),
-                                    entity_delta.x(),
-                                    min_corner.x(),
-                                    max_corner.x(),
-                                    &min_time,
-                            )) {
-                                wall_normal = Vector2.new(0, -1);
-                                opt_hit_entity = test_entity;
-                            }
-
-                            if (testWall(
-                                    max_corner.y(),
-                                    relative.y(),
-                                    relative.x(),
-                                    entity_delta.y(),
-                                    entity_delta.x(),
-                                    min_corner.x(),
-                                    max_corner.x(),
-                                    &min_time,
-                            )) {
-                                wall_normal = Vector2.new(0, 1);
-                                opt_hit_entity = test_entity;
-                            }
+                        if (testWall(
+                            min_corner.x(),
+                            relative.x(),
+                            relative.y(),
+                            entity_delta.x(),
+                            entity_delta.y(),
+                            min_corner.y(),
+                            max_corner.y(),
+                            &min_time,
+                        )) {
+                            wall_normal = Vector2.new(-1, 0);
+                            opt_hit_entity = test_entity;
                         }
+
+                        if (testWall(
+                            max_corner.x(),
+                            relative.x(),
+                            relative.y(),
+                            entity_delta.x(),
+                            entity_delta.y(),
+                            min_corner.y(),
+                            max_corner.y(),
+                            &min_time,
+                        )) {
+                            wall_normal = Vector2.new(1, 0);
+                            opt_hit_entity = test_entity;
+                        }
+
+                        if (testWall(
+                            min_corner.y(),
+                            relative.y(),
+                            relative.x(),
+                            entity_delta.y(),
+                            entity_delta.x(),
+                            min_corner.x(),
+                            max_corner.x(),
+                            &min_time,
+                        )) {
+                            wall_normal = Vector2.new(0, -1);
+                            opt_hit_entity = test_entity;
+                        }
+
+                        if (testWall(
+                            max_corner.y(),
+                            relative.y(),
+                            relative.x(),
+                            entity_delta.y(),
+                            entity_delta.x(),
+                            min_corner.x(),
+                            max_corner.x(),
+                            &min_time,
+                        )) {
+                            wall_normal = Vector2.new(0, 1);
+                            opt_hit_entity = test_entity;
+                        }
+                    }
                 }
             }
         }
@@ -398,19 +443,25 @@ pub fn testWall(
 }
 
 pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
-    var sim_entity_index = 0;
+    var sim_entity_index: u32 = 0;
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
-        const entity = sim_region.entities[sim_entity_index];
+        const entity = &sim_region.entities[sim_entity_index];
         const stored = &state.low_entities[entity.storage_index];
 
-        stored.sim_entity = entity.*;
-        storeEntityReference(stored.sim_entity.sword);
+        stored.sim = entity.*;
+        storeEntityReference(&stored.sim.sword);
 
         var new_position = world.mapIntoChunkSpace(state.world, sim_region.origin, entity.position);
-        world.changeEntityLocation(&state.world_arena, state.world, stored, entity.storage_index, &stored.position, &new_position,);
+        world.changeEntityLocation(
+            &state.world_arena,
+            state.world,
+            stored,
+            entity.storage_index,
+            &stored.position,
+            &new_position,
+        );
 
         // Update camera position.
-        // if (getEntityByStorageIndex(sim_region, state.camera_following_entity_index)) |camera_following_entity| {
         if (entity.storage_index == state.camera_following_entity_index) {
             var new_camera_position = state.camera_position;
             new_camera_position.chunk_z = stored.position.chunk_z;
