@@ -30,21 +30,16 @@ fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) 
     if (rl.loadFileData(std.mem.span(file_name))) |data| {
         result.content_size = @intCast(rl.getFileLength(std.mem.span(file_name)));
         result.contents = data.ptr;
-    } else |_| {
-    }
+    } else |_| {}
 
     return result;
 }
 
 fn debugWriteEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
     _ = thread;
-    _ = memory_size;
 
-    _ = file_name;
-    _ = memory;
-    return false;
-
-    // return rl.saveFileData(std.mem.span(file_name), @ptrCast(memory[0..0]));
+    const data: []u8 = @as([*]u8, @ptrCast(@alignCast(memory)))[0..memory_size];
+    return rl.saveFileData(std.mem.span(file_name), data);
 }
 
 fn debugFreeFileMemory(thread: *shared.ThreadContext, memory: *anyopaque) callconv(.C) void {
@@ -117,7 +112,6 @@ pub fn main() anyerror!void {
 
             row += game_buffer.pitch;
         }
-
     }
 }
 
