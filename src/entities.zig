@@ -10,7 +10,9 @@ const SimEntity = sim.SimEntity;
 pub fn updatePlayer(state: *State, sim_region: *sim.SimRegion, entity: *SimEntity, delta_time: f32) void {
     for (state.controlled_heroes) |controlled_hero| {
         if (controlled_hero.entity_index == entity.storage_index) {
-            entity.z_velocity = controlled_hero.vertical_direction;
+            if (controlled_hero.vertical_direction != 0) {
+                entity.z_velocity = controlled_hero.vertical_direction;
+            }
 
             const move_spec = sim.MoveSpec{
                 .speed = 50,
@@ -27,9 +29,10 @@ pub fn updatePlayer(state: *State, sim_region: *sim.SimRegion, entity: *SimEntit
 
             if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
                 if (entity.sword.ptr) |sword| {
-                    sword.position = entity.position;
-                    sword.distance_remaining = 5.0;
-                    sword.velocity = controlled_hero.sword_direction.scaledTo(5.0);
+                    if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
+                        sword.distance_remaining = 5.0;
+                        sword.makeSpatial(entity.position, controlled_hero.sword_direction.scaledTo(5.0));
+                    }
                 }
             }
         }
@@ -42,7 +45,7 @@ pub fn updateFamiliar(sim_region: *sim.SimRegion, entity: *SimEntity, delta_time
 
     var entity_index: u32 = 0;
     while (entity_index < sim_region.entity_count) : (entity_index += 1) {
-        const test_entity = &sim_region.entities[entity_index];
+        var test_entity = &sim_region.entities[entity_index];
         if (test_entity.type == .Hero) {
             const distance = test_entity.position.minus(entity.position).lengthSquared();
 
@@ -77,16 +80,18 @@ pub fn updateMonster(sim_region: *sim.SimRegion, entity: *SimEntity, delta_time:
 }
 
 pub fn updateSword(sim_region: *sim.SimRegion, entity: *SimEntity, delta_time: f32) void {
-    const move_spec = sim.MoveSpec{};
+    if (!entity.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
+        const move_spec = sim.MoveSpec{};
 
-    const old_position = entity.position;
+        const old_position = entity.position;
 
-    sim.moveEntity(sim_region, entity, delta_time, Vector2.zero(), &move_spec);
+        sim.moveEntity(sim_region, entity, delta_time, Vector2.zero(), &move_spec);
 
-    const distance_traveled = entity.position.minus(old_position).length();
-    entity.distance_remaining -= distance_traveled;
+        const distance_traveled = entity.position.minus(old_position).length();
+        entity.distance_remaining -= distance_traveled;
 
-    // if (entity.low.distance_remaining < 0) {
-    // TODO: Implement removing entities.
-    // }
+        if (entity.distance_remaining < 0) {
+            entity.makeNonSpatial();
+        }
+    }
 }

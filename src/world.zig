@@ -1,6 +1,7 @@
 const shared = @import("shared.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
+const sim = @import("sim.zig");
 const std = @import("std");
 
 const Vector2 = math.Vector2;
@@ -65,7 +66,7 @@ pub const WorldPosition = struct {
         };
     }
 
-    pub fn isValid(self: *WorldPosition) bool {
+    pub fn isValid(self: *const WorldPosition) bool {
         return self.chunk_x != TILE_CHUNK_UNINITIALIZED;
     }
 };
@@ -161,9 +162,19 @@ pub fn changeEntityLocation(
     world: *World,
     low_entity: *shared.LowEntity,
     low_entity_index: u32,
-    opt_old_position: ?*WorldPosition,
-    opt_new_position: ?*WorldPosition,
+    new_position: WorldPosition,
 ) void {
+    var opt_old_position: ?*WorldPosition = null;
+    var opt_new_position: ?*WorldPosition = null;
+
+    if (!low_entity.sim.isSet(sim.SimEntityFlags.Nonspatial.toInt()) and low_entity.position.isValid()) {
+        opt_old_position = &low_entity.position;
+    }
+
+    if (new_position.isValid()) {
+        opt_new_position = @constCast(&new_position);
+    }
+
     changeEntityLocationRaw(
         memory_arena,
         world,
@@ -172,10 +183,12 @@ pub fn changeEntityLocation(
         opt_new_position,
     );
 
-    if (opt_new_position) |new_position| {
-        low_entity.position = new_position.*;
+    if (new_position.isValid()) {
+        low_entity.position = new_position;
+        low_entity.sim.clearFlag(sim.SimEntityFlags.Nonspatial.toInt());
     } else {
         low_entity.position = WorldPosition.nullPosition();
+        low_entity.sim.addFlag(sim.SimEntityFlags.Nonspatial.toInt());
     }
 }
 
@@ -204,7 +217,7 @@ pub fn changeEntityLocationRaw(
                 old_position.chunk_x,
                 old_position.chunk_y,
                 old_position.chunk_z,
-                memory_arena,
+                null,
             );
 
             std.debug.assert(opt_chunk != null);
@@ -216,8 +229,9 @@ pub fn changeEntityLocationRaw(
                 var opt_block: ?*WorldEntityBlock = &old_chunk.first_block;
                 outer: while (opt_block) |block| : (opt_block = block.next) {
                     // Look through the entity indices in the block.
-                    for (block.low_entity_indices, 0..) |_, index| {
-                        if (low_entity_index == index) {
+                    var index: u32 = 0;
+                    while (index < block.entity_count) : (index += 1) {
+                        if (low_entity_index == block.low_entity_indices[index]) {
                             std.debug.assert(first_block.entity_count > 0);
 
                             // Remove the entity from the block.
@@ -253,6 +267,9 @@ pub fn changeEntityLocationRaw(
                 new_position.chunk_z,
                 memory_arena,
             );
+
+            std.debug.assert(opt_chunk != null);
+
             if (opt_chunk) |new_chunk| {
                 const block = &new_chunk.first_block;
 

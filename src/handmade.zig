@@ -11,6 +11,7 @@ const std = @import("std");
 const Vector2 = math.Vector2;
 const Color = math.Color;
 const State = shared.State;
+const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
 
 pub export fn updateAndRender(
@@ -26,7 +27,7 @@ pub export fn updateAndRender(
 
     if (!memory.is_initialized) {
         state.* = State{
-            .camera_position = world.WorldPosition.zero(),
+            .camera_position = WorldPosition.zero(),
             .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
             .hero_bitmaps = .{
                 shared.HeroBitmaps{
@@ -68,7 +69,7 @@ pub export fn updateAndRender(
             memory.permanent_storage.? + @sizeOf(State),
         );
 
-        _ = addLowEntity(state, .Null, null);
+        _ = addLowEntity(state, .Null, WorldPosition.nullPosition());
 
         state.world = shared.pushStruct(&state.world_arena, world.World);
         world.initializeWorld(state.world, 1.4);
@@ -191,6 +192,7 @@ pub export fn updateAndRender(
         const camera_tile_x = screen_base_x * tiles_per_width + (17 / 2);
         const camera_tile_y = screen_base_y * tiles_per_height + (9 / 2);
         const camera_tile_z = screen_base_z;
+        state.camera_position = world.chunkPositionFromTilePosition(state.world, camera_tile_x, camera_tile_y, camera_tile_z);
 
         _ = addMonster(state, camera_tile_x + 2, camera_tile_y + 2, camera_tile_z);
 
@@ -414,7 +416,7 @@ pub export fn updateAndRender(
         }
     }
 
-    var world_origin = world.WorldPosition.zero();
+    var world_origin = WorldPosition.zero();
     const diff = world.subtractPositions(screen_sim_region.world, &world_origin, &screen_sim_region.origin);
     drawRectangle(buffer, diff.xy, Vector2.new(10, 10), math.Color.new(1, 1, 0, 1));
 
@@ -426,7 +428,7 @@ fn getCameraSpacePosition(state: *State, low_entity: *shared.LowEntity) Vector2 
     return diff.xy;
 }
 
-fn addLowEntity(state: *State, entity_type: sim.EntityType, opt_world_position: ?world.WorldPosition) AddLowEntityResult {
+fn addLowEntity(state: *State, entity_type: sim.EntityType, world_position: WorldPosition) AddLowEntityResult {
     std.debug.assert(state.low_entity_count < state.low_entities.len);
 
     const low_entity_index = state.low_entity_count;
@@ -435,19 +437,14 @@ fn addLowEntity(state: *State, entity_type: sim.EntityType, opt_world_position: 
     var low_entity = &state.low_entities[low_entity_index];
     low_entity.sim.type = entity_type;
 
-    if (opt_world_position) |world_position| {
-        low_entity.position = world_position;
-        world.changeEntityLocation(
-            &state.world_arena,
-            state.world,
-            low_entity,
-            low_entity_index,
-            null,
-            @constCast(@ptrCast(&opt_world_position)),
-        );
-    } else {
-        low_entity.position = world.WorldPosition.nullPosition();
-    }
+    low_entity.position = WorldPosition.nullPosition();
+    world.changeEntityLocation(
+        &state.world_arena,
+        state.world,
+        low_entity,
+        low_entity_index,
+        world_position,
+    );
 
     return AddLowEntityResult{
         .low_index = low_entity_index,
@@ -461,7 +458,7 @@ fn addWall(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Add
 
     entity.low.sim.height = state.world.tile_side_in_meters;
     entity.low.sim.width = state.world.tile_side_in_meters;
-    entity.low.sim.collides = true;
+    entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
 
     return entity;
 }
@@ -506,7 +503,7 @@ fn addPlayer(state: *State) AddLowEntityResult {
 
     entity.low.sim.height = 0.5; // 1.4;
     entity.low.sim.width = 1.0;
-    entity.low.sim.collides = true;
+    entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
 
     initHitPoints(&entity.low.sim, 3);
 
@@ -521,11 +518,11 @@ fn addPlayer(state: *State) AddLowEntityResult {
 }
 
 fn addSword(state: *State) AddLowEntityResult {
-    const entity = addLowEntity(state, .Sword, null);
+    const entity = addLowEntity(state, .Sword, WorldPosition.nullPosition());
 
     entity.low.sim.height = 0.5;
     entity.low.sim.width = 1.0;
-    entity.low.sim.collides = false;
+    entity.low.sim.addFlag(sim.SimEntityFlags.Nonspatial.toInt());
 
     return entity;
 }
@@ -536,7 +533,7 @@ fn addMonster(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) 
 
     entity.low.sim.height = 0.5;
     entity.low.sim.width = 1.0;
-    entity.low.sim.collides = true;
+    entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
 
     initHitPoints(&entity.low.sim, 3);
 
@@ -549,7 +546,6 @@ fn addFamiliar(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32)
 
     entity.low.sim.height = 0.5;
     entity.low.sim.width = 1.0;
-    entity.low.sim.collides = false;
 
     return entity;
 }
