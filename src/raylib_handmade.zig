@@ -141,7 +141,7 @@ pub fn main() anyerror!void {
 
         game.updateAndRender(&thread, platform, &game_memory, new_input.*, &game_buffer);
 
-        displayBufferInWindow(&back_buffer, window_width, window_height);
+        displayBufferInWindow(&back_buffer, rl.getScreenWidth(), rl.getScreenHeight());
 
         rl.drawFPS(10, 10);
 
@@ -190,7 +190,10 @@ fn displayBufferInWindow(buffer: *OffscreenBuffer, window_width: i32, window_hei
     const blit_height = if (should_double_size) buffer.height * 2 else buffer.height;
     const offset_x = @divFloor((window_width - blit_width), 2);
     const offset_y = @divFloor((window_height - blit_height), 2);
-    rl.drawTexture(rl.loadTextureFromImage(image), offset_x, offset_y, rl.Color.white);
+
+    const source = rl.Rectangle.init(0, 0, @floatFromInt(buffer.width), @floatFromInt(buffer.height));
+    const dest = rl.Rectangle.init(@floatFromInt(offset_x), @floatFromInt(offset_y), @floatFromInt(blit_width), @floatFromInt(blit_height));
+    rl.drawTexturePro(rl.loadTextureFromImage(image), source, dest, rl.Vector2.zero(), 0, rl.Color.white);
 }
 
 fn captureKeyboardInput(keyboard_controller: *shared.ControllerInput) void {
@@ -208,6 +211,10 @@ fn captureKeyboardInput(keyboard_controller: *shared.ControllerInput) void {
 
     processKeyboardInput(&keyboard_controller.start_button, rl.isKeyDown(rl.KeyboardKey.key_space));
     processKeyboardInput(&keyboard_controller.back_button, rl.isKeyDown(rl.KeyboardKey.key_escape));
+
+    if (rl.isKeyPressed(rl.KeyboardKey.key_enter) and rl.isKeyDown(rl.KeyboardKey.key_left_alt)) {
+        rl.toggleBorderlessWindowed();
+    }
 }
 
 fn processKeyboardInput(new_state: *shared.ControllerButtonState, is_down: bool) void {
