@@ -303,7 +303,8 @@ pub fn changeEntityLocationRaw(
 }
 
 pub fn recannonicalizeCoordinate(world: *World, tile_abs: *i32, tile_rel: *const f32) f32 {
-    const offset = intrinsics.roundReal32ToInt32(tile_rel.* / world.chunk_side_in_meters);
+    const epsilon = 0.0001;
+    const offset = intrinsics.roundReal32ToInt32((tile_rel.* + epsilon) / world.chunk_side_in_meters);
 
     tile_abs.* +%= offset;
     const result = tile_rel.* - @as(f32, @floatFromInt(offset)) * world.chunk_side_in_meters;

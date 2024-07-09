@@ -17,6 +17,7 @@ pub const SimRegion = struct {
 
     origin: world.WorldPosition,
     bounds: Rectangle2,
+    updatable_bounds: Rectangle2,
 
     max_entity_count: u32,
     entity_count: u32 = 0,
@@ -37,9 +38,8 @@ pub const SimEntityHash = struct {
 };
 
 pub const SimEntityFlags = enum(u32) {
-    None = 0,
-    Collides = (1 << 1),
-    Nonspatial = (1 << 2),
+    Collides = (1 << 0),
+    Nonspatial = (1 << 1),
 
     Simming = (1 << 30),
 
@@ -50,6 +50,8 @@ pub const SimEntityFlags = enum(u32) {
 
 pub const SimEntity = struct {
     storage_index: u32 = 0,
+    updatable: bool = false,
+
     type: EntityType = .Null,
     flags: u32 = 0,
 
@@ -165,7 +167,8 @@ pub fn loadEntityReference(state: *State, sim_region: *SimRegion, reference: *En
                 if (entry.ptr == null) {
                     entry.index = reference.index;
                     if (getLowEntity(state, reference.index)) |low_entity| {
-                        entry.ptr = addEntity(state, sim_region, reference.index, low_entity, null);
+                        var position = getSimSpacePosition(sim_region, low_entity);
+                        entry.ptr = addEntity(state, sim_region, reference.index, low_entity, &position);
                     }
                 }
 
@@ -216,6 +219,7 @@ pub fn addEntityRaw(
             }
 
             entity.?.storage_index = storage_index;
+            entity.?.updatable = false;
         } else {
             unreachable;
         }
@@ -247,6 +251,7 @@ pub fn addEntity(
     if (opt_entity) |sim_entity| {
         if (opt_sim_position) |sim_position| {
             sim_entity.position = sim_position.*;
+            sim_entity.updatable = sim_entity.position.isInRectangle(sim_region.updatable_bounds);
         } else {
             sim_entity.position = getSimSpacePosition(sim_region, source);
         }
@@ -265,9 +270,12 @@ pub fn beginSimulation(
     var sim_region: *SimRegion = shared.pushStruct(sim_arena, SimRegion);
     shared.zeroStruct([4096]SimEntityHash, &sim_region.sim_entity_hash);
 
+    const update_safety_margin: f32 = 1;
+
     sim_region.world = game_world;
     sim_region.origin = origin;
-    sim_region.bounds = bounds;
+    sim_region.updatable_bounds = bounds;
+    sim_region.bounds = bounds.addRadius(update_safety_margin, update_safety_margin);
     sim_region.max_entity_count = 4096;
     sim_region.entity_count = 0;
     sim_region.entities = shared.pushArray(sim_arena, sim_region.max_entity_count, SimEntity);
@@ -309,16 +317,16 @@ pub fn moveEntity(
     sim_region: *SimRegion,
     entity: *SimEntity,
     delta_time: f32,
-    direction: Vector2,
+    acceleration_in: Vector2,
     move_spec: *const MoveSpec,
 ) void {
     std.debug.assert(!entity.isSet(SimEntityFlags.Nonspatial.toInt()));
 
-    var acceleration = direction;
+    var acceleration = acceleration_in;
 
     // Correct speed when multiple axes are contributing to the direction.
     if (move_spec.unit_max_acceleration) {
-        const direction_length = direction.lengthSquared();
+        const direction_length = acceleration.lengthSquared();
         if (direction_length > 1.0) {
             acceleration = acceleration.scaledTo(1.0 / intrinsics.squareRoot(direction_length));
         }
@@ -335,6 +343,15 @@ pub fn moveEntity(
     var entity_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
         .plus(entity.velocity.scaledTo(delta_time));
     entity.velocity = acceleration.scaledTo(delta_time).plus(entity.velocity);
+
+    // Jump.
+    const z_acceleration = -9.8;
+    entity.z = (0.5 * z_acceleration * math.square(delta_time)) +
+        entity.z_velocity * delta_time + entity.z;
+    entity.z_velocity = z_acceleration * delta_time + entity.z_velocity;
+    if (entity.z < 0) {
+        entity.z = 0;
+    }
 
     var iterations: u32 = 0;
     while (iterations < 4) : (iterations += 1) {

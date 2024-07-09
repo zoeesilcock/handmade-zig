@@ -300,125 +300,183 @@ pub export fn updateAndRender(
     var entity_index: u32 = 0;
     while (entity_index < screen_sim_region.entity_count) : (entity_index += 1) {
         const entity = &screen_sim_region.entities[entity_index];
-        piece_group.piece_count = 0;
 
-        const delta_time = input.frame_delta_time;
-        var shadow_alpha: f32 = 1 - entity.z;
-        if (shadow_alpha < 0) {
-            shadow_alpha = 0;
-        }
+        if (entity.updatable) {
+            piece_group.piece_count = 0;
 
-        switch (entity.type) {
-            .Hero => {
-                entities.updatePlayer(state, screen_sim_region, entity, delta_time);
+            const delta_time = input.frame_delta_time;
+            var shadow_alpha: f32 = 1 - entity.z;
+            if (shadow_alpha < 0) {
+                shadow_alpha = 0;
+            }
 
-                var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                piece_group.pushBitmap(&hero_bitmaps.cape, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+            var move_spec = sim.MoveSpec{};
+            var acceleration = Vector2.zero();
 
-                drawHitPoints(entity, &piece_group);
-            },
-            .Sword => {
-                entities.updateSword(screen_sim_region, entity, delta_time);
+            switch (entity.type) {
+                .Hero => {
+                    for (state.controlled_heroes) |controlled_hero| {
+                        if (controlled_hero.entity_index == entity.storage_index) {
+                            if (controlled_hero.vertical_direction != 0) {
+                                entity.z_velocity = controlled_hero.vertical_direction;
+                            }
 
-                var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                piece_group.pushBitmap(&state.sword, Vector2.zero(), 0, Vector2.new(29, 10), 1, 1);
-            },
-            .Wall => {
-                piece_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
-            },
-            .Monster => {
-                entities.updateMonster(screen_sim_region, entity, delta_time);
+                            move_spec = sim.MoveSpec{
+                                .speed = 50,
+                                .drag = 8,
+                                .unit_max_acceleration = true,
+                            };
+                            acceleration = controlled_hero.movement_direction;
 
-                var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
-                piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                            if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
+                                if (entity.sword.ptr) |sword| {
+                                    if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
+                                        sword.distance_remaining = 5.0;
+                                        sword.makeSpatial(entity.position, controlled_hero.sword_direction.scaledTo(5.0));
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-                drawHitPoints(entity, &piece_group);
-            },
-            .Familiar => {
-                entities.updateFamiliar(screen_sim_region, entity, delta_time);
+                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
+                    piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                    piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                    piece_group.pushBitmap(&hero_bitmaps.cape, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                    piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
-                // Update head bob.
-                entity.head_bob_time += delta_time * 2;
-                if (entity.head_bob_time > shared.TAU32) {
-                    entity.head_bob_time = -shared.TAU32;
-                }
+                    drawHitPoints(entity, &piece_group);
+                },
+                .Sword => {
+                    // TODO: This doesn't work now, this will be handled in the moveEntity function.
+                    const old_position = entity.position;
+                    const distance_traveled = entity.position.minus(old_position).length();
 
-                const head_bob_sine = @sin(2 * entity.head_bob_time);
-                const head_z = 0.25 * head_bob_sine;
-                const head_shadow_alpha = (0.5 * shadow_alpha) + (0.2 * head_bob_sine);
+                    entity.distance_remaining -= distance_traveled;
+                    if (entity.distance_remaining < 0) {
+                        entity.makeNonSpatial();
+                    }
 
-                var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
-                piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
-            },
-            else => {
-                // unreachable;
-            },
-        }
+                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
+                    piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                    piece_group.pushBitmap(&state.sword, Vector2.zero(), 0, Vector2.new(29, 10), 1, 1);
+                },
+                .Wall => {
+                    piece_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
+                },
+                .Monster => {
+                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
+                    piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
+                    piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
-        // Jump.
-        const z_acceleration = -9.8;
-        entity.z = (0.5 * z_acceleration * math.square(delta_time)) +
-            entity.z_velocity * delta_time + entity.z;
-        entity.z_velocity = z_acceleration * delta_time + entity.z_velocity;
-        if (entity.z < 0) {
-            entity.z = 0;
-        }
+                    drawHitPoints(entity, &piece_group);
+                },
+                .Familiar => {
+                    var closest_hero: ?*sim.SimEntity = null;
+                    var closest_hero_squared: f32 = math.square(10.0);
 
-        const entity_ground_point_x = screen_center_x + meters_to_pixels * entity.position.x();
-        const entity_ground_point_y = screen_center_y - meters_to_pixels * entity.position.y();
-        const entity_z = -meters_to_pixels * entity.z;
+                    var hero_entity_index: u32 = 0;
+                    while (hero_entity_index < screen_sim_region.entity_count) : (hero_entity_index += 1) {
+                        var test_entity = &screen_sim_region.entities[hero_entity_index];
+                        if (test_entity.type == .Hero) {
+                            const distance = test_entity.position.minus(entity.position).lengthSquared();
 
-        if (false) {
-            const tile_color = Color.new(1.0, 1.0, 0.0, 1);
-            const entity_left_top = Vector2{
-                .x = entity_ground_point_x - (0.5 * meters_to_pixels * entity.width),
-                .y = entity_ground_point_y - (0.5 * meters_to_pixels * entity.height),
-            };
-            const entity_width_height = Vector2{
-                .x = entity.width,
-                .y = entity.height,
-            };
+                            if (distance < closest_hero_squared) {
+                                closest_hero = test_entity;
+                                closest_hero_squared = distance;
+                            }
+                        }
+                    }
 
-            drawRectangle(
-                buffer,
-                entity_left_top,
-                entity_left_top.plus(entity_width_height.scaledTo(meters_to_pixels).scaledTo(0.9)),
-                tile_color,
-            );
-        }
+                    if (closest_hero) |hero| {
+                        if (closest_hero_squared > math.square(3.0)) {
+                            const speed: f32 = 1.0;
+                            const one_over_length = speed / @sqrt(closest_hero_squared);
+                            acceleration = hero.position.minus(entity.position).scaledTo(one_over_length);
+                        }
+                    }
 
-        var piece_group_index: u32 = 0;
-        while (piece_group_index < piece_group.piece_count) : (piece_group_index += 1) {
-            const piece = piece_group.pieces[piece_group_index];
-            const center = Vector2.new(
-                piece.offset.x() + entity_ground_point_x,
-                piece.offset.y() + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
-            );
+                    move_spec = sim.MoveSpec{
+                        .speed = 25,
+                        .drag = 8,
+                        .unit_max_acceleration = true,
+                    };
 
-            if (piece.bitmap) |bitmap| {
-                drawBitmap(buffer, bitmap, center.x(), center.y(), piece.color.a());
-            } else {
-                const dimension = piece.dimension.scaledTo(meters_to_pixels);
+                    // Update head bob.
+                    entity.head_bob_time += delta_time * 2;
+                    if (entity.head_bob_time > shared.TAU32) {
+                        entity.head_bob_time = -shared.TAU32;
+                    }
+
+                    const head_bob_sine = @sin(2 * entity.head_bob_time);
+                    const head_z = 0.25 * head_bob_sine;
+                    const head_shadow_alpha = (0.5 * shadow_alpha) + (0.2 * head_bob_sine);
+
+                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
+                    piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
+                    piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
+                },
+                else => {
+                    unreachable;
+                },
+            }
+
+            if (!entity.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
+                sim.moveEntity(
+                    screen_sim_region,
+                    entity,
+                    delta_time,
+                    acceleration,
+                    &move_spec,
+                );
+            }
+
+            const entity_ground_point_x = screen_center_x + meters_to_pixels * entity.position.x();
+            const entity_ground_point_y = screen_center_y - meters_to_pixels * entity.position.y();
+            const entity_z = -meters_to_pixels * entity.z;
+
+            if (false) {
+                const tile_color = Color.new(1.0, 1.0, 0.0, 1);
+                const entity_left_top = Vector2{
+                    .x = entity_ground_point_x - (0.5 * meters_to_pixels * entity.width),
+                    .y = entity_ground_point_y - (0.5 * meters_to_pixels * entity.height),
+                };
+                const entity_width_height = Vector2{
+                    .x = entity.width,
+                    .y = entity.height,
+                };
 
                 drawRectangle(
                     buffer,
-                    center.minus(dimension.scaledTo(0.5)),
-                    center.plus(dimension.scaledTo(0.5)),
-                    piece.color,
+                    entity_left_top,
+                    entity_left_top.plus(entity_width_height.scaledTo(meters_to_pixels).scaledTo(0.9)),
+                    tile_color,
                 );
+            }
+
+            var piece_group_index: u32 = 0;
+            while (piece_group_index < piece_group.piece_count) : (piece_group_index += 1) {
+                const piece = piece_group.pieces[piece_group_index];
+                const center = Vector2.new(
+                    piece.offset.x() + entity_ground_point_x,
+                    piece.offset.y() + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
+                );
+
+                if (piece.bitmap) |bitmap| {
+                    drawBitmap(buffer, bitmap, center.x(), center.y(), piece.color.a());
+                } else {
+                    const dimension = piece.dimension.scaledTo(meters_to_pixels);
+
+                    drawRectangle(
+                        buffer,
+                        center.minus(dimension.scaledTo(0.5)),
+                        center.plus(dimension.scaledTo(0.5)),
+                        piece.color,
+                    );
+                }
             }
         }
     }
-
-    var world_origin = WorldPosition.zero();
-    const diff = world.subtractPositions(screen_sim_region.world, &world_origin, &screen_sim_region.origin);
-    drawRectangle(buffer, diff.xy, Vector2.new(10, 10), math.Color.new(1, 1, 0, 1));
 
     sim.endSimulation(state, screen_sim_region);
 }

@@ -217,6 +217,13 @@ pub const Rectangle2 = struct {
     pub fn getCenter(self: Rectangle2) Vector2 {
         return self.min.plus(self.max).scale(0.5);
     }
+
+    pub fn addRadius(self: Rectangle2, radius_width: f32, radius_height: f32) Rectangle2 {
+        return Rectangle2{
+            .min = self.min.minus(Vector2.new(radius_width, radius_height)),
+            .max = self.max.plus(Vector2.new(radius_width, radius_height)),
+        };
+    }
 };
 
 pub fn square(a: f32) f32 {
