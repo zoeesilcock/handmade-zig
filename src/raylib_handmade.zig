@@ -88,7 +88,11 @@ pub fn main() anyerror!void {
     rl.initWindow(WIDTH, HEIGHT, "Handmade Zig");
     defer rl.closeWindow();
 
-    rl.setTargetFPS(30);
+    const monitor_id = rl.getCurrentMonitor();
+    const monitor_refresh_hz = rl.getMonitorRefreshRate(monitor_id);
+    const game_update_hz: f32 = @as(f32, @floatFromInt(monitor_refresh_hz)) / 2.0;
+    const target_seconds_per_frame = 1.0 / game_update_hz;
+    rl.setTargetFPS(@intFromFloat(game_update_hz));
 
     while (!rl.windowShouldClose()) {
         rl.beginDrawing();
