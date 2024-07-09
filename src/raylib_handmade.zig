@@ -66,8 +66,8 @@ pub fn main() anyerror!void {
     };
     const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
     // const base_address = if (DEBUG) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
-    game_memory.permanent_storage = rl.memAlloc(@intCast(total_size));
-    game_memory.transient_storage = @ptrFromInt(@intFromPtr(&game_memory.permanent_storage) + game_memory.permanent_storage_size);
+    game_memory.permanent_storage = @as([*]void, @ptrCast(rl.memAlloc(@intCast(total_size))));
+    game_memory.transient_storage = game_memory.permanent_storage.? + game_memory.permanent_storage_size;
 
     // TODO: Capture input
     const input: shared.GameInput = shared.GameInput{};
