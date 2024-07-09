@@ -3,11 +3,19 @@ const shared = @import("shared.zig");
 const game = @import("handmade.zig");
 const std = @import("std");
 
-const DEBUG = shared.DEBUG;
-
 const WIDTH = 960;
 const HEIGHT = 540;
 const BYTES_PER_PIXEL = 4;
+
+const DEBUG_WINDOW_POS_X = 0 + 2560;
+const DEBUG_WINDOW_POS_Y = 30;
+const DEBUG_WINDOW_WIDTH = 1280;
+const DEBUG_WINDOW_HEIGHT = 720;
+const DEBUG_WINDOW_ACTIVE_OPACITY = 1.0;
+const DEBUG_WINDOW_INACTIVE_OPACITY = 0.25;
+
+// Build options.
+const DEBUG = shared.DEBUG;
 
 var back_buffer: OffscreenBuffer = .{
     .width = WIDTH,
@@ -82,7 +90,15 @@ pub fn main() anyerror!void {
     };
 
     // Create the window.
-    rl.initWindow(WIDTH, HEIGHT, "Handmade Zig");
+    const window_width: i32 = if (DEBUG) DEBUG_WINDOW_WIDTH else WIDTH;
+    const window_height: i32 = if (DEBUG) DEBUG_WINDOW_HEIGHT else HEIGHT;
+    rl.initWindow(window_width, window_height, "Handmade Zig");
+
+    if (DEBUG) {
+        rl.setWindowPosition(DEBUG_WINDOW_POS_X, DEBUG_WINDOW_POS_Y);
+        rl.setWindowState(rl.ConfigFlags{ .window_transparent = true });
+    }
+
     defer rl.closeWindow();
 
     const monitor_id = rl.getCurrentMonitor();
@@ -106,6 +122,8 @@ pub fn main() anyerror!void {
 
     rl.setTraceLogLevel(rl.TraceLogLevel.log_warning);
 
+    var window_was_focused = rl.isWindowFocused();
+
     while (!rl.windowShouldClose()) {
         const old_keyboard_controller = &old_input.controllers[0];
         var new_keyboard_controller = &new_input.controllers[0];
@@ -123,30 +141,22 @@ pub fn main() anyerror!void {
 
         game.updateAndRender(&thread, platform, &game_memory, new_input.*, &game_buffer);
 
-        // Blit the graphics to the screen.
-        var row: [*]u8 = @ptrCast(game_buffer.memory);
-        var y: i32 = 0;
-        var image = rl.genImageColor(game_buffer.width, game_buffer.height, rl.Color.black);
-        while (y < game_buffer.height) : (y += 1) {
-            var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+        displayBufferInWindow(&back_buffer, window_width, window_height);
 
-            var x: i32 = 0;
-            while (x < game_buffer.width - 1) : (x += 1) {
-                rl.imageDrawPixel(&image, x, y, handmadeColorToRaylib(pixel[0]));
-                pixel += 1;
-            }
-
-            row += game_buffer.pitch;
-        }
-
-        rl.drawTexture(rl.loadTextureFromImage(image), 0, 0, rl.Color.white);
-
-        rl.drawFPS(0, 0);
+        rl.drawFPS(10, 10);
 
         // Flip the controller inputs for next frame.
         const temp: *shared.GameInput = new_input;
         new_input = old_input;
         old_input = temp;
+
+        if (DEBUG) {
+            const window_is_focused = rl.isWindowFocused();
+            if (window_was_focused != window_is_focused) {
+                rl.setWindowOpacity(if (window_is_focused) DEBUG_WINDOW_ACTIVE_OPACITY else DEBUG_WINDOW_INACTIVE_OPACITY);
+            }
+            window_was_focused = window_is_focused;
+        }
     }
 }
 
@@ -157,6 +167,30 @@ fn handmadeColorToRaylib(color: u32) rl.Color {
         .b = @truncate((color) >> 0),
         .a = 255,
     };
+}
+
+fn displayBufferInWindow(buffer: *OffscreenBuffer, window_width: i32, window_height: i32) void {
+    var row: [*]u8 = @ptrCast(buffer.memory);
+    var y: i32 = 0;
+    var image = rl.genImageColor(buffer.width, buffer.height, rl.Color.black);
+    while (y < buffer.height) : (y += 1) {
+        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+
+        var x: i32 = 0;
+        while (x < buffer.width - 1) : (x += 1) {
+            rl.imageDrawPixel(&image, x, y, handmadeColorToRaylib(pixel[0]));
+            pixel += 1;
+        }
+
+        row += buffer.pitch;
+    }
+
+    const should_double_size = window_width >= buffer.width * 2 and window_height >= buffer.height * 2;
+    const blit_width = if (should_double_size) buffer.width * 2 else buffer.width;
+    const blit_height = if (should_double_size) buffer.height * 2 else buffer.height;
+    const offset_x = @divFloor((window_width - blit_width), 2);
+    const offset_y = @divFloor((window_height - blit_height), 2);
+    rl.drawTexture(rl.loadTextureFromImage(image), offset_x, offset_y, rl.Color.white);
 }
 
 fn captureKeyboardInput(keyboard_controller: *shared.ControllerInput) void {
@@ -182,5 +216,3 @@ fn processKeyboardInput(new_state: *shared.ControllerButtonState, is_down: bool)
         new_state.half_transitions += 1;
     }
 }
-
-

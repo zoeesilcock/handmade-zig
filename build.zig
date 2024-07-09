@@ -1,13 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const Backend = enum{
+const Backend = enum {
     Win32,
     Raylib,
 };
 
 pub fn build(b: *std.Build) void {
-    const backend= b.option(Backend, "backend", "win32 or raylib") orelse .Win32;
+    const backend = b.option(Backend, "backend", "win32 or raylib") orelse .Win32;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const exe = b.addExecutable(.{
