@@ -105,6 +105,24 @@ pub const ControllerInput = extern struct {
 
     start_button: ControllerButtonState,
     back_button: ControllerButtonState,
+
+    pub fn copyButtonStatesTo(self: *ControllerInput, target: *ControllerInput) void {
+        target.move_up.ended_down = self.move_up.ended_down;
+        target.move_down.ended_down = self.move_down.ended_down;
+        target.move_left.ended_down = self.move_left.ended_down;
+        target.move_right.ended_down = self.move_right.ended_down;
+
+        target.action_up.ended_down = self.action_up.ended_down;
+        target.action_down.ended_down = self.action_down.ended_down;
+        target.action_left.ended_down = self.action_left.ended_down;
+        target.action_right.ended_down = self.action_right.ended_down;
+
+        target.left_shoulder.ended_down = self.left_shoulder.ended_down;
+        target.right_shoulder.ended_down = self.right_shoulder.ended_down;
+
+        target.start_button.ended_down = self.start_button.ended_down;
+        target.back_button.ended_down = self.back_button.ended_down;
+    }
 };
 
 pub const ControllerButtonState = extern struct {

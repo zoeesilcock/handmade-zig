@@ -1,12 +1,18 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const Backend = enum{
+    Win32,
+    Raylib,
+};
+
 pub fn build(b: *std.Build) void {
+    const backend= b.option(Backend, "backend", "win32 or raylib") orelse .Win32;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const exe = b.addExecutable(.{
         .name = "handmade-zig",
-        .root_source_file = b.path("src/win32_handmade.zig"),
+        .root_source_file = if (backend == .Win32) b.path("src/win32_handmade.zig") else b.path("src/raylib_handmade.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -14,11 +20,29 @@ pub fn build(b: *std.Build) void {
     // Build options.
     const build_options = b.addOptions();
     build_options.addOption(bool, "timing", b.option(bool, "timing", "print timing info to debug output") orelse false);
+    build_options.addOption(Backend, "backend", backend);
     exe.root_module.addOptions("build_options", build_options);
 
-    // Add the win32 API wrapper.
-    const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
-    exe.root_module.addImport("win32", zigwin32);
+    if (backend == .Win32) {
+        // Add the win32 API wrapper.
+        const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
+        exe.root_module.addImport("win32", zigwin32);
+    }
+
+    if (backend == .Raylib) {
+        // Add the raylib API wrapper and library.
+        const raylib_dep = b.dependency("raylib-zig", .{
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const raylib = raylib_dep.module("raylib");
+        const raygui = raylib_dep.module("raygui");
+        const raylib_artifact = raylib_dep.artifact("raylib");
+        exe.linkLibrary(raylib_artifact);
+        exe.root_module.addImport("raylib", raylib);
+        exe.root_module.addImport("raygui", raygui);
+    }
 
     b.installArtifact(exe);
 
