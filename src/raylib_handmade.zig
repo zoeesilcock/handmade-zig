@@ -104,6 +104,8 @@ pub fn main() anyerror!void {
     var old_input = &game_input[1];
     rl.setExitKey(rl.KeyboardKey.key_null);
 
+    rl.setTraceLogLevel(rl.TraceLogLevel.log_warning);
+
     while (!rl.windowShouldClose()) {
         const old_keyboard_controller = &old_input.controllers[0];
         var new_keyboard_controller = &new_input.controllers[0];
@@ -124,17 +126,22 @@ pub fn main() anyerror!void {
         // Blit the graphics to the screen.
         var row: [*]u8 = @ptrCast(game_buffer.memory);
         var y: i32 = 0;
+        var image = rl.genImageColor(game_buffer.width, game_buffer.height, rl.Color.black);
         while (y < game_buffer.height) : (y += 1) {
             var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
 
             var x: i32 = 0;
             while (x < game_buffer.width - 1) : (x += 1) {
-                rl.drawPixel(x, y, handmadeColorToRaylib(pixel[0]));
+                rl.imageDrawPixel(&image, x, y, handmadeColorToRaylib(pixel[0]));
                 pixel += 1;
             }
 
             row += game_buffer.pitch;
         }
+
+        rl.drawTexture(rl.loadTextureFromImage(image), 0, 0, rl.Color.white);
+
+        rl.drawFPS(0, 0);
 
         // Flip the controller inputs for next frame.
         const temp: *shared.GameInput = new_input;
