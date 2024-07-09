@@ -331,7 +331,7 @@ pub export fn updateAndRender(
                             if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
                                 if (entity.sword.ptr) |sword| {
                                     if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
-                                        sword.distance_remaining = 5.0;
+                                        sword.distance_limit = 5.0;
                                         sword.makeSpatial(entity.position, controlled_hero.sword_direction.scaledTo(5.0));
                                     }
                                 }
@@ -348,12 +348,13 @@ pub export fn updateAndRender(
                     drawHitPoints(entity, &piece_group);
                 },
                 .Sword => {
-                    // TODO: This doesn't work now, this will be handled in the moveEntity function.
-                    const old_position = entity.position;
-                    const distance_traveled = entity.position.minus(old_position).length();
+                    move_spec = sim.MoveSpec{
+                        .speed = 0,
+                        .drag = 0,
+                        .unit_max_acceleration = false,
+                    };
 
-                    entity.distance_remaining -= distance_traveled;
-                    if (entity.distance_remaining < 0) {
+                    if (entity.distance_limit == 0) {
                         entity.makeNonSpatial();
                     }
 

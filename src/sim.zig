@@ -61,6 +61,8 @@ pub const SimEntity = struct {
     z: f32 = 0,
     z_velocity: f32 = 0,
 
+    distance_limit: f32 = 0,
+
     chunk_z: i32 = 0,
 
     width: f32 = 0,
@@ -75,7 +77,6 @@ pub const SimEntity = struct {
     hit_points: [16]HitPoint,
 
     sword: EntityReference = null,
-    distance_remaining: f32 = 0,
 
     pub fn isSet(self: *const SimEntity, flag: u32) bool {
         return (self.flags & flag) != 0;
@@ -339,7 +340,7 @@ pub fn moveEntity(
     acceleration = acceleration.plus(entity.velocity.scaledTo(move_spec.drag).negated());
     // acceleration = acceleration.minus(entity.velocity.scaledTo(move_spec.drag));
 
-    // Calculate player delta.
+    // Calculate movement delta.
     var entity_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
         .plus(entity.velocity.scaledTo(delta_time));
     entity.velocity = acceleration.scaledTo(delta_time).plus(entity.velocity);
@@ -353,107 +354,142 @@ pub fn moveEntity(
         entity.z = 0;
     }
 
+    var distance_remaining = entity.distance_limit;
+    if (distance_remaining == 0) {
+        distance_remaining = 10000;
+    }
+
     var iterations: u32 = 0;
     while (iterations < 4) : (iterations += 1) {
         var min_time: f32 = 1.0;
-        var wall_normal = Vector2.zero();
-        var opt_hit_entity: ?*SimEntity = null;
+        const entity_delta_length = entity_delta.length();
 
-        const desired_position = entity.position.plus(entity_delta);
+        if (entity_delta_length > 0) {
+            if (entity_delta_length > distance_remaining) {
+                min_time = distance_remaining / entity_delta_length;
+            }
 
-        if (entity.isSet(SimEntityFlags.Collides.toInt()) and !entity.isSet(SimEntityFlags.Nonspatial.toInt())) {
-            var test_entity_index: u32 = 0;
-            while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
-                const test_entity = &sim_region.entities[test_entity_index];
+            var wall_normal = Vector2.zero();
+            var opt_hit_entity: ?*SimEntity = null;
 
-                if (entity != test_entity) {
-                    if (test_entity.isSet(SimEntityFlags.Collides.toInt()) and
-                        !test_entity.isSet(SimEntityFlags.Nonspatial.toInt()))
-                    {
-                        const collision_diameter = Vector2.new(
-                            test_entity.width + entity.width,
-                            test_entity.height + entity.height,
-                        );
-                        const min_corner = collision_diameter.scaledTo(-0.5);
-                        const max_corner = collision_diameter.scaledTo(0.5);
-                        const relative = entity.position.minus(test_entity.position);
+            const desired_position = entity.position.plus(entity_delta);
 
-                        if (testWall(
-                            min_corner.x(),
-                            relative.x(),
-                            relative.y(),
-                            entity_delta.x(),
-                            entity_delta.y(),
-                            min_corner.y(),
-                            max_corner.y(),
-                            &min_time,
-                        )) {
-                            wall_normal = Vector2.new(-1, 0);
-                            opt_hit_entity = test_entity;
-                        }
+            const stops_on_collision = entity.isSet(SimEntityFlags.Collides.toInt());
 
-                        if (testWall(
-                            max_corner.x(),
-                            relative.x(),
-                            relative.y(),
-                            entity_delta.x(),
-                            entity_delta.y(),
-                            min_corner.y(),
-                            max_corner.y(),
-                            &min_time,
-                        )) {
-                            wall_normal = Vector2.new(1, 0);
-                            opt_hit_entity = test_entity;
-                        }
+            if (!entity.isSet(SimEntityFlags.Nonspatial.toInt())) {
+                var test_entity_index: u32 = 0;
+                while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
+                    const test_entity = &sim_region.entities[test_entity_index];
 
-                        if (testWall(
-                            min_corner.y(),
-                            relative.y(),
-                            relative.x(),
-                            entity_delta.y(),
-                            entity_delta.x(),
-                            min_corner.x(),
-                            max_corner.x(),
-                            &min_time,
-                        )) {
-                            wall_normal = Vector2.new(0, -1);
-                            opt_hit_entity = test_entity;
-                        }
+                    if (entity != test_entity) {
+                        if (test_entity.isSet(SimEntityFlags.Collides.toInt()) and
+                            !test_entity.isSet(SimEntityFlags.Nonspatial.toInt()))
+                        {
+                            const collision_diameter = Vector2.new(
+                                test_entity.width + entity.width,
+                                test_entity.height + entity.height,
+                            );
+                            const min_corner = collision_diameter.scaledTo(-0.5);
+                            const max_corner = collision_diameter.scaledTo(0.5);
+                            const relative = entity.position.minus(test_entity.position);
 
-                        if (testWall(
-                            max_corner.y(),
-                            relative.y(),
-                            relative.x(),
-                            entity_delta.y(),
-                            entity_delta.x(),
-                            min_corner.x(),
-                            max_corner.x(),
-                            &min_time,
-                        )) {
-                            wall_normal = Vector2.new(0, 1);
-                            opt_hit_entity = test_entity;
+                            if (testWall(
+                                min_corner.x(),
+                                relative.x(),
+                                relative.y(),
+                                entity_delta.x(),
+                                entity_delta.y(),
+                                min_corner.y(),
+                                max_corner.y(),
+                                &min_time,
+                            )) {
+                                wall_normal = Vector2.new(-1, 0);
+                                opt_hit_entity = test_entity;
+                            }
+
+                            if (testWall(
+                                max_corner.x(),
+                                relative.x(),
+                                relative.y(),
+                                entity_delta.x(),
+                                entity_delta.y(),
+                                min_corner.y(),
+                                max_corner.y(),
+                                &min_time,
+                            )) {
+                                wall_normal = Vector2.new(1, 0);
+                                opt_hit_entity = test_entity;
+                            }
+
+                            if (testWall(
+                                min_corner.y(),
+                                relative.y(),
+                                relative.x(),
+                                entity_delta.y(),
+                                entity_delta.x(),
+                                min_corner.x(),
+                                max_corner.x(),
+                                &min_time,
+                            )) {
+                                wall_normal = Vector2.new(0, -1);
+                                opt_hit_entity = test_entity;
+                            }
+
+                            if (testWall(
+                                max_corner.y(),
+                                relative.y(),
+                                relative.x(),
+                                entity_delta.y(),
+                                entity_delta.x(),
+                                min_corner.x(),
+                                max_corner.x(),
+                                &min_time,
+                            )) {
+                                wall_normal = Vector2.new(0, 1);
+                                opt_hit_entity = test_entity;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Apply the amount of delta allowed by collision detection.
-        entity.position = entity.position.plus(entity_delta.scaledTo(min_time));
+            // Apply the amount of delta allowed by collision detection.
+            entity.position = entity.position.plus(entity_delta.scaledTo(min_time));
+            distance_remaining -= min_time * entity_delta_length;
 
-        if (opt_hit_entity) |_| {
-            // Remove velocity that is facing into the wall.
-            entity.velocity = entity.velocity.minus(wall_normal.scaledTo(entity.velocity.dotProduct(wall_normal)));
+            if (opt_hit_entity) |hit_entity| {
+                // Remove the applied delta.
+                entity_delta = desired_position.minus(entity.position);
 
-            // Remove the applied delta.
-            entity_delta = desired_position.minus(entity.position);
-            entity_delta = entity_delta.minus(wall_normal.scaledTo(entity_delta.dotProduct(wall_normal)));
+                if (stops_on_collision) {
+                    // Remove velocity that is facing into the wall.
+                    entity_delta = entity_delta.minus(wall_normal.scaledTo(entity_delta.dotProduct(wall_normal)));
+                    entity.velocity = entity.velocity.minus(wall_normal.scaledTo(entity.velocity.dotProduct(wall_normal)));
+                }
 
-            // Update player Z when hitting a ladder.
-            // entity.chunk_z += hit_low_entity.abs_tile_z_delta;
+                var a = entity;
+                var b = hit_entity;
+
+                if (@intFromEnum(a.type) > @intFromEnum(b.type)) {
+                    const temp = a;
+                    a = b;
+                    b = temp;
+                }
+
+                handleCollision(a, b);
+
+                // Update player Z when hitting a ladder.
+                // entity.chunk_z += hit_low_entity.abs_tile_z_delta;
+            } else {
+                break;
+            }
         } else {
             break;
         }
+    }
+
+    if (entity.distance_limit != 0) {
+        entity.distance_limit = distance_remaining;
     }
 
     // Update facing direction based on velocity.
@@ -471,6 +507,13 @@ pub fn moveEntity(
         } else {
             entity.facing_direction = 3;
         }
+    }
+}
+
+pub fn handleCollision(a: *SimEntity, b: *SimEntity) void {
+    if (a.type == .Monster and b.type == .Sword) {
+        a.hit_point_max -= 1;
+        b.makeNonSpatial();
     }
 }
 
