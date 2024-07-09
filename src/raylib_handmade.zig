@@ -69,9 +69,6 @@ pub fn main() anyerror!void {
     game_memory.permanent_storage = @as([*]void, @ptrCast(rl.memAlloc(@intCast(total_size))));
     game_memory.transient_storage = game_memory.permanent_storage.? + game_memory.permanent_storage_size;
 
-    // TODO: Capture input
-    const input: shared.GameInput = shared.GameInput{};
-
     // Create the back buffer.
     const bitmap_memory_size: usize = @intCast((back_buffer.width * back_buffer.height) * BYTES_PER_PIXEL);
     back_buffer.memory = rl.memAlloc(@intCast(bitmap_memory_size));
@@ -94,13 +91,35 @@ pub fn main() anyerror!void {
     const target_seconds_per_frame = 1.0 / game_update_hz;
     rl.setTargetFPS(@intFromFloat(game_update_hz));
 
+    // Initialize input.
+    var game_input = [2]shared.GameInput{
+        shared.GameInput{
+            .frame_delta_time = target_seconds_per_frame,
+        },
+        shared.GameInput{
+            .frame_delta_time = target_seconds_per_frame,
+        },
+    };
+    var new_input = &game_input[0];
+    var old_input = &game_input[1];
+    rl.setExitKey(rl.KeyboardKey.key_null);
+
     while (!rl.windowShouldClose()) {
+        const old_keyboard_controller = &old_input.controllers[0];
+        var new_keyboard_controller = &new_input.controllers[0];
+        new_keyboard_controller.is_connected = true;
+
+        // Transfer buttons state from previous loop to this one.
+        old_keyboard_controller.copyButtonStatesTo(new_keyboard_controller);
+
+        captureKeyboardInput(new_keyboard_controller);
+
         rl.beginDrawing();
         defer rl.endDrawing();
 
         rl.clearBackground(rl.Color.black);
 
-        game.updateAndRender(&thread, platform, &game_memory, input, &game_buffer);
+        game.updateAndRender(&thread, platform, &game_memory, new_input.*, &game_buffer);
 
         // Blit the graphics to the screen.
         var row: [*]u8 = @ptrCast(game_buffer.memory);
@@ -116,6 +135,11 @@ pub fn main() anyerror!void {
 
             row += game_buffer.pitch;
         }
+
+        // Flip the controller inputs for next frame.
+        const temp: *shared.GameInput = new_input;
+        new_input = old_input;
+        old_input = temp;
     }
 }
 
@@ -127,3 +151,29 @@ fn handmadeColorToRaylib(color: u32) rl.Color {
         .a = 255,
     };
 }
+
+fn captureKeyboardInput(keyboard_controller: *shared.ControllerInput) void {
+    processKeyboardInput(&keyboard_controller.move_up, rl.isKeyDown(rl.KeyboardKey.key_w));
+    processKeyboardInput(&keyboard_controller.move_left, rl.isKeyDown(rl.KeyboardKey.key_a));
+    processKeyboardInput(&keyboard_controller.move_down, rl.isKeyDown(rl.KeyboardKey.key_s));
+    processKeyboardInput(&keyboard_controller.move_right, rl.isKeyDown(rl.KeyboardKey.key_d));
+    processKeyboardInput(&keyboard_controller.left_shoulder, rl.isKeyDown(rl.KeyboardKey.key_q));
+    processKeyboardInput(&keyboard_controller.right_shoulder, rl.isKeyDown(rl.KeyboardKey.key_e));
+
+    processKeyboardInput(&keyboard_controller.action_up, rl.isKeyDown(rl.KeyboardKey.key_up));
+    processKeyboardInput(&keyboard_controller.action_down, rl.isKeyDown(rl.KeyboardKey.key_down));
+    processKeyboardInput(&keyboard_controller.action_left, rl.isKeyDown(rl.KeyboardKey.key_left));
+    processKeyboardInput(&keyboard_controller.action_right, rl.isKeyDown(rl.KeyboardKey.key_right));
+
+    processKeyboardInput(&keyboard_controller.start_button, rl.isKeyDown(rl.KeyboardKey.key_space));
+    processKeyboardInput(&keyboard_controller.back_button, rl.isKeyDown(rl.KeyboardKey.key_escape));
+}
+
+fn processKeyboardInput(new_state: *shared.ControllerButtonState, is_down: bool) void {
+    if (new_state.ended_down != is_down) {
+        new_state.ended_down = is_down;
+        new_state.half_transitions += 1;
+    }
+}
+
+
