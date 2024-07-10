@@ -333,6 +333,7 @@ pub export fn updateAndRender(
                                     if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
                                         sword.distance_limit = 5.0;
                                         sword.makeSpatial(entity.position, controlled_hero.sword_direction.scaledTo(5.0));
+                                        addCollisionRule(state, sword.storage_index, entity.storage_index, false);
                                     }
                                 }
                             }
@@ -356,6 +357,7 @@ pub export fn updateAndRender(
 
                     if (entity.distance_limit == 0) {
                         entity.makeNonSpatial();
+                        clearCollisionRulesFor(state, entity.storage_index);
                     }
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
@@ -424,6 +426,7 @@ pub export fn updateAndRender(
 
             if (!entity.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
                 sim.moveEntity(
+                    state,
                     screen_sim_region,
                     entity,
                     delta_time,
@@ -553,6 +556,69 @@ fn drawHitPoints(entity: *sim.SimEntity, piece_group: *shared.EntityVisiblePiece
 
             piece_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
             hit_position = hit_position.plus(hit_position_delta);
+        }
+    }
+}
+
+pub fn addCollisionRule(state: *State, in_storage_index_a: u32, in_storage_index_b: u32, should_collide: bool) void {
+    var storage_index_a = in_storage_index_a;
+    var storage_index_b = in_storage_index_b;
+
+    // Sort entities based on storage index.
+    if (storage_index_a > storage_index_b) {
+        const temp = storage_index_a;
+        storage_index_a = storage_index_b;
+        storage_index_b = temp;
+    }
+
+    // Look for an existing rule in the hash.
+    const hash_bucket = storage_index_a & ((state.collision_rule_hash.len) - 1);
+    var found_rule: ?*shared.PairwiseCollisionRule = null;
+    var opt_rule: ?*shared.PairwiseCollisionRule = state.collision_rule_hash[hash_bucket];
+    while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
+        if (rule.storage_index_a == storage_index_a and rule.storage_index_b == storage_index_b) {
+            found_rule = rule;
+            break;
+        }
+    }
+
+    // Create a new rule if it didn't exist.
+    if (found_rule == null) {
+        found_rule = state.first_free_collision_rule;
+
+        if (found_rule) |rule| {
+            state.first_free_collision_rule = rule.next_in_hash;
+        } else {
+            found_rule = shared.pushStruct(&state.world_arena, shared.PairwiseCollisionRule);
+        }
+
+        found_rule.?.next_in_hash = state.collision_rule_hash[hash_bucket];
+        state.collision_rule_hash[hash_bucket] = found_rule.?;
+    }
+
+    // Apply the rule settings.
+    if (found_rule) |found| {
+        found.storage_index_a = storage_index_a;
+        found.storage_index_b = storage_index_b;
+        found.should_collide = should_collide;
+    }
+}
+
+pub fn clearCollisionRulesFor(state: *State, storage_index: u32) void {
+    var hash_bucket: u32 = 0;
+    while (hash_bucket < state.collision_rule_hash.len) : (hash_bucket += 1) {
+        var opt_rule = &state.collision_rule_hash[hash_bucket];
+        while (opt_rule.*) |rule| {
+            if (rule.storage_index_a == storage_index or rule.storage_index_b == storage_index) {
+                const removed_rule = rule;
+
+                opt_rule.* = rule.next_in_hash;
+
+                removed_rule.next_in_hash = state.first_free_collision_rule;
+                state.first_free_collision_rule = removed_rule;
+            } else {
+                opt_rule = &rule.next_in_hash;
+            }
         }
     }
 }

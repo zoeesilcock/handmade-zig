@@ -202,6 +202,17 @@ pub const State = struct {
     hero_bitmaps: [4]HeroBitmaps,
     tree: LoadedBitmap,
     sword: LoadedBitmap,
+
+    collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
+    first_free_collision_rule: ?*PairwiseCollisionRule = null,
+};
+
+pub const PairwiseCollisionRule = struct {
+    should_collide: bool,
+    storage_index_a: u32,
+    storage_index_b: u32,
+
+    next_in_hash: ?*PairwiseCollisionRule,
 };
 
 pub const ControlledHero = struct {

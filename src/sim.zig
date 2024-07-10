@@ -4,6 +4,8 @@ const intrinsics = @import("intrinsics.zig");
 const world = @import("world.zig");
 const std = @import("std");
 
+const addCollisionRule = @import("handmade.zig").addCollisionRule;
+
 // Types.
 const Vector2 = math.Vector2;
 const Rectangle2 = math.Rectangle2;
@@ -314,7 +316,75 @@ pub fn beginSimulation(
     return sim_region;
 }
 
+pub fn shouldCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
+    var result = false;
+    var a = entity;
+    var b = hit_entity;
+
+    // Sort entities based on storage index.
+    if (a.storage_index > b.storage_index) {
+        const temp = a;
+        a = b;
+        b = temp;
+    }
+
+    // Basic rules.
+    if (!a.isSet(SimEntityFlags.Nonspatial.toInt()) and
+        !b.isSet(SimEntityFlags.Nonspatial.toInt())) {
+        result = true;
+
+        if (a == b) {
+            result = false;
+        }
+
+    }
+
+    // Specific rules.
+    const hash_bucket = a.storage_index & ((state.collision_rule_hash.len) - 1);
+    var opt_rule: ?*shared.PairwiseCollisionRule = state.collision_rule_hash[hash_bucket];
+    while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
+        if ((rule.storage_index_a == a.storage_index) and (rule.storage_index_b == b.storage_index)) {
+            result = rule.should_collide;
+            break;
+        }
+    }
+
+    return result;
+}
+
+pub fn handleCollision(entity: *SimEntity, hit_entity: *SimEntity) bool {
+    var stops_on_collision = false;
+
+    if (entity.type == .Sword) {
+        stops_on_collision = false;
+    } else {
+        stops_on_collision = true;
+    }
+
+    var a = entity;
+    var b = hit_entity;
+
+    // Sort entities based on type.
+    if (@intFromEnum(a.type) > @intFromEnum(b.type)) {
+        const temp = a;
+        a = b;
+        b = temp;
+    }
+
+    if (a.type == .Monster and b.type == .Sword) {
+        if (a.hit_point_max > 0) {
+            a.hit_point_max -= 1;
+        }
+    }
+
+    // TODO: Update player Z when hitting a ladder.
+    // entity.chunk_z += hit_low_entity.abs_tile_z_delta;
+
+    return stops_on_collision;
+}
+
 pub fn moveEntity(
+    state: *State,
     sim_region: *SimRegion,
     entity: *SimEntity,
     delta_time: f32,
@@ -374,26 +444,21 @@ pub fn moveEntity(
 
             const desired_position = entity.position.plus(entity_delta);
 
-            const stops_on_collision = entity.isSet(SimEntityFlags.Collides.toInt());
-
             if (!entity.isSet(SimEntityFlags.Nonspatial.toInt())) {
                 var test_entity_index: u32 = 0;
                 while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
                     const test_entity = &sim_region.entities[test_entity_index];
 
-                    if (entity != test_entity) {
-                        if (test_entity.isSet(SimEntityFlags.Collides.toInt()) and
-                            !test_entity.isSet(SimEntityFlags.Nonspatial.toInt()))
-                        {
-                            const collision_diameter = Vector2.new(
-                                test_entity.width + entity.width,
-                                test_entity.height + entity.height,
-                            );
-                            const min_corner = collision_diameter.scaledTo(-0.5);
-                            const max_corner = collision_diameter.scaledTo(0.5);
-                            const relative = entity.position.minus(test_entity.position);
+                    if (shouldCollide(state, entity, test_entity)) {
+                        const collision_diameter = Vector2.new(
+                            test_entity.width + entity.width,
+                            test_entity.height + entity.height,
+                        );
+                        const min_corner = collision_diameter.scaledTo(-0.5);
+                        const max_corner = collision_diameter.scaledTo(0.5);
+                        const relative = entity.position.minus(test_entity.position);
 
-                            if (testWall(
+                        if (testWall(
                                 min_corner.x(),
                                 relative.x(),
                                 relative.y(),
@@ -402,12 +467,12 @@ pub fn moveEntity(
                                 min_corner.y(),
                                 max_corner.y(),
                                 &min_time,
-                            )) {
-                                wall_normal = Vector2.new(-1, 0);
-                                opt_hit_entity = test_entity;
-                            }
+                        )) {
+                            wall_normal = Vector2.new(-1, 0);
+                            opt_hit_entity = test_entity;
+                        }
 
-                            if (testWall(
+                        if (testWall(
                                 max_corner.x(),
                                 relative.x(),
                                 relative.y(),
@@ -416,12 +481,12 @@ pub fn moveEntity(
                                 min_corner.y(),
                                 max_corner.y(),
                                 &min_time,
-                            )) {
-                                wall_normal = Vector2.new(1, 0);
-                                opt_hit_entity = test_entity;
-                            }
+                        )) {
+                            wall_normal = Vector2.new(1, 0);
+                            opt_hit_entity = test_entity;
+                        }
 
-                            if (testWall(
+                        if (testWall(
                                 min_corner.y(),
                                 relative.y(),
                                 relative.x(),
@@ -430,12 +495,12 @@ pub fn moveEntity(
                                 min_corner.x(),
                                 max_corner.x(),
                                 &min_time,
-                            )) {
-                                wall_normal = Vector2.new(0, -1);
-                                opt_hit_entity = test_entity;
-                            }
+                        )) {
+                            wall_normal = Vector2.new(0, -1);
+                            opt_hit_entity = test_entity;
+                        }
 
-                            if (testWall(
+                        if (testWall(
                                 max_corner.y(),
                                 relative.y(),
                                 relative.x(),
@@ -444,10 +509,9 @@ pub fn moveEntity(
                                 min_corner.x(),
                                 max_corner.x(),
                                 &min_time,
-                            )) {
-                                wall_normal = Vector2.new(0, 1);
-                                opt_hit_entity = test_entity;
-                            }
+                        )) {
+                            wall_normal = Vector2.new(0, 1);
+                            opt_hit_entity = test_entity;
                         }
                     }
                 }
@@ -461,25 +525,15 @@ pub fn moveEntity(
                 // Remove the applied delta.
                 entity_delta = desired_position.minus(entity.position);
 
+                const stops_on_collision = handleCollision(entity, hit_entity);
                 if (stops_on_collision) {
                     // Remove velocity that is facing into the wall.
                     entity_delta = entity_delta.minus(wall_normal.scaledTo(entity_delta.dotProduct(wall_normal)));
                     entity.velocity = entity.velocity.minus(wall_normal.scaledTo(entity.velocity.dotProduct(wall_normal)));
+                } else {
+                    // Stop future collisons between these entities.
+                    addCollisionRule(state, entity.storage_index, hit_entity.storage_index, false);
                 }
-
-                var a = entity;
-                var b = hit_entity;
-
-                if (@intFromEnum(a.type) > @intFromEnum(b.type)) {
-                    const temp = a;
-                    a = b;
-                    b = temp;
-                }
-
-                handleCollision(a, b);
-
-                // Update player Z when hitting a ladder.
-                // entity.chunk_z += hit_low_entity.abs_tile_z_delta;
             } else {
                 break;
             }
@@ -507,13 +561,6 @@ pub fn moveEntity(
         } else {
             entity.facing_direction = 3;
         }
-    }
-}
-
-pub fn handleCollision(a: *SimEntity, b: *SimEntity) void {
-    if (a.type == .Monster and b.type == .Sword) {
-        a.hit_point_max -= 1;
-        b.makeNonSpatial();
     }
 }
 
