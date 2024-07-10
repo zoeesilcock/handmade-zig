@@ -318,34 +318,33 @@ pub fn beginSimulation(
 
 pub fn shouldCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
     var result = false;
-    var a = entity;
-    var b = hit_entity;
 
-    // Sort entities based on storage index.
-    if (a.storage_index > b.storage_index) {
-        const temp = a;
-        a = b;
-        b = temp;
-    }
+    if (entity != hit_entity) {
+        var a = entity;
+        var b = hit_entity;
 
-    // Basic rules.
-    if (!a.isSet(SimEntityFlags.Nonspatial.toInt()) and
-        !b.isSet(SimEntityFlags.Nonspatial.toInt())) {
-        result = true;
-
-        if (a == b) {
-            result = false;
+        // Sort entities based on storage index.
+        if (a.storage_index > b.storage_index) {
+            const temp = a;
+            a = b;
+            b = temp;
         }
 
-    }
+        // Basic rules.
+        if (!a.isSet(SimEntityFlags.Nonspatial.toInt()) and
+            !b.isSet(SimEntityFlags.Nonspatial.toInt()))
+        {
+            result = true;
+        }
 
-    // Specific rules.
-    const hash_bucket = a.storage_index & ((state.collision_rule_hash.len) - 1);
-    var opt_rule: ?*shared.PairwiseCollisionRule = state.collision_rule_hash[hash_bucket];
-    while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
-        if ((rule.storage_index_a == a.storage_index) and (rule.storage_index_b == b.storage_index)) {
-            result = rule.should_collide;
-            break;
+        // Specific rules.
+        const hash_bucket = a.storage_index & ((state.collision_rule_hash.len) - 1);
+        var opt_rule: ?*shared.PairwiseCollisionRule = state.collision_rule_hash[hash_bucket];
+        while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
+            if ((rule.storage_index_a == a.storage_index) and (rule.storage_index_b == b.storage_index)) {
+                result = rule.should_collide;
+                break;
+            }
         }
     }
 
@@ -459,56 +458,56 @@ pub fn moveEntity(
                         const relative = entity.position.minus(test_entity.position);
 
                         if (testWall(
-                                min_corner.x(),
-                                relative.x(),
-                                relative.y(),
-                                entity_delta.x(),
-                                entity_delta.y(),
-                                min_corner.y(),
-                                max_corner.y(),
-                                &min_time,
+                            min_corner.x(),
+                            relative.x(),
+                            relative.y(),
+                            entity_delta.x(),
+                            entity_delta.y(),
+                            min_corner.y(),
+                            max_corner.y(),
+                            &min_time,
                         )) {
                             wall_normal = Vector2.new(-1, 0);
                             opt_hit_entity = test_entity;
                         }
 
                         if (testWall(
-                                max_corner.x(),
-                                relative.x(),
-                                relative.y(),
-                                entity_delta.x(),
-                                entity_delta.y(),
-                                min_corner.y(),
-                                max_corner.y(),
-                                &min_time,
+                            max_corner.x(),
+                            relative.x(),
+                            relative.y(),
+                            entity_delta.x(),
+                            entity_delta.y(),
+                            min_corner.y(),
+                            max_corner.y(),
+                            &min_time,
                         )) {
                             wall_normal = Vector2.new(1, 0);
                             opt_hit_entity = test_entity;
                         }
 
                         if (testWall(
-                                min_corner.y(),
-                                relative.y(),
-                                relative.x(),
-                                entity_delta.y(),
-                                entity_delta.x(),
-                                min_corner.x(),
-                                max_corner.x(),
-                                &min_time,
+                            min_corner.y(),
+                            relative.y(),
+                            relative.x(),
+                            entity_delta.y(),
+                            entity_delta.x(),
+                            min_corner.x(),
+                            max_corner.x(),
+                            &min_time,
                         )) {
                             wall_normal = Vector2.new(0, -1);
                             opt_hit_entity = test_entity;
                         }
 
                         if (testWall(
-                                max_corner.y(),
-                                relative.y(),
-                                relative.x(),
-                                entity_delta.y(),
-                                entity_delta.x(),
-                                min_corner.x(),
-                                max_corner.x(),
-                                &min_time,
+                            max_corner.y(),
+                            relative.y(),
+                            relative.x(),
+                            entity_delta.y(),
+                            entity_delta.x(),
+                            min_corner.x(),
+                            max_corner.x(),
+                            &min_time,
                         )) {
                             wall_normal = Vector2.new(0, 1);
                             opt_hit_entity = test_entity;

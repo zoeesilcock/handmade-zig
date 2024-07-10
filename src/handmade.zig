@@ -7,6 +7,58 @@ const math = @import("math.zig");
 const random = @import("random.zig");
 const std = @import("std");
 
+/// TODO: An overview of upcoming tasks.
+///
+/// Architecture exploration:
+///
+/// * Collision detection?
+///     * Entry/exit?
+///     * Robustness/shape definition?
+/// * Implement multiple sim regions per frame.
+///     * Per-entity clocking.
+///     * Sim region merging? For multiple players?
+/// * Z-axis.
+///     * Clean things up by using a Vector3.
+///     * Figure out how you go up and down, and how it is rendered.
+///
+/// * Debug code.
+///     * Logging.
+///     * Diagramming.
+///     * Switches, sliders etc.
+///
+/// * Audio.
+///     * Sound effect triggers.
+///     * Ambient sounds.
+///     * Music.
+/// * Asset streaming.
+///
+/// * Metagame/save game?
+///     * How do you enter a save slot? Multiple profiles and potential "menu world".
+///     * Persistent unlocks, etc.
+///     * De we allo save games? Probably yes, just for "pausing".
+///     * Continuous save for crash recovery?
+/// * Rudimentary world generation to understand which elements will be needed.
+///     * Placement of background things.
+///     * Connectivity?
+///     * None-overlapping?
+///     * Map display.
+/// * AI.
+///     * Rudimentary monster behaviour example.
+///     * Pathfinding.
+///     * AI storage.
+///
+/// * Animation, should lead into rendering.
+///     * Skeletal animation.
+///     * Particle system.
+///
+/// Production:
+///
+/// * Rendering.
+/// * Game.
+///     * Entity system.
+///     * World generation.
+///
+
 // Types.
 const Vector2 = math.Vector2;
 const Color = math.Color;
@@ -332,7 +384,10 @@ pub export fn updateAndRender(
                                 if (entity.sword.ptr) |sword| {
                                     if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
                                         sword.distance_limit = 5.0;
-                                        sword.makeSpatial(entity.position, controlled_hero.sword_direction.scaledTo(5.0));
+                                        sword.makeSpatial(
+                                            entity.position,
+                                            entity.velocity.plus(controlled_hero.sword_direction.scaledTo(5.0)),
+                                        );
                                         addCollisionRule(state, sword.storage_index, entity.storage_index, false);
                                     }
                                 }
