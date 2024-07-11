@@ -13,6 +13,7 @@ const sim = @import("sim.zig");
 const std = @import("std");
 
 const Vector2 = math.Vector2;
+const Vector3 = math.Vector3;
 const Color = math.Color;
 
 // Build options.

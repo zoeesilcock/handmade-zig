@@ -7,7 +7,7 @@ const VectorAccessorStyle = enum {
     Color,
 };
 
-fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: VectorAccessorStyle ) type {
+fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: VectorAccessorStyle) type {
     return struct {
         values: @Vector(dimension_count, f32),
         pub const dimensions = dimension_count;
@@ -57,6 +57,20 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         }
                         pub inline fn z(self: *const Self) f32 {
                             return self.values[2];
+                        }
+                        pub inline fn xy(self: *const Self) Vector2 {
+                            return Vector2.new(self.x(), self.y());
+                        }
+                        pub inline fn fromVector2(in_xy: Vector2, in_z: f32) Self {
+                            return Self.new(in_xy.x(), in_xy.y(), in_z);
+                        }
+                        pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle3) bool {
+                            const result = ((self.x() >= rectangle.min.x()) and
+                                (self.y() >= rectangle.min.y()) and
+                                (self.x() < rectangle.max.x()) and
+                                (self.y() < rectangle.max.y()));
+
+                            return result;
                         }
                     },
                     inline .Color => struct {
@@ -146,8 +160,8 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                 .values = self.values
             };
 
-            for (0..dimensions) |index| {
-                result.values[index] *= scalar;
+            for (0..dimensions) |axis_index| {
+                result.values[axis_index] *= scalar;
             }
 
             return result;
@@ -162,8 +176,18 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
         pub fn dotProduct(self: *const Self, b: Self) f32 {
             var result: f32 = 0;
 
-            for (0..dimensions) |index| {
-                result += self.values[index] * b.values[index];
+            for (0..dimensions) |axis_index| {
+                result += self.values[axis_index] * b.values[axis_index];
+            }
+
+            return result;
+        }
+
+        pub fn hadamardProduct(self: *const Self, b: Self) Self {
+            var result = Self.zero();
+
+            for (0..dimensions) |axis_index| {
+                result.values[axis_index] = self.values[axis_index] * b.values[axis_index];
             }
 
             return result;
@@ -176,55 +200,75 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
         pub fn length(self: *const Self) f32 {
             return @sqrt(self.lengthSquared());
         }
+
+        pub fn invalidPosition() Self {
+            var result = Self.zero();
+
+            for (0..dimensions) |axis_index| {
+                result.values[axis_index] = 100000;
+            }
+
+            return result;
+        }
     };
 }
 
-pub const Rectangle2 = struct {
-    min: Vector2 = Vector2.zero(),
-    max: Vector2 = Vector2.zero(),
+pub const Rectangle2 = Rectangle(2);
+pub const Rectangle3 = Rectangle(3);
 
-    pub fn fromMinMax(min: Vector2, max: Vector2) Rectangle2 {
-        return Rectangle2{
-            .min = min,
-            .max = max,
-        };
-    }
+fn Rectangle(comptime dimension_count: comptime_int) type {
+    return struct {
+        const VectorType = Vector(dimension_count, .Position);
 
-    pub fn fromMinDimension(min: Vector2, dimension: Vector2) Rectangle2 {
-        return Rectangle2{
-            .min = min,
-            .max = min.plus(dimension),
-        };
-    }
+        min: VectorType,
+        max: VectorType,
+        pub const dimensions = dimension_count;
 
-    pub fn fromCenterHalfDimension(center: Vector2, half_dimension: Vector2) Rectangle2 {
-        return Rectangle2{
-            .min = center.minus(half_dimension),
-            .max = center.plus(half_dimension),
-        };
-    }
+        const Self = @This();
 
-    pub fn fromCenterDimension(center: Vector2, dimension: Vector2) Rectangle2 {
-        return fromCenterHalfDimension(center, dimension.scaledTo(0.5));
-    }
+        pub fn fromMinMax(min: VectorType, max: VectorType) Self {
+            return Self{
+                .min = min,
+                .max = max,
+            };
+        }
 
-    pub fn getMinCorner(self: Rectangle2) Vector2 {
-        return self.min;
-    }
-    pub fn getMaxCorner(self: Rectangle2) Vector2 {
-        return self.max;
-    }
-    pub fn getCenter(self: Rectangle2) Vector2 {
-        return self.min.plus(self.max).scale(0.5);
-    }
+        pub fn fromMinDimension(min: VectorType, dimension: VectorType) Self {
+            return Self{
+                .min = min,
+                .max = min.plus(dimension),
+            };
+        }
 
-    pub fn addRadius(self: Rectangle2, radius_width: f32, radius_height: f32) Rectangle2 {
-        return Rectangle2{
-            .min = self.min.minus(Vector2.new(radius_width, radius_height)),
-            .max = self.max.plus(Vector2.new(radius_width, radius_height)),
-        };
-    }
-};
+        pub fn fromCenterHalfDimension(center: VectorType, half_dimension: VectorType) Self {
+            return Self{
+                .min = center.minus(half_dimension),
+                .max = center.plus(half_dimension),
+            };
+        }
+
+        pub fn fromCenterDimension(center: VectorType, dimension: VectorType) Self {
+            return fromCenterHalfDimension(center, dimension.scaledTo(0.5));
+        }
+
+        pub fn getMinCorner(self: Self) VectorType {
+            return self.min;
+        }
+        pub fn getMaxCorner(self: Self) VectorType {
+            return self.max;
+        }
+        pub fn getCenter(self: Self) VectorType {
+            return self.min.plus(self.max).scale(0.5);
+        }
+
+        pub fn addRadius(self: Self, radius: VectorType) Self {
+            return Self{
+                .min = self.min.minus(radius),
+                .max = self.max.plus(radius),
+            };
+        }
+    };
+}
 
 pub fn square(a: f32) f32 {
     return a * a;

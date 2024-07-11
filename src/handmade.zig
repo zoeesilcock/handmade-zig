@@ -11,15 +11,15 @@ const std = @import("std");
 ///
 /// Architecture exploration:
 ///
+/// * Z-axis.
+///     * Minkowski inclusio test for sim region begin / updatable bounds.
+///     * Figure out how you go up and down, and how it is rendered.
 /// * Collision detection?
 ///     * Entry/exit?
 ///     * Robustness/shape definition?
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
-/// * Z-axis.
-///     * Clean things up by using a Vector3.
-///     * Figure out how you go up and down, and how it is rendered.
 ///
 /// * Debug code.
 ///     * Logging.
@@ -61,6 +61,7 @@ const std = @import("std");
 
 // Types.
 const Vector2 = math.Vector2;
+const Vector3 = math.Vector3;
 const Color = math.Color;
 const State = shared.State;
 const WorldPosition = world.WorldPosition;
@@ -314,9 +315,10 @@ pub export fn updateAndRender(
     // Calculate the camera bounds.
     const tile_span_x = 17 * 3;
     const tile_span_y = 9 * 3;
-    const bounds_in_tiles = Vector2.new(tile_span_x, tile_span_y);
-    const camera_bounds = math.Rectangle2.fromCenterDimension(
-        Vector2.zero(),
+    const tile_span_z = 1;
+    const bounds_in_tiles = Vector3.new(tile_span_x, tile_span_y, tile_span_z);
+    const camera_bounds = math.Rectangle3.fromCenterDimension(
+        Vector3.zero(),
         bounds_in_tiles.scaledTo(state.world.tile_side_in_meters),
     );
 
@@ -329,9 +331,6 @@ pub export fn updateAndRender(
         state.camera_position,
         camera_bounds,
     );
-
-    const foo = state.world.chunk_side_in_meters;
-    _ = foo;
 
     // Clear background.
     const clear_color = Color.new(0.5, 0.5, 0.5, 1);
@@ -357,20 +356,24 @@ pub export fn updateAndRender(
             piece_group.piece_count = 0;
 
             const delta_time = input.frame_delta_time;
-            var shadow_alpha: f32 = 1 - entity.z;
+            var shadow_alpha: f32 = 1 - entity.position.z();
             if (shadow_alpha < 0) {
                 shadow_alpha = 0;
             }
 
             var move_spec = sim.MoveSpec{};
-            var acceleration = Vector2.zero();
+            var acceleration = Vector3.zero();
 
             switch (entity.type) {
                 .Hero => {
                     for (state.controlled_heroes) |controlled_hero| {
                         if (controlled_hero.entity_index == entity.storage_index) {
                             if (controlled_hero.vertical_direction != 0) {
-                                entity.z_velocity = controlled_hero.vertical_direction;
+                                entity.velocity = Vector3.new(
+                                    entity.velocity.x(),
+                                    entity.velocity.y(),
+                                    controlled_hero.vertical_direction,
+                                );
                             }
 
                             move_spec = sim.MoveSpec{
@@ -378,7 +381,7 @@ pub export fn updateAndRender(
                                 .drag = 8,
                                 .unit_max_acceleration = true,
                             };
-                            acceleration = controlled_hero.movement_direction;
+                            acceleration = Vector3.fromVector2(controlled_hero.movement_direction, 0);
 
                             if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
                                 if (entity.sword.ptr) |sword| {
@@ -386,7 +389,9 @@ pub export fn updateAndRender(
                                         sword.distance_limit = 5.0;
                                         sword.makeSpatial(
                                             entity.position,
-                                            entity.velocity.plus(controlled_hero.sword_direction.scaledTo(5.0)),
+                                            entity.velocity.plus(
+                                                Vector3.fromVector2(controlled_hero.sword_direction, 0).scaledTo(5.0),
+                                            ),
                                         );
                                         addCollisionRule(state, sword.storage_index, entity.storage_index, false);
                                     }
@@ -492,7 +497,7 @@ pub export fn updateAndRender(
 
             const entity_ground_point_x = screen_center_x + meters_to_pixels * entity.position.x();
             const entity_ground_point_y = screen_center_y - meters_to_pixels * entity.position.y();
-            const entity_z = -meters_to_pixels * entity.z;
+            const entity_z = -meters_to_pixels * entity.position.z();
 
             if (false) {
                 const tile_color = Color.new(1.0, 1.0, 0.0, 1);
@@ -538,11 +543,6 @@ pub export fn updateAndRender(
     }
 
     sim.endSimulation(state, screen_sim_region);
-}
-
-fn getCameraSpacePosition(state: *State, low_entity: *shared.LowEntity) Vector2 {
-    const diff = world.subtractPositions(state.world, &low_entity.position, &state.camera_position);
-    return diff.xy;
 }
 
 fn addLowEntity(state: *State, entity_type: sim.EntityType, world_position: WorldPosition) AddLowEntityResult {

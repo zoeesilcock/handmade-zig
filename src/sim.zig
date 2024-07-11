@@ -7,19 +7,18 @@ const std = @import("std");
 const addCollisionRule = @import("handmade.zig").addCollisionRule;
 
 // Types.
-const Vector2 = math.Vector2;
+const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
+const Rectangle3 = math.Rectangle3;
 const State = shared.State;
 const World = world.World;
-
-pub const INVALID_POSITION = Vector2.new(100000, 100000);
 
 pub const SimRegion = struct {
     world: *World,
 
     origin: world.WorldPosition,
-    bounds: Rectangle2,
-    updatable_bounds: Rectangle2,
+    bounds: Rectangle3,
+    updatable_bounds: Rectangle3,
 
     max_entity_count: u32,
     entity_count: u32 = 0,
@@ -57,15 +56,10 @@ pub const SimEntity = struct {
     type: EntityType = .Null,
     flags: u32 = 0,
 
-    position: Vector2 = Vector2.zero(),
-    velocity: Vector2 = Vector2.zero(),
-
-    z: f32 = 0,
-    z_velocity: f32 = 0,
+    position: Vector3 = Vector3.zero(),
+    velocity: Vector3 = Vector3.zero(),
 
     distance_limit: f32 = 0,
-
-    chunk_z: i32 = 0,
 
     width: f32 = 0,
     height: f32 = 0,
@@ -94,10 +88,10 @@ pub const SimEntity = struct {
 
     pub fn makeNonSpatial(self: *SimEntity) void {
         self.addFlag(SimEntityFlags.Nonspatial.toInt());
-        self.position = INVALID_POSITION;
+        self.position = Vector3.invalidPosition();
     }
 
-    pub fn makeSpatial(self: *SimEntity, position: Vector2, velocity: Vector2) void {
+    pub fn makeSpatial(self: *SimEntity, position: Vector3, velocity: Vector3) void {
         self.clearFlag(SimEntityFlags.Nonspatial.toInt());
         self.position = position;
         self.velocity = velocity;
@@ -231,12 +225,11 @@ pub fn addEntityRaw(
     return entity;
 }
 
-fn getSimSpacePosition(sim_region: *SimRegion, low_entity: *shared.LowEntity) Vector2 {
-    var result = INVALID_POSITION;
+fn getSimSpacePosition(sim_region: *SimRegion, low_entity: *shared.LowEntity) Vector3 {
+    var result = Vector3.invalidPosition();
 
     if (!low_entity.sim.isSet(SimEntityFlags.Nonspatial.toInt())) {
-        const diff = world.subtractPositions(sim_region.world, &low_entity.position, &sim_region.origin);
-        result = diff.xy;
+        result = world.subtractPositions(sim_region.world, &low_entity.position, &sim_region.origin);
     }
 
     return result;
@@ -247,7 +240,7 @@ pub fn addEntity(
     sim_region: *SimRegion,
     storage_index: u32,
     source: *shared.LowEntity,
-    opt_sim_position: ?*Vector2,
+    opt_sim_position: ?*Vector3,
 ) ?*SimEntity {
     const opt_entity = addEntityRaw(state, sim_region, storage_index, source);
 
@@ -268,23 +261,31 @@ pub fn beginSimulation(
     sim_arena: *shared.MemoryArena,
     game_world: *World,
     origin: world.WorldPosition,
-    bounds: Rectangle2,
+    bounds: Rectangle3,
 ) *SimRegion {
     var sim_region: *SimRegion = shared.pushStruct(sim_arena, SimRegion);
     shared.zeroStruct([4096]SimEntityHash, &sim_region.sim_entity_hash);
 
-    const update_safety_margin: f32 = 1;
+    const update_safety_margin = Vector3.new(1, 1, 1);
 
     sim_region.world = game_world;
     sim_region.origin = origin;
     sim_region.updatable_bounds = bounds;
-    sim_region.bounds = bounds.addRadius(update_safety_margin, update_safety_margin);
+    sim_region.bounds = bounds.addRadius(update_safety_margin);
     sim_region.max_entity_count = 4096;
     sim_region.entity_count = 0;
     sim_region.entities = shared.pushArray(sim_arena, sim_region.max_entity_count, SimEntity);
 
-    const min_chunk_position = world.mapIntoChunkSpace(sim_region.world, sim_region.origin, sim_region.bounds.getMinCorner());
-    const max_chunk_position = world.mapIntoChunkSpace(sim_region.world, sim_region.origin, sim_region.bounds.getMaxCorner());
+    const min_chunk_position = world.mapIntoChunkSpace(
+        sim_region.world,
+        sim_region.origin,
+        sim_region.bounds.getMinCorner(),
+    );
+    const max_chunk_position = world.mapIntoChunkSpace(
+        sim_region.world,
+        sim_region.origin,
+        sim_region.bounds.getMaxCorner(),
+    );
 
     var chunk_y = min_chunk_position.chunk_y;
     while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
@@ -387,12 +388,12 @@ pub fn moveEntity(
     sim_region: *SimRegion,
     entity: *SimEntity,
     delta_time: f32,
-    acceleration_in: Vector2,
+    in_acceleration: Vector3,
     move_spec: *const MoveSpec,
 ) void {
     std.debug.assert(!entity.isSet(SimEntityFlags.Nonspatial.toInt()));
 
-    var acceleration = acceleration_in;
+    var acceleration = in_acceleration;
 
     // Correct speed when multiple axes are contributing to the direction.
     if (move_spec.unit_max_acceleration) {
@@ -405,23 +406,16 @@ pub fn moveEntity(
     // Calculate acceleration.
     acceleration = acceleration.scaledTo(move_spec.speed);
 
-    // Apply drag.
+    // Add drag to acceleration.
     acceleration = acceleration.plus(entity.velocity.scaledTo(move_spec.drag).negated());
-    // acceleration = acceleration.minus(entity.velocity.scaledTo(move_spec.drag));
+
+    // Add gravity to acceleration.
+    acceleration = acceleration.plus(Vector3.new(0, 0, -9.8));
 
     // Calculate movement delta.
     var entity_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
         .plus(entity.velocity.scaledTo(delta_time));
     entity.velocity = acceleration.scaledTo(delta_time).plus(entity.velocity);
-
-    // Jump.
-    const z_acceleration = -9.8;
-    entity.z = (0.5 * z_acceleration * math.square(delta_time)) +
-        entity.z_velocity * delta_time + entity.z;
-    entity.z_velocity = z_acceleration * delta_time + entity.z_velocity;
-    if (entity.z < 0) {
-        entity.z = 0;
-    }
 
     var distance_remaining = entity.distance_limit;
     if (distance_remaining == 0) {
@@ -438,7 +432,7 @@ pub fn moveEntity(
                 min_time = distance_remaining / entity_delta_length;
             }
 
-            var wall_normal = Vector2.zero();
+            var wall_normal = Vector3.zero();
             var opt_hit_entity: ?*SimEntity = null;
 
             const desired_position = entity.position.plus(entity_delta);
@@ -449,12 +443,13 @@ pub fn moveEntity(
                     const test_entity = &sim_region.entities[test_entity_index];
 
                     if (shouldCollide(state, entity, test_entity)) {
-                        const collision_diameter = Vector2.new(
+                        const minkowski_diameter = Vector3.new(
                             test_entity.width + entity.width,
                             test_entity.height + entity.height,
+                            2.0 * state.world.tile_depth_in_meters,
                         );
-                        const min_corner = collision_diameter.scaledTo(-0.5);
-                        const max_corner = collision_diameter.scaledTo(0.5);
+                        const min_corner = minkowski_diameter.scaledTo(-0.5);
+                        const max_corner = minkowski_diameter.scaledTo(0.5);
                         const relative = entity.position.minus(test_entity.position);
 
                         if (testWall(
@@ -467,7 +462,7 @@ pub fn moveEntity(
                             max_corner.y(),
                             &min_time,
                         )) {
-                            wall_normal = Vector2.new(-1, 0);
+                            wall_normal = Vector3.new(-1, 0, 0);
                             opt_hit_entity = test_entity;
                         }
 
@@ -481,7 +476,7 @@ pub fn moveEntity(
                             max_corner.y(),
                             &min_time,
                         )) {
-                            wall_normal = Vector2.new(1, 0);
+                            wall_normal = Vector3.new(1, 0, 0);
                             opt_hit_entity = test_entity;
                         }
 
@@ -495,7 +490,7 @@ pub fn moveEntity(
                             max_corner.x(),
                             &min_time,
                         )) {
-                            wall_normal = Vector2.new(0, -1);
+                            wall_normal = Vector3.new(0, -1, 0);
                             opt_hit_entity = test_entity;
                         }
 
@@ -509,7 +504,7 @@ pub fn moveEntity(
                             max_corner.x(),
                             &min_time,
                         )) {
-                            wall_normal = Vector2.new(0, 1);
+                            wall_normal = Vector3.new(0, 1, 0);
                             opt_hit_entity = test_entity;
                         }
                     }
@@ -539,6 +534,11 @@ pub fn moveEntity(
         } else {
             break;
         }
+    }
+
+    // Ground check.
+    if (entity.position.z() < 0) {
+        entity.position = Vector3.new(entity.position.x(), entity.position.y(), 0);
     }
 
     if (entity.distance_limit != 0) {
