@@ -87,7 +87,7 @@ pub fn initializeWorld(world: *World, tile_side_in_meters: f32) void {
 }
 
 fn isCanonical(chunk_dimension: f32, relative: f32) bool {
-    const epsilon = 0.0001;
+    const epsilon = 0.01;
     return ((relative >= -(0.5 * chunk_dimension + epsilon)) and
         (relative <= (0.5 * chunk_dimension + epsilon)));
 }
@@ -307,7 +307,7 @@ pub fn changeEntityLocationRaw(
 }
 
 pub fn recannonicalizeCoordinate(chunk_dimension: f32, tile_abs: *i32, tile_rel: *const f32) f32 {
-    const epsilon = 0.0001;
+    const epsilon = 0.01;
     const offset = intrinsics.roundReal32ToInt32((tile_rel.* + epsilon) / chunk_dimension);
 
     tile_abs.* +%= offset;
@@ -338,11 +338,11 @@ pub fn chunkPositionFromTilePosition(
     abs_tile_z: i32,
 ) WorldPosition {
     const base_position = WorldPosition.zero();
-    const offset = world.chunk_dimension_in_meters.hadamardProduct(Vector3.new(
+    const offset = Vector3.new(
         @floatFromInt(abs_tile_x),
         @floatFromInt(abs_tile_y),
         @floatFromInt(abs_tile_z),
-    ));
+    ).scaledTo(world.tile_side_in_meters);
 
     const result = mapIntoChunkSpace(world, base_position, offset);
 

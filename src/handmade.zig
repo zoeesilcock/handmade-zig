@@ -12,7 +12,6 @@ const std = @import("std");
 /// Architecture exploration:
 ///
 /// * Z-axis.
-///     * Minkowski inclusio test for sim region begin / updatable bounds.
 ///     * Figure out how you go up and down, and how it is rendered.
 /// * Collision detection?
 ///     * Entry/exit?
@@ -330,6 +329,7 @@ pub export fn updateAndRender(
         state.world,
         state.camera_position,
         camera_bounds,
+        input.frame_delta_time,
     );
 
     // Clear background.
@@ -573,8 +573,7 @@ fn addWall(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Add
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Wall, world_position);
 
-    entity.low.sim.height = state.world.tile_side_in_meters;
-    entity.low.sim.width = state.world.tile_side_in_meters;
+    entity.low.sim.dimension = Vector3.splat(state.world.tile_side_in_meters);
     entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
 
     return entity;
@@ -681,8 +680,7 @@ pub fn clearCollisionRulesFor(state: *State, storage_index: u32) void {
 fn addPlayer(state: *State) AddLowEntityResult {
     const entity = addLowEntity(state, .Hero, state.camera_position);
 
-    entity.low.sim.height = 0.5; // 1.4;
-    entity.low.sim.width = 1.0;
+    entity.low.sim.dimension = Vector3.new(0.5, 1.0, 0);
     entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
 
     initHitPoints(&entity.low.sim, 3);
@@ -700,8 +698,7 @@ fn addPlayer(state: *State) AddLowEntityResult {
 fn addSword(state: *State) AddLowEntityResult {
     const entity = addLowEntity(state, .Sword, WorldPosition.nullPosition());
 
-    entity.low.sim.height = 0.5;
-    entity.low.sim.width = 1.0;
+    entity.low.sim.dimension = Vector3.new(0.5, 1.0, 0);
     entity.low.sim.addFlag(sim.SimEntityFlags.Nonspatial.toInt());
 
     return entity;
@@ -711,8 +708,7 @@ fn addMonster(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) 
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Monster, world_position);
 
-    entity.low.sim.height = 0.5;
-    entity.low.sim.width = 1.0;
+    entity.low.sim.dimension = Vector3.new(0.5, 1.0, 0);
     entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
 
     initHitPoints(&entity.low.sim, 3);
@@ -724,8 +720,7 @@ fn addFamiliar(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32)
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
     const entity = addLowEntity(state, .Familiar, world_position);
 
-    entity.low.sim.height = 0.5;
-    entity.low.sim.width = 1.0;
+    entity.low.sim.dimension = Vector3.new(0.5, 1.0, 0);
 
     return entity;
 }

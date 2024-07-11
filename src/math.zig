@@ -67,8 +67,10 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle3) bool {
                             const result = ((self.x() >= rectangle.min.x()) and
                                 (self.y() >= rectangle.min.y()) and
+                                (self.z() >= rectangle.min.z()) and
                                 (self.x() < rectangle.max.x()) and
-                                (self.y() < rectangle.max.y()));
+                                (self.y() < rectangle.max.y()) and
+                                (self.z() < rectangle.max.z()));
 
                             return result;
                         }
@@ -127,8 +129,12 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             },
         };
 
-        pub inline fn zero() Self {
+        pub fn zero() Self {
             return Self{ .values = @splat(0) };
+        }
+
+        pub fn splat(value: f32) Self {
+            return Self{ .values = @splat(value) };
         }
 
         pub fn plus(self: *const Self, b: Self) Self {

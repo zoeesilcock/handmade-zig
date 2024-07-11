@@ -15,6 +15,8 @@ const World = world.World;
 
 pub const SimRegion = struct {
     world: *World,
+    max_entity_radius: f32,
+    max_entity_velocity: f32,
 
     origin: world.WorldPosition,
     bounds: Rectangle3,
@@ -58,11 +60,9 @@ pub const SimEntity = struct {
 
     position: Vector3 = Vector3.zero(),
     velocity: Vector3 = Vector3.zero(),
+    dimension: Vector3 = Vector3.zero(),
 
     distance_limit: f32 = 0,
-
-    width: f32 = 0,
-    height: f32 = 0,
 
     facing_direction: u32 = undefined,
     head_bob_time: f32 = 0,
@@ -235,6 +235,11 @@ fn getSimSpacePosition(sim_region: *SimRegion, low_entity: *shared.LowEntity) Ve
     return result;
 }
 
+pub fn entityOverlapsRectangle(position: Vector3, dimension: Vector3, rectangle: Rectangle3) bool {
+    const grown = rectangle.addRadius(dimension.scaledTo(0.5));
+    return position.isInRectangle(grown);
+}
+
 pub fn addEntity(
     state: *State,
     sim_region: *SimRegion,
@@ -247,7 +252,11 @@ pub fn addEntity(
     if (opt_entity) |sim_entity| {
         if (opt_sim_position) |sim_position| {
             sim_entity.position = sim_position.*;
-            sim_entity.updatable = sim_entity.position.isInRectangle(sim_region.updatable_bounds);
+            sim_entity.updatable = entityOverlapsRectangle(
+                sim_entity.position,
+                sim_entity.dimension,
+                sim_region.updatable_bounds,
+            );
         } else {
             sim_entity.position = getSimSpacePosition(sim_region, source);
         }
@@ -262,16 +271,19 @@ pub fn beginSimulation(
     game_world: *World,
     origin: world.WorldPosition,
     bounds: Rectangle3,
+    delta_time: f32,
 ) *SimRegion {
     var sim_region: *SimRegion = shared.pushStruct(sim_arena, SimRegion);
     shared.zeroStruct([4096]SimEntityHash, &sim_region.sim_entity_hash);
 
-    const update_safety_margin = Vector3.new(1, 1, 1);
+    sim_region.max_entity_radius = 5;
+    sim_region.max_entity_velocity = 30;
+    const update_safety_margin = sim_region.max_entity_radius + sim_region.max_entity_velocity * delta_time;
 
     sim_region.world = game_world;
     sim_region.origin = origin;
-    sim_region.updatable_bounds = bounds;
-    sim_region.bounds = bounds.addRadius(update_safety_margin);
+    sim_region.updatable_bounds = bounds.addRadius(Vector3.splat(sim_region.max_entity_radius));
+    sim_region.bounds = bounds.addRadius(Vector3.splat(update_safety_margin));
     sim_region.max_entity_count = 4096;
     sim_region.entity_count = 0;
     sim_region.entities = shared.pushArray(sim_arena, sim_region.max_entity_count, SimEntity);
@@ -304,7 +316,11 @@ pub fn beginSimulation(
                         if (!low_entity.sim.isSet(SimEntityFlags.Nonspatial.toInt())) {
                             var sim_space_position = getSimSpacePosition(sim_region, low_entity);
 
-                            if (sim_space_position.isInRectangle(sim_region.bounds)) {
+                            if (entityOverlapsRectangle(
+                                sim_space_position,
+                                low_entity.sim.dimension,
+                                sim_region.updatable_bounds,
+                            )) {
                                 _ = addEntity(state, sim_region, low_entity_index, low_entity, &sim_space_position);
                             }
                         }
@@ -417,6 +433,8 @@ pub fn moveEntity(
         .plus(entity.velocity.scaledTo(delta_time));
     entity.velocity = acceleration.scaledTo(delta_time).plus(entity.velocity);
 
+    std.debug.assert(entity.velocity.lengthSquared() <= math.square(sim_region.max_entity_velocity));
+
     var distance_remaining = entity.distance_limit;
     if (distance_remaining == 0) {
         distance_remaining = 10000;
@@ -444,9 +462,9 @@ pub fn moveEntity(
 
                     if (shouldCollide(state, entity, test_entity)) {
                         const minkowski_diameter = Vector3.new(
-                            test_entity.width + entity.width,
-                            test_entity.height + entity.height,
-                            2.0 * state.world.tile_depth_in_meters,
+                            test_entity.dimension.x() + entity.dimension.x(),
+                            test_entity.dimension.y() + entity.dimension.y(),
+                            test_entity.dimension.z() + entity.dimension.z(),
                         );
                         const min_corner = minkowski_diameter.scaledTo(-0.5);
                         const max_corner = minkowski_diameter.scaledTo(0.5);
@@ -539,6 +557,7 @@ pub fn moveEntity(
     // Ground check.
     if (entity.position.z() < 0) {
         entity.position = Vector3.new(entity.position.x(), entity.position.y(), 0);
+        entity.velocity = Vector3.new(entity.velocity.x(), entity.velocity.y(), 0);
     }
 
     if (entity.distance_limit != 0) {
@@ -632,7 +651,13 @@ pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
                     new_camera_position.chunk_y -= 9;
                 }
             } else {
+                const camera_z_offset = new_camera_position.offset.z();
                 new_camera_position = stored.position;
+                new_camera_position.offset = Vector3.new(
+                    new_camera_position.offset.x(),
+                    new_camera_position.offset.y(),
+                    camera_z_offset,
+                );
             }
 
             state.camera_position = new_camera_position;
