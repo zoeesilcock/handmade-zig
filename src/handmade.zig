@@ -356,11 +356,7 @@ pub export fn updateAndRender(
             piece_group.piece_count = 0;
 
             const delta_time = input.frame_delta_time;
-            var shadow_alpha: f32 = 1 - entity.position.z();
-            if (shadow_alpha < 0) {
-                shadow_alpha = 0;
-            }
-
+            const shadow_alpha: f32 = std.math.clamp(1 - entity.position.z(), 0, 1);
             var move_spec = sim.MoveSpec{};
             var acceleration = Vector3.zero();
 
@@ -787,6 +783,9 @@ fn drawBitmap(
     real_y: f32,
     alpha: f32,
 ) void {
+    // The pixel color calculation below doesn't handle sizes outside the range of 0 - 1.
+    std.debug.assert(alpha >= 0 and alpha <= 1);
+
     // Calculate extents.
     var min_x = intrinsics.roundReal32ToInt32(real_x);
     var min_y = intrinsics.roundReal32ToInt32(real_y);
