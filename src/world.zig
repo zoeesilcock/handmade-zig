@@ -189,10 +189,10 @@ pub fn changeEntityLocation(
 
     if (new_position.isValid()) {
         low_entity.position = new_position;
-        low_entity.sim.clearFlag(sim.SimEntityFlags.Nonspatial.toInt());
+        low_entity.sim.clearFlags(sim.SimEntityFlags.Nonspatial.toInt());
     } else {
         low_entity.position = WorldPosition.nullPosition();
-        low_entity.sim.addFlag(sim.SimEntityFlags.Nonspatial.toInt());
+        low_entity.sim.addFlags(sim.SimEntityFlags.Nonspatial.toInt());
     }
 }
 
@@ -336,13 +336,18 @@ pub fn chunkPositionFromTilePosition(
     abs_tile_x: i32,
     abs_tile_y: i32,
     abs_tile_z: i32,
+    opt_additional_offset: ?Vector3,
 ) WorldPosition {
     const base_position = WorldPosition.zero();
-    const offset = Vector3.new(
+    var offset = Vector3.new(
         @floatFromInt(abs_tile_x),
         @floatFromInt(abs_tile_y),
         @floatFromInt(abs_tile_z),
     ).scaledTo(world.tile_side_in_meters);
+
+    if (opt_additional_offset) |additional_offset| {
+        offset = offset.plus(additional_offset);
+    }
 
     const result = mapIntoChunkSpace(world, base_position, offset);
 

@@ -116,6 +116,8 @@ pub export fn updateAndRender(
             },
             .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
             .sword = debugLoadBMP(thread, platform, "test2/rock03.bmp"),
+
+            // TODO: Remove?
             .stairwell = debugLoadBMP(thread, platform, "test2/rock02.bmp"),
         };
 
@@ -246,7 +248,13 @@ pub export fn updateAndRender(
         const camera_tile_x = screen_base_x * tiles_per_width + (17 / 2);
         const camera_tile_y = screen_base_y * tiles_per_height + (9 / 2);
         const camera_tile_z = screen_base_z;
-        state.camera_position = world.chunkPositionFromTilePosition(state.world, camera_tile_x, camera_tile_y, camera_tile_z);
+        state.camera_position = world.chunkPositionFromTilePosition(
+            state.world,
+            camera_tile_x,
+            camera_tile_y,
+            camera_tile_z,
+            null,
+        );
 
         _ = addMonster(state, camera_tile_x - 3, camera_tile_y + 2, camera_tile_z);
 
@@ -426,7 +434,8 @@ pub export fn updateAndRender(
                     piece_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
                 },
                 .Stairwell => {
-                    piece_group.pushBitmap(&state.stairwell, Vector2.zero(), 0, Vector2.new(37, 37), 1, 1);
+                    const stairwell_color = Color.new(1, 1, 0, 1);
+                    piece_group.pushRectangle(entity.dimension.xy(), Vector2.zero(), 0, stairwell_color, 0);
                 },
                 .Monster => {
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
@@ -485,7 +494,9 @@ pub export fn updateAndRender(
                 },
             }
 
-            if (!entity.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
+            if (!entity.isSet(sim.SimEntityFlags.Nonspatial.toInt()) and
+                entity.isSet(sim.SimEntityFlags.Movable.toInt()))
+            {
                 sim.moveEntity(
                     state,
                     screen_sim_region,
@@ -532,6 +543,13 @@ pub export fn updateAndRender(
                 } else {
                     const dimension = piece.dimension.scaledTo(meters_to_pixels);
 
+                    const a = dimension.scaledTo(0.5);
+                    const c = center;
+                    const b = c.minus(a);
+
+                    const result = b.y();
+                    _ = result;
+
                     drawRectangle(
                         buffer,
                         center.minus(dimension.scaledTo(0.5)),
@@ -571,23 +589,29 @@ fn addLowEntity(state: *State, entity_type: sim.EntityType, world_position: Worl
 }
 
 fn addWall(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
-    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
+    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
     const entity = addLowEntity(state, .Wall, world_position);
 
     entity.low.sim.dimension = Vector3.splat(state.world.tile_side_in_meters);
-    entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
+    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
 
     return entity;
 }
 
 fn addStairs(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
-    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
+    const world_position = world.chunkPositionFromTilePosition(
+        state.world,
+        abs_tile_x,
+        abs_tile_y,
+        abs_tile_z,
+        Vector3.new(0, 0, state.world.tile_depth_in_meters).scaledTo(0.5),
+    );
     const entity = addLowEntity(state, .Stairwell, world_position);
 
     entity.low.sim.dimension = Vector3.new(
         state.world.tile_side_in_meters,
         state.world.tile_side_in_meters,
-        state.world.tile_depth_in_meters,
+        state.world.tile_depth_in_meters * 1.2,
     );
 
     return entity;
@@ -628,7 +652,7 @@ fn drawHitPoints(entity: *sim.SimEntity, piece_group: *shared.EntityVisiblePiece
     }
 }
 
-pub fn addCollisionRule(state: *State, in_storage_index_a: u32, in_storage_index_b: u32, should_collide: bool) void {
+pub fn addCollisionRule(state: *State, in_storage_index_a: u32, in_storage_index_b: u32, can_collide: bool) void {
     var storage_index_a = in_storage_index_a;
     var storage_index_b = in_storage_index_b;
 
@@ -668,7 +692,7 @@ pub fn addCollisionRule(state: *State, in_storage_index_a: u32, in_storage_index
     if (found_rule) |found| {
         found.storage_index_a = storage_index_a;
         found.storage_index_b = storage_index_b;
-        found.should_collide = should_collide;
+        found.can_collide = can_collide;
     }
 }
 
@@ -695,7 +719,7 @@ fn addPlayer(state: *State) AddLowEntityResult {
     const entity = addLowEntity(state, .Hero, state.camera_position);
 
     entity.low.sim.dimension = Vector3.new(0.5, 1.0, 0);
-    entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
+    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
 
     initHitPoints(&entity.low.sim, 3);
 
@@ -713,17 +737,17 @@ fn addSword(state: *State) AddLowEntityResult {
     const entity = addLowEntity(state, .Sword, WorldPosition.nullPosition());
 
     entity.low.sim.dimension = Vector3.new(0.5, 1.0, 0);
-    entity.low.sim.addFlag(sim.SimEntityFlags.Nonspatial.toInt());
+    entity.low.sim.addFlags(sim.SimEntityFlags.Movable.toInt());
 
     return entity;
 }
 
 fn addMonster(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
-    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
+    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
     const entity = addLowEntity(state, .Monster, world_position);
 
     entity.low.sim.dimension = Vector3.new(0.5, 1.0, 0);
-    entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
+    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
 
     initHitPoints(&entity.low.sim, 3);
 
@@ -731,10 +755,11 @@ fn addMonster(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) 
 }
 
 fn addFamiliar(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
-    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
+    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
     const entity = addLowEntity(state, .Familiar, world_position);
 
     entity.low.sim.dimension = Vector3.new(0.5, 1.0, 0);
+    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
 
     return entity;
 }

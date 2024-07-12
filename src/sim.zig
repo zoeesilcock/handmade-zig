@@ -43,6 +43,7 @@ pub const SimEntityHash = struct {
 pub const SimEntityFlags = enum(u32) {
     Collides = (1 << 0),
     Nonspatial = (1 << 1),
+    Movable = (1 << 2),
 
     Simming = (1 << 30),
 
@@ -78,21 +79,21 @@ pub const SimEntity = struct {
         return (self.flags & flag) != 0;
     }
 
-    pub fn addFlag(self: *SimEntity, flag: u32) void {
-        self.flags = self.flags | flag;
+    pub fn addFlags(self: *SimEntity, flags: u32) void {
+        self.flags = self.flags | flags;
     }
 
-    pub fn clearFlag(self: *SimEntity, flag: u32) void {
-        self.flags = self.flags & ~flag;
+    pub fn clearFlags(self: *SimEntity, flags: u32) void {
+        self.flags = self.flags & ~flags;
     }
 
     pub fn makeNonSpatial(self: *SimEntity) void {
-        self.addFlag(SimEntityFlags.Nonspatial.toInt());
+        self.addFlags(SimEntityFlags.Nonspatial.toInt());
         self.position = Vector3.invalidPosition();
     }
 
     pub fn makeSpatial(self: *SimEntity, position: Vector3, velocity: Vector3) void {
-        self.clearFlag(SimEntityFlags.Nonspatial.toInt());
+        self.clearFlags(SimEntityFlags.Nonspatial.toInt());
         self.position = position;
         self.velocity = velocity;
     }
@@ -213,7 +214,7 @@ pub fn addEntityRaw(
                 loadEntityReference(state, sim_region, &entity.?.sword);
 
                 std.debug.assert(!source.sim.isSet(SimEntityFlags.Simming.toInt()));
-                source.sim.addFlag(SimEntityFlags.Simming.toInt());
+                source.sim.addFlags(SimEntityFlags.Simming.toInt());
             }
 
             entity.?.storage_index = storage_index;
@@ -300,29 +301,32 @@ pub fn beginSimulation(
         sim_region.bounds.getMaxCorner(),
     );
 
-    var chunk_y = min_chunk_position.chunk_y;
-    while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
-        var chunk_x = min_chunk_position.chunk_x;
-        while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
-            const opt_chunk = world.getWorldChunk(sim_region.world, chunk_x, chunk_y, sim_region.origin.chunk_z, null);
+    var chunk_z = min_chunk_position.chunk_z;
+    while (chunk_z <= max_chunk_position.chunk_z) : (chunk_z += 1) {
+        var chunk_y = min_chunk_position.chunk_y;
+        while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
+            var chunk_x = min_chunk_position.chunk_x;
+            while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
+                const opt_chunk = world.getWorldChunk(sim_region.world, chunk_x, chunk_y, chunk_z, null);
 
-            if (opt_chunk) |chunk| {
-                var opt_block: ?*world.WorldEntityBlock = &chunk.first_block;
-                while (opt_block) |block| : (opt_block = block.next) {
-                    var block_entity_index: u32 = 0;
-                    while (block_entity_index < block.entity_count) : (block_entity_index += 1) {
-                        const low_entity_index = block.low_entity_indices[block_entity_index];
-                        var low_entity = &state.low_entities[low_entity_index];
+                if (opt_chunk) |chunk| {
+                    var opt_block: ?*world.WorldEntityBlock = &chunk.first_block;
+                    while (opt_block) |block| : (opt_block = block.next) {
+                        var block_entity_index: u32 = 0;
+                        while (block_entity_index < block.entity_count) : (block_entity_index += 1) {
+                            const low_entity_index = block.low_entity_indices[block_entity_index];
+                            var low_entity = &state.low_entities[low_entity_index];
 
-                        if (!low_entity.sim.isSet(SimEntityFlags.Nonspatial.toInt())) {
-                            var sim_space_position = getSimSpacePosition(sim_region, low_entity);
+                            if (!low_entity.sim.isSet(SimEntityFlags.Nonspatial.toInt())) {
+                                var sim_space_position = getSimSpacePosition(sim_region, low_entity);
 
-                            if (entityOverlapsRectangle(
-                                sim_space_position,
-                                low_entity.sim.dimension,
-                                sim_region.updatable_bounds,
-                            )) {
-                                _ = addEntity(state, sim_region, low_entity_index, low_entity, &sim_space_position);
+                                if (entityOverlapsRectangle(
+                                    sim_space_position,
+                                    low_entity.sim.dimension,
+                                    sim_region.updatable_bounds,
+                                )) {
+                                    _ = addEntity(state, sim_region, low_entity_index, low_entity, &sim_space_position);
+                                }
                             }
                         }
                     }
@@ -334,7 +338,32 @@ pub fn beginSimulation(
     return sim_region;
 }
 
-pub fn shouldCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
+pub fn canOverlap(state: *State, mover: *SimEntity, region: *SimEntity) bool {
+    _ = state;
+
+    var result = false;
+
+    if (mover != region) {
+        if (region.type == .Stairwell) {
+            result = true;
+        }
+    }
+
+    return result;
+}
+
+pub fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_time: f32, ground: *f32) void {
+    _ = state;
+    _ = delta_time;
+
+    if (region.type == .Stairwell) {
+        const region_rectangle = Rectangle3.fromCenterDimension(region.position, region.dimension);
+        const barycentric = region_rectangle.getBarycentricPosition(mover.position).clamp01();
+        ground.* = math.lerp(region_rectangle.min.z(), barycentric.y(), region_rectangle.max.z());
+    }
+}
+
+pub fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
     var result = false;
 
     if (entity != hit_entity) {
@@ -355,12 +384,16 @@ pub fn shouldCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) 
             result = true;
         }
 
+        if (a.type == .Stairwell or b.type == .Stairwell) {
+            result = false;
+        }
+
         // Specific rules.
         const hash_bucket = a.storage_index & ((state.collision_rule_hash.len) - 1);
         var opt_rule: ?*shared.PairwiseCollisionRule = state.collision_rule_hash[hash_bucket];
         while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
             if ((rule.storage_index_a == a.storage_index) and (rule.storage_index_b == b.storage_index)) {
-                result = rule.should_collide;
+                result = rule.can_collide;
                 break;
             }
         }
@@ -369,9 +402,7 @@ pub fn shouldCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) 
     return result;
 }
 
-pub fn handleCollision(state: *State, entity: *SimEntity, hit_entity: *SimEntity, was_overlapping: bool) bool {
-    _ = was_overlapping;
-
+pub fn handleCollision(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
     var stops_on_collision = false;
 
     if (entity.type == .Sword) {
@@ -398,13 +429,6 @@ pub fn handleCollision(state: *State, entity: *SimEntity, hit_entity: *SimEntity
             a.hit_point_max -= 1;
         }
     }
-
-    if (a.type == .Hero and b.type == .Stairwell) {
-        stops_on_collision = false;
-    }
-
-    // TODO: Update player Z when hitting a ladder.
-    // entity.chunk_z += hit_low_entity.abs_tile_z_delta;
 
     return stops_on_collision;
 }
@@ -450,29 +474,6 @@ pub fn moveEntity(
         distance_remaining = 10000;
     }
 
-    var overlapping_count: u32 = 0;
-    var overlapping_entities: [16]*SimEntity =  [1]*SimEntity{undefined} ** 16;
-    var test_entity_index: u32 = 0;
-    const entity_rectangle = Rectangle3.fromCenterDimension(entity.position, entity.dimension);
-    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
-        const test_entity = &sim_region.entities[test_entity_index];
-
-        if (shouldCollide(state, entity, test_entity)) {
-            const test_entity_rectangle = Rectangle3.fromCenterDimension(test_entity.position, test_entity.dimension);
-            if (entity_rectangle.intersects(&test_entity_rectangle)) {
-                if (overlapping_count < overlapping_entities.len) {
-                    // if (addCollisionRule(state, entity.storage_index, test_entity.storage_index, false)) {
-                        overlapping_entities[overlapping_count] = @constCast(test_entity);
-                        overlapping_count += 1;
-                    // }
-                } else {
-                    unreachable;
-                }
-            }
-        }
-    }
-
-
     var iterations: u32 = 0;
     while (iterations < 4) : (iterations += 1) {
         var min_time: f32 = 1.0;
@@ -489,11 +490,11 @@ pub fn moveEntity(
             const desired_position = entity.position.plus(entity_delta);
 
             if (!entity.isSet(SimEntityFlags.Nonspatial.toInt())) {
-                test_entity_index = 0;
+                var test_entity_index: u32 = 0;
                 while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
                     const test_entity = &sim_region.entities[test_entity_index];
 
-                    if (shouldCollide(state, entity, test_entity)) {
+                    if (canCollide(state, entity, test_entity) and entity.position.z() == test_entity.position.z()) {
                         const minkowski_diameter = Vector3.new(
                             test_entity.dimension.x() + entity.dimension.x(),
                             test_entity.dimension.y() + entity.dimension.y(),
@@ -570,32 +571,11 @@ pub fn moveEntity(
                 // Remove the applied delta.
                 entity_delta = desired_position.minus(entity.position);
 
-                var overlap_index: u32 = overlapping_count;
-                var test_overlap_index: u32 = 0;
-                while (test_overlap_index < overlapping_count) : (test_overlap_index += 1) {
-                    if (hit_entity == overlapping_entities[test_overlap_index]) {
-                        overlap_index = test_overlap_index;
-                        break;
-                    }
-                }
-
-                const was_overlapping = (overlap_index != overlapping_count);
-                const stops_on_collision = handleCollision(state, entity, hit_entity, was_overlapping);
-
+                const stops_on_collision = handleCollision(state, entity, hit_entity);
                 if (stops_on_collision) {
                     // Remove velocity that is facing into the wall.
                     entity_delta = entity_delta.minus(wall_normal.scaledTo(entity_delta.dotProduct(wall_normal)));
                     entity.velocity = entity.velocity.minus(wall_normal.scaledTo(entity.velocity.dotProduct(wall_normal)));
-                } else {
-                    if (was_overlapping) {
-                        overlapping_count -= 1;
-                        overlapping_entities[overlap_index] = overlapping_entities[overlapping_count];
-                    } else if (overlapping_count < overlapping_entities.len) {
-                        overlapping_entities[overlapping_count] = hit_entity;
-                        overlapping_count += 1;
-                    } else {
-                        unreachable;
-                    }
                 }
             } else {
                 break;
@@ -605,9 +585,26 @@ pub fn moveEntity(
         }
     }
 
+    var ground: f32 = 0;
+
+    // Handle events based on area overlapping.
+    var test_entity_index: u32 = 0;
+    const entity_rectangle = Rectangle3.fromCenterDimension(entity.position, entity.dimension);
+    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
+        const test_entity = &sim_region.entities[test_entity_index];
+
+        if (canOverlap(state, entity, test_entity)) {
+            const test_entity_rectangle = Rectangle3.fromCenterDimension(test_entity.position, test_entity.dimension);
+
+            if (entity_rectangle.intersects(&test_entity_rectangle)) {
+                handleOverlap(state, entity, test_entity, delta_time, &ground);
+            }
+        }
+    }
+
     // Ground check.
-    if (entity.position.z() < 0) {
-        entity.position = Vector3.new(entity.position.x(), entity.position.y(), 0);
+    if (entity.position.z() < ground) {
+        entity.position = Vector3.new(entity.position.x(), entity.position.y(), ground);
         entity.velocity = Vector3.new(entity.velocity.x(), entity.velocity.y(), 0);
     }
 

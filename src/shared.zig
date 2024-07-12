@@ -210,12 +210,12 @@ pub const State = struct {
 };
 
 pub const PairwiseCollisionRuleFlag = enum(u8) {
-    ShouldCollide = 0x1,
+    CanCollide = 0x1,
     Temporary = 0x2a,
 };
 
 pub const PairwiseCollisionRule = struct {
-    should_collide: bool,
+    can_collide: bool,
     storage_index_a: u32,
     storage_index_b: u32,
 

@@ -39,7 +39,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                     },
                     else => {
                         unreachable;
-                    }
+                    },
                 };
             },
             inline 3 => struct {
@@ -138,33 +138,23 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
         }
 
         pub fn plus(self: *const Self, b: Self) Self {
-            return Self{
-                .values = self.values + b.values
-            };
+            return Self{ .values = self.values + b.values };
         }
 
         pub fn minus(self: *const Self, b: Self) Self {
-            return Self{
-                .values = self.values - b.values
-            };
+            return Self{ .values = self.values - b.values };
         }
 
         pub fn times(self: *const Self, b: Self) Self {
-            return Self{
-                .values = self.values * b.values
-            };
+            return Self{ .values = self.values * b.values };
         }
 
         pub fn dividedBy(self: *const Self, b: Self) Self {
-            return Self{
-                .values = self.values / b.values
-            };
+            return Self{ .values = self.values / b.values };
         }
 
         pub fn scaledTo(self: *const Self, scalar: f32) Self {
-            var result = Self{
-                .values = self.values
-            };
+            var result = Self{ .values = self.values };
 
             for (0..dimensions) |axis_index| {
                 result.values[axis_index] *= scalar;
@@ -173,10 +163,18 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             return result;
         }
 
+        pub fn clamp01(self: *const Self) Self {
+            var result = Self{ .values = self.values };
+
+            for (0..dimensions) |axis_index| {
+                result.values[axis_index] = clampf01(result.values[axis_index]);
+            }
+
+            return result;
+        }
+
         pub fn negated(self: *const Self) Self {
-            return Self{
-                .values = -self.values
-            };
+            return Self{ .values = -self.values };
         }
 
         pub fn dotProduct(self: *const Self, b: Self) f32 {
@@ -260,11 +258,26 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
         pub fn getMinCorner(self: *const Self) VectorType {
             return self.min;
         }
+
         pub fn getMaxCorner(self: *const Self) VectorType {
             return self.max;
         }
+
         pub fn getCenter(self: *const Self) VectorType {
             return self.min.plus(self.max).scale(0.5);
+        }
+
+        pub fn getBarycentricPosition(self: *const Self, position: VectorType) VectorType {
+            var result = VectorType.zero();
+
+            for (0..dimensions) |axis_index| {
+                result.values[axis_index] = safeRatio0(
+                    position.values[axis_index] - self.min.values[axis_index],
+                    self.max.values[axis_index] - self.min.values[axis_index],
+                );
+            }
+
+            return result;
         }
 
         pub fn addRadius(self: *const Self, radius: VectorType) Self {
@@ -275,11 +288,18 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
         }
 
         pub fn intersects(self: *const Self, b: *const Self) bool {
-            return !(
-                b.max.x() < self.min.x() or b.min.x() > self.max.x() or
-                b.max.y() < self.min.y() or b.min.y() > self.max.y() or
-                b.max.z() < self.min.z() or b.min.z() > self.max.z()
-            );
+            var result = true;
+
+            for (0..dimensions) |axis_index| {
+                if ((b.max.values[axis_index] < self.min.values[axis_index]) or
+                    (b.min.values[axis_index] > self.max.values[axis_index]))
+                {
+                    result = false;
+                    break;
+                }
+            }
+
+            return result;
         }
     };
 }
@@ -288,3 +308,42 @@ pub fn square(a: f32) f32 {
     return a * a;
 }
 
+pub fn lerp(a: f32, b: f32, t: f32) f32 {
+    return (1.0 - t) * a + t * b;
+}
+
+pub fn clampf(min: f32, value: f32, max: f32) f32 {
+    var result = value;
+
+    if (result < min) {
+        result = min;
+    }
+
+    if (result > max) {
+        result = max;
+    }
+
+    return value;
+}
+
+pub fn clampf01(value: f32) f32 {
+    return clampf(0, value, 1);
+}
+
+pub fn safeRatioN(numerator: f32, divisor: f32, fallback: f32) f32 {
+    var result: f32 = fallback;
+
+    if (divisor != 0) {
+        result = numerator / divisor;
+    }
+
+    return result;
+}
+
+pub fn safeRatio0(numerator: f32, divisor: f32) f32 {
+    return safeRatioN(numerator, divisor, 0);
+}
+
+pub fn safeRatio1(numerator: f32, divisor: f32) f32 {
+    return safeRatioN(numerator, divisor, 1);
+}
