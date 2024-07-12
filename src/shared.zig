@@ -203,9 +203,15 @@ pub const State = struct {
     hero_bitmaps: [4]HeroBitmaps,
     tree: LoadedBitmap,
     sword: LoadedBitmap,
+    stairwell: LoadedBitmap,
 
     collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
+};
+
+pub const PairwiseCollisionRuleFlag = enum(u8) {
+    ShouldCollide = 0x1,
+    Temporary = 0x2a,
 };
 
 pub const PairwiseCollisionRule = struct {

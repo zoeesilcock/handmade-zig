@@ -257,21 +257,29 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
             return fromCenterHalfDimension(center, dimension.scaledTo(0.5));
         }
 
-        pub fn getMinCorner(self: Self) VectorType {
+        pub fn getMinCorner(self: *const Self) VectorType {
             return self.min;
         }
-        pub fn getMaxCorner(self: Self) VectorType {
+        pub fn getMaxCorner(self: *const Self) VectorType {
             return self.max;
         }
-        pub fn getCenter(self: Self) VectorType {
+        pub fn getCenter(self: *const Self) VectorType {
             return self.min.plus(self.max).scale(0.5);
         }
 
-        pub fn addRadius(self: Self, radius: VectorType) Self {
+        pub fn addRadius(self: *const Self, radius: VectorType) Self {
             return Self{
                 .min = self.min.minus(radius),
                 .max = self.max.plus(radius),
             };
+        }
+
+        pub fn intersects(self: *const Self, b: *const Self) bool {
+            return !(
+                b.max.x() < self.min.x() or b.min.x() > self.max.x() or
+                b.max.y() < self.min.y() or b.min.y() > self.max.y() or
+                b.max.z() < self.min.z() or b.min.z() > self.max.z()
+            );
         }
     };
 }

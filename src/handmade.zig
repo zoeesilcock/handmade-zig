@@ -11,11 +11,14 @@ const std = @import("std");
 ///
 /// Architecture exploration:
 ///
-/// * Z-axis.
-///     * Figure out how you go up and down, and how it is rendered.
 /// * Collision detection?
+///     * Transient collusion rules. Clear based on flag.
+///         * Allow non-transient rules to override transient ones.
 ///     * Entry/exit?
 ///     * Robustness/shape definition?
+///     * Implement reprojection to handle interpenetration.
+/// * Z-axis.
+///     * Figure out how you go up and down, and how it is rendered.
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
@@ -113,6 +116,7 @@ pub export fn updateAndRender(
             },
             .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
             .sword = debugLoadBMP(thread, platform, "test2/rock03.bmp"),
+            .stairwell = debugLoadBMP(thread, platform, "test2/rock02.bmp"),
         };
 
         shared.initializeArena(
@@ -132,7 +136,7 @@ pub export fn updateAndRender(
         const tiles_per_width: u32 = 17;
         const tiles_per_height: u32 = 9;
 
-        var random_number_index: u32 = 0;
+        var random_number_index: u32 = 3;
         const screen_base_x: i32 = 0;
         const screen_base_y: i32 = 0;
         const screen_base_z: i32 = 0;
@@ -149,11 +153,11 @@ pub export fn updateAndRender(
         for (0..200) |_| {
             std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
             var random_choice: u32 = 0;
-            // if (door_up or door_down) {
-            random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
-            // } else {
-            //     random_choice = random.RANDOM_NUMBERS[random_number_index] % 3;
-            // }
+            if (door_up or door_down) {
+                random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
+            } else {
+                random_choice = random.RANDOM_NUMBERS[random_number_index] % 3;
+            }
 
             random_number_index += 1;
 
@@ -176,32 +180,30 @@ pub export fn updateAndRender(
                 for (0..tiles_per_width) |tile_x| {
                     const abs_tile_x: i32 = screen_x * tiles_per_width + @as(i32, @intCast(tile_x));
                     const abs_tile_y: i32 = screen_y * tiles_per_height + @as(i32, @intCast(tile_y));
-                    var tile_value: u32 = 1;
+                    var should_be_door = true;
 
-                    // Generate doors.
+                    // Generate walls.
                     if ((tile_x == 0) and (!door_left or (tile_y != (tiles_per_height / 2)))) {
-                        tile_value = 2;
+                        should_be_door = false;
                     }
                     if ((tile_x == (tiles_per_width - 1)) and (!door_right or (tile_y != (tiles_per_height / 2)))) {
-                        tile_value = 2;
+                        should_be_door = false;
                     }
                     if ((tile_y == 0) and (!door_bottom or (tile_x != (tiles_per_width / 2)))) {
-                        tile_value = 2;
+                        should_be_door = false;
                     }
                     if ((tile_y == (tiles_per_height - 1)) and (!door_top or (tile_x != (tiles_per_width / 2)))) {
-                        tile_value = 2;
+                        should_be_door = false;
                     }
 
-                    if (tile_x == 10 and tile_y == 6) {
-                        if (door_up) {
-                            tile_value = 3;
-                        } else if (door_down) {
-                            tile_value = 4;
-                        }
-                    }
-
-                    if (tile_value == 2) {
+                    if (!should_be_door) {
                         _ = addWall(state, abs_tile_x, abs_tile_y, chunk_z);
+                    }
+
+                    if (created_z_door) {
+                        if (tile_x == 10 and tile_y == 6) {
+                            _ = addStairs(state, abs_tile_x, abs_tile_y, if (door_down) chunk_z - 1 else chunk_z);
+                        }
                     }
                 }
             }
@@ -246,7 +248,7 @@ pub export fn updateAndRender(
         const camera_tile_z = screen_base_z;
         state.camera_position = world.chunkPositionFromTilePosition(state.world, camera_tile_x, camera_tile_y, camera_tile_z);
 
-        _ = addMonster(state, camera_tile_x + 2, camera_tile_y + 2, camera_tile_z);
+        _ = addMonster(state, camera_tile_x - 3, camera_tile_y + 2, camera_tile_z);
 
         for (0..1) |_| {
             const familiar_offset_x: i32 = @mod(@as(i32, @intCast(random.RANDOM_NUMBERS[random_number_index])), 10) - 7;
@@ -423,6 +425,9 @@ pub export fn updateAndRender(
                 .Wall => {
                     piece_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
                 },
+                .Stairwell => {
+                    piece_group.pushBitmap(&state.stairwell, Vector2.zero(), 0, Vector2.new(37, 37), 1, 1);
+                },
                 .Monster => {
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
                     piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
@@ -571,6 +576,19 @@ fn addWall(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) Add
 
     entity.low.sim.dimension = Vector3.splat(state.world.tile_side_in_meters);
     entity.low.sim.addFlag(sim.SimEntityFlags.Collides.toInt());
+
+    return entity;
+}
+
+fn addStairs(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
+    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z);
+    const entity = addLowEntity(state, .Stairwell, world_position);
+
+    entity.low.sim.dimension = Vector3.new(
+        state.world.tile_side_in_meters,
+        state.world.tile_side_in_meters,
+        state.world.tile_depth_in_meters,
+    );
 
     return entity;
 }

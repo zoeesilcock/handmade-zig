@@ -105,6 +105,7 @@ pub const EntityType = enum(u8) {
     Familiar,
     Monster,
     Sword,
+    Stairwell,
 };
 
 pub const HitPoint = struct {
@@ -368,10 +369,15 @@ pub fn shouldCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) 
     return result;
 }
 
-pub fn handleCollision(entity: *SimEntity, hit_entity: *SimEntity) bool {
+pub fn handleCollision(state: *State, entity: *SimEntity, hit_entity: *SimEntity, was_overlapping: bool) bool {
+    _ = was_overlapping;
+
     var stops_on_collision = false;
 
     if (entity.type == .Sword) {
+        // Stop future collisons between these entities.
+        addCollisionRule(state, entity.storage_index, hit_entity.storage_index, false);
+
         stops_on_collision = false;
     } else {
         stops_on_collision = true;
@@ -391,6 +397,10 @@ pub fn handleCollision(entity: *SimEntity, hit_entity: *SimEntity) bool {
         if (a.hit_point_max > 0) {
             a.hit_point_max -= 1;
         }
+    }
+
+    if (a.type == .Hero and b.type == .Stairwell) {
+        stops_on_collision = false;
     }
 
     // TODO: Update player Z when hitting a ladder.
@@ -440,6 +450,29 @@ pub fn moveEntity(
         distance_remaining = 10000;
     }
 
+    var overlapping_count: u32 = 0;
+    var overlapping_entities: [16]*SimEntity =  [1]*SimEntity{undefined} ** 16;
+    var test_entity_index: u32 = 0;
+    const entity_rectangle = Rectangle3.fromCenterDimension(entity.position, entity.dimension);
+    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
+        const test_entity = &sim_region.entities[test_entity_index];
+
+        if (shouldCollide(state, entity, test_entity)) {
+            const test_entity_rectangle = Rectangle3.fromCenterDimension(test_entity.position, test_entity.dimension);
+            if (entity_rectangle.intersects(&test_entity_rectangle)) {
+                if (overlapping_count < overlapping_entities.len) {
+                    // if (addCollisionRule(state, entity.storage_index, test_entity.storage_index, false)) {
+                        overlapping_entities[overlapping_count] = @constCast(test_entity);
+                        overlapping_count += 1;
+                    // }
+                } else {
+                    unreachable;
+                }
+            }
+        }
+    }
+
+
     var iterations: u32 = 0;
     while (iterations < 4) : (iterations += 1) {
         var min_time: f32 = 1.0;
@@ -456,7 +489,7 @@ pub fn moveEntity(
             const desired_position = entity.position.plus(entity_delta);
 
             if (!entity.isSet(SimEntityFlags.Nonspatial.toInt())) {
-                var test_entity_index: u32 = 0;
+                test_entity_index = 0;
                 while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
                     const test_entity = &sim_region.entities[test_entity_index];
 
@@ -537,14 +570,32 @@ pub fn moveEntity(
                 // Remove the applied delta.
                 entity_delta = desired_position.minus(entity.position);
 
-                const stops_on_collision = handleCollision(entity, hit_entity);
+                var overlap_index: u32 = overlapping_count;
+                var test_overlap_index: u32 = 0;
+                while (test_overlap_index < overlapping_count) : (test_overlap_index += 1) {
+                    if (hit_entity == overlapping_entities[test_overlap_index]) {
+                        overlap_index = test_overlap_index;
+                        break;
+                    }
+                }
+
+                const was_overlapping = (overlap_index != overlapping_count);
+                const stops_on_collision = handleCollision(state, entity, hit_entity, was_overlapping);
+
                 if (stops_on_collision) {
                     // Remove velocity that is facing into the wall.
                     entity_delta = entity_delta.minus(wall_normal.scaledTo(entity_delta.dotProduct(wall_normal)));
                     entity.velocity = entity.velocity.minus(wall_normal.scaledTo(entity.velocity.dotProduct(wall_normal)));
                 } else {
-                    // Stop future collisons between these entities.
-                    addCollisionRule(state, entity.storage_index, hit_entity.storage_index, false);
+                    if (was_overlapping) {
+                        overlapping_count -= 1;
+                        overlapping_entities[overlap_index] = overlapping_entities[overlapping_count];
+                    } else if (overlapping_count < overlapping_entities.len) {
+                        overlapping_entities[overlapping_count] = hit_entity;
+                        overlapping_count += 1;
+                    } else {
+                        unreachable;
+                    }
                 }
             } else {
                 break;
