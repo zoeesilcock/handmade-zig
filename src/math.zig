@@ -164,10 +164,10 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
         }
 
         pub fn clamp01(self: *const Self) Self {
-            var result = Self{ .values = self.values };
+            var result = Self.zero();
 
             for (0..dimensions) |axis_index| {
-                result.values[axis_index] = clampf01(result.values[axis_index]);
+                result.values[axis_index] = clampf01(self.values[axis_index]);
             }
 
             return result;
@@ -323,7 +323,7 @@ pub fn clampf(min: f32, value: f32, max: f32) f32 {
         result = max;
     }
 
-    return value;
+    return result;
 }
 
 pub fn clampf01(value: f32) f32 {

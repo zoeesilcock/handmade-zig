@@ -44,6 +44,7 @@ pub const SimEntityFlags = enum(u32) {
     Collides = (1 << 0),
     Nonspatial = (1 << 1),
     Movable = (1 << 2),
+    ZSupported = (1 << 4),
 
     Simming = (1 << 30),
 
@@ -205,7 +206,6 @@ pub fn addEntityRaw(
             entity = &sim_region.entities[sim_region.entity_count];
             sim_region.entity_count += 1;
 
-            std.debug.assert(entry.index == 0 or entry.index == storage_index);
             entry.index = storage_index;
             entry.ptr = entity.?;
 
@@ -281,11 +281,14 @@ pub fn beginSimulation(
     sim_region.max_entity_radius = 5;
     sim_region.max_entity_velocity = 30;
     const update_safety_margin = sim_region.max_entity_radius + sim_region.max_entity_velocity * delta_time;
+    const update_safety_margin_z = 1;
 
     sim_region.world = game_world;
     sim_region.origin = origin;
     sim_region.updatable_bounds = bounds.addRadius(Vector3.splat(sim_region.max_entity_radius));
-    sim_region.bounds = bounds.addRadius(Vector3.splat(update_safety_margin));
+    sim_region.bounds = sim_region.updatable_bounds.addRadius(
+        Vector3.new(update_safety_margin, update_safety_margin, update_safety_margin_z),
+    );
     sim_region.max_entity_count = 4096;
     sim_region.entity_count = 0;
     sim_region.entities = shared.pushArray(sim_arena, sim_region.max_entity_count, SimEntity);
@@ -323,7 +326,7 @@ pub fn beginSimulation(
                                 if (entityOverlapsRectangle(
                                     sim_space_position,
                                     low_entity.sim.dimension,
-                                    sim_region.updatable_bounds,
+                                    sim_region.bounds,
                                 )) {
                                     _ = addEntity(state, sim_region, low_entity_index, low_entity, &sim_space_position);
                                 }
@@ -338,7 +341,7 @@ pub fn beginSimulation(
     return sim_region;
 }
 
-pub fn canOverlap(state: *State, mover: *SimEntity, region: *SimEntity) bool {
+fn canOverlap(state: *State, mover: *SimEntity, region: *SimEntity) bool {
     _ = state;
 
     var result = false;
@@ -352,7 +355,7 @@ pub fn canOverlap(state: *State, mover: *SimEntity, region: *SimEntity) bool {
     return result;
 }
 
-pub fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_time: f32, ground: *f32) void {
+fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_time: f32, ground: *f32) void {
     _ = state;
     _ = delta_time;
 
@@ -363,7 +366,23 @@ pub fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta
     }
 }
 
-pub fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
+fn speculativeCollide(mover: *SimEntity, region: *SimEntity) bool {
+    var result = true;
+
+    if (region.type == .Stairwell) {
+        const region_rectangle = Rectangle3.fromCenterDimension(region.position, region.dimension);
+        const barycentric = region_rectangle.getBarycentricPosition(mover.position).clamp01();
+        const ground = math.lerp(region_rectangle.min.z(), barycentric.y(), region_rectangle.max.z());
+        const step_height = 0.1;
+
+        result = ((@abs(mover.position.z() - ground) > step_height) or
+            (barycentric.y() > 0.1 and barycentric.y() < 0.9));
+    }
+
+    return result;
+}
+
+fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
     var result = false;
 
     if (entity != hit_entity) {
@@ -382,10 +401,6 @@ pub fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) boo
             !b.isSet(SimEntityFlags.Nonspatial.toInt()))
         {
             result = true;
-        }
-
-        if (a.type == .Stairwell or b.type == .Stairwell) {
-            result = false;
         }
 
         // Specific rules.
@@ -443,6 +458,11 @@ pub fn moveEntity(
 ) void {
     std.debug.assert(!entity.isSet(SimEntityFlags.Nonspatial.toInt()));
 
+    if (entity.type == .Hero) {
+        const break_here = true;
+        _ = break_here;
+    }
+
     var acceleration = in_acceleration;
 
     // Correct speed when multiple axes are contributing to the direction.
@@ -459,8 +479,10 @@ pub fn moveEntity(
     // Add drag to acceleration.
     acceleration = acceleration.plus(entity.velocity.scaledTo(move_spec.drag).negated());
 
-    // Add gravity to acceleration.
-    acceleration = acceleration.plus(Vector3.new(0, 0, -9.8));
+    if (!entity.isSet(SimEntityFlags.ZSupported.toInt())) {
+        // Add gravity to acceleration.
+        acceleration = acceleration.plus(Vector3.new(0, 0, -9.8));
+    }
 
     // Calculate movement delta.
     var entity_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
@@ -494,7 +516,7 @@ pub fn moveEntity(
                 while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
                     const test_entity = &sim_region.entities[test_entity_index];
 
-                    if (canCollide(state, entity, test_entity) and entity.position.z() == test_entity.position.z()) {
+                    if (canCollide(state, entity, test_entity)) {
                         const minkowski_diameter = Vector3.new(
                             test_entity.dimension.x() + entity.dimension.x(),
                             test_entity.dimension.y() + entity.dimension.y(),
@@ -504,6 +526,10 @@ pub fn moveEntity(
                         const max_corner = minkowski_diameter.scaledTo(0.5);
                         const relative = entity.position.minus(test_entity.position);
 
+                        var test_min_time = min_time;
+                        var test_wall_normal = Vector3.zero();
+                        var hit_this = false;
+
                         if (testWall(
                             min_corner.x(),
                             relative.x(),
@@ -512,10 +538,10 @@ pub fn moveEntity(
                             entity_delta.y(),
                             min_corner.y(),
                             max_corner.y(),
-                            &min_time,
+                            &test_min_time,
                         )) {
-                            wall_normal = Vector3.new(-1, 0, 0);
-                            opt_hit_entity = test_entity;
+                            test_wall_normal = Vector3.new(-1, 0, 0);
+                            hit_this = true;
                         }
 
                         if (testWall(
@@ -526,10 +552,10 @@ pub fn moveEntity(
                             entity_delta.y(),
                             min_corner.y(),
                             max_corner.y(),
-                            &min_time,
+                            &test_min_time,
                         )) {
-                            wall_normal = Vector3.new(1, 0, 0);
-                            opt_hit_entity = test_entity;
+                            test_wall_normal = Vector3.new(1, 0, 0);
+                            hit_this = true;
                         }
 
                         if (testWall(
@@ -540,10 +566,10 @@ pub fn moveEntity(
                             entity_delta.x(),
                             min_corner.x(),
                             max_corner.x(),
-                            &min_time,
+                            &test_min_time,
                         )) {
-                            wall_normal = Vector3.new(0, -1, 0);
-                            opt_hit_entity = test_entity;
+                            test_wall_normal = Vector3.new(0, -1, 0);
+                            hit_this = true;
                         }
 
                         if (testWall(
@@ -554,10 +580,19 @@ pub fn moveEntity(
                             entity_delta.x(),
                             min_corner.x(),
                             max_corner.x(),
-                            &min_time,
+                            &test_min_time,
                         )) {
-                            wall_normal = Vector3.new(0, 1, 0);
-                            opt_hit_entity = test_entity;
+                            test_wall_normal = Vector3.new(0, 1, 0);
+                            hit_this = true;
+                        }
+
+                        if (hit_this) {
+                            // const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
+                            if (speculativeCollide(entity, test_entity)) {
+                                min_time = test_min_time;
+                                wall_normal = test_wall_normal;
+                                opt_hit_entity = test_entity;
+                            }
                         }
                     }
                 }
@@ -603,9 +638,14 @@ pub fn moveEntity(
     }
 
     // Ground check.
-    if (entity.position.z() < ground) {
+    if (entity.position.z() <= ground or
+        (entity.isSet(SimEntityFlags.ZSupported.toInt()) and entity.velocity.z() == 0.0))
+    {
         entity.position = Vector3.new(entity.position.x(), entity.position.y(), ground);
         entity.velocity = Vector3.new(entity.velocity.x(), entity.velocity.y(), 0);
+        entity.addFlags(SimEntityFlags.ZSupported.toInt());
+    } else {
+        entity.clearFlags(SimEntityFlags.ZSupported.toInt());
     }
 
     if (entity.distance_limit != 0) {
@@ -684,9 +724,9 @@ pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
         // Update camera position.
         if (entity.storage_index == state.camera_following_entity_index) {
             var new_camera_position = state.camera_position;
-            if (false) {
-                new_camera_position.chunk_z = stored.position.chunk_z;
+            new_camera_position.chunk_z = stored.position.chunk_z;
 
+            if (false) {
                 // Move camera when player leaves the current screen.
                 if (entity.position.x() > 9.0 * state.world.tile_side_in_meters) {
                     new_camera_position.chunk_x += 17;

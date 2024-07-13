@@ -12,6 +12,7 @@ const world = @import("world.zig");
 const sim = @import("sim.zig");
 const std = @import("std");
 
+// Types.
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;

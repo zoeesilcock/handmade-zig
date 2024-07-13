@@ -11,14 +11,21 @@ const std = @import("std");
 ///
 /// Architecture exploration:
 ///
+/// * Z-axis.
+///     * Need to make a solid concept of ground levels so thet camer can be freely placed in Z and have multiple
+///     ground levels in one sim region.
+///     * 3D collision detection.
+///     * How it this rendered.
+///     * Z fudge!
 /// * Collision detection?
+///     * Clean up predicate proliferation! Can we make a nice clean set of flag rules so that it's easy to understnad
+///     how things work in terms of special handling? This may involve making the iteration handle everything
+///     instead of handling overlap outside and so on.
 ///     * Transient collusion rules. Clear based on flag.
 ///         * Allow non-transient rules to override transient ones.
 ///     * Entry/exit?
 ///     * Robustness/shape definition?
 ///     * Implement reprojection to handle interpenetration.
-/// * Z-axis.
-///     * Figure out how you go up and down, and how it is rendered.
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
@@ -116,8 +123,6 @@ pub export fn updateAndRender(
             },
             .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
             .sword = debugLoadBMP(thread, platform, "test2/rock03.bmp"),
-
-            // TODO: Remove?
             .stairwell = debugLoadBMP(thread, platform, "test2/rock02.bmp"),
         };
 
@@ -144,7 +149,7 @@ pub export fn updateAndRender(
         const screen_base_z: i32 = 0;
         var screen_x = screen_base_x;
         var screen_y = screen_base_y;
-        var chunk_z: i32 = screen_base_z;
+        var abs_tile_z: i32 = screen_base_z;
         var door_left = false;
         var door_right = false;
         var door_top = false;
@@ -167,7 +172,7 @@ pub export fn updateAndRender(
             if (random_choice == 2) {
                 created_z_door = true;
 
-                if (chunk_z == screen_base_z) {
+                if (abs_tile_z == screen_base_z) {
                     door_up = true;
                 } else {
                     door_down = true;
@@ -199,12 +204,10 @@ pub export fn updateAndRender(
                     }
 
                     if (!should_be_door) {
-                        _ = addWall(state, abs_tile_x, abs_tile_y, chunk_z);
-                    }
-
-                    if (created_z_door) {
-                        if (tile_x == 10 and tile_y == 6) {
-                            _ = addStairs(state, abs_tile_x, abs_tile_y, if (door_down) chunk_z - 1 else chunk_z);
+                        _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
+                    } else if (created_z_door) {
+                        if (tile_x == 10 and tile_y == 5) {
+                            _ = addStairs(state, abs_tile_x, abs_tile_y, if (door_down) abs_tile_z - 1 else abs_tile_z);
                         }
                     }
                 }
@@ -225,10 +228,10 @@ pub export fn updateAndRender(
             door_top = false;
 
             if (random_choice == 2) {
-                if (chunk_z == screen_base_z) {
-                    chunk_z = screen_base_z + 1;
+                if (abs_tile_z == screen_base_z) {
+                    abs_tile_z = screen_base_z + 1;
                 } else {
-                    chunk_z = screen_base_z;
+                    abs_tile_z = screen_base_z;
                 }
             } else if (random_choice == 1) {
                 screen_x += 1;
@@ -461,13 +464,13 @@ pub export fn updateAndRender(
                         }
                     }
 
-                    if (closest_hero) |hero| {
-                        if (closest_hero_squared > math.square(3.0)) {
-                            const speed: f32 = 1.0;
-                            const one_over_length = speed / @sqrt(closest_hero_squared);
-                            acceleration = hero.position.minus(entity.position).scaledTo(one_over_length);
-                        }
-                    }
+                    // if (closest_hero) |hero| {
+                    //     if (closest_hero_squared > math.square(3.0)) {
+                    //         const speed: f32 = 1.0;
+                    //         const one_over_length = speed / @sqrt(closest_hero_squared);
+                    //         acceleration = hero.position.minus(entity.position).scaledTo(one_over_length);
+                    //     }
+                    // }
 
                     move_spec = sim.MoveSpec{
                         .speed = 25,
@@ -507,8 +510,9 @@ pub export fn updateAndRender(
                 );
             }
 
-            const entity_ground_point_x = screen_center_x + meters_to_pixels * entity.position.x();
-            const entity_ground_point_y = screen_center_y - meters_to_pixels * entity.position.y();
+            const z_fudge = 1.0 + 0.1 * entity.position.z();
+            const entity_ground_point_x = screen_center_x + meters_to_pixels * z_fudge * entity.position.x();
+            const entity_ground_point_y = screen_center_y - meters_to_pixels * z_fudge * entity.position.y();
             const entity_z = -meters_to_pixels * entity.position.z();
 
             if (false) {
@@ -610,9 +614,10 @@ fn addStairs(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) A
 
     entity.low.sim.dimension = Vector3.new(
         state.world.tile_side_in_meters,
-        state.world.tile_side_in_meters,
-        state.world.tile_depth_in_meters * 1.2,
+        state.world.tile_side_in_meters * 2.0,
+        state.world.tile_depth_in_meters,
     );
+    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
 
     return entity;
 }
@@ -824,8 +829,11 @@ fn drawBitmap(
     bitmap: *shared.LoadedBitmap,
     real_x: f32,
     real_y: f32,
-    alpha: f32,
+    in_alpha: f32,
 ) void {
+    // TODO: Should we really clamp here?
+    const alpha = math.clampf01(in_alpha);
+
     // The pixel color calculation below doesn't handle sizes outside the range of 0 - 1.
     std.debug.assert(alpha >= 0 and alpha <= 1);
 
