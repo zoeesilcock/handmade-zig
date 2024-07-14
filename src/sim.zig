@@ -526,72 +526,74 @@ pub fn moveEntity(
                         const max_corner = minkowski_diameter.scaledTo(0.5);
                         const relative = entity.position.minus(test_entity.position);
 
-                        var test_min_time = min_time;
-                        var test_wall_normal = Vector3.zero();
-                        var hit_this = false;
+                        if ((relative.z() >= min_corner.z()) and (relative.z() < max_corner.z())) {
+                            var test_min_time = min_time;
+                            var test_wall_normal = Vector3.zero();
+                            var hit_this = false;
 
-                        if (testWall(
-                            min_corner.x(),
-                            relative.x(),
-                            relative.y(),
-                            entity_delta.x(),
-                            entity_delta.y(),
-                            min_corner.y(),
-                            max_corner.y(),
-                            &test_min_time,
-                        )) {
-                            test_wall_normal = Vector3.new(-1, 0, 0);
-                            hit_this = true;
-                        }
+                            if (testWall(
+                                min_corner.x(),
+                                relative.x(),
+                                relative.y(),
+                                entity_delta.x(),
+                                entity_delta.y(),
+                                min_corner.y(),
+                                max_corner.y(),
+                                &test_min_time,
+                            )) {
+                                test_wall_normal = Vector3.new(-1, 0, 0);
+                                hit_this = true;
+                            }
 
-                        if (testWall(
-                            max_corner.x(),
-                            relative.x(),
-                            relative.y(),
-                            entity_delta.x(),
-                            entity_delta.y(),
-                            min_corner.y(),
-                            max_corner.y(),
-                            &test_min_time,
-                        )) {
-                            test_wall_normal = Vector3.new(1, 0, 0);
-                            hit_this = true;
-                        }
+                            if (testWall(
+                                max_corner.x(),
+                                relative.x(),
+                                relative.y(),
+                                entity_delta.x(),
+                                entity_delta.y(),
+                                min_corner.y(),
+                                max_corner.y(),
+                                &test_min_time,
+                            )) {
+                                test_wall_normal = Vector3.new(1, 0, 0);
+                                hit_this = true;
+                            }
 
-                        if (testWall(
-                            min_corner.y(),
-                            relative.y(),
-                            relative.x(),
-                            entity_delta.y(),
-                            entity_delta.x(),
-                            min_corner.x(),
-                            max_corner.x(),
-                            &test_min_time,
-                        )) {
-                            test_wall_normal = Vector3.new(0, -1, 0);
-                            hit_this = true;
-                        }
+                            if (testWall(
+                                min_corner.y(),
+                                relative.y(),
+                                relative.x(),
+                                entity_delta.y(),
+                                entity_delta.x(),
+                                min_corner.x(),
+                                max_corner.x(),
+                                &test_min_time,
+                            )) {
+                                test_wall_normal = Vector3.new(0, -1, 0);
+                                hit_this = true;
+                            }
 
-                        if (testWall(
-                            max_corner.y(),
-                            relative.y(),
-                            relative.x(),
-                            entity_delta.y(),
-                            entity_delta.x(),
-                            min_corner.x(),
-                            max_corner.x(),
-                            &test_min_time,
-                        )) {
-                            test_wall_normal = Vector3.new(0, 1, 0);
-                            hit_this = true;
-                        }
+                            if (testWall(
+                                max_corner.y(),
+                                relative.y(),
+                                relative.x(),
+                                entity_delta.y(),
+                                entity_delta.x(),
+                                min_corner.x(),
+                                max_corner.x(),
+                                &test_min_time,
+                            )) {
+                                test_wall_normal = Vector3.new(0, 1, 0);
+                                hit_this = true;
+                            }
 
-                        if (hit_this) {
-                            // const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
-                            if (speculativeCollide(entity, test_entity)) {
-                                min_time = test_min_time;
-                                wall_normal = test_wall_normal;
-                                opt_hit_entity = test_entity;
+                            if (hit_this) {
+                                // const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
+                                if (speculativeCollide(entity, test_entity)) {
+                                    min_time = test_min_time;
+                                    wall_normal = test_wall_normal;
+                                    opt_hit_entity = test_entity;
+                                }
                             }
                         }
                     }

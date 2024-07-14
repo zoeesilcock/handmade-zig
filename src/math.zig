@@ -291,8 +291,8 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
             var result = true;
 
             for (0..dimensions) |axis_index| {
-                if ((b.max.values[axis_index] < self.min.values[axis_index]) or
-                    (b.min.values[axis_index] > self.max.values[axis_index]))
+                if ((b.max.values[axis_index] <= self.min.values[axis_index]) or
+                    (b.min.values[axis_index] >= self.max.values[axis_index]))
                 {
                     result = false;
                     break;

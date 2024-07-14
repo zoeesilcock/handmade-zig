@@ -67,13 +67,13 @@ pub const WorldPosition = struct {
     }
 };
 
-pub fn initializeWorld(world: *World, tile_side_in_meters: f32) void {
+pub fn initializeWorld(world: *World, tile_side_in_meters: f32, tile_depth_in_meters: f32) void {
     world.tile_side_in_meters = tile_side_in_meters;
-    world.tile_depth_in_meters = tile_side_in_meters;
+    world.tile_depth_in_meters = tile_depth_in_meters;
     world.chunk_dimension_in_meters = Vector3.new(
         TILES_PER_CHUNK * tile_side_in_meters,
         TILES_PER_CHUNK * tile_side_in_meters,
-        tile_side_in_meters,
+        tile_depth_in_meters,
     );
 
     world.first_free = null;
@@ -339,11 +339,12 @@ pub fn chunkPositionFromTilePosition(
     opt_additional_offset: ?Vector3,
 ) WorldPosition {
     const base_position = WorldPosition.zero();
+    const tile_dimension = Vector3.new(world.tile_side_in_meters, world.tile_side_in_meters, world.tile_depth_in_meters,);
     var offset = Vector3.new(
         @floatFromInt(abs_tile_x),
         @floatFromInt(abs_tile_y),
         @floatFromInt(abs_tile_z),
-    ).scaledTo(world.tile_side_in_meters);
+    ).hadamardProduct(tile_dimension);
 
     if (opt_additional_offset) |additional_offset| {
         offset = offset.plus(additional_offset);
