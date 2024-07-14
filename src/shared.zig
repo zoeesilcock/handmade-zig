@@ -198,7 +198,7 @@ pub const State = struct {
     controlled_heroes: [MAX_CONTROLLER_COUNT]ControlledHero = [1]ControlledHero{undefined} ** MAX_CONTROLLER_COUNT,
 
     low_entity_count: u32 = 0,
-    low_entities: [100000]LowEntity = [1]LowEntity{undefined} ** 100000,
+    low_entities: [90000]LowEntity = [1]LowEntity{undefined} ** 90000,
 
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
@@ -273,7 +273,7 @@ pub const EntityVisiblePieceGroup = struct {
 
         piece.bitmap = bitmap;
         piece.offset = Vector2.new(offset.x(), -offset.y()).scaledTo(self.state.meters_to_pixels).minus(alignment);
-        piece.offset_z = offset_z * self.state.meters_to_pixels;
+        piece.offset_z = offset_z;
         piece.entity_z_amount = entity_z_amount;
 
         piece.color = color;

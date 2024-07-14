@@ -307,10 +307,10 @@ pub fn changeEntityLocationRaw(
 }
 
 pub fn recannonicalizeCoordinate(chunk_dimension: f32, tile_abs: *i32, tile_rel: *const f32) f32 {
-    const epsilon = 0.01;
+    const epsilon = 0.0001;
     const offset = intrinsics.roundReal32ToInt32((tile_rel.* + epsilon) / chunk_dimension);
 
-    tile_abs.* +%= offset;
+    tile_abs.* += offset;
     const result = tile_rel.* - @as(f32, @floatFromInt(offset)) * chunk_dimension;
 
     std.debug.assert(isCanonical(chunk_dimension, result));
@@ -339,7 +339,11 @@ pub fn chunkPositionFromTilePosition(
     opt_additional_offset: ?Vector3,
 ) WorldPosition {
     const base_position = WorldPosition.zero();
-    const tile_dimension = Vector3.new(world.tile_side_in_meters, world.tile_side_in_meters, world.tile_depth_in_meters,);
+    const tile_dimension = Vector3.new(
+        world.tile_side_in_meters,
+        world.tile_side_in_meters,
+        world.tile_depth_in_meters,
+    );
     var offset = Vector3.new(
         @floatFromInt(abs_tile_x),
         @floatFromInt(abs_tile_y),

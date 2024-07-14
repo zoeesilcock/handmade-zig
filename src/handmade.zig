@@ -12,10 +12,10 @@ const std = @import("std");
 /// Architecture exploration:
 ///
 /// * Z-axis.
-///     * Debug drawing of z levels and inclussion of ze to make sure there are no bugs.
-///     * Make sure flying things can go over low walls.
 ///     * Need to make a solid concept of ground levels so thet camer can be freely placed in Z and have multiple
 ///     ground levels in one sim region.
+///     * Concept of ground in the collision loop so it can handle collisions coming onto and off of stairwells.
+///     * Make sure flying things can go over low walls.
 ///     * How it this rendered.
 ///     * Z fudge!
 /// * Collision detection?
@@ -371,7 +371,7 @@ pub export fn updateAndRender(
             piece_group.piece_count = 0;
 
             const delta_time = input.frame_delta_time;
-            const shadow_alpha: f32 = std.math.clamp(1 - entity.position.z(), 0, 1);
+            const shadow_alpha: f32 = std.math.clamp(1 - 0.5 * (entity.position.z() - entity.dimension.z()), 0, 1);
             var move_spec = sim.MoveSpec{};
             var acceleration = Vector3.zero();
 
@@ -439,8 +439,10 @@ pub export fn updateAndRender(
                     piece_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
                 },
                 .Stairwell => {
-                    const stairwell_color = Color.new(1, 1, 0, 1);
-                    piece_group.pushRectangle(entity.dimension.xy(), Vector2.zero(), 0, stairwell_color, 0);
+                    const stairwell_color1 = Color.new(1, 0.5, 0, 1);
+                    const stairwell_color2 = Color.new(1, 1, 0, 1);
+                    piece_group.pushRectangle(entity.dimension.xy(), Vector2.zero(), 0, stairwell_color1, 0);
+                    piece_group.pushRectangle(entity.dimension.xy(), Vector2.zero(), entity.dimension.z(), stairwell_color2, 0);
                 },
                 .Monster => {
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
@@ -512,50 +514,24 @@ pub export fn updateAndRender(
                 );
             }
 
-            const z_fudge = 1.0 + 0.1 * entity.position.z();
-            const entity_ground_point_x = screen_center_x + meters_to_pixels * z_fudge * entity.position.x();
-            const entity_ground_point_y = screen_center_y - meters_to_pixels * z_fudge * entity.position.y();
-            const entity_z = -meters_to_pixels * entity.position.z();
-
-            if (false) {
-                const tile_color = Color.new(1.0, 1.0, 0.0, 1);
-                const entity_left_top = Vector2{
-                    .x = entity_ground_point_x - (0.5 * meters_to_pixels * entity.width),
-                    .y = entity_ground_point_y - (0.5 * meters_to_pixels * entity.height),
-                };
-                const entity_width_height = Vector2{
-                    .x = entity.width,
-                    .y = entity.height,
-                };
-
-                drawRectangle(
-                    buffer,
-                    entity_left_top,
-                    entity_left_top.plus(entity_width_height.scaledTo(meters_to_pixels).scaledTo(0.9)),
-                    tile_color,
-                );
-            }
-
             var piece_group_index: u32 = 0;
             while (piece_group_index < piece_group.piece_count) : (piece_group_index += 1) {
                 const piece = piece_group.pieces[piece_group_index];
+                const entity_base_position = entity.getGroundPoint();
+                const z_fudge = 1.0 + 0.1 * (entity_base_position.z() - piece.offset_z);
+                const entity_ground_point_x = screen_center_x + meters_to_pixels * z_fudge * entity_base_position.x();
+                const entity_ground_point_y = screen_center_y - meters_to_pixels * z_fudge * entity_base_position.y();
+                const entity_z = -meters_to_pixels * entity_base_position.z();
+
                 const center = Vector2.new(
                     piece.offset.x() + entity_ground_point_x,
-                    piece.offset.y() + piece.offset_z + entity_ground_point_y + (entity_z * piece.entity_z_amount),
+                    piece.offset.y() + entity_ground_point_y + (entity_z * piece.entity_z_amount),
                 );
 
                 if (piece.bitmap) |bitmap| {
                     drawBitmap(buffer, bitmap, center.x(), center.y(), piece.color.a());
                 } else {
                     const dimension = piece.dimension.scaledTo(meters_to_pixels);
-
-                    const a = dimension.scaledTo(0.5);
-                    const c = center;
-                    const b = c.minus(a);
-
-                    const result = b.y();
-                    _ = result;
-
                     drawRectangle(
                         buffer,
                         center.minus(dimension.scaledTo(0.5)),
@@ -628,10 +604,11 @@ fn addStairs(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) A
     const dimension = Vector3.new(
         state.world.tile_side_in_meters,
         state.world.tile_side_in_meters * 2.0,
-        state.world.tile_depth_in_meters,
+        state.world.tile_depth_in_meters * 1.1,
     );
     const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
     const entity = addGroundedEntity(state, .Stairwell, world_position, dimension);
+    entity.low.sim.walkable_height = state.world.tile_depth_in_meters;
 
     entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
 

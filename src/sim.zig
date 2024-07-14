@@ -76,6 +76,8 @@ pub const SimEntity = struct {
 
     sword: EntityReference = null,
 
+    walkable_height: f32 = 0,
+
     pub fn isSet(self: *const SimEntity, flag: u32) bool {
         return (self.flags & flag) != 0;
     }
@@ -97,6 +99,18 @@ pub const SimEntity = struct {
         self.clearFlags(SimEntityFlags.Nonspatial.toInt());
         self.position = position;
         self.velocity = velocity;
+    }
+
+    pub fn getGroundPoint(self: *const SimEntity) Vector3 {
+        return self.position.plus(Vector3.new(0, 0, -0.5 * self.dimension.z()));
+    }
+
+    pub fn getStairGround(self: *const SimEntity, at_ground_point: Vector3) f32 {
+        std.debug.assert(self.type == .Stairwell);
+
+        const region_rectangle = Rectangle3.fromCenterDimension(self.position, self.dimension);
+        const barycentric = region_rectangle.getBarycentricPosition(at_ground_point).clamp01();
+        return region_rectangle.min.z() + barycentric.y() * self.walkable_height;
     }
 };
 
@@ -360,9 +374,7 @@ fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_tim
     _ = delta_time;
 
     if (region.type == .Stairwell) {
-        const region_rectangle = Rectangle3.fromCenterDimension(region.position, region.dimension);
-        const barycentric = region_rectangle.getBarycentricPosition(mover.position).clamp01();
-        ground.* = math.lerp(region_rectangle.min.z(), barycentric.y(), region_rectangle.max.z());
+        ground.* = region.getStairGround(mover.getGroundPoint());
     }
 }
 
@@ -370,13 +382,10 @@ fn speculativeCollide(mover: *SimEntity, region: *SimEntity) bool {
     var result = true;
 
     if (region.type == .Stairwell) {
-        const region_rectangle = Rectangle3.fromCenterDimension(region.position, region.dimension);
-        const barycentric = region_rectangle.getBarycentricPosition(mover.position).clamp01();
-        const ground = math.lerp(region_rectangle.min.z(), barycentric.y(), region_rectangle.max.z());
         const step_height = 0.1;
-
-        result = ((@abs(mover.position.z() - ground) > step_height) or
-            (barycentric.y() > 0.1 and barycentric.y() < 0.9));
+        const mover_ground_point = mover.getGroundPoint();
+        const ground = region.getStairGround(mover_ground_point);
+        result = ((@abs(mover_ground_point.z() - ground) > step_height));
     }
 
     return result;
@@ -457,11 +466,6 @@ pub fn moveEntity(
     move_spec: *const MoveSpec,
 ) void {
     std.debug.assert(!entity.isSet(SimEntityFlags.Nonspatial.toInt()));
-
-    if (entity.type == .Hero) {
-        const break_here = true;
-        _ = break_here;
-    }
 
     var acceleration = in_acceleration;
 
@@ -638,6 +642,8 @@ pub fn moveEntity(
             }
         }
     }
+
+    ground += entity.position.z() - entity.getGroundPoint().z();
 
     // Ground check.
     if (entity.position.z() <= ground or
