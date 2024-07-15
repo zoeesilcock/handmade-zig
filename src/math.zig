@@ -28,6 +28,17 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn y(self: *const Self) f32 {
                             return self.values[1];
                         }
+                        pub inline fn setX(self: *Self, value: f32) *Self {
+                            self.values[0] = value;
+                            return self;
+                        }
+                        pub inline fn setY(self: *Self, value: f32) *Self {
+                            self.values[1] = value;
+                            return self;
+                        }
+                        pub inline fn toVector3(self: Self, in_z: f32) Vector3 {
+                            return Vector3.new(self.x(), self.y(), in_z);
+                        }
                         pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle2) bool {
                             const result = ((self.x() >= rectangle.min.x()) and
                                 (self.y() >= rectangle.min.y()) and
@@ -61,8 +72,20 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn xy(self: *const Self) Vector2 {
                             return Vector2.new(self.x(), self.y());
                         }
-                        pub inline fn fromVector2(in_xy: Vector2, in_z: f32) Self {
-                            return Self.new(in_xy.x(), in_xy.y(), in_z);
+                        pub inline fn setX(self: *Self, value: f32) *Self {
+                            self.values[0] = value;
+                            return self;
+                        }
+                        pub inline fn setY(self: *Self, value: f32) *Self {
+                            self.values[1] = value;
+                            return self;
+                        }
+                        pub inline fn setZ(self: *Self, value: f32) *Self {
+                            self.values[2] = value;
+                            return self;
+                        }
+                        pub inline fn toVector2(self: *const Self) Vector2 {
+                            return Vector2.new(self.x(), self.y());
                         }
                         pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle3) bool {
                             const result = ((self.x() >= rectangle.min.x()) and
@@ -229,6 +252,28 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
         pub const dimensions = dimension_count;
 
         const Self = @This();
+
+        pub usingnamespace switch (Self.dimensions) {
+            inline 2 => struct {
+                pub fn toRectangle3(self: Self, min_z: f32, max_z: f32) Rectangle3 {
+                    return Rectangle3{
+                        .min = self.min.toVector3(min_z),
+                        .max = self.max.toVector3(max_z),
+                    };
+                }
+            },
+            inline 3 => struct {
+                pub fn toRectangle2(self: Self) Rectangle2 {
+                    return Rectangle2{
+                        .min = self.min.xy(),
+                        .max = self.max.xy(),
+                    };
+                }
+            },
+            else => {
+                unreachable;
+            },
+        };
 
         pub fn fromMinMax(min: VectorType, max: VectorType) Self {
             return Self{

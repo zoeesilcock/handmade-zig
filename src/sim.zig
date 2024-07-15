@@ -7,6 +7,7 @@ const std = @import("std");
 const addCollisionRule = @import("handmade.zig").addCollisionRule;
 
 // Types.
+const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
@@ -53,6 +54,18 @@ pub const SimEntityFlags = enum(u32) {
     }
 };
 
+pub const SimEntityCollisionVolume = struct {
+    offset_position: Vector3,
+    dimension: Vector3,
+};
+
+pub const SimEntityCollisionVolumeGroup = struct {
+    total_volume: SimEntityCollisionVolume,
+
+    volume_count: u32,
+    volumes: [*]SimEntityCollisionVolume,
+};
+
 pub const SimEntity = struct {
     storage_index: u32 = 0,
     updatable: bool = false,
@@ -62,7 +75,8 @@ pub const SimEntity = struct {
 
     position: Vector3 = Vector3.zero(),
     velocity: Vector3 = Vector3.zero(),
-    dimension: Vector3 = Vector3.zero(),
+
+    collision: *SimEntityCollisionVolumeGroup,
 
     distance_limit: f32 = 0,
 
@@ -76,6 +90,7 @@ pub const SimEntity = struct {
 
     sword: EntityReference = null,
 
+    walkable_dimension: Vector2,
     walkable_height: f32 = 0,
 
     pub fn isSet(self: *const SimEntity, flag: u32) bool {
@@ -102,15 +117,15 @@ pub const SimEntity = struct {
     }
 
     pub fn getGroundPoint(self: *const SimEntity) Vector3 {
-        return self.position.plus(Vector3.new(0, 0, -0.5 * self.dimension.z()));
+        return self.position;
     }
 
     pub fn getStairGround(self: *const SimEntity, at_ground_point: Vector3) f32 {
         std.debug.assert(self.type == .Stairwell);
 
-        const region_rectangle = Rectangle3.fromCenterDimension(self.position, self.dimension);
-        const barycentric = region_rectangle.getBarycentricPosition(at_ground_point).clamp01();
-        return region_rectangle.min.z() + barycentric.y() * self.walkable_height;
+        const region_rectangle = Rectangle2.fromCenterDimension(self.position.xy(), self.walkable_dimension);
+        const barycentric = region_rectangle.getBarycentricPosition(at_ground_point.xy()).clamp01();
+        return self.position.z() + barycentric.y() * self.walkable_height;
     }
 };
 
@@ -251,9 +266,9 @@ fn getSimSpacePosition(sim_region: *SimRegion, low_entity: *shared.LowEntity) Ve
     return result;
 }
 
-pub fn entityOverlapsRectangle(position: Vector3, dimension: Vector3, rectangle: Rectangle3) bool {
-    const grown = rectangle.addRadius(dimension.scaledTo(0.5));
-    return position.isInRectangle(grown);
+pub fn entityOverlapsRectangle(position: Vector3, volume: SimEntityCollisionVolume, rectangle: Rectangle3) bool {
+    const grown = rectangle.addRadius(volume.dimension.scaledTo(0.5));
+    return position.plus(volume.offset_position).isInRectangle(grown);
 }
 
 pub fn addEntity(
@@ -270,7 +285,7 @@ pub fn addEntity(
             sim_entity.position = sim_position.*;
             sim_entity.updatable = entityOverlapsRectangle(
                 sim_entity.position,
-                sim_entity.dimension,
+                sim_entity.collision.total_volume,
                 sim_region.updatable_bounds,
             );
         } else {
@@ -339,7 +354,7 @@ pub fn beginSimulation(
 
                                 if (entityOverlapsRectangle(
                                     sim_space_position,
-                                    low_entity.sim.dimension,
+                                    low_entity.sim.collision.total_volume,
                                     sim_region.bounds,
                                 )) {
                                     _ = addEntity(state, sim_region, low_entity_index, low_entity, &sim_space_position);
@@ -482,6 +497,7 @@ pub fn moveEntity(
 
     // Add drag to acceleration.
     acceleration = acceleration.plus(entity.velocity.scaledTo(move_spec.drag).negated());
+    _ = acceleration.setZ(0);
 
     if (!entity.isSet(SimEntityFlags.ZSupported.toInt())) {
         // Add gravity to acceleration.
@@ -521,82 +537,91 @@ pub fn moveEntity(
                     const test_entity = &sim_region.entities[test_entity_index];
 
                     if (canCollide(state, entity, test_entity)) {
-                        const minkowski_diameter = Vector3.new(
-                            test_entity.dimension.x() + entity.dimension.x(),
-                            test_entity.dimension.y() + entity.dimension.y(),
-                            test_entity.dimension.z() + entity.dimension.z(),
-                        );
-                        const min_corner = minkowski_diameter.scaledTo(-0.5);
-                        const max_corner = minkowski_diameter.scaledTo(0.5);
-                        const relative = entity.position.minus(test_entity.position);
+                        var entity_volume_index: u32 = 0;
+                        while (entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
+                            const entity_volume = entity.collision.volumes[entity_volume_index];
+                            var test_volume_index: u32 = 0;
+                            while (test_volume_index < test_entity.collision.volume_count) : (test_volume_index += 1) {
+                                const test_volume = test_entity.collision.volumes[test_volume_index];
+                                const minkowski_diameter = Vector3.new(
+                                    test_volume.dimension.x() + entity_volume.dimension.x(),
+                                    test_volume.dimension.y() + entity_volume.dimension.y(),
+                                    test_volume.dimension.z() + entity_volume.dimension.z(),
+                                );
+                                const min_corner = minkowski_diameter.scaledTo(-0.5);
+                                const max_corner = minkowski_diameter.scaledTo(0.5);
+                                const relative = entity.position.plus(entity_volume.offset_position)
+                                    .minus(test_entity.position.plus(test_volume.offset_position));
 
-                        if ((relative.z() >= min_corner.z()) and (relative.z() < max_corner.z())) {
-                            var test_min_time = min_time;
-                            var test_wall_normal = Vector3.zero();
-                            var hit_this = false;
+                                if ((relative.z() >= min_corner.z()) and (relative.z() < max_corner.z())) {
+                                    var test_min_time = min_time;
+                                    var test_wall_normal = Vector3.zero();
+                                    var hit_this = false;
 
-                            if (testWall(
-                                min_corner.x(),
-                                relative.x(),
-                                relative.y(),
-                                entity_delta.x(),
-                                entity_delta.y(),
-                                min_corner.y(),
-                                max_corner.y(),
-                                &test_min_time,
-                            )) {
-                                test_wall_normal = Vector3.new(-1, 0, 0);
-                                hit_this = true;
-                            }
+                                    if (testWall(
+                                        min_corner.x(),
+                                        relative.x(),
+                                        relative.y(),
+                                        entity_delta.x(),
+                                        entity_delta.y(),
+                                        min_corner.y(),
+                                        max_corner.y(),
+                                        &test_min_time,
+                                    )) {
+                                        test_wall_normal = Vector3.new(-1, 0, 0);
+                                        hit_this = true;
+                                    }
 
-                            if (testWall(
-                                max_corner.x(),
-                                relative.x(),
-                                relative.y(),
-                                entity_delta.x(),
-                                entity_delta.y(),
-                                min_corner.y(),
-                                max_corner.y(),
-                                &test_min_time,
-                            )) {
-                                test_wall_normal = Vector3.new(1, 0, 0);
-                                hit_this = true;
-                            }
+                                    if (testWall(
+                                        max_corner.x(),
+                                        relative.x(),
+                                        relative.y(),
+                                        entity_delta.x(),
+                                        entity_delta.y(),
+                                        min_corner.y(),
+                                        max_corner.y(),
+                                        &test_min_time,
+                                    )) {
+                                        test_wall_normal = Vector3.new(1, 0, 0);
+                                        hit_this = true;
+                                    }
 
-                            if (testWall(
-                                min_corner.y(),
-                                relative.y(),
-                                relative.x(),
-                                entity_delta.y(),
-                                entity_delta.x(),
-                                min_corner.x(),
-                                max_corner.x(),
-                                &test_min_time,
-                            )) {
-                                test_wall_normal = Vector3.new(0, -1, 0);
-                                hit_this = true;
-                            }
+                                    if (testWall(
+                                        min_corner.y(),
+                                        relative.y(),
+                                        relative.x(),
+                                        entity_delta.y(),
+                                        entity_delta.x(),
+                                        min_corner.x(),
+                                        max_corner.x(),
+                                        &test_min_time,
+                                    )) {
+                                        test_wall_normal = Vector3.new(0, -1, 0);
+                                        hit_this = true;
+                                    }
 
-                            if (testWall(
-                                max_corner.y(),
-                                relative.y(),
-                                relative.x(),
-                                entity_delta.y(),
-                                entity_delta.x(),
-                                min_corner.x(),
-                                max_corner.x(),
-                                &test_min_time,
-                            )) {
-                                test_wall_normal = Vector3.new(0, 1, 0);
-                                hit_this = true;
-                            }
+                                    if (testWall(
+                                        max_corner.y(),
+                                        relative.y(),
+                                        relative.x(),
+                                        entity_delta.y(),
+                                        entity_delta.x(),
+                                        min_corner.x(),
+                                        max_corner.x(),
+                                        &test_min_time,
+                                    )) {
+                                        test_wall_normal = Vector3.new(0, 1, 0);
+                                        hit_this = true;
+                                    }
 
-                            if (hit_this) {
-                                // const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
-                                if (speculativeCollide(entity, test_entity)) {
-                                    min_time = test_min_time;
-                                    wall_normal = test_wall_normal;
-                                    opt_hit_entity = test_entity;
+                                    if (hit_this) {
+                                        // const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
+                                        if (speculativeCollide(entity, test_entity)) {
+                                            min_time = test_min_time;
+                                            wall_normal = test_wall_normal;
+                                            opt_hit_entity = test_entity;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -630,12 +655,18 @@ pub fn moveEntity(
 
     // Handle events based on area overlapping.
     var test_entity_index: u32 = 0;
-    const entity_rectangle = Rectangle3.fromCenterDimension(entity.position, entity.dimension);
+    const entity_rectangle = Rectangle3.fromCenterDimension(
+        entity.position.plus(entity.collision.total_volume.offset_position),
+        entity.collision.total_volume.dimension,
+    );
     while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
         const test_entity = &sim_region.entities[test_entity_index];
 
         if (canOverlap(state, entity, test_entity)) {
-            const test_entity_rectangle = Rectangle3.fromCenterDimension(test_entity.position, test_entity.dimension);
+            const test_entity_rectangle = Rectangle3.fromCenterDimension(
+                test_entity.position.plus(test_entity.collision.total_volume.offset_position),
+                test_entity.collision.total_volume.dimension,
+            );
 
             if (entity_rectangle.intersects(&test_entity_rectangle)) {
                 handleOverlap(state, entity, test_entity, delta_time, &ground);

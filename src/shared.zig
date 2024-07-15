@@ -208,6 +208,14 @@ pub const State = struct {
 
     collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
+
+    null_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
+    wall_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
+    stair_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
+    player_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
+    sword_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
+    familiar_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
+    monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
 };
 
 pub const PairwiseCollisionRuleFlag = enum(u8) {
