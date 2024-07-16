@@ -146,6 +146,12 @@ pub export fn updateAndRender(
         const tiles_per_height: u32 = 9;
 
         state.null_collision = makeNullCollision(state);
+        state.standard_room_collision = makeSimpleGroundedCollision(
+            state,
+            state.world.tile_side_in_meters * tiles_per_width,
+            state.world.tile_side_in_meters * tiles_per_height,
+            state.world.tile_depth_in_meters,
+        );
         state.wall_collision = makeSimpleGroundedCollision(
             state,
             state.world.tile_side_in_meters,
@@ -202,6 +208,13 @@ pub export fn updateAndRender(
             } else {
                 door_top = true;
             }
+
+            _ = addStandardRoom(
+                state,
+                screen_x * tiles_per_width + (tiles_per_width / 2),
+                screen_y * tiles_per_height + (tiles_per_height / 2),
+                abs_tile_z,
+            );
 
             for (0..tiles_per_height) |tile_y| {
                 for (0..tiles_per_width) |tile_x| {
@@ -514,6 +527,14 @@ pub export fn updateAndRender(
                     piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
                     piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
                 },
+                .Space => {
+                    const space_color = Color.new(0, 0.5, 1, 1);
+                    var volume_index: u32 = 0;
+                    while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+                        const volume = entity.collision.volumes[volume_index];
+                        piece_group.pushRectangleOutline(volume.dimension.xy(), volume.offset_position.xy(), 0, space_color, 0);
+                    }
+                },
                 else => {
                     unreachable;
                 },
@@ -597,6 +618,15 @@ fn addGroundedEntity(
 ) AddLowEntityResult {
     const entity = addLowEntity(state, entity_type, world_position);
     entity.low.sim.collision = collision;
+    return entity;
+}
+
+fn addStandardRoom(state: *State, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
+    const world_position = world.chunkPositionFromTilePosition(state.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
+    const entity = addGroundedEntity(state, .Space, world_position, state.standard_room_collision);
+
+    entity.low.sim.addFlags(sim.SimEntityFlags.Traversable.toInt());
+
     return entity;
 }
 

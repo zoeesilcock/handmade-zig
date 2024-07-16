@@ -45,7 +45,8 @@ pub const SimEntityFlags = enum(u32) {
     Collides = (1 << 0),
     Nonspatial = (1 << 1),
     Movable = (1 << 2),
-    ZSupported = (1 << 4),
+    ZSupported = (1 << 3),
+    Traversable = (1 << 4),
 
     Simming = (1 << 30),
 
@@ -64,6 +65,10 @@ pub const SimEntityCollisionVolumeGroup = struct {
 
     volume_count: u32,
     volumes: [*]SimEntityCollisionVolume,
+
+    pub fn getSpaceVolume(self: *const SimEntityCollisionVolumeGroup, index: u32) SimEntityCollisionVolume {
+        return self.volumes[index];
+    }
 };
 
 pub const SimEntity = struct {
@@ -131,6 +136,7 @@ pub const SimEntity = struct {
 
 pub const EntityType = enum(u8) {
     Null,
+    Space,
     Hero,
     Wall,
     Familiar,
@@ -400,7 +406,7 @@ fn speculativeCollide(mover: *SimEntity, region: *SimEntity) bool {
         const step_height = 0.1;
         const mover_ground_point = mover.getGroundPoint();
         const ground = region.getStairGround(mover_ground_point);
-        result = ((@abs(mover_ground_point.z() - ground) > step_height));
+        result = ((intrinsics.absoluteValue(mover_ground_point.z() - ground) > step_height));
     }
 
     return result;
@@ -421,19 +427,23 @@ fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
         }
 
         // Basic rules.
-        if (!a.isSet(SimEntityFlags.Nonspatial.toInt()) and
-            !b.isSet(SimEntityFlags.Nonspatial.toInt()))
+        if (a.isSet(SimEntityFlags.Collides.toInt()) and
+            b.isSet(SimEntityFlags.Collides.toInt()))
         {
-            result = true;
-        }
+            if (!a.isSet(SimEntityFlags.Nonspatial.toInt()) and
+                !b.isSet(SimEntityFlags.Nonspatial.toInt()))
+            {
+                result = true;
+            }
 
-        // Specific rules.
-        const hash_bucket = a.storage_index & ((state.collision_rule_hash.len) - 1);
-        var opt_rule: ?*shared.PairwiseCollisionRule = state.collision_rule_hash[hash_bucket];
-        while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
-            if ((rule.storage_index_a == a.storage_index) and (rule.storage_index_b == b.storage_index)) {
-                result = rule.can_collide;
-                break;
+            // Specific rules.
+            const hash_bucket = a.storage_index & ((state.collision_rule_hash.len) - 1);
+            var opt_rule: ?*shared.PairwiseCollisionRule = state.collision_rule_hash[hash_bucket];
+            while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
+                if ((rule.storage_index_a == a.storage_index) and (rule.storage_index_b == b.storage_index)) {
+                    result = rule.can_collide;
+                    break;
+                }
             }
         }
     }

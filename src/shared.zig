@@ -210,6 +210,7 @@ pub const State = struct {
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
 
     null_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
+    standard_room_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
     wall_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
     stair_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     player_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
@@ -310,6 +311,53 @@ pub const EntityVisiblePieceGroup = struct {
         entity_z_amount: f32,
     ) void {
         self.pushPiece(null, offset, offset_z, entity_z_amount, Vector2.zero(), color, dimension);
+    }
+    pub fn pushRectangleOutline(
+        self: *EntityVisiblePieceGroup,
+        dimension: Vector2,
+        offset: Vector2,
+        offset_z: f32,
+        color: Color,
+        entity_z_amount: f32,
+    ) void {
+        const thickness: f32 = 0.1;
+        self.pushPiece(
+            null,
+            offset.minus(Vector2.new(0, dimension.y() / 2)),
+            offset_z,
+            entity_z_amount,
+            Vector2.zero(),
+            color,
+            Vector2.new(dimension.x(), thickness),
+        );
+        self.pushPiece(
+            null,
+            offset.plus(Vector2.new(0, dimension.y() / 2)),
+            offset_z,
+            entity_z_amount,
+            Vector2.zero(),
+            color,
+            Vector2.new(dimension.x(), thickness),
+        );
+
+        self.pushPiece(
+            null,
+            offset.minus(Vector2.new(dimension.x() / 2, 0)),
+            offset_z,
+            entity_z_amount,
+            Vector2.zero(),
+            color,
+            Vector2.new(thickness, dimension.y()),
+        );
+        self.pushPiece(
+            null,
+            offset.plus(Vector2.new(dimension.x() / 2, 0)),
+            offset_z,
+            entity_z_amount,
+            Vector2.zero(),
+            color,
+            Vector2.new(thickness, dimension.y()),
+        );
     }
 };
 
