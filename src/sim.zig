@@ -156,6 +156,17 @@ pub const MoveSpec = struct {
     unit_max_acceleration: bool = false,
 };
 
+const WallTestData = struct {
+    x: f32,
+    rel_x: f32,
+    rel_y: f32,
+    delta_y: f32,
+    delta_x: f32,
+    min_y: f32,
+    max_y: f32,
+    normal: Vector3,
+};
+
 fn getLowEntity(state: *State, index: u32) ?*shared.LowEntity {
     var entity: ?*shared.LowEntity = null;
 
@@ -412,6 +423,33 @@ fn speculativeCollide(mover: *SimEntity, region: *SimEntity) bool {
     return result;
 }
 
+fn entitiesOverlap(entity: *SimEntity, test_entity: *SimEntity, epsilon: Vector3) bool {
+    var overlapped = false;
+
+    var entity_volume_index: u32 = 0;
+    while (!overlapped and entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
+        const entity_volume = entity.collision.volumes[entity_volume_index];
+
+        var test_volume_index: u32 = 0;
+        while (!overlapped and test_volume_index < test_entity.collision.volume_count) : (test_volume_index += 1) {
+            const test_volume = test_entity.collision.volumes[test_volume_index];
+
+            const entity_rectangle = Rectangle3.fromCenterDimension(
+                entity.position.plus(entity_volume.offset_position),
+                entity_volume.dimension.plus(epsilon),
+            );
+            const test_entity_rectangle = Rectangle3.fromCenterDimension(
+                test_entity.position.plus(test_volume.offset_position),
+                test_volume.dimension,
+            );
+
+            overlapped = entity_rectangle.intersects(&test_entity_rectangle);
+        }
+    }
+
+    return overlapped;
+}
+
 fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
     var result = false;
 
@@ -526,9 +564,13 @@ pub fn moveEntity(
         distance_remaining = 10000;
     }
 
+    const overlap_epsilon = 0.001;
+    const time_epsilon = 0.001;
+
     var iterations: u32 = 0;
     while (iterations < 4) : (iterations += 1) {
         var min_time: f32 = 1.0;
+        var max_time: f32 = 0.0;
         const entity_delta_length = entity_delta.length();
 
         if (entity_delta_length > 0) {
@@ -536,8 +578,10 @@ pub fn moveEntity(
                 min_time = distance_remaining / entity_delta_length;
             }
 
-            var wall_normal = Vector3.zero();
-            var opt_hit_entity: ?*SimEntity = null;
+            var wall_normal_min = Vector3.zero();
+            var wall_normal_max = Vector3.zero();
+            var opt_hit_entity_min: ?*SimEntity = null;
+            var opt_hit_entity_max: ?*SimEntity = null;
 
             const desired_position = entity.position.plus(entity_delta);
 
@@ -546,7 +590,10 @@ pub fn moveEntity(
                 while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
                     const test_entity = &sim_region.entities[test_entity_index];
 
-                    if (canCollide(state, entity, test_entity)) {
+                    if ((test_entity.isSet(SimEntityFlags.Traversable.toInt()) and
+                        entitiesOverlap(entity, test_entity, Vector3.splat(overlap_epsilon))) or
+                        canCollide(state, entity, test_entity))
+                    {
                         var entity_volume_index: u32 = 0;
                         while (entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
                             const entity_volume = entity.collision.volumes[entity_volume_index];
@@ -564,72 +611,105 @@ pub fn moveEntity(
                                     .minus(test_entity.position.plus(test_volume.offset_position));
 
                                 if ((relative.z() >= min_corner.z()) and (relative.z() < max_corner.z())) {
-                                    var test_min_time = min_time;
-                                    var test_wall_normal = Vector3.zero();
-                                    var hit_this = false;
+                                    const walls: [4]WallTestData = .{
+                                        .{
+                                            .x = min_corner.x(),
+                                            .rel_x = relative.x(),
+                                            .rel_y = relative.y(),
+                                            .delta_x = entity_delta.x(),
+                                            .delta_y = entity_delta.y(),
+                                            .min_y = min_corner.y(),
+                                            .max_y = max_corner.y(),
+                                            .normal = Vector3.new(-1, 0, 0),
+                                        },
+                                        .{
+                                            .x = max_corner.x(),
+                                            .rel_x = relative.x(),
+                                            .rel_y = relative.y(),
+                                            .delta_x = entity_delta.x(),
+                                            .delta_y = entity_delta.y(),
+                                            .min_y = min_corner.y(),
+                                            .max_y = max_corner.y(),
+                                            .normal = Vector3.new(1, 0, 0),
+                                        },
+                                        .{
+                                            .x = min_corner.y(),
+                                            .rel_x = relative.y(),
+                                            .rel_y = relative.x(),
+                                            .delta_x = entity_delta.y(),
+                                            .delta_y = entity_delta.x(),
+                                            .min_y = min_corner.x(),
+                                            .max_y = max_corner.x(),
+                                            .normal = Vector3.new(0, -1, 0),
+                                        },
+                                        .{
+                                            .x = max_corner.y(),
+                                            .rel_x = relative.y(),
+                                            .rel_y = relative.x(),
+                                            .delta_x = entity_delta.y(),
+                                            .delta_y = entity_delta.x(),
+                                            .min_y = min_corner.x(),
+                                            .max_y = max_corner.x(),
+                                            .normal = Vector3.new(0, 1, 0),
+                                        },
+                                    };
 
-                                    if (testWall(
-                                        min_corner.x(),
-                                        relative.x(),
-                                        relative.y(),
-                                        entity_delta.x(),
-                                        entity_delta.y(),
-                                        min_corner.y(),
-                                        max_corner.y(),
-                                        &test_min_time,
-                                    )) {
-                                        test_wall_normal = Vector3.new(-1, 0, 0);
-                                        hit_this = true;
-                                    }
+                                    if (test_entity.isSet(SimEntityFlags.Traversable.toInt())) {
+                                        var test_max_time = max_time;
+                                        var hit_this = false;
+                                        var test_wall_normal = Vector3.zero();
+                                        var wall_index: u32 = 0;
 
-                                    if (testWall(
-                                        max_corner.x(),
-                                        relative.x(),
-                                        relative.y(),
-                                        entity_delta.x(),
-                                        entity_delta.y(),
-                                        min_corner.y(),
-                                        max_corner.y(),
-                                        &test_min_time,
-                                    )) {
-                                        test_wall_normal = Vector3.new(1, 0, 0);
-                                        hit_this = true;
-                                    }
+                                        while (wall_index < walls.len) : (wall_index += 1) {
+                                            const wall = &walls[wall_index];
 
-                                    if (testWall(
-                                        min_corner.y(),
-                                        relative.y(),
-                                        relative.x(),
-                                        entity_delta.y(),
-                                        entity_delta.x(),
-                                        min_corner.x(),
-                                        max_corner.x(),
-                                        &test_min_time,
-                                    )) {
-                                        test_wall_normal = Vector3.new(0, -1, 0);
-                                        hit_this = true;
-                                    }
+                                            if (wall.delta_x != 0.0) {
+                                                const result_time = (wall.x - wall.rel_x) / wall.delta_x;
+                                                const y = wall.rel_y + (result_time * wall.delta_y);
+                                                if (result_time >= 0 and test_max_time < result_time) {
+                                                    if (y >= wall.min_y and y <= wall.max_y) {
+                                                        test_max_time = @max(0, result_time - time_epsilon);
+                                                        test_wall_normal = wall.normal;
+                                                        hit_this = true;
+                                                    }
+                                                }
+                                            }
+                                        }
 
-                                    if (testWall(
-                                        max_corner.y(),
-                                        relative.y(),
-                                        relative.x(),
-                                        entity_delta.y(),
-                                        entity_delta.x(),
-                                        min_corner.x(),
-                                        max_corner.x(),
-                                        &test_min_time,
-                                    )) {
-                                        test_wall_normal = Vector3.new(0, 1, 0);
-                                        hit_this = true;
-                                    }
+                                        if (hit_this) {
+                                            max_time = test_max_time;
+                                            wall_normal_max = test_wall_normal;
+                                            opt_hit_entity_max = test_entity;
+                                        }
+                                    } else {
+                                        var test_min_time = min_time;
+                                        var hit_this = false;
+                                        var test_wall_normal = Vector3.zero();
+                                        var wall_index: u32 = 0;
 
-                                    if (hit_this) {
-                                        // const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
-                                        if (speculativeCollide(entity, test_entity)) {
-                                            min_time = test_min_time;
-                                            wall_normal = test_wall_normal;
-                                            opt_hit_entity = test_entity;
+                                        while (wall_index < walls.len) : (wall_index += 1) {
+                                            const wall = &walls[wall_index];
+
+                                            if (wall.delta_x != 0.0) {
+                                                const result_time = (wall.x - wall.rel_x) / wall.delta_x;
+                                                const y = wall.rel_y + (result_time * wall.delta_y);
+                                                if (result_time >= 0 and test_min_time > result_time) {
+                                                    if (y >= wall.min_y and y <= wall.max_y) {
+                                                        test_min_time = @max(0.0, result_time - time_epsilon);
+                                                        test_wall_normal = wall.normal;
+                                                        hit_this = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (hit_this) {
+                                            // const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
+                                            if (speculativeCollide(entity, test_entity)) {
+                                                min_time = test_min_time;
+                                                wall_normal_min = test_wall_normal;
+                                                opt_hit_entity_min = test_entity;
+                                            }
                                         }
                                     }
                                 }
@@ -639,9 +719,23 @@ pub fn moveEntity(
                 }
             }
 
+            var wall_normal = Vector3.zero();
+            var opt_hit_entity: ?*SimEntity = null;
+            var stop_time: f32 = 0;
+
+            if (min_time < max_time) {
+                stop_time = min_time;
+                opt_hit_entity = opt_hit_entity_min;
+                wall_normal = wall_normal_min;
+            } else {
+                stop_time = max_time;
+                opt_hit_entity = opt_hit_entity_max;
+                wall_normal = wall_normal_max;
+            }
+
             // Apply the amount of delta allowed by collision detection.
-            entity.position = entity.position.plus(entity_delta.scaledTo(min_time));
-            distance_remaining -= min_time * entity_delta_length;
+            entity.position = entity.position.plus(entity_delta.scaledTo(stop_time));
+            distance_remaining -= stop_time * entity_delta_length;
 
             if (opt_hit_entity) |hit_entity| {
                 // Remove the applied delta.
@@ -665,22 +759,11 @@ pub fn moveEntity(
 
     // Handle events based on area overlapping.
     var test_entity_index: u32 = 0;
-    const entity_rectangle = Rectangle3.fromCenterDimension(
-        entity.position.plus(entity.collision.total_volume.offset_position),
-        entity.collision.total_volume.dimension,
-    );
     while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
         const test_entity = &sim_region.entities[test_entity_index];
 
-        if (canOverlap(state, entity, test_entity)) {
-            const test_entity_rectangle = Rectangle3.fromCenterDimension(
-                test_entity.position.plus(test_entity.collision.total_volume.offset_position),
-                test_entity.collision.total_volume.dimension,
-            );
-
-            if (entity_rectangle.intersects(&test_entity_rectangle)) {
-                handleOverlap(state, entity, test_entity, delta_time, &ground);
-            }
+        if (canOverlap(state, entity, test_entity) and entitiesOverlap(entity, test_entity, Vector3.zero())) {
+            handleOverlap(state, entity, test_entity, delta_time, &ground);
         }
     }
 
@@ -717,33 +800,6 @@ pub fn moveEntity(
             entity.facing_direction = 3;
         }
     }
-}
-
-pub fn testWall(
-    wall_x: f32,
-    relative_x: f32,
-    relative_y: f32,
-    delta_x: f32,
-    delta_y: f32,
-    min_y: f32,
-    max_y: f32,
-    min_time: *f32,
-) bool {
-    var hit = false;
-
-    if (delta_x != 0.0) {
-        const epsilon_time = 0.001;
-        const result_time = (wall_x - relative_x) / delta_x;
-        const y = relative_y + (result_time * delta_y);
-        if (result_time >= 0 and min_time.* > result_time) {
-            if (y >= min_y and y <= max_y) {
-                min_time.* = @max(0.0, result_time - epsilon_time);
-                hit = true;
-            }
-        }
-    }
-
-    return hit;
 }
 
 pub fn endSimulation(state: *State, sim_region: *SimRegion) void {

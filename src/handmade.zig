@@ -183,7 +183,7 @@ pub export fn updateAndRender(
         var door_up = false;
         var door_down = false;
 
-        for (0..200) |_| {
+        for (0..200) |screen_index| {
             std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
             var random_choice: u32 = 0;
             if (door_up or door_down) {
@@ -237,7 +237,9 @@ pub export fn updateAndRender(
                     }
 
                     if (!should_be_door) {
-                        _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
+                        if (screen_index == 0) {
+                            _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
+                        }
                     } else if (created_z_door) {
                         if (tile_x == 10 and tile_y == 5) {
                             _ = addStairs(state, abs_tile_x, abs_tile_y, if (door_down) abs_tile_z - 1 else abs_tile_z);
