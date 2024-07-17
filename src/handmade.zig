@@ -126,6 +126,21 @@ pub export fn updateAndRender(
             .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
             .sword = debugLoadBMP(thread, platform, "test2/rock03.bmp"),
             .stairwell = debugLoadBMP(thread, platform, "test2/rock02.bmp"),
+            .grass = .{
+                debugLoadBMP(thread, platform, "test2/grass00.bmp"),
+                debugLoadBMP(thread, platform, "test2/grass01.bmp"),
+            },
+            .stone = .{
+                debugLoadBMP(thread, platform, "test2/ground00.bmp"),
+                debugLoadBMP(thread, platform, "test2/ground01.bmp"),
+                debugLoadBMP(thread, platform, "test2/ground02.bmp"),
+                debugLoadBMP(thread, platform, "test2/ground03.bmp"),
+            },
+            .tuft = .{
+                debugLoadBMP(thread, platform, "test2/tuft00.bmp"),
+                debugLoadBMP(thread, platform, "test2/tuft01.bmp"),
+                debugLoadBMP(thread, platform, "test2/tuft02.bmp"),
+            },
         };
 
         shared.initializeArena(
@@ -388,6 +403,7 @@ pub export fn updateAndRender(
         Vector2.new(@floatFromInt(buffer.width), @floatFromInt(buffer.height)),
         clear_color,
     );
+    drawTestGround(state, buffer);
     // drawBitmap(buffer, state.backdrop, 0, 0, 0, 0, 1);
 
     const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
@@ -834,6 +850,61 @@ pub export fn getSoundSamples(
 
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
     outputSound(sound_buffer, shared.MIDDLE_C, state);
+}
+
+fn drawTestGround(state: *State, buffer: *shared.OffscreenBuffer) void {
+    var random_number_index: u32 = 0;
+    const center = Vector2.newI(buffer.width, buffer.height).scaledTo(0.5);
+
+    var grass_index: u32 = 0;
+    while (grass_index < 100) : (grass_index += 1) {
+        std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
+
+        var stamp: shared.LoadedBitmap = undefined;
+        const random_stamp = random.RANDOM_NUMBERS[random_number_index];
+        random_number_index += 1;
+
+        const random_stamp_type = random.RANDOM_NUMBERS[random_number_index] % 2;
+        random_number_index += 1;
+        if (random_stamp_type == 1) {
+            stamp = state.grass[random_stamp % state.grass.len];
+        } else {
+            stamp = state.stone[random_stamp % state.stone.len];
+        }
+
+        const x = ((@as(f32, @floatFromInt(random.RANDOM_NUMBERS[random_number_index])) / @as(f32, @floatFromInt(random.MAX_RANDOM_NUMBER)) * 2) - 1);
+        random_number_index += 1;
+        const y = ((@as(f32, @floatFromInt(random.RANDOM_NUMBERS[random_number_index])) / @as(f32, @floatFromInt(random.MAX_RANDOM_NUMBER)) * 2) - 1);
+        random_number_index += 1;
+        const offset = Vector2.new(x, y);
+
+        const radius: f32 = 5;
+        const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
+        const position = center.plus(offset.scaledTo(state.meters_to_pixels * radius)).minus(bitmap_center);
+
+        drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
+    }
+
+    grass_index = 0;
+    while (grass_index < 100) : (grass_index += 1) {
+        std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
+
+        const random_stamp = random.RANDOM_NUMBERS[random_number_index];
+        random_number_index += 1;
+        var stamp: shared.LoadedBitmap = state.tuft[random_stamp % state.tuft.len];
+
+        const x = ((@as(f32, @floatFromInt(random.RANDOM_NUMBERS[random_number_index])) / @as(f32, @floatFromInt(random.MAX_RANDOM_NUMBER)) * 2) - 1);
+        random_number_index += 1;
+        const y = ((@as(f32, @floatFromInt(random.RANDOM_NUMBERS[random_number_index])) / @as(f32, @floatFromInt(random.MAX_RANDOM_NUMBER)) * 2) - 1);
+        random_number_index += 1;
+        const offset = Vector2.new(x, y);
+
+        const radius: f32 = 5;
+        const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
+        const position = center.plus(offset.scaledTo(state.meters_to_pixels * radius)).minus(bitmap_center);
+
+        drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
+    }
 }
 
 fn drawRectangle(

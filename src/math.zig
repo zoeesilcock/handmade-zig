@@ -19,6 +19,19 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                 pub inline fn new(x_value: f32, y_value: f32) Self {
                     return Self{ .values = .{ x_value, y_value } };
                 }
+                pub inline fn newI(x_value: i32, y_value: i32) Self {
+                    return Self{ .values = .{
+                        @floatFromInt(x_value),
+                        @floatFromInt(y_value),
+                    } };
+                }
+
+                pub inline fn newU(x_value: u32, y_value: u32) Self {
+                    return Self{ .values = .{
+                        @floatFromInt(x_value),
+                        @floatFromInt(y_value),
+                    } };
+                }
 
                 pub usingnamespace switch (accessor_style) {
                     inline .Position => struct {
@@ -56,6 +69,22 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             inline 3 => struct {
                 pub inline fn new(x_value: f32, y_value: f32, z_value: f32) Self {
                     return Self{ .values = .{ x_value, y_value, z_value } };
+                }
+
+                pub inline fn newI(x_value: i32, y_value: i32, z_value: i32) Self {
+                    return Self{ .values = .{
+                        @floatFromInt(x_value),
+                        @floatFromInt(y_value),
+                        @floatFromInt(z_value),
+                    } };
+                }
+
+                pub inline fn newU(x_value: u32, y_value: u32, z_value: u32) Self {
+                    return Self{ .values = .{
+                        @floatFromInt(x_value),
+                        @floatFromInt(y_value),
+                        @floatFromInt(z_value),
+                    } };
                 }
 
                 pub usingnamespace switch (accessor_style) {

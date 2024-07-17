@@ -205,6 +205,9 @@ pub const State = struct {
     tree: LoadedBitmap,
     sword: LoadedBitmap,
     stairwell: LoadedBitmap,
+    grass: [2]LoadedBitmap,
+    stone: [4]LoadedBitmap,
+    tuft: [3]LoadedBitmap,
 
     collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
