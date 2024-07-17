@@ -184,7 +184,7 @@ pub export fn updateAndRender(
         state.monster_collsion = makeSimpleGroundedCollision(state, 1, 1, 0.5);
         state.familiar_collsion = makeSimpleGroundedCollision(state, 1, 0.5, 0.5);
 
-        var random_number_index: u32 = 3;
+        var series = random.Series.seed(3);
         const screen_base_x: i32 = 0;
         const screen_base_y: i32 = 0;
         const screen_base_z: i32 = 0;
@@ -199,18 +199,10 @@ pub export fn updateAndRender(
         var door_down = false;
 
         for (0..200) |screen_index| {
-            std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
-            var random_choice: u32 = 0;
-            if (door_up or door_down) {
-                random_choice = random.RANDOM_NUMBERS[random_number_index] % 2;
-            } else {
-                random_choice = random.RANDOM_NUMBERS[random_number_index] % 3;
-            }
-
-            random_number_index += 1;
+            const door_direction = series.randomChoice(if (door_up or door_down) 2 else 3);
 
             var created_z_door = false;
-            if (random_choice == 2) {
+            if (door_direction == 2) {
                 created_z_door = true;
 
                 if (abs_tile_z == screen_base_z) {
@@ -218,7 +210,7 @@ pub export fn updateAndRender(
                 } else {
                     door_down = true;
                 }
-            } else if (random_choice == 1) {
+            } else if (door_direction == 1) {
                 door_right = true;
             } else {
                 door_top = true;
@@ -277,13 +269,13 @@ pub export fn updateAndRender(
             door_right = false;
             door_top = false;
 
-            if (random_choice == 2) {
+            if (door_direction == 2) {
                 if (abs_tile_z == screen_base_z) {
                     abs_tile_z = screen_base_z + 1;
                 } else {
                     abs_tile_z = screen_base_z;
                 }
-            } else if (random_choice == 1) {
+            } else if (door_direction == 1) {
                 screen_x += 1;
             } else {
                 screen_y += 1;
@@ -312,10 +304,8 @@ pub export fn updateAndRender(
         _ = addMonster(state, camera_tile_x - 3, camera_tile_y + 2, camera_tile_z);
 
         for (0..1) |_| {
-            const familiar_offset_x: i32 = @mod(@as(i32, @intCast(random.RANDOM_NUMBERS[random_number_index])), 10) - 7;
-            random_number_index += 1;
-            const familiar_offset_y: i32 = @mod(@as(i32, @intCast(random.RANDOM_NUMBERS[random_number_index])), 6) - 3;
-            random_number_index += 1;
+            const familiar_offset_x: i32 = series.randomIntBetween(-7, 7);
+            const familiar_offset_y: i32 = series.randomIntBetween(-3, -1);
 
             _ = addFamiliar(state, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
         }
@@ -853,30 +843,20 @@ pub export fn getSoundSamples(
 }
 
 fn drawTestGround(state: *State, buffer: *shared.OffscreenBuffer) void {
-    var random_number_index: u32 = 0;
+    var series = random.Series.seed(1234);
+
     const center = Vector2.newI(buffer.width, buffer.height).scaledTo(0.5);
 
     var grass_index: u32 = 0;
     while (grass_index < 100) : (grass_index += 1) {
-        std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
-
         var stamp: shared.LoadedBitmap = undefined;
-        const random_stamp = random.RANDOM_NUMBERS[random_number_index];
-        random_number_index += 1;
-
-        const random_stamp_type = random.RANDOM_NUMBERS[random_number_index] % 2;
-        random_number_index += 1;
-        if (random_stamp_type == 1) {
-            stamp = state.grass[random_stamp % state.grass.len];
+        if (series.randomChoice(2) == 1) {
+            stamp = state.grass[series.randomChoice(state.grass.len)];
         } else {
-            stamp = state.stone[random_stamp % state.stone.len];
+            stamp = state.stone[series.randomChoice(state.stone.len)];
         }
 
-        const x = ((@as(f32, @floatFromInt(random.RANDOM_NUMBERS[random_number_index])) / @as(f32, @floatFromInt(random.MAX_RANDOM_NUMBER)) * 2) - 1);
-        random_number_index += 1;
-        const y = ((@as(f32, @floatFromInt(random.RANDOM_NUMBERS[random_number_index])) / @as(f32, @floatFromInt(random.MAX_RANDOM_NUMBER)) * 2) - 1);
-        random_number_index += 1;
-        const offset = Vector2.new(x, y);
+        const offset = Vector2.new(series.randomBilateral(), series.randomBilateral());
 
         const radius: f32 = 5;
         const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
@@ -887,17 +867,9 @@ fn drawTestGround(state: *State, buffer: *shared.OffscreenBuffer) void {
 
     grass_index = 0;
     while (grass_index < 100) : (grass_index += 1) {
-        std.debug.assert(random_number_index < random.RANDOM_NUMBERS.len);
+        var stamp: shared.LoadedBitmap = state.tuft[series.randomChoice(state.tuft.len)];
 
-        const random_stamp = random.RANDOM_NUMBERS[random_number_index];
-        random_number_index += 1;
-        var stamp: shared.LoadedBitmap = state.tuft[random_stamp % state.tuft.len];
-
-        const x = ((@as(f32, @floatFromInt(random.RANDOM_NUMBERS[random_number_index])) / @as(f32, @floatFromInt(random.MAX_RANDOM_NUMBER)) * 2) - 1);
-        random_number_index += 1;
-        const y = ((@as(f32, @floatFromInt(random.RANDOM_NUMBERS[random_number_index])) / @as(f32, @floatFromInt(random.MAX_RANDOM_NUMBER)) * 2) - 1);
-        random_number_index += 1;
-        const offset = Vector2.new(x, y);
+        const offset = Vector2.new(series.randomBilateral(), series.randomBilateral());
 
         const radius: f32 = 5;
         const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);

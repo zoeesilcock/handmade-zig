@@ -382,8 +382,8 @@ pub fn square(a: f32) f32 {
     return a * a;
 }
 
-pub fn lerp(a: f32, b: f32, t: f32) f32 {
-    return (1.0 - t) * a + t * b;
+pub fn lerp(min: f32, max: f32, distance: f32) f32 {
+    return (1.0 - distance) * min + distance * max;
 }
 
 pub fn clampf(min: f32, value: f32, max: f32) f32 {

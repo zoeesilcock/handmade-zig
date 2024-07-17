@@ -1,7 +1,52 @@
+const std = @import("std");
+const math = @import("math.zig");
+
 pub const MIN_RANDOM_NUMBER = 0x0002890;
 pub const MAX_RANDOM_NUMBER = 0x5F515C5;
 
-pub const RANDOM_NUMBERS = [_]u32{
+pub const Series = struct {
+    index: u32 = 0,
+
+    pub fn seed(seed_value: u32) Series {
+        return Series{ .index = seed_value };
+    }
+
+    pub fn randomInt(self: *Series) u32 {
+        std.debug.assert(self.index < RANDOM_NUMBERS.len);
+
+        const result = RANDOM_NUMBERS[self.index];
+        self.index += 1;
+
+        if (self.index >= RANDOM_NUMBERS.len) {
+            self.index = 0;
+        }
+
+        return result;
+    }
+
+    pub fn randomChoice(self: *Series, choice_count: u32) u32 {
+        return self.randomInt() % choice_count;
+    }
+
+    pub fn randomUnilateral(self: *Series) f32 {
+        const divisor = 1.0 / @as(f32, @floatFromInt(MAX_RANDOM_NUMBER));
+        return divisor * @as(f32, @floatFromInt(self.randomInt()));
+    }
+
+    pub fn randomBilateral(self: *Series) f32 {
+        return self.randomUnilateral() * 2 - 1;
+    }
+
+    pub fn randomFloatBetween(self: *Series, min: f32, max: f32) f32 {
+        return math.lerp(min, max, self.randomUnilateral());
+    }
+
+    pub fn randomIntBetween(self: *Series, min: i32, max: i32) i32 {
+        return min + @mod(@as(i32, @intCast(self.randomInt())), ((max + 1) - min));
+    }
+};
+
+const RANDOM_NUMBERS = [_]u32{
     0x1bd7662, 0x5f10ef8, 0x264049d, 0x4531c82, 0x384221b, 0x37ffa17, 0x34fe794, 0x01ec963,
     0x219f1bc, 0x1b8c717, 0x3b6ad3d, 0x129d32d, 0x181cea8, 0x2fc68f7, 0x06cf6d1, 0x481079b,
     0x0d72e17, 0x2f33fdc, 0x3267c6e, 0x5b1608f, 0x119dec3, 0x2c8df18, 0x4abe6f3, 0x0ab8992,
