@@ -854,12 +854,20 @@ pub export fn getSoundSamples(
 }
 
 fn drawTestGround(state: *State, draw_buffer: *shared.LoadedBitmap) void {
+    drawRectangle(
+        draw_buffer,
+        Vector2.zero(),
+        Vector2.new(@floatFromInt(draw_buffer.width), @floatFromInt(draw_buffer.height)),
+        Color.new(0, 0, 0, 0),
+    );
+
     var series = random.Series.seed(1234);
     const center = Vector2.newI(draw_buffer.width, draw_buffer.height).scaledTo(0.5);
 
     var grass_index: u32 = 0;
     while (grass_index < 100) : (grass_index += 1) {
         var stamp: shared.LoadedBitmap = undefined;
+
         if (series.randomChoice(2) == 1) {
             stamp = state.grass[series.randomChoice(state.grass.len)];
         } else {
@@ -992,25 +1000,25 @@ fn drawBitmap(
 
         var x = min_x;
         while (x < max_x) : (x += 1) {
-            var sa: f32 = @as(f32, @floatFromInt((source[0] >> 24) & 0xFF)) / 255.0;
-            sa *= alpha;
-
-            const sr: f32 = @floatFromInt((source[0] >> 16) & 0xFF);
-            const sg: f32 = @floatFromInt((source[0] >> 8) & 0xFF);
-            const sb: f32 = @floatFromInt((source[0] >> 0) & 0xFF);
+            const sa: f32 = @floatFromInt((source[0] >> 24) & 0xFF);
+            const rsa: f32 = alpha * (sa / 255.0);
+            const sr: f32 = alpha * @as(f32, @floatFromInt((source[0] >> 16) & 0xFF));
+            const sg: f32 = alpha * @as(f32, @floatFromInt((source[0] >> 8) & 0xFF));
+            const sb: f32 = alpha * @as(f32, @floatFromInt((source[0] >> 0) & 0xFF));
 
             const da: f32 = @floatFromInt((dest[0] >> 24) & 0xFF);
+            const rda: f32 = (da / 255.0);
             const dr: f32 = @floatFromInt((dest[0] >> 16) & 0xFF);
             const dg: f32 = @floatFromInt((dest[0] >> 8) & 0xFF);
             const db: f32 = @floatFromInt((dest[0] >> 0) & 0xFF);
 
-            const a = @max(da, 255.0 * sa);
-            const r = (1.0 - sa) * dr + sa * sr;
-            const g = (1.0 - sa) * dg + sa * sg;
-            const b = (1.0 - sa) * db + sa * sb;
+            const inv_rsa = (1.0 - rsa);
+            const a = 255.0 * (rsa + rda - rsa * rda);
+            const r = inv_rsa * dr + sr;
+            const g = inv_rsa * dg + sg;
+            const b = inv_rsa * db + sb;
 
-            dest[0] = (
-                (@as(u32, @intFromFloat(a + 0.5)) << 24) |
+            dest[0] = ((@as(u32, @intFromFloat(a + 0.5)) << 24) |
                 (@as(u32, @intFromFloat(r + 0.5)) << 16) |
                 (@as(u32, @intFromFloat(g + 0.5)) << 8) |
                 (@as(u32, @intFromFloat(b + 0.5)) << 0));
@@ -1070,10 +1078,11 @@ fn debugLoadBMP(
         std.debug.assert(green_scan.found);
         std.debug.assert(blue_scan.found);
 
-        const alpha_shift = 24 - @as(i32, @intCast(alpha_scan.index));
-        const red_shift = 16 - @as(i32, @intCast(red_scan.index));
-        const green_shift = 8 - @as(i32, @intCast(green_scan.index));
-        const blue_shift = 0 - @as(i32, @intCast(blue_scan.index));
+
+        const red_shift_down = @as(u5, @intCast(red_scan.index));
+        const green_shift_down = @as(u5, @intCast(green_scan.index));
+        const blue_shift_down = @as(u5, @intCast(blue_scan.index));
+        const alpha_shift_down = @as(u5, @intCast(alpha_scan.index));
 
         var source_dest: [*]align(@alignOf(u8)) u32 = @ptrCast(result.memory);
         var x: u32 = 0;
@@ -1081,10 +1090,22 @@ fn debugLoadBMP(
             var y: u32 = 0;
             while (y < header.height) : (y += 1) {
                 const color = source_dest[0];
-                source_dest[0] = (intrinsics.rotateLeft(color & header.red_mask, red_shift) |
-                    intrinsics.rotateLeft(color & header.green_mask, green_shift) |
-                    intrinsics.rotateLeft(color & header.blue_mask, blue_shift) |
-                    intrinsics.rotateLeft(color & alpha_mask, alpha_shift));
+                var r: f32 = @floatFromInt((color & header.red_mask) >> red_shift_down);
+                var g: f32 = @floatFromInt((color & header.green_mask) >> green_shift_down);
+                var b: f32 = @floatFromInt((color & header.blue_mask) >> blue_shift_down);
+                const a: f32 = @floatFromInt((color & alpha_mask) >> alpha_shift_down);
+                const an = (a / 255.0);
+
+                // Pre-multiply alpha.
+                r *= an;
+                g *= an;
+                b *= an;
+
+                source_dest[0] = ((@as(u32, @intFromFloat(a + 0.5)) << 24) |
+                    (@as(u32, @intFromFloat(r + 0.5)) << 16) |
+                    (@as(u32, @intFromFloat(g + 0.5)) << 8) |
+                    (@as(u32, @intFromFloat(b + 0.5)) << 0));
+
                 source_dest += 1;
             }
         }
