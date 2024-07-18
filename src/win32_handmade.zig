@@ -803,7 +803,6 @@ fn getGameBuffer() shared.OffscreenBuffer {
         .width = back_buffer.width,
         .height = back_buffer.height,
         .pitch = back_buffer.pitch,
-        .bytes_per_pixel = back_buffer.bytes_per_pixel,
     };
 }
 

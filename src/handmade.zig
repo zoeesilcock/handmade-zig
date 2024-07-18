@@ -310,6 +310,9 @@ pub export fn updateAndRender(
             _ = addFamiliar(state, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
         }
 
+        state.ground_buffer = makeEmptyBitmap(&state.world_arena, 512, 512);
+        drawTestGround(state, &state.ground_buffer);
+
         memory.is_initialized = true;
     }
 
@@ -385,19 +388,27 @@ pub export fn updateAndRender(
         input.frame_delta_time,
     );
 
+    // Create draw buffer.
+    var draw_buffer_ = shared.LoadedBitmap{
+        .width = buffer.width,
+        .height = buffer.height,
+        .pitch = @intCast(buffer.pitch),
+        .memory = @ptrCast(buffer.memory),
+    };
+    const draw_buffer = &draw_buffer_;
+
     // Clear background.
     const clear_color = Color.new(0.5, 0.5, 0.5, 1);
     drawRectangle(
-        buffer,
+        draw_buffer,
         Vector2.zero(),
-        Vector2.new(@floatFromInt(buffer.width), @floatFromInt(buffer.height)),
+        Vector2.new(@floatFromInt(draw_buffer.width), @floatFromInt(draw_buffer.height)),
         clear_color,
     );
-    drawTestGround(state, buffer);
-    // drawBitmap(buffer, state.backdrop, 0, 0, 0, 0, 1);
+    drawBitmap(draw_buffer, &state.ground_buffer, 0, 0, 1);
 
-    const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(buffer.width));
-    const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(buffer.height));
+    const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(draw_buffer.width));
+    const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(draw_buffer.height));
 
     var piece_group = shared.EntityVisiblePieceGroup{
         .state = state,
@@ -576,11 +587,11 @@ pub export fn updateAndRender(
                 );
 
                 if (piece.bitmap) |bitmap| {
-                    drawBitmap(buffer, bitmap, center.x(), center.y(), piece.color.a());
+                    drawBitmap(draw_buffer, bitmap, center.x(), center.y(), piece.color.a());
                 } else {
                     const dimension = piece.dimension.scaledTo(meters_to_pixels);
                     drawRectangle(
-                        buffer,
+                        draw_buffer,
                         center.minus(dimension.scaledTo(0.5)),
                         center.plus(dimension.scaledTo(0.5)),
                         piece.color,
@@ -842,10 +853,9 @@ pub export fn getSoundSamples(
     outputSound(sound_buffer, shared.MIDDLE_C, state);
 }
 
-fn drawTestGround(state: *State, buffer: *shared.OffscreenBuffer) void {
+fn drawTestGround(state: *State, draw_buffer: *shared.LoadedBitmap) void {
     var series = random.Series.seed(1234);
-
-    const center = Vector2.newI(buffer.width, buffer.height).scaledTo(0.5);
+    const center = Vector2.newI(draw_buffer.width, draw_buffer.height).scaledTo(0.5);
 
     var grass_index: u32 = 0;
     while (grass_index < 100) : (grass_index += 1) {
@@ -862,7 +872,7 @@ fn drawTestGround(state: *State, buffer: *shared.OffscreenBuffer) void {
         const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
         const position = center.plus(offset.scaledTo(state.meters_to_pixels * radius)).minus(bitmap_center);
 
-        drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
+        drawBitmap(draw_buffer, &stamp, position.x(), position.y(), 1);
     }
 
     grass_index = 0;
@@ -875,12 +885,12 @@ fn drawTestGround(state: *State, buffer: *shared.OffscreenBuffer) void {
         const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
         const position = center.plus(offset.scaledTo(state.meters_to_pixels * radius)).minus(bitmap_center);
 
-        drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
+        drawBitmap(draw_buffer, &stamp, position.x(), position.y(), 1);
     }
 }
 
 fn drawRectangle(
-    buffer: *shared.OffscreenBuffer,
+    draw_buffer: *shared.LoadedBitmap,
     vector_min: Vector2,
     vector_max: Vector2,
     color: Color,
@@ -898,16 +908,16 @@ fn drawRectangle(
     if (min_y < 0) {
         min_y = 0;
     }
-    if (max_x > buffer.width) {
-        max_x = buffer.width;
+    if (max_x > draw_buffer.width) {
+        max_x = draw_buffer.width;
     }
-    if (max_y > buffer.height) {
-        max_y = buffer.height;
+    if (max_y > draw_buffer.height) {
+        max_y = draw_buffer.height;
     }
 
     // Set the pointer to the top left corner of the rectangle.
-    var row: [*]u8 = @ptrCast(buffer.memory);
-    row += @as(u32, @intCast((min_x * buffer.bytes_per_pixel) + (min_y * @as(i32, @intCast(buffer.pitch)))));
+    var row: [*]u8 = @ptrCast(draw_buffer.memory);
+    row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch)))));
 
     var y = min_y;
     while (y < max_y) : (y += 1) {
@@ -919,12 +929,12 @@ fn drawRectangle(
             pixel += 1;
         }
 
-        row += buffer.pitch;
+        row += @as(usize, @intCast(draw_buffer.pitch));
     }
 }
 
 fn drawBitmap(
-    buffer: *shared.OffscreenBuffer,
+    draw_buffer: *shared.LoadedBitmap,
     bitmap: *shared.LoadedBitmap,
     real_x: f32,
     real_y: f32,
@@ -953,52 +963,55 @@ fn drawBitmap(
         source_offset_y = -min_y;
         min_y = 0;
     }
-    if (max_x > buffer.width) {
-        max_x = buffer.width;
+    if (max_x > draw_buffer.width) {
+        max_x = draw_buffer.width;
     }
-    if (max_y > buffer.height) {
-        max_y = buffer.height;
+    if (max_y > draw_buffer.height) {
+        max_y = draw_buffer.height;
     }
-
-    // Calculate offset in data.
-    const clipping_offset: i32 = -source_offset_y * bitmap.width + source_offset_x;
-    const offset: i32 = bitmap.width * (bitmap.height - 1) + clipping_offset;
 
     // Move to the correct spot in the data.
-    var source_row = bitmap.data.per_pixel;
-    if (offset >= 0) {
-        source_row += @as(u32, @intCast(offset));
+    const source_offset: i32 =
+        @intCast(source_offset_y * @as(i32, @intCast(bitmap.pitch)) + shared.BITMAP_BYTES_PER_PIXEL * source_offset_x);
+    var source_row: [*]u8 = @ptrCast(bitmap.memory);
+    if (source_offset >= 0) {
+        source_row += @as(usize, @intCast(source_offset));
     } else {
-        source_row += @abs(offset);
+        source_row -= @as(usize, @intCast(-source_offset));
     }
 
     // Move to the correct spot in the destination.
-    var dest_row: [*]u8 = @ptrCast(buffer.memory);
-    dest_row += @as(u32, @intCast((min_x * buffer.bytes_per_pixel) + (min_y * @as(i32, @intCast(buffer.pitch)))));
+    const dest_offset: usize = @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch))));
+    var dest_row: [*]u8 = @ptrCast(draw_buffer.memory);
+    dest_row += dest_offset;
 
     var y = min_y;
     while (y < max_y) : (y += 1) {
         var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
-        var source = source_row;
+        var source: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(source_row));
 
         var x = min_x;
         while (x < max_x) : (x += 1) {
-            var a: f32 = @as(f32, @floatFromInt((source[0] >> 24) & 0xFF)) / 255.0;
-            a *= alpha;
+            var sa: f32 = @as(f32, @floatFromInt((source[0] >> 24) & 0xFF)) / 255.0;
+            sa *= alpha;
 
             const sr: f32 = @floatFromInt((source[0] >> 16) & 0xFF);
             const sg: f32 = @floatFromInt((source[0] >> 8) & 0xFF);
             const sb: f32 = @floatFromInt((source[0] >> 0) & 0xFF);
 
+            const da: f32 = @floatFromInt((dest[0] >> 24) & 0xFF);
             const dr: f32 = @floatFromInt((dest[0] >> 16) & 0xFF);
             const dg: f32 = @floatFromInt((dest[0] >> 8) & 0xFF);
             const db: f32 = @floatFromInt((dest[0] >> 0) & 0xFF);
 
-            const r = (1.0 - a) * dr + a * sr;
-            const g = (1.0 - a) * dg + a * sg;
-            const b = (1.0 - a) * db + a * sb;
+            const a = @max(da, 255.0 * sa);
+            const r = (1.0 - sa) * dr + sa * sr;
+            const g = (1.0 - sa) * dg + sa * sg;
+            const b = (1.0 - sa) * db + sa * sb;
 
-            dest[0] = ((@as(u32, @intFromFloat(r + 0.5)) << 16) |
+            dest[0] = (
+                (@as(u32, @intFromFloat(a + 0.5)) << 24) |
+                (@as(u32, @intFromFloat(r + 0.5)) << 16) |
                 (@as(u32, @intFromFloat(g + 0.5)) << 8) |
                 (@as(u32, @intFromFloat(b + 0.5)) << 0));
 
@@ -1006,9 +1019,27 @@ fn drawBitmap(
             dest += 1;
         }
 
-        dest_row += buffer.pitch;
-        source_row -= @as(usize, @intCast(bitmap.width));
+        dest_row += @as(usize, @intCast(draw_buffer.pitch));
+        if (bitmap.pitch >= 0) {
+            source_row += @as(usize, @intCast(bitmap.pitch));
+        } else {
+            source_row -= @as(usize, @intCast(-bitmap.pitch));
+        }
     }
+}
+
+fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32) shared.LoadedBitmap {
+    const result = shared.pushStruct(arena, shared.LoadedBitmap);
+
+    result.width = width;
+    result.height = height;
+    result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
+
+    const total_bitmap_size: u32 = @intCast(result.width * result.height * shared.BITMAP_BYTES_PER_PIXEL);
+    result.memory = @ptrCast(shared.pushSize(arena, total_bitmap_size));
+    shared.zeroSize(total_bitmap_size, result.memory);
+
+    return result.*;
 }
 
 fn debugLoadBMP(
@@ -1024,7 +1055,7 @@ fn debugLoadBMP(
 
         std.debug.assert(header.compression == 3);
 
-        result.data.per_pixel_channel = @as([*]u8, @ptrCast(read_result.contents)) + header.bitmap_offset;
+        result.memory = @as([*]void, @ptrCast(read_result.contents)) + header.bitmap_offset;
         result.width = header.width;
         result.height = header.height;
 
@@ -1044,7 +1075,7 @@ fn debugLoadBMP(
         const green_shift = 8 - @as(i32, @intCast(green_scan.index));
         const blue_shift = 0 - @as(i32, @intCast(blue_scan.index));
 
-        var source_dest = result.data.per_pixel;
+        var source_dest: [*]align(@alignOf(u8)) u32 = @ptrCast(result.memory);
         var x: u32 = 0;
         while (x < header.width) : (x += 1) {
             var y: u32 = 0;
@@ -1058,6 +1089,10 @@ fn debugLoadBMP(
             }
         }
     }
+
+    result.pitch = -result.width * shared.BITMAP_BYTES_PER_PIXEL;
+    const offset: usize = @intCast(-result.pitch * (result.height - 1));
+    result.memory = @ptrCast(@as([*]u8, @ptrCast(result.memory)) + offset);
 
     return result;
 }

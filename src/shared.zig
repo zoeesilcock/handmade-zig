@@ -5,6 +5,7 @@ pub const MIDDLE_C: u32 = 261;
 pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
 pub const HIT_POINT_SUB_COUNT = 4;
+pub const BITMAP_BYTES_PER_PIXEL = 4;
 
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
@@ -66,7 +67,6 @@ pub const OffscreenBuffer = extern struct {
     width: i32 = 0,
     height: i32 = 0,
     pitch: usize = 0,
-    bytes_per_pixel: i32 = 0,
 };
 
 pub const SoundOutputBuffer = extern struct {
@@ -155,7 +155,7 @@ pub inline fn initializeArena(arena: *MemoryArena, size: MemoryIndex, base: [*]v
     arena.used = 0;
 }
 
-inline fn pushSize(arena: *MemoryArena, size: MemoryIndex) [*]u8 {
+pub inline fn pushSize(arena: *MemoryArena, size: MemoryIndex) [*]u8 {
     std.debug.assert((arena.used + size) <= arena.size);
 
     const result = arena.base + arena.used;
@@ -173,7 +173,7 @@ pub inline fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: typ
     return @as([*]T, @ptrCast(@alignCast(pushSize(arena, size))));
 }
 
-inline fn zeroSize(size: MemoryIndex, ptr: [*]void) void {
+pub inline fn zeroSize(size: MemoryIndex, ptr: [*]void) void {
     var byte: [*]u8 = @ptrCast(ptr);
     var index = size;
     while (index > 0) : (index -= 1) {
@@ -220,6 +220,8 @@ pub const State = struct {
     sword_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     familiar_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
+
+    ground_buffer: LoadedBitmap = undefined,
 };
 
 pub const PairwiseCollisionRuleFlag = enum(u8) {
@@ -387,10 +389,8 @@ pub const HeroBitmaps = struct {
 pub const LoadedBitmap = struct {
     width: i32 = 0,
     height: i32 = 0,
-    data: extern union {
-        per_pixel_channel: [*]u8,
-        per_pixel: [*]u32,
-    },
+    pitch: i32 = 0,
+    memory: [*]void,
 };
 
 pub const BitmapHeader = packed struct {

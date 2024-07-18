@@ -5,7 +5,6 @@ const std = @import("std");
 
 const WIDTH = 960;
 const HEIGHT = 540;
-const BYTES_PER_PIXEL = 4;
 
 const DEBUG_WINDOW_POS_X = 0 + 2560;
 const DEBUG_WINDOW_POS_Y = 30;
@@ -27,7 +26,6 @@ const OffscreenBuffer = struct {
     width: i32 = 0,
     height: i32 = 0,
     pitch: usize = 0,
-    bytes_per_pixel: i32 = BYTES_PER_PIXEL,
 };
 
 fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
@@ -78,15 +76,14 @@ pub fn main() anyerror!void {
     game_memory.transient_storage = game_memory.permanent_storage.? + game_memory.permanent_storage_size;
 
     // Create the back buffer.
-    const bitmap_memory_size: usize = @intCast((back_buffer.width * back_buffer.height) * BYTES_PER_PIXEL);
+    const bitmap_memory_size: usize = @intCast((back_buffer.width * back_buffer.height) * shared.BITMAP_BYTES_PER_PIXEL);
     back_buffer.memory = rl.memAlloc(@intCast(bitmap_memory_size));
-    back_buffer.pitch = @intCast(back_buffer.width * BYTES_PER_PIXEL);
+    back_buffer.pitch = @intCast(back_buffer.width * shared.BITMAP_BYTES_PER_PIXEL);
     var game_buffer = shared.OffscreenBuffer{
         .memory = back_buffer.memory,
         .width = back_buffer.width,
         .height = back_buffer.height,
         .pitch = back_buffer.pitch,
-        .bytes_per_pixel = back_buffer.bytes_per_pixel,
     };
 
     // Create the window.
