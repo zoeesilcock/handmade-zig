@@ -136,7 +136,7 @@ pub fn getWorldChunk(
 
         if (opt_memory_arena) |memory_arena| {
             if (chunk.x != TILE_CHUNK_UNINITIALIZED and chunk.next_in_hash == null) {
-                chunk.next_in_hash = shared.pushStruct(memory_arena, WorldChunk);
+                chunk.next_in_hash = memory_arena.pushStruct(WorldChunk);
                 tile_chunk = chunk.next_in_hash;
                 tile_chunk.?.x = TILE_CHUNK_UNINITIALIZED;
 
@@ -288,7 +288,7 @@ pub fn changeEntityLocationRaw(
                         old_block = free_block;
                     } else {
                         // No free blocks, create a new block.
-                        old_block = shared.pushStruct(memory_arena, WorldEntityBlock);
+                        old_block = memory_arena.pushStruct(WorldEntityBlock);
                     }
 
                     // Copy the existing block into the old block position.

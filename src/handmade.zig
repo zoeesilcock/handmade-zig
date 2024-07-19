@@ -147,15 +147,14 @@ pub export fn updateAndRender(
             },
         };
 
-        shared.initializeArena(
-            &state.world_arena,
+        state.world_arena.initialize(
             memory.permanent_storage_size - @sizeOf(State),
             memory.permanent_storage.? + @sizeOf(State),
         );
 
         _ = addLowEntity(state, .Null, WorldPosition.nullPosition());
 
-        state.world = shared.pushStruct(&state.world_arena, world.World);
+        state.world = state.world_arena.pushStruct(world.World);
         world.initializeWorld(state.world, 1.4, 3.0);
 
         const tile_side_in_pixels = 60;
@@ -388,7 +387,7 @@ pub export fn updateAndRender(
     );
 
     var sim_arena: shared.MemoryArena = undefined;
-    shared.initializeArena(&sim_arena, memory.transient_storage_size, memory.transient_storage.?);
+    sim_arena.initialize(memory.transient_storage_size, memory.transient_storage.?);
     const screen_sim_region = sim.beginSimulation(
         state,
         &sim_arena,
@@ -739,10 +738,10 @@ fn makeSimpleGroundedCollision(
     y_dimension: f32,
     z_dimension: f32,
 ) *sim.SimEntityCollisionVolumeGroup {
-    const group = shared.pushStruct(&state.world_arena, sim.SimEntityCollisionVolumeGroup);
+    const group = state.world_arena.pushStruct(sim.SimEntityCollisionVolumeGroup);
 
     group.volume_count = 1;
-    group.volumes = shared.pushArray(&state.world_arena, group.volume_count, sim.SimEntityCollisionVolume);
+    group.volumes = state.world_arena.pushArray(group.volume_count, sim.SimEntityCollisionVolume);
     group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension);
     group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
     group.volumes[0] = group.total_volume;
@@ -751,7 +750,7 @@ fn makeSimpleGroundedCollision(
 }
 
 fn makeNullCollision(state: *State) *sim.SimEntityCollisionVolumeGroup {
-    const group = shared.pushStruct(&state.world_arena, sim.SimEntityCollisionVolumeGroup);
+    const group = state.world_arena.pushStruct(sim.SimEntityCollisionVolumeGroup);
 
     group.volume_count = 0;
     group.volumes = undefined;
@@ -790,7 +789,7 @@ pub fn addCollisionRule(state: *State, in_storage_index_a: u32, in_storage_index
         if (found_rule) |rule| {
             state.first_free_collision_rule = rule.next_in_hash;
         } else {
-            found_rule = shared.pushStruct(&state.world_arena, shared.PairwiseCollisionRule);
+            found_rule = state.world_arena.pushStruct(shared.PairwiseCollisionRule);
         }
 
         found_rule.?.next_in_hash = state.collision_rule_hash[hash_bucket];
@@ -1046,14 +1045,14 @@ fn drawBitmap(
 }
 
 fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32) shared.LoadedBitmap {
-    const result = shared.pushStruct(arena, shared.LoadedBitmap);
+    const result = arena.pushStruct(shared.LoadedBitmap);
 
     result.width = width;
     result.height = height;
     result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
 
     const total_bitmap_size: u32 = @intCast(result.width * result.height * shared.BITMAP_BYTES_PER_PIXEL);
-    result.memory = @ptrCast(shared.pushSize(arena, total_bitmap_size));
+    result.memory = @ptrCast(arena.pushSize(total_bitmap_size));
     shared.zeroSize(total_bitmap_size, result.memory);
 
     return result.*;

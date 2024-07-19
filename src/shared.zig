@@ -147,31 +147,31 @@ pub const MemoryArena = struct {
     size: MemoryIndex,
     base: [*]u8,
     used: MemoryIndex,
+
+    pub inline fn initialize(arena: *MemoryArena, size: MemoryIndex, base: [*]void) void {
+        arena.size = size;
+        arena.base = @ptrCast(base);
+        arena.used = 0;
+    }
+
+    pub inline fn pushSize(arena: *MemoryArena, size: MemoryIndex) [*]u8 {
+        std.debug.assert((arena.used + size) <= arena.size);
+
+        const result = arena.base + arena.used;
+        arena.used += size;
+        return result;
+    }
+
+    pub inline fn pushStruct(arena: *MemoryArena, comptime T: type) *T {
+        const size: MemoryIndex = @sizeOf(T);
+        return @as(*T, @ptrCast(@alignCast(pushSize(arena, size))));
+    }
+
+    pub inline fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
+        const size: MemoryIndex = @sizeOf(T) * count;
+        return @as([*]T, @ptrCast(@alignCast(pushSize(arena, size))));
+    }
 };
-
-pub inline fn initializeArena(arena: *MemoryArena, size: MemoryIndex, base: [*]void) void {
-    arena.size = size;
-    arena.base = @ptrCast(base);
-    arena.used = 0;
-}
-
-pub inline fn pushSize(arena: *MemoryArena, size: MemoryIndex) [*]u8 {
-    std.debug.assert((arena.used + size) <= arena.size);
-
-    const result = arena.base + arena.used;
-    arena.used += size;
-    return result;
-}
-
-pub inline fn pushStruct(arena: *MemoryArena, comptime T: type) *T {
-    const size: MemoryIndex = @sizeOf(T);
-    return @as(*T, @ptrCast(@alignCast(pushSize(arena, size))));
-}
-
-pub inline fn pushArray(arena: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
-    const size: MemoryIndex = @sizeOf(T) * count;
-    return @as([*]T, @ptrCast(@alignCast(pushSize(arena, size))));
-}
 
 pub inline fn zeroSize(size: MemoryIndex, ptr: [*]void) void {
     var byte: [*]u8 = @ptrCast(ptr);
