@@ -221,6 +221,7 @@ pub const State = struct {
     familiar_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
 
+    ground_buffer_position: world.WorldPosition = undefined,
     ground_buffer: LoadedBitmap = undefined,
 };
 

@@ -202,8 +202,9 @@ pub export fn updateAndRender(
         var door_up = false;
         var door_down = false;
 
-        for (0..200) |screen_index| {
-            const door_direction = series.randomChoice(if (door_up or door_down) 2 else 3);
+        for (0..200) |_| {
+            // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 3);
+            const door_direction = series.randomChoice(2);
 
             var created_z_door = false;
             if (door_direction == 2) {
@@ -248,9 +249,7 @@ pub export fn updateAndRender(
                     }
 
                     if (!should_be_door) {
-                        if (screen_index == 0) {
-                            _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
-                        }
+                        _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
                     } else if (created_z_door) {
                         if (tile_x == 10 and tile_y == 5) {
                             _ = addStairs(state, abs_tile_x, abs_tile_y, if (door_down) abs_tile_z - 1 else abs_tile_z);
@@ -314,8 +313,15 @@ pub export fn updateAndRender(
             _ = addFamiliar(state, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
         }
 
-        state.ground_buffer = makeEmptyBitmap(&state.world_arena, 512, 512);
-        drawTestGround(state, &state.ground_buffer);
+        const screen_width: f32 = @floatFromInt(buffer.width);
+        const screen_height: f32 = @floatFromInt(buffer.height);
+        // const max_z_scale = 0.5;
+        const ground_overscan = 1.5;
+        const ground_buffer_width = intrinsics.roundReal32ToInt32(screen_width * ground_overscan);
+        const ground_buffer_height = intrinsics.roundReal32ToInt32(screen_height * ground_overscan);
+        state.ground_buffer = makeEmptyBitmap(&state.world_arena, ground_buffer_width, ground_buffer_height);
+        state.ground_buffer_position = state.camera_position;
+        drawGroundChunk(state, &state.ground_buffer, &state.ground_buffer_position);
 
         memory.is_initialized = true;
     }
@@ -409,10 +415,17 @@ pub export fn updateAndRender(
         Vector2.new(@floatFromInt(draw_buffer.width), @floatFromInt(draw_buffer.height)),
         clear_color,
     );
-    drawBitmap(draw_buffer, &state.ground_buffer, 0, 0, 1);
 
     const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(draw_buffer.width));
     const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(draw_buffer.height));
+
+    const flip_y = Vector3.new(1, -1, 1);
+    const ground_delta = world.subtractPositions(state.world, &state.ground_buffer_position, &state.camera_position).times(flip_y);
+    const ground = Vector2.new(
+        screen_center_x - 0.5 * @as(f32, @floatFromInt(state.ground_buffer.width)),
+        screen_center_y - 0.5 * @as(f32, @floatFromInt(state.ground_buffer.height)),
+    ).plus(ground_delta.xy().scaledTo(meters_to_pixels));
+    drawBitmap(draw_buffer, &state.ground_buffer, ground.x(), ground.y(), 1);
 
     var piece_group = shared.EntityVisiblePieceGroup{
         .state = state,
@@ -857,19 +870,15 @@ pub export fn getSoundSamples(
     outputSound(sound_buffer, shared.MIDDLE_C, state);
 }
 
-fn drawTestGround(state: *State, draw_buffer: *shared.LoadedBitmap) void {
-    drawRectangle(
-        draw_buffer,
-        Vector2.zero(),
-        Vector2.new(@floatFromInt(draw_buffer.width), @floatFromInt(draw_buffer.height)),
-        Color.new(0, 0, 0, 0),
+fn drawGroundChunk(state: *State, draw_buffer: *shared.LoadedBitmap, chunk_position: *world.WorldPosition) void {
+    const width: f32 = @floatFromInt(draw_buffer.width);
+    const height: f32 = @floatFromInt(draw_buffer.height);
+    var series = random.Series.seed(
+        @intCast(139 * chunk_position.chunk_x + 593 * chunk_position.chunk_y + 329 * chunk_position.chunk_z),
     );
 
-    var series = random.Series.seed(1234);
-    const center = Vector2.newI(draw_buffer.width, draw_buffer.height).scaledTo(0.5);
-
     var grass_index: u32 = 0;
-    while (grass_index < 100) : (grass_index += 1) {
+    while (grass_index < 500) : (grass_index += 1) {
         var stamp: shared.LoadedBitmap = undefined;
 
         if (series.randomChoice(2) == 1) {
@@ -878,11 +887,9 @@ fn drawTestGround(state: *State, draw_buffer: *shared.LoadedBitmap) void {
             stamp = state.stone[series.randomChoice(state.stone.len)];
         }
 
-        const offset = Vector2.new(series.randomBilateral(), series.randomBilateral());
-
-        const radius: f32 = 5;
         const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
-        const position = center.plus(offset.scaledTo(state.meters_to_pixels * radius)).minus(bitmap_center);
+        const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
+        const position = offset.minus(bitmap_center);
 
         drawBitmap(draw_buffer, &stamp, position.x(), position.y(), 1);
     }
@@ -891,11 +898,9 @@ fn drawTestGround(state: *State, draw_buffer: *shared.LoadedBitmap) void {
     while (grass_index < 100) : (grass_index += 1) {
         var stamp: shared.LoadedBitmap = state.tuft[series.randomChoice(state.tuft.len)];
 
-        const offset = Vector2.new(series.randomBilateral(), series.randomBilateral());
-
-        const radius: f32 = 5;
         const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
-        const position = center.plus(offset.scaledTo(state.meters_to_pixels * radius)).minus(bitmap_center);
+        const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
+        const position = offset.minus(bitmap_center);
 
         drawBitmap(draw_buffer, &stamp, position.x(), position.y(), 1);
     }
@@ -1081,7 +1086,6 @@ fn debugLoadBMP(
         std.debug.assert(red_scan.found);
         std.debug.assert(green_scan.found);
         std.debug.assert(blue_scan.found);
-
 
         const red_shift_down = @as(u5, @intCast(red_scan.index));
         const green_shift_down = @as(u5, @intCast(green_scan.index));
