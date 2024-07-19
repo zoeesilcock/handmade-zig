@@ -19,6 +19,7 @@ const std = @import("std");
 ///     * How it this rendered.
 ///     * Z fudge!
 /// * Collision detection?
+///     * Fix sword collisions!
 ///     * Clean up predicate proliferation! Can we make a nice clean set of flag rules so that it's easy to understnad
 ///     how things work in terms of special handling? This may involve making the iteration handle everything
 ///     instead of handling overlap outside and so on.
@@ -32,22 +33,25 @@ const std = @import("std");
 ///     * Sim region merging? For multiple players?
 ///
 /// * Debug code.
+///     * Fonts.
 ///     * Logging.
 ///     * Diagramming.
 ///     * Switches, sliders etc.
 ///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
 ///
+/// * Asset streaming.
+///
 /// * Audio.
 ///     * Sound effect triggers.
 ///     * Ambient sounds.
 ///     * Music.
-/// * Asset streaming.
 ///
 /// * Metagame/save game?
 ///     * How do you enter a save slot? Multiple profiles and potential "menu world".
 ///     * Persistent unlocks, etc.
 ///     * De we allo save games? Probably yes, just for "pausing".
 ///     * Continuous save for crash recovery?
+///
 /// * Rudimentary world generation to understand which elements will be needed.
 ///     * Placement of background things.
 ///     * Connectivity?
