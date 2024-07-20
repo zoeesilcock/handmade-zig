@@ -78,7 +78,9 @@ const std = @import("std");
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
+const LoadedBitmap = shared.LoadedBitmap;
 const State = shared.State;
+const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
 
@@ -90,9 +92,7 @@ pub export fn updateAndRender(
     buffer: *shared.OffscreenBuffer,
 ) void {
     std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
-
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
-
     if (!memory.is_initialized) {
         state.* = State{
             .camera_position = WorldPosition.zero(),
@@ -312,17 +312,41 @@ pub export fn updateAndRender(
             _ = addFamiliar(state, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
         }
 
-        const screen_width: f32 = @floatFromInt(buffer.width);
-        const screen_height: f32 = @floatFromInt(buffer.height);
-        // const max_z_scale = 0.5;
-        const ground_overscan = 1.5;
-        const ground_buffer_width = intrinsics.roundReal32ToInt32(screen_width * ground_overscan);
-        const ground_buffer_height = intrinsics.roundReal32ToInt32(screen_height * ground_overscan);
-        state.ground_buffer = makeEmptyBitmap(&state.world_arena, ground_buffer_width, ground_buffer_height);
-        state.ground_buffer_position = state.camera_position;
-        drawGroundChunk(state, &state.ground_buffer, &state.ground_buffer_position);
-
         memory.is_initialized = true;
+    }
+
+    // Transient initialization.
+    std.debug.assert(@sizeOf(TransientState) <= memory.transient_storage_size);
+    var transient_state: *TransientState = @ptrCast(@alignCast(memory.transient_storage));
+    if (!transient_state.is_initialized) {
+        transient_state.arena.initialize(
+            memory.transient_storage_size - @sizeOf(TransientState),
+            memory.transient_storage.? + @sizeOf(TransientState),
+        );
+
+        const ground_buffer_width: u32 = 256;
+        const ground_buffer_height: u32 = 256;
+        transient_state.ground_buffer_count = 128;
+        transient_state.ground_buffers = transient_state.arena.pushArray(
+            transient_state.ground_buffer_count,
+            shared.GroundBuffer,
+        );
+
+        for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
+            const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
+            transient_state.ground_bitmap_template = makeEmptyBitmap(
+                &transient_state.arena,
+                ground_buffer_width,
+                ground_buffer_height,
+                false,
+            );
+            ground_buffer.memory = transient_state.ground_bitmap_template.memory;
+            ground_buffer.position = WorldPosition.nullPosition();
+        }
+
+        fillGroundChunk(transient_state, state, &transient_state.ground_buffers[0], &state.camera_position);
+
+        transient_state.is_initialized = true;
     }
 
     const meters_to_pixels = state.meters_to_pixels;
@@ -386,11 +410,10 @@ pub export fn updateAndRender(
         bounds_in_tiles.scaledTo(state.world.tile_side_in_meters),
     );
 
-    var sim_arena: shared.MemoryArena = undefined;
-    sim_arena.initialize(memory.transient_storage_size, memory.transient_storage.?);
+    const sim_memory = transient_state.arena.beginTemporaryMemory();
     const screen_sim_region = sim.beginSimulation(
         state,
-        &sim_arena,
+        &transient_state.arena,
         state.world,
         state.camera_position,
         camera_bounds,
@@ -398,7 +421,7 @@ pub export fn updateAndRender(
     );
 
     // Create draw buffer.
-    var draw_buffer_ = shared.LoadedBitmap{
+    var draw_buffer_ = LoadedBitmap{
         .width = buffer.width,
         .height = buffer.height,
         .pitch = @intCast(buffer.pitch),
@@ -418,13 +441,25 @@ pub export fn updateAndRender(
     const screen_center_x: f32 = 0.5 * @as(f32, @floatFromInt(draw_buffer.width));
     const screen_center_y: f32 = 0.5 * @as(f32, @floatFromInt(draw_buffer.height));
 
-    const flip_y = Vector3.new(1, -1, 1);
-    const ground_delta = world.subtractPositions(state.world, &state.ground_buffer_position, &state.camera_position).times(flip_y);
-    const ground = Vector2.new(
-        screen_center_x - 0.5 * @as(f32, @floatFromInt(state.ground_buffer.width)),
-        screen_center_y - 0.5 * @as(f32, @floatFromInt(state.ground_buffer.height)),
-    ).plus(ground_delta.xy().scaledTo(meters_to_pixels));
-    drawBitmap(draw_buffer, &state.ground_buffer, ground.x(), ground.y(), 1);
+    var ground_buffer_index: u32 = 0;
+    while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
+        const ground_buffer = transient_state.ground_buffers[ground_buffer_index];
+
+        if (ground_buffer.position.isValid()) {
+            var bitmap = transient_state.ground_bitmap_template;
+            bitmap.memory = ground_buffer.memory;
+            const delta = world.subtractPositions(
+                state.world,
+                &ground_buffer.position,
+                &state.camera_position,
+            ).scaledTo(meters_to_pixels);
+            const ground = Vector2.new(
+                screen_center_x + delta.x() - 0.5 * @as(f32, @floatFromInt(bitmap.width)),
+                screen_center_y - delta.y() - 0.5 * @as(f32, @floatFromInt(bitmap.height)),
+            );
+            drawBitmap(draw_buffer, &bitmap, ground.x(), ground.y(), 1);
+        }
+    }
 
     var piece_group = shared.EntityVisiblePieceGroup{
         .state = state,
@@ -618,6 +653,10 @@ pub export fn updateAndRender(
     }
 
     sim.endSimulation(state, screen_sim_region);
+    transient_state.arena.endTemporaryMemory(sim_memory);
+
+    state.world_arena.checkArena();
+    transient_state.arena.checkArena();
 }
 
 fn addLowEntity(state: *State, entity_type: sim.EntityType, world_position: WorldPosition) AddLowEntityResult {
@@ -869,16 +908,26 @@ pub export fn getSoundSamples(
     outputSound(sound_buffer, shared.MIDDLE_C, state);
 }
 
-fn drawGroundChunk(state: *State, draw_buffer: *shared.LoadedBitmap, chunk_position: *world.WorldPosition) void {
-    const width: f32 = @floatFromInt(draw_buffer.width);
-    const height: f32 = @floatFromInt(draw_buffer.height);
+fn fillGroundChunk(
+    transient_state: *TransientState,
+    state: *State,
+    ground_buffer: *shared.GroundBuffer,
+    chunk_position: *world.WorldPosition,
+) void {
+    var buffer = transient_state.ground_bitmap_template;
+    buffer.memory = ground_buffer.memory;
+
+    ground_buffer.position = chunk_position.*;
+
+    const width: f32 = @floatFromInt(buffer.width);
+    const height: f32 = @floatFromInt(buffer.height);
     var series = random.Series.seed(
         @intCast(139 * chunk_position.chunk_x + 593 * chunk_position.chunk_y + 329 * chunk_position.chunk_z),
     );
 
     var grass_index: u32 = 0;
-    while (grass_index < 500) : (grass_index += 1) {
-        var stamp: shared.LoadedBitmap = undefined;
+    while (grass_index < 16) : (grass_index += 1) {
+        var stamp: LoadedBitmap = undefined;
 
         if (series.randomChoice(2) == 1) {
             stamp = state.grass[series.randomChoice(state.grass.len)];
@@ -890,23 +939,23 @@ fn drawGroundChunk(state: *State, draw_buffer: *shared.LoadedBitmap, chunk_posit
         const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
         const position = offset.minus(bitmap_center);
 
-        drawBitmap(draw_buffer, &stamp, position.x(), position.y(), 1);
+        drawBitmap(&buffer, &stamp, position.x(), position.y(), 1);
     }
 
     grass_index = 0;
-    while (grass_index < 100) : (grass_index += 1) {
-        var stamp: shared.LoadedBitmap = state.tuft[series.randomChoice(state.tuft.len)];
+    while (grass_index < 10) : (grass_index += 1) {
+        var stamp: LoadedBitmap = state.tuft[series.randomChoice(state.tuft.len)];
 
         const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
         const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
         const position = offset.minus(bitmap_center);
 
-        drawBitmap(draw_buffer, &stamp, position.x(), position.y(), 1);
+        drawBitmap(&buffer, &stamp, position.x(), position.y(), 1);
     }
 }
 
 fn drawRectangle(
-    draw_buffer: *shared.LoadedBitmap,
+    draw_buffer: *LoadedBitmap,
     vector_min: Vector2,
     vector_max: Vector2,
     color: Color,
@@ -950,8 +999,8 @@ fn drawRectangle(
 }
 
 fn drawBitmap(
-    draw_buffer: *shared.LoadedBitmap,
-    bitmap: *shared.LoadedBitmap,
+    draw_buffer: *LoadedBitmap,
+    bitmap: *LoadedBitmap,
     real_x: f32,
     real_y: f32,
     in_alpha: f32,
@@ -1044,16 +1093,26 @@ fn drawBitmap(
     }
 }
 
-fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32) shared.LoadedBitmap {
-    const result = arena.pushStruct(shared.LoadedBitmap);
+fn clearBitmap(bitmap: *LoadedBitmap) void {
+    if (bitmap.memory) |*memory| {
+        const total_bitmap_size: u32 = @intCast(bitmap.*.width * bitmap.*.height * shared.BITMAP_BYTES_PER_PIXEL);
+        shared.zeroSize(total_bitmap_size, memory.*);
+    }
+}
+
+fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to_zero: bool) LoadedBitmap {
+    const result = arena.pushStruct(LoadedBitmap);
 
     result.width = width;
     result.height = height;
     result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
 
     const total_bitmap_size: u32 = @intCast(result.width * result.height * shared.BITMAP_BYTES_PER_PIXEL);
-    result.memory = @ptrCast(arena.pushSize(total_bitmap_size));
-    shared.zeroSize(total_bitmap_size, result.memory);
+    result.memory = @ptrCast(arena.pushSize(@alignOf(u8), total_bitmap_size));
+
+    if (clear_to_zero) {
+        clearBitmap(result);
+    }
 
     return result.*;
 }
@@ -1062,8 +1121,8 @@ fn debugLoadBMP(
     thread: *shared.ThreadContext,
     platform: shared.Platform,
     file_name: [*:0]const u8,
-) shared.LoadedBitmap {
-    var result: shared.LoadedBitmap = undefined;
+) LoadedBitmap {
+    var result: LoadedBitmap = undefined;
     const read_result = platform.debugReadEntireFile(thread, file_name);
 
     if (read_result.content_size > 0) {

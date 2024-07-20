@@ -361,7 +361,7 @@ pub fn chunkPositionFromTilePosition(
     return result;
 }
 
-pub fn subtractPositions(world: *World, a: *WorldPosition, b: *WorldPosition) Vector3 {
+pub fn subtractPositions(world: *World, a: *const WorldPosition, b: *const WorldPosition) Vector3 {
     var tile_diff = Vector3.new(
         @as(f32, @floatFromInt(a.chunk_x)) - @as(f32, @floatFromInt(b.chunk_x)),
         @as(f32, @floatFromInt(a.chunk_y)) - @as(f32, @floatFromInt(b.chunk_y)),
