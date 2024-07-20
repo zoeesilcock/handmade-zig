@@ -8,11 +8,9 @@ const Vector3 = math.Vector3;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
-const TILES_PER_CHUNK = 16;
+const TILES_PER_CHUNK = 8;
 
 pub const World = struct {
-    tile_side_in_meters: f32,
-    tile_depth_in_meters: f32,
     chunk_dimension_in_meters: Vector3,
 
     first_free: ?*WorldEntityBlock,
@@ -28,6 +26,10 @@ pub const WorldChunk = struct {
     first_block: WorldEntityBlock,
 
     next_in_hash: ?*WorldChunk = null,
+
+    pub fn centeredPoint(self: *const WorldChunk) WorldPosition {
+        return centeredChunkPoint(self.x, self.y, self.z);
+    }
 };
 
 pub const WorldEntityBlock = struct {
@@ -67,14 +69,8 @@ pub const WorldPosition = struct {
     }
 };
 
-pub fn initializeWorld(world: *World, tile_side_in_meters: f32, tile_depth_in_meters: f32) void {
-    world.tile_side_in_meters = tile_side_in_meters;
-    world.tile_depth_in_meters = tile_depth_in_meters;
-    world.chunk_dimension_in_meters = Vector3.new(
-        TILES_PER_CHUNK * tile_side_in_meters,
-        TILES_PER_CHUNK * tile_side_in_meters,
-        tile_depth_in_meters,
-    );
+pub fn initializeWorld(world: *World, chunk_dimension_in_meters: Vector3) void {
+    world.chunk_dimension_in_meters = chunk_dimension_in_meters;
 
     world.first_free = null;
 
@@ -92,13 +88,13 @@ fn isCanonical(chunk_dimension: f32, relative: f32) bool {
         (relative <= (0.5 * chunk_dimension + epsilon)));
 }
 
-fn isVector3Canonical(world: *World, offset: Vector3) bool {
+pub fn isVector3Canonical(world: *World, offset: Vector3) bool {
     return (isCanonical(world.chunk_dimension_in_meters.x(), offset.x()) and
         isCanonical(world.chunk_dimension_in_meters.y(), offset.y()) and
         isCanonical(world.chunk_dimension_in_meters.z(), offset.z()));
 }
 
-pub fn areInSameChunk(world: *World, a: *WorldPosition, b: *WorldPosition) bool {
+pub fn areInSameChunk(world: *World, a: *const WorldPosition, b: *const WorldPosition) bool {
     std.debug.assert(isVector3Canonical(world, a.offset));
     std.debug.assert(isVector3Canonical(world, b.offset));
 
@@ -310,7 +306,7 @@ pub fn recannonicalizeCoordinate(chunk_dimension: f32, tile_abs: *i32, tile_rel:
     const epsilon = 0.0001;
     const offset = intrinsics.roundReal32ToInt32((tile_rel.* + epsilon) / chunk_dimension);
 
-    tile_abs.* += offset;
+    tile_abs.* +%= offset;
     const result = tile_rel.* - @as(f32, @floatFromInt(offset)) * chunk_dimension;
 
     std.debug.assert(isCanonical(chunk_dimension, result));
@@ -327,36 +323,6 @@ pub fn mapIntoChunkSpace(world: *World, base_position: WorldPosition, offset: Ve
         recannonicalizeCoordinate(world.chunk_dimension_in_meters.y(), &result.chunk_y, &result.offset.y()),
         recannonicalizeCoordinate(world.chunk_dimension_in_meters.z(), &result.chunk_z, &result.offset.z()),
     );
-
-    return result;
-}
-
-pub fn chunkPositionFromTilePosition(
-    world: *World,
-    abs_tile_x: i32,
-    abs_tile_y: i32,
-    abs_tile_z: i32,
-    opt_additional_offset: ?Vector3,
-) WorldPosition {
-    const base_position = WorldPosition.zero();
-    const tile_dimension = Vector3.new(
-        world.tile_side_in_meters,
-        world.tile_side_in_meters,
-        world.tile_depth_in_meters,
-    );
-    var offset = Vector3.new(
-        @floatFromInt(abs_tile_x),
-        @floatFromInt(abs_tile_y),
-        @floatFromInt(abs_tile_z),
-    ).hadamardProduct(tile_dimension);
-
-    if (opt_additional_offset) |additional_offset| {
-        offset = offset.plus(additional_offset);
-    }
-
-    const result = mapIntoChunkSpace(world, base_position, offset);
-
-    std.debug.assert(isVector3Canonical(world, result.offset));
 
     return result;
 }

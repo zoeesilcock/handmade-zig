@@ -361,6 +361,13 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
             };
         }
 
+        pub fn offsetBy(self: *Self, offset: VectorType) Self {
+            return Self {
+                .min = self.min.add(offset),
+                .max = self.max.add(offset),
+            };
+        }
+
         pub fn intersects(self: *const Self, b: *const Self) bool {
             var result = true;
 
