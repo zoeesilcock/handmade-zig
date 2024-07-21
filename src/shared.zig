@@ -80,6 +80,7 @@ pub const GameInput = extern struct {
     mouse_x: i32 = 0,
     mouse_y: i32 = 0,
 
+    executable_reloaded: bool = false,
     frame_delta_time: f32 = 0,
 
     controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{undefined} ** MAX_CONTROLLER_COUNT,

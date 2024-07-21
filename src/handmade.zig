@@ -357,6 +357,13 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
+    if (input.executable_reloaded) {
+        for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
+            const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
+            ground_buffer.position = WorldPosition.nullPosition();
+        }
+    }
+
     const meters_to_pixels: f32 = state.meters_to_pixels;
     const pixels_to_meters: f32 = 1.0 / meters_to_pixels;
 

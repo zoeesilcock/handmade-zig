@@ -1368,9 +1368,11 @@ pub export fn wWinMain(
                 while (running) {
                     // Reload the game code if it has changed.
                     const last_dll_write_time = getLastWriteTime(&source_dll_path);
+                    new_input.executable_reloaded = false;
                     if (win32.CompareFileTime(&last_dll_write_time, &game.last_write_time) != 0) {
                         unloadGameCode(&game);
                         game = loadGameCode(&source_dll_path, &temp_dll_path);
+                        new_input.executable_reloaded = true;
                     }
 
                     var message: win32.MSG = undefined;
