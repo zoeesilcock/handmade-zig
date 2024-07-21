@@ -336,7 +336,7 @@ pub export fn updateAndRender(
             memory.transient_storage.? + @sizeOf(TransientState),
         );
 
-        transient_state.ground_buffer_count = 128;
+        transient_state.ground_buffer_count = 32;
         transient_state.ground_buffers = transient_state.arena.pushArray(
             transient_state.ground_buffer_count,
             shared.GroundBuffer,
@@ -357,8 +357,8 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
-    const meters_to_pixels = state.meters_to_pixels;
-    const pixels_to_meters = 1.0 / meters_to_pixels;
+    const meters_to_pixels: f32 = state.meters_to_pixels;
+    const pixels_to_meters: f32 = 1.0 / meters_to_pixels;
 
     // Handle input.
     for (&input.controllers, 0..) |controller, controller_index| {
@@ -434,6 +434,30 @@ pub export fn updateAndRender(
     const screen_size = Vector3.newI(buffer.width, buffer.height, 0).scaledTo(pixels_to_meters);
     const camera_bounds_in_meters = math.Rectangle3.fromCenterDimension(Vector3.zero(), screen_size);
 
+    // Draw ground.
+    {
+        var ground_buffer_index: u32 = 0;
+        while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
+            const ground_buffer = transient_state.ground_buffers[ground_buffer_index];
+
+            if (ground_buffer.position.isValid()) {
+                var bitmap = transient_state.ground_bitmap_template;
+                bitmap.memory = ground_buffer.memory;
+                const delta = world.subtractPositions(
+                    state.world,
+                    &ground_buffer.position,
+                    &state.camera_position,
+                ).scaledTo(meters_to_pixels);
+                const ground = Vector2.new(
+                    screen_center.x() + delta.x() - 0.5 * @as(f32, @floatFromInt(bitmap.width)),
+                    screen_center.y() - delta.y() - 0.5 * @as(f32, @floatFromInt(bitmap.height)),
+                );
+                drawBitmap(draw_buffer, &bitmap, ground.x(), ground.y(), 1);
+            }
+        }
+    }
+
+    // Populate ground chunks.
     {
         const min_chunk_position = world.mapIntoChunkSpace(
             state.world,
@@ -465,32 +489,45 @@ pub export fn updateAndRender(
                     );
                     const screen_dimension = state.world.chunk_dimension_in_meters.xy().scaledTo(meters_to_pixels);
 
-                    var found = false;
-                    var opt_empty_buffer: ?*shared.GroundBuffer = null;
+                    var opt_furthest_buffer: ?*shared.GroundBuffer = null;
+                    var furthest_buffer_length_squared: f32 = 0;
                     var ground_buffer_index: u32 = 0;
                     while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
                         const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
                         if (world.areInSameChunk(state.world, &ground_buffer.position, &chunk_center)) {
-                            found = true;
+                            // Buffer already exists.
+                            opt_furthest_buffer = null;
                             break;
-                        } else if (!ground_buffer.position.isValid()) {
-                            opt_empty_buffer = ground_buffer;
+                        } else if (ground_buffer.position.isValid()) {
+                            const buffer_relative_position = world.subtractPositions(
+                                state.world,
+                                &ground_buffer.position,
+                                &state.camera_position,
+                            );
+                            const buffer_length_squared = buffer_relative_position.xy().lengthSquared();
+                            if (buffer_length_squared > furthest_buffer_length_squared) {
+                                opt_furthest_buffer = ground_buffer;
+                                furthest_buffer_length_squared = buffer_length_squared;
+                            }
+                        } else {
+                            furthest_buffer_length_squared = std.math.floatMax(f32);
+                            opt_furthest_buffer = ground_buffer;
                         }
                     }
 
-                    if (!found) {
-                        if (opt_empty_buffer) |empty_buffer| {
-                            fillGroundChunk(transient_state, state, empty_buffer, &chunk_center);
-                        }
+                    if (opt_furthest_buffer) |furthest_buffer| {
+                        fillGroundChunk(transient_state, state, furthest_buffer, &chunk_center);
                     }
 
-                    drawRectangleOutline(
-                        draw_buffer,
-                        screen_position.minus(screen_dimension.scaledTo(0.5)),
-                        screen_position.plus(screen_dimension.scaledTo(0.5)),
-                        Color.new(1, 1, 0, 1),
-                        2,
-                    );
+                    if (false) {
+                        drawRectangleOutline(
+                            draw_buffer,
+                            screen_position.minus(screen_dimension.scaledTo(0.5)),
+                            screen_position.plus(screen_dimension.scaledTo(0.5)),
+                            Color.new(1, 1, 0, 1),
+                            2,
+                        );
+                    }
                 }
             }
         }
@@ -507,27 +544,6 @@ pub export fn updateAndRender(
         simulation_bounds,
         input.frame_delta_time,
     );
-
-    // Draw ground.
-    var ground_buffer_index: u32 = 0;
-    while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
-        const ground_buffer = transient_state.ground_buffers[ground_buffer_index];
-
-        if (ground_buffer.position.isValid()) {
-            var bitmap = transient_state.ground_bitmap_template;
-            bitmap.memory = ground_buffer.memory;
-            const delta = world.subtractPositions(
-                state.world,
-                &ground_buffer.position,
-                &state.camera_position,
-            ).scaledTo(meters_to_pixels);
-            const ground = Vector2.new(
-                screen_center.x() + delta.x() - 0.5 * @as(f32, @floatFromInt(bitmap.width)),
-                screen_center.y() - delta.y() - 0.5 * @as(f32, @floatFromInt(bitmap.height)),
-            );
-            drawBitmap(draw_buffer, &bitmap, ground.x(), ground.y(), 1);
-        }
-    }
 
     var piece_group = shared.EntityVisiblePieceGroup{
         .state = state,
@@ -598,6 +614,7 @@ pub export fn updateAndRender(
                     if (entity.distance_limit == 0) {
                         entity.makeNonSpatial();
                         clearCollisionRulesFor(state, entity.storage_index);
+                        continue;
                     }
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
@@ -1022,36 +1039,69 @@ fn fillGroundChunk(
 
     const width: f32 = @floatFromInt(buffer.width);
     const height: f32 = @floatFromInt(buffer.height);
-    var series = random.Series.seed(
-        @intCast(139 * chunk_position.chunk_x + 593 * chunk_position.chunk_y + 329 * chunk_position.chunk_z),
-    );
 
-    var grass_index: u32 = 0;
-    while (grass_index < 16) : (grass_index += 1) {
-        var stamp: LoadedBitmap = undefined;
+    var chunk_offset_y: i32 = -1;
+    while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
+        var chunk_offset_x: i32 = -1;
+        while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
+            const chunk_x = chunk_position.chunk_x + chunk_offset_x;
+            const chunk_y = chunk_position.chunk_y + chunk_offset_y;
+            const chunk_z = chunk_position.chunk_z;
+            const center = Vector2.new(
+                @as(f32, @floatFromInt(chunk_offset_x)) * width,
+                -@as(f32, @floatFromInt(chunk_offset_y)) * height,
+            );
 
-        if (series.randomChoice(2) == 1) {
-            stamp = state.grass[series.randomChoice(state.grass.len)];
-        } else {
-            stamp = state.stone[series.randomChoice(state.stone.len)];
+            const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
+            const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
+            var series = random.Series.seed(seed);
+
+            var grass_index: u32 = 0;
+            while (grass_index < 100) : (grass_index += 1) {
+                var stamp: LoadedBitmap = undefined;
+
+                if (series.randomChoice(2) == 1) {
+                    stamp = state.grass[series.randomChoice(state.grass.len)];
+                } else {
+                    stamp = state.stone[series.randomChoice(state.stone.len)];
+                }
+
+                const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
+                const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
+                const position = center.plus(offset.minus(bitmap_center));
+
+                drawBitmap(&buffer, &stamp, position.x(), position.y(), 1);
+            }
         }
-
-        const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
-        const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
-        const position = offset.minus(bitmap_center);
-
-        drawBitmap(&buffer, &stamp, position.x(), position.y(), 1);
     }
 
-    grass_index = 0;
-    while (grass_index < 10) : (grass_index += 1) {
-        var stamp: LoadedBitmap = state.tuft[series.randomChoice(state.tuft.len)];
+    chunk_offset_y = -1;
+    while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
+        var chunk_offset_x: i32 = -1;
+        while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
+            const chunk_x = chunk_position.chunk_x + chunk_offset_x;
+            const chunk_y = chunk_position.chunk_y + chunk_offset_y;
+            const chunk_z = chunk_position.chunk_z;
+            const center = Vector2.new(
+                @as(f32, @floatFromInt(chunk_offset_x)) * width,
+                -@as(f32, @floatFromInt(chunk_offset_y)) * height,
+            );
 
-        const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
-        const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
-        const position = offset.minus(bitmap_center);
+            const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
+            const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
+            var series = random.Series.seed(seed);
 
-        drawBitmap(&buffer, &stamp, position.x(), position.y(), 1);
+            var grass_index: u32 = 0;
+            while (grass_index < 50) : (grass_index += 1) {
+                var stamp: LoadedBitmap = state.tuft[series.randomChoice(state.tuft.len)];
+
+                const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
+                const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
+                const position = center.plus(offset.minus(bitmap_center));
+
+                drawBitmap(&buffer, &stamp, position.x(), position.y(), 1);
+            }
+        }
     }
 }
 
@@ -1062,10 +1112,10 @@ fn drawRectangle(
     color: Color,
 ) void {
     // Round input values.
-    var min_x = intrinsics.roundReal32ToInt32(min.x());
-    var min_y = intrinsics.roundReal32ToInt32(min.y());
-    var max_x = intrinsics.roundReal32ToInt32(max.x());
-    var max_y = intrinsics.roundReal32ToInt32(max.y());
+    var min_x = intrinsics.floorReal32ToInt32(min.x());
+    var min_y = intrinsics.floorReal32ToInt32(min.y());
+    var max_x = intrinsics.floorReal32ToInt32(max.x());
+    var max_y = intrinsics.floorReal32ToInt32(max.y());
 
     // Clip input values to buffer.
     if (min_x < 0) {
@@ -1153,8 +1203,8 @@ fn drawBitmap(
     std.debug.assert(alpha >= 0 and alpha <= 1);
 
     // Calculate extents.
-    var min_x = intrinsics.roundReal32ToInt32(real_x);
-    var min_y = intrinsics.roundReal32ToInt32(real_y);
+    var min_x = intrinsics.floorReal32ToInt32(real_x);
+    var min_y = intrinsics.floorReal32ToInt32(real_y);
     var max_x: i32 = @intFromFloat(real_x + @as(f32, @floatFromInt(bitmap.width)));
     var max_y: i32 = @intFromFloat(real_y + @as(f32, @floatFromInt(bitmap.height)));
 

@@ -12,14 +12,12 @@ pub const Series = struct {
     }
 
     pub fn randomInt(self: *Series) u32 {
-        std.debug.assert(self.index < RANDOM_NUMBERS.len);
-
-        const result = RANDOM_NUMBERS[self.index];
-        self.index += 1;
-
         if (self.index >= RANDOM_NUMBERS.len) {
             self.index = 0;
         }
+
+        const result = RANDOM_NUMBERS[self.index];
+        self.index += 1;
 
         return result;
     }
