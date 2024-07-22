@@ -125,6 +125,11 @@ pub const SimEntity = struct {
         return self.position;
     }
 
+    pub fn getGroundPointFor(self: *const SimEntity, position: Vector3) Vector3 {
+        _ = self;
+        return position;
+    }
+
     pub fn getStairGround(self: *const SimEntity, at_ground_point: Vector3) f32 {
         std.debug.assert(self.type == .Stairwell);
 
@@ -410,12 +415,12 @@ fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_tim
     }
 }
 
-fn speculativeCollide(mover: *SimEntity, region: *SimEntity) bool {
+fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vector3) bool {
     var result = true;
 
     if (region.type == .Stairwell) {
         const step_height = 0.1;
-        const mover_ground_point = mover.getGroundPoint();
+        const mover_ground_point = mover.getGroundPointFor(test_position);
         const ground = region.getStairGround(mover_ground_point);
         result = ((intrinsics.absoluteValue(mover_ground_point.z() - ground) > step_height));
     }
@@ -704,8 +709,8 @@ pub fn moveEntity(
                                         }
 
                                         if (hit_this) {
-                                            // const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
-                                            if (speculativeCollide(entity, test_entity)) {
+                                            const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
+                                            if (speculativeCollide(entity, test_entity, test_position)) {
                                                 min_time = test_min_time;
                                                 wall_normal_min = test_wall_normal;
                                                 opt_hit_entity_min = test_entity;

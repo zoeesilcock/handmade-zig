@@ -266,12 +266,11 @@ pub const TransientState = struct {
     arena: MemoryArena = undefined,
     ground_buffer_count: u32 = 0,
     ground_buffers: [*]GroundBuffer = undefined,
-    ground_bitmap_template: LoadedBitmap = undefined,
 };
 
 pub const GroundBuffer = struct {
     position: world.WorldPosition = undefined,
-    memory: ?[*]void,
+    bitmap: LoadedBitmap,
 };
 
 pub const PairwiseCollisionRuleFlag = enum(u8) {
@@ -313,117 +312,6 @@ pub const LowEntity = struct {
 pub const AddLowEntityResult = struct {
     low: *LowEntity,
     low_index: u32,
-};
-
-pub const EntityVisiblePieceGroup = struct {
-    state: *State,
-    piece_count: u32 = 0,
-    pieces: [32]EntityVisiblePiece = [1]EntityVisiblePiece{undefined} ** 32,
-
-    fn pushPiece(
-        self: *EntityVisiblePieceGroup,
-        bitmap: ?*LoadedBitmap,
-        offset: Vector2,
-        offset_z: f32,
-        entity_z_amount: f32,
-        alignment: Vector2,
-        color: Color,
-        dimension: Vector2,
-    ) void {
-        std.debug.assert(self.piece_count < self.pieces.len);
-
-        var piece = &self.pieces[self.piece_count];
-        self.piece_count += 1;
-
-        piece.bitmap = bitmap;
-        piece.offset = Vector2.new(offset.x(), -offset.y()).scaledTo(self.state.meters_to_pixels).minus(alignment);
-        piece.offset_z = offset_z;
-        piece.entity_z_amount = entity_z_amount;
-
-        piece.color = color;
-        piece.dimension = dimension;
-    }
-
-    pub fn pushBitmap(
-        self: *EntityVisiblePieceGroup,
-        bitmap: *LoadedBitmap,
-        offset: Vector2,
-        offset_z: f32,
-        alignment: Vector2,
-        alpha: f32,
-        entity_z_amount: f32,
-    ) void {
-        const color = Color.new(0, 0, 0, alpha);
-        self.pushPiece(bitmap, offset, offset_z, entity_z_amount, alignment, color, Vector2.zero());
-    }
-
-    pub fn pushRectangle(
-        self: *EntityVisiblePieceGroup,
-        dimension: Vector2,
-        offset: Vector2,
-        offset_z: f32,
-        color: Color,
-        entity_z_amount: f32,
-    ) void {
-        self.pushPiece(null, offset, offset_z, entity_z_amount, Vector2.zero(), color, dimension);
-    }
-    pub fn pushRectangleOutline(
-        self: *EntityVisiblePieceGroup,
-        dimension: Vector2,
-        offset: Vector2,
-        offset_z: f32,
-        color: Color,
-        entity_z_amount: f32,
-    ) void {
-        const thickness: f32 = 0.1;
-        self.pushPiece(
-            null,
-            offset.minus(Vector2.new(0, dimension.y() / 2)),
-            offset_z,
-            entity_z_amount,
-            Vector2.zero(),
-            color,
-            Vector2.new(dimension.x(), thickness),
-        );
-        self.pushPiece(
-            null,
-            offset.plus(Vector2.new(0, dimension.y() / 2)),
-            offset_z,
-            entity_z_amount,
-            Vector2.zero(),
-            color,
-            Vector2.new(dimension.x(), thickness),
-        );
-
-        self.pushPiece(
-            null,
-            offset.minus(Vector2.new(dimension.x() / 2, 0)),
-            offset_z,
-            entity_z_amount,
-            Vector2.zero(),
-            color,
-            Vector2.new(thickness, dimension.y()),
-        );
-        self.pushPiece(
-            null,
-            offset.plus(Vector2.new(dimension.x() / 2, 0)),
-            offset_z,
-            entity_z_amount,
-            Vector2.zero(),
-            color,
-            Vector2.new(thickness, dimension.y()),
-        );
-    }
-};
-
-pub const EntityVisiblePiece = struct {
-    bitmap: ?*LoadedBitmap,
-    offset: Vector2,
-    offset_z: f32,
-    entity_z_amount: f32,
-
-    color: Color,
-    dimension: Vector2 = Vector2.zero(),
 };
 
 pub const HeroBitmaps = struct {

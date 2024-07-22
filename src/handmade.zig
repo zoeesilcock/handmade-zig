@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const world = @import("world.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
+const render = @import("render.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
@@ -84,6 +85,9 @@ const State = shared.State;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
+const EntityVisiblePiece = render.EntityVisiblePiece;
+const RenderGroup = render.RenderGroup;
+const RenderBasis = render.RenderBasis;
 
 pub export fn updateAndRender(
     thread: *shared.ThreadContext,
@@ -336,7 +340,7 @@ pub export fn updateAndRender(
             memory.transient_storage.? + @sizeOf(TransientState),
         );
 
-        transient_state.ground_buffer_count = 32;
+        transient_state.ground_buffer_count = 64;
         transient_state.ground_buffers = transient_state.arena.pushArray(
             transient_state.ground_buffer_count,
             shared.GroundBuffer,
@@ -344,13 +348,12 @@ pub export fn updateAndRender(
 
         for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
             const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
-            transient_state.ground_bitmap_template = makeEmptyBitmap(
+            ground_buffer.bitmap = makeEmptyBitmap(
                 &transient_state.arena,
                 ground_buffer_width,
                 ground_buffer_height,
                 false,
             );
-            ground_buffer.memory = transient_state.ground_bitmap_template.memory;
             ground_buffer.position = WorldPosition.nullPosition();
         }
 
@@ -416,6 +419,10 @@ pub export fn updateAndRender(
         }
     }
 
+    // Create the piece group.
+    const render_memory = transient_state.arena.beginTemporaryMemory();
+    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), state.meters_to_pixels);
+
     // Create draw buffer.
     var draw_buffer_ = LoadedBitmap{
         .width = buffer.width,
@@ -445,21 +452,13 @@ pub export fn updateAndRender(
     {
         var ground_buffer_index: u32 = 0;
         while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
-            const ground_buffer = transient_state.ground_buffers[ground_buffer_index];
+            const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
 
             if (ground_buffer.position.isValid()) {
-                var bitmap = transient_state.ground_bitmap_template;
-                bitmap.memory = ground_buffer.memory;
-                const delta = world.subtractPositions(
-                    state.world,
-                    &ground_buffer.position,
-                    &state.camera_position,
-                ).scaledTo(meters_to_pixels);
-                const ground = Vector2.new(
-                    screen_center.x() + delta.x() - 0.5 * @as(f32, @floatFromInt(bitmap.width)),
-                    screen_center.y() - delta.y() - 0.5 * @as(f32, @floatFromInt(bitmap.height)),
-                );
-                drawBitmap(draw_buffer, &bitmap, ground.x(), ground.y(), 1);
+                const bitmap = &ground_buffer.bitmap;
+                const delta = world.subtractPositions(state.world, &ground_buffer.position, &state.camera_position);
+                const alignment = Vector2.newI(bitmap.width, bitmap.height).scaledTo(0.5);
+                render_group.pushBitmap(bitmap, delta.xy(), delta.z(), alignment, 1, 0);
             }
         }
     }
@@ -523,7 +522,7 @@ pub export fn updateAndRender(
                     }
 
                     if (opt_furthest_buffer) |furthest_buffer| {
-                        fillGroundChunk(transient_state, state, furthest_buffer, &chunk_center);
+                        fillGroundChunk(state, furthest_buffer, &chunk_center);
                     }
 
                     if (false) {
@@ -552,20 +551,18 @@ pub export fn updateAndRender(
         input.frame_delta_time,
     );
 
-    var piece_group = shared.EntityVisiblePieceGroup{
-        .state = state,
-    };
     var entity_index: u32 = 0;
     while (entity_index < screen_sim_region.entity_count) : (entity_index += 1) {
         const entity = &screen_sim_region.entities[entity_index];
 
         if (entity.updatable) {
-            piece_group.piece_count = 0;
-
             const delta_time = input.frame_delta_time;
             const shadow_alpha: f32 = math.clampf01(1 - 0.5 * entity.position.z());
             var move_spec = sim.MoveSpec{};
             var acceleration = Vector3.zero();
+
+            var basis = transient_state.arena.pushStruct(RenderBasis);
+            render_group.default_basis = basis;
 
             switch (entity.type) {
                 .Hero => {
@@ -604,12 +601,12 @@ pub export fn updateAndRender(
                     }
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                    piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                    piece_group.pushBitmap(&hero_bitmaps.cape, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                    piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                    render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                    render_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                    render_group.pushBitmap(&hero_bitmaps.cape, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                    render_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
-                    drawHitPoints(entity, &piece_group);
+                    drawHitPoints(entity, render_group);
                 },
                 .Sword => {
                     move_spec = sim.MoveSpec{
@@ -625,24 +622,24 @@ pub export fn updateAndRender(
                     }
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                    piece_group.pushBitmap(&state.sword, Vector2.zero(), 0, Vector2.new(29, 10), 1, 1);
+                    render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
+                    render_group.pushBitmap(&state.sword, Vector2.zero(), 0, Vector2.new(29, 10), 1, 1);
                 },
                 .Wall => {
-                    piece_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
+                    render_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
                     const stairwell_color2 = Color.new(1, 1, 0, 1);
-                    piece_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), 0, stairwell_color1, 0);
-                    piece_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), entity.walkable_height, stairwell_color2, 0);
+                    render_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), 0, stairwell_color1, 0);
+                    render_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), entity.walkable_height, stairwell_color2, 0);
                 },
                 .Monster => {
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
-                    piece_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                    render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
+                    render_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
 
-                    drawHitPoints(entity, &piece_group);
+                    drawHitPoints(entity, render_group);
                 },
                 .Familiar => {
                     var closest_hero: ?*sim.SimEntity = null;
@@ -686,15 +683,15 @@ pub export fn updateAndRender(
                     const head_shadow_alpha = (0.5 * shadow_alpha) + (0.2 * head_bob_sine);
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    piece_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
-                    piece_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
+                    render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
+                    render_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
                 },
                 .Space => {
                     const space_color = Color.new(0, 0.5, 1, 1);
                     var volume_index: u32 = 0;
                     while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
                         const volume = entity.collision.volumes[volume_index];
-                        piece_group.pushRectangleOutline(volume.dimension.xy(), volume.offset_position.xy(), 0, space_color, 0);
+                        render_group.pushRectangleOutline(volume.dimension.xy(), volume.offset_position.xy(), 0, space_color, 0);
                     }
                 },
                 else => {
@@ -715,37 +712,42 @@ pub export fn updateAndRender(
                 );
             }
 
-            var piece_group_index: u32 = 0;
-            while (piece_group_index < piece_group.piece_count) : (piece_group_index += 1) {
-                const piece = piece_group.pieces[piece_group_index];
-                const entity_base_position = entity.getGroundPoint();
-                const z_fudge = 1.0 + 0.1 * (entity_base_position.z() - piece.offset_z);
-                const entity_ground_point_x = screen_center.x() + meters_to_pixels * z_fudge * entity_base_position.x();
-                const entity_ground_point_y = screen_center.y() - meters_to_pixels * z_fudge * entity_base_position.y();
-                const entity_z = -meters_to_pixels * entity_base_position.z();
+            basis.position = entity.getGroundPoint();
+        }
+    }
 
-                const center = Vector2.new(
-                    piece.offset.x() + entity_ground_point_x,
-                    piece.offset.y() + entity_ground_point_y + (entity_z * piece.entity_z_amount),
-                );
+    var render_group_base: u32 = 0;
+    while (render_group_base < render_group.push_buffer_size) {
+        const piece: *EntityVisiblePiece = @ptrCast(@alignCast(render_group.push_buffer_base + render_group_base));
+        render_group_base += @sizeOf(EntityVisiblePiece);
 
-                if (piece.bitmap) |bitmap| {
-                    drawBitmap(draw_buffer, bitmap, center.x(), center.y(), piece.color.a());
-                } else {
-                    const dimension = piece.dimension.scaledTo(meters_to_pixels);
-                    drawRectangle(
-                        draw_buffer,
-                        center.minus(dimension.scaledTo(0.5)),
-                        center.plus(dimension.scaledTo(0.5)),
-                        piece.color,
-                    );
-                }
-            }
+        const entity_base_position = piece.basis.position;
+        const z_fudge = 1.0 + 0.1 * (entity_base_position.z() + piece.offset_z);
+        const entity_ground_point_x = screen_center.x() + meters_to_pixels * z_fudge * entity_base_position.x();
+        const entity_ground_point_y = screen_center.y() - meters_to_pixels * z_fudge * entity_base_position.y();
+        const entity_z = -meters_to_pixels * entity_base_position.z();
+
+        const center = Vector2.new(
+            piece.offset.x() + entity_ground_point_x,
+            piece.offset.y() + entity_ground_point_y + (entity_z * piece.entity_z_amount),
+        );
+
+        if (piece.bitmap) |bitmap| {
+            drawBitmap(draw_buffer, bitmap, center.x(), center.y(), piece.color.a());
+        } else {
+            const dimension = piece.dimension.scaledTo(meters_to_pixels);
+            drawRectangle(
+                draw_buffer,
+                center.minus(dimension.scaledTo(0.5)),
+                center.plus(dimension.scaledTo(0.5)),
+                piece.color,
+            );
         }
     }
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
+    transient_state.arena.endTemporaryMemory(render_memory);
 
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
@@ -1001,7 +1003,7 @@ fn initHitPoints(entity: *sim.SimEntity, count: u32) void {
     }
 }
 
-fn drawHitPoints(entity: *sim.SimEntity, piece_group: *shared.EntityVisiblePieceGroup) void {
+fn drawHitPoints(entity: *sim.SimEntity, render_group: *RenderGroup) void {
     if (entity.hit_point_max >= 1) {
         const hit_point_dimension = Vector2.new(0.2, 0.2);
         const hit_point_spacing_x = hit_point_dimension.x() * 2;
@@ -1016,7 +1018,7 @@ fn drawHitPoints(entity: *sim.SimEntity, piece_group: *shared.EntityVisiblePiece
                 hit_point_color = Color.new(0.2, 0.2, 0.2, 1);
             }
 
-            piece_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
+            render_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
             hit_position = hit_position.plus(hit_position_delta);
         }
     }
@@ -1034,13 +1036,11 @@ pub export fn getSoundSamples(
 }
 
 fn fillGroundChunk(
-    transient_state: *TransientState,
     state: *State,
     ground_buffer: *shared.GroundBuffer,
     chunk_position: *const world.WorldPosition,
 ) void {
-    var buffer = transient_state.ground_bitmap_template;
-    buffer.memory = ground_buffer.memory;
+    const buffer = &ground_buffer.bitmap;
 
     ground_buffer.position = chunk_position.*;
 
@@ -1077,7 +1077,7 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                drawBitmap(&buffer, &stamp, position.x(), position.y(), 1);
+                drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
             }
         }
     }
@@ -1106,7 +1106,7 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                drawBitmap(&buffer, &stamp, position.x(), position.y(), 1);
+                drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
             }
         }
     }
@@ -1198,7 +1198,7 @@ pub fn drawRectangleOutline(
 
 fn drawBitmap(
     draw_buffer: *LoadedBitmap,
-    bitmap: *LoadedBitmap,
+    bitmap: *const LoadedBitmap,
     real_x: f32,
     real_y: f32,
     in_alpha: f32,
