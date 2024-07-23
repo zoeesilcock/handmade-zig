@@ -433,18 +433,8 @@ pub export fn updateAndRender(
     const draw_buffer = &draw_buffer_;
 
     // Clear background.
-    const clear_color = Color.new(0.5, 0.5, 0.5, 1);
-    render.drawRectangle(
-        draw_buffer,
-        Vector2.zero(),
-        Vector2.new(@floatFromInt(draw_buffer.width), @floatFromInt(draw_buffer.height)),
-        clear_color,
-    );
+    render_group.pushClear(Color.new(1, 0, 1, 1));
 
-    const screen_center = Vector2.new(
-        0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
-        0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
-    );
     const screen_size = Vector3.newI(buffer.width, buffer.height, 0).scaledTo(pixels_to_meters);
     const camera_bounds_in_meters = math.Rectangle3.fromCenterDimension(Vector3.zero(), screen_size);
 
@@ -489,12 +479,6 @@ pub export fn updateAndRender(
                         &state.camera_position,
                     );
 
-                    const screen_position = Vector2.new(
-                        screen_center.x() + meters_to_pixels * relative_position.x(),
-                        screen_center.y() - meters_to_pixels * relative_position.y(),
-                    );
-                    const screen_dimension = state.world.chunk_dimension_in_meters.xy().scaledTo(meters_to_pixels);
-
                     var opt_furthest_buffer: ?*shared.GroundBuffer = null;
                     var furthest_buffer_length_squared: f32 = 0;
                     var ground_buffer_index: u32 = 0;
@@ -522,18 +506,16 @@ pub export fn updateAndRender(
                     }
 
                     if (opt_furthest_buffer) |furthest_buffer| {
-                        fillGroundChunk(state, furthest_buffer, &chunk_center);
+                        fillGroundChunk(state, transient_state, furthest_buffer, &chunk_center);
                     }
 
-                    if (false) {
-                        render.drawRectangleOutline(
-                            draw_buffer,
-                            screen_position.minus(screen_dimension.scaledTo(0.5)),
-                            screen_position.plus(screen_dimension.scaledTo(0.5)),
-                            Color.new(1, 1, 0, 1),
-                            2,
-                        );
-                    }
+                    render_group.pushRectangleOutline(
+                        state.world.chunk_dimension_in_meters.xy(),
+                        relative_position.xy(),
+                        0,
+                        Color.new(1, 1, 0, 1),
+                        2,
+                    );
                 }
             }
         }
@@ -631,8 +613,8 @@ pub export fn updateAndRender(
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
                     const stairwell_color2 = Color.new(1, 1, 0, 1);
-                    render_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), 0, stairwell_color1, 0);
-                    render_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), entity.walkable_height, stairwell_color2, 0);
+                    render_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), 0, 0, stairwell_color1);
+                    render_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), entity.walkable_height, 0, stairwell_color2);
                 },
                 .Monster => {
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
@@ -716,7 +698,7 @@ pub export fn updateAndRender(
         }
     }
 
-    render_group.toOutput(draw_buffer);
+    render_group.renderTo(draw_buffer);
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
@@ -991,7 +973,7 @@ fn drawHitPoints(entity: *sim.SimEntity, render_group: *RenderGroup) void {
                 hit_point_color = Color.new(0.2, 0.2, 0.2, 1);
             }
 
-            render_group.pushRectangle(hit_point_dimension, hit_position, 0, hit_point_color, 0);
+            render_group.pushRectangle(hit_point_dimension, hit_position, 0, 0, hit_point_color);
             hit_position = hit_position.plus(hit_position_delta);
         }
     }
@@ -1010,10 +992,15 @@ pub export fn getSoundSamples(
 
 fn fillGroundChunk(
     state: *State,
+    transient_state: *TransientState,
     ground_buffer: *shared.GroundBuffer,
     chunk_position: *const world.WorldPosition,
 ) void {
+    const render_memory = transient_state.arena.beginTemporaryMemory();
+    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), 1.0);
     const buffer = &ground_buffer.bitmap;
+
+    render_group.pushClear(Color.new(1, 1, 0, 1));
 
     ground_buffer.position = chunk_position.*;
 
@@ -1038,19 +1025,19 @@ fn fillGroundChunk(
 
             var grass_index: u32 = 0;
             while (grass_index < 100) : (grass_index += 1) {
-                var stamp: LoadedBitmap = undefined;
+                var stamp: *LoadedBitmap = undefined;
 
                 if (series.randomChoice(2) == 1) {
-                    stamp = state.grass[series.randomChoice(state.grass.len)];
+                    stamp = &state.grass[series.randomChoice(state.grass.len)];
                 } else {
-                    stamp = state.stone[series.randomChoice(state.stone.len)];
+                    stamp = &state.stone[series.randomChoice(state.stone.len)];
                 }
 
                 const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                render.drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
+                render_group.pushBitmap(stamp, position, 0,  Vector2.zero(), 1, 1);
             }
         }
     }
@@ -1073,16 +1060,19 @@ fn fillGroundChunk(
 
             var grass_index: u32 = 0;
             while (grass_index < 50) : (grass_index += 1) {
-                var stamp: LoadedBitmap = state.tuft[series.randomChoice(state.tuft.len)];
+                const stamp: *LoadedBitmap = &state.tuft[series.randomChoice(state.tuft.len)];
 
                 const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                render.drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
+                render_group.pushBitmap(stamp, position, 0,  Vector2.zero(), 1, 1);
             }
         }
     }
+
+    render_group.renderTo(buffer);
+    transient_state.arena.endTemporaryMemory(render_memory);
 }
 
 fn clearBitmap(bitmap: *LoadedBitmap) void {

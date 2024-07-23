@@ -77,7 +77,12 @@ pub const RenderGroup = struct {
         return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, @alignOf(T))));
     }
 
-    fn pushRenderElement_(self: *RenderGroup, size: u32, entry_type: RenderEntryType, alignment: usize) ?*RenderEntryHeader {
+    fn pushRenderElement_(
+        self: *RenderGroup,
+        size: u32,
+        entry_type: RenderEntryType,
+        alignment: usize,
+    ) ?*RenderEntryHeader {
         _ = alignment;
         var result: ?*RenderEntryHeader = null;
 
@@ -104,12 +109,19 @@ pub const RenderGroup = struct {
     ) void {
         if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
             entry.entity_basis.basis = self.default_basis;
-            entry.entity_basis.offset = Vector2.new(offset.x(), -offset.y()).scaledTo(self.meters_to_pixels).minus(alignment);
+            entry.entity_basis.offset = Vector2.new(offset.x(), -offset.y())
+                .scaledTo(self.meters_to_pixels).minus(alignment);
             entry.entity_basis.offset_z = offset_z;
             entry.entity_basis.entity_z_amount = entity_z_amount;
 
             entry.bitmap = bitmap;
 
+            entry.color = color;
+        }
+    }
+
+    pub fn pushClear(self: *RenderGroup, color: Color) void {
+        if (self.pushRenderElement(RenderEntryClear)) |entry| {
             entry.color = color;
         }
     }
@@ -132,16 +144,15 @@ pub const RenderGroup = struct {
         dimension: Vector2,
         offset: Vector2,
         offset_z: f32,
-        color: Color,
         entity_z_amount: f32,
+        color: Color,
     ) void {
         if (self.pushRenderElement(RenderEntryRectangle)) |entry| {
-
             const half_dimension = dimension.scaledTo(self.meters_to_pixels).scaledTo(0.5);
 
             entry.entity_basis.basis = self.default_basis;
-            entry.entity_basis.offset = Vector2.new(offset.x(), -offset.y()).scaledTo(self.meters_to_pixels).minus(half_dimension);
-                // .plus(Vector2.new(-half_dimension.x(), half_dimension.y()));
+            entry.entity_basis.offset = Vector2.new(offset.x(), -offset.y())
+                .scaledTo(self.meters_to_pixels).minus(half_dimension);
             entry.entity_basis.offset_z = offset_z;
             entry.entity_basis.entity_z_amount = entity_z_amount;
 
@@ -159,46 +170,42 @@ pub const RenderGroup = struct {
         entity_z_amount: f32,
     ) void {
         const thickness: f32 = 0.1;
-        self.pushPiece(
-            null,
+        self.pushRectangle(
+            Vector2.new(dimension.x(), thickness),
             offset.minus(Vector2.new(0, dimension.y() / 2)),
             offset_z,
             entity_z_amount,
-            Vector2.zero(),
             color,
-            Vector2.new(dimension.x(), thickness),
         );
-        self.pushPiece(
-            null,
+        self.pushRectangle(
+            Vector2.new(dimension.x(), thickness),
             offset.plus(Vector2.new(0, dimension.y() / 2)),
             offset_z,
             entity_z_amount,
-            Vector2.zero(),
             color,
-            Vector2.new(dimension.x(), thickness),
         );
 
-        self.pushPiece(
-            null,
+        self.pushRectangle(
+            Vector2.new(thickness, dimension.y()),
             offset.minus(Vector2.new(dimension.x() / 2, 0)),
             offset_z,
             entity_z_amount,
-            Vector2.zero(),
             color,
-            Vector2.new(thickness, dimension.y()),
         );
-        self.pushPiece(
-            null,
+        self.pushRectangle(
+            Vector2.new(thickness, dimension.y()),
             offset.plus(Vector2.new(dimension.x() / 2, 0)),
             offset_z,
             entity_z_amount,
-            Vector2.zero(),
             color,
-            Vector2.new(thickness, dimension.y()),
         );
     }
 
-    pub fn getRenderEntityBasisPosition(self: *RenderGroup, entity_basis: *RenderEntityBasis, screen_center: Vector2,) Vector2 {
+    pub fn getRenderEntityBasisPosition(
+        self: *RenderGroup,
+        entity_basis: *RenderEntityBasis,
+        screen_center: Vector2,
+    ) Vector2 {
         const entity_base_position = entity_basis.basis.position;
         const z_fudge = 1.0 + 0.1 * (entity_base_position.z() + entity_basis.offset_z);
         const entity_ground_point_x = screen_center.x() + self.meters_to_pixels * z_fudge * entity_base_position.x();
@@ -213,7 +220,7 @@ pub const RenderGroup = struct {
         return center;
     }
 
-    pub fn toOutput(self: *RenderGroup, output_target: *LoadedBitmap) void {
+    pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap) void {
         const screen_center = Vector2.new(
             0.5 * @as(f32, @floatFromInt(output_target.width)),
             0.5 * @as(f32, @floatFromInt(output_target.height)),
@@ -227,6 +234,9 @@ pub const RenderGroup = struct {
                 .RenderEntryClear => {
                     const entry: *RenderEntryClear = @ptrCast(@alignCast(header));
                     base_address += @sizeOf(@TypeOf(entry.*));
+
+                    const dimension = Vector2.newI(output_target.width, output_target.height);
+                    drawRectangle(output_target, Vector2.zero(), dimension, entry.color);
                 },
                 .RenderEntryBitmap => {
                     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(header));
@@ -246,7 +256,6 @@ pub const RenderGroup = struct {
                 },
             }
         }
-
     }
 };
 
@@ -382,7 +391,8 @@ pub fn drawBitmap(
     }
 
     // Move to the correct spot in the destination.
-    const dest_offset: usize = @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch))));
+    const dest_offset: usize =
+        @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch))));
     var dest_row: [*]u8 = @ptrCast(draw_buffer.memory);
     dest_row += dest_offset;
 
@@ -477,7 +487,8 @@ pub fn drawBitmapMatte(
     }
 
     // Move to the correct spot in the destination.
-    const dest_offset: usize = @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch))));
+    const dest_offset: usize =
+        @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch))));
     var dest_row: [*]u8 = @ptrCast(draw_buffer.memory);
     dest_row += dest_offset;
 
@@ -519,4 +530,3 @@ pub fn drawBitmapMatte(
         }
     }
 }
-
