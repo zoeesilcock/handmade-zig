@@ -11,7 +11,7 @@ const Vector3 = math.Vector3;
 const Color = math.Color;
 const LoadedBitmap = shared.LoadedBitmap;
 
-pub const RenderBasis = struct {
+pub const RenderBasis = extern struct {
     position: Vector3,
 };
 
@@ -51,7 +51,7 @@ pub const RenderEntryRectangle = extern struct {
     color: Color,
 };
 
-pub const RenderGroup = struct {
+pub const RenderGroup = extern struct {
     default_basis: *RenderBasis,
     meters_to_pixels: f32,
 
@@ -64,7 +64,7 @@ pub const RenderGroup = struct {
 
         result.max_push_buffer_size = max_push_buffer_size;
         result.push_buffer_size = 0;
-        result.push_buffer_base = @ptrCast(arena.pushSize(@alignOf(u8), result.max_push_buffer_size));
+        result.push_buffer_base = @ptrCast(arena.pushSize(result.max_push_buffer_size));
         result.default_basis = arena.pushStruct(RenderBasis);
         result.default_basis.position = Vector3.zero();
         result.meters_to_pixels = meters_to_pixels;

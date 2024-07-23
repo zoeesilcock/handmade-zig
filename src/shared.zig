@@ -161,28 +161,20 @@ pub const MemoryArena = struct {
         self.temp_count = 0;
     }
 
-    pub fn pushSize(self: *MemoryArena, comptime alignment: usize, size: MemoryIndex) [*]u8 {
-        const base = @intFromPtr(self.base + self.used);
-        const aligned_base = std.mem.alignForward(usize, base, alignment);
-        const alignment_offset = aligned_base - base;
-        const aligned_size = size + alignment_offset;
+    pub fn pushSize(self: *MemoryArena, size: MemoryIndex) [*]u8 {
+        std.debug.assert((self.used + size) <= self.size);
 
-        std.debug.assert((self.used + aligned_size) <= self.size);
-
-        const result: [*]align(alignment) u8 = @ptrFromInt(aligned_base);
-        self.used += aligned_size;
-
+        const result: [*]u8 = self.base + self.used;
+        self.used += size;
         return result;
     }
 
     pub fn pushStruct(self: *MemoryArena, comptime T: type) *T {
-        const size: MemoryIndex = @sizeOf(T);
-        return @as(*T, @ptrCast(@alignCast(pushSize(self, @alignOf(T), size))));
+        return @as(*T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T)))));
     }
 
     pub fn pushArray(self: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
-        const size: MemoryIndex = @sizeOf(T) * count;
-        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @alignOf(T), size))));
+        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count))));
     }
 
     pub fn beginTemporaryMemory(self: *MemoryArena) TemporaryMemory {
@@ -268,7 +260,7 @@ pub const TransientState = struct {
     ground_buffers: [*]GroundBuffer = undefined,
 };
 
-pub const GroundBuffer = struct {
+pub const GroundBuffer = extern struct {
     position: world.WorldPosition = undefined,
     bitmap: LoadedBitmap,
 };
@@ -278,7 +270,7 @@ pub const PairwiseCollisionRuleFlag = enum(u8) {
     Temporary = 0x2a,
 };
 
-pub const PairwiseCollisionRule = struct {
+pub const PairwiseCollisionRule = extern struct {
     can_collide: bool,
     storage_index_a: u32,
     storage_index_b: u32,
@@ -324,7 +316,7 @@ pub const HeroBitmaps = struct {
 };
 
 // Data structures.
-pub const LoadedBitmap = struct {
+pub const LoadedBitmap = extern struct {
     width: i32 = 0,
     height: i32 = 0,
     pitch: i32 = 0,

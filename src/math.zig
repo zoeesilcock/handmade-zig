@@ -273,7 +273,7 @@ pub const Rectangle2 = Rectangle(2);
 pub const Rectangle3 = Rectangle(3);
 
 fn Rectangle(comptime dimension_count: comptime_int) type {
-    return struct {
+    return extern struct {
         const VectorType = Vector(dimension_count, .Position);
 
         min: VectorType,

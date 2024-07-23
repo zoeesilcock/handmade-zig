@@ -10,7 +10,7 @@ const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
 const TILES_PER_CHUNK = 8;
 
-pub const World = struct {
+pub const World = extern struct {
     chunk_dimension_in_meters: Vector3,
 
     first_free: ?*WorldEntityBlock,
@@ -18,7 +18,7 @@ pub const World = struct {
     chunk_hash: [4096]WorldChunk,
 };
 
-pub const WorldChunk = struct {
+pub const WorldChunk = extern struct {
     x: i32,
     y: i32,
     z: i32,
@@ -32,13 +32,13 @@ pub const WorldChunk = struct {
     }
 };
 
-pub const WorldEntityBlock = struct {
+pub const WorldEntityBlock = extern struct {
     entity_count: u32,
     low_entity_indices: [TILES_PER_CHUNK]u32,
     next: ?*WorldEntityBlock,
 };
 
-pub const WorldPosition = struct {
+pub const WorldPosition = extern struct {
     chunk_x: i32,
     chunk_y: i32,
     chunk_z: i32,

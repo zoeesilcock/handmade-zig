@@ -1090,7 +1090,7 @@ fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to
     result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
 
     const total_bitmap_size: u32 = @intCast(result.width * result.height * shared.BITMAP_BYTES_PER_PIXEL);
-    result.memory = @ptrCast(arena.pushSize(@alignOf(u8), total_bitmap_size));
+    result.memory = @ptrCast(arena.pushSize(total_bitmap_size));
 
     if (clear_to_zero) {
         clearBitmap(result);

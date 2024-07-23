@@ -14,7 +14,7 @@ const Rectangle3 = math.Rectangle3;
 const State = shared.State;
 const World = world.World;
 
-pub const SimRegion = struct {
+pub const SimRegion = extern struct {
     world: *World,
     max_entity_radius: f32,
     max_entity_velocity: f32,
@@ -30,13 +30,12 @@ pub const SimRegion = struct {
     sim_entity_hash: [4096]SimEntityHash = [1]SimEntityHash{undefined} ** 4096,
 };
 
-const EntityReferenceTag = enum { ptr, index };
-pub const EntityReference = union(EntityReferenceTag) {
+pub const EntityReference = packed union {
     ptr: ?*SimEntity,
     index: u32,
 };
 
-pub const SimEntityHash = struct {
+pub const SimEntityHash = extern struct {
     ptr: ?*SimEntity = null,
     index: u32 = 0,
 };
@@ -55,12 +54,12 @@ pub const SimEntityFlags = enum(u32) {
     }
 };
 
-pub const SimEntityCollisionVolume = struct {
+pub const SimEntityCollisionVolume = extern struct {
     offset_position: Vector3,
     dimension: Vector3,
 };
 
-pub const SimEntityCollisionVolumeGroup = struct {
+pub const SimEntityCollisionVolumeGroup = extern struct {
     total_volume: SimEntityCollisionVolume,
 
     volume_count: u32,
@@ -71,7 +70,7 @@ pub const SimEntityCollisionVolumeGroup = struct {
     }
 };
 
-pub const SimEntity = struct {
+pub const SimEntity = extern struct {
     storage_index: u32 = 0,
     updatable: bool = false,
 
@@ -150,7 +149,7 @@ pub const EntityType = enum(u8) {
     Stairwell,
 };
 
-pub const HitPoint = struct {
+pub const HitPoint = extern struct {
     flags: u8,
     filled_amount: u8,
 };
@@ -210,34 +209,24 @@ pub fn getEntityByStorageIndex(sim_region: *SimRegion, storage_index: u32) ?*Sim
 }
 
 pub fn loadEntityReference(state: *State, sim_region: *SimRegion, reference: *EntityReference) void {
-    switch (reference.*) {
-        .index => |index| {
-            if (index != 0) {
-                const entry = getHashFromStorageIndex(sim_region, reference.index);
+    if (reference.index != 0) {
+        const entry = getHashFromStorageIndex(sim_region, reference.index);
 
-                if (entry.ptr == null) {
-                    entry.index = reference.index;
-                    if (getLowEntity(state, reference.index)) |low_entity| {
-                        var position = getSimSpacePosition(sim_region, low_entity);
-                        entry.ptr = addEntity(state, sim_region, reference.index, low_entity, &position);
-                    }
-                }
-
-                reference.* = EntityReference{ .ptr = entry.ptr };
+        if (entry.ptr == null) {
+            entry.index = reference.index;
+            if (getLowEntity(state, reference.index)) |low_entity| {
+                var position = getSimSpacePosition(sim_region, low_entity);
+                entry.ptr = addEntity(state, sim_region, reference.index, low_entity, &position);
             }
-        },
-        else => {},
+        }
+
+        reference.* = EntityReference{ .ptr = entry.ptr };
     }
 }
 
 pub fn storeEntityReference(reference: *EntityReference) void {
-    switch (reference.*) {
-        .ptr => |opt_ptr| {
-            if (opt_ptr) |ptr| {
-                reference.* = EntityReference{ .index = ptr.storage_index };
-            }
-        },
-        else => {},
+    if (reference.ptr) |ptr| {
+        reference.* = EntityReference{ .index = ptr.storage_index };
     }
 }
 
