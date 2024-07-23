@@ -85,7 +85,7 @@ const State = shared.State;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
-const EntityVisiblePiece = render.EntityVisiblePiece;
+const RenderGroupEntry = render.RenderGroupEntry;
 const RenderGroup = render.RenderGroup;
 const RenderBasis = render.RenderBasis;
 
@@ -434,7 +434,7 @@ pub export fn updateAndRender(
 
     // Clear background.
     const clear_color = Color.new(0.5, 0.5, 0.5, 1);
-    drawRectangle(
+    render.drawRectangle(
         draw_buffer,
         Vector2.zero(),
         Vector2.new(@floatFromInt(draw_buffer.width), @floatFromInt(draw_buffer.height)),
@@ -526,7 +526,7 @@ pub export fn updateAndRender(
                     }
 
                     if (false) {
-                        drawRectangleOutline(
+                        render.drawRectangleOutline(
                             draw_buffer,
                             screen_position.minus(screen_dimension.scaledTo(0.5)),
                             screen_position.plus(screen_dimension.scaledTo(0.5)),
@@ -716,34 +716,7 @@ pub export fn updateAndRender(
         }
     }
 
-    var render_group_base: u32 = 0;
-    while (render_group_base < render_group.push_buffer_size) {
-        const piece: *EntityVisiblePiece = @ptrCast(@alignCast(render_group.push_buffer_base + render_group_base));
-        render_group_base += @sizeOf(EntityVisiblePiece);
-
-        const entity_base_position = piece.basis.position;
-        const z_fudge = 1.0 + 0.1 * (entity_base_position.z() + piece.offset_z);
-        const entity_ground_point_x = screen_center.x() + meters_to_pixels * z_fudge * entity_base_position.x();
-        const entity_ground_point_y = screen_center.y() - meters_to_pixels * z_fudge * entity_base_position.y();
-        const entity_z = -meters_to_pixels * entity_base_position.z();
-
-        const center = Vector2.new(
-            piece.offset.x() + entity_ground_point_x,
-            piece.offset.y() + entity_ground_point_y + (entity_z * piece.entity_z_amount),
-        );
-
-        if (piece.bitmap) |bitmap| {
-            drawBitmap(draw_buffer, bitmap, center.x(), center.y(), piece.color.a());
-        } else {
-            const dimension = piece.dimension.scaledTo(meters_to_pixels);
-            drawRectangle(
-                draw_buffer,
-                center.minus(dimension.scaledTo(0.5)),
-                center.plus(dimension.scaledTo(0.5)),
-                piece.color,
-            );
-        }
-    }
+    render_group.toOutput(draw_buffer);
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
@@ -1077,7 +1050,7 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
+                render.drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
             }
         }
     }
@@ -1106,278 +1079,8 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
+                render.drawBitmap(buffer, &stamp, position.x(), position.y(), 1);
             }
-        }
-    }
-}
-
-fn drawRectangle(
-    draw_buffer: *LoadedBitmap,
-    min: Vector2,
-    max: Vector2,
-    color: Color,
-) void {
-    // Round input values.
-    var min_x = intrinsics.floorReal32ToInt32(min.x());
-    var min_y = intrinsics.floorReal32ToInt32(min.y());
-    var max_x = intrinsics.floorReal32ToInt32(max.x());
-    var max_y = intrinsics.floorReal32ToInt32(max.y());
-
-    // Clip input values to buffer.
-    if (min_x < 0) {
-        min_x = 0;
-    }
-    if (min_y < 0) {
-        min_y = 0;
-    }
-    if (max_x > draw_buffer.width) {
-        max_x = draw_buffer.width;
-    }
-    if (max_y > draw_buffer.height) {
-        max_y = draw_buffer.height;
-    }
-
-    // Set the pointer to the top left corner of the rectangle.
-    var row: [*]u8 = @ptrCast(draw_buffer.memory);
-    row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch)))));
-
-    var y = min_y;
-    while (y < max_y) : (y += 1) {
-        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
-
-        var x = min_x;
-        while (x < max_x) : (x += 1) {
-            pixel[0] = shared.colorToInt(color);
-            pixel += 1;
-        }
-
-        row += @as(usize, @intCast(draw_buffer.pitch));
-    }
-}
-
-pub fn drawRectangleOutline(
-    draw_buffer: *LoadedBitmap,
-    min: Vector2,
-    max: Vector2,
-    color: Color,
-    radius: f32,
-) void {
-    // Top.
-    drawRectangle(
-        draw_buffer,
-        Vector2.new(min.x() - radius, min.y() - radius),
-        Vector2.new(max.x() + radius, min.y() + radius),
-        color,
-    );
-
-    // Bottom.
-    drawRectangle(
-        draw_buffer,
-        Vector2.new(min.x() - radius, max.y() - radius),
-        Vector2.new(max.x() + radius, max.y() + radius),
-        color,
-    );
-
-    // Left.
-    drawRectangle(
-        draw_buffer,
-        Vector2.new(min.x() - radius, min.y() - radius),
-        Vector2.new(min.x() + radius, max.y() + radius),
-        color,
-    );
-
-    // Right.
-    drawRectangle(
-        draw_buffer,
-        Vector2.new(max.x() - radius, min.y() - radius),
-        Vector2.new(max.x() + radius, max.y() + radius),
-        color,
-    );
-}
-
-fn drawBitmap(
-    draw_buffer: *LoadedBitmap,
-    bitmap: *const LoadedBitmap,
-    real_x: f32,
-    real_y: f32,
-    in_alpha: f32,
-) void {
-    // TODO: Should we really clamp here?
-    const alpha = math.clampf01(in_alpha);
-
-    // The pixel color calculation below doesn't handle sizes outside the range of 0 - 1.
-    std.debug.assert(alpha >= 0 and alpha <= 1);
-
-    // Calculate extents.
-    var min_x = intrinsics.floorReal32ToInt32(real_x);
-    var min_y = intrinsics.floorReal32ToInt32(real_y);
-    var max_x: i32 = @intFromFloat(real_x + @as(f32, @floatFromInt(bitmap.width)));
-    var max_y: i32 = @intFromFloat(real_y + @as(f32, @floatFromInt(bitmap.height)));
-
-    // Clip input values to buffer.
-    var source_offset_x: i32 = 0;
-    if (min_x < 0) {
-        source_offset_x = -min_x;
-        min_x = 0;
-    }
-    var source_offset_y: i32 = 0;
-    if (min_y < 0) {
-        source_offset_y = -min_y;
-        min_y = 0;
-    }
-    if (max_x > draw_buffer.width) {
-        max_x = draw_buffer.width;
-    }
-    if (max_y > draw_buffer.height) {
-        max_y = draw_buffer.height;
-    }
-
-    // Move to the correct spot in the data.
-    const source_offset: i32 =
-        @intCast(source_offset_y * @as(i32, @intCast(bitmap.pitch)) + shared.BITMAP_BYTES_PER_PIXEL * source_offset_x);
-    var source_row: [*]u8 = @ptrCast(bitmap.memory);
-    if (source_offset >= 0) {
-        source_row += @as(usize, @intCast(source_offset));
-    } else {
-        source_row -= @as(usize, @intCast(-source_offset));
-    }
-
-    // Move to the correct spot in the destination.
-    const dest_offset: usize = @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch))));
-    var dest_row: [*]u8 = @ptrCast(draw_buffer.memory);
-    dest_row += dest_offset;
-
-    var y = min_y;
-    while (y < max_y) : (y += 1) {
-        var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
-        var source: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(source_row));
-
-        var x = min_x;
-        while (x < max_x) : (x += 1) {
-            const sa: f32 = @floatFromInt((source[0] >> 24) & 0xFF);
-            const rsa: f32 = alpha * (sa / 255.0);
-            const sr: f32 = alpha * @as(f32, @floatFromInt((source[0] >> 16) & 0xFF));
-            const sg: f32 = alpha * @as(f32, @floatFromInt((source[0] >> 8) & 0xFF));
-            const sb: f32 = alpha * @as(f32, @floatFromInt((source[0] >> 0) & 0xFF));
-
-            const da: f32 = @floatFromInt((dest[0] >> 24) & 0xFF);
-            const rda: f32 = (da / 255.0);
-            const dr: f32 = @floatFromInt((dest[0] >> 16) & 0xFF);
-            const dg: f32 = @floatFromInt((dest[0] >> 8) & 0xFF);
-            const db: f32 = @floatFromInt((dest[0] >> 0) & 0xFF);
-
-            const inv_rsa = (1.0 - rsa);
-            const a = 255.0 * (rsa + rda - rsa * rda);
-            const r = inv_rsa * dr + sr;
-            const g = inv_rsa * dg + sg;
-            const b = inv_rsa * db + sb;
-
-            dest[0] = ((@as(u32, @intFromFloat(a + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(r + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(g + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(b + 0.5)) << 0));
-
-            source += 1;
-            dest += 1;
-        }
-
-        dest_row += @as(usize, @intCast(draw_buffer.pitch));
-        if (bitmap.pitch >= 0) {
-            source_row += @as(usize, @intCast(bitmap.pitch));
-        } else {
-            source_row -= @as(usize, @intCast(-bitmap.pitch));
-        }
-    }
-}
-
-fn drawBitmapMatte(
-    draw_buffer: *LoadedBitmap,
-    bitmap: *LoadedBitmap,
-    real_x: f32,
-    real_y: f32,
-    in_alpha: f32,
-) void {
-    // TODO: Should we really clamp here?
-    const alpha = math.clampf01(in_alpha);
-
-    // The pixel color calculation below doesn't handle sizes outside the range of 0 - 1.
-    std.debug.assert(alpha >= 0 and alpha <= 1);
-
-    // Calculate extents.
-    var min_x = intrinsics.floorReal32ToInt32(real_x);
-    var min_y = intrinsics.floorReal32ToInt32(real_y);
-    var max_x: i32 = @intFromFloat(real_x + @as(f32, @floatFromInt(bitmap.width)));
-    var max_y: i32 = @intFromFloat(real_y + @as(f32, @floatFromInt(bitmap.height)));
-
-    // Clip input values to buffer.
-    var source_offset_x: i32 = 0;
-    if (min_x < 0) {
-        source_offset_x = -min_x;
-        min_x = 0;
-    }
-    var source_offset_y: i32 = 0;
-    if (min_y < 0) {
-        source_offset_y = -min_y;
-        min_y = 0;
-    }
-    if (max_x > draw_buffer.width) {
-        max_x = draw_buffer.width;
-    }
-    if (max_y > draw_buffer.height) {
-        max_y = draw_buffer.height;
-    }
-
-    // Move to the correct spot in the data.
-    const source_offset: i32 =
-        @intCast(source_offset_y * @as(i32, @intCast(bitmap.pitch)) + shared.BITMAP_BYTES_PER_PIXEL * source_offset_x);
-    var source_row: [*]u8 = @ptrCast(bitmap.memory);
-    if (source_offset >= 0) {
-        source_row += @as(usize, @intCast(source_offset));
-    } else {
-        source_row -= @as(usize, @intCast(-source_offset));
-    }
-
-    // Move to the correct spot in the destination.
-    const dest_offset: usize = @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch))));
-    var dest_row: [*]u8 = @ptrCast(draw_buffer.memory);
-    dest_row += dest_offset;
-
-    var y = min_y;
-    while (y < max_y) : (y += 1) {
-        var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
-        var source: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(source_row));
-
-        var x = min_x;
-        while (x < max_x) : (x += 1) {
-            const sa: f32 = @floatFromInt((source[0] >> 24) & 0xFF);
-            const rsa: f32 = alpha * (sa / 255.0);
-
-            const da: f32 = @floatFromInt((dest[0] >> 24) & 0xFF);
-            const dr: f32 = @floatFromInt((dest[0] >> 16) & 0xFF);
-            const dg: f32 = @floatFromInt((dest[0] >> 8) & 0xFF);
-            const db: f32 = @floatFromInt((dest[0] >> 0) & 0xFF);
-
-            const inv_rsa = (1.0 - rsa);
-            const a = inv_rsa * da;
-            const r = inv_rsa * dr;
-            const g = inv_rsa * dg;
-            const b = inv_rsa * db;
-
-            dest[0] = ((@as(u32, @intFromFloat(a + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(r + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(g + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(b + 0.5)) << 0));
-
-            source += 1;
-            dest += 1;
-        }
-
-        dest_row += @as(usize, @intCast(draw_buffer.pitch));
-        if (bitmap.pitch >= 0) {
-            source_row += @as(usize, @intCast(bitmap.pitch));
-        } else {
-            source_row -= @as(usize, @intCast(-bitmap.pitch));
         }
     }
 }
