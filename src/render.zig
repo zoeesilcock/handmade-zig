@@ -290,20 +290,29 @@ pub const RenderGroup = extern struct {
                     const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(header));
                     base_address += @sizeOf(@TypeOf(entry.*));
 
+                    const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
+                    drawRectangleSlowly(output_target, entry.origin, entry.x_axis, entry.y_axis, entry.color);
+
+                    const color = Color.new(1, 1, 0, 1);
                     const dimension = Vector2.new(6, 6);
                     var position = entry.origin;
-                    drawRectangle(output_target, position, position.plus(dimension), entry.color);
+                    drawRectangle(output_target, position, position.plus(dimension), color);
 
                     position = entry.origin.plus(entry.x_axis);
-                    drawRectangle(output_target, position, position.plus(dimension), entry.color);
+                    drawRectangle(output_target, position, position.plus(dimension), color);
 
                     position = entry.origin.plus(entry.y_axis);
-                    drawRectangle(output_target, position, position.plus(dimension), entry.color);
+                    drawRectangle(output_target, position, position.plus(dimension), color);
 
-                    for (entry.points) |point| {
-                        position = entry.origin
-                            .plus(entry.x_axis.scaledTo(point.x()).plus(entry.y_axis.scaledTo(point.y())));
-                        drawRectangle(output_target, position, position.plus(dimension), entry.color);
+                    position = max;
+                    drawRectangle(output_target, position, position.plus(dimension), color);
+
+                    if (false) {
+                        for (entry.points) |point| {
+                            position = entry.origin
+                                .plus(entry.x_axis.scaledTo(point.x()).plus(entry.y_axis.scaledTo(point.y())));
+                            drawRectangle(output_target, position, position.plus(dimension), entry.color);
+                        }
                     }
                 },
             }
@@ -348,6 +357,70 @@ pub fn drawRectangle(
         var x = min_x;
         while (x < max_x) : (x += 1) {
             pixel[0] = shared.colorToInt(color);
+            pixel += 1;
+        }
+
+        row += @as(usize, @intCast(draw_buffer.pitch));
+    }
+}
+
+pub fn drawRectangleSlowly(
+    draw_buffer: *LoadedBitmap,
+    origin: Vector2,
+    x_axis: Vector2,
+    y_axis: Vector2,
+    color: Color,
+) void {
+    const points: [4]Vector2 = .{
+        origin,
+        origin.plus(x_axis),
+        origin.plus(x_axis).plus(y_axis),
+        origin.plus(y_axis),
+    };
+
+    const width_max = draw_buffer.width - 1;
+    const height_max = draw_buffer.height - 1;
+    var y_min: i32 = height_max;
+    var y_max: i32 = 0;
+    var x_min: i32 = width_max;
+    var x_max: i32 = 0;
+
+    for (points) |point| {
+        const floor_x = intrinsics.floorReal32ToInt32(point.x());
+        const ceil_x = intrinsics.ceilReal32ToInt32(point.x());
+        const floor_y = intrinsics.floorReal32ToInt32(point.y());
+        const ceil_y = intrinsics.ceilReal32ToInt32(point.y());
+
+        if (x_min > floor_x) { x_min = floor_x; }
+        if (y_min > floor_y) { y_min = floor_y; }
+        if (x_max < ceil_x) { x_max = ceil_x; }
+        if (y_max < ceil_y) { y_max = ceil_y; }
+    }
+
+    if (x_min < 0) { x_min = 0; }
+    if (y_min < 0) { y_min = 0; }
+    if (x_max > width_max) { x_max = width_max; }
+    if (y_max > width_max) { y_max = height_max; }
+
+    var row: [*]u8 = @ptrCast(draw_buffer.memory);
+    row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
+
+    var y: i32 = y_min;
+    while (y < y_max) : (y += 1) {
+        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+
+        var x: i32 = x_min;
+        while (x < x_max) : (x += 1) {
+            const pixel_position = Vector2.newI(x, y);
+            const edge0 = pixel_position.minus(origin).dotProduct(x_axis.perp().negated());
+            const edge1 = pixel_position.minus(origin.plus(x_axis)).dotProduct(y_axis.perp().negated());
+            const edge2 = pixel_position.minus(origin.plus(x_axis).plus(y_axis)).dotProduct(x_axis.perp());
+            const edge3 = pixel_position.minus(origin.plus(y_axis)).dotProduct(y_axis.perp());
+
+            if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
+                pixel[0] = shared.colorToInt(color);
+            }
+
             pixel += 1;
         }
 

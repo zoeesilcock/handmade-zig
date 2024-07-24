@@ -33,6 +33,12 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                     } };
                 }
 
+                pub inline fn perp(self: *const Self) Self {
+                    return Self {
+                        .values = .{ -self.values[1], self.values[0] }
+                    };
+                }
+
                 pub usingnamespace switch (accessor_style) {
                     inline .Position => struct {
                         pub inline fn x(self: *const Self) f32 {
@@ -159,6 +165,22 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn w(self: *const Self) f32 {
                             return self.values[3];
                         }
+                        pub inline fn setX(self: *Self, value: f32) *Self {
+                            self.values[0] = value;
+                            return self;
+                        }
+                        pub inline fn setY(self: *Self, value: f32) *Self {
+                            self.values[1] = value;
+                            return self;
+                        }
+                        pub inline fn setZ(self: *Self, value: f32) *Self {
+                            self.values[2] = value;
+                            return self;
+                        }
+                        pub inline fn setW(self: *Self, value: f32) *Self {
+                            self.values[3] = value;
+                            return self;
+                        }
                     },
                     inline .Color => struct {
                         pub inline fn r(self: *const Self) f32 {
@@ -172,6 +194,22 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         }
                         pub inline fn a(self: *const Self) f32 {
                             return self.values[3];
+                        }
+                        pub inline fn setR(self: *Self, value: f32) *Self {
+                            self.values[0] = value;
+                            return self;
+                        }
+                        pub inline fn setG(self: *Self, value: f32) *Self {
+                            self.values[1] = value;
+                            return self;
+                        }
+                        pub inline fn setB(self: *Self, value: f32) *Self {
+                            self.values[2] = value;
+                            return self;
+                        }
+                        pub inline fn setA(self: *Self, value: f32) *Self {
+                            self.values[3] = value;
+                            return self;
                         }
                     },
                 };

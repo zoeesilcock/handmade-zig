@@ -700,16 +700,17 @@ pub export fn updateAndRender(
 
     state.time += input.frame_delta_time;
     const angle = state.time;
+    // const angle: f32 = 0;
 
     const screen_center = Vector2.new(
         0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
         0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
     );
-    const origin = screen_center.plus(Vector2.new(intrinsics.sin(angle), 0).scaledTo(10));
-    const scale = 100.0;
-    const x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale + 25.0 * intrinsics.cos(4.2 * angle));
-    const y_axis = Vector2.new(intrinsics.cos(angle + 1), intrinsics.sin(angle + 1)).scaledTo(scale + 50.0 * intrinsics.cos(3.9 * angle));
-    // const y_axis = Vector2.new(-x_axis.y(), x_axis.x()).scaledTo(1);
+    const origin = screen_center;
+    // const scale = 100.0;
+    const x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
+    // const y_axis = Vector2.new(-x_axis.y(), x_axis.x());
+    const y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
     if (render_group.pushCoordinateSystem(origin, x_axis, y_axis, Color.new(0.5 + 0.5 * intrinsics.sin(angle), 0.5 + 0.5 * intrinsics.sin(2.9 * angle), 0.5 + 0.5 * intrinsics.sin(9.9 * angle), 1))) |*coordinate_system| {
         var point_index: u32 = 0;
         var point_y: f32 = 0.0;
