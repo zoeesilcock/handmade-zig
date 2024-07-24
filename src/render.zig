@@ -26,6 +26,7 @@ pub const RenderEntryType = enum(u8) {
     RenderEntryClear,
     RenderEntryBitmap,
     RenderEntryRectangle,
+    RenderEntryCoordinateSystem,
 };
 
 pub const RenderEntryHeader = extern struct {
@@ -49,6 +50,16 @@ pub const RenderEntryRectangle = extern struct {
     entity_basis: RenderEntityBasis,
     dimension: Vector2 = Vector2.zero(),
     color: Color,
+};
+
+pub const RenderEntryCoordinateSystem = extern struct {
+    header: RenderEntryHeader,
+    origin: Vector2,
+    x_axis: Vector2,
+    y_axis: Vector2,
+    color: Color,
+
+    points: [16]Vector2 = [1]Vector2{Vector2.zero()} ** 16,
 };
 
 pub const RenderGroup = extern struct {
@@ -201,6 +212,27 @@ pub const RenderGroup = extern struct {
         );
     }
 
+    pub fn pushCoordinateSystem(
+        self: *RenderGroup,
+        origin: Vector2,
+        x_axis: Vector2,
+        y_axis: Vector2,
+        color: Color,
+    ) ?*RenderEntryCoordinateSystem {
+        var result: ?*RenderEntryCoordinateSystem = null;
+
+        if (self.pushRenderElement(RenderEntryCoordinateSystem)) |entry| {
+            entry.origin = origin;
+            entry.x_axis = x_axis;
+            entry.y_axis = y_axis;
+            entry.color = color;
+
+            result = entry;
+        }
+
+        return result;
+    }
+
     pub fn getRenderEntityBasisPosition(
         self: *RenderGroup,
         entity_basis: *RenderEntityBasis,
@@ -253,6 +285,26 @@ pub const RenderGroup = extern struct {
 
                     const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
                     drawRectangle(output_target, position, position.plus(entry.dimension), entry.color);
+                },
+                .RenderEntryCoordinateSystem => {
+                    const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(header));
+                    base_address += @sizeOf(@TypeOf(entry.*));
+
+                    const dimension = Vector2.new(6, 6);
+                    var position = entry.origin;
+                    drawRectangle(output_target, position, position.plus(dimension), entry.color);
+
+                    position = entry.origin.plus(entry.x_axis);
+                    drawRectangle(output_target, position, position.plus(dimension), entry.color);
+
+                    position = entry.origin.plus(entry.y_axis);
+                    drawRectangle(output_target, position, position.plus(dimension), entry.color);
+
+                    for (entry.points) |point| {
+                        position = entry.origin
+                            .plus(entry.x_axis.scaledTo(point.x()).plus(entry.y_axis.scaledTo(point.y())));
+                        drawRectangle(output_target, position, position.plus(dimension), entry.color);
+                    }
                 },
             }
         }

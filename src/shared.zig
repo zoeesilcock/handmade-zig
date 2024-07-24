@@ -251,6 +251,8 @@ pub const State = struct {
     sword_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     familiar_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
+
+    time: f32 = 0,
 };
 
 pub const TransientState = struct {

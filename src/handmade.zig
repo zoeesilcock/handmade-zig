@@ -698,6 +698,30 @@ pub export fn updateAndRender(
         }
     }
 
+    state.time += input.frame_delta_time;
+    const angle = state.time;
+
+    const screen_center = Vector2.new(
+        0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
+        0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
+    );
+    const origin = screen_center.plus(Vector2.new(intrinsics.sin(angle), 0).scaledTo(10));
+    const scale = 100.0;
+    const x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale + 25.0 * intrinsics.cos(4.2 * angle));
+    const y_axis = Vector2.new(intrinsics.cos(angle + 1), intrinsics.sin(angle + 1)).scaledTo(scale + 50.0 * intrinsics.cos(3.9 * angle));
+    // const y_axis = Vector2.new(-x_axis.y(), x_axis.x()).scaledTo(1);
+    if (render_group.pushCoordinateSystem(origin, x_axis, y_axis, Color.new(0.5 + 0.5 * intrinsics.sin(angle), 0.5 + 0.5 * intrinsics.sin(2.9 * angle), 0.5 + 0.5 * intrinsics.sin(9.9 * angle), 1))) |*coordinate_system| {
+        var point_index: u32 = 0;
+        var point_y: f32 = 0.0;
+        while (point_y < 1) : (point_y += 0.25) {
+            var point_x: f32 = 0.0;
+            while (point_x < 1) : (point_x += 0.25) {
+                coordinate_system.*.points[point_index] = Vector2.new(point_x, point_y);
+                point_index += 1;
+            }
+        }
+    }
+
     render_group.renderTo(draw_buffer);
 
     sim.endSimulation(state, screen_sim_region);
@@ -1037,7 +1061,7 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                render_group.pushBitmap(stamp, position, 0,  Vector2.zero(), 1, 1);
+                render_group.pushBitmap(stamp, position, 0, Vector2.zero(), 1, 1);
             }
         }
     }
@@ -1066,7 +1090,7 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                render_group.pushBitmap(stamp, position, 0,  Vector2.zero(), 1, 1);
+                render_group.pushBitmap(stamp, position, 0, Vector2.zero(), 1, 1);
             }
         }
     }
