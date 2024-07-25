@@ -304,6 +304,16 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
 
             return result;
         }
+
+        pub fn lerp(min: Self, max: Self, distance: f32) Self {
+            var result = Self.zero();
+
+            for (0..dimensions) |axis_index| {
+                result.values[axis_index] = lerpf(min.values[axis_index], max.values[axis_index], distance);
+            }
+
+            return result;
+        }
     };
 }
 
@@ -427,7 +437,7 @@ pub fn square(a: f32) f32 {
     return a * a;
 }
 
-pub fn lerp(min: f32, max: f32, distance: f32) f32 {
+pub fn lerpf(min: f32, max: f32, distance: f32) f32 {
     return (1.0 - distance) * min + distance * max;
 }
 

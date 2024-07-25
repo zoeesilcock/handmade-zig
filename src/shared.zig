@@ -38,6 +38,14 @@ pub inline fn terabytes(value: u32) u64 {
     return gigabytes(value) * 1024;
 }
 
+pub inline fn incrementPointer(comptime T: type, pointer: [*]void, offset: i32) T {
+    if (offset >= 0) {
+        return @ptrCast(@alignCast(pointer + @as(usize, @intCast(offset))));
+    } else {
+        return @ptrCast(@alignCast(pointer - @as(usize, @intCast(-offset))));
+    }
+}
+
 // Platform.
 pub const Platform = extern struct {
     debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,

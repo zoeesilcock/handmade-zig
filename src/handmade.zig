@@ -699,19 +699,37 @@ pub export fn updateAndRender(
     }
 
     state.time += input.frame_delta_time;
-    const angle = state.time;
-    // const angle: f32 = 0;
+    const angle = 0.1 * state.time;
+    const displacement = 100.0 * intrinsics.cos(5.0 * angle);
 
     const screen_center = Vector2.new(
         0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
         0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
     );
     const origin = screen_center;
-    // const scale = 100.0;
-    const x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
-    // const y_axis = Vector2.new(-x_axis.y(), x_axis.x());
-    const y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
-    if (render_group.pushCoordinateSystem(origin, x_axis, y_axis, Color.new(0.5 + 0.5 * intrinsics.sin(angle), 0.5 + 0.5 * intrinsics.sin(2.9 * angle), 0.5 + 0.5 * intrinsics.sin(9.9 * angle), 1))) |*coordinate_system| {
+    const scale = 150.0;
+
+    var x_axis = Vector2.zero();
+    var y_axis = Vector2.zero();
+
+    if (true) {
+        x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
+        y_axis = x_axis.perp();
+    } else if (false) {
+        x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
+        y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
+    } else {
+        x_axis = Vector2.new(scale, 0);
+        y_axis = Vector2.new(0, scale);
+    }
+
+    if (render_group.pushCoordinateSystem(
+        origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(Vector2.new(displacement, 0)),
+        x_axis,
+        y_axis,
+        Color.new(0.5 + 0.5 * intrinsics.sin(angle), 0.5 + 0.5 * intrinsics.sin(2.9 * angle), 0.5 + 0.5 * intrinsics.sin(9.9 * angle), 1),
+        &state.tree,
+    )) |*coordinate_system| {
         var point_index: u32 = 0;
         var point_y: f32 = 0.0;
         while (point_y < 1) : (point_y += 0.25) {

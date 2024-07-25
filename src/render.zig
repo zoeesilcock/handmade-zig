@@ -58,6 +58,7 @@ pub const RenderEntryCoordinateSystem = extern struct {
     x_axis: Vector2,
     y_axis: Vector2,
     color: Color,
+    texture: *LoadedBitmap,
 
     points: [16]Vector2 = [1]Vector2{Vector2.zero()} ** 16,
 };
@@ -218,6 +219,7 @@ pub const RenderGroup = extern struct {
         x_axis: Vector2,
         y_axis: Vector2,
         color: Color,
+        texture: *LoadedBitmap,
     ) ?*RenderEntryCoordinateSystem {
         var result: ?*RenderEntryCoordinateSystem = null;
 
@@ -226,6 +228,7 @@ pub const RenderGroup = extern struct {
             entry.x_axis = x_axis;
             entry.y_axis = y_axis;
             entry.color = color;
+            entry.texture = texture;
 
             result = entry;
         }
@@ -291,7 +294,14 @@ pub const RenderGroup = extern struct {
                     base_address += @sizeOf(@TypeOf(entry.*));
 
                     const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
-                    drawRectangleSlowly(output_target, entry.origin, entry.x_axis, entry.y_axis, entry.color);
+                    drawRectangleSlowly(
+                        output_target,
+                        entry.origin,
+                        entry.x_axis,
+                        entry.y_axis,
+                        entry.color,
+                        entry.texture,
+                    );
 
                     const color = Color.new(1, 1, 0, 1);
                     const dimension = Vector2.new(6, 6);
@@ -370,7 +380,10 @@ pub fn drawRectangleSlowly(
     x_axis: Vector2,
     y_axis: Vector2,
     color: Color,
+    texture: *LoadedBitmap,
 ) void {
+    const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
+    const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
     const points: [4]Vector2 = .{
         origin,
         origin.plus(x_axis),
@@ -391,16 +404,32 @@ pub fn drawRectangleSlowly(
         const floor_y = intrinsics.floorReal32ToInt32(point.y());
         const ceil_y = intrinsics.ceilReal32ToInt32(point.y());
 
-        if (x_min > floor_x) { x_min = floor_x; }
-        if (y_min > floor_y) { y_min = floor_y; }
-        if (x_max < ceil_x) { x_max = ceil_x; }
-        if (y_max < ceil_y) { y_max = ceil_y; }
+        if (x_min > floor_x) {
+            x_min = floor_x;
+        }
+        if (y_min > floor_y) {
+            y_min = floor_y;
+        }
+        if (x_max < ceil_x) {
+            x_max = ceil_x;
+        }
+        if (y_max < ceil_y) {
+            y_max = ceil_y;
+        }
     }
 
-    if (x_min < 0) { x_min = 0; }
-    if (y_min < 0) { y_min = 0; }
-    if (x_max > width_max) { x_max = width_max; }
-    if (y_max > width_max) { y_max = height_max; }
+    if (x_min < 0) {
+        x_min = 0;
+    }
+    if (y_min < 0) {
+        y_min = 0;
+    }
+    if (x_max > width_max) {
+        x_max = width_max;
+    }
+    if (y_max > height_max) {
+        y_max = height_max;
+    }
 
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
     row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
@@ -412,13 +441,95 @@ pub fn drawRectangleSlowly(
         var x: i32 = x_min;
         while (x < x_max) : (x += 1) {
             const pixel_position = Vector2.newI(x, y);
-            const edge0 = pixel_position.minus(origin).dotProduct(x_axis.perp().negated());
-            const edge1 = pixel_position.minus(origin.plus(x_axis)).dotProduct(y_axis.perp().negated());
-            const edge2 = pixel_position.minus(origin.plus(x_axis).plus(y_axis)).dotProduct(x_axis.perp());
-            const edge3 = pixel_position.minus(origin.plus(y_axis)).dotProduct(y_axis.perp());
+            const d = pixel_position.minus(origin);
+
+            const edge0 = d.dotProduct(x_axis.perp().negated());
+            const edge1 = d.minus(x_axis).dotProduct(y_axis.perp().negated());
+            const edge2 = d.minus(x_axis).minus(y_axis).dotProduct(x_axis.perp());
+            const edge3 = d.minus(y_axis).dotProduct(y_axis.perp());
 
             if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
-                pixel[0] = shared.colorToInt(color);
+                const u = d.dotProduct(x_axis) * inv_x_axis_length_squared;
+                const v = d.dotProduct(y_axis) * inv_y_axis_length_squared;
+
+                // std.debug.assert(u >= 0 and u <= 1.0);
+                // std.debug.assert(v >= 0 and v <= 1.0);
+
+                const texel_x: f32 = 1 + (u * @as(f32, @floatFromInt(texture.width - 3)));
+                const texel_y: f32 = 1 + (v * @as(f32, @floatFromInt(texture.height - 3)));
+
+                const texel_rounded_x: i32 = @intFromFloat(texel_x);
+                const texel_rounded_y: i32 = @intFromFloat(texel_y);
+
+                const texel_fraction_x: f32 = texel_x - @as(f32, @floatFromInt(texel_rounded_x));
+                const texel_fraction_y: f32 = texel_y - @as(f32, @floatFromInt(texel_rounded_y));
+
+                std.debug.assert(texel_rounded_x >= 0 and texel_rounded_x <= texture.width);
+                std.debug.assert(texel_rounded_y >= 0 and texel_rounded_y <= texture.height);
+
+                if (texture.memory) |base| {
+                    const offset: i32 =
+                        @intCast((texel_rounded_x * shared.BITMAP_BYTES_PER_PIXEL) + (texel_rounded_y * texture.pitch));
+                    const texel_pointer = shared.incrementPointer([*]void, base, offset);
+                    const texel_pointer_a: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texel_pointer));
+                    const texel_pointer_b = shared.incrementPointer(*align(1) u32, texel_pointer, @sizeOf(u32));
+                    const texel_pointer_c = shared.incrementPointer(*align(1) u32, texel_pointer, @as(i32, @intCast(texture.pitch)));
+                    const texel_pointer_d = shared.incrementPointer(*align(1) u32, texel_pointer, @sizeOf(u32) + @as(i32, @intCast(texture.pitch)));
+
+                    const texel_a = Color.new(
+                        @as(f32, @floatFromInt((texel_pointer_a.* >> 16) & 0xFF)),
+                        @as(f32, @floatFromInt((texel_pointer_a.* >> 8) & 0xFF)),
+                        @as(f32, @floatFromInt((texel_pointer_a.* >> 0) & 0xFF)),
+                        @floatFromInt((texel_pointer_a.* >> 24) & 0xFF),
+                    );
+                    const texel_b = Color.new(
+                        @as(f32, @floatFromInt((texel_pointer_b.* >> 16) & 0xFF)),
+                        @as(f32, @floatFromInt((texel_pointer_b.* >> 8) & 0xFF)),
+                        @as(f32, @floatFromInt((texel_pointer_b.* >> 0) & 0xFF)),
+                        @floatFromInt((texel_pointer_b.* >> 24) & 0xFF),
+                    );
+                    const texel_c = Color.new(
+                        @as(f32, @floatFromInt((texel_pointer_c.* >> 16) & 0xFF)),
+                        @as(f32, @floatFromInt((texel_pointer_c.* >> 8) & 0xFF)),
+                        @as(f32, @floatFromInt((texel_pointer_c.* >> 0) & 0xFF)),
+                        @floatFromInt((texel_pointer_c.* >> 24) & 0xFF),
+                    );
+                    const texel_d = Color.new(
+                        @as(f32, @floatFromInt((texel_pointer_d.* >> 16) & 0xFF)),
+                        @as(f32, @floatFromInt((texel_pointer_d.* >> 8) & 0xFF)),
+                        @as(f32, @floatFromInt((texel_pointer_d.* >> 0) & 0xFF)),
+                        @floatFromInt((texel_pointer_d.* >> 24) & 0xFF),
+                    );
+
+                    // const texel = texel_a;
+                    const texel = texel_a.lerp(texel_b, texel_fraction_x).lerp(texel_c.lerp(texel_d, texel_fraction_x), texel_fraction_y);
+
+                    const sa = texel.a();
+                    const sr = texel.r();
+                    const sg = texel.g();
+                    const sb = texel.b();
+
+                    const rsa: f32 = color.a() * (sa / 255.0);
+
+                    const da: f32 = @floatFromInt((pixel[0] >> 24) & 0xFF);
+                    const rda: f32 = (da / 255.0);
+                    const dr: f32 = @floatFromInt((pixel[0] >> 16) & 0xFF);
+                    const dg: f32 = @floatFromInt((pixel[0] >> 8) & 0xFF);
+                    const db: f32 = @floatFromInt((pixel[0] >> 0) & 0xFF);
+
+                    const inv_rsa = (1.0 - rsa);
+                    const a = 255.0 * (rsa + rda - rsa * rda);
+                    const r = inv_rsa * dr + sr;
+                    const g = inv_rsa * dg + sg;
+                    const b = inv_rsa * db + sb;
+
+                    pixel[0] = ((@as(u32, @intFromFloat(a + 0.5)) << 24) |
+                        (@as(u32, @intFromFloat(r + 0.5)) << 16) |
+                        (@as(u32, @intFromFloat(g + 0.5)) << 8) |
+                        (@as(u32, @intFromFloat(b + 0.5)) << 0));
+                }
+
+                // pixel[0] = shared.colorToInt(color);
             }
 
             pixel += 1;
