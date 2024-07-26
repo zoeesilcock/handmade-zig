@@ -38,12 +38,11 @@ pub inline fn terabytes(value: u32) u64 {
     return gigabytes(value) * 1024;
 }
 
-pub inline fn incrementPointer(comptime T: type, pointer: [*]void, offset: i32) T {
-    if (offset >= 0) {
-        return @ptrCast(@alignCast(pointer + @as(usize, @intCast(offset))));
-    } else {
-        return @ptrCast(@alignCast(pointer - @as(usize, @intCast(-offset))));
-    }
+pub inline fn incrementPointer(pointer: anytype, offset: i32) @TypeOf(pointer) {
+    return if (offset >= 0)
+        pointer + @as(usize, @intCast(offset))
+    else
+        pointer - @abs(offset);
 }
 
 // Platform.

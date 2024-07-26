@@ -470,11 +470,11 @@ pub fn drawRectangleSlowly(
                 if (texture.memory) |base| {
                     const offset: i32 =
                         @intCast((texel_rounded_x * shared.BITMAP_BYTES_PER_PIXEL) + (texel_rounded_y * texture.pitch));
-                    const texel_pointer = shared.incrementPointer([*]void, base, offset);
-                    const texel_pointer_a: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texel_pointer));
-                    const texel_pointer_b = shared.incrementPointer(*align(1) u32, texel_pointer, @sizeOf(u32));
-                    const texel_pointer_c = shared.incrementPointer(*align(1) u32, texel_pointer, @as(i32, @intCast(texture.pitch)));
-                    const texel_pointer_d = shared.incrementPointer(*align(1) u32, texel_pointer, @sizeOf(u32) + @as(i32, @intCast(texture.pitch)));
+                    const texture_base = base - @abs(offset);
+                    const texel_pointer_a: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));
+                    const texel_pointer_b: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base + @sizeOf(u32)));
+                    const texel_pointer_c: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base - @abs(texture.pitch)));
+                    const texel_pointer_d: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base + @sizeOf(u32) - @abs(texture.pitch)));
 
                     var texel_a = Color.new(
                         @as(f32, @floatFromInt((texel_pointer_a.* >> 16) & 0xFF)),
@@ -627,12 +627,8 @@ pub fn drawBitmap(
     // Move to the correct spot in the data.
     const source_offset: i32 =
         @intCast(source_offset_y * @as(i32, @intCast(bitmap.pitch)) + shared.BITMAP_BYTES_PER_PIXEL * source_offset_x);
-    var source_row: [*]u8 = @ptrCast(bitmap.memory);
-    if (source_offset >= 0) {
-        source_row += @as(usize, @intCast(source_offset));
-    } else {
-        source_row -= @as(usize, @intCast(-source_offset));
-    }
+    const bitmap_pointer = @as([*]u8, @ptrCast(@alignCast(bitmap.memory.?)));
+    var source_row: [*]u8 = shared.incrementPointer(bitmap_pointer, source_offset);
 
     // Move to the correct spot in the destination.
     const dest_offset: usize =
@@ -675,11 +671,8 @@ pub fn drawBitmap(
         }
 
         dest_row += @as(usize, @intCast(draw_buffer.pitch));
-        if (bitmap.pitch >= 0) {
-            source_row += @as(usize, @intCast(bitmap.pitch));
-        } else {
-            source_row -= @as(usize, @intCast(-bitmap.pitch));
-        }
+
+        source_row = shared.incrementPointer(source_row, bitmap.pitch);
     }
 }
 
@@ -723,12 +716,8 @@ pub fn drawBitmapMatte(
     // Move to the correct spot in the data.
     const source_offset: i32 =
         @intCast(source_offset_y * @as(i32, @intCast(bitmap.pitch)) + shared.BITMAP_BYTES_PER_PIXEL * source_offset_x);
-    var source_row: [*]u8 = @ptrCast(bitmap.memory);
-    if (source_offset >= 0) {
-        source_row += @as(usize, @intCast(source_offset));
-    } else {
-        source_row -= @as(usize, @intCast(-source_offset));
-    }
+    const bitmap_pointer = @as([*]u8, @ptrCast(@alignCast(bitmap.memory.?)));
+    var source_row: [*]u8 = shared.incrementPointer(bitmap_pointer, source_offset);
 
     // Move to the correct spot in the destination.
     const dest_offset: usize =
@@ -767,11 +756,7 @@ pub fn drawBitmapMatte(
         }
 
         dest_row += @as(usize, @intCast(draw_buffer.pitch));
-        if (bitmap.pitch >= 0) {
-            source_row += @as(usize, @intCast(bitmap.pitch));
-        } else {
-            source_row -= @as(usize, @intCast(-bitmap.pitch));
-        }
+        source_row = shared.incrementPointer(source_row, bitmap.pitch);
     }
 }
 
