@@ -476,57 +476,65 @@ pub fn drawRectangleSlowly(
                     const texel_pointer_c = shared.incrementPointer(*align(1) u32, texel_pointer, @as(i32, @intCast(texture.pitch)));
                     const texel_pointer_d = shared.incrementPointer(*align(1) u32, texel_pointer, @sizeOf(u32) + @as(i32, @intCast(texture.pitch)));
 
-                    const texel_a = Color.new(
+                    var texel_a = Color.new(
                         @as(f32, @floatFromInt((texel_pointer_a.* >> 16) & 0xFF)),
                         @as(f32, @floatFromInt((texel_pointer_a.* >> 8) & 0xFF)),
                         @as(f32, @floatFromInt((texel_pointer_a.* >> 0) & 0xFF)),
                         @floatFromInt((texel_pointer_a.* >> 24) & 0xFF),
                     );
-                    const texel_b = Color.new(
+                    var texel_b = Color.new(
                         @as(f32, @floatFromInt((texel_pointer_b.* >> 16) & 0xFF)),
                         @as(f32, @floatFromInt((texel_pointer_b.* >> 8) & 0xFF)),
                         @as(f32, @floatFromInt((texel_pointer_b.* >> 0) & 0xFF)),
                         @floatFromInt((texel_pointer_b.* >> 24) & 0xFF),
                     );
-                    const texel_c = Color.new(
+                    var texel_c = Color.new(
                         @as(f32, @floatFromInt((texel_pointer_c.* >> 16) & 0xFF)),
                         @as(f32, @floatFromInt((texel_pointer_c.* >> 8) & 0xFF)),
                         @as(f32, @floatFromInt((texel_pointer_c.* >> 0) & 0xFF)),
                         @floatFromInt((texel_pointer_c.* >> 24) & 0xFF),
                     );
-                    const texel_d = Color.new(
+                    var texel_d = Color.new(
                         @as(f32, @floatFromInt((texel_pointer_d.* >> 16) & 0xFF)),
                         @as(f32, @floatFromInt((texel_pointer_d.* >> 8) & 0xFF)),
                         @as(f32, @floatFromInt((texel_pointer_d.* >> 0) & 0xFF)),
                         @floatFromInt((texel_pointer_d.* >> 24) & 0xFF),
                     );
 
-                    // const texel = texel_a;
-                    const texel = texel_a.lerp(texel_b, texel_fraction_x).lerp(texel_c.lerp(texel_d, texel_fraction_x), texel_fraction_y);
+                    texel_a = sRGB255ToLinear1(texel_a);
+                    texel_b = sRGB255ToLinear1(texel_b);
+                    texel_c = sRGB255ToLinear1(texel_c);
+                    texel_d = sRGB255ToLinear1(texel_d);
 
-                    const sa = texel.a();
-                    const sr = texel.r();
-                    const sg = texel.g();
-                    const sb = texel.b();
-
-                    const rsa: f32 = color.a() * (sa / 255.0);
-
-                    const da: f32 = @floatFromInt((pixel[0] >> 24) & 0xFF);
-                    const rda: f32 = (da / 255.0);
-                    const dr: f32 = @floatFromInt((pixel[0] >> 16) & 0xFF);
-                    const dg: f32 = @floatFromInt((pixel[0] >> 8) & 0xFF);
-                    const db: f32 = @floatFromInt((pixel[0] >> 0) & 0xFF);
-
+                    const texel = texel_a.lerp(texel_b, texel_fraction_x).lerp(
+                        texel_c.lerp(texel_d, texel_fraction_x),
+                        texel_fraction_y,
+                    );
+                    const rsa: f32 = texel.a() * color.a();
                     const inv_rsa = (1.0 - rsa);
-                    const a = 255.0 * (rsa + rda - rsa * rda);
-                    const r = inv_rsa * dr + sr;
-                    const g = inv_rsa * dg + sg;
-                    const b = inv_rsa * db + sb;
 
-                    pixel[0] = ((@as(u32, @intFromFloat(a + 0.5)) << 24) |
-                        (@as(u32, @intFromFloat(r + 0.5)) << 16) |
-                        (@as(u32, @intFromFloat(g + 0.5)) << 8) |
-                        (@as(u32, @intFromFloat(b + 0.5)) << 0));
+                    var dest = Color.new(
+                        @floatFromInt((pixel[0] >> 16) & 0xFF),
+                        @floatFromInt((pixel[0] >> 8) & 0xFF),
+                        @floatFromInt((pixel[0] >> 0) & 0xFF),
+                        @floatFromInt((pixel[0] >> 24) & 0xFF),
+                    );
+                    dest = sRGB255ToLinear1(dest);
+
+                    const rda: f32 = dest.a();
+                    const blended = Color.new(
+                        inv_rsa * dest.r() + color.a() * color.r() * texel.r(),
+                        inv_rsa * dest.g() + color.a() * color.g() * texel.g(),
+                        inv_rsa * dest.b() + color.a() * color.b() * texel.b(),
+                        rsa + rda - rsa * rda,
+                    );
+
+                    const blended255 = linear1ToSRGB255(blended);
+
+                    pixel[0] = ((@as(u32, @intFromFloat(blended255.a() + 0.5)) << 24) |
+                        (@as(u32, @intFromFloat(blended255.r() + 0.5)) << 16) |
+                        (@as(u32, @intFromFloat(blended255.g() + 0.5)) << 8) |
+                        (@as(u32, @intFromFloat(blended255.b() + 0.5)) << 0));
                 }
 
                 // pixel[0] = shared.colorToInt(color);
@@ -765,4 +773,24 @@ pub fn drawBitmapMatte(
             source_row -= @as(usize, @intCast(-bitmap.pitch));
         }
     }
+}
+
+fn sRGB255ToLinear1(color: Color) Color {
+    const inverse_255: f32 = 1.0 / 255.0;
+
+    return Color.new(
+        math.square(inverse_255 * color.r()),
+        math.square(inverse_255 * color.g()),
+        math.square(inverse_255 * color.b()),
+        inverse_255 * color.a(),
+    );
+}
+
+fn linear1ToSRGB255(color: Color) Color {
+    return Color.new(
+        255.0 * @sqrt(color.r()),
+        255.0 * @sqrt(color.g()),
+        255.0 * @sqrt(color.b()),
+        255.0 * color.a(),
+    );
 }

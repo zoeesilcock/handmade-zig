@@ -723,11 +723,19 @@ pub export fn updateAndRender(
         y_axis = Vector2.new(0, scale);
     }
 
+    const color_angle = 5.0 * angle;
+    const color =
+        Color.new(
+        0.5 + 0.5 * intrinsics.sin(color_angle),
+        0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
+        0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
+        0.5 + 0.5 * intrinsics.sin(10 * color_angle),
+    );
     if (render_group.pushCoordinateSystem(
         origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(Vector2.new(displacement, 0)),
         x_axis,
         y_axis,
-        Color.new(0.5 + 0.5 * intrinsics.sin(angle), 0.5 + 0.5 * intrinsics.sin(2.9 * angle), 0.5 + 0.5 * intrinsics.sin(9.9 * angle), 1),
+        color,
         &state.tree,
     )) |*coordinate_system| {
         var point_index: u32 = 0;
