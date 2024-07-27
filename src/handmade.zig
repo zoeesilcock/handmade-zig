@@ -723,14 +723,15 @@ pub export fn updateAndRender(
         y_axis = Vector2.new(0, scale);
     }
 
-    const color_angle = 5.0 * angle;
-    const color =
-        Color.new(
-        0.5 + 0.5 * intrinsics.sin(color_angle),
-        0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
-        0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
-        0.5 + 0.5 * intrinsics.sin(10 * color_angle),
-    );
+    const color = Color.new(1, 1, 1, 1);
+    // const color_angle = 5.0 * angle;
+    // const color =
+    //     Color.new(
+    //     0.5 + 0.5 * intrinsics.sin(color_angle),
+    //     0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
+    //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
+    //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
+    // );
     if (render_group.pushCoordinateSystem(
         origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(Vector2.new(displacement, 0)),
         x_axis,
@@ -1189,21 +1190,22 @@ fn debugLoadBMP(
             var y: u32 = 0;
             while (y < header.height) : (y += 1) {
                 const color = source_dest[0];
-                var r: f32 = @floatFromInt((color & header.red_mask) >> red_shift_down);
-                var g: f32 = @floatFromInt((color & header.green_mask) >> green_shift_down);
-                var b: f32 = @floatFromInt((color & header.blue_mask) >> blue_shift_down);
-                const a: f32 = @floatFromInt((color & alpha_mask) >> alpha_shift_down);
-                const an = (a / 255.0);
+                var texel = Color.new(
+                    @floatFromInt((color & header.red_mask) >> red_shift_down),
+                    @floatFromInt((color & header.green_mask) >> green_shift_down),
+                    @floatFromInt((color & header.blue_mask) >> blue_shift_down),
+                    @floatFromInt((color & alpha_mask) >> alpha_shift_down),
+                );
+                texel = render.sRGB255ToLinear1(texel);
 
-                // Pre-multiply alpha.
-                r *= an;
-                g *= an;
-                b *= an;
+                _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
 
-                source_dest[0] = ((@as(u32, @intFromFloat(a + 0.5)) << 24) |
-                    (@as(u32, @intFromFloat(r + 0.5)) << 16) |
-                    (@as(u32, @intFromFloat(g + 0.5)) << 8) |
-                    (@as(u32, @intFromFloat(b + 0.5)) << 0));
+                texel = render.linear1ToSRGB255(texel);
+
+                source_dest[0] = ((@as(u32, @intFromFloat(texel.a() + 0.5)) << 24) |
+                    (@as(u32, @intFromFloat(texel.r() + 0.5)) << 16) |
+                    (@as(u32, @intFromFloat(texel.g() + 0.5)) << 8) |
+                    (@as(u32, @intFromFloat(texel.b() + 0.5)) << 0));
 
                 source_dest += 1;
             }

@@ -1,5 +1,6 @@
 pub const Vector2 = Vector(2, .Position);
 pub const Vector3 = Vector(3, .Position);
+pub const Color3 = Vector(3, .Color);
 pub const Color = Vector(4, .Color);
 
 const VectorAccessorStyle = enum {
@@ -143,6 +144,18 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn b(self: *const Self) f32 {
                             return self.values[2];
                         }
+                        pub inline fn setR(self: *Self, value: f32) *Self {
+                            self.values[0] = value;
+                            return self;
+                        }
+                        pub inline fn setG(self: *Self, value: f32) *Self {
+                            self.values[1] = value;
+                            return self;
+                        }
+                        pub inline fn setB(self: *Self, value: f32) *Self {
+                            self.values[2] = value;
+                            return self;
+                        }
                     },
                 };
             },
@@ -195,6 +208,9 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn a(self: *const Self) f32 {
                             return self.values[3];
                         }
+                        pub inline fn rgb(self: *const Self) Color3 {
+                            return Color3.new(self.r(), self.g(), self.b());
+                        }
                         pub inline fn setR(self: *Self, value: f32) *Self {
                             self.values[0] = value;
                             return self;
@@ -209,6 +225,12 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         }
                         pub inline fn setA(self: *Self, value: f32) *Self {
                             self.values[3] = value;
+                            return self;
+                        }
+                        pub inline fn setRGB(self: *Self, value: Color3) *Self {
+                            self.values[0] = value.values[0];
+                            self.values[1] = value.values[1];
+                            self.values[2] = value.values[2];
                             return self;
                         }
                     },
