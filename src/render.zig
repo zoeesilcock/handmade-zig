@@ -34,26 +34,22 @@ pub const RenderEntryHeader = extern struct {
 };
 
 pub const RenderEntryClear = extern struct {
-    header: RenderEntryHeader,
     color: Color,
 };
 
 pub const RenderEntryBitmap = extern struct {
-    header: RenderEntryHeader,
     entity_basis: RenderEntityBasis,
     bitmap: ?*const LoadedBitmap,
     color: Color,
 };
 
 pub const RenderEntryRectangle = extern struct {
-    header: RenderEntryHeader,
     entity_basis: RenderEntityBasis,
     dimension: Vector2 = Vector2.zero(),
     color: Color,
 };
 
 pub const RenderEntryCoordinateSystem = extern struct {
-    header: RenderEntryHeader,
     origin: Vector2,
     x_axis: Vector2,
     y_axis: Vector2,
@@ -91,17 +87,24 @@ pub const RenderGroup = extern struct {
 
     fn pushRenderElement_(
         self: *RenderGroup,
-        size: u32,
+        in_size: u32,
         entry_type: RenderEntryType,
-        alignment: usize,
-    ) ?*RenderEntryHeader {
-        _ = alignment;
-        var result: ?*RenderEntryHeader = null;
+        comptime alignment: u32,
+    ) ?*void {
+        var result: ?*void = null;
+        const size = in_size + @sizeOf(RenderEntryHeader);
 
         if ((self.push_buffer_size + size) < self.max_push_buffer_size) {
-            result = @ptrCast(self.push_buffer_base + self.push_buffer_size);
-            result.?.type = entry_type;
-            self.push_buffer_size += size;
+            const header: *RenderEntryHeader = @ptrCast(self.push_buffer_base + self.push_buffer_size);
+            header.type = entry_type;
+
+            const data_address = @intFromPtr(header) + @sizeOf(RenderEntryHeader);
+            const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+            const aligned_offset = aligned_address - data_address;
+            const aligned_size = size + aligned_offset;
+
+            result = @ptrFromInt(aligned_address);
+            self.push_buffer_size += @intCast(aligned_size);
         } else {
             unreachable;
         }
@@ -230,7 +233,7 @@ pub const RenderGroup = extern struct {
             entry.color = color;
             entry.texture = texture;
 
-            result = entry;
+            result = @alignCast(entry);
         }
 
         return result;
@@ -263,35 +266,48 @@ pub const RenderGroup = extern struct {
 
         var base_address: u32 = 0;
         while (base_address < self.push_buffer_size) {
-            const header: *RenderEntryHeader = @ptrCast(@alignCast(self.push_buffer_base + base_address));
+            const header: *RenderEntryHeader = @ptrCast(self.push_buffer_base + base_address);
+            const alignment: usize = switch (header.type) {
+                .RenderEntryClear => @alignOf(RenderEntryClear),
+                .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
+                .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
+                .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
+            };
+
+            const header_address = @intFromPtr(header);
+            const data_address = header_address + @sizeOf(RenderEntryHeader);
+            const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+            const aligned_offset: u32 = @intCast(aligned_address - data_address);
+            const data: *void = @ptrFromInt(aligned_address);
+
+            base_address += @sizeOf(RenderEntryHeader) + aligned_offset;
 
             switch (header.type) {
                 .RenderEntryClear => {
-                    const entry: *RenderEntryClear = @ptrCast(@alignCast(header));
-                    base_address += @sizeOf(@TypeOf(entry.*));
-
+                    const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
                     const dimension = Vector2.newI(output_target.width, output_target.height);
                     drawRectangle(output_target, Vector2.zero(), dimension, entry.color);
+
+                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
                 .RenderEntryBitmap => {
-                    const entry: *RenderEntryBitmap = @ptrCast(@alignCast(header));
-                    base_address += @sizeOf(@TypeOf(entry.*));
-
+                    const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                     if (entry.bitmap) |bitmap| {
                         const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
                         drawBitmap(output_target, bitmap, position.x(), position.y(), entry.color.a());
                     }
+
+                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
                 .RenderEntryRectangle => {
-                    const entry: *RenderEntryRectangle = @ptrCast(@alignCast(header));
-                    base_address += @sizeOf(@TypeOf(entry.*));
-
+                    const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                     const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
                     drawRectangle(output_target, position, position.plus(entry.dimension), entry.color);
+
+                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
                 .RenderEntryCoordinateSystem => {
-                    const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(header));
-                    base_address += @sizeOf(@TypeOf(entry.*));
+                    const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
 
                     const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
                     drawRectangleSlowly(
@@ -324,6 +340,8 @@ pub const RenderGroup = extern struct {
                             drawRectangle(output_target, position, position.plus(dimension), entry.color);
                         }
                     }
+
+                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
             }
         }
