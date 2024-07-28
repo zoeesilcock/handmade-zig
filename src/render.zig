@@ -537,10 +537,7 @@ pub fn drawRectangleSlowly(
                         texel_fraction_y,
                     );
 
-                    _ = texel.setR(texel.r() * color.r());
-                    _ = texel.setG(texel.g() * color.g());
-                    _ = texel.setB(texel.b() * color.b());
-                    _ = texel.setA(texel.a() * color.a());
+                    texel = texel.hadamardProduct(color);
 
                     var dest = Color.new(
                         @floatFromInt((pixel[0] >> 16) & 0xFF),
@@ -550,15 +547,7 @@ pub fn drawRectangleSlowly(
                     );
                     dest = sRGB255ToLinear1(dest);
 
-                    const inv_rsa = (1.0 - texel.a());
-
-                    const blended = Color.new(
-                        inv_rsa * dest.r() + texel.r(),
-                        inv_rsa * dest.g() + texel.g(),
-                        inv_rsa * dest.b() + texel.b(),
-                        texel.a() + dest.a() - texel.a() * dest.a(),
-                    );
-
+                    const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
                     const blended255 = linear1ToSRGB255(blended);
 
                     pixel[0] = ((@as(u32, @intFromFloat(blended255.a() + 0.5)) << 24) |
@@ -691,14 +680,7 @@ pub fn drawBitmap(
 
             d = sRGB255ToLinear1(d);
 
-            const inv_rsa = (1.0 - texel.a());
-            var result = Color.new(
-                inv_rsa * d.r() + texel.r(),
-                inv_rsa * d.g() + texel.g(),
-                inv_rsa * d.b() + texel.b(),
-                (texel.a() + d.a() - texel.a() * d.a()),
-            );
-
+            var result = d.scaledTo(1.0 - texel.a()).plus(texel);
             result = linear1ToSRGB255(result);
 
             dest[0] = ((@as(u32, @intFromFloat(result.a() + 0.5)) << 24) |
