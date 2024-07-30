@@ -353,10 +353,3 @@ pub const BitmapHeader = packed struct {
     green_mask: u32,
     blue_mask: u32,
 };
-
-pub fn colorToInt(color: Color) u32 {
-    return ((intrinsics.roundReal32ToUInt32(color.a() * 255.0) << 24) |
-        (intrinsics.roundReal32ToUInt32(color.r() * 255.0) << 16) |
-        (intrinsics.roundReal32ToUInt32(color.g() * 255.0) << 8) |
-        (intrinsics.roundReal32ToUInt32(color.b() * 255.0) << 0));
-}

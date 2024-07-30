@@ -8,8 +8,16 @@ pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 // Types.
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
+const Vector4 = math.Vector4;
 const Color = math.Color;
+const Color3 = math.Color3;
 const LoadedBitmap = shared.LoadedBitmap;
+
+const EnvironmentMap = extern struct {
+    width: i32,
+    height: i32,
+    lod: [4]*LoadedBitmap,
+};
 
 pub const RenderBasis = extern struct {
     position: Vector3,
@@ -54,9 +62,13 @@ pub const RenderEntryCoordinateSystem = extern struct {
     x_axis: Vector2,
     y_axis: Vector2,
     color: Color,
-    texture: *LoadedBitmap,
 
-    points: [16]Vector2 = [1]Vector2{Vector2.zero()} ** 16,
+    texture: *LoadedBitmap,
+    normal_map: ?*LoadedBitmap,
+
+    top: *EnvironmentMap,
+    middle: *EnvironmentMap,
+    bottom: *EnvironmentMap,
 };
 
 pub const RenderGroup = extern struct {
@@ -223,6 +235,10 @@ pub const RenderGroup = extern struct {
         y_axis: Vector2,
         color: Color,
         texture: *LoadedBitmap,
+        normal_map: ?*LoadedBitmap,
+        top: *EnvironmentMap,
+        middle: *EnvironmentMap,
+        bottom: *EnvironmentMap,
     ) ?*RenderEntryCoordinateSystem {
         var result: ?*RenderEntryCoordinateSystem = null;
 
@@ -232,6 +248,10 @@ pub const RenderGroup = extern struct {
             entry.y_axis = y_axis;
             entry.color = color;
             entry.texture = texture;
+            entry.normal_map = normal_map;
+            entry.top = top;
+            entry.middle = middle;
+            entry.bottom = bottom;
 
             result = @alignCast(entry);
         }
@@ -292,10 +312,10 @@ pub const RenderGroup = extern struct {
                 },
                 .RenderEntryBitmap => {
                     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                    if (entry.bitmap) |bitmap| {
-                        const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
-                        drawBitmap(output_target, bitmap, position.x(), position.y(), entry.color.a());
-                    }
+                    // if (entry.bitmap) |bitmap| {
+                    //     const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
+                    //     drawBitmap(output_target, bitmap, position.x(), position.y(), entry.color.a());
+                    // }
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -317,6 +337,10 @@ pub const RenderGroup = extern struct {
                         entry.y_axis,
                         entry.color,
                         entry.texture,
+                        entry.normal_map,
+                        entry.top,
+                        entry.middle,
+                        entry.bottom,
                     );
 
                     const color = Color.new(1, 1, 0, 1);
@@ -332,14 +356,6 @@ pub const RenderGroup = extern struct {
 
                     position = max;
                     drawRectangle(output_target, position, position.plus(dimension), color);
-
-                    if (false) {
-                        for (entry.points) |point| {
-                            position = entry.origin
-                                .plus(entry.x_axis.scaledTo(point.x()).plus(entry.y_axis.scaledTo(point.y())));
-                            drawRectangle(output_target, position, position.plus(dimension), entry.color);
-                        }
-                    }
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -384,7 +400,7 @@ pub fn drawRectangle(
 
         var x = min_x;
         while (x < max_x) : (x += 1) {
-            pixel[0] = shared.colorToInt(color);
+            pixel[0] = color.packColor();
             pixel += 1;
         }
 
@@ -399,6 +415,10 @@ pub fn drawRectangleSlowly(
     y_axis: Vector2,
     color_in: Color,
     texture: *LoadedBitmap,
+    opt_normal_map: ?*LoadedBitmap,
+    top: *EnvironmentMap,
+    middle: *EnvironmentMap,
+    bottom: *EnvironmentMap,
 ) void {
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -414,6 +434,8 @@ pub fn drawRectangleSlowly(
 
     const width_max = draw_buffer.width - 1;
     const height_max = draw_buffer.height - 1;
+    const inv_width_max: f32 = 1.0 / @as(f32, @floatFromInt(width_max));
+    const inv_height_max: f32 = 1.0 / @as(f32, @floatFromInt(height_max));
     var y_min: i32 = height_max;
     var y_max: i32 = 0;
     var x_min: i32 = width_max;
@@ -470,6 +492,10 @@ pub fn drawRectangleSlowly(
             const edge3 = d.minus(y_axis).dotProduct(y_axis.perp());
 
             if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
+                const screen_space_uv = Vector2.new(
+                    inv_width_max * @as(f32, @floatFromInt(x)),
+                    inv_height_max * @as(f32, @floatFromInt(y)),
+                );
                 const u = d.dotProduct(x_axis) * inv_x_axis_length_squared;
                 const v = d.dotProduct(y_axis) * inv_y_axis_length_squared;
 
@@ -497,54 +523,65 @@ pub fn drawRectangleSlowly(
                     const texel_pointer_c: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base - @abs(texture.pitch)));
                     const texel_pointer_d: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base + @sizeOf(u32) - @abs(texture.pitch)));
 
-                    var texel_a = Color.new(
-                        @as(f32, @floatFromInt((texel_pointer_a.* >> 16) & 0xFF)),
-                        @as(f32, @floatFromInt((texel_pointer_a.* >> 8) & 0xFF)),
-                        @as(f32, @floatFromInt((texel_pointer_a.* >> 0) & 0xFF)),
-                        @floatFromInt((texel_pointer_a.* >> 24) & 0xFF),
-                    );
-                    var texel_b = Color.new(
-                        @as(f32, @floatFromInt((texel_pointer_b.* >> 16) & 0xFF)),
-                        @as(f32, @floatFromInt((texel_pointer_b.* >> 8) & 0xFF)),
-                        @as(f32, @floatFromInt((texel_pointer_b.* >> 0) & 0xFF)),
-                        @floatFromInt((texel_pointer_b.* >> 24) & 0xFF),
-                    );
-                    var texel_c = Color.new(
-                        @as(f32, @floatFromInt((texel_pointer_c.* >> 16) & 0xFF)),
-                        @as(f32, @floatFromInt((texel_pointer_c.* >> 8) & 0xFF)),
-                        @as(f32, @floatFromInt((texel_pointer_c.* >> 0) & 0xFF)),
-                        @floatFromInt((texel_pointer_c.* >> 24) & 0xFF),
-                    );
-                    var texel_d = Color.new(
-                        @as(f32, @floatFromInt((texel_pointer_d.* >> 16) & 0xFF)),
-                        @as(f32, @floatFromInt((texel_pointer_d.* >> 8) & 0xFF)),
-                        @as(f32, @floatFromInt((texel_pointer_d.* >> 0) & 0xFF)),
-                        @floatFromInt((texel_pointer_d.* >> 24) & 0xFF),
-                    );
+                    var texel_a = Color.unpackColor(texel_pointer_a.*);
+                    var texel_b = Color.unpackColor(texel_pointer_b.*);
+                    var texel_c = Color.unpackColor(texel_pointer_c.*);
+                    var texel_d = Color.unpackColor(texel_pointer_d.*);
 
                     texel_a = sRGB255ToLinear1(texel_a);
                     texel_b = sRGB255ToLinear1(texel_b);
                     texel_c = sRGB255ToLinear1(texel_c);
                     texel_d = sRGB255ToLinear1(texel_d);
 
-                    _ = texel_a.setRGB(texel_a.rgb().scaledTo(texel_a.a()));
-                    _ = texel_b.setRGB(texel_b.rgb().scaledTo(texel_b.a()));
-                    _ = texel_c.setRGB(texel_c.rgb().scaledTo(texel_c.a()));
-                    _ = texel_d.setRGB(texel_d.rgb().scaledTo(texel_d.a()));
-
                     var texel = texel_a.lerp(texel_b, texel_fraction_x).lerp(
                         texel_c.lerp(texel_d, texel_fraction_x),
                         texel_fraction_y,
                     );
 
+                    if (opt_normal_map) |normal_map| {
+                        if (normal_map.memory) |normal_texture| {
+                            const normal_offset: i32 =
+                                @intCast((texel_rounded_x * shared.BITMAP_BYTES_PER_PIXEL) + (texel_rounded_y * texture.pitch));
+                            const normal_base = normal_texture - @abs(normal_offset);
+                            const normal_pointer_a: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(normal_base));
+                            const normal_pointer_b: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(normal_base + @sizeOf(u32)));
+                            const normal_pointer_c: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(normal_base - @abs(texture.pitch)));
+                            const normal_pointer_d: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(normal_base + @sizeOf(u32) - @abs(texture.pitch)));
+
+                            const normal_a = Vector4.unpackColor(normal_pointer_a.*);
+                            const normal_b = Vector4.unpackColor(normal_pointer_b.*);
+                            const normal_c = Vector4.unpackColor(normal_pointer_c.*);
+                            const normal_d = Vector4.unpackColor(normal_pointer_d.*);
+
+                            const normal = normal_a.lerp(normal_b, texel_fraction_x).lerp(
+                                normal_c.lerp(normal_d, texel_fraction_x),
+                                texel_fraction_y,
+                            );
+
+                            var opt_far_map: ?*EnvironmentMap = null;
+                            const env_map_blend: f32 = normal.z();
+                            var far_map_blend: f32 = 0;
+                            if (env_map_blend < 0.25) {
+                                opt_far_map = bottom;
+                                far_map_blend = 1.0 - (env_map_blend / 0.25);
+                            } else if (env_map_blend > 0.75) {
+                                opt_far_map = top;
+                                far_map_blend = (1.0 - env_map_blend) / 0.25;
+                            }
+
+                            var light_color = sampleEnvironmentMap(middle, screen_space_uv, normal.xyz(), normal.w());
+                            if (opt_far_map) |far_map| {
+                                const far_map_color = sampleEnvironmentMap(far_map, screen_space_uv, normal.xyz(), normal.w());
+                                light_color = light_color.lerp(far_map_color, far_map_blend);
+                            }
+
+                            _ = texel.setRGB(texel.rgb().hadamardProduct(light_color));
+                        }
+                    }
+
                     texel = texel.hadamardProduct(color);
 
-                    var dest = Color.new(
-                        @floatFromInt((pixel[0] >> 16) & 0xFF),
-                        @floatFromInt((pixel[0] >> 8) & 0xFF),
-                        @floatFromInt((pixel[0] >> 0) & 0xFF),
-                        @floatFromInt((pixel[0] >> 24) & 0xFF),
-                    );
+                    var dest = Color.unpackColor(pixel[0]);
                     dest = sRGB255ToLinear1(dest);
 
                     const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
@@ -661,32 +698,23 @@ pub fn drawBitmap(
         var x = min_x;
         while (x < max_x) : (x += 1) {
 
-            var texel = Color.new(
-                @as(f32, @floatFromInt((source[0] >> 16) & 0xFF)),
-                @as(f32, @floatFromInt((source[0] >> 8) & 0xFF)),
-                @as(f32, @floatFromInt((source[0] >> 0) & 0xFF)),
-                @floatFromInt((source[0] >> 24) & 0xFF),
-            );
+            var texel = Color.unpackColor(source[0]);
 
             texel = sRGB255ToLinear1(texel);
             texel = texel.scaledTo(alpha);
 
-            var d = Color.new(
-                @floatFromInt((dest[0] >> 16) & 0xFF),
-                @floatFromInt((dest[0] >> 8) & 0xFF),
-                @floatFromInt((dest[0] >> 0) & 0xFF),
-                @floatFromInt((dest[0] >> 24) & 0xFF),
-            );
+            var d = Color.unpackColor(dest[0]);
 
             d = sRGB255ToLinear1(d);
 
             var result = d.scaledTo(1.0 - texel.a()).plus(texel);
             result = linear1ToSRGB255(result);
 
-            dest[0] = ((@as(u32, @intFromFloat(result.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(result.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(result.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(result.b() + 0.5)) << 0));
+            dest[0] = result.packColor();
+            // dest[0] = ((@as(u32, @intFromFloat(result.a() + 0.5)) << 24) |
+            //     (@as(u32, @intFromFloat(result.r() + 0.5)) << 16) |
+            //     (@as(u32, @intFromFloat(result.g() + 0.5)) << 8) |
+            //     (@as(u32, @intFromFloat(result.b() + 0.5)) << 0));
 
             source += 1;
             dest += 1;
@@ -801,3 +829,12 @@ pub fn linear1ToSRGB255(color: Color) Color {
         255.0 * color.a(),
     );
 }
+
+fn sampleEnvironmentMap(map: *EnvironmentMap, screen_space_uv: Vector2, normal: Vector3, roughness: f32) Color3 {
+    _ = map;
+    _ = screen_space_uv;
+    _ = roughness;
+
+    return Color3.new(normal.x(), normal.y(), normal.z());
+}
+

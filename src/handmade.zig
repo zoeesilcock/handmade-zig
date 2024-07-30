@@ -433,7 +433,7 @@ pub export fn updateAndRender(
     const draw_buffer = &draw_buffer_;
 
     // Clear background.
-    render_group.pushClear(Color.new(1, 0, 1, 1));
+    render_group.pushClear(Color.new(0.5, 0.5, 0.5, 0));
 
     const screen_size = Vector3.newI(buffer.width, buffer.height, 0).scaledTo(pixels_to_meters);
     const camera_bounds_in_meters = math.Rectangle3.fromCenterDimension(Vector3.zero(), screen_size);
@@ -699,7 +699,8 @@ pub export fn updateAndRender(
     }
 
     state.time += input.frame_delta_time;
-    const angle = 0.1 * state.time;
+    // const angle = 0.1 * state.time;
+    const angle: f32 = 0;
     const displacement = 100.0 * intrinsics.cos(5.0 * angle);
 
     const screen_center = Vector2.new(
@@ -712,7 +713,7 @@ pub export fn updateAndRender(
     var x_axis = Vector2.zero();
     var y_axis = Vector2.zero();
 
-    if (true) {
+    if (false) {
         x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
         y_axis = x_axis.perp();
     } else if (false) {
@@ -732,23 +733,21 @@ pub export fn updateAndRender(
     //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
     //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
     // );
-    if (render_group.pushCoordinateSystem(
+    var normal_map = makeEmptyBitmap(&transient_state.arena, 128, 128, false);
+    makeSphereNormalMap(&normal_map, 1);
+
+    _ = render_group.pushCoordinateSystem(
         origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(Vector2.new(displacement, 0)),
         x_axis,
         y_axis,
         color,
-        &state.tree,
-    )) |*coordinate_system| {
-        var point_index: u32 = 0;
-        var point_y: f32 = 0.0;
-        while (point_y < 1) : (point_y += 0.25) {
-            var point_x: f32 = 0.0;
-            while (point_x < 1) : (point_x += 0.25) {
-                coordinate_system.*.points[point_index] = Vector2.new(point_x, point_y);
-                point_index += 1;
-            }
-        }
-    }
+        &normal_map,
+        // &state.tree,
+        null,
+        undefined,
+        undefined,
+        undefined,
+    );
 
     render_group.renderTo(draw_buffer);
 
@@ -1149,6 +1148,45 @@ fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to
     }
 
     return result.*;
+}
+
+fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
+    const inv_width: f32 = 1.0 / (1.0 - @as(f32, @floatFromInt(bitmap.width)));
+    const inv_height: f32 = 1.0 / (1.0 - @as(f32, @floatFromInt(bitmap.height)));
+
+    var row: [*]u8 = @ptrCast(bitmap.memory);
+    var y: u32 = 0;
+    while (y < bitmap.height) : (y += 1) {
+        var x: u32 = 0;
+        while (x < bitmap.width) : (x += 1) {
+            var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+            const bitmap_uv = Vector2.new(
+                inv_width * @as(f32, @floatFromInt(x)),
+                inv_height * @as(f32, @floatFromInt(y)),
+            );
+            var normal = Vector3.new(
+                2.0 * bitmap_uv.x() - 1.0,
+                2.0 * bitmap_uv.y() - 1.0,
+                0,
+            );
+            _ = normal.setZ(intrinsics.squareRoot(1.0 - @min(1.0, math.square(normal.x()) + math.square(normal.y()))));
+
+            const color = Color.new(
+                255.0 * (0.5 * (normal.x() + 1.0)),
+                255.0 * (0.5 * (normal.y() + 1.0)),
+                127.0 * normal.z(),
+                255.0 * roughness,
+            );
+
+            pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
+                (@as(u32, @intFromFloat(color.r() + 0.5)) << 16) |
+                (@as(u32, @intFromFloat(color.g() + 0.5)) << 8) |
+                (@as(u32, @intFromFloat(color.b() + 0.5)) << 0));
+            pixel += 1;
+        }
+
+        row += @as(usize, @intCast(bitmap.pitch));
+    }
 }
 
 fn debugLoadBMP(

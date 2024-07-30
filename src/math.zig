@@ -1,5 +1,8 @@
+const intrinsics = @import("intrinsics.zig");
+
 pub const Vector2 = Vector(2, .Position);
 pub const Vector3 = Vector(3, .Position);
+pub const Vector4 = Vector(4, .Position);
 pub const Color3 = Vector(3, .Color);
 pub const Color = Vector(4, .Color);
 
@@ -164,6 +167,21 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                     return Self{ .values = .{ x_value, y_value, z_value, w_value } };
                 }
 
+                pub inline fn packColor(self: Self) u32 {
+                    return ((intrinsics.roundReal32ToUInt32(self.a() * 255.0) << 24) |
+                        (intrinsics.roundReal32ToUInt32(self.r() * 255.0) << 16) |
+                        (intrinsics.roundReal32ToUInt32(self.g() * 255.0) << 8) |
+                        (intrinsics.roundReal32ToUInt32(self.b() * 255.0) << 0));
+                }
+                pub inline fn unpackColor(value: u32) Self {
+                    return Self.new(
+                        @as(f32, @floatFromInt((value >> 16) & 0xFF)),
+                        @as(f32, @floatFromInt((value >> 8) & 0xFF)),
+                        @as(f32, @floatFromInt((value >> 0) & 0xFF)),
+                        @floatFromInt((value >> 24) & 0xFF),
+                    );
+                }
+
                 pub usingnamespace switch (accessor_style) {
                     inline .Position => struct {
                         pub inline fn x(self: *const Self) f32 {
@@ -177,6 +195,9 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         }
                         pub inline fn w(self: *const Self) f32 {
                             return self.values[3];
+                        }
+                        pub inline fn xyz(self: *const Self) Vector3 {
+                            return Vector3.new(self.x(), self.y(), self.z());
                         }
                         pub inline fn setX(self: *Self, value: f32) *Self {
                             self.values[0] = value;
@@ -335,6 +356,10 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             }
 
             return result;
+        }
+
+        pub fn normalized(self: Self) Self {
+            return self.scaledTo(1.0 / self.length());
         }
     };
 }
