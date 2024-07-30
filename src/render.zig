@@ -84,7 +84,7 @@ pub const RenderGroup = extern struct {
 
         result.max_push_buffer_size = max_push_buffer_size;
         result.push_buffer_size = 0;
-        result.push_buffer_base = @ptrCast(arena.pushSize(result.max_push_buffer_size));
+        result.push_buffer_base = @ptrCast(arena.pushSize(result.max_push_buffer_size, @alignOf(u8)));
         result.default_basis = arena.pushStruct(RenderBasis);
         result.default_basis.position = Vector3.zero();
         result.meters_to_pixels = meters_to_pixels;

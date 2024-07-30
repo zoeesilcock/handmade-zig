@@ -168,20 +168,26 @@ pub const MemoryArena = struct {
         self.temp_count = 0;
     }
 
-    pub fn pushSize(self: *MemoryArena, size: MemoryIndex) [*]u8 {
-        std.debug.assert((self.used + size) <= self.size);
+    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, alignment: u32) [*]u8 {
+        const address = @intFromPtr(self.base + self.used);
+        const aligned_address = std.mem.alignForward(usize, address, alignment);
+        const aligned_offset = aligned_address - address;
+        const aligned_size = size + aligned_offset;
 
-        const result: [*]u8 = self.base + self.used;
-        self.used += size;
+        std.debug.assert((self.used + aligned_size) <= self.size);
+
+        const result: [*]u8 = @ptrFromInt(aligned_address);
+        self.used += aligned_size;
+
         return result;
     }
 
     pub fn pushStruct(self: *MemoryArena, comptime T: type) *T {
-        return @as(*T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T)))));
+        return @as(*T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T), @alignOf(T)))));
     }
 
     pub fn pushArray(self: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
-        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count))));
+        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, @alignOf(T)))));
     }
 
     pub fn beginTemporaryMemory(self: *MemoryArena) TemporaryMemory {
