@@ -247,6 +247,7 @@ pub const State = struct {
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
     tree: LoadedBitmap,
+    tree_normal: LoadedBitmap,
     sword: LoadedBitmap,
     stairwell: LoadedBitmap,
     grass: [2]LoadedBitmap,

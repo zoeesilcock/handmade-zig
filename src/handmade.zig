@@ -136,6 +136,7 @@ pub export fn updateAndRender(
                 },
             },
             .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
+            .tree_normal = undefined,
             .sword = debugLoadBMP(thread, platform, "test2/rock03.bmp"),
             .stairwell = debugLoadBMP(thread, platform, "test2/rock02.bmp"),
             .grass = .{
@@ -356,6 +357,9 @@ pub export fn updateAndRender(
             );
             ground_buffer.position = WorldPosition.nullPosition();
         }
+
+        state.tree_normal = makeEmptyBitmap(&transient_state.arena, state.tree.width, state.tree.height, false);
+        makeSphereNormalMap(&state.tree_normal, 0);
 
         transient_state.is_initialized = true;
     }
@@ -733,17 +737,14 @@ pub export fn updateAndRender(
     //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
     //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
     // );
-    var normal_map = makeEmptyBitmap(&transient_state.arena, 128, 128, false);
-    makeSphereNormalMap(&normal_map, 1);
 
     _ = render_group.pushCoordinateSystem(
         origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(Vector2.new(displacement, 0)),
         x_axis,
         y_axis,
         color,
-        &normal_map,
-        // &state.tree,
-        null,
+        &state.tree,
+        &state.tree_normal,
         undefined,
         undefined,
         undefined,
@@ -1141,7 +1142,7 @@ fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to
     result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
 
     const total_bitmap_size: u32 = @intCast(result.width * result.height * shared.BITMAP_BYTES_PER_PIXEL);
-    result.memory = @ptrCast(arena.pushSize(total_bitmap_size));
+    result.memory = @ptrCast(arena.pushSize(total_bitmap_size, @alignOf(u8)));
 
     if (clear_to_zero) {
         clearBitmap(result);
@@ -1151,37 +1152,45 @@ fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to
 }
 
 fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
-    const inv_width: f32 = 1.0 / (1.0 - @as(f32, @floatFromInt(bitmap.width)));
-    const inv_height: f32 = 1.0 / (1.0 - @as(f32, @floatFromInt(bitmap.height)));
+    const inv_width: f32 = 1.0 / (@as(f32, @floatFromInt(bitmap.width - 1)));
+    const inv_height: f32 = 1.0 / (@as(f32, @floatFromInt(bitmap.height - 1)));
 
     var row: [*]u8 = @ptrCast(bitmap.memory);
     var y: u32 = 0;
     while (y < bitmap.height) : (y += 1) {
+        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+
         var x: u32 = 0;
         while (x < bitmap.width) : (x += 1) {
-            var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
             const bitmap_uv = Vector2.new(
                 inv_width * @as(f32, @floatFromInt(x)),
                 inv_height * @as(f32, @floatFromInt(y)),
             );
-            var normal = Vector3.new(
-                2.0 * bitmap_uv.x() - 1.0,
-                2.0 * bitmap_uv.y() - 1.0,
-                0,
-            );
-            _ = normal.setZ(intrinsics.squareRoot(1.0 - @min(1.0, math.square(normal.x()) + math.square(normal.y()))));
 
-            const color = Color.new(
+            const nx: f32 = 2.0 * bitmap_uv.x() - 1.0;
+            const ny: f32 = 2.0 * bitmap_uv.y() - 1.0;
+
+            const root_term: f32 = 1.0 - nx * nx - ny * ny;
+            var normal = Vector3.new(0, 0, 1);
+            var nz: f32 = 0;
+            if (root_term >= 0) {
+                nz = intrinsics.squareRoot(root_term);
+                normal = Vector3.new(nx, ny, nz);
+            }
+
+            var color = Color.new(
                 255.0 * (0.5 * (normal.x() + 1.0)),
                 255.0 * (0.5 * (normal.y() + 1.0)),
-                127.0 * normal.z(),
+                255.0 * (0.5 * (normal.z() + 1.0)),
                 255.0 * roughness,
             );
 
-            pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
+            pixel[0] = (
+                (@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
                 (@as(u32, @intFromFloat(color.r() + 0.5)) << 16) |
                 (@as(u32, @intFromFloat(color.g() + 0.5)) << 8) |
                 (@as(u32, @intFromFloat(color.b() + 0.5)) << 0));
+
             pixel += 1;
         }
 

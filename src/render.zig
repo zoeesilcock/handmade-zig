@@ -14,9 +14,14 @@ const Color3 = math.Color3;
 const LoadedBitmap = shared.LoadedBitmap;
 
 const EnvironmentMap = extern struct {
-    width: i32,
-    height: i32,
     lod: [4]*LoadedBitmap,
+};
+
+const BilinearSample = struct {
+    a: u32,
+    b: u32,
+    c: u32,
+    d: u32,
 };
 
 pub const RenderBasis = extern struct {
@@ -514,84 +519,57 @@ pub fn drawRectangleSlowly(
                 std.debug.assert(texel_rounded_x >= 0 and texel_rounded_x <= texture.width);
                 std.debug.assert(texel_rounded_y >= 0 and texel_rounded_y <= texture.height);
 
-                if (texture.memory) |base| {
-                    const offset: i32 =
-                        @intCast((texel_rounded_x * shared.BITMAP_BYTES_PER_PIXEL) + (texel_rounded_y * texture.pitch));
-                    const texture_base = base - @abs(offset);
-                    const texel_pointer_a: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));
-                    const texel_pointer_b: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base + @sizeOf(u32)));
-                    const texel_pointer_c: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base - @abs(texture.pitch)));
-                    const texel_pointer_d: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base + @sizeOf(u32) - @abs(texture.pitch)));
+                const texel_sample = bilinearSample(texture, texel_rounded_x, texel_rounded_y);
+                var texel = sRGBBilinearBlend(texel_sample, texel_fraction_x, texel_fraction_y);
 
-                    var texel_a = Color.unpackColor(texel_pointer_a.*);
-                    var texel_b = Color.unpackColor(texel_pointer_b.*);
-                    var texel_c = Color.unpackColor(texel_pointer_c.*);
-                    var texel_d = Color.unpackColor(texel_pointer_d.*);
+                if (opt_normal_map) |normal_map| {
+                    const normal_sample = bilinearSample(normal_map, texel_rounded_x, texel_rounded_y);
+                    const blended_normal = sRGBBilinearBlend(normal_sample, texel_fraction_x, texel_fraction_y);
+                    const normal = unscaleAndBiasNormal(blended_normal.asPosition());
 
-                    texel_a = sRGB255ToLinear1(texel_a);
-                    texel_b = sRGB255ToLinear1(texel_b);
-                    texel_c = sRGB255ToLinear1(texel_c);
-                    texel_d = sRGB255ToLinear1(texel_d);
-
-                    var texel = texel_a.lerp(texel_b, texel_fraction_x).lerp(
-                        texel_c.lerp(texel_d, texel_fraction_x),
-                        texel_fraction_y,
-                    );
-
-                    if (opt_normal_map) |normal_map| {
-                        if (normal_map.memory) |normal_texture| {
-                            const normal_offset: i32 =
-                                @intCast((texel_rounded_x * shared.BITMAP_BYTES_PER_PIXEL) + (texel_rounded_y * texture.pitch));
-                            const normal_base = normal_texture - @abs(normal_offset);
-                            const normal_pointer_a: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(normal_base));
-                            const normal_pointer_b: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(normal_base + @sizeOf(u32)));
-                            const normal_pointer_c: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(normal_base - @abs(texture.pitch)));
-                            const normal_pointer_d: *align(@alignOf(u8)) u32 = @ptrCast(@alignCast(normal_base + @sizeOf(u32) - @abs(texture.pitch)));
-
-                            const normal_a = Vector4.unpackColor(normal_pointer_a.*);
-                            const normal_b = Vector4.unpackColor(normal_pointer_b.*);
-                            const normal_c = Vector4.unpackColor(normal_pointer_c.*);
-                            const normal_d = Vector4.unpackColor(normal_pointer_d.*);
-
-                            const normal = normal_a.lerp(normal_b, texel_fraction_x).lerp(
-                                normal_c.lerp(normal_d, texel_fraction_x),
-                                texel_fraction_y,
-                            );
-
-                            var opt_far_map: ?*EnvironmentMap = null;
-                            const env_map_blend: f32 = normal.z();
-                            var far_map_blend: f32 = 0;
-                            if (env_map_blend < 0.25) {
-                                opt_far_map = bottom;
-                                far_map_blend = 1.0 - (env_map_blend / 0.25);
-                            } else if (env_map_blend > 0.75) {
-                                opt_far_map = top;
-                                far_map_blend = (1.0 - env_map_blend) / 0.25;
-                            }
-
-                            var light_color = sampleEnvironmentMap(middle, screen_space_uv, normal.xyz(), normal.w());
-                            if (opt_far_map) |far_map| {
-                                const far_map_color = sampleEnvironmentMap(far_map, screen_space_uv, normal.xyz(), normal.w());
-                                light_color = light_color.lerp(far_map_color, far_map_blend);
-                            }
-
-                            _ = texel.setRGB(texel.rgb().hadamardProduct(light_color));
-                        }
+                    var opt_far_map: ?*EnvironmentMap = null;
+                    const env_map_blend: f32 = normal.y();
+                    var far_map_blend: f32 = 0;
+                    if (env_map_blend < -0.5) {
+                        opt_far_map = bottom;
+                        far_map_blend = 2.0 * (env_map_blend + 1.0);
+                    } else if (env_map_blend > 0.5) {
+                        opt_far_map = top;
+                        far_map_blend = 2.0 * (env_map_blend - 0.5);
                     }
 
-                    texel = texel.hadamardProduct(color);
+                    // var light_color = sampleEnvironmentMap(middle, screen_space_uv, normal.xyz(), normal.w());
+                    _ = middle;
 
-                    var dest = Color.unpackColor(pixel[0]);
-                    dest = sRGB255ToLinear1(dest);
+                    var light_color = Color3.zero();
+                    if (opt_far_map) |far_map| {
+                        const far_map_color = sampleEnvironmentMap(far_map, screen_space_uv, normal.xyz(), normal.w());
+                        light_color = light_color.lerp(far_map_color, far_map_blend);
+                    }
 
-                    const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
-                    const blended255 = linear1ToSRGB255(blended);
+                    _ = texel.setRGB(texel.rgb().plus(light_color.scaledTo(texel.a())));
 
-                    pixel[0] = ((@as(u32, @intFromFloat(blended255.a() + 0.5)) << 24) |
-                        (@as(u32, @intFromFloat(blended255.r() + 0.5)) << 16) |
-                        (@as(u32, @intFromFloat(blended255.g() + 0.5)) << 8) |
-                        (@as(u32, @intFromFloat(blended255.b() + 0.5)) << 0));
+                    // texel = Color.new(
+                    //     normal.x() * 0.5 + 0.5,
+                    //     normal.y() * 0.5 + 0.5,
+                    //     normal.z() * 0.5 + 0.5,
+                    //     1.0,
+                    // );
                 }
+
+                texel = texel.hadamardProduct(color);
+                _ = texel.setRGB(texel.rgb().clamp01());
+
+                var dest = Color.unpackColor(pixel[0]);
+                dest = sRGB255ToLinear1(dest);
+
+                const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
+                const blended255 = linear1ToSRGB255(blended);
+
+                pixel[0] = ((@as(u32, @intFromFloat(blended255.a() + 0.5)) << 24) |
+                    (@as(u32, @intFromFloat(blended255.r() + 0.5)) << 16) |
+                    (@as(u32, @intFromFloat(blended255.g() + 0.5)) << 8) |
+                    (@as(u32, @intFromFloat(blended255.b() + 0.5)) << 0));
             }
 
             pixel += 1;
@@ -697,7 +675,6 @@ pub fn drawBitmap(
 
         var x = min_x;
         while (x < max_x) : (x += 1) {
-
             var texel = Color.unpackColor(source[0]);
 
             texel = sRGB255ToLinear1(texel);
@@ -710,11 +687,10 @@ pub fn drawBitmap(
             var result = d.scaledTo(1.0 - texel.a()).plus(texel);
             result = linear1ToSRGB255(result);
 
-            dest[0] = result.packColor();
-            // dest[0] = ((@as(u32, @intFromFloat(result.a() + 0.5)) << 24) |
-            //     (@as(u32, @intFromFloat(result.r() + 0.5)) << 16) |
-            //     (@as(u32, @intFromFloat(result.g() + 0.5)) << 8) |
-            //     (@as(u32, @intFromFloat(result.b() + 0.5)) << 0));
+            dest[0] = ((@as(u32, @intFromFloat(result.a() + 0.5)) << 24) |
+                (@as(u32, @intFromFloat(result.r() + 0.5)) << 16) |
+                (@as(u32, @intFromFloat(result.g() + 0.5)) << 8) |
+                (@as(u32, @intFromFloat(result.b() + 0.5)) << 0));
 
             source += 1;
             dest += 1;
@@ -830,11 +806,80 @@ pub fn linear1ToSRGB255(color: Color) Color {
     );
 }
 
-fn sampleEnvironmentMap(map: *EnvironmentMap, screen_space_uv: Vector2, normal: Vector3, roughness: f32) Color3 {
-    _ = map;
-    _ = screen_space_uv;
-    _ = roughness;
+fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color {
+    var texel_a = Color.unpackColor(texel_sample.a);
+    var texel_b = Color.unpackColor(texel_sample.b);
+    var texel_c = Color.unpackColor(texel_sample.c);
+    var texel_d = Color.unpackColor(texel_sample.d);
 
-    return Color3.new(normal.x(), normal.y(), normal.z());
+    texel_a = sRGB255ToLinear1(texel_a);
+    texel_b = sRGB255ToLinear1(texel_b);
+    texel_c = sRGB255ToLinear1(texel_c);
+    texel_d = sRGB255ToLinear1(texel_d);
+
+    return texel_a.lerp(texel_b, x).lerp(
+        texel_c.lerp(texel_d, x),
+        y,
+    );
 }
 
+fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
+    const inv_255: f32 = 1.0 / 255.0;
+
+    return Vector4.new(
+        -1.0 + 2.0 * (inv_255 * normal.x()),
+        -1.0 + 2.0 * (inv_255 * normal.y()),
+        -1.0 + 2.0 * (inv_255 * normal.z()),
+        inv_255 * normal.w(),
+    );
+}
+
+fn sampleEnvironmentMap(map: *EnvironmentMap, screen_space_uv: Vector2, normal: Vector3, roughness: f32) Color3 {
+    _ = screen_space_uv;
+    _ = normal;
+
+    const lod_index: u32 = @intFromFloat(roughness * @as(f32, @floatFromInt(map.lod.len - 1)) + 0.5);
+
+    std.debug.assert(lod_index < map.lod.len);
+
+    const lod = map.lod[lod_index];
+
+    const map_x: f32 = 0.0;
+    const map_y: f32 = 0.0;
+
+    const rounded_x: i32 = @intFromFloat(map_x);
+    const rounded_y: i32 = @intFromFloat(map_y);
+
+    const fraction_x: f32 = map_x - @as(f32, @floatFromInt(rounded_x));
+    const fraction_y: f32 = map_y - @as(f32, @floatFromInt(rounded_y));
+
+    std.debug.assert(rounded_x >= 0 and rounded_x <= lod.width);
+    std.debug.assert(rounded_y >= 0 and rounded_y <= lod.height);
+
+    const sample = bilinearSample(lod, map_x, map_y);
+    const result = sRGBBilinearBlend(sample, fraction_x, fraction_y);
+
+    return result.rgb();
+}
+
+fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample {
+    const offset: i32 = @intCast((x * @sizeOf(u32)) + (y * texture.pitch));
+    const texture_base = shared.incrementPointer(texture.memory.?, offset);
+    const texel_pointer_a: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));
+    const texel_pointer_b: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(
+        shared.incrementPointer(texture_base, @sizeOf(u32)),
+    ));
+    const texel_pointer_c: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(
+        shared.incrementPointer(texture_base, texture.pitch),
+    ));
+    const texel_pointer_d: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(
+        shared.incrementPointer(texture_base, @sizeOf(u32) + texture.pitch),
+    ));
+
+    return BilinearSample{
+        .a = texel_pointer_a[0],
+        .b = texel_pointer_b[0],
+        .c = texel_pointer_c[0],
+        .d = texel_pointer_d[0],
+    };
+}

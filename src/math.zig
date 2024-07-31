@@ -215,6 +215,15 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                             self.values[3] = value;
                             return self;
                         }
+                        pub inline fn setXYZ(self: *Self, value: Vector3) *Self {
+                            self.values[0] = value.values[0];
+                            self.values[1] = value.values[1];
+                            self.values[2] = value.values[2];
+                            return self;
+                        }
+                        pub inline fn asColor(self: Self) Color {
+                            return Color.new(self.x(), self.y(), self.z(), self.w());
+                        }
                     },
                     inline .Color => struct {
                         pub inline fn r(self: *const Self) f32 {
@@ -253,6 +262,9 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                             self.values[1] = value.values[1];
                             self.values[2] = value.values[2];
                             return self;
+                        }
+                        pub inline fn asPosition(self: Self) Vector4 {
+                            return Vector4.new(self.r(), self.g(), self.b(), self.a());
                         }
                     },
                 };
