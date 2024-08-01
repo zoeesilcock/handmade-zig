@@ -11,10 +11,16 @@ const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Color = math.Color;
 const Color3 = math.Color3;
-const LoadedBitmap = shared.LoadedBitmap;
 
-const EnvironmentMap = extern struct {
-    lod: [4]*LoadedBitmap,
+pub const LoadedBitmap = extern struct {
+    width: i32 = 0,
+    height: i32 = 0,
+    pitch: i32 = 0,
+    memory: ?[*]void,
+};
+
+pub const EnvironmentMap = extern struct {
+    lod: [4]LoadedBitmap,
 };
 
 const BilinearSample = struct {
@@ -349,18 +355,18 @@ pub const RenderGroup = extern struct {
                     );
 
                     const color = Color.new(1, 1, 0, 1);
-                    const dimension = Vector2.new(6, 6);
+                    const dimension = Vector2.new(2, 2);
                     var position = entry.origin;
-                    drawRectangle(output_target, position, position.plus(dimension), color);
+                    drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
 
                     position = entry.origin.plus(entry.x_axis);
-                    drawRectangle(output_target, position, position.plus(dimension), color);
+                    drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
 
                     position = entry.origin.plus(entry.y_axis);
-                    drawRectangle(output_target, position, position.plus(dimension), color);
+                    drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
 
                     position = max;
-                    drawRectangle(output_target, position, position.plus(dimension), color);
+                    drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -507,8 +513,8 @@ pub fn drawRectangleSlowly(
                 // std.debug.assert(u >= 0 and u <= 1.0);
                 // std.debug.assert(v >= 0 and v <= 1.0);
 
-                const texel_x: f32 = 1 + (u * @as(f32, @floatFromInt(texture.width - 3)));
-                const texel_y: f32 = 1 + (v * @as(f32, @floatFromInt(texture.height - 3)));
+                const texel_x: f32 = 1 + (u * @as(f32, @floatFromInt(texture.width - 2)));
+                const texel_y: f32 = 1 + (v * @as(f32, @floatFromInt(texture.height - 2)));
 
                 const texel_rounded_x: i32 = @intFromFloat(texel_x);
                 const texel_rounded_y: i32 = @intFromFloat(texel_y);
@@ -524,15 +530,24 @@ pub fn drawRectangleSlowly(
 
                 if (opt_normal_map) |normal_map| {
                     const normal_sample = bilinearSample(normal_map, texel_rounded_x, texel_rounded_y);
-                    const blended_normal = sRGBBilinearBlend(normal_sample, texel_fraction_x, texel_fraction_y);
-                    const normal = unscaleAndBiasNormal(blended_normal.asPosition());
+                    const normal_a = Color.unpackColor(normal_sample.a);
+                    const normal_b = Color.unpackColor(normal_sample.b);
+                    const normal_c = Color.unpackColor(normal_sample.c);
+                    const normal_d = Color.unpackColor(normal_sample.d);
+                    var normal = normal_a.lerp(normal_b, texel_fraction_x).lerp(
+                        normal_c.lerp(normal_d, texel_fraction_x),
+                        texel_fraction_y,
+                    ).asPosition();
+
+                    normal = unscaleAndBiasNormal(normal);
+                    _ = normal.setXYZ(normal.xyz().normalized());
 
                     var opt_far_map: ?*EnvironmentMap = null;
                     const env_map_blend: f32 = normal.y();
                     var far_map_blend: f32 = 0;
                     if (env_map_blend < -0.5) {
                         opt_far_map = bottom;
-                        far_map_blend = 2.0 * (env_map_blend + 1.0);
+                        far_map_blend = -1.0 - 2.0 * env_map_blend;
                     } else if (env_map_blend > 0.5) {
                         opt_far_map = top;
                         far_map_blend = 2.0 * (env_map_blend - 0.5);
@@ -836,16 +851,17 @@ fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
 
 fn sampleEnvironmentMap(map: *EnvironmentMap, screen_space_uv: Vector2, normal: Vector3, roughness: f32) Color3 {
     _ = screen_space_uv;
-    _ = normal;
 
     const lod_index: u32 = @intFromFloat(roughness * @as(f32, @floatFromInt(map.lod.len - 1)) + 0.5);
 
     std.debug.assert(lod_index < map.lod.len);
 
-    const lod = map.lod[lod_index];
+    var lod = map.lod[lod_index];
 
-    const map_x: f32 = 0.0;
-    const map_y: f32 = 0.0;
+    const map_x: f32 = @as(f32, @floatFromInt(@divFloor(lod.width, 2))) +
+        normal.x() * @as(f32, @floatFromInt(@divFloor(lod.width, 2)));
+    const map_y: f32 = @as(f32, @floatFromInt(@divFloor(lod.height, 2))) +
+        normal.y() * @as(f32, @floatFromInt(@divFloor(lod.height, 2)));
 
     const rounded_x: i32 = @intFromFloat(map_x);
     const rounded_y: i32 = @intFromFloat(map_y);
@@ -856,7 +872,7 @@ fn sampleEnvironmentMap(map: *EnvironmentMap, screen_space_uv: Vector2, normal: 
     std.debug.assert(rounded_x >= 0 and rounded_x <= lod.width);
     std.debug.assert(rounded_y >= 0 and rounded_y <= lod.height);
 
-    const sample = bilinearSample(lod, map_x, map_y);
+    const sample = bilinearSample(&lod, rounded_x, rounded_y);
     const result = sRGBBilinearBlend(sample, fraction_x, fraction_y);
 
     return result.rgb();

@@ -12,6 +12,14 @@ const std = @import("std");
 ///
 /// Architecture exploration:
 ///
+/// * Rendering.
+///     * Lighting.
+///     * Straighten out all coordinate systems!
+///         * Screen.
+///         * World.
+///         * Texture.
+///     * Optimization.
+///
 /// * Z-axis.
 ///     * Need to make a solid concept of ground levels so thet camer can be freely placed in Z and have multiple
 ///     ground levels in one sim region.
@@ -69,7 +77,6 @@ const std = @import("std");
 ///
 /// Production:
 ///
-/// * Rendering.
 /// * Game.
 ///     * Entity system.
 ///     * World generation.
@@ -80,7 +87,7 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
-const LoadedBitmap = shared.LoadedBitmap;
+const LoadedBitmap = render.LoadedBitmap;
 const State = shared.State;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
@@ -136,7 +143,6 @@ pub export fn updateAndRender(
                 },
             },
             .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
-            .tree_normal = undefined,
             .sword = debugLoadBMP(thread, platform, "test2/rock03.bmp"),
             .stairwell = debugLoadBMP(thread, platform, "test2/rock02.bmp"),
             .grass = .{
@@ -154,6 +160,8 @@ pub export fn updateAndRender(
                 debugLoadBMP(thread, platform, "test2/tuft01.bmp"),
                 debugLoadBMP(thread, platform, "test2/tuft02.bmp"),
             },
+            .test_diffuse = undefined,
+            .test_normal = undefined,
         };
 
         state.world_arena.initialize(
@@ -358,8 +366,29 @@ pub export fn updateAndRender(
             ground_buffer.position = WorldPosition.nullPosition();
         }
 
-        state.tree_normal = makeEmptyBitmap(&transient_state.arena, state.tree.width, state.tree.height, false);
-        makeSphereNormalMap(&state.tree_normal, 0);
+        state.test_diffuse = makeEmptyBitmap(&transient_state.arena, 256, 256, false);
+        render.drawRectangle(
+            &state.test_diffuse,
+            Vector2.zero(),
+            Vector2.newI(state.test_diffuse.width, state.test_diffuse.height),
+            Color.new(0.5, 0.5, 0.5, 1),
+        );
+        state.test_normal = makeEmptyBitmap(&transient_state.arena, state.test_diffuse.width, state.test_diffuse.height, false);
+        makeSphereNormalMap(&state.test_normal, 0);
+
+        transient_state.env_map_width = 512;
+        transient_state.env_map_height = 256;
+
+        for (&transient_state.env_maps) |*map| {
+            var width: i32 = transient_state.env_map_width;
+            var height: i32 = transient_state.env_map_height;
+
+            for (&map.lod) |*lod| {
+                lod.* = makeEmptyBitmap(&transient_state.arena, width, height, false);
+                width >>= 1;
+                height >>= 1;
+            }
+        }
 
         transient_state.is_initialized = true;
     }
@@ -437,7 +466,7 @@ pub export fn updateAndRender(
     const draw_buffer = &draw_buffer_;
 
     // Clear background.
-    render_group.pushClear(Color.new(0.5, 0.5, 0.5, 0));
+    render_group.pushClear(Color.new(0.25, 0.25, 0.25, 0));
 
     const screen_size = Vector3.newI(buffer.width, buffer.height, 0).scaledTo(pixels_to_meters);
     const camera_bounds_in_meters = math.Rectangle3.fromCenterDimension(Vector3.zero(), screen_size);
@@ -702,6 +731,35 @@ pub export fn updateAndRender(
         }
     }
 
+    const map_colors: [3]Color = .{
+        Color.new(1, 0, 0, 1),
+        Color.new(0, 1, 0, 1),
+        Color.new(0, 0, 1, 1),
+    };
+
+    const checker_width = 16;
+    const checker_height = 16;
+    const checker_dimension = Vector2.new(checker_width, checker_height);
+    for (&transient_state.env_maps, 0..) |*map, map_index| {
+        const lod: *LoadedBitmap = &map.lod[0];
+
+        var row_checker_on = false;
+        var y: u32 = 0;
+        while (y < lod.height) : (y += checker_height) {
+            var checker_on = row_checker_on;
+            var x: u32 = 0;
+            while (x < lod.width) : (x += checker_width) {
+                const min_position = Vector2.newU(x, y);
+                const max_position = min_position.plus(checker_dimension);
+                const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
+                render.drawRectangle(lod, min_position, max_position, color);
+                checker_on = !checker_on;
+            }
+
+            row_checker_on = !row_checker_on;
+        }
+    }
+
     state.time += input.frame_delta_time;
     // const angle = 0.1 * state.time;
     const angle: f32 = 0;
@@ -743,12 +801,34 @@ pub export fn updateAndRender(
         x_axis,
         y_axis,
         color,
-        &state.tree,
-        &state.tree_normal,
-        undefined,
-        undefined,
-        undefined,
+        &state.test_diffuse,
+        &state.test_normal,
+        &transient_state.env_maps[2],
+        &transient_state.env_maps[1],
+        &transient_state.env_maps[0],
     );
+
+    var map_position = Vector2.zero();
+    for (&transient_state.env_maps) |*map| {
+        const lod: *LoadedBitmap = &map.lod[0];
+
+        x_axis = Vector2.newI(lod.width, 0).scaledTo(0.5);
+        y_axis = Vector2.newI(0, lod.height).scaledTo(0.5);
+
+        _ = render_group.pushCoordinateSystem(
+            map_position,
+            x_axis,
+            y_axis,
+            Color.new(1, 1, 1, 1),
+            lod,
+            null,
+            undefined,
+            undefined,
+            undefined,
+        );
+
+        map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
+    }
 
     render_group.renderTo(draw_buffer);
 
@@ -1185,8 +1265,7 @@ fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
                 255.0 * roughness,
             );
 
-            pixel[0] = (
-                (@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
+            pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
                 (@as(u32, @intFromFloat(color.r() + 0.5)) << 16) |
                 (@as(u32, @intFromFloat(color.g() + 0.5)) << 8) |
                 (@as(u32, @intFromFloat(color.b() + 0.5)) << 0));

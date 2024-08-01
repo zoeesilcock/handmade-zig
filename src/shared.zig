@@ -11,12 +11,14 @@ const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const world = @import("world.zig");
 const sim = @import("sim.zig");
+const render = @import("render.zig");
 const std = @import("std");
 
 // Types.
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
+const LoadedBitmap = render.LoadedBitmap;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -247,7 +249,6 @@ pub const State = struct {
     backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
     tree: LoadedBitmap,
-    tree_normal: LoadedBitmap,
     sword: LoadedBitmap,
     stairwell: LoadedBitmap,
     grass: [2]LoadedBitmap,
@@ -267,6 +268,9 @@ pub const State = struct {
     monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
 
     time: f32 = 0,
+
+    test_diffuse: LoadedBitmap,
+    test_normal: LoadedBitmap,
 };
 
 pub const TransientState = struct {
@@ -274,6 +278,10 @@ pub const TransientState = struct {
     arena: MemoryArena = undefined,
     ground_buffer_count: u32 = 0,
     ground_buffers: [*]GroundBuffer = undefined,
+
+    env_map_width: i32,
+    env_map_height: i32,
+    env_maps: [3]render.EnvironmentMap = [1]render.EnvironmentMap{undefined} ** 3,
 };
 
 pub const GroundBuffer = extern struct {
@@ -332,13 +340,6 @@ pub const HeroBitmaps = struct {
 };
 
 // Data structures.
-pub const LoadedBitmap = extern struct {
-    width: i32 = 0,
-    height: i32 = 0,
-    pitch: i32 = 0,
-    memory: ?[*]void,
-};
-
 pub const BitmapHeader = packed struct {
     file_type: u16,
     file_size: u32,
