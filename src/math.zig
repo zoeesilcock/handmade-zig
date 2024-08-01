@@ -126,6 +126,9 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn toVector2(self: *const Self) Vector2 {
                             return Vector2.new(self.x(), self.y());
                         }
+                        pub inline fn toVector4(vector3: Vector3, in_w: f32) Self {
+                            return Self.new(vector3.values[0], vector3.values[1], vector3.values[2], in_w);
+                        }
                         pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle3) bool {
                             const result = ((self.x() >= rectangle.min.x()) and
                                 (self.y() >= rectangle.min.y()) and
@@ -158,6 +161,9 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn setB(self: *Self, value: f32) *Self {
                             self.values[2] = value;
                             return self;
+                        }
+                        pub inline fn toColor(self: Self, in_a: f32) Color {
+                            return Color.new(self.r(), self.g(), self.b(), in_a);
                         }
                     },
                 };
@@ -221,7 +227,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                             self.values[2] = value.values[2];
                             return self;
                         }
-                        pub inline fn asColor(self: Self) Color {
+                        pub inline fn toColor(self: Self) Color {
                             return Color.new(self.x(), self.y(), self.z(), self.w());
                         }
                     },
@@ -263,7 +269,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                             self.values[2] = value.values[2];
                             return self;
                         }
-                        pub inline fn asPosition(self: Self) Vector4 {
+                        pub inline fn toVector4(self: Self) Vector4 {
                             return Vector4.new(self.r(), self.g(), self.b(), self.a());
                         }
                     },

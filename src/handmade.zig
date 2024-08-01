@@ -830,6 +830,10 @@ pub export fn updateAndRender(
         map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
     }
 
+    if (false) {
+        render_group.pushSaturation(0.5 + 0.5 * intrinsics.sin(10.0 * state.time));
+    }
+
     render_group.renderTo(draw_buffer);
 
     sim.endSimulation(state, screen_sim_region);

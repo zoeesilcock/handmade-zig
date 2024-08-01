@@ -46,6 +46,7 @@ pub const RenderEntryType = enum(u8) {
     RenderEntryBitmap,
     RenderEntryRectangle,
     RenderEntryCoordinateSystem,
+    RenderEntrySaturation,
 };
 
 pub const RenderEntryHeader = extern struct {
@@ -54,6 +55,10 @@ pub const RenderEntryHeader = extern struct {
 
 pub const RenderEntryClear = extern struct {
     color: Color,
+};
+
+pub const RenderEntrySaturation = extern struct {
+    level: f32,
 };
 
 pub const RenderEntryBitmap = extern struct {
@@ -161,6 +166,12 @@ pub const RenderGroup = extern struct {
     pub fn pushClear(self: *RenderGroup, color: Color) void {
         if (self.pushRenderElement(RenderEntryClear)) |entry| {
             entry.color = color;
+        }
+    }
+
+    pub fn pushSaturation(self: *RenderGroup, level: f32) void {
+        if (self.pushRenderElement(RenderEntrySaturation)) |entry| {
+            entry.level = level;
         }
     }
 
@@ -303,6 +314,7 @@ pub const RenderGroup = extern struct {
                 .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
                 .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
                 .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
+                .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
             };
 
             const header_address = @intFromPtr(header);
@@ -318,6 +330,13 @@ pub const RenderGroup = extern struct {
                     const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
                     const dimension = Vector2.newI(output_target.width, output_target.height);
                     drawRectangle(output_target, Vector2.zero(), dimension, entry.color);
+
+                    base_address += @sizeOf(@TypeOf(entry.*));
+                },
+                .RenderEntrySaturation => {
+                    const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
+
+                    changeSaturation(output_target, entry.level);
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -416,6 +435,32 @@ pub fn drawRectangle(
         }
 
         row += @as(usize, @intCast(draw_buffer.pitch));
+    }
+}
+
+fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
+    var dest_row: [*]u8 = @ptrCast(draw_buffer.memory);
+
+    var y: u32 = 0;
+    while (y < draw_buffer.height) : (y += 1) {
+        var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
+
+        var x: u32 = 0;
+        while (x < draw_buffer.width) : (x += 1) {
+            const d = Color.unpackColor(dest[0]);
+            const average: f32 = (1.0 / 3.0) * (d.r() + d.g() + d.b());
+            const delta = Color3.new(d.r() - average, d.g() - average, d.b() - average);
+            var result = Color3.splat(average).plus(delta.scaledTo(level)).toColor(d.a());
+
+            dest[0] = ((@as(u32, @intFromFloat(result.a() + 0.5)) << 24) |
+                (@as(u32, @intFromFloat(result.r() + 0.5)) << 16) |
+                (@as(u32, @intFromFloat(result.g() + 0.5)) << 8) |
+                (@as(u32, @intFromFloat(result.b() + 0.5)) << 0));
+
+            dest += 1;
+        }
+
+        dest_row += @as(usize, @intCast(draw_buffer.pitch));
     }
 }
 
@@ -537,7 +582,7 @@ pub fn drawRectangleSlowly(
                     var normal = normal_a.lerp(normal_b, texel_fraction_x).lerp(
                         normal_c.lerp(normal_d, texel_fraction_x),
                         texel_fraction_y,
-                    ).asPosition();
+                    ).toVector4();
 
                     normal = unscaleAndBiasNormal(normal);
                     _ = normal.setXYZ(normal.xyz().normalized());
