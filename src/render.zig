@@ -587,23 +587,27 @@ pub fn drawRectangleSlowly(
                     normal = unscaleAndBiasNormal(normal);
                     _ = normal.setXYZ(normal.xyz().normalized());
 
+                    // The eye vector is always asumed to be 0, 0, 1.
+                    var bounce_direction = normal.xyz().scaledTo(2.0 * normal.z());
+                    _ = bounce_direction.setZ(bounce_direction.z() - 1.0);
+
                     var opt_far_map: ?*EnvironmentMap = null;
-                    const env_map_blend: f32 = normal.y();
+                    const env_map_blend: f32 = bounce_direction.y();
                     var far_map_blend: f32 = 0;
                     if (env_map_blend < -0.5) {
                         opt_far_map = bottom;
                         far_map_blend = -1.0 - 2.0 * env_map_blend;
+                        _ = bounce_direction.setY(-bounce_direction.y());
                     } else if (env_map_blend > 0.5) {
                         opt_far_map = top;
                         far_map_blend = 2.0 * (env_map_blend - 0.5);
                     }
 
-                    // var light_color = sampleEnvironmentMap(middle, screen_space_uv, normal.xyz(), normal.w());
+                    var light_color = Color3.zero();
                     _ = middle;
 
-                    var light_color = Color3.zero();
                     if (opt_far_map) |far_map| {
-                        const far_map_color = sampleEnvironmentMap(far_map, screen_space_uv, normal.xyz(), normal.w());
+                        const far_map_color = sampleEnvironmentMap(far_map, screen_space_uv, bounce_direction, normal.w());
                         light_color = light_color.lerp(far_map_color, far_map_blend);
                     }
 
@@ -894,19 +898,26 @@ fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
     );
 }
 
-fn sampleEnvironmentMap(map: *EnvironmentMap, screen_space_uv: Vector2, normal: Vector3, roughness: f32) Color3 {
-    _ = screen_space_uv;
-
+fn sampleEnvironmentMap(
+    map: *EnvironmentMap,
+    screen_space_uv: Vector2,
+    sample_direction: Vector3,
+    roughness: f32,
+) Color3 {
     const lod_index: u32 = @intFromFloat(roughness * @as(f32, @floatFromInt(map.lod.len - 1)) + 0.5);
-
     std.debug.assert(lod_index < map.lod.len);
-
     var lod = map.lod[lod_index];
 
-    const map_x: f32 = @as(f32, @floatFromInt(@divFloor(lod.width, 2))) +
-        normal.x() * @as(f32, @floatFromInt(@divFloor(lod.width, 2)));
-    const map_y: f32 = @as(f32, @floatFromInt(@divFloor(lod.height, 2))) +
-        normal.y() * @as(f32, @floatFromInt(@divFloor(lod.height, 2)));
+    std.debug.assert(sample_direction.y() > 0);
+
+    const distance_from_map_in_z = 1.0;
+    const uvs_per_meter = 0.01;
+    const coefficient = (uvs_per_meter * distance_from_map_in_z) / sample_direction.y();
+    const offset = Vector2.new(sample_direction.x(), sample_direction.z()).scaledTo(coefficient);
+    var uv = screen_space_uv.plus(offset).clamp01();
+
+    const map_x: f32 = (uv.x() * @as(f32, @floatFromInt(lod.width - 2)));
+    const map_y: f32 = (uv.y() * @as(f32, @floatFromInt(lod.height - 2)));
 
     const rounded_x: i32 = @intFromFloat(map_x);
     const rounded_y: i32 = @intFromFloat(map_y);

@@ -374,7 +374,8 @@ pub export fn updateAndRender(
             Color.new(0.5, 0.5, 0.5, 1),
         );
         state.test_normal = makeEmptyBitmap(&transient_state.arena, state.test_diffuse.width, state.test_diffuse.height, false);
-        makeSphereNormalMap(&state.test_normal, 0);
+        makeSphereNormalMap(&state.test_normal, 0, 0, 1);
+        // makePyramidNormalMap(&state.test_normal, 0);
 
         transient_state.env_map_width = 512;
         transient_state.env_map_height = 256;
@@ -761,8 +762,8 @@ pub export fn updateAndRender(
     }
 
     state.time += input.frame_delta_time;
-    // const angle = 0.1 * state.time;
-    const angle: f32 = 0;
+    const angle = 0.1 * state.time;
+    // const angle: f32 = 0;
     const displacement = 100.0 * intrinsics.cos(5.0 * angle);
 
     const screen_center = Vector2.new(
@@ -775,7 +776,7 @@ pub export fn updateAndRender(
     var x_axis = Vector2.zero();
     var y_axis = Vector2.zero();
 
-    if (false) {
+    if (true) {
         x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
         y_axis = x_axis.perp();
     } else if (false) {
@@ -1235,7 +1236,7 @@ fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to
     return result.*;
 }
 
-fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
+fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32, cx: f32, cy: f32) void {
     const inv_width: f32 = 1.0 / (@as(f32, @floatFromInt(bitmap.width - 1)));
     const inv_height: f32 = 1.0 / (@as(f32, @floatFromInt(bitmap.height - 1)));
 
@@ -1251,15 +1252,59 @@ fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
                 inv_height * @as(f32, @floatFromInt(y)),
             );
 
-            const nx: f32 = 2.0 * bitmap_uv.x() - 1.0;
-            const ny: f32 = 2.0 * bitmap_uv.y() - 1.0;
+            const nx: f32 = cx * (2.0 * bitmap_uv.x() - 1.0);
+            const ny: f32 = cy * (2.0 * bitmap_uv.y() - 1.0);
 
             const root_term: f32 = 1.0 - nx * nx - ny * ny;
-            var normal = Vector3.new(0, 0, 1);
+            var normal = Vector3.new(0, 0.7071067811865475244, 0.7071067811865475244);
             var nz: f32 = 0;
             if (root_term >= 0) {
                 nz = intrinsics.squareRoot(root_term);
                 normal = Vector3.new(nx, ny, nz);
+            }
+
+            var color = Color.new(
+                255.0 * (0.5 * (normal.x() + 1.0)),
+                255.0 * (0.5 * (normal.y() + 1.0)),
+                255.0 * (0.5 * (normal.z() + 1.0)),
+                255.0 * roughness,
+            );
+
+            pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
+                (@as(u32, @intFromFloat(color.r() + 0.5)) << 16) |
+                (@as(u32, @intFromFloat(color.g() + 0.5)) << 8) |
+                (@as(u32, @intFromFloat(color.b() + 0.5)) << 0));
+
+            pixel += 1;
+        }
+
+        row += @as(usize, @intCast(bitmap.pitch));
+    }
+}
+
+fn makePyramidNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
+    var row: [*]u8 = @ptrCast(bitmap.memory);
+    var y: u32 = 0;
+    while (y < bitmap.height) : (y += 1) {
+        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+
+        var x: u32 = 0;
+        while (x < bitmap.width) : (x += 1) {
+            const seven = 0.7071067811865475244;
+            var normal = Vector3.new(0, 0, seven);
+            const inv_x: u32 = (@as(u32, @intCast(bitmap.width)) - 1) - x;
+            if (x < y) {
+                if (inv_x < y) {
+                    _ = normal.setX(-seven);
+                } else {
+                    _ = normal.setY(seven);
+                }
+            } else {
+                if (inv_x < y) {
+                    _ = normal.setY(-seven);
+                } else {
+                    _ = normal.setX(seven);
+                }
             }
 
             var color = Color.new(
