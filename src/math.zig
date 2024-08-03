@@ -123,11 +123,19 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                             self.values[2] = value;
                             return self;
                         }
+                        pub inline fn setXY(self: *Self, value: Vector2) *Self {
+                            self.values[0] = value.values[0];
+                            self.values[1] = value.values[1];
+                            return self;
+                        }
                         pub inline fn toVector2(self: *const Self) Vector2 {
                             return Vector2.new(self.x(), self.y());
                         }
                         pub inline fn toVector4(vector3: Vector3, in_w: f32) Self {
                             return Self.new(vector3.values[0], vector3.values[1], vector3.values[2], in_w);
+                        }
+                        pub inline fn toColor3(self: Self) Color3 {
+                            return Color3.new(self.x(), self.y(), self.z());
                         }
                         pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle3) bool {
                             const result = ((self.x() >= rectangle.min.x()) and
@@ -225,6 +233,11 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                             self.values[0] = value.values[0];
                             self.values[1] = value.values[1];
                             self.values[2] = value.values[2];
+                            return self;
+                        }
+                        pub inline fn setXY(self: *Self, value: Vector2) *Self {
+                            self.values[0] = value.values[0];
+                            self.values[1] = value.values[1];
                             return self;
                         }
                         pub inline fn toColor(self: Self) Color {

@@ -479,6 +479,12 @@ pub fn drawRectangleSlowly(
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
 
+    const y_axis_length = y_axis.length();
+    const x_axis_length = x_axis.length();
+    const normal_x_axis = x_axis.scaledTo(y_axis_length / x_axis_length);
+    const normal_y_axis = y_axis.scaledTo(x_axis_length / y_axis_length);
+    const normal_z_scale = 0.5 * (x_axis_length + y_axis_length);
+
     const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
     const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
     const points: [4]Vector2 = .{
@@ -585,11 +591,16 @@ pub fn drawRectangleSlowly(
                     ).toVector4();
 
                     normal = unscaleAndBiasNormal(normal);
+
+                    _ = normal.setXY(normal_x_axis.scaledTo(normal.x()).plus(normal_y_axis.scaledTo(normal.y())));
+                    _ = normal.setZ(normal.z() * normal_z_scale);
                     _ = normal.setXYZ(normal.xyz().normalized());
 
                     // The eye vector is always asumed to be 0, 0, 1.
+                    var distance_from_map_in_z: f32 = 1.0;
                     var bounce_direction = normal.xyz().scaledTo(2.0 * normal.z());
                     _ = bounce_direction.setZ(bounce_direction.z() - 1.0);
+                    _ = bounce_direction.setZ(-bounce_direction.z());
 
                     var opt_far_map: ?*EnvironmentMap = null;
                     const env_map_blend: f32 = bounce_direction.y();
@@ -597,7 +608,7 @@ pub fn drawRectangleSlowly(
                     if (env_map_blend < -0.5) {
                         opt_far_map = bottom;
                         far_map_blend = -1.0 - 2.0 * env_map_blend;
-                        _ = bounce_direction.setY(-bounce_direction.y());
+                        distance_from_map_in_z = -distance_from_map_in_z;
                     } else if (env_map_blend > 0.5) {
                         opt_far_map = top;
                         far_map_blend = 2.0 * (env_map_blend - 0.5);
@@ -607,11 +618,19 @@ pub fn drawRectangleSlowly(
                     _ = middle;
 
                     if (opt_far_map) |far_map| {
-                        const far_map_color = sampleEnvironmentMap(far_map, screen_space_uv, bounce_direction, normal.w());
+                        const far_map_color = sampleEnvironmentMap(
+                            far_map,
+                            screen_space_uv,
+                            bounce_direction,
+                            normal.w(),
+                            distance_from_map_in_z,
+                        );
                         light_color = light_color.lerp(far_map_color, far_map_blend);
                     }
 
                     _ = texel.setRGB(texel.rgb().plus(light_color.scaledTo(texel.a())));
+
+                    // _ = texel.setRGB(bounce_direction.scaledTo(0.5).plus(Vector3.splat(0.5)).toColor3());
 
                     // texel = Color.new(
                     //     normal.x() * 0.5 + 0.5,
@@ -898,24 +917,33 @@ fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
     );
 }
 
+/// Sample from environment map, used when calculating light impact on a normal map.
+///
+/// * screen_space_uv tells us where the ray is being cast from in normalized screen coordinates.
+/// * sample_direction tells us what direction the cast is going.
+/// * roughness says which LODs of the map we sample from.
+/// * distance_from_map_in_z says how far the map is from the sample point in Z, given in meters.
 fn sampleEnvironmentMap(
     map: *EnvironmentMap,
     screen_space_uv: Vector2,
     sample_direction: Vector3,
     roughness: f32,
+    distance_from_map_in_z: f32,
 ) Color3 {
+    // Pick which LOD to sample from.
     const lod_index: u32 = @intFromFloat(roughness * @as(f32, @floatFromInt(map.lod.len - 1)) + 0.5);
     std.debug.assert(lod_index < map.lod.len);
     var lod = map.lod[lod_index];
 
-    std.debug.assert(sample_direction.y() > 0);
-
-    const distance_from_map_in_z = 1.0;
+    // Calculate the distance to the map and the scaling factor for meters to UVs.
     const uvs_per_meter = 0.01;
     const coefficient = (uvs_per_meter * distance_from_map_in_z) / sample_direction.y();
     const offset = Vector2.new(sample_direction.x(), sample_direction.z()).scaledTo(coefficient);
+
+    // Find the intersection point and clamp it to a valid range.
     var uv = screen_space_uv.plus(offset).clamp01();
 
+    // Bilinear sample.
     const map_x: f32 = (uv.x() * @as(f32, @floatFromInt(lod.width - 2)));
     const map_y: f32 = (uv.y() * @as(f32, @floatFromInt(lod.height - 2)));
 
@@ -927,6 +955,13 @@ fn sampleEnvironmentMap(
 
     std.debug.assert(rounded_x >= 0 and rounded_x <= lod.width);
     std.debug.assert(rounded_y >= 0 and rounded_y <= lod.height);
+
+    if (shared.DEBUG) {
+        const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
+        const texture_base = shared.incrementPointer(lod.memory.?, test_offset);
+        const texel_pointer: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));
+        texel_pointer[0] = Color.new(255, 255, 255, 255).packColor();
+    }
 
     const sample = bilinearSample(&lod, rounded_x, rounded_y);
     const result = sRGBBilinearBlend(sample, fraction_x, fraction_y);

@@ -374,7 +374,8 @@ pub export fn updateAndRender(
             Color.new(0.5, 0.5, 0.5, 1),
         );
         state.test_normal = makeEmptyBitmap(&transient_state.arena, state.test_diffuse.width, state.test_diffuse.height, false);
-        makeSphereNormalMap(&state.test_normal, 0, 0, 1);
+
+        makeSphereNormalMap(&state.test_normal, 0, 1, 1);
         // makePyramidNormalMap(&state.test_normal, 0);
 
         transient_state.env_map_width = 512;
@@ -764,7 +765,10 @@ pub export fn updateAndRender(
     state.time += input.frame_delta_time;
     const angle = 0.1 * state.time;
     // const angle: f32 = 0;
-    const displacement = 100.0 * intrinsics.cos(5.0 * angle);
+    const displacement = Vector2.new(
+        100.0 * intrinsics.cos(5.0 * angle),
+        100.0 * intrinsics.sin(3.0 * angle),
+    );
 
     const screen_center = Vector2.new(
         0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
@@ -798,7 +802,7 @@ pub export fn updateAndRender(
     // );
 
     _ = render_group.pushCoordinateSystem(
-        origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(Vector2.new(displacement, 0)),
+        origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(displacement),
         x_axis,
         y_axis,
         color,
