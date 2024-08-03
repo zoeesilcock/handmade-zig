@@ -1,4 +1,5 @@
 const intrinsics = @import("intrinsics.zig");
+const std = @import("std");
 
 pub const Vector2 = Vector(2, .Position);
 pub const Vector3 = Vector(3, .Position);
@@ -393,6 +394,50 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             return self.scaledTo(1.0 / self.length());
         }
     };
+}
+
+pub const Matrix2x2 = Matrix(2, 2);
+pub const Matrix3x3 = Matrix(3, 3);
+
+fn Matrix(comptime row_count: comptime_int, comptime col_count: comptime_int) type {
+    return extern struct {
+        const VectorType = Vector(col_count, .Position);
+
+        values: [row_count]VectorType,
+
+        const Self = @This();
+
+        pub inline fn plus(self: Self, b: Self) Self {
+            var result = self;
+
+            for (0..row_count) |row| {
+                result.values[row] = result.values[row].plus(b.values[row]);
+            }
+
+            return result;
+        }
+    };
+}
+
+test "add two matrices together" {
+    const a = Matrix2x2{
+        .values = .{
+            Vector2.new(1, 0),
+            Vector2.new(0, 1),
+        },
+    };
+    const b = Matrix2x2{
+        .values = .{
+            Vector2.new(1, 1),
+            Vector2.new(1, 1),
+        },
+    };
+    const result = a.plus(b);
+
+    try std.testing.expect(result.values[0].values[0] == 2);
+    try std.testing.expect(result.values[0].values[1] == 1);
+    try std.testing.expect(result.values[1].values[0] == 1);
+    try std.testing.expect(result.values[1].values[1] == 2);
 }
 
 pub const Rectangle2 = Rectangle(2);
