@@ -21,6 +21,7 @@ pub const LoadedBitmap = extern struct {
 
 pub const EnvironmentMap = extern struct {
     lod: [4]LoadedBitmap,
+    z_position: f32,
 };
 
 const BilinearSample = struct {
@@ -371,6 +372,7 @@ pub const RenderGroup = extern struct {
                         entry.top,
                         entry.middle,
                         entry.bottom,
+                        1.0 / self.meters_to_pixels,
                     );
 
                     const color = Color.new(1, 1, 0, 1);
@@ -475,6 +477,7 @@ pub fn drawRectangleSlowly(
     top: *EnvironmentMap,
     middle: *EnvironmentMap,
     bottom: *EnvironmentMap,
+    pixels_to_meters: f32,
 ) void {
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -502,6 +505,10 @@ pub fn drawRectangleSlowly(
     var y_max: i32 = 0;
     var x_min: i32 = width_max;
     var x_max: i32 = 0;
+
+    const origin_z: f32 = 0.0;
+    const origin_y: f32 = (origin.plus(x_axis.scaledTo(0.5).plus(y_axis.scaledTo(0.5)))).y();
+    const fixed_cast_y = inv_height_max * origin_y;
 
     for (points) |point| {
         const floor_x = intrinsics.floorReal32ToInt32(point.x());
@@ -554,10 +561,22 @@ pub fn drawRectangleSlowly(
             const edge3 = d.minus(y_axis).dotProduct(y_axis.perp());
 
             if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
-                const screen_space_uv = Vector2.new(
+                // For items that are standing up.
+                var screen_space_uv = Vector2.new(
                     inv_width_max * @as(f32, @floatFromInt(x)),
-                    inv_height_max * @as(f32, @floatFromInt(y)),
+                    fixed_cast_y,
                 );
+                var z_diff: f32 = pixels_to_meters * (@as(f32, @floatFromInt(y)) - origin_y);
+
+                if (false) {
+                    // For items that are lying down on the ground.
+                    screen_space_uv = Vector2.new(
+                        inv_width_max * @as(f32, @floatFromInt(x)),
+                        inv_height_max * @as(f32, @floatFromInt(y)),
+                    );
+                    z_diff = 0;
+                }
+
                 const u = d.dotProduct(x_axis) * inv_x_axis_length_squared;
                 const v = d.dotProduct(y_axis) * inv_y_axis_length_squared;
 
@@ -597,7 +616,7 @@ pub fn drawRectangleSlowly(
                     _ = normal.setXYZ(normal.xyz().normalized());
 
                     // The eye vector is always asumed to be 0, 0, 1.
-                    var distance_from_map_in_z: f32 = 1.0;
+                    const z_position = origin_z + z_diff;
                     var bounce_direction = normal.xyz().scaledTo(2.0 * normal.z());
                     _ = bounce_direction.setZ(bounce_direction.z() - 1.0);
                     _ = bounce_direction.setZ(-bounce_direction.z());
@@ -608,16 +627,19 @@ pub fn drawRectangleSlowly(
                     if (env_map_blend < -0.5) {
                         opt_far_map = bottom;
                         far_map_blend = -1.0 - 2.0 * env_map_blend;
-                        distance_from_map_in_z = -distance_from_map_in_z;
                     } else if (env_map_blend > 0.5) {
                         opt_far_map = top;
                         far_map_blend = 2.0 * (env_map_blend - 0.5);
                     }
 
+                    far_map_blend *= far_map_blend;
+                    far_map_blend *= far_map_blend;
+
                     var light_color = Color3.zero();
                     _ = middle;
 
                     if (opt_far_map) |far_map| {
+                        const distance_from_map_in_z = far_map.z_position - z_position;
                         const far_map_color = sampleEnvironmentMap(
                             far_map,
                             screen_space_uv,
@@ -630,7 +652,11 @@ pub fn drawRectangleSlowly(
 
                     _ = texel.setRGB(texel.rgb().plus(light_color.scaledTo(texel.a())));
 
-                    // _ = texel.setRGB(bounce_direction.scaledTo(0.5).plus(Vector3.splat(0.5)).toColor3());
+                    if (false) {
+                        // Draw bounce direction.
+                        _ = texel.setRGB(bounce_direction.scaledTo(0.5).plus(Vector3.splat(0.5)).toColor3());
+                        _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
+                    }
 
                     // texel = Color.new(
                     //     normal.x() * 0.5 + 0.5,
@@ -936,7 +962,7 @@ fn sampleEnvironmentMap(
     var lod = map.lod[lod_index];
 
     // Calculate the distance to the map and the scaling factor for meters to UVs.
-    const uvs_per_meter = 0.01;
+    const uvs_per_meter = 0.1;
     const coefficient = (uvs_per_meter * distance_from_map_in_z) / sample_direction.y();
     const offset = Vector2.new(sample_direction.x(), sample_direction.z()).scaledTo(coefficient);
 
@@ -956,7 +982,8 @@ fn sampleEnvironmentMap(
     std.debug.assert(rounded_x >= 0 and rounded_x <= lod.width);
     std.debug.assert(rounded_y >= 0 and rounded_y <= lod.height);
 
-    if (shared.DEBUG) {
+    if (false) {
+        // Debug where we are sampling from on the environment map.
         const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
         const texture_base = shared.incrementPointer(lod.memory.?, test_offset);
         const texel_pointer: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));

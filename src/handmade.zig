@@ -87,6 +87,7 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
+const Color3 = math.Color3;
 const LoadedBitmap = render.LoadedBitmap;
 const State = shared.State;
 const TransientState = shared.TransientState;
@@ -376,6 +377,7 @@ pub export fn updateAndRender(
         state.test_normal = makeEmptyBitmap(&transient_state.arena, state.test_diffuse.width, state.test_diffuse.height, false);
 
         makeSphereNormalMap(&state.test_normal, 0, 1, 1);
+        makeSphereDiffuseMap(&state.test_diffuse, 1, 1);
         // makePyramidNormalMap(&state.test_normal, 0);
 
         transient_state.env_map_width = 512;
@@ -761,14 +763,13 @@ pub export fn updateAndRender(
             row_checker_on = !row_checker_on;
         }
     }
+    transient_state.env_maps[0].z_position = -1.5;
+    transient_state.env_maps[1].z_position = 0;
+    transient_state.env_maps[2].z_position = 1.5;
 
     state.time += input.frame_delta_time;
     const angle = 0.1 * state.time;
     // const angle: f32 = 0;
-    const displacement = Vector2.new(
-        100.0 * intrinsics.cos(5.0 * angle),
-        100.0 * intrinsics.sin(3.0 * angle),
-    );
 
     const screen_center = Vector2.new(
         0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
@@ -780,8 +781,14 @@ pub export fn updateAndRender(
     var x_axis = Vector2.zero();
     var y_axis = Vector2.zero();
 
+    // const displacement = Vector2.zero();
+    const displacement = Vector2.new(
+        100.0 * intrinsics.cos(5.0 * angle),
+        100.0 * intrinsics.sin(3.0 * angle),
+    );
+
     if (true) {
-        x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
+        x_axis = Vector2.new(intrinsics.cos(10 * angle), intrinsics.sin(10 * angle)).scaledTo(scale);
         y_axis = x_axis.perp();
     } else if (false) {
         x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
@@ -1272,6 +1279,53 @@ fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32, cx: f32, cy: f32) 
                 255.0 * (0.5 * (normal.y() + 1.0)),
                 255.0 * (0.5 * (normal.z() + 1.0)),
                 255.0 * roughness,
+            );
+
+            pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
+                (@as(u32, @intFromFloat(color.r() + 0.5)) << 16) |
+                (@as(u32, @intFromFloat(color.g() + 0.5)) << 8) |
+                (@as(u32, @intFromFloat(color.b() + 0.5)) << 0));
+
+            pixel += 1;
+        }
+
+        row += @as(usize, @intCast(bitmap.pitch));
+    }
+}
+
+fn makeSphereDiffuseMap(bitmap: *LoadedBitmap, cx: f32, cy: f32) void {
+    const inv_width: f32 = 1.0 / (@as(f32, @floatFromInt(bitmap.width - 1)));
+    const inv_height: f32 = 1.0 / (@as(f32, @floatFromInt(bitmap.height - 1)));
+
+    var row: [*]u8 = @ptrCast(bitmap.memory);
+    var y: u32 = 0;
+    while (y < bitmap.height) : (y += 1) {
+        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+
+        var x: u32 = 0;
+        while (x < bitmap.width) : (x += 1) {
+            const bitmap_uv = Vector2.new(
+                inv_width * @as(f32, @floatFromInt(x)),
+                inv_height * @as(f32, @floatFromInt(y)),
+            );
+
+            const nx: f32 = cx * (2.0 * bitmap_uv.x() - 1.0);
+            const ny: f32 = cy * (2.0 * bitmap_uv.y() - 1.0);
+
+            const root_term: f32 = 1.0 - nx * nx - ny * ny;
+            var alpha: f32 = 0;
+            if (root_term >= 0) {
+                alpha = 1;
+            }
+
+            const base_color = Color3.splat(0);
+            alpha *= 255.0;
+
+            var color = Color.new(
+                alpha * base_color.r(),
+                alpha * base_color.g(),
+                alpha * base_color.b(),
+                alpha,
             );
 
             pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
