@@ -326,13 +326,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
         }
 
         pub fn scaledTo(self: *const Self, scalar: f32) Self {
-            var result = Self{ .values = self.values };
-
-            for (0..dimensions) |axis_index| {
-                result.values[axis_index] *= scalar;
-            }
-
-            return result;
+            return Self{ .values = self.values * @as(@TypeOf(self.values), @splat(scalar)) };
         }
 
         pub fn clamp01(self: *const Self) Self {
@@ -350,27 +344,15 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
         }
 
         pub fn dotProduct(self: *const Self, b: Self) f32 {
-            var result: f32 = 0;
-
-            for (0..dimensions) |axis_index| {
-                result += self.values[axis_index] * b.values[axis_index];
-            }
-
-            return result;
+            return @reduce(.Add, self.values * b.values);
         }
 
         pub fn hadamardProduct(self: *const Self, b: Self) Self {
-            var result = Self.zero();
-
-            for (0..dimensions) |axis_index| {
-                result.values[axis_index] = self.values[axis_index] * b.values[axis_index];
-            }
-
-            return result;
+            return Self{ .values = self.values * b.values };
         }
 
         pub fn lengthSquared(self: *const Self) f32 {
-            return self.dotProduct(@constCast(self).*);
+            return self.dotProduct(self.*);
         }
 
         pub fn length(self: *const Self) f32 {
@@ -378,23 +360,11 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
         }
 
         pub fn invalidPosition() Self {
-            var result = Self.zero();
-
-            for (0..dimensions) |axis_index| {
-                result.values[axis_index] = 100000;
-            }
-
-            return result;
+            return Self{ .values = @splat(100000) };
         }
 
         pub fn lerp(min: Self, max: Self, distance: f32) Self {
-            var result = Self.zero();
-
-            for (0..dimensions) |axis_index| {
-                result.values[axis_index] = lerpf(min.values[axis_index], max.values[axis_index], distance);
-            }
-
-            return result;
+            return Self{ .values = min.values + @as(@TypeOf(min.values), @splat(distance)) * (max.values - min.values) };
         }
 
         pub fn normalized(self: Self) Self {
