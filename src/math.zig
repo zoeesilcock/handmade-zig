@@ -190,9 +190,9 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                 }
                 pub inline fn unpackColor(value: u32) Self {
                     return Self.new(
-                        @as(f32, @floatFromInt((value >> 16) & 0xFF)),
-                        @as(f32, @floatFromInt((value >> 8) & 0xFF)),
-                        @as(f32, @floatFromInt((value >> 0) & 0xFF)),
+                        @floatFromInt((value >> 16) & 0xFF),
+                        @floatFromInt((value >> 8) & 0xFF),
+                        @floatFromInt((value >> 0) & 0xFF),
                         @floatFromInt((value >> 24) & 0xFF),
                     );
                 }
@@ -286,6 +286,9 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         pub inline fn toVector4(self: Self) Vector4 {
                             return Vector4.new(self.r(), self.g(), self.b(), self.a());
                         }
+                        pub inline fn white() Self {
+                            return Self.one();
+                        }
                     },
                 };
             },
@@ -296,6 +299,10 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
 
         pub fn zero() Self {
             return Self{ .values = @splat(0) };
+        }
+
+        pub fn one() Self {
+            return Self{ .values = @splat(1) };
         }
 
         pub fn splat(value: f32) Self {

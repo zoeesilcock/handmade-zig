@@ -11,7 +11,7 @@
 //! 4: Z is a special coordinate because it is broken up into discrete slices, and the renderer actually understands
 //! these slices (potentially).
 //!
-//! TODO: ZHANDLING
+//! 5: All color values specified to the renderer using the Color and Color3 types are in non-premultiplied alpha.
 //!
 
 const shared = @import("shared.zig");
@@ -29,6 +29,7 @@ const Color = math.Color;
 const Color3 = math.Color3;
 
 pub const LoadedBitmap = extern struct {
+    alignment: Vector2 = Vector2.zero(),
     width: i32 = 0,
     height: i32 = 0,
     pitch: i32 = 0,
@@ -53,9 +54,7 @@ pub const RenderBasis = extern struct {
 
 pub const RenderEntityBasis = extern struct {
     basis: *RenderBasis,
-    offset: Vector2,
-    offset_z: f32,
-    entity_z_amount: f32,
+    offset: Vector3,
 };
 
 pub const RenderEntryType = enum(u8) {
@@ -158,29 +157,20 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-    fn pushPiece(
+    fn getRenderEntityBasisPosition(
         self: *RenderGroup,
-        bitmap: ?*const LoadedBitmap,
-        offset: Vector2,
-        offset_z: f32,
-        entity_z_amount: f32,
-        alignment: Vector2,
-        color: Color,
-        _: Vector2,
-    ) void {
-        if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
-            entry.entity_basis.basis = self.default_basis;
-            entry.entity_basis.offset = Vector2.new(offset.x(), offset.y())
-                .scaledTo(self.meters_to_pixels).minus(alignment);
-            entry.entity_basis.offset_z = offset_z;
-            entry.entity_basis.entity_z_amount = entity_z_amount;
+        entity_basis: *RenderEntityBasis,
+        screen_center: Vector2,
+    ) Vector2 {
+        const entity_base_position = entity_basis.basis.position.scaledTo(self.meters_to_pixels);
+        const z_fudge = 1.0 + 0.1 * entity_base_position.z();
+        const entity_ground_point = screen_center.plus(entity_base_position.xy().scaledTo(z_fudge).plus(entity_basis.offset.xy()));
+        const center = entity_ground_point.plus(Vector2.new(0, (entity_base_position.z() + entity_basis.offset.z())));
 
-            entry.bitmap = bitmap;
-
-            entry.color = color;
-        }
+        return center;
     }
 
+    // Renderer API.
     pub fn pushClear(self: *RenderGroup, color: Color) void {
         if (self.pushRenderElement(RenderEntryClear)) |entry| {
             entry.color = color;
@@ -196,33 +186,27 @@ pub const RenderGroup = extern struct {
     pub fn pushBitmap(
         self: *RenderGroup,
         bitmap: *const LoadedBitmap,
-        offset: Vector2,
-        offset_z: f32,
-        alignment: Vector2,
-        alpha: f32,
-        entity_z_amount: f32,
+        offset: Vector3,
+        color: Color,
     ) void {
-        const color = Color.new(0, 0, 0, alpha);
-        self.pushPiece(bitmap, offset, offset_z, entity_z_amount, alignment, color, Vector2.zero());
+        if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
+            entry.bitmap = bitmap;
+            entry.entity_basis.basis = self.default_basis;
+            entry.entity_basis.offset = offset.scaledTo(self.meters_to_pixels).minus(bitmap.alignment.toVector3(0));
+            entry.color = color;
+        }
     }
 
     pub fn pushRectangle(
         self: *RenderGroup,
         dimension: Vector2,
-        offset: Vector2,
-        offset_z: f32,
-        entity_z_amount: f32,
+        offset: Vector3,
         color: Color,
     ) void {
         if (self.pushRenderElement(RenderEntryRectangle)) |entry| {
-            const half_dimension = dimension.scaledTo(self.meters_to_pixels).scaledTo(0.5);
-
             entry.entity_basis.basis = self.default_basis;
-            entry.entity_basis.offset = Vector2.new(offset.x(), offset.y())
-                .scaledTo(self.meters_to_pixels).minus(half_dimension);
-            entry.entity_basis.offset_z = offset_z;
-            entry.entity_basis.entity_z_amount = entity_z_amount;
-
+            entry.entity_basis.offset = offset.minus(dimension.scaledTo(0.5).toVector3(0))
+                .scaledTo(self.meters_to_pixels);
             entry.color = color;
             entry.dimension = dimension.scaledTo(self.meters_to_pixels);
         }
@@ -231,39 +215,29 @@ pub const RenderGroup = extern struct {
     pub fn pushRectangleOutline(
         self: *RenderGroup,
         dimension: Vector2,
-        offset: Vector2,
-        offset_z: f32,
+        offset: Vector3,
         color: Color,
-        entity_z_amount: f32,
     ) void {
         const thickness: f32 = 0.1;
         self.pushRectangle(
             Vector2.new(dimension.x(), thickness),
-            offset.minus(Vector2.new(0, dimension.y() / 2)),
-            offset_z,
-            entity_z_amount,
+            offset.minus(Vector3.new(0, dimension.y() / 2, 0)),
             color,
         );
         self.pushRectangle(
             Vector2.new(dimension.x(), thickness),
-            offset.plus(Vector2.new(0, dimension.y() / 2)),
-            offset_z,
-            entity_z_amount,
+            offset.plus(Vector3.new(0, dimension.y() / 2, 0)),
             color,
         );
 
         self.pushRectangle(
             Vector2.new(thickness, dimension.y()),
-            offset.minus(Vector2.new(dimension.x() / 2, 0)),
-            offset_z,
-            entity_z_amount,
+            offset.minus(Vector3.new(dimension.x() / 2, 0, 0)),
             color,
         );
         self.pushRectangle(
             Vector2.new(thickness, dimension.y()),
-            offset.plus(Vector2.new(dimension.x() / 2, 0)),
-            offset_z,
-            entity_z_amount,
+            offset.plus(Vector3.new(dimension.x() / 2, 0, 0)),
             color,
         );
     }
@@ -297,27 +271,6 @@ pub const RenderGroup = extern struct {
         }
 
         return result;
-    }
-
-    pub fn getRenderEntityBasisPosition(
-        self: *RenderGroup,
-        entity_basis: *RenderEntityBasis,
-        screen_center: Vector2,
-    ) Vector2 {
-        // TODO: ZHANDLING
-        const entity_base_position = entity_basis.basis.position;
-        const z_fudge = 1.0 + 0.1 * (entity_base_position.z() + entity_basis.offset_z);
-
-        const entity_ground_point = screen_center.plus(
-            entity_base_position.xy().scaledTo(self.meters_to_pixels * z_fudge),
-        );
-        const entity_z = self.meters_to_pixels * entity_base_position.z();
-
-        const center = entity_ground_point.plus(entity_basis.offset).plus(
-            Vector2.new(0, entity_z * entity_basis.entity_z_amount),
-        );
-
-        return center;
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap) void {
@@ -635,11 +588,11 @@ pub fn drawRectangleSlowly(
                     _ = normal.setXYZ(normal.xyz().normalized());
 
                     // The eye vector is always asumed to be 0, 0, 1.
-                    const z_position = origin_z + z_diff;
                     var bounce_direction = normal.xyz().scaledTo(2.0 * normal.z());
                     _ = bounce_direction.setZ(bounce_direction.z() - 1.0);
                     _ = bounce_direction.setZ(-bounce_direction.z());
 
+                    const z_position = origin_z + z_diff;
                     var opt_far_map: ?*EnvironmentMap = null;
                     const env_map_blend: f32 = bounce_direction.y();
                     var far_map_blend: f32 = 0;
@@ -998,8 +951,8 @@ fn sampleEnvironmentMap(
     const fraction_x: f32 = map_x - @as(f32, @floatFromInt(rounded_x));
     const fraction_y: f32 = map_y - @as(f32, @floatFromInt(rounded_y));
 
-    std.debug.assert(rounded_x >= 0 and rounded_x <= lod.width);
-    std.debug.assert(rounded_y >= 0 and rounded_y <= lod.height);
+    std.debug.assert(rounded_x >= 0 and rounded_x < lod.width);
+    std.debug.assert(rounded_y >= 0 and rounded_y < lod.height);
 
     if (false) {
         // Debug where we are sampling from on the environment map.
@@ -1010,9 +963,9 @@ fn sampleEnvironmentMap(
     }
 
     const sample = bilinearSample(&lod, rounded_x, rounded_y);
-    const result = sRGBBilinearBlend(sample, fraction_x, fraction_y);
+    const result = sRGBBilinearBlend(sample, fraction_x, fraction_y).rgb();
 
-    return result.rgb();
+    return result;
 }
 
 fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample {

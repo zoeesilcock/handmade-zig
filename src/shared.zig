@@ -246,8 +246,9 @@ pub const State = struct {
     low_entity_count: u32 = 0,
     low_entities: [90000]LowEntity = [1]LowEntity{undefined} ** 90000,
 
-    backdrop: LoadedBitmap,
     hero_bitmaps: [4]HeroBitmaps,
+    backdrop: LoadedBitmap,
+    shadow: LoadedBitmap,
     tree: LoadedBitmap,
     sword: LoadedBitmap,
     stairwell: LoadedBitmap,
@@ -331,12 +332,9 @@ pub const AddLowEntityResult = struct {
 };
 
 pub const HeroBitmaps = struct {
-    alignment: Vector2,
-
     head: LoadedBitmap,
     torso: LoadedBitmap,
     cape: LoadedBitmap,
-    shadow: LoadedBitmap,
 };
 
 // Data structures.

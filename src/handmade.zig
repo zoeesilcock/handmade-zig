@@ -102,8 +102,12 @@ fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
     _ = result.setY(@as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y());
     return result;
 }
-fn convertToTopDownAligned(bitmaps: *shared.HeroBitmaps) void {
-    bitmaps.alignment = topDownAligned(&bitmaps.head, bitmaps.alignment);
+fn setTopDownAligned(bitmaps: *shared.HeroBitmaps, in_alignment: Vector2) void {
+    const alignment = topDownAligned(&bitmaps.head, in_alignment);
+
+    bitmaps.head.alignment = alignment;
+    bitmaps.cape.alignment = alignment;
+    bitmaps.torso.alignment = alignment;
 }
 
 pub export fn updateAndRender(
@@ -121,39 +125,32 @@ pub export fn updateAndRender(
     if (!memory.is_initialized) {
         state.* = State{
             .camera_position = WorldPosition.zero(),
-            .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
             .hero_bitmaps = .{
                 shared.HeroBitmaps{
-                    .alignment = Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_right_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_right_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_right_cape.bmp"),
-                    .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_back_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_back_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_back_cape.bmp"),
-                    .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_left_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_left_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_left_cape.bmp"),
-                    .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
                 shared.HeroBitmaps{
-                    .alignment = Vector2.new(72, 182),
                     .head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
                     .torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
                     .cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
-                    .shadow = debugLoadBMP(thread, platform, "test/test_hero_shadow.bmp"),
                 },
             },
-            .tree = debugLoadBMP(thread, platform, "test2/tree00.bmp"),
-            .sword = debugLoadBMP(thread, platform, "test2/rock03.bmp"),
+            .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
+            .shadow = debugLoadBMPAligned(thread, platform, "test/test_hero_shadow.bmp", 72, 182),
+            .tree = debugLoadBMPAligned(thread, platform, "test2/tree00.bmp", 40, 80),
+            .sword = debugLoadBMPAligned(thread, platform, "test2/rock03.bmp", 29, 10),
             .stairwell = debugLoadBMP(thread, platform, "test2/rock02.bmp"),
             .grass = .{
                 debugLoadBMP(thread, platform, "test2/grass00.bmp"),
@@ -175,7 +172,7 @@ pub export fn updateAndRender(
         };
 
         for (&state.hero_bitmaps) |*bitmaps| {
-            convertToTopDownAligned(bitmaps);
+            setTopDownAligned(bitmaps, Vector2.new(72, 182));
         }
 
         state.world_arena.initialize(
@@ -499,8 +496,8 @@ pub export fn updateAndRender(
             if (ground_buffer.position.isValid()) {
                 const bitmap = &ground_buffer.bitmap;
                 const delta = world.subtractPositions(state.world, &ground_buffer.position, &state.camera_position);
-                const alignment = Vector2.newI(bitmap.width, bitmap.height).scaledTo(0.5);
-                render_group.pushBitmap(bitmap, delta.xy(), delta.z(), alignment, 1, 0);
+                bitmap.alignment = Vector2.newI(bitmap.width, bitmap.height);
+                render_group.pushBitmap(bitmap, delta, Color.white());
             }
         }
     }
@@ -567,7 +564,6 @@ pub export fn updateAndRender(
                             relative_position.xy(),
                             0,
                             Color.new(1, 1, 0, 1),
-                            2,
                         );
                     }
                 }
@@ -593,7 +589,7 @@ pub export fn updateAndRender(
 
         if (entity.updatable) {
             const delta_time = input.frame_delta_time;
-            const shadow_alpha: f32 = math.clampf01(1 - 0.5 * entity.position.z());
+            const shadow_color = Color.new(1, 1, 1, math.clampf01(1 - 0.5 * entity.position.z()));
             var move_spec = sim.MoveSpec{};
             var acceleration = Vector3.zero();
 
@@ -637,10 +633,10 @@ pub export fn updateAndRender(
                     }
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                    render_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                    render_group.pushBitmap(&hero_bitmaps.cape, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
-                    render_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                    render_group.pushBitmap(&state.shadow, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&hero_bitmaps.torso, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&hero_bitmaps.cape, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&hero_bitmaps.head, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
                 },
@@ -657,25 +653,26 @@ pub export fn updateAndRender(
                         continue;
                     }
 
-                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    const alignment = topDownAligned(&state.sword, Vector2.new(29, 10));
-                    render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                    render_group.pushBitmap(&state.sword, Vector2.zero(), 0, alignment, 1, 1);
+                    render_group.pushBitmap(&state.shadow, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&state.sword, Vector3.zero(), Color.white());
                 },
                 .Wall => {
-                    const alignment = topDownAligned(&state.tree, Vector2.new(40, 80));
-                    render_group.pushBitmap(&state.tree, Vector2.zero(), 0, alignment, 1, 1);
+                    render_group.pushBitmap(&state.tree, Vector3.zero(), Color.white());
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
                     const stairwell_color2 = Color.new(1, 1, 0, 1);
-                    render_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), 0, 0, stairwell_color1);
-                    render_group.pushRectangle(entity.walkable_dimension, Vector2.zero(), entity.walkable_height, 0, stairwell_color2);
+                    render_group.pushRectangle(entity.walkable_dimension, Vector3.zero(), stairwell_color1);
+                    render_group.pushRectangle(
+                        entity.walkable_dimension,
+                        Vector3.new(0, 0, entity.walkable_height),
+                        stairwell_color2,
+                    );
                 },
                 .Monster => {
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 1);
-                    render_group.pushBitmap(&hero_bitmaps.torso, Vector2.zero(), 0, hero_bitmaps.alignment, 1, 1);
+                    render_group.pushBitmap(&state.shadow, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&hero_bitmaps.torso, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
                 },
@@ -718,18 +715,22 @@ pub export fn updateAndRender(
 
                     const head_bob_sine = @sin(2 * entity.head_bob_time);
                     const head_z = 0.25 * head_bob_sine;
-                    const head_shadow_alpha = (0.5 * shadow_alpha) + (0.2 * head_bob_sine);
+                    const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, head_shadow_alpha, 0);
-                    render_group.pushBitmap(&hero_bitmaps.head, Vector2.zero(), head_z, hero_bitmaps.alignment, 1, 1);
+                    render_group.pushBitmap(&state.shadow, Vector3.zero(), head_shadow_color);
+                    render_group.pushBitmap(&hero_bitmaps.head, Vector3.new(0, 0, head_z), Color.white());
                 },
                 .Space => {
                     const space_color = Color.new(0, 0.5, 1, 1);
                     var volume_index: u32 = 0;
                     while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
                         const volume = entity.collision.volumes[volume_index];
-                        render_group.pushRectangleOutline(volume.dimension.xy(), volume.offset_position.xy(), 0, space_color, 0);
+                        render_group.pushRectangleOutline(
+                            volume.dimension.xy(),
+                            volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                            space_color,
+                        );
                     }
                 },
                 else => {
@@ -754,7 +755,7 @@ pub export fn updateAndRender(
         }
     }
 
-    if (false) {
+    if (true) {
         const map_colors: [3]Color = .{
             Color.new(1, 0, 0, 1),
             Color.new(0, 1, 0, 1),
@@ -796,7 +797,7 @@ pub export fn updateAndRender(
             0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
         );
         const origin = screen_center;
-        const scale = 150.0;
+        const scale = 100.0;
 
         var x_axis = Vector2.zero();
         var y_axis = Vector2.zero();
@@ -1142,7 +1143,7 @@ fn drawHitPoints(entity: *sim.SimEntity, render_group: *RenderGroup) void {
                 hit_point_color = Color.new(0.2, 0.2, 0.2, 1);
             }
 
-            render_group.pushRectangle(hit_point_dimension, hit_position, 0, 0, hit_point_color);
+            render_group.pushRectangle(hit_point_dimension, hit_position.toVector3(0), hit_point_color);
             hit_position = hit_position.plus(hit_position_delta);
         }
     }
@@ -1206,7 +1207,7 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                render_group.pushBitmap(stamp, position, 0, Vector2.zero(), 1, 1);
+                render_group.pushBitmap(stamp, position.toVector3(0), Color.white());
             }
         }
     }
@@ -1235,7 +1236,7 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                render_group.pushBitmap(stamp, position, 0, Vector2.zero(), 1, 1);
+                render_group.pushBitmap(stamp, position.toVector3(0), Color.white());
             }
         }
     }
@@ -1410,6 +1411,16 @@ fn debugLoadBMP(
     platform: shared.Platform,
     file_name: [*:0]const u8,
 ) LoadedBitmap {
+    return debugLoadBMPAligned(thread, platform, file_name, 0, 0);
+}
+
+fn debugLoadBMPAligned(
+    thread: *shared.ThreadContext,
+    platform: shared.Platform,
+    file_name: [*:0]const u8,
+    align_x: i32,
+    top_down_align_y: i32,
+) LoadedBitmap {
     var result: LoadedBitmap = undefined;
     const read_result = platform.debugReadEntireFile(thread, file_name);
 
@@ -1422,6 +1433,7 @@ fn debugLoadBMP(
         result.memory = @as([*]void, @ptrCast(read_result.contents)) + header.bitmap_offset;
         result.width = header.width;
         result.height = header.height;
+        result.alignment = topDownAligned(&result, Vector2.newI(align_x, top_down_align_y));
 
         const alpha_mask = ~(header.red_mask | header.green_mask | header.blue_mask);
         const alpha_scan = intrinsics.findLeastSignificantSetBit(alpha_mask);
