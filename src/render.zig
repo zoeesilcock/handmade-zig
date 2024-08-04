@@ -1,3 +1,19 @@
+//! Software renderer.
+//!
+//! 1: Everywhere outside the renderer, Y always goeas upward, X to the right.
+//!
+//! 2: All bitmaps including the render target are assumed to be bottom-up (meaning that the first row pointer points
+//! to the bottom-most row when viewed on the screen).
+//!
+//! 3: Unless otherwise specified, all inputs to the renderer are in world coordinates (meters), not pixels.
+//! Anything that is in pixel values will be explicitly marked as such.
+//!
+//! 4: Z is a special coordinate because it is broken up into discrete slices, and the renderer actually understands
+//! these slices (potentially).
+//!
+//! TODO: ZHANDLING
+//!
+
 const shared = @import("shared.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
@@ -74,6 +90,7 @@ pub const RenderEntryRectangle = extern struct {
     color: Color,
 };
 
+/// This is only for testing.
 pub const RenderEntryCoordinateSystem = extern struct {
     origin: Vector2,
     x_axis: Vector2,
@@ -153,7 +170,7 @@ pub const RenderGroup = extern struct {
     ) void {
         if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
             entry.entity_basis.basis = self.default_basis;
-            entry.entity_basis.offset = Vector2.new(offset.x(), -offset.y())
+            entry.entity_basis.offset = Vector2.new(offset.x(), offset.y())
                 .scaledTo(self.meters_to_pixels).minus(alignment);
             entry.entity_basis.offset_z = offset_z;
             entry.entity_basis.entity_z_amount = entity_z_amount;
@@ -201,7 +218,7 @@ pub const RenderGroup = extern struct {
             const half_dimension = dimension.scaledTo(self.meters_to_pixels).scaledTo(0.5);
 
             entry.entity_basis.basis = self.default_basis;
-            entry.entity_basis.offset = Vector2.new(offset.x(), -offset.y())
+            entry.entity_basis.offset = Vector2.new(offset.x(), offset.y())
                 .scaledTo(self.meters_to_pixels).minus(half_dimension);
             entry.entity_basis.offset_z = offset_z;
             entry.entity_basis.entity_z_amount = entity_z_amount;
@@ -287,15 +304,17 @@ pub const RenderGroup = extern struct {
         entity_basis: *RenderEntityBasis,
         screen_center: Vector2,
     ) Vector2 {
+        // TODO: ZHANDLING
         const entity_base_position = entity_basis.basis.position;
         const z_fudge = 1.0 + 0.1 * (entity_base_position.z() + entity_basis.offset_z);
-        const entity_ground_point_x = screen_center.x() + self.meters_to_pixels * z_fudge * entity_base_position.x();
-        const entity_ground_point_y = screen_center.y() - self.meters_to_pixels * z_fudge * entity_base_position.y();
-        const entity_z = -self.meters_to_pixels * entity_base_position.z();
 
-        const center = Vector2.new(
-            entity_basis.offset.x() + entity_ground_point_x,
-            entity_basis.offset.y() + entity_ground_point_y + (entity_z * entity_basis.entity_z_amount),
+        const entity_ground_point = screen_center.plus(
+            entity_base_position.xy().scaledTo(self.meters_to_pixels * z_fudge),
+        );
+        const entity_z = self.meters_to_pixels * entity_base_position.z();
+
+        const center = entity_ground_point.plus(entity_basis.offset).plus(
+            Vector2.new(0, entity_z * entity_basis.entity_z_amount),
         );
 
         return center;
@@ -343,10 +362,10 @@ pub const RenderGroup = extern struct {
                 },
                 .RenderEntryBitmap => {
                     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                    // if (entry.bitmap) |bitmap| {
-                    //     const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
-                    //     drawBitmap(output_target, bitmap, position.x(), position.y(), entry.color.a());
-                    // }
+                    if (entry.bitmap) |bitmap| {
+                        const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
+                        drawBitmap(output_target, bitmap, position.x(), position.y(), entry.color.a());
+                    }
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },

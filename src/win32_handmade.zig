@@ -779,7 +779,7 @@ fn resizeDIBSection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
         .bmiHeader = win32.BITMAPINFOHEADER{
             .biSize = @sizeOf(win32.BITMAPINFOHEADER),
             .biWidth = buffer.width,
-            .biHeight = -buffer.height,
+            .biHeight = buffer.height,
             .biPlanes = 1,
             .biBitCount = 32,
             .biCompression = win32.BI_RGB,

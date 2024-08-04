@@ -97,6 +97,15 @@ const RenderGroupEntry = render.RenderGroupEntry;
 const RenderGroup = render.RenderGroup;
 const RenderBasis = render.RenderBasis;
 
+fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
+    var result = alignment;
+    _ = result.setY(@as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y());
+    return result;
+}
+fn convertToTopDownAligned(bitmaps: *shared.HeroBitmaps) void {
+    bitmaps.alignment = topDownAligned(&bitmaps.head, bitmaps.alignment);
+}
+
 pub export fn updateAndRender(
     thread: *shared.ThreadContext,
     platform: shared.Platform,
@@ -164,6 +173,10 @@ pub export fn updateAndRender(
             .test_diffuse = undefined,
             .test_normal = undefined,
         };
+
+        for (&state.hero_bitmaps) |*bitmaps| {
+            convertToTopDownAligned(bitmaps);
+        }
 
         state.world_arena.initialize(
             memory.permanent_storage_size - @sizeOf(State),
@@ -397,10 +410,12 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
-    if (input.executable_reloaded) {
-        for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
-            const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
-            ground_buffer.position = WorldPosition.nullPosition();
+    if (false) {
+        if (input.executable_reloaded) {
+            for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
+                const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
+                ground_buffer.position = WorldPosition.nullPosition();
+            }
         }
     }
 
@@ -546,13 +561,15 @@ pub export fn updateAndRender(
                         fillGroundChunk(state, transient_state, furthest_buffer, &chunk_center);
                     }
 
-                    render_group.pushRectangleOutline(
-                        state.world.chunk_dimension_in_meters.xy(),
-                        relative_position.xy(),
-                        0,
-                        Color.new(1, 1, 0, 1),
-                        2,
-                    );
+                    if (false) {
+                        render_group.pushRectangleOutline(
+                            state.world.chunk_dimension_in_meters.xy(),
+                            relative_position.xy(),
+                            0,
+                            Color.new(1, 1, 0, 1),
+                            2,
+                        );
+                    }
                 }
             }
         }
@@ -641,11 +658,13 @@ pub export fn updateAndRender(
                     }
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
+                    const alignment = topDownAligned(&state.sword, Vector2.new(29, 10));
                     render_group.pushBitmap(&hero_bitmaps.shadow, Vector2.zero(), 0, hero_bitmaps.alignment, shadow_alpha, 0);
-                    render_group.pushBitmap(&state.sword, Vector2.zero(), 0, Vector2.new(29, 10), 1, 1);
+                    render_group.pushBitmap(&state.sword, Vector2.zero(), 0, alignment, 1, 1);
                 },
                 .Wall => {
-                    render_group.pushBitmap(&state.tree, Vector2.zero(), 0, Vector2.new(40, 80), 1, 1);
+                    const alignment = topDownAligned(&state.tree, Vector2.new(40, 80));
+                    render_group.pushBitmap(&state.tree, Vector2.zero(), 0, alignment, 1, 1);
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
@@ -735,115 +754,117 @@ pub export fn updateAndRender(
         }
     }
 
-    const map_colors: [3]Color = .{
-        Color.new(1, 0, 0, 1),
-        Color.new(0, 1, 0, 1),
-        Color.new(0, 0, 1, 1),
-    };
+    if (false) {
+        const map_colors: [3]Color = .{
+            Color.new(1, 0, 0, 1),
+            Color.new(0, 1, 0, 1),
+            Color.new(0, 0, 1, 1),
+        };
 
-    const checker_width = 16;
-    const checker_height = 16;
-    const checker_dimension = Vector2.new(checker_width, checker_height);
-    for (&transient_state.env_maps, 0..) |*map, map_index| {
-        const lod: *LoadedBitmap = &map.lod[0];
+        const checker_width = 16;
+        const checker_height = 16;
+        const checker_dimension = Vector2.new(checker_width, checker_height);
+        for (&transient_state.env_maps, 0..) |*map, map_index| {
+            const lod: *LoadedBitmap = &map.lod[0];
 
-        var row_checker_on = false;
-        var y: u32 = 0;
-        while (y < lod.height) : (y += checker_height) {
-            var checker_on = row_checker_on;
-            var x: u32 = 0;
-            while (x < lod.width) : (x += checker_width) {
-                const min_position = Vector2.newU(x, y);
-                const max_position = min_position.plus(checker_dimension);
-                const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
-                render.drawRectangle(lod, min_position, max_position, color);
-                checker_on = !checker_on;
+            var row_checker_on = false;
+            var y: u32 = 0;
+            while (y < lod.height) : (y += checker_height) {
+                var checker_on = row_checker_on;
+                var x: u32 = 0;
+                while (x < lod.width) : (x += checker_width) {
+                    const min_position = Vector2.newU(x, y);
+                    const max_position = min_position.plus(checker_dimension);
+                    const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
+                    render.drawRectangle(lod, min_position, max_position, color);
+                    checker_on = !checker_on;
+                }
+
+                row_checker_on = !row_checker_on;
             }
-
-            row_checker_on = !row_checker_on;
         }
-    }
-    transient_state.env_maps[0].z_position = -1.5;
-    transient_state.env_maps[1].z_position = 0;
-    transient_state.env_maps[2].z_position = 1.5;
+        transient_state.env_maps[0].z_position = -1.5;
+        transient_state.env_maps[1].z_position = 0;
+        transient_state.env_maps[2].z_position = 1.5;
 
-    state.time += input.frame_delta_time;
-    const angle = 0.1 * state.time;
-    // const angle: f32 = 0;
+        state.time += input.frame_delta_time;
+        const angle = 0.1 * state.time;
+        // const angle: f32 = 0;
 
-    const screen_center = Vector2.new(
-        0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
-        0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
-    );
-    const origin = screen_center;
-    const scale = 150.0;
+        const screen_center = Vector2.new(
+            0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
+            0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
+        );
+        const origin = screen_center;
+        const scale = 150.0;
 
-    var x_axis = Vector2.zero();
-    var y_axis = Vector2.zero();
+        var x_axis = Vector2.zero();
+        var y_axis = Vector2.zero();
 
-    // const displacement = Vector2.zero();
-    const displacement = Vector2.new(
-        100.0 * intrinsics.cos(5.0 * angle),
-        100.0 * intrinsics.sin(3.0 * angle),
-    );
-
-    if (true) {
-        x_axis = Vector2.new(intrinsics.cos(10 * angle), intrinsics.sin(10 * angle)).scaledTo(scale);
-        y_axis = x_axis.perp();
-    } else if (false) {
-        x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
-        y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
-    } else {
-        x_axis = Vector2.new(scale, 0);
-        y_axis = Vector2.new(0, scale);
-    }
-
-    const color = Color.new(1, 1, 1, 1);
-    // const color_angle = 5.0 * angle;
-    // const color =
-    //     Color.new(
-    //     0.5 + 0.5 * intrinsics.sin(color_angle),
-    //     0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
-    //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
-    //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
-    // );
-
-    _ = render_group.pushCoordinateSystem(
-        origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(displacement),
-        x_axis,
-        y_axis,
-        color,
-        &state.test_diffuse,
-        &state.test_normal,
-        &transient_state.env_maps[2],
-        &transient_state.env_maps[1],
-        &transient_state.env_maps[0],
-    );
-
-    var map_position = Vector2.zero();
-    for (&transient_state.env_maps) |*map| {
-        const lod: *LoadedBitmap = &map.lod[0];
-
-        x_axis = Vector2.newI(lod.width, 0).scaledTo(0.5);
-        y_axis = Vector2.newI(0, lod.height).scaledTo(0.5);
-
-        _ = render_group.pushCoordinateSystem(
-            map_position,
-            x_axis,
-            y_axis,
-            Color.new(1, 1, 1, 1),
-            lod,
-            null,
-            undefined,
-            undefined,
-            undefined,
+        // const displacement = Vector2.zero();
+        const displacement = Vector2.new(
+            100.0 * intrinsics.cos(5.0 * angle),
+            100.0 * intrinsics.sin(3.0 * angle),
         );
 
-        map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
-    }
+        if (true) {
+            x_axis = Vector2.new(intrinsics.cos(10 * angle), intrinsics.sin(10 * angle)).scaledTo(scale);
+            y_axis = x_axis.perp();
+        } else if (false) {
+            x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
+            y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
+        } else {
+            x_axis = Vector2.new(scale, 0);
+            y_axis = Vector2.new(0, scale);
+        }
 
-    if (false) {
-        render_group.pushSaturation(0.5 + 0.5 * intrinsics.sin(10.0 * state.time));
+        const color = Color.new(1, 1, 1, 1);
+        // const color_angle = 5.0 * angle;
+        // const color =
+        //     Color.new(
+        //     0.5 + 0.5 * intrinsics.sin(color_angle),
+        //     0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
+        //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
+        //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
+        // );
+
+        _ = render_group.pushCoordinateSystem(
+            origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(displacement),
+            x_axis,
+            y_axis,
+            color,
+            &state.test_diffuse,
+            &state.test_normal,
+            &transient_state.env_maps[2],
+            &transient_state.env_maps[1],
+            &transient_state.env_maps[0],
+        );
+
+        var map_position = Vector2.zero();
+        for (&transient_state.env_maps) |*map| {
+            const lod: *LoadedBitmap = &map.lod[0];
+
+            x_axis = Vector2.newI(lod.width, 0).scaledTo(0.5);
+            y_axis = Vector2.newI(0, lod.height).scaledTo(0.5);
+
+            _ = render_group.pushCoordinateSystem(
+                map_position,
+                x_axis,
+                y_axis,
+                Color.new(1, 1, 1, 1),
+                lod,
+                null,
+                undefined,
+                undefined,
+                undefined,
+            );
+
+            map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
+        }
+
+        if (false) {
+            render_group.pushSaturation(0.5 + 0.5 * intrinsics.sin(10.0 * state.time));
+        }
     }
 
     render_group.renderTo(draw_buffer);
@@ -1164,7 +1185,7 @@ fn fillGroundChunk(
             const chunk_z = chunk_position.chunk_z;
             const center = Vector2.new(
                 @as(f32, @floatFromInt(chunk_offset_x)) * width,
-                -@as(f32, @floatFromInt(chunk_offset_y)) * height,
+                @as(f32, @floatFromInt(chunk_offset_y)) * height,
             );
 
             const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
@@ -1199,7 +1220,7 @@ fn fillGroundChunk(
             const chunk_z = chunk_position.chunk_z;
             const center = Vector2.new(
                 @as(f32, @floatFromInt(chunk_offset_x)) * width,
-                -@as(f32, @floatFromInt(chunk_offset_y)) * height,
+                @as(f32, @floatFromInt(chunk_offset_y)) * height,
             );
 
             const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
@@ -1395,6 +1416,7 @@ fn debugLoadBMP(
     if (read_result.content_size > 0) {
         const header = @as(*shared.BitmapHeader, @ptrCast(@alignCast(read_result.contents)));
 
+        std.debug.assert(header.height >= 0);
         std.debug.assert(header.compression == 3);
 
         result.memory = @as([*]void, @ptrCast(read_result.contents)) + header.bitmap_offset;
@@ -1445,9 +1467,13 @@ fn debugLoadBMP(
         }
     }
 
-    result.pitch = -result.width * shared.BITMAP_BYTES_PER_PIXEL;
-    const offset: usize = @intCast(-result.pitch * (result.height - 1));
-    result.memory = @ptrCast(@as([*]u8, @ptrCast(result.memory)) + offset);
+    result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
+
+    if (false) {
+        result.pitch = -result.width * shared.BITMAP_BYTES_PER_PIXEL;
+        const offset: usize = @intCast(-result.pitch * (result.height - 1));
+        result.memory = @ptrCast(@as([*]u8, @ptrCast(result.memory)) + offset);
+    }
 
     return result;
 }
