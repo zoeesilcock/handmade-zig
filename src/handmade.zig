@@ -238,18 +238,17 @@ pub export fn updateAndRender(
         var door_down = false;
 
         for (0..200) |_| {
-            const door_direction = series.randomChoice(if (door_up or door_down) 2 else 3);
+            const door_direction = 3;
+            // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
             // const door_direction = series.randomChoice(2);
 
             var created_z_door = false;
-            if (door_direction == 2) {
+            if (door_direction == 3) {
                 created_z_door = true;
-
-                if (abs_tile_z == screen_base_z) {
-                    door_up = true;
-                } else {
-                    door_down = true;
-                }
+                door_down = true;
+            } else if (door_direction == 2) {
+                created_z_door = true;
+                door_up = true;
             } else if (door_direction == 1) {
                 door_right = true;
             } else {
@@ -284,9 +283,13 @@ pub export fn updateAndRender(
                     }
 
                     if (!should_be_door) {
-                        _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
+                        if (@mod(tile_y, 2) == 1 or @mod(tile_x, 2) == 1) {
+                            _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
+                        }
                     } else if (created_z_door) {
-                        if (tile_x == 10 and tile_y == 5) {
+                        if ((@mod(abs_tile_z, 2) == 1 and (tile_x == 10 and tile_y == 5)) or
+                            ((@mod(abs_tile_z, 2) == 0 and (tile_x == 4 and tile_y == 5))))
+                        {
                             _ = addStairs(state, abs_tile_x, abs_tile_y, if (door_down) abs_tile_z - 1 else abs_tile_z);
                         }
                     }
@@ -307,12 +310,10 @@ pub export fn updateAndRender(
             door_right = false;
             door_top = false;
 
-            if (door_direction == 2) {
-                if (abs_tile_z == screen_base_z) {
-                    abs_tile_z = screen_base_z + 1;
-                } else {
-                    abs_tile_z = screen_base_z;
-                }
+            if (door_direction == 3) {
+                abs_tile_z -= 1;
+            } else if (door_direction == 2) {
+                abs_tile_z += 1;
             } else if (door_direction == 1) {
                 screen_x += 1;
             } else {
@@ -453,30 +454,17 @@ pub export fn updateAndRender(
                 controlled_hero.vertical_direction = 3;
             }
 
-            if (false) {
-                if (controller.action_up.ended_down) {
-                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
-                }
-                if (controller.action_down.ended_down) {
-                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
-                }
-                if (controller.action_left.ended_down) {
-                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
-                }
-                if (controller.action_right.ended_down) {
-                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
-                }
-            } else {
-                var zoom_rate: f32 = 0;
-
-                if (controller.action_up.ended_down) {
-                    zoom_rate = 1;
-                }
-                if (controller.action_down.ended_down) {
-                    zoom_rate = -1;
-                }
-
-                state.z_offset += zoom_rate * input.frame_delta_time;
+            if (controller.action_up.ended_down) {
+                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
+            }
+            if (controller.action_down.ended_down) {
+                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
+            }
+            if (controller.action_left.ended_down) {
+                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
+            }
+            if (controller.action_right.ended_down) {
+                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
             }
         }
     }
@@ -484,7 +472,6 @@ pub export fn updateAndRender(
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
     var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), state.meters_to_pixels);
-    render_group.global_alpha = 1; //math.clampf01(1 - state.z_offset);
 
     // Create draw buffer.
     var draw_buffer_ = LoadedBitmap{
@@ -499,7 +486,9 @@ pub export fn updateAndRender(
     render_group.pushClear(Color.new(0.25, 0.25, 0.25, 0));
 
     const screen_size = Vector3.newI(buffer.width, buffer.height, 0).scaledTo(pixels_to_meters);
-    const camera_bounds_in_meters = math.Rectangle3.fromCenterDimension(Vector3.zero(), screen_size);
+    var camera_bounds_in_meters = math.Rectangle3.fromCenterDimension(Vector3.zero(), screen_size);
+    _ = camera_bounds_in_meters.min.setZ(-3.0 * state.typical_floor_height);
+    _ = camera_bounds_in_meters.max.setZ(1.0 * state.typical_floor_height);
 
     // Draw ground.
     if (false) {
@@ -514,7 +503,7 @@ pub export fn updateAndRender(
 
                 var basis = transient_state.arena.pushStruct(RenderBasis);
                 render_group.default_basis = basis;
-                basis.position = delta.plus(Vector3.new(0, 0, state.z_offset));
+                basis.position = delta;
 
                 render_group.pushBitmap(bitmap, Vector3.zero(), Color.white());
             }
@@ -590,17 +579,20 @@ pub export fn updateAndRender(
         }
     }
 
-    const simulation_bounds_expansion = Vector3.new(15, 15, 15);
-    const simulation_bounds = camera_bounds_in_meters.addRadius(simulation_bounds_expansion);
+    const sim_bounds_expansion = Vector3.new(15, 15, 0);
+    const simulation_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
     const sim_memory = transient_state.arena.beginTemporaryMemory();
+    const sim_center_position = state.camera_position;
     const screen_sim_region = sim.beginSimulation(
         state,
         &transient_state.arena,
         state.world,
-        state.camera_position,
+        sim_center_position,
         simulation_bounds,
         input.frame_delta_time,
     );
+
+    const camera_position = world.subtractPositions(state.world, &state.camera_position, &sim_center_position);
 
     var entity_index: u32 = 0;
     while (entity_index < screen_sim_region.entity_count) : (entity_index += 1) {
@@ -614,6 +606,27 @@ pub export fn updateAndRender(
 
             var basis = transient_state.arena.pushStruct(RenderBasis);
             render_group.default_basis = basis;
+
+            const camera_relative_ground_position = entity.getGroundPoint().minus(camera_position);
+            const fade_top_end_z: f32 = 0.75 * state.typical_floor_height;
+            const fade_top_start_z: f32 = 0.5 * state.typical_floor_height;
+            const fade_bottom_start_z: f32 = -2 * state.typical_floor_height;
+            const fade_bottom_end_z: f32 = -2.25 * state.typical_floor_height;
+            render_group.global_alpha = 1;
+
+            if (camera_relative_ground_position.z() > fade_top_start_z) {
+                render_group.global_alpha = math.clamp01MapToRange(
+                    fade_top_end_z,
+                    fade_top_start_z,
+                    camera_relative_ground_position.z(),
+                );
+            } else if (camera_relative_ground_position.z() < fade_bottom_start_z) {
+                render_group.global_alpha = math.clamp01MapToRange(
+                    fade_bottom_end_z,
+                    fade_bottom_start_z,
+                    camera_relative_ground_position.z(),
+                );
+            }
 
             switch (entity.type) {
                 .Hero => {
@@ -770,9 +783,11 @@ pub export fn updateAndRender(
                 );
             }
 
-            basis.position = entity.getGroundPoint().plus(Vector3.new(0, 0, state.z_offset));
+            basis.position = entity.getGroundPoint();
         }
     }
+
+    render_group.global_alpha = 1;
 
     if (false) {
         const map_colors: [3]Color = .{

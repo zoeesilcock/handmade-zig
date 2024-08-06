@@ -585,6 +585,17 @@ pub inline fn clampf01(value: f32) f32 {
     return clampf(0, value, 1);
 }
 
+pub inline fn clamp01MapToRange(min: f32, max: f32, value: f32) f32 {
+    var result: f32 = 0;
+    const range = max - min;
+
+    if (range != 0) {
+        result = clampf01((value - min) / range);
+    }
+
+    return result;
+}
+
 pub inline fn safeRatioN(numerator: f32, divisor: f32, fallback: f32) f32 {
     var result: f32 = fallback;
 

@@ -889,7 +889,7 @@ pub fn drawBitmapMatte(
     }
 }
 
-pub fn sRGB255ToLinear1(color: Color) Color {
+pub inline fn sRGB255ToLinear1(color: Color) Color {
     const inverse_255: f32 = 1.0 / 255.0;
 
     return Color.new(
@@ -900,7 +900,7 @@ pub fn sRGB255ToLinear1(color: Color) Color {
     );
 }
 
-pub fn linear1ToSRGB255(color: Color) Color {
+pub inline fn linear1ToSRGB255(color: Color) Color {
     return Color.new(
         255.0 * @sqrt(color.r()),
         255.0 * @sqrt(color.g()),
@@ -909,7 +909,7 @@ pub fn linear1ToSRGB255(color: Color) Color {
     );
 }
 
-fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color {
+inline fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color {
     var texel_a = Color.unpackColor(texel_sample.a);
     var texel_b = Color.unpackColor(texel_sample.b);
     var texel_c = Color.unpackColor(texel_sample.c);
@@ -926,7 +926,7 @@ fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color {
     );
 }
 
-fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
+inline fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
     const inv_255: f32 = 1.0 / 255.0;
 
     return Vector4.new(
@@ -943,7 +943,7 @@ fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
 /// * sample_direction tells us what direction the cast is going.
 /// * roughness says which LODs of the map we sample from.
 /// * distance_from_map_in_z says how far the map is from the sample point in Z, given in meters.
-fn sampleEnvironmentMap(
+inline fn sampleEnvironmentMap(
     map: *EnvironmentMap,
     screen_space_uv: Vector2,
     sample_direction: Vector3,
@@ -990,7 +990,7 @@ fn sampleEnvironmentMap(
     return result;
 }
 
-fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample {
+inline fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample {
     const offset: i32 = @intCast((x * @sizeOf(u32)) + (y * texture.pitch));
     const texture_base = shared.incrementPointer(texture.memory.?, offset);
     const texel_pointer_a: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));

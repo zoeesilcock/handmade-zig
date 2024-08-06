@@ -272,8 +272,6 @@ pub const State = struct {
 
     test_diffuse: LoadedBitmap,
     test_normal: LoadedBitmap,
-
-    z_offset: f32 = 0,
 };
 
 pub const TransientState = struct {

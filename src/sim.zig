@@ -325,7 +325,9 @@ pub fn beginSimulation(
 
     sim_region.world = game_world;
     sim_region.origin = origin;
-    sim_region.updatable_bounds = bounds.addRadius(Vector3.splat(sim_region.max_entity_radius));
+    sim_region.updatable_bounds = bounds.addRadius(
+        Vector3.new(sim_region.max_entity_radius, sim_region.max_entity_radius, 0),
+    );
     sim_region.bounds = sim_region.updatable_bounds.addRadius(
         Vector3.new(update_safety_margin, update_safety_margin, update_safety_margin_z),
     );
@@ -838,13 +840,7 @@ pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
                     new_camera_position.chunk_y -= 9;
                 }
             } else {
-                const camera_z_offset = new_camera_position.offset.z();
                 new_camera_position = stored.position;
-                new_camera_position.offset = Vector3.new(
-                    new_camera_position.offset.x(),
-                    new_camera_position.offset.y(),
-                    camera_z_offset,
-                );
             }
 
             state.camera_position = new_camera_position;
