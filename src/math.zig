@@ -297,39 +297,39 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             },
         };
 
-        pub fn zero() Self {
+        pub inline fn zero() Self {
             return Self{ .values = @splat(0) };
         }
 
-        pub fn one() Self {
+        pub inline fn one() Self {
             return Self{ .values = @splat(1) };
         }
 
-        pub fn splat(value: f32) Self {
+        pub inline fn splat(value: f32) Self {
             return Self{ .values = @splat(value) };
         }
 
-        pub fn plus(self: *const Self, b: Self) Self {
+        pub inline fn plus(self: *const Self, b: Self) Self {
             return Self{ .values = self.values + b.values };
         }
 
-        pub fn minus(self: *const Self, b: Self) Self {
+        pub inline fn minus(self: *const Self, b: Self) Self {
             return Self{ .values = self.values - b.values };
         }
 
-        pub fn times(self: *const Self, b: Self) Self {
+        pub inline fn times(self: *const Self, b: Self) Self {
             return Self{ .values = self.values * b.values };
         }
 
-        pub fn dividedBy(self: *const Self, b: Self) Self {
+        pub inline fn dividedBy(self: *const Self, b: Self) Self {
             return Self{ .values = self.values / b.values };
         }
 
-        pub fn scaledTo(self: *const Self, scalar: f32) Self {
+        pub inline fn scaledTo(self: *const Self, scalar: f32) Self {
             return Self{ .values = self.values * @as(@TypeOf(self.values), @splat(scalar)) };
         }
 
-        pub fn clamp01(self: *const Self) Self {
+        pub inline fn clamp01(self: *const Self) Self {
             var result = Self.zero();
 
             for (0..dimensions) |axis_index| {
@@ -339,35 +339,35 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             return result;
         }
 
-        pub fn negated(self: *const Self) Self {
+        pub inline fn negated(self: *const Self) Self {
             return Self{ .values = -self.values };
         }
 
-        pub fn dotProduct(self: *const Self, b: Self) f32 {
+        pub inline fn dotProduct(self: *const Self, b: Self) f32 {
             return @reduce(.Add, self.values * b.values);
         }
 
-        pub fn hadamardProduct(self: *const Self, b: Self) Self {
+        pub inline fn hadamardProduct(self: *const Self, b: Self) Self {
             return Self{ .values = self.values * b.values };
         }
 
-        pub fn lengthSquared(self: *const Self) f32 {
+        pub inline fn lengthSquared(self: *const Self) f32 {
             return self.dotProduct(self.*);
         }
 
-        pub fn length(self: *const Self) f32 {
+        pub inline fn length(self: *const Self) f32 {
             return @sqrt(self.lengthSquared());
         }
 
-        pub fn invalidPosition() Self {
+        pub inline fn invalidPosition() Self {
             return Self{ .values = @splat(100000) };
         }
 
-        pub fn lerp(min: Self, max: Self, distance: f32) Self {
+        pub inline fn lerp(min: Self, max: Self, distance: f32) Self {
             return Self{ .values = min.values + @as(@TypeOf(min.values), @splat(distance)) * (max.values - min.values) };
         }
 
-        pub fn normalized(self: Self) Self {
+        pub inline fn normalized(self: Self) Self {
             return self.scaledTo(1.0 / self.length());
         }
     };
@@ -432,7 +432,7 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
 
         pub usingnamespace switch (Self.dimensions) {
             inline 2 => struct {
-                pub fn toRectangle3(self: Self, min_z: f32, max_z: f32) Rectangle3 {
+                pub inline fn toRectangle3(self: Self, min_z: f32, max_z: f32) Rectangle3 {
                     return Rectangle3{
                         .min = self.min.toVector3(min_z),
                         .max = self.max.toVector3(max_z),
@@ -440,7 +440,7 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
                 }
             },
             inline 3 => struct {
-                pub fn toRectangle2(self: Self) Rectangle2 {
+                pub inline fn toRectangle2(self: Self) Rectangle2 {
                     return Rectangle2{
                         .min = self.min.xy(),
                         .max = self.max.xy(),
@@ -452,44 +452,44 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
             },
         };
 
-        pub fn fromMinMax(min: VectorType, max: VectorType) Self {
+        pub inline fn fromMinMax(min: VectorType, max: VectorType) Self {
             return Self{
                 .min = min,
                 .max = max,
             };
         }
 
-        pub fn fromMinDimension(min: VectorType, dimension: VectorType) Self {
+        pub inline fn fromMinDimension(min: VectorType, dimension: VectorType) Self {
             return Self{
                 .min = min,
                 .max = min.plus(dimension),
             };
         }
 
-        pub fn fromCenterHalfDimension(center: VectorType, half_dimension: VectorType) Self {
+        pub inline fn fromCenterHalfDimension(center: VectorType, half_dimension: VectorType) Self {
             return Self{
                 .min = center.minus(half_dimension),
                 .max = center.plus(half_dimension),
             };
         }
 
-        pub fn fromCenterDimension(center: VectorType, dimension: VectorType) Self {
+        pub inline fn fromCenterDimension(center: VectorType, dimension: VectorType) Self {
             return fromCenterHalfDimension(center, dimension.scaledTo(0.5));
         }
 
-        pub fn getMinCorner(self: *const Self) VectorType {
+        pub inline fn getMinCorner(self: *const Self) VectorType {
             return self.min;
         }
 
-        pub fn getMaxCorner(self: *const Self) VectorType {
+        pub inline fn getMaxCorner(self: *const Self) VectorType {
             return self.max;
         }
 
-        pub fn getCenter(self: *const Self) VectorType {
+        pub inline fn getCenter(self: *const Self) VectorType {
             return self.min.plus(self.max).scale(0.5);
         }
 
-        pub fn getBarycentricPosition(self: *const Self, position: VectorType) VectorType {
+        pub inline fn getBarycentricPosition(self: *const Self, position: VectorType) VectorType {
             var result = VectorType.zero();
 
             for (0..dimensions) |axis_index| {
@@ -502,21 +502,21 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
             return result;
         }
 
-        pub fn addRadius(self: *const Self, radius: VectorType) Self {
+        pub inline fn addRadius(self: *const Self, radius: VectorType) Self {
             return Self{
                 .min = self.min.minus(radius),
                 .max = self.max.plus(radius),
             };
         }
 
-        pub fn offsetBy(self: *Self, offset: VectorType) Self {
+        pub inline fn offsetBy(self: *Self, offset: VectorType) Self {
             return Self {
                 .min = self.min.add(offset),
                 .max = self.max.add(offset),
             };
         }
 
-        pub fn intersects(self: *const Self, b: *const Self) bool {
+        pub inline fn intersects(self: *const Self, b: *const Self) bool {
             var result = true;
 
             for (0..dimensions) |axis_index| {
@@ -533,15 +533,15 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
     };
 }
 
-pub fn square(a: f32) f32 {
+pub inline fn square(a: f32) f32 {
     return a * a;
 }
 
-pub fn lerpf(min: f32, max: f32, distance: f32) f32 {
+pub inline fn lerpf(min: f32, max: f32, distance: f32) f32 {
     return (1.0 - distance) * min + distance * max;
 }
 
-pub fn clampf(min: f32, value: f32, max: f32) f32 {
+pub inline fn clampf(min: f32, value: f32, max: f32) f32 {
     var result = value;
 
     if (result < min) {
@@ -555,11 +555,11 @@ pub fn clampf(min: f32, value: f32, max: f32) f32 {
     return result;
 }
 
-pub fn clampf01(value: f32) f32 {
+pub inline fn clampf01(value: f32) f32 {
     return clampf(0, value, 1);
 }
 
-pub fn safeRatioN(numerator: f32, divisor: f32, fallback: f32) f32 {
+pub inline fn safeRatioN(numerator: f32, divisor: f32, fallback: f32) f32 {
     var result: f32 = fallback;
 
     if (divisor != 0) {
@@ -569,10 +569,10 @@ pub fn safeRatioN(numerator: f32, divisor: f32, fallback: f32) f32 {
     return result;
 }
 
-pub fn safeRatio0(numerator: f32, divisor: f32) f32 {
+pub inline fn safeRatio0(numerator: f32, divisor: f32) f32 {
     return safeRatioN(numerator, divisor, 0);
 }
 
-pub fn safeRatio1(numerator: f32, divisor: f32) f32 {
+pub inline fn safeRatio1(numerator: f32, divisor: f32) f32 {
     return safeRatioN(numerator, divisor, 1);
 }
