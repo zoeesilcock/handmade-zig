@@ -9,7 +9,8 @@
 //! Anything that is in pixel values will be explicitly marked as such.
 //!
 //! 4: Z is a special coordinate because it is broken up into discrete slices, and the renderer actually understands
-//! these slices (potentially).
+//! these slices. Z slices are what control the scaling of things, whereas Z offsets inside a slice are what control
+//! Y offsetting.
 //!
 //! 5: All color values specified to the renderer using the Color and Color3 types are in non-premultiplied alpha.
 //!
@@ -55,6 +56,11 @@ pub const RenderBasis = extern struct {
 pub const RenderEntityBasis = extern struct {
     basis: *RenderBasis,
     offset: Vector3,
+};
+
+pub const RenderEntityBasisResult = extern struct {
+    position: Vector2,
+    scale: f32,
 };
 
 pub const RenderEntryType = enum(u8) {
@@ -105,6 +111,8 @@ pub const RenderEntryCoordinateSystem = extern struct {
 };
 
 pub const RenderGroup = extern struct {
+    global_alpha: f32,
+
     default_basis: *RenderBasis,
     meters_to_pixels: f32,
 
@@ -121,6 +129,7 @@ pub const RenderGroup = extern struct {
         result.default_basis = arena.pushStruct(RenderBasis);
         result.default_basis.position = Vector3.zero();
         result.meters_to_pixels = meters_to_pixels;
+        result.global_alpha = 1;
 
         return result;
     }
@@ -161,13 +170,13 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         entity_basis: *RenderEntityBasis,
         screen_center: Vector2,
-    ) Vector2 {
+    ) RenderEntityBasisResult {
         const entity_base_position = entity_basis.basis.position.scaledTo(self.meters_to_pixels);
-        const z_fudge = 1.0 + 0.1 * entity_base_position.z();
-        const entity_ground_point = screen_center.plus(entity_base_position.xy().scaledTo(z_fudge).plus(entity_basis.offset.xy()));
-        const center = entity_ground_point.plus(Vector2.new(0, (entity_base_position.z() + entity_basis.offset.z())));
+        const z_fudge = 1.0 + 0.0015 * entity_base_position.z();
+        const entity_ground_point = screen_center.plus(entity_base_position.xy().plus(entity_basis.offset.xy()).scaledTo(z_fudge));
+        const center = entity_ground_point; //.plus(Vector2.new(0, (entity_base_position.z() + entity_basis.offset.z())));
 
-        return center;
+        return RenderEntityBasisResult{ .position = center, .scale = z_fudge };
     }
 
     // Renderer API.
@@ -193,7 +202,7 @@ pub const RenderGroup = extern struct {
             entry.bitmap = bitmap;
             entry.entity_basis.basis = self.default_basis;
             entry.entity_basis.offset = offset.scaledTo(self.meters_to_pixels).minus(bitmap.alignment.toVector3(0));
-            entry.color = color;
+            entry.color = color.scaledTo(self.global_alpha);
         }
     }
 
@@ -278,6 +287,7 @@ pub const RenderGroup = extern struct {
             0.5 * @as(f32, @floatFromInt(output_target.width)),
             0.5 * @as(f32, @floatFromInt(output_target.height)),
         );
+        const pixels_to_meters: f32 = 1.0 / self.meters_to_pixels;
 
         var base_address: u32 = 0;
         while (base_address < self.push_buffer_size) {
@@ -316,16 +326,38 @@ pub const RenderGroup = extern struct {
                 .RenderEntryBitmap => {
                     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                     if (entry.bitmap) |bitmap| {
-                        const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
-                        drawBitmap(output_target, bitmap, position.x(), position.y(), entry.color.a());
+                        const basis = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
+
+                        if (false) {
+                            drawBitmap(output_target, bitmap, basis.position.x(), basis.position.y(), entry.color.a());
+                        } else {
+                            drawRectangleSlowly(
+                                output_target,
+                                basis.position,
+                                Vector2.newI(bitmap.width, 0).scaledTo(basis.scale),
+                                Vector2.newI(0, bitmap.height).scaledTo(basis.scale),
+                                entry.color,
+                                @constCast(bitmap),
+                                null,
+                                undefined,
+                                undefined,
+                                undefined,
+                                pixels_to_meters,
+                            );
+                        }
                     }
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
                 .RenderEntryRectangle => {
                     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
-                    const position = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
-                    drawRectangle(output_target, position, position.plus(entry.dimension), entry.color);
+                    const basis = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_center);
+                    drawRectangle(
+                        output_target,
+                        basis.position,
+                        basis.position.plus(entry.dimension.scaledTo(basis.scale)),
+                        entry.color,
+                    );
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -344,7 +376,7 @@ pub const RenderGroup = extern struct {
                         entry.top,
                         entry.middle,
                         entry.bottom,
-                        1.0 / self.meters_to_pixels,
+                        pixels_to_meters,
                     );
 
                     const color = Color.new(1, 1, 0, 1);

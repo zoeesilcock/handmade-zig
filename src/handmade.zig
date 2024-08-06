@@ -238,8 +238,8 @@ pub export fn updateAndRender(
         var door_down = false;
 
         for (0..200) |_| {
-            // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 3);
-            const door_direction = series.randomChoice(2);
+            const door_direction = series.randomChoice(if (door_up or door_down) 2 else 3);
+            // const door_direction = series.randomChoice(2);
 
             var created_z_door = false;
             if (door_direction == 2) {
@@ -453,17 +453,30 @@ pub export fn updateAndRender(
                 controlled_hero.vertical_direction = 3;
             }
 
-            if (controller.action_up.ended_down) {
-                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
-            }
-            if (controller.action_down.ended_down) {
-                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
-            }
-            if (controller.action_left.ended_down) {
-                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
-            }
-            if (controller.action_right.ended_down) {
-                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
+            if (false) {
+                if (controller.action_up.ended_down) {
+                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
+                }
+                if (controller.action_down.ended_down) {
+                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
+                }
+                if (controller.action_left.ended_down) {
+                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
+                }
+                if (controller.action_right.ended_down) {
+                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
+                }
+            } else {
+                var zoom_rate: f32 = 0;
+
+                if (controller.action_up.ended_down) {
+                    zoom_rate = 1;
+                }
+                if (controller.action_down.ended_down) {
+                    zoom_rate = -1;
+                }
+
+                state.z_offset += zoom_rate * input.frame_delta_time;
             }
         }
     }
@@ -471,6 +484,7 @@ pub export fn updateAndRender(
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
     var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), state.meters_to_pixels);
+    render_group.global_alpha = 1; //math.clampf01(1 - state.z_offset);
 
     // Create draw buffer.
     var draw_buffer_ = LoadedBitmap{
@@ -488,7 +502,7 @@ pub export fn updateAndRender(
     const camera_bounds_in_meters = math.Rectangle3.fromCenterDimension(Vector3.zero(), screen_size);
 
     // Draw ground.
-    {
+    if (false) {
         var ground_buffer_index: u32 = 0;
         while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
             const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -497,13 +511,18 @@ pub export fn updateAndRender(
                 const bitmap = &ground_buffer.bitmap;
                 const delta = world.subtractPositions(state.world, &ground_buffer.position, &state.camera_position);
                 bitmap.alignment = Vector2.newI(bitmap.width, bitmap.height);
-                render_group.pushBitmap(bitmap, delta, Color.white());
+
+                var basis = transient_state.arena.pushStruct(RenderBasis);
+                render_group.default_basis = basis;
+                basis.position = delta.plus(Vector3.new(0, 0, state.z_offset));
+
+                render_group.pushBitmap(bitmap, Vector3.zero(), Color.white());
             }
         }
     }
 
     // Populate ground chunks.
-    {
+    if (false) {
         const min_chunk_position = world.mapIntoChunkSpace(
             state.world,
             state.camera_position,
@@ -751,11 +770,11 @@ pub export fn updateAndRender(
                 );
             }
 
-            basis.position = entity.getGroundPoint();
+            basis.position = entity.getGroundPoint().plus(Vector3.new(0, 0, state.z_offset));
         }
     }
 
-    if (true) {
+    if (false) {
         const map_colors: [3]Color = .{
             Color.new(1, 0, 0, 1),
             Color.new(0, 1, 0, 1),
