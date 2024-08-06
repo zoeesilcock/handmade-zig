@@ -1322,10 +1322,7 @@ fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32, cx: f32, cy: f32) 
                 255.0 * roughness,
             );
 
-            pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(color.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(color.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(color.b() + 0.5)) << 0));
+            pixel[0] = color.packColor1();
 
             pixel += 1;
         }
@@ -1369,10 +1366,7 @@ fn makeSphereDiffuseMap(bitmap: *LoadedBitmap, cx: f32, cy: f32) void {
                 alpha,
             );
 
-            pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(color.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(color.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(color.b() + 0.5)) << 0));
+            pixel[0] = color.packColor1();
 
             pixel += 1;
         }
@@ -1413,10 +1407,7 @@ fn makePyramidNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
                 255.0 * roughness,
             );
 
-            pixel[0] = ((@as(u32, @intFromFloat(color.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(color.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(color.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(color.b() + 0.5)) << 0));
+            pixel[0] = color.packColor1();
 
             pixel += 1;
         }
@@ -1488,10 +1479,7 @@ fn debugLoadBMPAligned(
 
                 texel = render.linear1ToSRGB255(texel);
 
-                source_dest[0] = ((@as(u32, @intFromFloat(texel.a() + 0.5)) << 24) |
-                    (@as(u32, @intFromFloat(texel.r() + 0.5)) << 16) |
-                    (@as(u32, @intFromFloat(texel.g() + 0.5)) << 8) |
-                    (@as(u32, @intFromFloat(texel.b() + 0.5)) << 0));
+                source_dest[0] = texel.packColor1();
 
                 source_dest += 1;
             }

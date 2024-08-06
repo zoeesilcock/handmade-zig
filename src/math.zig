@@ -182,18 +182,44 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                     return Self{ .values = .{ x_value, y_value, z_value, w_value } };
                 }
 
+                pub inline fn newI(x_value: i32, y_value: i32, z_value: i32, w_value: i32) Self {
+                    return Self{ .values = .{
+                        @floatFromInt(x_value),
+                        @floatFromInt(y_value),
+                        @floatFromInt(z_value),
+                        @floatFromInt(w_value),
+                    } };
+                }
+
+                pub inline fn newU(x_value: u32, y_value: u32, z_value: u32, w_value: u32) Self {
+                    return Self{ .values = .{
+                        @floatFromInt(x_value),
+                        @floatFromInt(y_value),
+                        @floatFromInt(z_value),
+                        @floatFromInt(w_value),
+                    } };
+                }
+
                 pub inline fn packColor(self: Self) u32 {
                     return ((intrinsics.roundReal32ToUInt32(self.a() * 255.0) << 24) |
                         (intrinsics.roundReal32ToUInt32(self.r() * 255.0) << 16) |
                         (intrinsics.roundReal32ToUInt32(self.g() * 255.0) << 8) |
                         (intrinsics.roundReal32ToUInt32(self.b() * 255.0) << 0));
                 }
+
+                pub inline fn packColor1(self: Self) u32 {
+                    return ((@as(u32, @intFromFloat(self.a() + 0.5)) << 24) |
+                        (@as(u32, @intFromFloat(self.r() + 0.5)) << 16) |
+                        (@as(u32, @intFromFloat(self.g() + 0.5)) << 8) |
+                        (@as(u32, @intFromFloat(self.b() + 0.5)) << 0));
+                }
+
                 pub inline fn unpackColor(value: u32) Self {
-                    return Self.new(
-                        @floatFromInt((value >> 16) & 0xFF),
-                        @floatFromInt((value >> 8) & 0xFF),
-                        @floatFromInt((value >> 0) & 0xFF),
-                        @floatFromInt((value >> 24) & 0xFF),
+                    return Self.newU(
+                        (value >> 16) & 0xFF,
+                        (value >> 8) & 0xFF,
+                        (value >> 0) & 0xFF,
+                        (value >> 24) & 0xFF,
                     );
                 }
 

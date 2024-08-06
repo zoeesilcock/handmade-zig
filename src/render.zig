@@ -458,10 +458,7 @@ fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
             const delta = Color3.new(d.r() - average, d.g() - average, d.b() - average);
             var result = Color3.splat(average).plus(delta.scaledTo(level)).toColor(d.a());
 
-            dest[0] = ((@as(u32, @intFromFloat(result.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(result.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(result.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(result.b() + 0.5)) << 0));
+            dest[0] = result.packColor1();
 
             dest += 1;
         }
@@ -679,10 +676,7 @@ pub fn drawRectangleSlowly(
                 const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
                 const blended255 = linear1ToSRGB255(blended);
 
-                pixel[0] = ((@as(u32, @intFromFloat(blended255.a() + 0.5)) << 24) |
-                    (@as(u32, @intFromFloat(blended255.r() + 0.5)) << 16) |
-                    (@as(u32, @intFromFloat(blended255.g() + 0.5)) << 8) |
-                    (@as(u32, @intFromFloat(blended255.b() + 0.5)) << 0));
+                pixel[0] = blended255.packColor1();
             }
 
             pixel += 1;
@@ -800,10 +794,7 @@ pub fn drawBitmap(
             var result = d.scaledTo(1.0 - texel.a()).plus(texel);
             result = linear1ToSRGB255(result);
 
-            dest[0] = ((@as(u32, @intFromFloat(result.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(result.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(result.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(result.b() + 0.5)) << 0));
+            dest[0] = result.packColor1();
 
             source += 1;
             dest += 1;
@@ -880,15 +871,14 @@ pub fn drawBitmapMatte(
             const db: f32 = @floatFromInt((dest[0] >> 0) & 0xFF);
 
             const inv_rsa = (1.0 - rsa);
-            const a = inv_rsa * da;
-            const r = inv_rsa * dr;
-            const g = inv_rsa * dg;
-            const b = inv_rsa * db;
+            const color = Color.new(
+                inv_rsa * da,
+                inv_rsa * dr,
+                inv_rsa * dg,
+                inv_rsa * db,
+            );
 
-            dest[0] = ((@as(u32, @intFromFloat(a + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(r + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(g + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(b + 0.5)) << 0));
+            dest[0] = color.packColor1();
 
             source += 1;
             dest += 1;
