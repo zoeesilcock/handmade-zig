@@ -59,8 +59,9 @@ pub const RenderEntityBasis = extern struct {
 };
 
 pub const RenderEntityBasisResult = extern struct {
-    position: Vector2,
-    scale: f32,
+    position: Vector2 = Vector2.zero(),
+    scale: f32 = 0,
+    valid: bool = false,
 };
 
 pub const RenderEntryType = enum(u8) {
@@ -171,12 +172,25 @@ pub const RenderGroup = extern struct {
         entity_basis: *RenderEntityBasis,
         screen_center: Vector2,
     ) RenderEntityBasisResult {
-        const entity_base_position = entity_basis.basis.position.scaledTo(self.meters_to_pixels);
-        const z_fudge = 1.0 + 0.0015 * entity_base_position.z();
-        const entity_ground_point = screen_center.plus(entity_base_position.xy().plus(entity_basis.offset.xy()).scaledTo(z_fudge));
-        const center = entity_ground_point; //.plus(Vector2.new(0, (entity_base_position.z() + entity_basis.offset.z())));
+        var result = RenderEntityBasisResult{};
 
-        return RenderEntityBasisResult{ .position = center, .scale = z_fudge };
+        const entity_base_position = entity_basis.basis.position.scaledTo(self.meters_to_pixels);
+
+        const focal_length = self.meters_to_pixels * 20.0;
+        const camera_distance_above_ground = self.meters_to_pixels * 20.0;
+        const distance_to_position_z = camera_distance_above_ground - entity_base_position.z();
+        const near_clip_plane = self.meters_to_pixels * 0.2;
+
+        const raw_xy = entity_base_position.xy().plus(entity_basis.offset.xy()).toVector3(1);
+
+        if (distance_to_position_z > near_clip_plane) {
+            const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * focal_length);
+            result.position = screen_center.plus(projected_xy.xy());
+            result.scale = projected_xy.z();
+            result.valid = true;
+        }
+
+        return result;
     }
 
     // Renderer API.
@@ -229,23 +243,23 @@ pub const RenderGroup = extern struct {
     ) void {
         const thickness: f32 = 0.1;
         self.pushRectangle(
-            Vector2.new(dimension.x(), thickness),
+            Vector2.new(dimension.x() + thickness, thickness),
             offset.minus(Vector3.new(0, dimension.y() / 2, 0)),
             color,
         );
         self.pushRectangle(
-            Vector2.new(dimension.x(), thickness),
+            Vector2.new(dimension.x() + thickness, thickness),
             offset.plus(Vector3.new(0, dimension.y() / 2, 0)),
             color,
         );
 
         self.pushRectangle(
-            Vector2.new(thickness, dimension.y()),
+            Vector2.new(thickness, dimension.y() + thickness),
             offset.minus(Vector3.new(dimension.x() / 2, 0, 0)),
             color,
         );
         self.pushRectangle(
-            Vector2.new(thickness, dimension.y()),
+            Vector2.new(thickness, dimension.y() + thickness),
             offset.plus(Vector3.new(dimension.x() / 2, 0, 0)),
             color,
         );
