@@ -234,8 +234,6 @@ pub const State = struct {
     world_arena: MemoryArena = undefined,
     world: *world.World = undefined,
 
-    meters_to_pixels: f32 = 0,
-    pixels_to_meters: f32 = 0,
     typical_floor_height: f32 = 0,
 
     camera_following_entity_index: u32 = 0,

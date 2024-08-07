@@ -98,16 +98,18 @@ const RenderGroup = render.RenderGroup;
 const RenderBasis = render.RenderBasis;
 
 fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
-    var result = alignment;
-    _ = result.setY(@as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y());
-    return result;
+    const flipped_y = @as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y();
+    return Vector2.new(
+        math.safeRatio0(alignment.x(), @floatFromInt(bitmap.width)),
+        math.safeRatio0(flipped_y, @floatFromInt(bitmap.height)),
+    );
 }
 fn setTopDownAligned(bitmaps: *shared.HeroBitmaps, in_alignment: Vector2) void {
     const alignment = topDownAligned(&bitmaps.head, in_alignment);
 
-    bitmaps.head.alignment = alignment;
-    bitmaps.cape.alignment = alignment;
-    bitmaps.torso.alignment = alignment;
+    bitmaps.head.alignment_percentage = alignment;
+    bitmaps.cape.alignment_percentage = alignment;
+    bitmaps.torso.alignment_percentage = alignment;
 }
 
 pub export fn updateAndRender(
@@ -119,6 +121,9 @@ pub export fn updateAndRender(
 ) void {
     const ground_buffer_width: u32 = 256;
     const ground_buffer_height: u32 = 256;
+
+    // TODO: Replace this with a value received from the renderer.
+    const pixels_to_meters = 1.0 / 42.0;
 
     std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
@@ -183,12 +188,10 @@ pub export fn updateAndRender(
         _ = addLowEntity(state, .Null, WorldPosition.nullPosition());
 
         // Define pixel sizes.
-        state.meters_to_pixels = 42;
-        state.pixels_to_meters = 1.0 / state.meters_to_pixels;
         state.typical_floor_height = 3;
         const chunk_dimension_in_meters = Vector3.new(
-            state.pixels_to_meters * @as(f32, @floatFromInt(ground_buffer_width)),
-            state.pixels_to_meters * @as(f32, @floatFromInt(ground_buffer_height)),
+            pixels_to_meters * @as(f32, @floatFromInt(ground_buffer_width)),
+            pixels_to_meters * @as(f32, @floatFromInt(ground_buffer_height)),
             state.typical_floor_height,
         );
 
@@ -417,9 +420,6 @@ pub export fn updateAndRender(
         }
     }
 
-    const meters_to_pixels: f32 = state.meters_to_pixels;
-    const pixels_to_meters: f32 = 1.0 / meters_to_pixels;
-
     // Handle input.
     for (&input.controllers, 0..) |controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
@@ -471,7 +471,7 @@ pub export fn updateAndRender(
 
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), state.meters_to_pixels);
+    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4));
 
     // Create draw buffer.
     var draw_buffer_ = LoadedBitmap{
@@ -505,7 +505,7 @@ pub export fn updateAndRender(
                 render_group.default_basis = basis;
                 basis.position = delta;
 
-                render_group.pushBitmap(bitmap, Vector3.zero(), Color.white());
+                render_group.pushBitmap(bitmap, 1.0, Vector3.zero(), Color.white());
             }
         }
     }
@@ -665,10 +665,11 @@ pub export fn updateAndRender(
                     }
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&state.shadow, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&hero_bitmaps.torso, Vector3.zero(), Color.white());
-                    render_group.pushBitmap(&hero_bitmaps.cape, Vector3.zero(), Color.white());
-                    render_group.pushBitmap(&hero_bitmaps.head, Vector3.zero(), Color.white());
+                    const hero_scale = 2.5;
+                    render_group.pushBitmap(&state.shadow, hero_scale * 1.0, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
                 },
@@ -685,11 +686,11 @@ pub export fn updateAndRender(
                         continue;
                     }
 
-                    render_group.pushBitmap(&state.shadow, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&state.sword, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&state.shadow, 0.25, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&state.sword, 0.5, Vector3.zero(), Color.white());
                 },
                 .Wall => {
-                    render_group.pushBitmap(&state.tree, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&state.tree, 2.5, Vector3.zero(), Color.white());
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
@@ -703,8 +704,8 @@ pub export fn updateAndRender(
                 },
                 .Monster => {
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&state.shadow, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&hero_bitmaps.torso, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&state.shadow, 4.5, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
                 },
@@ -750,8 +751,8 @@ pub export fn updateAndRender(
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
                     var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&state.shadow, Vector3.zero(), head_shadow_color);
-                    render_group.pushBitmap(&hero_bitmaps.head, Vector3.new(0, 0, head_z), Color.white());
+                    render_group.pushBitmap(&state.shadow, 2.5, Vector3.zero(), head_shadow_color);
+                    render_group.pushBitmap(&hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
                 },
                 .Space => {
                     const space_color = Color.new(0, 0.5, 1, 1);
@@ -1241,7 +1242,7 @@ fn fillGroundChunk(
                 const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
                 const position = center.plus(offset.minus(bitmap_center));
 
-                render_group.pushBitmap(stamp, position.toVector3(0), Color.white());
+                render_group.pushBitmap(stamp, 1.0, position.toVector3(0), Color.white());
             }
         }
     }
@@ -1458,7 +1459,8 @@ fn debugLoadBMPAligned(
         result.memory = @as([*]void, @ptrCast(read_result.contents)) + header.bitmap_offset;
         result.width = header.width;
         result.height = header.height;
-        result.alignment = topDownAligned(&result, Vector2.newI(align_x, top_down_align_y));
+        result.alignment_percentage = topDownAligned(&result, Vector2.newI(align_x, top_down_align_y));
+        result.width_over_height = math.safeRatio0(@floatFromInt(result.width), @floatFromInt(result.height));
 
         const alpha_mask = ~(header.red_mask | header.green_mask | header.blue_mask);
         const alpha_scan = intrinsics.findLeastSignificantSetBit(alpha_mask);
