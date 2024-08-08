@@ -154,7 +154,7 @@ pub const RenderGroup = extern struct {
         result.game_camera.distance_above_target = 9.0;
 
         result.render_camera = result.game_camera;
-        result.render_camera.distance_above_target = 30.0;
+        // result.render_camera.distance_above_target = 50.0;
 
         result.meters_to_pixels = @as(f32, @floatFromInt(resolution_pixels_x)) * width_of_monitor_in_meters;
 

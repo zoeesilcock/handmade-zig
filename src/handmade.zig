@@ -285,9 +285,7 @@ pub export fn updateAndRender(
                     }
 
                     if (!should_be_door) {
-                        if (@mod(tile_y, 2) == 1 or @mod(tile_x, 2) == 1) {
-                            _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
-                        }
+                        _ = addWall(state, abs_tile_x, abs_tile_y, abs_tile_z);
                     } else if (created_z_door) {
                         if ((@mod(abs_tile_z, 2) == 1 and (tile_x == 10 and tile_y == 5)) or
                             ((@mod(abs_tile_z, 2) == 0 and (tile_x == 4 and tile_y == 5))))
@@ -498,7 +496,7 @@ pub export fn updateAndRender(
     _ = camera_bounds_in_meters.max.setZ(1.0 * state.typical_floor_height);
 
     // Draw ground.
-    if (false) {
+    if (true) {
         var ground_buffer_index: u32 = 0;
         while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
             const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -506,19 +504,31 @@ pub export fn updateAndRender(
             if (ground_buffer.position.isValid()) {
                 const bitmap = &ground_buffer.bitmap;
                 const delta = world.subtractPositions(state.world, &ground_buffer.position, &state.camera_position);
-                bitmap.alignment = Vector2.newI(bitmap.width, bitmap.height);
 
-                var basis = transient_state.arena.pushStruct(RenderBasis);
-                render_group.default_basis = basis;
-                basis.position = delta;
+                if (delta.z() >= -1 and delta.z() < 1) {
+                    bitmap.alignment_percentage = Vector2.new(0.5, 0.5);
 
-                render_group.pushBitmap(bitmap, 1.0, Vector3.zero(), Color.white());
+                    var basis = transient_state.arena.pushStruct(RenderBasis);
+                    render_group.default_basis = basis;
+                    basis.position = delta;
+
+                    const ground_side_in_meters = state.world.chunk_dimension_in_meters.x();
+                    render_group.pushBitmap(bitmap, ground_side_in_meters, Vector3.zero(), Color.white());
+
+                    if (true) {
+                        render_group.pushRectangleOutline(
+                            Vector2.splat(ground_side_in_meters),
+                            Vector3.zero(),
+                            Color.new(1, 1, 0, 1),
+                        );
+                    }
+                }
             }
         }
     }
 
     // Populate ground chunks.
-    if (false) {
+    if (true) {
         const min_chunk_position = world.mapIntoChunkSpace(
             state.world,
             state.camera_position,
@@ -537,11 +547,6 @@ pub export fn updateAndRender(
                 var chunk_x = min_chunk_position.chunk_x;
                 while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
                     const chunk_center = world.centeredChunkPoint(chunk_x, chunk_y, chunk_z);
-                    const relative_position = world.subtractPositions(
-                        state.world,
-                        &chunk_center,
-                        &state.camera_position,
-                    );
 
                     var opt_furthest_buffer: ?*shared.GroundBuffer = null;
                     var furthest_buffer_length_squared: f32 = 0;
@@ -572,15 +577,6 @@ pub export fn updateAndRender(
                     if (opt_furthest_buffer) |furthest_buffer| {
                         fillGroundChunk(state, transient_state, furthest_buffer, &chunk_center);
                     }
-
-                    if (false) {
-                        render_group.pushRectangleOutline(
-                            state.world.chunk_dimension_in_meters.xy(),
-                            relative_position.xy(),
-                            0,
-                            Color.new(1, 1, 0, 1),
-                        );
-                    }
                 }
             }
         }
@@ -598,6 +594,10 @@ pub export fn updateAndRender(
         sim_bounds,
         input.frame_delta_time,
     );
+
+    const basis_reset = transient_state.arena.pushStruct(RenderBasis);
+    render_group.default_basis = basis_reset;
+    basis_reset.position = Vector3.zero();
 
     render_group.pushRectangleOutline(screen_bounds.getDimension(), Vector3.zero(), Color.new(1, 1, 0, 1));
     // render_group.pushRectangleOutline(camera_bounds_in_meters.getDimension().xy(), Vector3.zero(), Color.new(1, 1, 1, 1));
@@ -1214,15 +1214,21 @@ fn fillGroundChunk(
     chunk_position: *const world.WorldPosition,
 ) void {
     const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), 1.0, 1920, 1080);
     const buffer = &ground_buffer.bitmap;
+    buffer.alignment_percentage = Vector2.new(0.5, 0.5);
+    buffer.width_over_height = 1.0;
+
+    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), buffer.width, buffer.height);
 
     render_group.pushClear(Color.new(1, 1, 0, 1));
 
     ground_buffer.position = chunk_position.*;
 
-    const width: f32 = @floatFromInt(buffer.width);
-    const height: f32 = @floatFromInt(buffer.height);
+    const width: f32 = state.world.chunk_dimension_in_meters.x();
+    const height: f32 = state.world.chunk_dimension_in_meters.y();
+    var half_dim = Vector2.new(width, height).scaledTo(0.5);
+
+    half_dim = half_dim.scaledTo(2);
 
     var chunk_offset_y: i32 = -1;
     while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
@@ -1250,11 +1256,12 @@ fn fillGroundChunk(
                     stamp = &state.stone[series.randomChoice(state.stone.len)];
                 }
 
-                const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
-                const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
-                const position = center.plus(offset.minus(bitmap_center));
+                const offset = half_dim.hadamardProduct(
+                    Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                );
+                const position = center.plus(offset);
 
-                render_group.pushBitmap(stamp, 1.0, position.toVector3(0), Color.white());
+                render_group.pushBitmap(stamp, 4, position.toVector3(0), Color.white());
             }
         }
     }
@@ -1279,11 +1286,12 @@ fn fillGroundChunk(
             while (grass_index < 50) : (grass_index += 1) {
                 const stamp: *LoadedBitmap = &state.tuft[series.randomChoice(state.tuft.len)];
 
-                const bitmap_center = Vector2.newI(stamp.width, stamp.height).scaledTo(0.5);
-                const offset = Vector2.new(width * series.randomUnilateral(), height * series.randomUnilateral());
-                const position = center.plus(offset.minus(bitmap_center));
+                const offset = half_dim.hadamardProduct(
+                    Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                );
+                const position = center.plus(offset);
 
-                render_group.pushBitmap(stamp, position.toVector3(0), Color.white());
+                render_group.pushBitmap(stamp, 0.4, position.toVector3(0), Color.white());
             }
         }
     }
@@ -1449,7 +1457,9 @@ fn debugLoadBMP(
     platform: shared.Platform,
     file_name: [*:0]const u8,
 ) LoadedBitmap {
-    return debugLoadBMPAligned(thread, platform, file_name, 0, 0);
+    var result = debugLoadBMPAligned(thread, platform, file_name, 0, 0);
+    result.alignment_percentage = Vector2.new(0.5, 0.5);
+    return result;
 }
 
 fn debugLoadBMPAligned(
