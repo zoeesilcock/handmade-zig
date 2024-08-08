@@ -187,7 +187,6 @@ pub export fn updateAndRender(
 
         _ = addLowEntity(state, .Null, WorldPosition.nullPosition());
 
-        // Define pixel sizes.
         state.typical_floor_height = 3;
         const chunk_dimension_in_meters = Vector3.new(
             pixels_to_meters * @as(f32, @floatFromInt(ground_buffer_width)),
@@ -241,8 +240,8 @@ pub export fn updateAndRender(
         var door_down = false;
 
         for (0..200) |_| {
-            const door_direction = 3;
-            // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
+            // const door_direction = 3;
+            const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
             // const door_direction = series.randomChoice(2);
 
             var created_z_door = false;
@@ -469,10 +468,6 @@ pub export fn updateAndRender(
         }
     }
 
-    // Create the piece group.
-    const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4));
-
     // Create draw buffer.
     var draw_buffer_ = LoadedBitmap{
         .width = buffer.width,
@@ -482,11 +477,23 @@ pub export fn updateAndRender(
     };
     const draw_buffer = &draw_buffer_;
 
+    // Create the piece group.
+    const render_memory = transient_state.arena.beginTemporaryMemory();
+    var render_group = RenderGroup.allocate(
+        &transient_state.arena,
+        shared.megabytes(4),
+        draw_buffer.width,
+        draw_buffer.height,
+    );
+
     // Clear background.
     render_group.pushClear(Color.new(0.25, 0.25, 0.25, 0));
 
-    const screen_size = Vector3.newI(buffer.width, buffer.height, 0).scaledTo(pixels_to_meters);
-    var camera_bounds_in_meters = math.Rectangle3.fromCenterDimension(Vector3.zero(), screen_size);
+    const screen_bounds = render_group.getCameraRectangleAtTarget();
+    var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
+        screen_bounds.min.toVector3(0),
+        screen_bounds.max.toVector3(0),
+    );
     _ = camera_bounds_in_meters.min.setZ(-3.0 * state.typical_floor_height);
     _ = camera_bounds_in_meters.max.setZ(1.0 * state.typical_floor_height);
 
@@ -580,7 +587,7 @@ pub export fn updateAndRender(
     }
 
     const sim_bounds_expansion = Vector3.new(15, 15, 0);
-    const simulation_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
+    const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
     const sim_memory = transient_state.arena.beginTemporaryMemory();
     const sim_center_position = state.camera_position;
     const screen_sim_region = sim.beginSimulation(
@@ -588,9 +595,14 @@ pub export fn updateAndRender(
         &transient_state.arena,
         state.world,
         sim_center_position,
-        simulation_bounds,
+        sim_bounds,
         input.frame_delta_time,
     );
+
+    render_group.pushRectangleOutline(screen_bounds.getDimension(), Vector3.zero(), Color.new(1, 1, 0, 1));
+    // render_group.pushRectangleOutline(camera_bounds_in_meters.getDimension().xy(), Vector3.zero(), Color.new(1, 1, 1, 1));
+    render_group.pushRectangleOutline(sim_bounds.getDimension().xy(), Vector3.zero(), Color.new(0, 1, 1, 1));
+    render_group.pushRectangleOutline(screen_sim_region.bounds.getDimension().xy(), Vector3.zero(), Color.new(1, 0, 1, 1));
 
     const camera_position = world.subtractPositions(state.world, &state.camera_position, &sim_center_position);
 
@@ -1202,7 +1214,7 @@ fn fillGroundChunk(
     chunk_position: *const world.WorldPosition,
 ) void {
     const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), 1.0);
+    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4), 1.0, 1920, 1080);
     const buffer = &ground_buffer.bitmap;
 
     render_group.pushClear(Color.new(1, 1, 0, 1));

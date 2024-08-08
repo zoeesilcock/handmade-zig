@@ -129,9 +129,6 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                             self.values[1] = value.values[1];
                             return self;
                         }
-                        pub inline fn toVector2(self: *const Self) Vector2 {
-                            return Vector2.new(self.x(), self.y());
-                        }
                         pub inline fn toVector4(vector3: Vector3, in_w: f32) Self {
                             return Self.new(vector3.values[0], vector3.values[1], vector3.values[2], in_w);
                         }
@@ -513,6 +510,10 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
 
         pub inline fn getCenter(self: *const Self) VectorType {
             return self.min.plus(self.max).scale(0.5);
+        }
+
+        pub inline fn getDimension(self: *const Self) VectorType {
+            return self.max.minus(self.min);
         }
 
         pub inline fn getBarycentricPosition(self: *const Self, position: VectorType) VectorType {
