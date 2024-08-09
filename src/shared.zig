@@ -89,6 +89,7 @@ pub const DebugCycleCounters = enum(u8) {
     GameUpdateAndRender = 0,
     RenderGrouptToOutput,
     DrawRectangleSlowly,
+    DrawRectangleHopefullyQuickly,
     TestPixel,
     FillPixel,
 };

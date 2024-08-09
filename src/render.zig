@@ -396,19 +396,31 @@ pub const RenderGroup = extern struct {
                         if (false) {
                             drawBitmap(output_target, bitmap, basis.position.x(), basis.position.y(), entry.color.a());
                         } else {
-                            drawRectangleSlowly(
-                                output_target,
-                                basis.position,
-                                Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
-                                Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
-                                entry.color,
-                                @constCast(bitmap),
-                                null,
-                                undefined,
-                                undefined,
-                                undefined,
-                                pixels_to_meters,
-                            );
+                            if (false) {
+                                drawRectangleSlowly(
+                                    output_target,
+                                    basis.position,
+                                    Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
+                                    Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
+                                    entry.color,
+                                    @constCast(bitmap),
+                                    null,
+                                    undefined,
+                                    undefined,
+                                    undefined,
+                                    pixels_to_meters,
+                                );
+                            } else {
+                                drawRectangleHopefullyQuickly(
+                                    output_target,
+                                    basis.position,
+                                    Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
+                                    Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
+                                    entry.color,
+                                    @constCast(bitmap),
+                                    pixels_to_meters,
+                                );
+                            }
                         }
                     }
 
@@ -530,6 +542,254 @@ fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
         }
 
         dest_row += @as(usize, @intCast(draw_buffer.pitch));
+    }
+}
+
+pub fn drawRectangleHopefullyQuickly(
+    draw_buffer: *LoadedBitmap,
+    origin: Vector2,
+    x_axis: Vector2,
+    y_axis: Vector2,
+    color_in: Color,
+    texture: *LoadedBitmap,
+    pixels_to_meters: f32,
+) void {
+    _ = pixels_to_meters;
+
+    shared.beginTimedBlock(.DrawRectangleHopefullyQuickly);
+    defer shared.endTimedBlock(.DrawRectangleHopefullyQuickly);
+
+    var color = color_in;
+    _ = color.setRGB(color.rgb().scaledTo(color.a()));
+
+    const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
+    const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
+    const points: [4]Vector2 = .{
+        origin,
+        origin.plus(x_axis),
+        origin.plus(x_axis).plus(y_axis),
+        origin.plus(y_axis),
+    };
+
+    const width_max = draw_buffer.width - 1;
+    const height_max = draw_buffer.height - 1;
+    var y_min: i32 = height_max;
+    var y_max: i32 = 0;
+    var x_min: i32 = width_max;
+    var x_max: i32 = 0;
+
+    for (points) |point| {
+        const floor_x = intrinsics.floorReal32ToInt32(point.x());
+        const ceil_x = intrinsics.ceilReal32ToInt32(point.x());
+        const floor_y = intrinsics.floorReal32ToInt32(point.y());
+        const ceil_y = intrinsics.ceilReal32ToInt32(point.y());
+
+        if (x_min > floor_x) {
+            x_min = floor_x;
+        }
+        if (y_min > floor_y) {
+            y_min = floor_y;
+        }
+        if (x_max < ceil_x) {
+            x_max = ceil_x;
+        }
+        if (y_max < ceil_y) {
+            y_max = ceil_y;
+        }
+    }
+
+    if (x_min < 0) {
+        x_min = 0;
+    }
+    if (y_min < 0) {
+        y_min = 0;
+    }
+    if (x_max > width_max) {
+        x_max = width_max;
+    }
+    if (y_max > height_max) {
+        y_max = height_max;
+    }
+
+    const inverse_255: f32 = 1.0 / 255.0;
+    const one_255: f32 = 255.0;
+    const n_x_axis = x_axis.scaledTo(inv_x_axis_length_squared);
+    const n_y_axis = y_axis.scaledTo(inv_y_axis_length_squared);
+
+    var row: [*]u8 = @ptrCast(draw_buffer.memory);
+    row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
+
+    var y: i32 = y_min;
+    while (y < y_max) : (y += 1) {
+        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+
+        var x: i32 = x_min;
+        while (x < x_max) : (x += 1) {
+            shared.beginTimedBlock(.TestPixel);
+            defer shared.endTimedBlock(.TestPixel);
+
+            const pixel_position = Vector2.newI(x, y);
+            const d = pixel_position.minus(origin);
+
+            const u = d.dotProduct(n_x_axis);
+            const v = d.dotProduct(n_y_axis);
+
+            if (u >= 0 and u <= 1.0 and v >= 0 and v <= 1.0) {
+                shared.beginTimedBlock(.FillPixel);
+                defer shared.endTimedBlock(.FillPixel);
+
+                const texel_x: f32 = (u * @as(f32, @floatFromInt(texture.width - 2)));
+                const texel_y: f32 = (v * @as(f32, @floatFromInt(texture.height - 2)));
+
+                const texel_rounded_x: i32 = @intFromFloat(texel_x);
+                const texel_rounded_y: i32 = @intFromFloat(texel_y);
+
+                const texel_fraction_x: f32 = texel_x - @as(f32, @floatFromInt(texel_rounded_x));
+                const texel_fraction_y: f32 = texel_y - @as(f32, @floatFromInt(texel_rounded_y));
+
+                std.debug.assert(texel_rounded_x >= 0 and texel_rounded_x <= texture.width);
+                std.debug.assert(texel_rounded_y >= 0 and texel_rounded_y <= texture.height);
+
+                // const texel_sample = bilinearSample(texture, texel_rounded_x, texel_rounded_y);
+                const offset: i32 = @intCast((texel_rounded_x * @sizeOf(u32)) + (texel_rounded_y * texture.pitch));
+                const texture_base = shared.incrementPointer(texture.memory.?, offset);
+                const sample_a: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
+                const sample_b: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(
+                        shared.incrementPointer(texture_base, @sizeOf(u32)),
+                )))[0];
+                const sample_c: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(
+                        shared.incrementPointer(texture_base, texture.pitch),
+                )))[0];
+                const sample_d: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(
+                        shared.incrementPointer(texture_base, @sizeOf(u32) + texture.pitch),
+                )))[0];
+
+                // var texel = sRGBBilinearBlend(texel_sample, texel_fraction_x, texel_fraction_y);
+                // var texel_a = Color.unpackColor(sample_a);
+                var texel_a_r: f32 = @floatFromInt((sample_a >> 16) & 0xFF);
+                var texel_a_g: f32 = @floatFromInt((sample_a >> 8) & 0xFF);
+                var texel_a_b: f32 = @floatFromInt((sample_a >> 0) & 0xFF);
+                var texel_a_a: f32 = @floatFromInt((sample_a >> 24) & 0xFF);
+                // var texel_b = Color.unpackColor(sample_b);
+                var texel_b_r: f32 = @floatFromInt((sample_b >> 16) & 0xFF);
+                var texel_b_g: f32 = @floatFromInt((sample_b >> 8) & 0xFF);
+                var texel_b_b: f32 = @floatFromInt((sample_b >> 0) & 0xFF);
+                var texel_b_a: f32 = @floatFromInt((sample_b >> 24) & 0xFF);
+                // var texel_c = Color.unpackColor(sample_c);
+                var texel_c_r: f32 = @floatFromInt((sample_c >> 16) & 0xFF);
+                var texel_c_g: f32 = @floatFromInt((sample_c >> 8) & 0xFF);
+                var texel_c_b: f32 = @floatFromInt((sample_c >> 0) & 0xFF);
+                var texel_c_a: f32 = @floatFromInt((sample_c >> 24) & 0xFF);
+                // var texel_d = Color.unpackColor(sample_d);
+                var texel_d_r: f32 = @floatFromInt((sample_d >> 16) & 0xFF);
+                var texel_d_g: f32 = @floatFromInt((sample_d >> 8) & 0xFF);
+                var texel_d_b: f32 = @floatFromInt((sample_d >> 0) & 0xFF);
+                var texel_d_a: f32 = @floatFromInt((sample_d >> 24) & 0xFF);
+
+                // Convert texture from sRGB to linear brightness space.
+                // texel_a = sRGB255ToLinear1(texel_a);
+                texel_a_r = math.square(inverse_255 * texel_a_r);
+                texel_a_g = math.square(inverse_255 * texel_a_g);
+                texel_a_b = math.square(inverse_255 * texel_a_b);
+                texel_a_a = inverse_255 * texel_a_a;
+                // texel_b = sRGB255ToLinear1(texel_b);
+                texel_b_r = math.square(inverse_255 * texel_b_r);
+                texel_b_g = math.square(inverse_255 * texel_b_g);
+                texel_b_b = math.square(inverse_255 * texel_b_b);
+                texel_b_a = inverse_255 * texel_b_a;
+                // texel_c = sRGB255ToLinear1(texel_c);
+                texel_c_r = math.square(inverse_255 * texel_c_r);
+                texel_c_g = math.square(inverse_255 * texel_c_g);
+                texel_c_b = math.square(inverse_255 * texel_c_b);
+                texel_c_a = inverse_255 * texel_c_a;
+                // texel_d = sRGB255ToLinear1(texel_d);
+                texel_d_r = math.square(inverse_255 * texel_d_r);
+                texel_d_g = math.square(inverse_255 * texel_d_g);
+                texel_d_b = math.square(inverse_255 * texel_d_b);
+                texel_d_a = inverse_255 * texel_d_a;
+
+                // Bilinear texture blend.
+                // const texel_a = Color.new(texel_a_r,texel_a_g,texel_a_b,texel_a_a,);
+                // const texel_b = Color.new(texel_b_r,texel_b_g,texel_b_b,texel_b_a,);
+                // const texel_c = Color.new(texel_c_r,texel_c_g,texel_c_b,texel_c_a,);
+                // const texel_d = Color.new(texel_d_r,texel_d_g,texel_d_b,texel_d_a,);
+                // var texel = texel_a.lerp(texel_b, texel_fraction_x).lerp(
+                //     texel_c.lerp(texel_d, texel_fraction_x),
+                //     texel_fraction_y,
+                // );
+                // var texelr = texel.r();
+                // var texelg = texel.g();
+                // var texelb = texel.b();
+                // var texela = texel.a();
+
+                const ifx = 1.0 - texel_fraction_x;
+                const ify = 1.0 - texel_fraction_y;
+
+                const l0 = ify * ifx;
+                const l1 = ify * texel_fraction_x;
+                const l2 = texel_fraction_y * ifx;
+                const l3 = texel_fraction_y * texel_fraction_x;
+
+                var texelr = l0 * texel_a_r + l1 * texel_b_r + l2 * texel_c_r + l3 * texel_d_r;
+                var texelg = l0 * texel_a_g + l1 * texel_b_g + l2 * texel_c_g + l3 * texel_d_g;
+                var texelb = l0 * texel_a_b + l1 * texel_b_b + l2 * texel_c_b + l3 * texel_d_b;
+                var texela = l0 * texel_a_a + l1 * texel_b_a + l2 * texel_c_a + l3 * texel_d_a;
+
+                // Modulate by incoming color.
+                // texel = texel.hadamardProduct(color);
+                texelr = texelr * color.r();
+                texelg = texelg * color.g();
+                texelb = texelb * color.b();
+                texela = texela * color.a();
+
+                // Clamp colors to valid range.
+                // _ = texel.setRGB(texel.rgb().clamp01());
+                texelr = math.clampf01(texelr);
+                texelg = math.clampf01(texelg);
+                texelb = math.clampf01(texelb);
+                texela = math.clampf01(texela);
+
+                // Load destination.
+                // var dest = Color.unpackColor(pixel[0]);
+                var dest_r: f32 = @floatFromInt((pixel[0] >> 16) & 0xFF);
+                var dest_g: f32 = @floatFromInt((pixel[0] >> 8) & 0xFF);
+                var dest_b: f32 = @floatFromInt((pixel[0] >> 0) & 0xFF);
+                var dest_a: f32 = @floatFromInt((pixel[0] >> 24) & 0xFF);
+
+                // Go from sRGB to linear brightness space.
+                // dest = sRGB255ToLinear1(dest);
+                dest_r = math.square(inverse_255 * dest_r);
+                dest_g = math.square(inverse_255 * dest_g);
+                dest_b = math.square(inverse_255 * dest_b);
+                dest_a = inverse_255 * dest_a;
+
+                // Destination blend.
+                // const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
+                const inv_texel_a = 1.0 - texela;
+                var blended_r = dest_r * inv_texel_a + texelr;
+                var blended_g = dest_g * inv_texel_a + texelg;
+                var blended_b = dest_b * inv_texel_a + texelb;
+                var blended_a = dest_a * inv_texel_a + texela;
+
+                // Go from linear brightness space to sRGB.
+                // const blended255 = linear1ToSRGB255(blended);
+                blended_r = one_255 * @sqrt(blended_r);
+                blended_g = one_255 * @sqrt(blended_g);
+                blended_b = one_255 * @sqrt(blended_b);
+                blended_a = one_255 * blended_a;
+
+                // Repack color.
+                // pixel[0] = blended255.packColor1();
+                pixel[0] = ((@as(u32, @intFromFloat(blended_a + 0.5)) << 24) |
+                    (@as(u32, @intFromFloat(blended_r + 0.5)) << 16) |
+                    (@as(u32, @intFromFloat(blended_g + 0.5)) << 8) |
+                    (@as(u32, @intFromFloat(blended_b + 0.5)) << 0));
+            }
+
+            pixel += 1;
+        }
+
+        row += @as(usize, @intCast(draw_buffer.pitch));
     }
 }
 
@@ -967,6 +1227,7 @@ pub fn drawBitmapMatte(
 pub inline fn sRGB255ToLinear1(color: Color) Color {
     const inverse_255: f32 = 1.0 / 255.0;
 
+    // TODO: Test using .values directly instead of creating a new Color.
     return Color.new(
         math.square(inverse_255 * color.r()),
         math.square(inverse_255 * color.g()),
