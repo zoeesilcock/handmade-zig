@@ -1023,8 +1023,9 @@ fn handleDebugCycleCounters(memory: *shared.Memory) void {
 
             if (counter.hit_count > 0) {
                 var buffer: [128]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "{d}: {d:>10} cycles, {d:>10} hits, {d:>10} cycles/hit, {d:>6.2}%\n", .{
+                const slice = std.fmt.bufPrintZ(&buffer, "{d} {s:>25}: {d:>10} cycles, {d:>10} hits, {d:>10} cycles/hit, {d:>6.2}%\n", .{
                     counter_index,
+                    shared.DEBUG_CYCLE_COUNTER_NAMES[counter_index],
                     counter.cycle_count,
                     counter.hit_count,
                     counter.cycle_count / counter.hit_count,

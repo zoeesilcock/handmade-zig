@@ -94,6 +94,15 @@ pub const DebugCycleCounters = enum(u8) {
 };
 
 pub const DEBUG_CYCLE_COUNTERS_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;
+pub const DEBUG_CYCLE_COUNTER_NAMES: [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 = buildDebugCycleCounterNames();
+
+fn buildDebugCycleCounterNames() [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 {
+    var names: [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 = undefined;
+    for(0..DEBUG_CYCLE_COUNTERS_COUNT) |counter_index| {
+        names[counter_index] = @typeInfo(DebugCycleCounters).Enum.fields[counter_index].name;
+    }
+    return names;
+}
 
 pub const DebugCycleCounter = extern struct {
     cycle_count: u64 = 0,
