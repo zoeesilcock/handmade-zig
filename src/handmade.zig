@@ -119,6 +119,12 @@ pub export fn updateAndRender(
     input: shared.GameInput,
     buffer: *shared.OffscreenBuffer,
 ) void {
+    if (shared.DEBUG) {
+        shared.debug_global_memory = memory;
+    }
+    shared.beginTimedBlock(.GameUpdateAndRender);
+    defer shared.endTimedBlock(.GameUpdateAndRender);
+
     const ground_buffer_width: u32 = 256;
     const ground_buffer_height: u32 = 256;
 
@@ -1224,74 +1230,76 @@ fn fillGroundChunk(
 
     ground_buffer.position = chunk_position.*;
 
-    const width: f32 = state.world.chunk_dimension_in_meters.x();
-    const height: f32 = state.world.chunk_dimension_in_meters.y();
-    var half_dim = Vector2.new(width, height).scaledTo(0.5);
+    if (false) {
+        const width: f32 = state.world.chunk_dimension_in_meters.x();
+        const height: f32 = state.world.chunk_dimension_in_meters.y();
+        var half_dim = Vector2.new(width, height).scaledTo(0.5);
 
-    half_dim = half_dim.scaledTo(2);
+        half_dim = half_dim.scaledTo(2);
 
-    var chunk_offset_y: i32 = -1;
-    while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
-        var chunk_offset_x: i32 = -1;
-        while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
-            const chunk_x = chunk_position.chunk_x + chunk_offset_x;
-            const chunk_y = chunk_position.chunk_y + chunk_offset_y;
-            const chunk_z = chunk_position.chunk_z;
-            const center = Vector2.new(
-                @as(f32, @floatFromInt(chunk_offset_x)) * width,
-                @as(f32, @floatFromInt(chunk_offset_y)) * height,
-            );
-
-            const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
-            const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
-            var series = random.Series.seed(seed);
-
-            var grass_index: u32 = 0;
-            while (grass_index < 100) : (grass_index += 1) {
-                var stamp: *LoadedBitmap = undefined;
-
-                if (series.randomChoice(2) == 1) {
-                    stamp = &state.grass[series.randomChoice(state.grass.len)];
-                } else {
-                    stamp = &state.stone[series.randomChoice(state.stone.len)];
-                }
-
-                const offset = half_dim.hadamardProduct(
-                    Vector2.new(series.randomBilateral(), series.randomBilateral()),
+        var chunk_offset_y: i32 = -1;
+        while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
+            var chunk_offset_x: i32 = -1;
+            while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
+                const chunk_x = chunk_position.chunk_x + chunk_offset_x;
+                const chunk_y = chunk_position.chunk_y + chunk_offset_y;
+                const chunk_z = chunk_position.chunk_z;
+                const center = Vector2.new(
+                    @as(f32, @floatFromInt(chunk_offset_x)) * width,
+                    @as(f32, @floatFromInt(chunk_offset_y)) * height,
                 );
-                const position = center.plus(offset);
 
-                render_group.pushBitmap(stamp, 4, position.toVector3(0), Color.white());
+                const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
+                const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
+                var series = random.Series.seed(seed);
+
+                var grass_index: u32 = 0;
+                while (grass_index < 100) : (grass_index += 1) {
+                    var stamp: *LoadedBitmap = undefined;
+
+                    if (series.randomChoice(2) == 1) {
+                        stamp = &state.grass[series.randomChoice(state.grass.len)];
+                    } else {
+                        stamp = &state.stone[series.randomChoice(state.stone.len)];
+                    }
+
+                    const offset = half_dim.hadamardProduct(
+                        Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                    );
+                    const position = center.plus(offset);
+
+                    render_group.pushBitmap(stamp, 4, position.toVector3(0), Color.white());
+                }
             }
         }
-    }
 
-    chunk_offset_y = -1;
-    while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
-        var chunk_offset_x: i32 = -1;
-        while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
-            const chunk_x = chunk_position.chunk_x + chunk_offset_x;
-            const chunk_y = chunk_position.chunk_y + chunk_offset_y;
-            const chunk_z = chunk_position.chunk_z;
-            const center = Vector2.new(
-                @as(f32, @floatFromInt(chunk_offset_x)) * width,
-                @as(f32, @floatFromInt(chunk_offset_y)) * height,
-            );
-
-            const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
-            const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
-            var series = random.Series.seed(seed);
-
-            var grass_index: u32 = 0;
-            while (grass_index < 50) : (grass_index += 1) {
-                const stamp: *LoadedBitmap = &state.tuft[series.randomChoice(state.tuft.len)];
-
-                const offset = half_dim.hadamardProduct(
-                    Vector2.new(series.randomBilateral(), series.randomBilateral()),
+        chunk_offset_y = -1;
+        while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
+            var chunk_offset_x: i32 = -1;
+            while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
+                const chunk_x = chunk_position.chunk_x + chunk_offset_x;
+                const chunk_y = chunk_position.chunk_y + chunk_offset_y;
+                const chunk_z = chunk_position.chunk_z;
+                const center = Vector2.new(
+                    @as(f32, @floatFromInt(chunk_offset_x)) * width,
+                    @as(f32, @floatFromInt(chunk_offset_y)) * height,
                 );
-                const position = center.plus(offset);
 
-                render_group.pushBitmap(stamp, 0.4, position.toVector3(0), Color.white());
+                const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
+                const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
+                var series = random.Series.seed(seed);
+
+                var grass_index: u32 = 0;
+                while (grass_index < 50) : (grass_index += 1) {
+                    const stamp: *LoadedBitmap = &state.tuft[series.randomChoice(state.tuft.len)];
+
+                    const offset = half_dim.hadamardProduct(
+                        Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                    );
+                    const position = center.plus(offset);
+
+                    render_group.pushBitmap(stamp, 0.4, position.toVector3(0), Color.white());
+                }
             }
         }
     }

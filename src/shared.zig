@@ -47,6 +47,18 @@ pub inline fn incrementPointer(pointer: anytype, offset: i32) @TypeOf(pointer) {
         pointer - @abs(offset);
 }
 
+pub inline fn rdtsc() u64 {
+    var hi: u32 = 0;
+    var low: u32 = 0;
+
+    asm (
+        \\rdtsc
+        : [low] "={eax}" (low),
+          [hi] "={edx}" (hi),
+    );
+    return (@as(u64, hi) << 32) | @as(u64, low);
+}
+
 // Platform.
 pub const Platform = extern struct {
     debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,
@@ -57,6 +69,36 @@ pub const Platform = extern struct {
 pub const DebugReadFileResult = extern struct {
     contents: *anyopaque = undefined,
     content_size: u32 = 0,
+};
+
+pub var debug_global_memory: ?*Memory = null;
+pub inline fn beginTimedBlock(counter_id: DebugCycleCounters) void {
+    if (debug_global_memory) |memory| {
+        memory.getCycleCounter(counter_id).last_cycle_start = rdtsc();
+    }
+}
+pub inline fn endTimedBlock(counter_id: DebugCycleCounters) void {
+    if (debug_global_memory) |memory| {
+        const counter = memory.getCycleCounter(counter_id);
+        counter.cycle_count += rdtsc() - counter.last_cycle_start;
+        counter.hit_count += 1;
+    }
+}
+
+pub const DebugCycleCounters = enum(u8) {
+    GameUpdateAndRender = 0,
+    RenderGrouptToOutput,
+    DrawRectangleSlowly,
+    TestPixel,
+    FillPixel,
+};
+
+pub const DEBUG_CYCLE_COUNTERS_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;
+
+pub const DebugCycleCounter = extern struct {
+    cycle_count: u64 = 0,
+    last_cycle_start: u64 = 0,
+    hit_count: u32 = 0,
 };
 
 // Data from platform.
@@ -145,13 +187,29 @@ pub const ControllerButtonState = extern struct {
 // Memory.
 pub const MemoryIndex = usize;
 
-pub const Memory = extern struct {
-    is_initialized: bool,
-    permanent_storage_size: u64,
-    permanent_storage: ?[*]void,
-    transient_storage_size: u64,
-    transient_storage: ?[*]void,
-};
+pub const Memory = GameMemory();
+fn GameMemory() type {
+    return extern struct {
+        is_initialized: bool,
+        permanent_storage_size: u64,
+        permanent_storage: ?[*]void,
+        transient_storage_size: u64,
+        transient_storage: ?[*]void,
+
+        counters: if (DEBUG) [DEBUG_CYCLE_COUNTERS_COUNT]DebugCycleCounter else void,
+
+        const Self = @This();
+
+        pub usingnamespace switch (DEBUG) {
+            inline true => struct {
+                pub fn getCycleCounter(self: *Self, counter_id: DebugCycleCounters) *DebugCycleCounter {
+                    return &self.counters[@intFromEnum(counter_id)];
+                }
+            },
+            else => {}
+        };
+    };
+}
 
 pub const TemporaryMemory = struct {
     used: MemoryIndex,

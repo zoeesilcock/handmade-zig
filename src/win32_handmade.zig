@@ -143,18 +143,6 @@ pub const Game = struct {
     getSoundSamples: *const @TypeOf(shared.getSoundSamplesStub) = undefined,
 };
 
-pub inline fn rdtsc() u64 {
-    var hi: u32 = 0;
-    var low: u32 = 0;
-
-    asm (
-        \\rdtsc
-        : [low] "={eax}" (low),
-          [hi] "={edx}" (hi),
-    );
-    return (@as(u64, hi) << 32) | @as(u64, low);
-}
-
 pub inline fn safeTruncateI64(value: i64) u32 {
     std.debug.assert(value <= 0xFFFFFFFF);
     return @as(u32, @intCast(value));
@@ -1023,6 +1011,35 @@ fn debugSyncDisplay(
     }
 }
 
+fn handleDebugCycleCounters(memory: *shared.Memory) void {
+    if (DEBUG) {
+        win32.OutputDebugStringA("DEBUG CYCLE COUNTERS:\n");
+        var total_cycles: u64 = 0;
+
+        for (&memory.counters, 0..) |*counter, counter_index| {
+            if (counter_index == 0) {
+                total_cycles = counter.cycle_count;
+            }
+
+            if (counter.hit_count > 0) {
+                var buffer: [128]u8 = undefined;
+                const slice = std.fmt.bufPrintZ(&buffer, "{d}: {d:>10} cycles, {d:>10} hits, {d:>10} cycles/hit, {d:>6.2}%\n", .{
+                    counter_index,
+                    counter.cycle_count,
+                    counter.hit_count,
+                    counter.cycle_count / counter.hit_count,
+                    (@as(f32, @floatFromInt(counter.cycle_count)) / @as(f32, @floatFromInt(total_cycles))) * 100.0,
+                }) catch "";
+                win32.OutputDebugStringA(@ptrCast(slice.ptr));
+            }
+
+            counter.cycle_count = 0;
+            counter.last_cycle_start = 0;
+            counter.hit_count = 0;
+        }
+    }
+}
+
 fn catStrings(
     source_a: []const u8,
     source_b: []const u8,
@@ -1278,6 +1295,7 @@ pub export fn wWinMain(
                 .permanent_storage = null,
                 .transient_storage_size = shared.megabytes(256),
                 .transient_storage = null,
+                .counters = [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 
             state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
@@ -1358,7 +1376,7 @@ pub export fn wWinMain(
                 var last_cycle_count: u64 = 0;
                 var last_counter: win32.LARGE_INTEGER = getWallClock();
                 var flip_wall_clock: win32.LARGE_INTEGER = getWallClock();
-                last_cycle_count = rdtsc();
+                last_cycle_count = shared.rdtsc();
 
                 // Load the game code.
                 var game = loadGameCode(&source_dll_path, &temp_dll_path);
@@ -1410,6 +1428,7 @@ pub export fn wWinMain(
 
                     // Send all input to game.
                     game.updateAndRender(&thread, platform, &game_memory, new_input.*, &game_buffer);
+                    handleDebugCycleCounters(&game_memory);
 
                     // Output sound.
                     if (opt_secondary_buffer) |secondary_buffer| {
@@ -1523,7 +1542,7 @@ pub export fn wWinMain(
                     }
 
                     // Capture timing.
-                    const end_cycle_count = rdtsc();
+                    const end_cycle_count = shared.rdtsc();
                     const work_counter = getWallClock();
                     const work_seconds_elapsed = getSecondsElapsed(last_counter, work_counter);
 

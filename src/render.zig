@@ -345,6 +345,9 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap) void {
+        shared.beginTimedBlock(.RenderGrouptToOutput);
+        defer shared.endTimedBlock(.RenderGrouptToOutput);
+
         const screen_dimension = Vector2.new(
             @as(f32, @floatFromInt(output_target.width)),
             @as(f32, @floatFromInt(output_target.height)),
@@ -390,24 +393,22 @@ pub const RenderGroup = extern struct {
                     if (entry.bitmap) |bitmap| {
                         const basis = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_dimension);
 
-                        if (basis.valid) {
-                            if (false) {
-                                drawBitmap(output_target, bitmap, basis.position.x(), basis.position.y(), entry.color.a());
-                            } else {
-                                drawRectangleSlowly(
-                                    output_target,
-                                    basis.position,
-                                    Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
-                                    Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
-                                    entry.color,
-                                    @constCast(bitmap),
-                                    null,
-                                    undefined,
-                                    undefined,
-                                    undefined,
-                                    pixels_to_meters,
-                                );
-                            }
+                        if (false) {
+                            drawBitmap(output_target, bitmap, basis.position.x(), basis.position.y(), entry.color.a());
+                        } else {
+                            drawRectangleSlowly(
+                                output_target,
+                                basis.position,
+                                Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
+                                Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
+                                entry.color,
+                                @constCast(bitmap),
+                                null,
+                                undefined,
+                                undefined,
+                                undefined,
+                                pixels_to_meters,
+                            );
                         }
                     }
 
@@ -417,14 +418,12 @@ pub const RenderGroup = extern struct {
                     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                     const basis = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_dimension);
 
-                    if (basis.valid) {
-                        drawRectangle(
-                            output_target,
-                            basis.position,
-                            basis.position.plus(entry.dimension.scaledTo(basis.scale)),
-                            entry.color,
-                        );
-                    }
+                    drawRectangle(
+                        output_target,
+                        basis.position,
+                        basis.position.plus(entry.dimension.scaledTo(basis.scale)),
+                        entry.color,
+                    );
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -547,6 +546,9 @@ pub fn drawRectangleSlowly(
     bottom: *EnvironmentMap,
     pixels_to_meters: f32,
 ) void {
+    shared.beginTimedBlock(.DrawRectangleSlowly);
+    defer shared.endTimedBlock(.DrawRectangleSlowly);
+
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
 
@@ -620,6 +622,9 @@ pub fn drawRectangleSlowly(
 
         var x: i32 = x_min;
         while (x < x_max) : (x += 1) {
+            shared.beginTimedBlock(.TestPixel);
+            defer shared.endTimedBlock(.TestPixel);
+
             const pixel_position = Vector2.newI(x, y);
             const d = pixel_position.minus(origin);
 
@@ -629,6 +634,9 @@ pub fn drawRectangleSlowly(
             const edge3 = d.minus(y_axis).dotProduct(y_axis.perp());
 
             if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
+                shared.beginTimedBlock(.FillPixel);
+                defer shared.endTimedBlock(.FillPixel);
+
                 // For items that are standing up.
                 var screen_space_uv = Vector2.new(
                     inv_width_max * @as(f32, @floatFromInt(x)),
