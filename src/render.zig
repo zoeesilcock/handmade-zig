@@ -612,7 +612,14 @@ pub fn drawRectangleHopefullyQuickly(
     }
 
     const inverse_255: f32 = 1.0 / 255.0;
-    const one_255: f32 = 255.0;
+    const inv_255: @Vector(4, f32) = @splat(inverse_255);
+    const color_r: @Vector(4, f32) = @splat(color.r());
+    const color_g: @Vector(4, f32) = @splat(color.g());
+    const color_b: @Vector(4, f32) = @splat(color.b());
+    const color_a: @Vector(4, f32) = @splat(color.a());
+    const one_255: @Vector(4, f32) = @splat(255.0);
+    const one: @Vector(4, f32) = @splat(1);
+    const zero: @Vector(4, f32) = @splat(0);
     const n_x_axis = x_axis.scaledTo(inv_x_axis_length_squared);
     const n_y_axis = y_axis.scaledTo(inv_y_axis_length_squared);
 
@@ -628,40 +635,47 @@ pub fn drawRectangleHopefullyQuickly(
             shared.beginTimedBlock(.TestPixel);
             defer shared.endTimedBlock(.TestPixel);
 
-            var texel_a_r: [4]f32 = undefined;
-            var texel_a_g: [4]f32 = undefined;
-            var texel_a_b: [4]f32 = undefined;
-            var texel_a_a: [4]f32 = undefined;
+            var texel_a_r: @Vector(4, f32) = @splat(0);
+            var texel_a_g: @Vector(4, f32) = @splat(0);
+            var texel_a_b: @Vector(4, f32) = @splat(0);
+            var texel_a_a: @Vector(4, f32) = @splat(0);
 
-            var texel_b_r: [4]f32 = undefined;
-            var texel_b_g: [4]f32 = undefined;
-            var texel_b_b: [4]f32 = undefined;
-            var texel_b_a: [4]f32 = undefined;
+            var texel_b_r: @Vector(4, f32) = @splat(0);
+            var texel_b_g: @Vector(4, f32) = @splat(0);
+            var texel_b_b: @Vector(4, f32) = @splat(0);
+            var texel_b_a: @Vector(4, f32) = @splat(0);
 
-            var texel_c_r: [4]f32 = undefined;
-            var texel_c_g: [4]f32 = undefined;
-            var texel_c_b: [4]f32 = undefined;
-            var texel_c_a: [4]f32 = undefined;
+            var texel_c_r: @Vector(4, f32) = @splat(0);
+            var texel_c_g: @Vector(4, f32) = @splat(0);
+            var texel_c_b: @Vector(4, f32) = @splat(0);
+            var texel_c_a: @Vector(4, f32) = @splat(0);
 
-            var texel_d_r: [4]f32 = undefined;
-            var texel_d_g: [4]f32 = undefined;
-            var texel_d_b: [4]f32 = undefined;
-            var texel_d_a: [4]f32 = undefined;
+            var texel_d_r: @Vector(4, f32) = @splat(0);
+            var texel_d_g: @Vector(4, f32) = @splat(0);
+            var texel_d_b: @Vector(4, f32) = @splat(0);
+            var texel_d_a: @Vector(4, f32) = @splat(0);
 
-            var dest_r: [4]f32 = undefined;
-            var dest_g: [4]f32 = undefined;
-            var dest_b: [4]f32 = undefined;
-            var dest_a: [4]f32 = undefined;
+            var dest_r: @Vector(4, f32) = @splat(0);
+            var dest_g: @Vector(4, f32) = @splat(0);
+            var dest_b: @Vector(4, f32) = @splat(0);
+            var dest_a: @Vector(4, f32) = @splat(0);
 
-            var blended_r: [4]f32 = undefined;
-            var blended_g: [4]f32 = undefined;
-            var blended_b: [4]f32 = undefined;
-            var blended_a: [4]f32 = undefined;
+            var blended_r: @Vector(4, f32) = @splat(0);
+            var blended_g: @Vector(4, f32) = @splat(0);
+            var blended_b: @Vector(4, f32) = @splat(0);
+            var blended_a: @Vector(4, f32) = @splat(0);
 
-            var should_fill: [4]bool = undefined;
+            var should_fill: @Vector(4, bool) = @splat(false);
 
-            var fx: [4]f32 = undefined;
-            var fy: [4]f32 = undefined;
+            var fx: @Vector(4, f32) = @splat(0);
+            var fy: @Vector(4, f32) = @splat(0);
+            var ifx: @Vector(4, f32) = @splat(0);
+            var ify: @Vector(4, f32) = @splat(0);
+
+            var l0: @Vector(4, f32) = @splat(0);
+            var l1: @Vector(4, f32) = @splat(0);
+            var l2: @Vector(4, f32) = @splat(0);
+            var l3: @Vector(4, f32) = @splat(0);
 
             for (0..4) |i| {
                 const pixel_position = Vector2.newI(xi + @as(i32, @intCast(i)), y);
@@ -680,11 +694,17 @@ pub fn drawRectangleHopefullyQuickly(
 
                     fx[i] = texel_x - @as(f32, @floatFromInt(texel_rounded_x));
                     fy[i] = texel_y - @as(f32, @floatFromInt(texel_rounded_y));
+                    ifx[i] = 1.0 - fx[i];
+                    ify[i] = 1.0 - fy[i];
+
+                    l0[i] = ify[i] * ifx[i];
+                    l1[i] = ify[i] * fx[i];
+                    l2[i] = fy[i] * ifx[i];
+                    l3[i] = fy[i] * fx[i];
 
                     std.debug.assert(texel_rounded_x >= 0 and texel_rounded_x <= texture.width);
                     std.debug.assert(texel_rounded_y >= 0 and texel_rounded_y <= texture.height);
 
-                    // const texel_sample = bilinearSample(texture, texel_rounded_x, texel_rounded_y);
                     const offset: i32 = @intCast((texel_rounded_x * @sizeOf(u32)) + (texel_rounded_y * texture.pitch));
                     const texture_base = shared.incrementPointer(texture.memory.?, offset);
                     const sample_a: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
@@ -698,30 +718,27 @@ pub fn drawRectangleHopefullyQuickly(
                             shared.incrementPointer(texture_base, @sizeOf(u32) + texture.pitch),
                     )))[0];
 
-                    // var texel = sRGBBilinearBlend(texel_sample, texel_fraction_x, texel_fraction_y);
-                    // var texel_a = Color.unpackColor(sample_a);
                     texel_a_r[i] = @floatFromInt((sample_a >> 16) & 0xFF);
                     texel_a_g[i] = @floatFromInt((sample_a >> 8) & 0xFF);
                     texel_a_b[i] = @floatFromInt((sample_a >> 0) & 0xFF);
                     texel_a_a[i] = @floatFromInt((sample_a >> 24) & 0xFF);
-                    // var texel_b = Color.unpackColor(sample_b);
+
                     texel_b_r[i] = @floatFromInt((sample_b >> 16) & 0xFF);
                     texel_b_g[i] = @floatFromInt((sample_b >> 8) & 0xFF);
                     texel_b_b[i] = @floatFromInt((sample_b >> 0) & 0xFF);
                     texel_b_a[i] = @floatFromInt((sample_b >> 24) & 0xFF);
-                    // var texel_c = Color.unpackColor(sample_c);
+
                     texel_c_r[i] = @floatFromInt((sample_c >> 16) & 0xFF);
                     texel_c_g[i] = @floatFromInt((sample_c >> 8) & 0xFF);
                     texel_c_b[i] = @floatFromInt((sample_c >> 0) & 0xFF);
                     texel_c_a[i] = @floatFromInt((sample_c >> 24) & 0xFF);
-                    // var texel_d = Color.unpackColor(sample_d);
+
                     texel_d_r[i] = @floatFromInt((sample_d >> 16) & 0xFF);
                     texel_d_g[i] = @floatFromInt((sample_d >> 8) & 0xFF);
                     texel_d_b[i] = @floatFromInt((sample_d >> 0) & 0xFF);
                     texel_d_a[i] = @floatFromInt((sample_d >> 24) & 0xFF);
 
                     // Load destination.
-                    // var dest = Color.unpackColor(pixel[0]);
                     dest_r[i] = @floatFromInt((pixel[i] >> 16) & 0xFF);
                     dest_g[i] = @floatFromInt((pixel[i] >> 8) & 0xFF);
                     dest_b[i] = @floatFromInt((pixel[i] >> 0) & 0xFF);
@@ -729,87 +746,89 @@ pub fn drawRectangleHopefullyQuickly(
                 }
             }
 
-            for (0..4) |i| {
-                // Convert texture from sRGB to linear brightness space.
-                // texel_a = sRGB255ToLinear1(texel_a);
-                texel_a_r[i] = inverse_255 * texel_a_r[i];
-                texel_a_r[i] *= texel_a_r[i];
-                texel_a_g[i] = inverse_255 * texel_a_g[i];
-                texel_a_g[i] *= texel_a_g[i];
-                texel_a_b[i] = inverse_255 * texel_a_b[i];
-                texel_a_b[i] *= texel_a_b[i];
-                texel_a_a[i] = inverse_255 * texel_a_a[i];
+            // Convert texture from sRGB to linear brightness space.
+            texel_a_r *= inv_255;
+            texel_a_r *= texel_a_r;
+            texel_a_g *= inv_255;
+            texel_a_g *= texel_a_g;
+            texel_a_b *= inv_255;
+            texel_a_b *= texel_a_b;
+            texel_a_a *= inv_255;
 
-                texel_b_r[i] = math.square(inverse_255 * texel_b_r[i]);
-                texel_b_g[i] = math.square(inverse_255 * texel_b_g[i]);
-                texel_b_b[i] = math.square(inverse_255 * texel_b_b[i]);
-                texel_b_a[i] = inverse_255 * texel_b_a[i];
+            texel_b_r *= inv_255;
+            texel_b_r *= texel_b_r;
+            texel_b_g *= inv_255;
+            texel_b_g *= texel_b_g;
+            texel_b_b *= inv_255;
+            texel_b_b *= texel_b_b;
+            texel_b_a *= inv_255;
 
-                texel_c_r[i] = math.square(inverse_255 * texel_c_r[i]);
-                texel_c_g[i] = math.square(inverse_255 * texel_c_g[i]);
-                texel_c_b[i] = math.square(inverse_255 * texel_c_b[i]);
-                texel_c_a[i] = inverse_255 * texel_c_a[i];
+            texel_c_r *= inv_255;
+            texel_c_r *= texel_c_r;
+            texel_c_g *= inv_255;
+            texel_c_g *= texel_c_g;
+            texel_c_b *= inv_255;
+            texel_c_b *= texel_c_b;
+            texel_c_a *= inv_255;
 
-                texel_d_r[i] = math.square(inverse_255 * texel_d_r[i]);
-                texel_d_g[i] = math.square(inverse_255 * texel_d_g[i]);
-                texel_d_b[i] = math.square(inverse_255 * texel_d_b[i]);
-                texel_d_a[i] = inverse_255 * texel_d_a[i];
+            texel_d_r *= inv_255;
+            texel_d_r *= texel_d_r;
+            texel_d_g *= inv_255;
+            texel_d_g *= texel_d_g;
+            texel_d_b *= inv_255;
+            texel_d_b *= texel_d_b;
+            texel_d_a *= inv_255;
 
-                // Bilinear texture blend.
-                const ifx = 1.0 - fx[i];
-                const ify = 1.0 - fy[i];
+            // Bilinear texture blend.
+            var texelr = l0 * texel_a_r + l1 * texel_b_r + l2 * texel_c_r + l3 * texel_d_r;
+            var texelg = l0 * texel_a_g + l1 * texel_b_g + l2 * texel_c_g + l3 * texel_d_g;
+            var texelb = l0 * texel_a_b + l1 * texel_b_b + l2 * texel_c_b + l3 * texel_d_b;
+            var texela = l0 * texel_a_a + l1 * texel_b_a + l2 * texel_c_a + l3 * texel_d_a;
 
-                const l0 = ify * ifx;
-                const l1 = ify * fx[i];
-                const l2 = fy[i] * ifx;
-                const l3 = fy[i] * fx[i];
+            // Modulate by incoming color.
+            texelr *= color_r;
+            texelg *= color_g;
+            texelb *= color_b;
+            texela *= color_a;
 
-                var texelr = l0 * texel_a_r[i] + l1 * texel_b_r[i] + l2 * texel_c_r[i] + l3 * texel_d_r[i];
-                var texelg = l0 * texel_a_g[i] + l1 * texel_b_g[i] + l2 * texel_c_g[i] + l3 * texel_d_g[i];
-                var texelb = l0 * texel_a_b[i] + l1 * texel_b_b[i] + l2 * texel_c_b[i] + l3 * texel_d_b[i];
-                var texela = l0 * texel_a_a[i] + l1 * texel_b_a[i] + l2 * texel_c_a[i] + l3 * texel_d_a[i];
+            // Clamp colors to valid range.
+            texelr = @max(zero, texelr);
+            texelr = @min(one, texelr);
+            texelg = @max(zero, texelg);
+            texelg = @min(one, texelg);
+            texelb = @max(zero, texelb);
+            texelb = @min(one, texelb);
+            texela = @max(zero, texela);
+            texela = @min(one, texela);
 
-                // Modulate by incoming color.
-                // texel = texel.hadamardProduct(color);
-                texelr = texelr * color.r();
-                texelg = texelg * color.g();
-                texelb = texelb * color.b();
-                texela = texela * color.a();
+            // Go from sRGB to linear brightness space.
+            dest_r *= inv_255;
+            dest_r *= dest_r;
+            dest_g *= inv_255;
+            dest_g *= dest_g;
+            dest_b *= inv_255;
+            dest_b *= dest_b;
+            dest_a *= inv_255;
 
-                // Clamp colors to valid range.
-                // _ = texel.setRGB(texel.rgb().clamp01());
-                texelr = math.clampf01(texelr);
-                texelg = math.clampf01(texelg);
-                texelb = math.clampf01(texelb);
-                texela = math.clampf01(texela);
+            // Destination blend.
+            const inv_texel_a = one - texela;
+            blended_r = dest_r * inv_texel_a + texelr;
+            blended_g = dest_g * inv_texel_a + texelg;
+            blended_b = dest_b * inv_texel_a + texelb;
+            blended_a = dest_a * inv_texel_a + texela;
 
-                // Go from sRGB to linear brightness space.
-                // dest = sRGB255ToLinear1(dest);
-                dest_r[i] = math.square(inverse_255 * dest_r[i]);
-                dest_g[i] = math.square(inverse_255 * dest_g[i]);
-                dest_b[i] = math.square(inverse_255 * dest_b[i]);
-                dest_a[i] = inverse_255 * dest_a[i];
-
-                // Destination blend.
-                // const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
-                const inv_texel_a = 1.0 - texela;
-                blended_r[i] = dest_r[i] * inv_texel_a + texelr;
-                blended_g[i] = dest_g[i] * inv_texel_a + texelg;
-                blended_b[i] = dest_b[i] * inv_texel_a + texelb;
-                blended_a[i] = dest_a[i] * inv_texel_a + texela;
-
-                // Go from linear brightness space to sRGB.
-                // const blended255 = linear1ToSRGB255(blended);
-                blended_r[i] = one_255 * @sqrt(blended_r[i]);
-                blended_g[i] = one_255 * @sqrt(blended_g[i]);
-                blended_b[i] = one_255 * @sqrt(blended_b[i]);
-                blended_a[i] = one_255 * blended_a[i];
-            }
+            // Go from linear brightness space to sRGB.
+            blended_r = @sqrt(blended_r);
+            blended_r = one_255 * blended_r;
+            blended_g = @sqrt(blended_g);
+            blended_g = one_255 * blended_g;
+            blended_b = @sqrt(blended_b);
+            blended_b = one_255 * blended_b;
+            blended_a = one_255 * blended_a;
 
             for (0..4) |i| {
                 if (should_fill[i]) {
                     // Repack color.
-                    // pixel[0] = blended255.packColor1();
                     pixel[i] = ((@as(u32, @intFromFloat(blended_a[i] + 0.5)) << 24) |
                         (@as(u32, @intFromFloat(blended_r[i] + 0.5)) << 16) |
                         (@as(u32, @intFromFloat(blended_g[i] + 0.5)) << 8) |
