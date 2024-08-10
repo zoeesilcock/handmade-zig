@@ -13,3 +13,13 @@ When running outside of an IDE, `OutputDebugString` messages can be viewed using
 
 ## Build options
 * Timing: use the `-Dtiming` flag when building to enable printing timing (ms/frame, fps and cycles/frame) to the debug output.
+
+## Reference
+
+### Intel
+* https://www.intel.com/content/www/us/en/docs/intrinsics-guide
+* https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
+
+### AMD
+* https://learn.microsoft.com/en-us/cpp/intrinsics/x64-amd64-intrinsics-list?view=msvc-170
+* https://www.amd.com/content/dam/amd/en/documents/processor-tech-docs/programmer-references/24592.pdf
