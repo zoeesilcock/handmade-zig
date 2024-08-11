@@ -85,13 +85,20 @@ pub inline fn endTimedBlock(counter_id: DebugCycleCounters) void {
     }
 }
 
+pub inline fn endTimedBlockCounted(counter_id: DebugCycleCounters, hit_count: u32) void {
+    if (debug_global_memory) |memory| {
+        const counter = memory.getCycleCounter(counter_id);
+        counter.cycle_count += rdtsc() - counter.last_cycle_start;
+        counter.hit_count += hit_count;
+    }
+}
+
 pub const DebugCycleCounters = enum(u8) {
     GameUpdateAndRender = 0,
     RenderGrouptToOutput,
     DrawRectangleSlowly,
-    DrawRectangleHopefullyQuickly,
-    TestPixel,
-    FillPixel,
+    DrawRectangleQuickly,
+    ProcessPixel,
 };
 
 pub const DEBUG_CYCLE_COUNTERS_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;

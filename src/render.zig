@@ -556,8 +556,8 @@ pub fn drawRectangleHopefullyQuickly(
 ) void {
     _ = pixels_to_meters;
 
-    shared.beginTimedBlock(.DrawRectangleHopefullyQuickly);
-    defer shared.endTimedBlock(.DrawRectangleHopefullyQuickly);
+    shared.beginTimedBlock(.DrawRectangleQuickly);
+    defer shared.endTimedBlock(.DrawRectangleQuickly);
 
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -611,8 +611,7 @@ pub fn drawRectangleHopefullyQuickly(
         y_max = height_max;
     }
 
-    const inverse_255: f32 = 1.0 / 255.0;
-    const inv_255: @Vector(4, f32) = @splat(inverse_255);
+    const inv_255: @Vector(4, f32) = @splat(1.0 / 255.0);
     const color_r: @Vector(4, f32) = @splat(color.r());
     const color_g: @Vector(4, f32) = @splat(color.g());
     const color_b: @Vector(4, f32) = @splat(color.b());
@@ -622,19 +621,23 @@ pub fn drawRectangleHopefullyQuickly(
     const zero: @Vector(4, f32) = @splat(0);
     const n_x_axis = x_axis.scaledTo(inv_x_axis_length_squared);
     const n_y_axis = y_axis.scaledTo(inv_y_axis_length_squared);
+    const n_x_axis_x: @Vector(4, f32) = @splat(n_x_axis.x());
+    const n_x_axis_y: @Vector(4, f32) = @splat(n_x_axis.y());
+    const n_y_axis_x: @Vector(4, f32) = @splat(n_y_axis.x());
+    const n_y_axis_y: @Vector(4, f32) = @splat(n_y_axis.y());
+    const origin_x: @Vector(4, f32) = @splat(origin.x());
+    const origin_y: @Vector(4, f32) = @splat(origin.y());
 
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
     row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
 
+    shared.beginTimedBlock(.ProcessPixel);
     var y: i32 = y_min;
     while (y < y_max) : (y += 1) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
 
         var xi: i32 = x_min;
         while (xi < x_max) : (xi += 4) {
-            shared.beginTimedBlock(.TestPixel);
-            defer shared.endTimedBlock(.TestPixel);
-
             var texel_a_r: @Vector(4, f32) = @splat(0);
             var texel_a_g: @Vector(4, f32) = @splat(0);
             var texel_a_b: @Vector(4, f32) = @splat(0);
@@ -677,26 +680,32 @@ pub fn drawRectangleHopefullyQuickly(
             var l2: @Vector(4, f32) = @splat(0);
             var l3: @Vector(4, f32) = @splat(0);
 
+            const pixel_position_x: @Vector(4, f32) = .{
+                @floatFromInt(xi + 0),
+                @floatFromInt(xi + 1),
+                @floatFromInt(xi + 2),
+                @floatFromInt(xi + 3),
+            };
+            const pixel_position_y: @Vector(4, f32) = @splat(@floatFromInt(y));
+            const dx: @Vector(4, f32) = pixel_position_x - origin_x;
+            const dy: @Vector(4, f32) = pixel_position_y - origin_y;
+            const u = dx * n_x_axis_x + dy * n_x_axis_y;
+            const v = dx * n_y_axis_x + dy * n_y_axis_y;
+
             for (0..4) |i| {
-                const pixel_position = Vector2.newI(xi + @as(i32, @intCast(i)), y);
-                const d = pixel_position.minus(origin);
-
-                const u = d.dotProduct(n_x_axis);
-                const v = d.dotProduct(n_y_axis);
-
-                should_fill[i] = (u >= 0 and u <= 1.0 and v >= 0 and v <= 1.0);
+                should_fill[i] = (u[i] >= 0 and u[i] <= 1.0 and v[i] >= 0 and v[i] <= 1.0);
                 if (should_fill[i]) {
-                    const texel_x: f32 = (u * @as(f32, @floatFromInt(texture.width - 2)));
-                    const texel_y: f32 = (v * @as(f32, @floatFromInt(texture.height - 2)));
+                    const texel_x: f32 = (u[i] * @as(f32, @floatFromInt(texture.width - 2)));
+                    const texel_y: f32 = (v[i] * @as(f32, @floatFromInt(texture.height - 2)));
 
                     const texel_rounded_x: i32 = @intFromFloat(texel_x);
                     const texel_rounded_y: i32 = @intFromFloat(texel_y);
 
+                    // Pre-calculate the texture blend.
                     fx[i] = texel_x - @as(f32, @floatFromInt(texel_rounded_x));
                     fy[i] = texel_y - @as(f32, @floatFromInt(texel_rounded_y));
                     ifx[i] = 1.0 - fx[i];
                     ify[i] = 1.0 - fy[i];
-
                     l0[i] = ify[i] * ifx[i];
                     l1[i] = ify[i] * fx[i];
                     l2[i] = fy[i] * ifx[i];
@@ -705,6 +714,7 @@ pub fn drawRectangleHopefullyQuickly(
                     std.debug.assert(texel_rounded_x >= 0 and texel_rounded_x <= texture.width);
                     std.debug.assert(texel_rounded_y >= 0 and texel_rounded_y <= texture.height);
 
+                    // Load the source.
                     const offset: i32 = @intCast((texel_rounded_x * @sizeOf(u32)) + (texel_rounded_y * texture.pitch));
                     const texture_base = shared.incrementPointer(texture.memory.?, offset);
                     const sample_a: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
@@ -747,36 +757,24 @@ pub fn drawRectangleHopefullyQuickly(
             }
 
             // Convert texture from sRGB to linear brightness space.
-            texel_a_r *= inv_255;
-            texel_a_r *= texel_a_r;
-            texel_a_g *= inv_255;
-            texel_a_g *= texel_a_g;
-            texel_a_b *= inv_255;
-            texel_a_b *= texel_a_b;
+            texel_a_r = math.square_v4(inv_255 * texel_a_r);
+            texel_a_g = math.square_v4(inv_255 * texel_a_g);
+            texel_a_b = math.square_v4(inv_255 * texel_a_b);
             texel_a_a *= inv_255;
 
-            texel_b_r *= inv_255;
-            texel_b_r *= texel_b_r;
-            texel_b_g *= inv_255;
-            texel_b_g *= texel_b_g;
-            texel_b_b *= inv_255;
-            texel_b_b *= texel_b_b;
+            texel_b_r = math.square_v4(inv_255 * texel_b_r);
+            texel_b_g = math.square_v4(inv_255 * texel_b_g);
+            texel_b_b = math.square_v4(inv_255 * texel_b_b);
             texel_b_a *= inv_255;
 
-            texel_c_r *= inv_255;
-            texel_c_r *= texel_c_r;
-            texel_c_g *= inv_255;
-            texel_c_g *= texel_c_g;
-            texel_c_b *= inv_255;
-            texel_c_b *= texel_c_b;
+            texel_c_r = math.square_v4(inv_255 * texel_c_r);
+            texel_c_g = math.square_v4(inv_255 * texel_c_g);
+            texel_c_b = math.square_v4(inv_255 * texel_c_b);
             texel_c_a *= inv_255;
 
-            texel_d_r *= inv_255;
-            texel_d_r *= texel_d_r;
-            texel_d_g *= inv_255;
-            texel_d_g *= texel_d_g;
-            texel_d_b *= inv_255;
-            texel_d_b *= texel_d_b;
+            texel_d_r = math.square_v4(inv_255 * texel_d_r);
+            texel_d_g = math.square_v4(inv_255 * texel_d_g);
+            texel_d_b = math.square_v4(inv_255 * texel_d_b);
             texel_d_a *= inv_255;
 
             // Bilinear texture blend.
@@ -802,12 +800,9 @@ pub fn drawRectangleHopefullyQuickly(
             texela = @min(one, texela);
 
             // Go from sRGB to linear brightness space.
-            dest_r *= inv_255;
-            dest_r *= dest_r;
-            dest_g *= inv_255;
-            dest_g *= dest_g;
-            dest_b *= inv_255;
-            dest_b *= dest_b;
+            dest_r = math.square_v4(dest_r * inv_255);
+            dest_g = math.square_v4(dest_g * inv_255);
+            dest_b = math.square_v4(dest_b * inv_255);
             dest_a *= inv_255;
 
             // Destination blend.
@@ -818,12 +813,9 @@ pub fn drawRectangleHopefullyQuickly(
             blended_a = dest_a * inv_texel_a + texela;
 
             // Go from linear brightness space to sRGB.
-            blended_r = @sqrt(blended_r);
-            blended_r = one_255 * blended_r;
-            blended_g = @sqrt(blended_g);
-            blended_g = one_255 * blended_g;
-            blended_b = @sqrt(blended_b);
-            blended_b = one_255 * blended_b;
+            blended_r = one_255 * @sqrt(blended_r);
+            blended_g = one_255 * @sqrt(blended_g);
+            blended_b = one_255 * @sqrt(blended_b);
             blended_a = one_255 * blended_a;
 
             for (0..4) |i| {
@@ -841,6 +833,7 @@ pub fn drawRectangleHopefullyQuickly(
 
         row += @as(usize, @intCast(draw_buffer.pitch));
     }
+    shared.endTimedBlockCounted(.ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
 }
 
 pub fn drawRectangleSlowly(
@@ -932,9 +925,6 @@ pub fn drawRectangleSlowly(
 
         var x: i32 = x_min;
         while (x < x_max) : (x += 1) {
-            shared.beginTimedBlock(.TestPixel);
-            defer shared.endTimedBlock(.TestPixel);
-
             const pixel_position = Vector2.newI(x, y);
             const d = pixel_position.minus(origin);
 
@@ -944,9 +934,6 @@ pub fn drawRectangleSlowly(
             const edge3 = d.minus(y_axis).dotProduct(y_axis.perp());
 
             if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
-                shared.beginTimedBlock(.FillPixel);
-                defer shared.endTimedBlock(.FillPixel);
-
                 // For items that are standing up.
                 var screen_space_uv = Vector2.new(
                     inv_width_max * @as(f32, @floatFromInt(x)),

@@ -564,6 +564,10 @@ pub inline fn square(a: f32) f32 {
     return a * a;
 }
 
+pub inline fn square_v4(vector: @Vector(4, f32)) @Vector(4, f32) {
+    return vector * vector;
+}
+
 pub inline fn lerpf(min: f32, max: f32, distance: f32) f32 {
     return (1.0 - distance) * min + distance * max;
 }
