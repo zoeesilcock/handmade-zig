@@ -619,6 +619,11 @@ pub fn drawRectangleHopefullyQuickly(
     const one_255: @Vector(4, f32) = @splat(255.0);
     const one: @Vector(4, f32) = @splat(1);
     const zero: @Vector(4, f32) = @splat(0);
+    const half: @Vector(4, f32) = @splat(0.5);
+    const shift_24: @Vector(4, u32) = @splat(24);
+    const shift_16: @Vector(4, u32) = @splat(16);
+    const shift_8: @Vector(4, u32) = @splat(8);
+
     const n_x_axis = x_axis.scaledTo(inv_x_axis_length_squared);
     const n_y_axis = y_axis.scaledTo(inv_y_axis_length_squared);
     const n_x_axis_x: @Vector(4, f32) = @splat(n_x_axis.x());
@@ -818,15 +823,14 @@ pub fn drawRectangleHopefullyQuickly(
             blended_b = one_255 * @sqrt(blended_b);
             blended_a = one_255 * blended_a;
 
-            for (0..4) |i| {
-                if (should_fill[i]) {
-                    // Repack color.
-                    pixel[i] = ((@as(u32, @intFromFloat(blended_a[i] + 0.5)) << 24) |
-                        (@as(u32, @intFromFloat(blended_r[i] + 0.5)) << 16) |
-                        (@as(u32, @intFromFloat(blended_g[i] + 0.5)) << 8) |
-                        (@as(u32, @intFromFloat(blended_b[i] + 0.5)) << 0));
-                }
-            }
+            const int_r: @Vector(4, u32) = @intFromFloat(blended_r + half);
+            const int_g: @Vector(4, u32) = @intFromFloat(blended_g + half);
+            const int_b: @Vector(4, u32) = @intFromFloat(blended_b + half);
+            const int_a: @Vector(4, u32) = @intFromFloat(blended_a + half);
+
+            const out: @Vector(4, u32) = int_r << shift_16 | int_g << shift_8 | int_b | int_a << shift_24;
+            const pixels = @as(*align(@alignOf(u32)) @Vector(4, u32), @ptrCast(@alignCast(pixel)));
+            pixels.* = out;
 
             pixel += 4;
         }
