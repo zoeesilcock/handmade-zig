@@ -619,10 +619,13 @@ pub fn drawRectangleHopefullyQuickly(
     const one_255: @Vector(4, f32) = @splat(255.0);
     const one: @Vector(4, f32) = @splat(1);
     const zero: @Vector(4, f32) = @splat(0);
-    const half: @Vector(4, f32) = @splat(0.5);
     const shift_24: @Vector(4, u32) = @splat(24);
     const shift_16: @Vector(4, u32) = @splat(16);
     const shift_8: @Vector(4, u32) = @splat(8);
+    const mask_ff: @Vector(4, u32) = @splat(0xFF);
+    const mask_scale: @Vector(4, u32) = @splat(0xFFFFFFFF);
+    const width_m2: @Vector(4, f32) = @splat(@floatFromInt(texture.width - 2));
+    const height_m2: @Vector(4, f32) = @splat(@floatFromInt(texture.height - 2));
 
     const n_x_axis = x_axis.scaledTo(inv_x_axis_length_squared);
     const n_y_axis = y_axis.scaledTo(inv_y_axis_length_squared);
@@ -643,48 +646,6 @@ pub fn drawRectangleHopefullyQuickly(
 
         var xi: i32 = x_min;
         while (xi < x_max) : (xi += 4) {
-            var texel_a_r: @Vector(4, f32) = @splat(0);
-            var texel_a_g: @Vector(4, f32) = @splat(0);
-            var texel_a_b: @Vector(4, f32) = @splat(0);
-            var texel_a_a: @Vector(4, f32) = @splat(0);
-
-            var texel_b_r: @Vector(4, f32) = @splat(0);
-            var texel_b_g: @Vector(4, f32) = @splat(0);
-            var texel_b_b: @Vector(4, f32) = @splat(0);
-            var texel_b_a: @Vector(4, f32) = @splat(0);
-
-            var texel_c_r: @Vector(4, f32) = @splat(0);
-            var texel_c_g: @Vector(4, f32) = @splat(0);
-            var texel_c_b: @Vector(4, f32) = @splat(0);
-            var texel_c_a: @Vector(4, f32) = @splat(0);
-
-            var texel_d_r: @Vector(4, f32) = @splat(0);
-            var texel_d_g: @Vector(4, f32) = @splat(0);
-            var texel_d_b: @Vector(4, f32) = @splat(0);
-            var texel_d_a: @Vector(4, f32) = @splat(0);
-
-            var dest_r: @Vector(4, f32) = @splat(0);
-            var dest_g: @Vector(4, f32) = @splat(0);
-            var dest_b: @Vector(4, f32) = @splat(0);
-            var dest_a: @Vector(4, f32) = @splat(0);
-
-            var blended_r: @Vector(4, f32) = @splat(0);
-            var blended_g: @Vector(4, f32) = @splat(0);
-            var blended_b: @Vector(4, f32) = @splat(0);
-            var blended_a: @Vector(4, f32) = @splat(0);
-
-            var should_fill: @Vector(4, bool) = @splat(false);
-
-            var fx: @Vector(4, f32) = @splat(0);
-            var fy: @Vector(4, f32) = @splat(0);
-            var ifx: @Vector(4, f32) = @splat(0);
-            var ify: @Vector(4, f32) = @splat(0);
-
-            var l0: @Vector(4, f32) = @splat(0);
-            var l1: @Vector(4, f32) = @splat(0);
-            var l2: @Vector(4, f32) = @splat(0);
-            var l3: @Vector(4, f32) = @splat(0);
-
             const pixel_position_x: @Vector(4, f32) = .{
                 @floatFromInt(xi + 0),
                 @floatFromInt(xi + 1),
@@ -694,72 +655,80 @@ pub fn drawRectangleHopefullyQuickly(
             const pixel_position_y: @Vector(4, f32) = @splat(@floatFromInt(y));
             const dx: @Vector(4, f32) = pixel_position_x - origin_x;
             const dy: @Vector(4, f32) = pixel_position_y - origin_y;
-            const u = dx * n_x_axis_x + dy * n_x_axis_y;
-            const v = dx * n_y_axis_x + dy * n_y_axis_y;
+            var u = dx * n_x_axis_x + dy * n_x_axis_y;
+            var v = dx * n_y_axis_x + dy * n_y_axis_y;
+
+            const original_dest: @Vector(4, u32) = @as(*align(@alignOf(u32)) @Vector(4, u32), @ptrCast(@alignCast(pixel))).*;
+            const write_mask: @Vector(4, u32) =
+                (@intFromBool(u >= zero) & @intFromBool(u <= one) & @intFromBool(v >= zero) & @intFromBool(v <= one)) * mask_scale;
+
+            // Clamp UV to valid range so we don't read out of invalid memory.
+            u = @max(zero, u);
+            u = @min(one, u);
+            v = @max(zero, v);
+            v = @min(one, v);
+
+            const texel_x: @Vector(4, f32) = u * width_m2;
+            const texel_y: @Vector(4, f32) = v * height_m2;
+            const texel_rounded_x: @Vector(4, i32) = @intFromFloat(texel_x);
+            const texel_rounded_y: @Vector(4, i32) = @intFromFloat(texel_y);
+
+            const fx = texel_x - @as(@Vector(4, f32), @floatFromInt(texel_rounded_x));
+            const fy = texel_y - @as(@Vector(4, f32), @floatFromInt(texel_rounded_y));
+            const ifx = one - fx;
+            const ify = one - fy;
+            const l0 = ify * ifx;
+            const l1 = ify * fx;
+            const l2 = fy * ifx;
+            const l3 = fy * fx;
+
+            var sample_a: @Vector(4, u32) = @splat(0);
+            var sample_b: @Vector(4, u32) = @splat(0);
+            var sample_c: @Vector(4, u32) = @splat(0);
+            var sample_d: @Vector(4, u32) = @splat(0);
 
             for (0..4) |i| {
-                should_fill[i] = (u[i] >= 0 and u[i] <= 1.0 and v[i] >= 0 and v[i] <= 1.0);
-                if (should_fill[i]) {
-                    const texel_x: f32 = (u[i] * @as(f32, @floatFromInt(texture.width - 2)));
-                    const texel_y: f32 = (v[i] * @as(f32, @floatFromInt(texture.height - 2)));
+                const offset: u32 = @intCast((texel_rounded_x[i] * @sizeOf(u32)) + (texel_rounded_y[i] * texture.pitch));
+                var texture_base = texture.memory.? + offset;
 
-                    const texel_rounded_x: i32 = @intFromFloat(texel_x);
-                    const texel_rounded_y: i32 = @intFromFloat(texel_y);
+                sample_a[i] = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
 
-                    // Pre-calculate the texture blend.
-                    fx[i] = texel_x - @as(f32, @floatFromInt(texel_rounded_x));
-                    fy[i] = texel_y - @as(f32, @floatFromInt(texel_rounded_y));
-                    ifx[i] = 1.0 - fx[i];
-                    ify[i] = 1.0 - fy[i];
-                    l0[i] = ify[i] * ifx[i];
-                    l1[i] = ify[i] * fx[i];
-                    l2[i] = fy[i] * ifx[i];
-                    l3[i] = fy[i] * fx[i];
+                texture_base += @sizeOf(u32);
+                sample_b[i] = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
 
-                    std.debug.assert(texel_rounded_x >= 0 and texel_rounded_x <= texture.width);
-                    std.debug.assert(texel_rounded_y >= 0 and texel_rounded_y <= texture.height);
+                texture_base += @as(usize, @intCast(texture.pitch));
+                sample_c[i] = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
 
-                    // Load the source.
-                    const offset: i32 = @intCast((texel_rounded_x * @sizeOf(u32)) + (texel_rounded_y * texture.pitch));
-                    const texture_base = shared.incrementPointer(texture.memory.?, offset);
-                    const sample_a: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
-                    const sample_b: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(
-                            shared.incrementPointer(texture_base, @sizeOf(u32)),
-                    )))[0];
-                    const sample_c: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(
-                            shared.incrementPointer(texture_base, texture.pitch),
-                    )))[0];
-                    const sample_d: u32 = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(
-                            shared.incrementPointer(texture_base, @sizeOf(u32) + texture.pitch),
-                    )))[0];
-
-                    texel_a_r[i] = @floatFromInt((sample_a >> 16) & 0xFF);
-                    texel_a_g[i] = @floatFromInt((sample_a >> 8) & 0xFF);
-                    texel_a_b[i] = @floatFromInt((sample_a >> 0) & 0xFF);
-                    texel_a_a[i] = @floatFromInt((sample_a >> 24) & 0xFF);
-
-                    texel_b_r[i] = @floatFromInt((sample_b >> 16) & 0xFF);
-                    texel_b_g[i] = @floatFromInt((sample_b >> 8) & 0xFF);
-                    texel_b_b[i] = @floatFromInt((sample_b >> 0) & 0xFF);
-                    texel_b_a[i] = @floatFromInt((sample_b >> 24) & 0xFF);
-
-                    texel_c_r[i] = @floatFromInt((sample_c >> 16) & 0xFF);
-                    texel_c_g[i] = @floatFromInt((sample_c >> 8) & 0xFF);
-                    texel_c_b[i] = @floatFromInt((sample_c >> 0) & 0xFF);
-                    texel_c_a[i] = @floatFromInt((sample_c >> 24) & 0xFF);
-
-                    texel_d_r[i] = @floatFromInt((sample_d >> 16) & 0xFF);
-                    texel_d_g[i] = @floatFromInt((sample_d >> 8) & 0xFF);
-                    texel_d_b[i] = @floatFromInt((sample_d >> 0) & 0xFF);
-                    texel_d_a[i] = @floatFromInt((sample_d >> 24) & 0xFF);
-
-                    // Load destination.
-                    dest_r[i] = @floatFromInt((pixel[i] >> 16) & 0xFF);
-                    dest_g[i] = @floatFromInt((pixel[i] >> 8) & 0xFF);
-                    dest_b[i] = @floatFromInt((pixel[i] >> 0) & 0xFF);
-                    dest_a[i] = @floatFromInt((pixel[i] >> 24) & 0xFF);
-                }
+                texture_base += @sizeOf(u32) + @as(usize, @intCast(texture.pitch));
+                sample_d[i] = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
             }
+
+            // Load the source.
+            var texel_a_r: @Vector(4, f32) = @floatFromInt((sample_a >> shift_16) & mask_ff);
+            var texel_a_g: @Vector(4, f32) = @floatFromInt((sample_a >> shift_8) & mask_ff);
+            var texel_a_b: @Vector(4, f32) = @floatFromInt((sample_a) & mask_ff);
+            var texel_a_a: @Vector(4, f32) = @floatFromInt((sample_a >> shift_24) & mask_ff);
+
+            var texel_b_r: @Vector(4, f32) = @floatFromInt((sample_b >> shift_16) & mask_ff);
+            var texel_b_g: @Vector(4, f32) = @floatFromInt((sample_b >> shift_8) & mask_ff);
+            var texel_b_b: @Vector(4, f32) = @floatFromInt((sample_b) & mask_ff);
+            var texel_b_a: @Vector(4, f32) = @floatFromInt((sample_b >> shift_24) & mask_ff);
+
+            var texel_c_r: @Vector(4, f32) = @floatFromInt((sample_c >> shift_16) & mask_ff);
+            var texel_c_g: @Vector(4, f32) = @floatFromInt((sample_c >> shift_8) & mask_ff);
+            var texel_c_b: @Vector(4, f32) = @floatFromInt((sample_c) & mask_ff);
+            var texel_c_a: @Vector(4, f32) = @floatFromInt((sample_c >> shift_24) & mask_ff);
+
+            var texel_d_r: @Vector(4, f32) = @floatFromInt((sample_d >> shift_16) & mask_ff);
+            var texel_d_g: @Vector(4, f32) = @floatFromInt((sample_d >> shift_8) & mask_ff);
+            var texel_d_b: @Vector(4, f32) = @floatFromInt((sample_d) & mask_ff);
+            var texel_d_a: @Vector(4, f32) = @floatFromInt((sample_d >> shift_24) & mask_ff);
+
+            // Load destination.
+            var dest_r: @Vector(4, f32) = @floatFromInt((original_dest >> shift_16) & mask_ff);
+            var dest_g: @Vector(4, f32) = @floatFromInt((original_dest >> shift_8) & mask_ff);
+            var dest_b: @Vector(4, f32) = @floatFromInt((original_dest) & mask_ff);
+            var dest_a: @Vector(4, f32) = @floatFromInt((original_dest >> shift_24) & mask_ff);
 
             // Convert texture from sRGB to linear brightness space.
             texel_a_r = math.square_v4(inv_255 * texel_a_r);
@@ -812,10 +781,10 @@ pub fn drawRectangleHopefullyQuickly(
 
             // Destination blend.
             const inv_texel_a = one - texela;
-            blended_r = dest_r * inv_texel_a + texelr;
-            blended_g = dest_g * inv_texel_a + texelg;
-            blended_b = dest_b * inv_texel_a + texelb;
-            blended_a = dest_a * inv_texel_a + texela;
+            var blended_r: @Vector(4, f32) = dest_r * inv_texel_a + texelr;
+            var blended_g: @Vector(4, f32) = dest_g * inv_texel_a + texelg;
+            var blended_b: @Vector(4, f32) = dest_b * inv_texel_a + texelb;
+            var blended_a: @Vector(4, f32) = dest_a * inv_texel_a + texela;
 
             // Go from linear brightness space to sRGB.
             blended_r = one_255 * @sqrt(blended_r);
@@ -823,14 +792,16 @@ pub fn drawRectangleHopefullyQuickly(
             blended_b = one_255 * @sqrt(blended_b);
             blended_a = one_255 * blended_a;
 
-            const int_r: @Vector(4, u32) = @intFromFloat(blended_r + half);
-            const int_g: @Vector(4, u32) = @intFromFloat(blended_g + half);
-            const int_b: @Vector(4, u32) = @intFromFloat(blended_b + half);
-            const int_a: @Vector(4, u32) = @intFromFloat(blended_a + half);
+            const int_r: @Vector(4, u32) = @intFromFloat(blended_r);
+            const int_g: @Vector(4, u32) = @intFromFloat(blended_g);
+            const int_b: @Vector(4, u32) = @intFromFloat(blended_b);
+            const int_a: @Vector(4, u32) = @intFromFloat(blended_a);
 
             const out: @Vector(4, u32) = int_r << shift_16 | int_g << shift_8 | int_b | int_a << shift_24;
+            const masked_out: @Vector(4, u32) = (write_mask & out) | (~write_mask & original_dest);
+
             const pixels = @as(*align(@alignOf(u32)) @Vector(4, u32), @ptrCast(@alignCast(pixel)));
-            pixels.* = out;
+            pixels.* = masked_out;
 
             pixel += 4;
         }
@@ -923,6 +894,7 @@ pub fn drawRectangleSlowly(
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
     row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
 
+    shared.beginTimedBlock(.ProcessPixel);
     var y: i32 = y_min;
     while (y < y_max) : (y += 1) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
@@ -1060,6 +1032,8 @@ pub fn drawRectangleSlowly(
 
         row += @as(usize, @intCast(draw_buffer.pitch));
     }
+
+    shared.endTimedBlockCounted(.ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
 }
 
 pub fn drawRectangleOutline(
