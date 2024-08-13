@@ -73,29 +73,36 @@ pub const DebugReadFileResult = extern struct {
 
 pub var debug_global_memory: ?*Memory = null;
 pub inline fn beginTimedBlock(counter_id: DebugCycleCounters) void {
-    if (debug_global_memory) |memory| {
-        memory.getCycleCounter(counter_id).last_cycle_start = rdtsc();
+    if (DEBUG) {
+        if (debug_global_memory) |memory| {
+            memory.getCycleCounter(counter_id).last_cycle_start = rdtsc();
+        }
     }
 }
 pub inline fn endTimedBlock(counter_id: DebugCycleCounters) void {
-    if (debug_global_memory) |memory| {
-        const counter = memory.getCycleCounter(counter_id);
-        counter.cycle_count += rdtsc() - counter.last_cycle_start;
-        counter.hit_count += 1;
+    if (DEBUG) {
+        if (debug_global_memory) |memory| {
+            const counter = memory.getCycleCounter(counter_id);
+            counter.cycle_count += rdtsc() - counter.last_cycle_start;
+            counter.hit_count += 1;
+        }
     }
 }
 
 pub inline fn endTimedBlockCounted(counter_id: DebugCycleCounters, hit_count: u32) void {
-    if (debug_global_memory) |memory| {
-        const counter = memory.getCycleCounter(counter_id);
-        counter.cycle_count += rdtsc() - counter.last_cycle_start;
-        counter.hit_count += hit_count;
+    if (DEBUG) {
+        if (debug_global_memory) |memory| {
+            const counter = memory.getCycleCounter(counter_id);
+            counter.cycle_count += rdtsc() - counter.last_cycle_start;
+            counter.hit_count += hit_count;
+        }
     }
 }
 
 pub const DebugCycleCounters = enum(u8) {
     GameUpdateAndRender = 0,
     RenderGrouptToOutput,
+    DrawRectangle,
     DrawRectangleSlowly,
     DrawRectangleQuickly,
     ProcessPixel,
@@ -223,7 +230,7 @@ fn GameMemory() type {
                     return &self.counters[@intFromEnum(counter_id)];
                 }
             },
-            else => {}
+            inline else => struct {}
         };
     };
 }

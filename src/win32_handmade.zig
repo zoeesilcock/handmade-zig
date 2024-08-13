@@ -136,7 +136,6 @@ const Win32State = struct {
 };
 
 pub const Game = struct {
-    is_valid: bool = false,
     dll: ?win32.HINSTANCE = undefined,
     last_write_time: win32.FILETIME = undefined,
     updateAndRender: *const @TypeOf(shared.updateAndRenderStub) = undefined,
@@ -255,6 +254,8 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
 
     result.last_write_time = getLastWriteTime(source_dll_name);
     result.dll = win32.LoadLibraryA(temp_dll_name);
+    result.updateAndRender = shared.updateAndRenderStub;
+    result.getSoundSamples = shared.getSoundSamplesStub;
 
     if (result.dll) |library| {
         if (win32.GetProcAddress(library, "updateAndRender")) |procedure| {
@@ -264,13 +265,6 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
         if (win32.GetProcAddress(library, "getSoundSamples")) |procedure| {
             result.getSoundSamples = @as(@TypeOf(result.getSoundSamples), @ptrCast(procedure));
         }
-
-        result.is_valid = (result.updateAndRender != undefined and result.getSoundSamples != undefined);
-    }
-
-    if (!result.is_valid) {
-        result.updateAndRender = shared.updateAndRenderStub;
-        result.getSoundSamples = shared.getSoundSamplesStub;
     }
 
     return result;
@@ -282,7 +276,6 @@ fn unloadGameCode(game: *Game) void {
         game.dll = undefined;
     }
 
-    game.is_valid = false;
     game.updateAndRender = shared.updateAndRenderStub;
     game.getSoundSamples = shared.getSoundSamplesStub;
 }
@@ -1093,7 +1086,7 @@ fn getReplayBuffer(state: *Win32State, index: u32) *ReplayBuffer {
 
 fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
     const replay_buffer = getReplayBuffer(state, input_recording_index);
-    if (replay_buffer.memory_block != undefined) {
+    if (replay_buffer.memory_block != null) {
         var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
         getInputFileLocation(state, true, @intCast(input_recording_index), &file_path);
         state.recording_handle = win32.CreateFileA(
@@ -1130,7 +1123,7 @@ fn endRecordingInput(state: *Win32State) void {
 
 fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
     const replay_buffer = getReplayBuffer(state, input_playing_index);
-    if (replay_buffer.memory_block != undefined) {
+    if (replay_buffer.memory_block != null) {
         var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
         getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
         state.playback_handle = win32.CreateFileA(
@@ -1274,7 +1267,7 @@ pub export fn wWinMain(
             sound_output.safety_bytes = @intFromFloat(@as(f32, @floatFromInt(sound_output.secondary_buffer_size)) / game_update_hz / 2.0);
             var sound_output_info = SoundOutputInfo{ .output_buffer = undefined };
 
-            const samples: [*]i16 = @ptrCast(@alignCast(win32.VirtualAlloc(
+            const samples: ?[*]i16 = @ptrCast(@alignCast(win32.VirtualAlloc(
                 null,
                 sound_output.secondary_buffer_size,
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
@@ -1296,7 +1289,7 @@ pub export fn wWinMain(
                 .permanent_storage = null,
                 .transient_storage_size = shared.megabytes(256),
                 .transient_storage = null,
-                .counters = [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
+                .counters = if (DEBUG) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 
             state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
@@ -1361,7 +1354,7 @@ pub export fn wWinMain(
                 }
             }
 
-            if (samples != undefined and game_memory.permanent_storage != null and game_memory.transient_storage != null) {
+            if (samples != null and game_memory.permanent_storage != null and game_memory.transient_storage != null) {
                 var game_input = [2]shared.GameInput{
                     shared.GameInput{
                         .frame_delta_time = target_seconds_per_frame,
@@ -1497,7 +1490,7 @@ pub export fn wWinMain(
                             }
 
                             sound_output_info.output_buffer = shared.SoundOutputBuffer{
-                                .samples = samples,
+                                .samples = samples.?,
                                 .sample_count = @divFloor(sound_output_info.bytes_to_write, sound_output.bytes_per_sample),
                                 .samples_per_second = sound_output.samples_per_second,
                             };

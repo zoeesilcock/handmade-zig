@@ -411,7 +411,7 @@ pub const RenderGroup = extern struct {
                                     pixels_to_meters,
                                 );
                             } else {
-                                drawRectangleHopefullyQuickly(
+                                drawRectangleQuickly(
                                     output_target,
                                     basis.position,
                                     Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
@@ -484,6 +484,7 @@ pub fn drawRectangle(
     max: Vector2,
     color: Color,
 ) void {
+    shared.beginTimedBlock(.DrawRectangle);
     // Round input values.
     var min_x = intrinsics.floorReal32ToInt32(min.x());
     var min_y = intrinsics.floorReal32ToInt32(min.y());
@@ -520,6 +521,8 @@ pub fn drawRectangle(
 
         row += @as(usize, @intCast(draw_buffer.pitch));
     }
+
+    shared.endTimedBlock(.DrawRectangle);
 }
 
 fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
@@ -545,7 +548,7 @@ fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
     }
 }
 
-pub fn drawRectangleHopefullyQuickly(
+pub fn drawRectangleQuickly(
     draw_buffer: *LoadedBitmap,
     origin: Vector2,
     x_axis: Vector2,
@@ -617,8 +620,11 @@ pub fn drawRectangleHopefullyQuickly(
     const color_b: @Vector(4, f32) = @splat(color.b());
     const color_a: @Vector(4, f32) = @splat(color.a());
     const one_255: @Vector(4, f32) = @splat(255.0);
+    const four: @Vector(4, f32) = @splat(4);
     const one: @Vector(4, f32) = @splat(1);
     const zero: @Vector(4, f32) = @splat(0);
+    const half: @Vector(4, f32) = @splat(0.5);
+    const zero_to_three: @Vector(4, f32) = .{ 0, 1, 2, 3 };
     const shift_24: @Vector(4, u32) = @splat(24);
     const shift_16: @Vector(4, u32) = @splat(16);
     const shift_8: @Vector(4, u32) = @splat(8);
@@ -643,20 +649,13 @@ pub fn drawRectangleHopefullyQuickly(
     var y: i32 = y_min;
     while (y < y_max) : (y += 1) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+        const pixel_position_y: @Vector(4, f32) = @as(@Vector(4, f32), @splat(@floatFromInt(y))) - origin_y;
+        var pixel_position_x: @Vector(4, f32) = @as(@Vector(4, f32), @splat(@floatFromInt(x_min))) - origin_x + zero_to_three;
 
         var xi: i32 = x_min;
         while (xi < x_max) : (xi += 4) {
-            const pixel_position_x: @Vector(4, f32) = .{
-                @floatFromInt(xi + 0),
-                @floatFromInt(xi + 1),
-                @floatFromInt(xi + 2),
-                @floatFromInt(xi + 3),
-            };
-            const pixel_position_y: @Vector(4, f32) = @splat(@floatFromInt(y));
-            const dx: @Vector(4, f32) = pixel_position_x - origin_x;
-            const dy: @Vector(4, f32) = pixel_position_y - origin_y;
-            var u = dx * n_x_axis_x + dy * n_x_axis_y;
-            var v = dx * n_y_axis_x + dy * n_y_axis_y;
+            var u = pixel_position_x * n_x_axis_x + pixel_position_y * n_x_axis_y;
+            var v = pixel_position_x * n_y_axis_x + pixel_position_y * n_y_axis_y;
 
             const original_dest: @Vector(4, u32) = @as(*align(@alignOf(u32)) @Vector(4, u32), @ptrCast(@alignCast(pixel))).*;
             const write_mask: @Vector(4, u32) =
@@ -670,8 +669,8 @@ pub fn drawRectangleHopefullyQuickly(
 
             const texel_x: @Vector(4, f32) = u * width_m2;
             const texel_y: @Vector(4, f32) = v * height_m2;
-            const texel_rounded_x: @Vector(4, i32) = @intFromFloat(texel_x);
-            const texel_rounded_y: @Vector(4, i32) = @intFromFloat(texel_y);
+            const texel_rounded_x: @Vector(4, i32) = @intFromFloat(texel_x + half);
+            const texel_rounded_y: @Vector(4, i32) = @intFromFloat(texel_y + half);
 
             const fx = texel_x - @as(@Vector(4, f32), @floatFromInt(texel_rounded_x));
             const fy = texel_y - @as(@Vector(4, f32), @floatFromInt(texel_rounded_y));
@@ -691,16 +690,16 @@ pub fn drawRectangleHopefullyQuickly(
                 const offset: u32 = @intCast((texel_rounded_x[i] * @sizeOf(u32)) + (texel_rounded_y[i] * texture.pitch));
                 var texture_base = texture.memory.? + offset;
 
-                sample_a[i] = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
+                sample_a[i] = @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base))).*;
 
                 texture_base += @sizeOf(u32);
-                sample_b[i] = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
+                sample_b[i] = @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base))).*;
 
                 texture_base += @as(usize, @intCast(texture.pitch));
-                sample_c[i] = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
+                sample_c[i] = @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base))).*;
 
                 texture_base += @sizeOf(u32) + @as(usize, @intCast(texture.pitch));
-                sample_d[i] = @as([*]align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base)))[0];
+                sample_d[i] = @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base))).*;
             }
 
             // Load the source.
@@ -804,10 +803,12 @@ pub fn drawRectangleHopefullyQuickly(
             pixels.* = masked_out;
 
             pixel += 4;
+            pixel_position_x += four;
         }
 
         row += @as(usize, @intCast(draw_buffer.pitch));
     }
+
     shared.endTimedBlockCounted(.ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
 }
 
