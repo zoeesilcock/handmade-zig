@@ -614,7 +614,8 @@ pub fn drawRectangleQuickly(
         y_max = height_max;
     }
 
-    const texture_pitch = texture.pitch;
+    const texture_pitch: u32 = @intCast(texture.pitch);
+    const texture_pitch_4x: @Vector(4, u32) = @splat(texture_pitch);
     const texture_memory = texture.memory.?;
     const inv_255: @Vector(4, f32) = @splat(1.0 / 255.0);
     const max_color_value: @Vector(4, f32) = @splat(255.0 * 255.0);
@@ -631,6 +632,7 @@ pub fn drawRectangleQuickly(
     const shift_24: @Vector(4, u32) = @splat(24);
     const shift_16: @Vector(4, u32) = @splat(16);
     const shift_8: @Vector(4, u32) = @splat(8);
+    const shift_2: @Vector(4, u32) = @splat(2);
     const mask_ff: @Vector(4, u32) = @splat(0xFF);
     const mask_scale: @Vector(4, u32) = @splat(0xFFFFFFFF);
     const width_m2: @Vector(4, f32) = @splat(@floatFromInt(texture.width - 2));
@@ -649,6 +651,7 @@ pub fn drawRectangleQuickly(
     row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
 
     shared.beginTimedBlock(.ProcessPixel);
+
     var y: i32 = y_min;
     while (y < y_max) : (y += 1) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
@@ -673,9 +676,10 @@ pub fn drawRectangleQuickly(
 
             const texel_x: @Vector(4, f32) = u * width_m2;
             const texel_y: @Vector(4, f32) = v * height_m2;
-            const texel_rounded_x: @Vector(4, i32) = @intFromFloat(texel_x + half);
-            const texel_rounded_y: @Vector(4, i32) = @intFromFloat(texel_y + half);
+            var texel_rounded_x: @Vector(4, u32) = @intFromFloat(texel_x + half);
+            var texel_rounded_y: @Vector(4, u32) = @intFromFloat(texel_y + half);
 
+            // Prepare for bilinear texture blend.
             const fx = texel_x - @as(@Vector(4, f32), @floatFromInt(texel_rounded_x));
             const fy = texel_y - @as(@Vector(4, f32), @floatFromInt(texel_rounded_y));
             const ifx = one - fx;
@@ -685,26 +689,39 @@ pub fn drawRectangleQuickly(
             const l2 = fy * ifx;
             const l3 = fy * fx;
 
-            var sample_a: @Vector(4, u32) = @splat(0);
-            var sample_b: @Vector(4, u32) = @splat(0);
-            var sample_c: @Vector(4, u32) = @splat(0);
-            var sample_d: @Vector(4, u32) = @splat(0);
+            // Locate source memory.
+            texel_rounded_x = texel_rounded_x << shift_2;
+            texel_rounded_y *= texture_pitch_4x;
+            const texel_offsets = texel_rounded_x + texel_rounded_y;
+            const texel_pointer0 = texture_memory + @as(u32, @intCast(texel_offsets[0]));
+            const texel_pointer1 = texture_memory + @as(u32, @intCast(texel_offsets[1]));
+            const texel_pointer2 = texture_memory + @as(u32, @intCast(texel_offsets[2]));
+            const texel_pointer3 = texture_memory + @as(u32, @intCast(texel_offsets[3]));
 
-            for (0..4) |i| {
-                const offset: u32 = @intCast((texel_rounded_x[i] * @sizeOf(u32)) + (texel_rounded_y[i] * texture_pitch));
-                var texture_base = texture_memory + offset;
-
-                sample_a[i] = @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base))).*;
-
-                texture_base += @sizeOf(u32);
-                sample_b[i] = @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base))).*;
-
-                texture_base += @as(usize, @intCast(texture_pitch));
-                sample_c[i] = @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base))).*;
-
-                texture_base += @sizeOf(u32) + @as(usize, @intCast(texture_pitch));
-                sample_d[i] = @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texture_base))).*;
-            }
+            const sample_a: @Vector(4, u32) = .{
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer0))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer1))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer2))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer3))).*,
+            };
+            const sample_b: @Vector(4, u32) = .{
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer0 + @sizeOf(u32)))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer1 + @sizeOf(u32)))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer2 + @sizeOf(u32)))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer3 + @sizeOf(u32)))).*,
+            };
+            const sample_c: @Vector(4, u32) = .{
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer0 + texture_pitch))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer1 + texture_pitch))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer2 + texture_pitch))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer3 + texture_pitch))).*,
+            };
+            const sample_d: @Vector(4, u32) = .{
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer0 + @sizeOf(u32) + texture_pitch))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer1 + @sizeOf(u32) + texture_pitch))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer2 + @sizeOf(u32) + texture_pitch))).*,
+                @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer3 + @sizeOf(u32) + texture_pitch))).*,
+            };
 
             // Load the source.
             var texel_a_r: @Vector(4, f32) = @floatFromInt((sample_a >> shift_16) & mask_ff);
