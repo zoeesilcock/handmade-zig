@@ -657,6 +657,7 @@ pub fn drawRectangleQuickly(
 
         var xi: i32 = x_min;
         while (xi < x_max) : (xi += 4) {
+            asm volatile("# LLVM-MCA-BEGIN ProcessPixel");
             var u = pixel_position_x * n_x_axis_x + pixel_position_y * n_x_axis_y;
             var v = pixel_position_x * n_y_axis_x + pixel_position_y * n_y_axis_y;
 
@@ -801,6 +802,7 @@ pub fn drawRectangleQuickly(
 
             pixel += 4;
             pixel_position_x += four;
+            asm volatile("# LLVM-MCA-END ProcessPixel");
         }
 
         row += @as(usize, @intCast(draw_buffer.pitch));

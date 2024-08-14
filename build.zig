@@ -44,6 +44,10 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addImport("raygui", raygui);
     }
 
+    // Emit generated assembly of the main executable.
+    const assembly_file = b.addInstallFile(exe.getEmittedAsm(), "bin/handmade.asm");
+    b.getInstallStep().dependOn(&assembly_file.step);
+
     b.installArtifact(exe);
 
     // Build the game library.
@@ -54,6 +58,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
+
+    // Emit generated assembly of the library.
+    const lib_assembly_file = b.addInstallFile(lib_handmade.getEmittedAsm(), "bin/handmade-dll.asm");
+    b.getInstallStep().dependOn(&lib_assembly_file.step);
 
     b.installArtifact(lib_handmade);
 
