@@ -367,7 +367,7 @@ pub export fn updateAndRender(
             memory.transient_storage.? + @sizeOf(TransientState),
         );
 
-        transient_state.ground_buffer_count = 64;
+        transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
             transient_state.ground_buffer_count,
             shared.GroundBuffer,
@@ -385,12 +385,12 @@ pub export fn updateAndRender(
         }
 
         state.test_diffuse = makeEmptyBitmap(&transient_state.arena, 256, 256, false);
-        render.drawRectangle(
-            &state.test_diffuse,
-            Vector2.zero(),
-            Vector2.newI(state.test_diffuse.width, state.test_diffuse.height),
-            Color.new(0.5, 0.5, 0.5, 1),
-        );
+        // render.drawRectangle(
+        //     &state.test_diffuse,
+        //     Vector2.zero(),
+        //     Vector2.newI(state.test_diffuse.width, state.test_diffuse.height),
+        //     Color.new(0.5, 0.5, 0.5, 1),
+        // );
         state.test_normal = makeEmptyBitmap(&transient_state.arena, state.test_diffuse.width, state.test_diffuse.height, false);
 
         makeSphereNormalMap(&state.test_normal, 0, 1, 1);
@@ -921,7 +921,7 @@ pub export fn updateAndRender(
         }
     }
 
-    render_group.renderTo(draw_buffer);
+    render_group.tiledRenderTo(draw_buffer);
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
@@ -1304,7 +1304,7 @@ fn fillGroundChunk(
         }
     }
 
-    render_group.renderTo(buffer);
+    render_group.tiledRenderTo(buffer);
     transient_state.arena.endTemporaryMemory(render_memory);
 }
 

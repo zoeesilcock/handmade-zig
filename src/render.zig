@@ -350,7 +350,35 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-    pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap) void {
+    pub fn tiledRenderTo(self: *RenderGroup, output_target: *LoadedBitmap) void {
+        if (true) {
+            const tile_count_x = 4;
+            const tile_count_y = 4;
+            const tile_width = @divFloor(output_target.width, tile_count_x);
+            const tile_height = @divFloor(output_target.height, tile_count_y);
+
+            var tile_y: i32 = 0;
+            while (tile_y < tile_count_y) : (tile_y += 1) {
+                var tile_x: i32 = 0;
+                while (tile_x < tile_count_x) : (tile_x += 1) {
+                    var clip_rect = Rectangle2i.zero();
+                    _ = clip_rect.min.setX(tile_x * tile_width + 4);
+                    _ = clip_rect.min.setY(tile_y * tile_height + 4);
+                    _ = clip_rect.max.setX(clip_rect.min.x() + tile_width - 4);
+                    _ = clip_rect.max.setY(clip_rect.min.y() + tile_height - 4);
+
+                    self.renderTo(output_target, clip_rect, true);
+                    self.renderTo(output_target, clip_rect, false);
+                }
+            }
+        } else {
+            const clip_rect = Rectangle2i.new(4, 4, output_target.width - 4, output_target.height - 4);
+            self.renderTo(output_target, clip_rect, true);
+            self.renderTo(output_target, clip_rect, false);
+        }
+    }
+
+    pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {
         shared.beginTimedBlock(.RenderGrouptToOutput);
         defer shared.endTimedBlock(.RenderGrouptToOutput);
 
@@ -383,7 +411,7 @@ pub const RenderGroup = extern struct {
                 .RenderEntryClear => {
                     const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
                     const dimension = Vector2.newI(output_target.width, output_target.height);
-                    drawRectangle(output_target, Vector2.zero(), dimension, entry.color);
+                    drawRectangle(output_target, Vector2.zero(), dimension, entry.color, clip_rect, even);
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -425,17 +453,8 @@ pub const RenderGroup = extern struct {
                                     entry.color,
                                     @constCast(bitmap),
                                     pixels_to_meters,
-                                    true,
-                                );
-                                drawRectangleQuickly(
-                                    output_target,
-                                    basis.position,
-                                    Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
-                                    Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
-                                    entry.color,
-                                    @constCast(bitmap),
-                                    pixels_to_meters,
-                                    false,
+                                    clip_rect,
+                                    even,
                                 );
                             }
                         }
@@ -452,6 +471,8 @@ pub const RenderGroup = extern struct {
                         basis.position,
                         basis.position.plus(entry.dimension.scaledTo(basis.scale)),
                         entry.color,
+                        clip_rect,
+                        even,
                     );
 
                     base_address += @sizeOf(@TypeOf(entry.*));
@@ -459,34 +480,34 @@ pub const RenderGroup = extern struct {
                 .RenderEntryCoordinateSystem => {
                     const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
 
-                    const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
-                    drawRectangleSlowly(
-                        output_target,
-                        entry.origin,
-                        entry.x_axis,
-                        entry.y_axis,
-                        entry.color,
-                        entry.texture,
-                        entry.normal_map,
-                        entry.top,
-                        entry.middle,
-                        entry.bottom,
-                        pixels_to_meters,
-                    );
-
-                    const color = Color.new(1, 1, 0, 1);
-                    const dimension = Vector2.new(2, 2);
-                    var position = entry.origin;
-                    drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-
-                    position = entry.origin.plus(entry.x_axis);
-                    drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-
-                    position = entry.origin.plus(entry.y_axis);
-                    drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-
-                    position = max;
-                    drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                    // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
+                    // drawRectangleSlowly(
+                    //     output_target,
+                    //     entry.origin,
+                    //     entry.x_axis,
+                    //     entry.y_axis,
+                    //     entry.color,
+                    //     entry.texture,
+                    //     entry.normal_map,
+                    //     entry.top,
+                    //     entry.middle,
+                    //     entry.bottom,
+                    //     pixels_to_meters,
+                    // );
+                    //
+                    // const color = Color.new(1, 1, 0, 1);
+                    // const dimension = Vector2.new(2, 2);
+                    // var position = entry.origin;
+                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                    //
+                    // position = entry.origin.plus(entry.x_axis);
+                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                    //
+                    // position = entry.origin.plus(entry.y_axis);
+                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                    //
+                    // position = max;
+                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -500,43 +521,40 @@ pub fn drawRectangle(
     min: Vector2,
     max: Vector2,
     color: Color,
+    clip_rect: Rectangle2i,
+    even: bool,
 ) void {
     shared.beginTimedBlock(.DrawRectangle);
-    // Round input values.
-    var min_x = intrinsics.floorReal32ToInt32(min.x());
-    var min_y = intrinsics.floorReal32ToInt32(min.y());
-    var max_x = intrinsics.floorReal32ToInt32(max.x());
-    var max_y = intrinsics.floorReal32ToInt32(max.y());
 
-    // Clip input values to buffer.
-    if (min_x < 0) {
-        min_x = 0;
-    }
-    if (min_y < 0) {
-        min_y = 0;
-    }
-    if (max_x > draw_buffer.width) {
-        max_x = draw_buffer.width;
-    }
-    if (max_y > draw_buffer.height) {
-        max_y = draw_buffer.height;
+    var fill_rect = Rectangle2i.new(
+        intrinsics.floorReal32ToInt32(min.x()),
+        intrinsics.floorReal32ToInt32(min.y()),
+        intrinsics.floorReal32ToInt32(max.x() + 2), // TODO: These magic numbers shouldn't be needed.
+        intrinsics.floorReal32ToInt32(max.y() + 2),
+    );
+    fill_rect = fill_rect.getIntersectionWith(clip_rect);
+    if (@intFromBool(!even) == fill_rect.min.y() & 1) {
+        _ = fill_rect.min.setY(fill_rect.min.y() + 1);
     }
 
     // Set the pointer to the top left corner of the rectangle.
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
-    row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * @as(i32, @intCast(draw_buffer.pitch)))));
+    row += @as(u32,
+        @intCast((fill_rect.min.x() * shared.BITMAP_BYTES_PER_PIXEL) +
+        (fill_rect.min.y() * @as(i32, @intCast(draw_buffer.pitch)))),
+    );
 
-    var y = min_y;
-    while (y < max_y) : (y += 1) {
+    var y = fill_rect.min.y();
+    while (y < fill_rect.max.y()) : (y += 2) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
 
-        var x = min_x;
-        while (x < max_x) : (x += 1) {
+        var x = fill_rect.min.x();
+        while (x < fill_rect.max.x()) : (x += 1) {
             pixel[0] = color.packColor();
             pixel += 1;
         }
 
-        row += @as(usize, @intCast(draw_buffer.pitch));
+        row += @as(usize, @intCast(draw_buffer.pitch * 2));
     }
 
     shared.endTimedBlock(.DrawRectangle);
@@ -573,6 +591,7 @@ pub fn drawRectangleQuickly(
     color_in: Color,
     texture: *LoadedBitmap,
     pixels_to_meters: f32,
+    clip_rect: Rectangle2i,
     even: bool,
 ) void {
     _ = pixels_to_meters;
@@ -591,10 +610,7 @@ pub fn drawRectangleQuickly(
         origin.plus(x_axis).plus(y_axis),
         origin.plus(y_axis),
     };
-
-    const width_max = draw_buffer.width - 3;
-    const height_max = draw_buffer.height - 3;
-    var fill_rect = Rectangle2i.new(width_max, height_max, 0, 0);
+    var fill_rect = Rectangle2i.invertedInfinity();
 
     // Expand the fill rect to include all four corners of the potentially rotated rectangle.
     for (points) |point| {
@@ -617,7 +633,7 @@ pub fn drawRectangleQuickly(
         }
     }
 
-    const clip_rect = Rectangle2i.new(0, 0, width_max, height_max);
+    // const clip_rect = Rectangle2i.new(0, 0, width_max, height_max);
     fill_rect = fill_rect.getIntersectionWith(clip_rect);
 
     if (@intFromBool(!even) == fill_rect.min.y() & 1) {
