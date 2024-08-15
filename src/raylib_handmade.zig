@@ -69,6 +69,7 @@ pub fn main() anyerror!void {
         .permanent_storage = null,
         .transient_storage_size = shared.megabytes(256),
         .transient_storage = null,
+        .counters = if (DEBUG) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
     };
     const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
     // const base_address = if (DEBUG) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
@@ -168,9 +169,9 @@ fn handmadeColorToRaylib(color: u32) rl.Color {
 
 fn displayBufferInWindow(buffer: *OffscreenBuffer, window_width: i32, window_height: i32) void {
     var row: [*]u8 = @ptrCast(buffer.memory);
-    var y: i32 = 0;
+    var y: i32 = buffer.height;
     var image = rl.genImageColor(buffer.width, buffer.height, rl.Color.black);
-    while (y < buffer.height) : (y += 1) {
+    while (y > 0) : (y -= 1) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
 
         var x: i32 = 0;
