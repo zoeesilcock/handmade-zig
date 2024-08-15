@@ -25,11 +25,17 @@ pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 
 // Types.
 const Vector2 = math.Vector2;
+const Vector2i = math.Vector2i;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
+const Rectangle2i = math.Rectangle2i;
+
+const Vec4f = math.Vec4f;
+const Vec4u = math.Vec4u;
+const Vec4i = math.Vec4i;
 
 pub const LoadedBitmap = extern struct {
     alignment_percentage: Vector2 = Vector2.zero(),
@@ -419,6 +425,17 @@ pub const RenderGroup = extern struct {
                                     entry.color,
                                     @constCast(bitmap),
                                     pixels_to_meters,
+                                    true,
+                                );
+                                drawRectangleQuickly(
+                                    output_target,
+                                    basis.position,
+                                    Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
+                                    Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
+                                    entry.color,
+                                    @constCast(bitmap),
+                                    pixels_to_meters,
+                                    false,
                                 );
                             }
                         }
@@ -556,6 +573,7 @@ pub fn drawRectangleQuickly(
     color_in: Color,
     texture: *LoadedBitmap,
     pixels_to_meters: f32,
+    even: bool,
 ) void {
     _ = pixels_to_meters;
 
@@ -574,45 +592,42 @@ pub fn drawRectangleQuickly(
         origin.plus(y_axis),
     };
 
-    const width_max = draw_buffer.width - 1 - 3;
-    const height_max = draw_buffer.height - 1 - 3;
-    var y_min: i32 = height_max;
-    var y_max: i32 = 0;
-    var x_min: i32 = width_max;
-    var x_max: i32 = 0;
+    const width_max = draw_buffer.width - 3;
+    const height_max = draw_buffer.height - 3;
+    var fill_rect = Rectangle2i.new(width_max, height_max, 0, 0);
 
+    // Expand the fill rect to include all four corners of the potentially rotated rectangle.
     for (points) |point| {
         const floor_x = intrinsics.floorReal32ToInt32(point.x());
-        const ceil_x = intrinsics.ceilReal32ToInt32(point.x());
+        const ceil_x = intrinsics.ceilReal32ToInt32(point.x()) + 1;
         const floor_y = intrinsics.floorReal32ToInt32(point.y());
-        const ceil_y = intrinsics.ceilReal32ToInt32(point.y());
+        const ceil_y = intrinsics.ceilReal32ToInt32(point.y()) + 1;
 
-        if (x_min > floor_x) {
-            x_min = floor_x;
+        if (fill_rect.min.x() > floor_x) {
+            _ = fill_rect.min.setX(floor_x);
         }
-        if (y_min > floor_y) {
-            y_min = floor_y;
+        if (fill_rect.min.y() > floor_y) {
+            _ = fill_rect.min.setY(floor_y);
         }
-        if (x_max < ceil_x) {
-            x_max = ceil_x;
+        if (fill_rect.max.x() < ceil_x) {
+            _ = fill_rect.max.setX(ceil_x);
         }
-        if (y_max < ceil_y) {
-            y_max = ceil_y;
+        if (fill_rect.max.y() < ceil_y) {
+            _ = fill_rect.max.setY(ceil_y);
         }
     }
 
-    if (x_min < 0) {
-        x_min = 0;
+    const clip_rect = Rectangle2i.new(0, 0, width_max, height_max);
+    fill_rect = fill_rect.getIntersectionWith(clip_rect);
+
+    if (@intFromBool(!even) == fill_rect.min.y() & 1) {
+        _ = fill_rect.min.setY(fill_rect.min.y() + 1);
     }
-    if (y_min < 0) {
-        y_min = 0;
-    }
-    if (x_max > width_max) {
-        x_max = width_max;
-    }
-    if (y_max > height_max) {
-        y_max = height_max;
-    }
+
+    const min_x = fill_rect.min.x();
+    const min_y = fill_rect.min.y();
+    const max_x = fill_rect.max.x();
+    const max_y = fill_rect.max.y();
 
     const texture_pitch: u32 = @intCast(texture.pitch);
     const texture_pitch_4x: @Vector(4, u32) = @splat(texture_pitch);
@@ -647,20 +662,22 @@ pub fn drawRectangleQuickly(
     const origin_x: @Vector(4, f32) = @splat(origin.x());
     const origin_y: @Vector(4, f32) = @splat(origin.y());
 
+    const row_advance: usize = @intCast(draw_buffer.pitch * 2);
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
-    row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
+    row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * draw_buffer.pitch)));
 
     shared.beginTimedBlock(.ProcessPixel);
 
-    var y: i32 = y_min;
-    while (y < y_max) : (y += 1) {
+    var y: i32 = min_y;
+    while (y < max_y) : (y += 2) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+        var pixel_position_x: @Vector(4, f32) =
+            @as(@Vector(4, f32), @splat(@floatFromInt(min_x))) - origin_x + zero_to_three;
         const pixel_position_y: @Vector(4, f32) = @as(@Vector(4, f32), @splat(@floatFromInt(y))) - origin_y;
-        var pixel_position_x: @Vector(4, f32) = @as(@Vector(4, f32), @splat(@floatFromInt(x_min))) - origin_x + zero_to_three;
 
-        var xi: i32 = x_min;
-        while (xi < x_max) : (xi += 4) {
-            asm volatile("# LLVM-MCA-BEGIN ProcessPixel");
+        var xi: i32 = min_x;
+        while (xi < max_x) : (xi += 4) {
+            asm volatile ("# LLVM-MCA-BEGIN ProcessPixel");
             var u = pixel_position_x * n_x_axis_x + pixel_position_y * n_x_axis_y;
             var v = pixel_position_x * n_y_axis_x + pixel_position_y * n_y_axis_y;
 
@@ -819,13 +836,13 @@ pub fn drawRectangleQuickly(
 
             pixel += 4;
             pixel_position_x += four;
-            asm volatile("# LLVM-MCA-END ProcessPixel");
+            asm volatile ("# LLVM-MCA-END ProcessPixel");
         }
 
-        row += @as(usize, @intCast(draw_buffer.pitch));
+        row += row_advance;
     }
 
-    shared.endTimedBlockCounted(.ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
+    shared.endTimedBlockCounted(.ProcessPixel, @intCast(@divFloor(fill_rect.getClampedArea(), 2)));
 }
 
 pub fn drawRectangleSlowly(

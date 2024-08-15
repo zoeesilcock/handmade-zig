@@ -1,27 +1,32 @@
 const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
 
-pub const Vector2 = Vector(2, .Position);
-pub const Vector3 = Vector(3, .Position);
-pub const Vector4 = Vector(4, .Position);
-pub const Color3 = Vector(3, .Color);
-pub const Color = Vector(4, .Color);
+pub const Vector2 = Vector(2, .Position, f32);
+pub const Vector2i = Vector(2, .Position, i32);
+pub const Vector3 = Vector(3, .Position, f32);
+pub const Vector4 = Vector(4, .Position, f32);
+pub const Color3 = Vector(3, .Color, f32);
+pub const Color = Vector(4, .Color, f32);
 
 const VectorAccessorStyle = enum {
     Position,
     Color,
 };
 
-fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: VectorAccessorStyle) type {
+fn Vector(
+    comptime dimension_count: comptime_int,
+    comptime accessor_style: VectorAccessorStyle,
+    comptime scalar_type: type,
+) type {
     return extern struct {
-        values: @Vector(dimension_count, f32),
+        values: @Vector(dimension_count, scalar_type),
         pub const dimensions = dimension_count;
 
         const Self = @This();
 
         pub usingnamespace switch (Self.dimensions) {
             inline 2 => struct {
-                pub inline fn new(x_value: f32, y_value: f32) Self {
+                pub inline fn new(x_value: scalar_type, y_value: scalar_type) Self {
                     return Self{ .values = .{ x_value, y_value } };
                 }
                 pub inline fn newI(x_value: i32, y_value: i32) Self {
@@ -39,28 +44,26 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                 }
 
                 pub inline fn perp(self: *const Self) Self {
-                    return Self {
-                        .values = .{ -self.values[1], self.values[0] }
-                    };
+                    return Self{ .values = .{ -self.values[1], self.values[0] } };
                 }
 
                 pub usingnamespace switch (accessor_style) {
                     inline .Position => struct {
-                        pub inline fn x(self: *const Self) f32 {
+                        pub inline fn x(self: *const Self) scalar_type {
                             return self.values[0];
                         }
-                        pub inline fn y(self: *const Self) f32 {
+                        pub inline fn y(self: *const Self) scalar_type {
                             return self.values[1];
                         }
-                        pub inline fn setX(self: *Self, value: f32) *Self {
+                        pub inline fn setX(self: *Self, value: scalar_type) *Self {
                             self.values[0] = value;
                             return self;
                         }
-                        pub inline fn setY(self: *Self, value: f32) *Self {
+                        pub inline fn setY(self: *Self, value: scalar_type) *Self {
                             self.values[1] = value;
                             return self;
                         }
-                        pub inline fn toVector3(self: Self, in_z: f32) Vector3 {
+                        pub inline fn toVector3(self: Self, in_z: scalar_type) Vector3 {
                             return Vector3.new(self.x(), self.y(), in_z);
                         }
                         pub inline fn isInRectangle(self: *const Self, rectangle: Rectangle2) bool {
@@ -78,7 +81,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                 };
             },
             inline 3 => struct {
-                pub inline fn new(x_value: f32, y_value: f32, z_value: f32) Self {
+                pub inline fn new(x_value: scalar_type, y_value: scalar_type, z_value: scalar_type) Self {
                     return Self{ .values = .{ x_value, y_value, z_value } };
                 }
 
@@ -100,27 +103,27 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
 
                 pub usingnamespace switch (accessor_style) {
                     inline .Position => struct {
-                        pub inline fn x(self: *const Self) f32 {
+                        pub inline fn x(self: *const Self) scalar_type {
                             return self.values[0];
                         }
-                        pub inline fn y(self: *const Self) f32 {
+                        pub inline fn y(self: *const Self) scalar_type {
                             return self.values[1];
                         }
-                        pub inline fn z(self: *const Self) f32 {
+                        pub inline fn z(self: *const Self) scalar_type {
                             return self.values[2];
                         }
                         pub inline fn xy(self: *const Self) Vector2 {
                             return Vector2.new(self.x(), self.y());
                         }
-                        pub inline fn setX(self: *Self, value: f32) *Self {
+                        pub inline fn setX(self: *Self, value: scalar_type) *Self {
                             self.values[0] = value;
                             return self;
                         }
-                        pub inline fn setY(self: *Self, value: f32) *Self {
+                        pub inline fn setY(self: *Self, value: scalar_type) *Self {
                             self.values[1] = value;
                             return self;
                         }
-                        pub inline fn setZ(self: *Self, value: f32) *Self {
+                        pub inline fn setZ(self: *Self, value: scalar_type) *Self {
                             self.values[2] = value;
                             return self;
                         }
@@ -129,7 +132,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                             self.values[1] = value.values[1];
                             return self;
                         }
-                        pub inline fn toVector4(vector3: Vector3, in_w: f32) Self {
+                        pub inline fn toVector4(vector3: Vector3, in_w: scalar_type) Self {
                             return Self.new(vector3.values[0], vector3.values[1], vector3.values[2], in_w);
                         }
                         pub inline fn toColor3(self: Self) Color3 {
@@ -147,35 +150,35 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         }
                     },
                     inline .Color => struct {
-                        pub inline fn r(self: *const Self) f32 {
+                        pub inline fn r(self: *const Self) scalar_type {
                             return self.values[0];
                         }
-                        pub inline fn g(self: *const Self) f32 {
+                        pub inline fn g(self: *const Self) scalar_type {
                             return self.values[1];
                         }
-                        pub inline fn b(self: *const Self) f32 {
+                        pub inline fn b(self: *const Self) scalar_type {
                             return self.values[2];
                         }
-                        pub inline fn setR(self: *Self, value: f32) *Self {
+                        pub inline fn setR(self: *Self, value: scalar_type) *Self {
                             self.values[0] = value;
                             return self;
                         }
-                        pub inline fn setG(self: *Self, value: f32) *Self {
+                        pub inline fn setG(self: *Self, value: scalar_type) *Self {
                             self.values[1] = value;
                             return self;
                         }
-                        pub inline fn setB(self: *Self, value: f32) *Self {
+                        pub inline fn setB(self: *Self, value: scalar_type) *Self {
                             self.values[2] = value;
                             return self;
                         }
-                        pub inline fn toColor(self: Self, in_a: f32) Color {
+                        pub inline fn toColor(self: Self, in_a: scalar_type) Color {
                             return Color.new(self.r(), self.g(), self.b(), in_a);
                         }
                     },
                 };
             },
             inline 4 => struct {
-                pub inline fn new(x_value: f32, y_value: f32, z_value: f32, w_value: f32) Self {
+                pub inline fn new(x_value: scalar_type, y_value: scalar_type, z_value: scalar_type, w_value: scalar_type) Self {
                     return Self{ .values = .{ x_value, y_value, z_value, w_value } };
                 }
 
@@ -222,34 +225,34 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
 
                 pub usingnamespace switch (accessor_style) {
                     inline .Position => struct {
-                        pub inline fn x(self: *const Self) f32 {
+                        pub inline fn x(self: *const Self) scalar_type {
                             return self.values[0];
                         }
-                        pub inline fn y(self: *const Self) f32 {
+                        pub inline fn y(self: *const Self) scalar_type {
                             return self.values[1];
                         }
-                        pub inline fn z(self: *const Self) f32 {
+                        pub inline fn z(self: *const Self) scalar_type {
                             return self.values[2];
                         }
-                        pub inline fn w(self: *const Self) f32 {
+                        pub inline fn w(self: *const Self) scalar_type {
                             return self.values[3];
                         }
                         pub inline fn xyz(self: *const Self) Vector3 {
                             return Vector3.new(self.x(), self.y(), self.z());
                         }
-                        pub inline fn setX(self: *Self, value: f32) *Self {
+                        pub inline fn setX(self: *Self, value: scalar_type) *Self {
                             self.values[0] = value;
                             return self;
                         }
-                        pub inline fn setY(self: *Self, value: f32) *Self {
+                        pub inline fn setY(self: *Self, value: scalar_type) *Self {
                             self.values[1] = value;
                             return self;
                         }
-                        pub inline fn setZ(self: *Self, value: f32) *Self {
+                        pub inline fn setZ(self: *Self, value: scalar_type) *Self {
                             self.values[2] = value;
                             return self;
                         }
-                        pub inline fn setW(self: *Self, value: f32) *Self {
+                        pub inline fn setW(self: *Self, value: scalar_type) *Self {
                             self.values[3] = value;
                             return self;
                         }
@@ -269,34 +272,34 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
                         }
                     },
                     inline .Color => struct {
-                        pub inline fn r(self: *const Self) f32 {
+                        pub inline fn r(self: *const Self) scalar_type {
                             return self.values[0];
                         }
-                        pub inline fn g(self: *const Self) f32 {
+                        pub inline fn g(self: *const Self) scalar_type {
                             return self.values[1];
                         }
-                        pub inline fn b(self: *const Self) f32 {
+                        pub inline fn b(self: *const Self) scalar_type {
                             return self.values[2];
                         }
-                        pub inline fn a(self: *const Self) f32 {
+                        pub inline fn a(self: *const Self) scalar_type {
                             return self.values[3];
                         }
                         pub inline fn rgb(self: *const Self) Color3 {
                             return Color3.new(self.r(), self.g(), self.b());
                         }
-                        pub inline fn setR(self: *Self, value: f32) *Self {
+                        pub inline fn setR(self: *Self, value: scalar_type) *Self {
                             self.values[0] = value;
                             return self;
                         }
-                        pub inline fn setG(self: *Self, value: f32) *Self {
+                        pub inline fn setG(self: *Self, value: scalar_type) *Self {
                             self.values[1] = value;
                             return self;
                         }
-                        pub inline fn setB(self: *Self, value: f32) *Self {
+                        pub inline fn setB(self: *Self, value: scalar_type) *Self {
                             self.values[2] = value;
                             return self;
                         }
-                        pub inline fn setA(self: *Self, value: f32) *Self {
+                        pub inline fn setA(self: *Self, value: scalar_type) *Self {
                             self.values[3] = value;
                             return self;
                         }
@@ -328,7 +331,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             return Self{ .values = @splat(1) };
         }
 
-        pub inline fn splat(value: f32) Self {
+        pub inline fn splat(value: scalar_type) Self {
             return Self{ .values = @splat(value) };
         }
 
@@ -348,7 +351,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             return Self{ .values = self.values / b.values };
         }
 
-        pub inline fn scaledTo(self: *const Self, scalar: f32) Self {
+        pub inline fn scaledTo(self: *const Self, scalar: scalar_type) Self {
             return Self{ .values = self.values * @as(@TypeOf(self.values), @splat(scalar)) };
         }
 
@@ -366,7 +369,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             return Self{ .values = -self.values };
         }
 
-        pub inline fn dotProduct(self: *const Self, b: Self) f32 {
+        pub inline fn dotProduct(self: *const Self, b: Self) scalar_type {
             return @reduce(.Add, self.values * b.values);
         }
 
@@ -374,11 +377,11 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             return Self{ .values = self.values * b.values };
         }
 
-        pub inline fn lengthSquared(self: *const Self) f32 {
+        pub inline fn lengthSquared(self: *const Self) scalar_type {
             return self.dotProduct(self.*);
         }
 
-        pub inline fn length(self: *const Self) f32 {
+        pub inline fn length(self: *const Self) scalar_type {
             return @sqrt(self.lengthSquared());
         }
 
@@ -386,7 +389,7 @@ fn Vector(comptime dimension_count: comptime_int, comptime accessor_style: Vecto
             return Self{ .values = @splat(100000) };
         }
 
-        pub inline fn lerp(min: Self, max: Self, distance: f32) Self {
+        pub inline fn lerp(min: Self, max: Self, distance: scalar_type) Self {
             return Self{ .values = min.values + @as(@TypeOf(min.values), @splat(distance)) * (max.values - min.values) };
         }
 
@@ -440,12 +443,14 @@ test "add two matrices together" {
     try std.testing.expect(result.values[1].values[1] == 2);
 }
 
-pub const Rectangle2 = Rectangle(2);
-pub const Rectangle3 = Rectangle(3);
 
-fn Rectangle(comptime dimension_count: comptime_int) type {
+pub const Rectangle2 = Rectangle(2, f32);
+pub const Rectangle2i = Rectangle(2, i32);
+pub const Rectangle3 = Rectangle(3, f32);
+
+fn Rectangle(comptime dimension_count: comptime_int, comptime scalar_type: type) type {
     return extern struct {
-        const VectorType = Vector(dimension_count, .Position);
+        const VectorType = Vector(dimension_count, .Position, scalar_type);
 
         min: VectorType,
         max: VectorType,
@@ -455,11 +460,52 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
 
         pub usingnamespace switch (Self.dimensions) {
             inline 2 => struct {
-                pub inline fn toRectangle3(self: Self, min_z: f32, max_z: f32) Rectangle3 {
+                pub inline fn new(min_x: scalar_type, min_y: scalar_type, max_x: scalar_type, max_y: scalar_type) Self {
+                    return Self{
+                        .min = VectorType.new(min_x, min_y),
+                        .max = VectorType.new(max_x, max_y),
+                    };
+                }
+                pub inline fn toRectangle3(self: Self, min_z: scalar_type, max_z: scalar_type) Rectangle3 {
                     return Rectangle3{
                         .min = self.min.toVector3(min_z),
                         .max = self.max.toVector3(max_z),
                     };
+                }
+                pub inline fn getIntersectionWith(self: *const Self, b: Self) Self {
+                    return Self{
+                        .min = VectorType.new(
+                            @max(self.min.x(), b.min.x()),
+                            @max(self.min.y(), b.min.y()),
+                        ),
+                        .max = VectorType.new(
+                            @min(self.max.x(), b.max.x()),
+                            @min(self.max.y(), b.max.y()),
+                        ),
+                    };
+                }
+                pub inline fn getUnionWith(self: *const Self, b: *Self) Self {
+                    return Self{
+                        .min = VectorType.new(
+                            @min(self.min.x(), b.min.x()),
+                            @min(self.min.y(), b.min.y()),
+                        ),
+                        .max = VectorType.new(
+                            @max(self.max.x(), b.max.x()),
+                            @max(self.max.y(), b.max.y()),
+                        ),
+                    };
+                }
+                pub inline fn getClampedArea(self: *const Self) scalar_type {
+                    const width = (self.max.x() - self.min.x());
+                    const height = (self.max.y() - self.min.y());
+                    var result: scalar_type = 0;
+
+                    if (width > 0 and height > 0) {
+                        result = width * height;
+                    }
+
+                    return result;
                 }
             },
             inline 3 => struct {
@@ -537,7 +583,7 @@ fn Rectangle(comptime dimension_count: comptime_int) type {
         }
 
         pub inline fn offsetBy(self: *Self, offset: VectorType) Self {
-            return Self {
+            return Self{
                 .min = self.min.add(offset),
                 .max = self.max.add(offset),
             };
