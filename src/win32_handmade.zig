@@ -1165,6 +1165,17 @@ fn endInputPlayback(state: *Win32State) void {
     state.playback_handle = undefined;
 }
 
+fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
+    const string_to_print: [*:0]const u8 = @ptrCast(lp_parameter.?);
+
+    while (true) {
+        win32.OutputDebugStringA(string_to_print);
+        win32.Sleep(1000);
+    }
+
+    return 0;
+}
+
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -1178,6 +1189,18 @@ pub export fn wWinMain(
     var thread = shared.ThreadContext{};
     var state = Win32State{};
     getExeFileName(&state);
+
+    const thread_param = "Thread started!\n";
+    var thread_id: std.os.windows.DWORD = undefined;
+    const thread_handle = win32.CreateThread(
+        null,
+        0,
+        threadProc,
+        @ptrCast(@constCast(thread_param)),
+        win32.THREAD_CREATE_RUN_IMMEDIATELY,
+        &thread_id,
+    );
+    _ = win32.CloseHandle(thread_handle);
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
     buildExePathFileName(&state, "handmade.dll", &source_dll_path);
