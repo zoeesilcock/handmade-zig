@@ -603,6 +603,10 @@ fn Rectangle(comptime dimension_count: comptime_int, comptime scalar_type: type)
 
             return result;
         }
+
+        pub inline fn hasArea(self: *const Self) bool {
+            return (self.min.x() < self.max.x() and self.min.y() < self.max.y());
+        }
     };
 }
 
