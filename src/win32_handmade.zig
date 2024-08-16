@@ -1165,12 +1165,51 @@ fn endInputPlayback(state: *Win32State) void {
     state.playback_handle = undefined;
 }
 
-fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
-    const string_to_print: [*:0]const u8 = @ptrCast(lp_parameter.?);
+const WorkQueueEntry = struct {
+    string_to_print: [*:0]const u8,
+};
 
-    while (true) {
-        win32.OutputDebugStringA(string_to_print);
-        win32.Sleep(1000);
+var next_entry_to_do: u32 = 0;
+var entry_count: u32 = 0;
+const work_queue: [256]WorkQueueEntry = [1]WorkQueueEntry{ WorkQueueEntry{ .string_to_print = "" } } ** 256;
+
+fn pushStringToQueue(string: [*:0]const u8) void {
+    std.debug.assert(entry_count < work_queue.len);
+
+    // TODO: These writes are not in order!
+    var entry = work_queue[entry_count];
+    entry.string_to_print = string;
+
+    entry_count += 1;
+}
+
+const ThreadInfo = struct {
+    logical_thread_index: u32,
+};
+
+fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
+    if (lp_parameter) |parameter| {
+        const thread_info: *ThreadInfo = @ptrCast(@alignCast(parameter));
+
+        while (true) {
+            if (next_entry_to_do < entry_count) {
+                // TODO: This line is not interlocked, so two threads could see the same value.
+                const entry_index = next_entry_to_do;
+                // TODO: Compiler doesn't know that multiple threads could write this value!
+                next_entry_to_do += 1;
+
+                // TODO: These reads are not in order!
+                const entry = work_queue[entry_index];
+
+                var buffer: [256]u8 = undefined;
+                const slice = std.fmt.bufPrintZ(&buffer, "Thread {d}: {s}\n", .{
+                    thread_info.logical_thread_index,
+                    entry.string_to_print,
+                }) catch "";
+
+                win32.OutputDebugStringA(@ptrCast(slice.ptr));
+            }
+        }
     }
 
     return 0;
@@ -1190,17 +1229,32 @@ pub export fn wWinMain(
     var state = Win32State{};
     getExeFileName(&state);
 
-    const thread_param = "Thread started!\n";
-    var thread_id: std.os.windows.DWORD = undefined;
-    const thread_handle = win32.CreateThread(
-        null,
-        0,
-        threadProc,
-        @ptrCast(@constCast(thread_param)),
-        win32.THREAD_CREATE_RUN_IMMEDIATELY,
-        &thread_id,
-    );
-    _ = win32.CloseHandle(thread_handle);
+    var thread_infos: [15]ThreadInfo = [1]ThreadInfo{undefined} ** 15;
+    var thread_index: u32 = 0;
+    while (thread_index < thread_infos.len) : (thread_index += 1) {
+        thread_infos[thread_index] = ThreadInfo{ .logical_thread_index = thread_index };
+        var thread_id: std.os.windows.DWORD = undefined;
+        const thread_handle = win32.CreateThread(
+            null,
+            0,
+            threadProc,
+            @ptrCast(@constCast(&thread_infos[thread_index])),
+            win32.THREAD_CREATE_RUN_IMMEDIATELY,
+            &thread_id,
+        );
+
+        _ = win32.CloseHandle(thread_handle);
+    }
+
+    pushStringToQueue("String 0");
+    pushStringToQueue("String 1");
+    pushStringToQueue("String 2");
+    pushStringToQueue("String 3");
+    pushStringToQueue("String 4");
+    pushStringToQueue("String 5");
+    pushStringToQueue("String 7");
+    pushStringToQueue("String 8");
+    pushStringToQueue("String 9");
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
     buildExePathFileName(&state, "handmade.dll", &source_dll_path);
