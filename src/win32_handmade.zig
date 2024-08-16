@@ -18,18 +18,20 @@ pub const UNICODE = true;
 const MIDDLE_C: u32 = 261;
 const TREBLE_C: u32 = 523;
 
+// const WIDTH = 960 / 2;
+// const HEIGHT = 540 / 2;
 const WIDTH = 960;
 const HEIGHT = 540;
 const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
 
-const DEBUG_WINDOW_POS_X = -7 + 2560;
-const DEBUG_WINDOW_POS_Y = 0;
-const DEBUG_WINDOW_WIDTH = 1280;
-const DEBUG_WINDOW_HEIGHT = 720;
+const DEBUG_WINDOW_POS_X = -7 + 210; // + 2560;
+const DEBUG_WINDOW_POS_Y = 0 + 30;
+const DEBUG_WINDOW_WIDTH = 1000;
+const DEBUG_WINDOW_HEIGHT = 600;
 const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
-const DEBUG_WINDOW_INACTIVE_OPACITY = 64;
+const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
@@ -1293,8 +1295,8 @@ pub export fn wWinMain(
     if (win32.RegisterClassW(&window_class) != 0) {
         const opt_window_handle: ?win32.HWND = win32.CreateWindowExW(
             .{
-                .TOPMOST = if (DEBUG) 1 else 0,
-                .LAYERED = if (DEBUG) 1 else 0,
+                // .TOPMOST = if (DEBUG) 1 else 0,
+                // .LAYERED = if (DEBUG) 1 else 0,
             },
             window_class.lpszClassName,
             win32.L("Handmade Zig"),
