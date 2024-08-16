@@ -1171,22 +1171,41 @@ const WorkQueueEntry = struct {
     string_to_print: [*:0]const u8,
 };
 
+var entry_completion_count: u32 = 0;
 var next_entry_to_do: u32 = 0;
 var entry_count: u32 = 0;
-const work_queue: [256]WorkQueueEntry = [1]WorkQueueEntry{ WorkQueueEntry{ .string_to_print = "" } } ** 256;
+var work_queue: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{ .string_to_print = "" }} ** 256;
 
-fn pushStringToQueue(string: [*:0]const u8) void {
+fn completePastWritesBeforeFutureWrites() void {
+    @fence(std.builtin.AtomicOrder.release);
+}
+
+fn completePastReadsBeforeFutureReads() void {
+    @fence(std.builtin.AtomicOrder.acquire);
+}
+
+fn interlockedIncrement(comptime T: type, pointer: *T) T {
+    const value = @atomicLoad(T, pointer, std.builtin.AtomicOrder.acquire);
+    @atomicStore(T, pointer, value + 1, std.builtin.AtomicOrder.release);
+    return value;
+}
+
+fn pushStringToQueue(semaphore_handle: win32.HANDLE, string: [*:0]const u8) void {
     std.debug.assert(entry_count < work_queue.len);
 
-    // TODO: These writes are not in order!
-    var entry = work_queue[entry_count];
+    var entry = &work_queue[entry_count];
     entry.string_to_print = string;
 
+    completePastWritesBeforeFutureWrites();
+
     entry_count += 1;
+
+    _ = win32.ReleaseSemaphore(semaphore_handle, 1, null);
 }
 
 const ThreadInfo = struct {
     logical_thread_index: u32,
+    semaphore_handle: ?win32.HANDLE = null,
 };
 
 fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
@@ -1195,12 +1214,10 @@ fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
 
         while (true) {
             if (next_entry_to_do < entry_count) {
-                // TODO: This line is not interlocked, so two threads could see the same value.
-                const entry_index = next_entry_to_do;
-                // TODO: Compiler doesn't know that multiple threads could write this value!
-                next_entry_to_do += 1;
+                const entry_index = interlockedIncrement(u32, &next_entry_to_do);
 
-                // TODO: These reads are not in order!
+                completePastReadsBeforeFutureReads();
+
                 const entry = work_queue[entry_index];
 
                 var buffer: [256]u8 = undefined;
@@ -1210,6 +1227,10 @@ fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
                 }) catch "";
 
                 win32.OutputDebugStringA(@ptrCast(slice.ptr));
+
+                _ = interlockedIncrement(u32, &entry_completion_count);
+            } else {
+                _ = win32.WaitForSingleObjectEx(thread_info.semaphore_handle, 100, 0);
             }
         }
     }
@@ -1231,32 +1252,61 @@ pub export fn wWinMain(
     var state = Win32State{};
     getExeFileName(&state);
 
-    var thread_infos: [15]ThreadInfo = [1]ThreadInfo{undefined} ** 15;
-    var thread_index: u32 = 0;
-    while (thread_index < thread_infos.len) : (thread_index += 1) {
-        thread_infos[thread_index] = ThreadInfo{ .logical_thread_index = thread_index };
-        var thread_id: std.os.windows.DWORD = undefined;
-        const thread_handle = win32.CreateThread(
-            null,
-            0,
-            threadProc,
-            @ptrCast(@constCast(&thread_infos[thread_index])),
-            win32.THREAD_CREATE_RUN_IMMEDIATELY,
-            &thread_id,
-        );
+    const thread_count = 8;
+    const initial_count = 0;
+    const opt_semaphore_handle = win32.CreateSemaphoreEx(null,
+        initial_count,
+        thread_count,
+        null,
+        0,
+        0x1F0003, // win32.SEMAPHORE_ALL_ACCESS,
+    );
 
-        _ = win32.CloseHandle(thread_handle);
+    if (opt_semaphore_handle) |semaphore_handle| {
+        var thread_infos: [thread_count]ThreadInfo = [1]ThreadInfo{undefined} ** thread_count;
+        var thread_index: u32 = 0;
+        while (thread_index < thread_infos.len) : (thread_index += 1) {
+            thread_infos[thread_index] = ThreadInfo{
+                .logical_thread_index = thread_index,
+                .semaphore_handle = semaphore_handle,
+            };
+            var thread_id: std.os.windows.DWORD = undefined;
+            const thread_handle = win32.CreateThread(
+                null,
+                0,
+                threadProc,
+                @ptrCast(@constCast(&thread_infos[thread_index])),
+                win32.THREAD_CREATE_RUN_IMMEDIATELY,
+                &thread_id,
+            );
+
+            _ = win32.CloseHandle(thread_handle);
+        }
+
+        pushStringToQueue(semaphore_handle, "String 0");
+        pushStringToQueue(semaphore_handle, "String 1");
+        pushStringToQueue(semaphore_handle, "String 2");
+        pushStringToQueue(semaphore_handle, "String 3");
+        pushStringToQueue(semaphore_handle, "String 4");
+        pushStringToQueue(semaphore_handle, "String 5");
+        pushStringToQueue(semaphore_handle, "String 7");
+        pushStringToQueue(semaphore_handle, "String 8");
+        pushStringToQueue(semaphore_handle, "String 9");
+
+        win32.Sleep(5000);
+
+        pushStringToQueue(semaphore_handle, "String B0");
+        pushStringToQueue(semaphore_handle, "String B1");
+        pushStringToQueue(semaphore_handle, "String B2");
+        pushStringToQueue(semaphore_handle, "String B3");
+        pushStringToQueue(semaphore_handle, "String B4");
+        pushStringToQueue(semaphore_handle, "String B5");
+        pushStringToQueue(semaphore_handle, "String B7");
+        pushStringToQueue(semaphore_handle, "String B8");
+        pushStringToQueue(semaphore_handle, "String B9");
+
+        while (entry_count != entry_completion_count) {}
     }
-
-    pushStringToQueue("String 0");
-    pushStringToQueue("String 1");
-    pushStringToQueue("String 2");
-    pushStringToQueue("String 3");
-    pushStringToQueue("String 4");
-    pushStringToQueue("String 5");
-    pushStringToQueue("String 7");
-    pushStringToQueue("String 8");
-    pushStringToQueue("String 9");
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
     buildExePathFileName(&state, "handmade.dll", &source_dll_path);
