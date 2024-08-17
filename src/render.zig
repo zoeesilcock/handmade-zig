@@ -127,6 +127,19 @@ const RenderGroupCamera = extern struct {
     distance_above_target: f32,
 };
 
+const TileRenderWork = struct {
+    group: *RenderGroup,
+    output_target: * LoadedBitmap,
+    clip_rect: Rectangle2i,
+};
+
+pub fn doTileRenderWork(data: *anyopaque) void {
+    const work: *TileRenderWork = @ptrCast(@alignCast(data));
+
+    work.group.renderTo(work.output_target, work.clip_rect, true);
+    work.group.renderTo(work.output_target, work.clip_rect, false);
+}
+
 pub const RenderGroup = extern struct {
     game_camera: RenderGroupCamera,
     render_camera: RenderGroupCamera,
@@ -350,31 +363,45 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
+     // render_queue: shared.PlatformWorkQueue,
     pub fn tiledRenderTo(self: *RenderGroup, output_target: *LoadedBitmap) void {
-        if (true) {
-            const tile_count_x = 4;
-            const tile_count_y = 4;
-            const tile_width = @divFloor(output_target.width, tile_count_x);
-            const tile_height = @divFloor(output_target.height, tile_count_y);
+        const tile_count_x = 4;
+        const tile_count_y = 4;
+        const work_count = tile_count_x * tile_count_y;
+        var work_array: [work_count]TileRenderWork = [1]TileRenderWork{TileRenderWork{
+            .group = self,
+            .output_target = output_target,
+            .clip_rect = undefined,
+        }} ** work_count;
 
-            var tile_y: i32 = 0;
-            while (tile_y < tile_count_y) : (tile_y += 1) {
-                var tile_x: i32 = 0;
-                while (tile_x < tile_count_x) : (tile_x += 1) {
-                    var clip_rect = Rectangle2i.zero();
-                    _ = clip_rect.min.setX(tile_x * tile_width + 4);
-                    _ = clip_rect.min.setY(tile_y * tile_height + 4);
-                    _ = clip_rect.max.setX(clip_rect.min.x() + tile_width - 4);
-                    _ = clip_rect.max.setY(clip_rect.min.y() + tile_height - 4);
+        const tile_width = @divFloor(output_target.width, tile_count_x);
+        const tile_height = @divFloor(output_target.height, tile_count_y);
 
-                    self.renderTo(output_target, clip_rect, true);
-                    self.renderTo(output_target, clip_rect, false);
-                }
+        var work_index: u32 = 0;
+        var tile_y: i32 = 0;
+        while (tile_y < tile_count_y) : (tile_y += 1) {
+
+            var tile_x: i32 = 0;
+            while (tile_x < tile_count_x) : (tile_x += 1) {
+                var work = &work_array[work_index];
+                work_index += 1;
+
+                var clip_rect = Rectangle2i.zero();
+                _ = clip_rect.min.setX(tile_x * tile_width + 4);
+                _ = clip_rect.min.setY(tile_y * tile_height + 4);
+                _ = clip_rect.max.setX(clip_rect.min.x() + tile_width - 4);
+                _ = clip_rect.max.setY(clip_rect.min.y() + tile_height - 4);
+
+                work.clip_rect = clip_rect;
+
+                // render_queue.addEntry(doTileRenderWork, &work);
             }
-        } else {
-            const clip_rect = Rectangle2i.new(4, 4, output_target.width - 4, output_target.height - 4);
-            self.renderTo(output_target, clip_rect, true);
-            self.renderTo(output_target, clip_rect, false);
+        }
+
+        // render_queue.completeAllWork();
+
+        for (work_array) |work| {
+            doTileRenderWork(@ptrCast(@constCast(&work)));
         }
     }
 

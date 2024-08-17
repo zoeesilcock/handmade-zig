@@ -1168,21 +1168,56 @@ fn endInputPlayback(state: *Win32State) void {
 }
 
 const WorkQueueEntry = struct {
-    string_to_print: [*:0]const u8,
+    is_valid: bool,
+    data: *anyopaque = undefined,
 };
 
-var entry_completion_count: u32 = 0;
-var next_entry_to_do: u32 = 0;
-var entry_count: u32 = 0;
-var work_queue: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{ .string_to_print = "" }} ** 256;
+const WorkQueueEntryStorage = struct {
+    user_pointer: *anyopaque = undefined,
+};
 
-fn completePastWritesBeforeFutureWrites() void {
-    @fence(std.builtin.AtomicOrder.release);
-}
+const WorkQueue = struct {
+    max_entry_count: u32 = 0,
+    entry_completion_count: u32 = 0,
+    next_entry_to_do: u32 = 0,
+    entry_count: u32 = 0,
+    semaphore_handle: ?win32.HANDLE = null,
+    entries: [256]WorkQueueEntryStorage = [1]WorkQueueEntryStorage{WorkQueueEntryStorage{}} ** 256,
 
-fn completePastReadsBeforeFutureReads() void {
-    @fence(std.builtin.AtomicOrder.acquire);
-}
+    pub fn addEntry(self: *WorkQueue, pointer: *anyopaque) void {
+        std.debug.assert(self.entry_count < self.entries.len);
+
+        self.entries[self.entry_count].user_pointer = pointer;
+
+        @fence(std.builtin.AtomicOrder.release);
+
+        self.entry_count += 1;
+        _ = win32.ReleaseSemaphore(self.semaphore_handle, 1, null);
+    }
+
+    pub fn completeAndGetNextEntry(self: *WorkQueue, completed: WorkQueueEntry) WorkQueueEntry {
+        var result = WorkQueueEntry{ .is_valid = false };
+
+        if (completed.is_valid) {
+            _ = interlockedIncrement(u32, &self.entry_completion_count);
+        }
+
+        if (self.next_entry_to_do < self.entry_count) {
+            const index = interlockedIncrement(u32, &self.next_entry_to_do);
+
+            result.data = self.entries[index].user_pointer;
+            result.is_valid = true;
+
+            @fence(std.builtin.AtomicOrder.acquire);
+        }
+
+        return result;
+    }
+
+    pub fn workInProgress(self: *WorkQueue) bool {
+        return self.entry_completion_count != self.entry_count;
+    }
+};
 
 fn interlockedIncrement(comptime T: type, pointer: *T) T {
     const value = @atomicLoad(T, pointer, std.builtin.AtomicOrder.acquire);
@@ -1190,52 +1225,44 @@ fn interlockedIncrement(comptime T: type, pointer: *T) T {
     return value;
 }
 
-fn pushStringToQueue(semaphore_handle: win32.HANDLE, string: [*:0]const u8) void {
-    std.debug.assert(entry_count < work_queue.len);
-
-    var entry = &work_queue[entry_count];
-    entry.string_to_print = string;
-
-    completePastWritesBeforeFutureWrites();
-
-    entry_count += 1;
-
-    _ = win32.ReleaseSemaphore(semaphore_handle, 1, null);
-}
-
 const ThreadInfo = struct {
     logical_thread_index: u32,
-    semaphore_handle: ?win32.HANDLE = null,
+    queue: *WorkQueue,
 };
 
 fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
     if (lp_parameter) |parameter| {
         const thread_info: *ThreadInfo = @ptrCast(@alignCast(parameter));
+        var entry = WorkQueueEntry{ .is_valid = false };
 
         while (true) {
-            if (next_entry_to_do < entry_count) {
-                const entry_index = interlockedIncrement(u32, &next_entry_to_do);
+            entry = thread_info.queue.completeAndGetNextEntry(entry);
 
-                completePastReadsBeforeFutureReads();
-
-                const entry = work_queue[entry_index];
-
-                var buffer: [256]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "Thread {d}: {s}\n", .{
-                    thread_info.logical_thread_index,
-                    entry.string_to_print,
-                }) catch "";
-
-                win32.OutputDebugStringA(@ptrCast(slice.ptr));
-
-                _ = interlockedIncrement(u32, &entry_completion_count);
+            if (entry.is_valid) {
+                doWorkerWork(entry, thread_info.logical_thread_index);
             } else {
-                _ = win32.WaitForSingleObjectEx(thread_info.semaphore_handle, 100, 0);
+                _ = win32.WaitForSingleObjectEx(thread_info.queue.semaphore_handle, 100, 0);
             }
         }
     }
 
     return 0;
+}
+
+inline fn doWorkerWork(entry: WorkQueueEntry, logical_thread_index: u32) void {
+    std.debug.assert(entry.is_valid);
+
+    var buffer: [256]u8 = undefined;
+    const slice = std.fmt.bufPrintZ(&buffer, "Thread {d}: {s}\n", .{
+        logical_thread_index,
+        @as([*:0]const u8, @ptrCast(entry.data)),
+    }) catch "";
+
+    win32.OutputDebugStringA(@ptrCast(slice.ptr));
+}
+
+fn pushStringToQueue(queue: *WorkQueue, string: [*:0]const u8) void {
+    queue.addEntry(@ptrCast(@constCast(string)));
 }
 
 pub export fn wWinMain(
@@ -1252,7 +1279,7 @@ pub export fn wWinMain(
     var state = Win32State{};
     getExeFileName(&state);
 
-    const thread_count = 8;
+    const thread_count = 7;
     const initial_count = 0;
     const opt_semaphore_handle = win32.CreateSemaphoreEx(null,
         initial_count,
@@ -1261,14 +1288,17 @@ pub export fn wWinMain(
         0,
         0x1F0003, // win32.SEMAPHORE_ALL_ACCESS,
     );
+    var queue = WorkQueue{};
 
     if (opt_semaphore_handle) |semaphore_handle| {
+        queue.semaphore_handle = semaphore_handle;
+
         var thread_infos: [thread_count]ThreadInfo = [1]ThreadInfo{undefined} ** thread_count;
         var thread_index: u32 = 0;
         while (thread_index < thread_infos.len) : (thread_index += 1) {
             thread_infos[thread_index] = ThreadInfo{
+                .queue = &queue,
                 .logical_thread_index = thread_index,
-                .semaphore_handle = semaphore_handle,
             };
             var thread_id: std.os.windows.DWORD = undefined;
             const thread_handle = win32.CreateThread(
@@ -1283,29 +1313,35 @@ pub export fn wWinMain(
             _ = win32.CloseHandle(thread_handle);
         }
 
-        pushStringToQueue(semaphore_handle, "String 0");
-        pushStringToQueue(semaphore_handle, "String 1");
-        pushStringToQueue(semaphore_handle, "String 2");
-        pushStringToQueue(semaphore_handle, "String 3");
-        pushStringToQueue(semaphore_handle, "String 4");
-        pushStringToQueue(semaphore_handle, "String 5");
-        pushStringToQueue(semaphore_handle, "String 7");
-        pushStringToQueue(semaphore_handle, "String 8");
-        pushStringToQueue(semaphore_handle, "String 9");
+        pushStringToQueue(&queue, "String A0");
+        pushStringToQueue(&queue, "String A1");
+        pushStringToQueue(&queue, "String A2");
+        pushStringToQueue(&queue, "String A3");
+        pushStringToQueue(&queue, "String A4");
+        pushStringToQueue(&queue, "String A5");
+        pushStringToQueue(&queue, "String A6");
+        pushStringToQueue(&queue, "String A7");
+        pushStringToQueue(&queue, "String A8");
+        pushStringToQueue(&queue, "String A9");
 
-        win32.Sleep(5000);
+        pushStringToQueue(&queue, "String B0");
+        pushStringToQueue(&queue, "String B1");
+        pushStringToQueue(&queue, "String B2");
+        pushStringToQueue(&queue, "String B3");
+        pushStringToQueue(&queue, "String B4");
+        pushStringToQueue(&queue, "String B5");
+        pushStringToQueue(&queue, "String B6");
+        pushStringToQueue(&queue, "String B7");
+        pushStringToQueue(&queue, "String B8");
+        pushStringToQueue(&queue, "String B9");
 
-        pushStringToQueue(semaphore_handle, "String B0");
-        pushStringToQueue(semaphore_handle, "String B1");
-        pushStringToQueue(semaphore_handle, "String B2");
-        pushStringToQueue(semaphore_handle, "String B3");
-        pushStringToQueue(semaphore_handle, "String B4");
-        pushStringToQueue(semaphore_handle, "String B5");
-        pushStringToQueue(semaphore_handle, "String B7");
-        pushStringToQueue(semaphore_handle, "String B8");
-        pushStringToQueue(semaphore_handle, "String B9");
-
-        while (entry_count != entry_completion_count) {}
+        var entry = WorkQueueEntry{ .is_valid = false };
+        while (queue.workInProgress()) {
+            entry = queue.completeAndGetNextEntry(entry);
+            if (entry.is_valid) {
+                doWorkerWork(entry, 7);
+            }
+        }
     }
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;

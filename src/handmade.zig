@@ -10,8 +10,6 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
-/// Architecture exploration:
-///
 /// * Rendering.
 ///     * Lighting.
 ///     * Straighten out all coordinate systems!
@@ -19,6 +17,17 @@ const std = @import("std");
 ///         * World.
 ///         * Texture.
 ///     * Optimization.
+/// * Asset streaming.
+///
+/// * Debug code.
+///     * Fonts.
+///     * Logging.
+///     * Diagramming.
+///     * Switches, sliders etc.
+///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
+///     * Thread visualization.
+///
+/// Architecture exploration:
 ///
 /// * Z-axis.
 ///     * Need to make a solid concept of ground levels so thet camer can be freely placed in Z and have multiple
@@ -40,15 +49,6 @@ const std = @import("std");
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
-///
-/// * Debug code.
-///     * Fonts.
-///     * Logging.
-///     * Diagramming.
-///     * Switches, sliders etc.
-///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
-///
-/// * Asset streaming.
 ///
 /// * Audio.
 ///     * Sound effect triggers.
