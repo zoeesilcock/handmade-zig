@@ -3,13 +3,13 @@ const shared = @import("shared.zig");
 const game = @import("handmade.zig");
 const std = @import("std");
 
-const WIDTH = 960;
-const HEIGHT = 540;
+const WIDTH = 1920;
+const HEIGHT = 1080;
 
 const DEBUG_WINDOW_POS_X = 0 + 2560;
 const DEBUG_WINDOW_POS_Y = 30;
-const DEBUG_WINDOW_WIDTH = 1280;
-const DEBUG_WINDOW_HEIGHT = 720;
+const DEBUG_WINDOW_WIDTH = WIDTH + 20;
+const DEBUG_WINDOW_HEIGHT = HEIGHT + 20;
 const DEBUG_WINDOW_ACTIVE_OPACITY = 1.0;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 0.25;
 
@@ -27,6 +27,50 @@ const OffscreenBuffer = struct {
     height: i32 = 0,
     pitch: usize = 0,
 };
+
+const ThreadInfo = struct {
+    logical_thread_index: u32,
+    queue: *shared.PlatformWorkQueue,
+};
+
+fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u8 {
+    if (lp_parameter) |parameter| {
+        const thread_info: *ThreadInfo = @ptrCast(@alignCast(parameter));
+
+        while (true) {
+            if (doNextWorkQueueEntry(thread_info.queue)) {
+                @as(*std.Thread.Semaphore, @ptrCast(@alignCast(thread_info.queue.semaphore_handle.?))).wait();
+            }
+        }
+    }
+
+    return 0;
+}
+
+pub fn doNextWorkQueueEntry(queue: *shared.PlatformWorkQueue) bool {
+    var should_wait = false;
+
+    const original_next_entry_to_read = @atomicLoad(u32, &queue.next_entry_to_read, .acquire);
+    const new_next_entry_to_read: u32 = @mod(original_next_entry_to_read + 1, @as(u32, @intCast(queue.entries.len)));
+    if (original_next_entry_to_read != @atomicLoad(u32, &queue.next_entry_to_write, .acquire)) {
+        if (@cmpxchgStrong(
+            u32,
+            &queue.next_entry_to_read,
+            original_next_entry_to_read,
+            new_next_entry_to_read,
+            .release,
+            .acquire,
+        ) == null) {
+            const entry = &queue.entries[original_next_entry_to_read];
+            entry.callback(queue, entry.data);
+            _ = @atomicRmw(u32, &queue.completion_count, .Add, 1, .monotonic);
+        }
+    } else {
+        should_wait = true;
+    }
+
+    return should_wait;
+}
 
 fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
     _ = thread;
@@ -54,13 +98,57 @@ fn debugFreeFileMemory(thread: *shared.ThreadContext, memory: *anyopaque) callco
     rl.memFree(memory);
 }
 
+fn addQueueEntry (queue: *shared.PlatformWorkQueue, callback: shared.PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void {
+    const original_next_entry_to_write = @atomicLoad(u32, &queue.next_entry_to_write, .acquire);
+    const original_next_entry_to_read = @atomicLoad(u32, &queue.next_entry_to_read, .acquire);
+    const new_next_entry_to_write: u32 = @mod(original_next_entry_to_write + 1, @as(u32, @intCast(queue.entries.len)));
+    std.debug.assert(new_next_entry_to_write != original_next_entry_to_read);
+
+    var entry = &queue.entries[original_next_entry_to_write];
+    entry.data = data;
+    entry.callback = callback;
+    _ = @atomicRmw(u32, &queue.completion_goal, .Add, 1, .monotonic);
+
+    @fence(std.builtin.AtomicOrder.release);
+
+    @atomicStore(u32, &queue.next_entry_to_write, new_next_entry_to_write, .release);
+
+    @as(*std.Thread.Semaphore, @ptrCast(@alignCast(queue.semaphore_handle.?))).post();
+}
+
+fn completeAllQueuedWork (queue: *shared.PlatformWorkQueue) callconv(.C) void {
+    while (@atomicLoad(u32, &queue.completion_goal, .acquire) != @atomicLoad(u32, &queue.completion_count, .acquire)) {
+        _ = doNextWorkQueueEntry(queue);
+    }
+
+    @atomicStore(u32, &queue.completion_goal, 0, .release);
+    @atomicStore(u32, &queue.completion_count, 0, .release);
+}
+
 pub fn main() anyerror!void {
     var thread = shared.ThreadContext{};
     const platform = shared.Platform{
         .debugReadEntireFile = debugReadEntireFile,
         .debugWriteEntireFile = debugWriteEntireFile,
         .debugFreeFileMemory = debugFreeFileMemory,
+
+        .addQueueEntry = addQueueEntry,
+        .completeAllQueuedWork = completeAllQueuedWork,
     };
+
+    // Setup work queue.
+    const thread_count = 7;
+    var semaphore = std.Thread.Semaphore{};
+    var queue = shared.PlatformWorkQueue{ .semaphore_handle = @ptrCast(&semaphore) };
+    var thread_infos: [thread_count]ThreadInfo = [1]ThreadInfo{undefined} ** thread_count;
+    var thread_index: u32 = 0;
+    while (thread_index < thread_infos.len) : (thread_index += 1) {
+        thread_infos[thread_index] = ThreadInfo{
+            .queue = &queue,
+            .logical_thread_index = thread_index,
+        };
+        _ = try std.Thread.spawn(std.Thread.SpawnConfig{}, threadProc, .{ &thread_infos[thread_index] });
+    }
 
     // Allocate game memory.
     var game_memory: shared.Memory = shared.Memory{
@@ -69,6 +157,7 @@ pub fn main() anyerror!void {
         .permanent_storage = null,
         .transient_storage_size = shared.megabytes(256),
         .transient_storage = null,
+        .high_priority_queue = &queue,
         .counters = if (DEBUG) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
     };
     const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
@@ -101,7 +190,7 @@ pub fn main() anyerror!void {
 
     const monitor_id = rl.getCurrentMonitor();
     const monitor_refresh_hz = rl.getMonitorRefreshRate(monitor_id);
-    const game_update_hz: f32 = @as(f32, @floatFromInt(monitor_refresh_hz)) / 2.0;
+    const game_update_hz: f32 = @as(f32, @floatFromInt(monitor_refresh_hz)); // / 2.0;
     const target_seconds_per_frame = 1.0 / game_update_hz;
     rl.setTargetFPS(@intFromFloat(game_update_hz));
 
