@@ -362,6 +362,7 @@ pub export fn updateAndRender(
     std.debug.assert(@sizeOf(TransientState) <= memory.transient_storage_size);
     var transient_state: *TransientState = @ptrCast(@alignCast(memory.transient_storage));
     if (!transient_state.is_initialized) {
+        transient_state.render_queue = memory.high_priority_queue;
         transient_state.arena.initialize(
             memory.transient_storage_size - @sizeOf(TransientState),
             memory.transient_storage.? + @sizeOf(TransientState),
@@ -581,7 +582,7 @@ pub export fn updateAndRender(
                     }
 
                     if (opt_furthest_buffer) |furthest_buffer| {
-                        fillGroundChunk(state, transient_state, furthest_buffer, &chunk_center);
+                        fillGroundChunk(state, &platform, transient_state.render_queue, transient_state, furthest_buffer, &chunk_center);
                     }
                 }
             }
@@ -921,7 +922,7 @@ pub export fn updateAndRender(
         }
     }
 
-    render_group.tiledRenderTo(draw_buffer);
+    render_group.tiledRenderTo(&platform, transient_state.render_queue, draw_buffer);
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
@@ -1215,6 +1216,8 @@ pub export fn getSoundSamples(
 
 fn fillGroundChunk(
     state: *State,
+    platform: *const shared.Platform,
+    render_queue: *shared.PlatformWorkQueue,
     transient_state: *TransientState,
     ground_buffer: *shared.GroundBuffer,
     chunk_position: *const world.WorldPosition,
@@ -1304,7 +1307,7 @@ fn fillGroundChunk(
         }
     }
 
-    render_group.tiledRenderTo(buffer);
+    render_group.tiledRenderTo(platform, render_queue, buffer);
     transient_state.arena.endTemporaryMemory(render_memory);
 }
 

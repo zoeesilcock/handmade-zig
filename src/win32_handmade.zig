@@ -20,16 +20,16 @@ const TREBLE_C: u32 = 523;
 
 // const WIDTH = 960 / 2;
 // const HEIGHT = 540 / 2;
-const WIDTH = 960;
-const HEIGHT = 540;
+const WIDTH = 1920;
+const HEIGHT = 1080;
 const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
 
 const DEBUG_WINDOW_POS_X = -7 + 210; // + 2560;
 const DEBUG_WINDOW_POS_Y = 0 + 30;
-const DEBUG_WINDOW_WIDTH = 1000;
-const DEBUG_WINDOW_HEIGHT = 600;
+const DEBUG_WINDOW_WIDTH = WIDTH + WINDOW_DECORATION_WIDTH + 20;
+const DEBUG_WINDOW_HEIGHT = HEIGHT + WINDOW_DECORATION_HEIGHT + 20;
 const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
@@ -1167,81 +1167,69 @@ fn endInputPlayback(state: *Win32State) void {
     state.playback_handle = undefined;
 }
 
-const WorkQueueEntry = struct {
-    is_valid: bool,
-    data: *anyopaque = undefined,
-};
+pub fn addQueueEntry(queue: *shared.PlatformWorkQueue, callback: shared.PlatformWorkQueueCallback, data: *anyopaque,) callconv(.C) void {
+    const original_next_entry_to_write = @atomicLoad(u32, &queue.next_entry_to_write, .acquire);
+    const original_next_entry_to_read = @atomicLoad(u32, &queue.next_entry_to_read, .acquire);
+    const new_next_entry_to_write: u32 = @mod(original_next_entry_to_write + 1, @as(u32, @intCast(queue.entries.len)));
+    std.debug.assert(new_next_entry_to_write != original_next_entry_to_read);
 
-const WorkQueueEntryStorage = struct {
-    user_pointer: *anyopaque = undefined,
-};
+    var entry = &queue.entries[original_next_entry_to_write];
+    entry.data = data;
+    entry.callback = callback;
+    _ = @atomicRmw(u32, &queue.completion_goal, .Add, 1, .monotonic);
 
-const WorkQueue = struct {
-    max_entry_count: u32 = 0,
-    entry_completion_count: u32 = 0,
-    next_entry_to_do: u32 = 0,
-    entry_count: u32 = 0,
-    semaphore_handle: ?win32.HANDLE = null,
-    entries: [256]WorkQueueEntryStorage = [1]WorkQueueEntryStorage{WorkQueueEntryStorage{}} ** 256,
+    @fence(std.builtin.AtomicOrder.release);
 
-    pub fn addEntry(self: *WorkQueue, pointer: *anyopaque) void {
-        std.debug.assert(self.entry_count < self.entries.len);
+    @atomicStore(u32, &queue.next_entry_to_write, new_next_entry_to_write, .release);
+    _ = win32.ReleaseSemaphore(queue.semaphore_handle, 1, null);
+}
 
-        self.entries[self.entry_count].user_pointer = pointer;
-
-        @fence(std.builtin.AtomicOrder.release);
-
-        self.entry_count += 1;
-        _ = win32.ReleaseSemaphore(self.semaphore_handle, 1, null);
+pub fn completeAllQueuedWork(queue: *shared.PlatformWorkQueue) callconv(.C) void {
+    while (@atomicLoad(u32, &queue.completion_goal, .acquire) != @atomicLoad(u32, &queue.completion_count, .acquire)) {
+        _ = doNextWorkQueueEntry(queue);
     }
 
-    pub fn completeAndGetNextEntry(self: *WorkQueue, completed: WorkQueueEntry) WorkQueueEntry {
-        var result = WorkQueueEntry{ .is_valid = false };
+    @atomicStore(u32, &queue.completion_goal, 0, .release);
+    @atomicStore(u32, &queue.completion_count, 0, .release);
+}
 
-        if (completed.is_valid) {
-            _ = interlockedIncrement(u32, &self.entry_completion_count);
+pub fn doNextWorkQueueEntry(queue: *shared.PlatformWorkQueue) bool {
+    var should_wait = false;
+
+    const original_next_entry_to_read = @atomicLoad(u32, &queue.next_entry_to_read, .acquire);
+    const new_next_entry_to_read: u32 = @mod(original_next_entry_to_read + 1, @as(u32, @intCast(queue.entries.len)));
+    if (original_next_entry_to_read != @atomicLoad(u32, &queue.next_entry_to_write, .acquire)) {
+        if (@cmpxchgStrong(
+            u32,
+            &queue.next_entry_to_read,
+            original_next_entry_to_read,
+            new_next_entry_to_read,
+            .release,
+            .acquire,
+        ) == null) {
+            const entry = &queue.entries[original_next_entry_to_read];
+            entry.callback(queue, entry.data);
+            _ = @atomicRmw(u32, &queue.completion_count, .Add, 1, .monotonic);
         }
-
-        if (self.next_entry_to_do < self.entry_count) {
-            const index = interlockedIncrement(u32, &self.next_entry_to_do);
-
-            result.data = self.entries[index].user_pointer;
-            result.is_valid = true;
-
-            @fence(std.builtin.AtomicOrder.acquire);
-        }
-
-        return result;
+    } else {
+        should_wait = true;
     }
 
-    pub fn workInProgress(self: *WorkQueue) bool {
-        return self.entry_completion_count != self.entry_count;
-    }
-};
-
-fn interlockedIncrement(comptime T: type, pointer: *T) T {
-    const value = @atomicLoad(T, pointer, std.builtin.AtomicOrder.acquire);
-    @atomicStore(T, pointer, value + 1, std.builtin.AtomicOrder.release);
-    return value;
+    return should_wait;
 }
 
 const ThreadInfo = struct {
     logical_thread_index: u32,
-    queue: *WorkQueue,
+    queue: *shared.PlatformWorkQueue,
 };
 
 fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
     if (lp_parameter) |parameter| {
         const thread_info: *ThreadInfo = @ptrCast(@alignCast(parameter));
-        var entry = WorkQueueEntry{ .is_valid = false };
 
         while (true) {
-            entry = thread_info.queue.completeAndGetNextEntry(entry);
-
-            if (entry.is_valid) {
-                doWorkerWork(entry, thread_info.logical_thread_index);
-            } else {
-                _ = win32.WaitForSingleObjectEx(thread_info.queue.semaphore_handle, 100, 0);
+            if (doNextWorkQueueEntry(thread_info.queue)) {
+                _ = win32.WaitForSingleObjectEx(thread_info.queue.semaphore_handle, std.math.maxInt(u32), 0);
             }
         }
     }
@@ -1249,20 +1237,16 @@ fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
     return 0;
 }
 
-inline fn doWorkerWork(entry: WorkQueueEntry, logical_thread_index: u32) void {
-    std.debug.assert(entry.is_valid);
+fn doWorkerWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+    _ = queue;
 
     var buffer: [256]u8 = undefined;
     const slice = std.fmt.bufPrintZ(&buffer, "Thread {d}: {s}\n", .{
-        logical_thread_index,
-        @as([*:0]const u8, @ptrCast(entry.data)),
+        win32.GetCurrentThreadId(),
+        @as([*:0]const u8, @ptrCast(data)),
     }) catch "";
 
     win32.OutputDebugStringA(@ptrCast(slice.ptr));
-}
-
-fn pushStringToQueue(queue: *WorkQueue, string: [*:0]const u8) void {
-    queue.addEntry(@ptrCast(@constCast(string)));
 }
 
 pub export fn wWinMain(
@@ -1288,7 +1272,7 @@ pub export fn wWinMain(
         0,
         0x1F0003, // win32.SEMAPHORE_ALL_ACCESS,
     );
-    var queue = WorkQueue{};
+    var queue = shared.PlatformWorkQueue{};
 
     if (opt_semaphore_handle) |semaphore_handle| {
         queue.semaphore_handle = semaphore_handle;
@@ -1313,35 +1297,29 @@ pub export fn wWinMain(
             _ = win32.CloseHandle(thread_handle);
         }
 
-        pushStringToQueue(&queue, "String A0");
-        pushStringToQueue(&queue, "String A1");
-        pushStringToQueue(&queue, "String A2");
-        pushStringToQueue(&queue, "String A3");
-        pushStringToQueue(&queue, "String A4");
-        pushStringToQueue(&queue, "String A5");
-        pushStringToQueue(&queue, "String A6");
-        pushStringToQueue(&queue, "String A7");
-        pushStringToQueue(&queue, "String A8");
-        pushStringToQueue(&queue, "String A9");
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A0")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A1")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A2")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A3")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A4")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A5")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A6")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A7")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A8")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A9")));
 
-        pushStringToQueue(&queue, "String B0");
-        pushStringToQueue(&queue, "String B1");
-        pushStringToQueue(&queue, "String B2");
-        pushStringToQueue(&queue, "String B3");
-        pushStringToQueue(&queue, "String B4");
-        pushStringToQueue(&queue, "String B5");
-        pushStringToQueue(&queue, "String B6");
-        pushStringToQueue(&queue, "String B7");
-        pushStringToQueue(&queue, "String B8");
-        pushStringToQueue(&queue, "String B9");
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B0")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B1")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B2")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B3")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B4")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B5")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B6")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B7")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B8")));
+        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B9")));
 
-        var entry = WorkQueueEntry{ .is_valid = false };
-        while (queue.workInProgress()) {
-            entry = queue.completeAndGetNextEntry(entry);
-            if (entry.is_valid) {
-                doWorkerWork(entry, 7);
-            }
-        }
+        completeAllQueuedWork(&queue);
     }
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
@@ -1363,6 +1341,8 @@ pub export fn wWinMain(
         .debugReadEntireFile = debugReadEntireFile,
         .debugWriteEntireFile = debugWriteEntireFile,
         .debugFreeFileMemory = debugFreeFileMemory,
+        .addQueueEntry = addQueueEntry,
+        .completeAllQueuedWork = completeAllQueuedWork,
     };
 
     const window_class: win32.WNDCLASSW = .{
@@ -1417,7 +1397,7 @@ pub export fn wWinMain(
                 monitor_refresh_hz = device_refresh_rate;
             }
 
-            const game_update_hz: f32 = @as(f32, @floatFromInt(monitor_refresh_hz)) / 2.0;
+            const game_update_hz: f32 = @as(f32, @floatFromInt(monitor_refresh_hz)); // / 2.0;
             const target_seconds_per_frame: f32 = 1.0 / game_update_hz;
 
             var sound_output = SoundOutput{
@@ -1454,6 +1434,7 @@ pub export fn wWinMain(
                 .permanent_storage = null,
                 .transient_storage_size = shared.megabytes(256),
                 .transient_storage = null,
+                .high_priority_queue = &queue,
                 .counters = if (DEBUG) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 

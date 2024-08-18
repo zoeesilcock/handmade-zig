@@ -60,10 +60,31 @@ pub inline fn rdtsc() u64 {
 }
 
 // Platform.
+pub const PlatformWorkQueueCallback = *const fn (queue: *PlatformWorkQueue, data: *anyopaque) callconv(.C) void;
+
+pub const WorkQueueEntry = extern struct {
+    callback: PlatformWorkQueueCallback = undefined,
+    data: *anyopaque = undefined,
+};
+
+pub const PlatformWorkQueue = extern struct {
+    completion_goal: u32 = 0,
+    completion_count: u32 = 0,
+
+    next_entry_to_write: u32 = 0,
+    next_entry_to_read: u32 = 0,
+    semaphore_handle: ?*anyopaque = null,
+
+    entries: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{}} ** 256,
+};
+
 pub const Platform = extern struct {
     debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,
     debugWriteEntireFile: *const fn (thread: *ThreadContext, file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool = undefined,
     debugReadEntireFile: *const fn (thread: *ThreadContext, file_name: [*:0]const u8) callconv(.C) DebugReadFileResult = undefined,
+
+    addQueueEntry: *const fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void = undefined,
+    completeAllQueuedWork: *const fn (queue: *PlatformWorkQueue) callconv(.C) void = undefined,
 };
 
 pub const DebugReadFileResult = extern struct {
@@ -83,8 +104,8 @@ pub inline fn endTimedBlock(counter_id: DebugCycleCounters) void {
     if (DEBUG) {
         if (debug_global_memory) |memory| {
             const counter = memory.getCycleCounter(counter_id);
-            counter.cycle_count += rdtsc() - counter.last_cycle_start;
-            counter.hit_count += 1;
+            counter.cycle_count +%= rdtsc() -% counter.last_cycle_start;
+            counter.hit_count +%= 1;
         }
     }
 }
@@ -93,8 +114,8 @@ pub inline fn endTimedBlockCounted(counter_id: DebugCycleCounters, hit_count: u3
     if (DEBUG) {
         if (debug_global_memory) |memory| {
             const counter = memory.getCycleCounter(counter_id);
-            counter.cycle_count += rdtsc() - counter.last_cycle_start;
-            counter.hit_count += hit_count;
+            counter.cycle_count +%= rdtsc() -% counter.last_cycle_start;
+            counter.hit_count +%= hit_count;
         }
     }
 }
@@ -211,6 +232,7 @@ pub const ControllerButtonState = extern struct {
 // Memory.
 pub const MemoryIndex = usize;
 
+
 pub const Memory = GameMemory();
 fn GameMemory() type {
     return extern struct {
@@ -219,6 +241,8 @@ fn GameMemory() type {
         permanent_storage: ?[*]void,
         transient_storage_size: u64,
         transient_storage: ?[*]void,
+
+        high_priority_queue: *PlatformWorkQueue,
 
         counters: if (DEBUG) [DEBUG_CYCLE_COUNTERS_COUNT]DebugCycleCounter else void,
 
@@ -359,6 +383,8 @@ pub const TransientState = struct {
     arena: MemoryArena = undefined,
     ground_buffer_count: u32 = 0,
     ground_buffers: [*]GroundBuffer = undefined,
+
+    render_queue: *PlatformWorkQueue,
 
     env_map_width: i32,
     env_map_height: i32,

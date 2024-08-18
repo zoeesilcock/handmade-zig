@@ -129,11 +129,12 @@ const RenderGroupCamera = extern struct {
 
 const TileRenderWork = struct {
     group: *RenderGroup,
-    output_target: * LoadedBitmap,
+    output_target: *LoadedBitmap,
     clip_rect: Rectangle2i,
 };
 
-pub fn doTileRenderWork(data: *anyopaque) void {
+pub fn doTileRenderWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+    _ = queue;
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
 
     work.group.renderTo(work.output_target, work.clip_rect, true);
@@ -363,8 +364,12 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-     // render_queue: shared.PlatformWorkQueue,
-    pub fn tiledRenderTo(self: *RenderGroup, output_target: *LoadedBitmap) void {
+    pub fn tiledRenderTo(
+        self: *RenderGroup,
+        platform: *const shared.Platform,
+        render_queue: *shared.PlatformWorkQueue,
+        output_target: *LoadedBitmap,
+    ) void {
         const tile_count_x = 4;
         const tile_count_y = 4;
         const work_count = tile_count_x * tile_count_y;
@@ -380,7 +385,6 @@ pub const RenderGroup = extern struct {
         var work_index: u32 = 0;
         var tile_y: i32 = 0;
         while (tile_y < tile_count_y) : (tile_y += 1) {
-
             var tile_x: i32 = 0;
             while (tile_x < tile_count_x) : (tile_x += 1) {
                 var work = &work_array[work_index];
@@ -394,15 +398,11 @@ pub const RenderGroup = extern struct {
 
                 work.clip_rect = clip_rect;
 
-                // render_queue.addEntry(doTileRenderWork, &work);
+                platform.addQueueEntry(render_queue, &doTileRenderWork, work);
             }
         }
 
-        // render_queue.completeAllWork();
-
-        for (work_array) |work| {
-            doTileRenderWork(@ptrCast(@constCast(&work)));
-        }
+        platform.completeAllQueuedWork(render_queue);
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {
@@ -552,6 +552,7 @@ pub fn drawRectangle(
     even: bool,
 ) void {
     shared.beginTimedBlock(.DrawRectangle);
+    shared.endTimedBlock(.DrawRectangle);
 
     var fill_rect = Rectangle2i.new(
         intrinsics.floorReal32ToInt32(min.x()),
@@ -566,9 +567,10 @@ pub fn drawRectangle(
 
     // Set the pointer to the top left corner of the rectangle.
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
-    row += @as(u32,
+    row += @as(
+        u32,
         @intCast((fill_rect.min.x() * shared.BITMAP_BYTES_PER_PIXEL) +
-        (fill_rect.min.y() * @as(i32, @intCast(draw_buffer.pitch)))),
+            (fill_rect.min.y() * @as(i32, @intCast(draw_buffer.pitch)))),
     );
 
     var y = fill_rect.min.y();
@@ -584,7 +586,6 @@ pub fn drawRectangle(
         row += @as(usize, @intCast(draw_buffer.pitch * 2));
     }
 
-    shared.endTimedBlock(.DrawRectangle);
 }
 
 fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
