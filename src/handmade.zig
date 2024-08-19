@@ -11,12 +11,13 @@ const std = @import("std");
 /// TODO: An overview of upcoming tasks.
 ///
 /// * Rendering.
-///     * Lighting.
 ///     * Straighten out all coordinate systems!
 ///         * Screen.
 ///         * World.
 ///         * Texture.
-///     * Optimization.
+///     * Particle systems.
+///     * Lighting.
+///     * Final optimization.
 /// * Asset streaming.
 ///
 /// * Debug code.
@@ -26,6 +27,11 @@ const std = @import("std");
 ///     * Switches, sliders etc.
 ///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
 ///     * Thread visualization.
+///
+/// * Audio.
+///     * Sound effect triggers.
+///     * Ambient sounds.
+///     * Music.
 ///
 /// Architecture exploration:
 ///
@@ -49,11 +55,6 @@ const std = @import("std");
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
-///
-/// * Audio.
-///     * Sound effect triggers.
-///     * Ambient sounds.
-///     * Music.
 ///
 /// * Metagame/save game?
 ///     * How do you enter a save slot? Multiple profiles and potential "menu world".
@@ -95,7 +96,6 @@ const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
 const RenderGroupEntry = render.RenderGroupEntry;
 const RenderGroup = render.RenderGroup;
-const RenderBasis = render.RenderBasis;
 
 fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
     const flipped_y = @as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y();
@@ -519,19 +519,13 @@ pub export fn updateAndRender(
                 const delta = world.subtractPositions(state.world, &ground_buffer.position, &state.camera_position);
 
                 if (delta.z() >= -1 and delta.z() < 1) {
-                    bitmap.alignment_percentage = Vector2.new(0.5, 0.5);
-
-                    var basis = transient_state.arena.pushStruct(RenderBasis);
-                    render_group.default_basis = basis;
-                    basis.position = delta;
-
                     const ground_side_in_meters = state.world.chunk_dimension_in_meters.x();
-                    render_group.pushBitmap(bitmap, ground_side_in_meters, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(bitmap, ground_side_in_meters, delta, Color.white());
 
                     if (true) {
                         render_group.pushRectangleOutline(
                             Vector2.splat(ground_side_in_meters),
-                            Vector3.zero(),
+                            delta,
                             Color.new(1, 1, 0, 1),
                         );
                     }
@@ -608,10 +602,6 @@ pub export fn updateAndRender(
         input.frame_delta_time,
     );
 
-    const basis_reset = transient_state.arena.pushStruct(RenderBasis);
-    render_group.default_basis = basis_reset;
-    basis_reset.position = Vector3.zero();
-
     render_group.pushRectangleOutline(screen_bounds.getDimension(), Vector3.zero(), Color.new(1, 1, 0, 1));
     // render_group.pushRectangleOutline(camera_bounds_in_meters.getDimension().xy(), Vector3.zero(), Color.new(1, 1, 1, 1));
     render_group.pushRectangleOutline(sim_bounds.getDimension().xy(), Vector3.zero(), Color.new(0, 1, 1, 1));
@@ -628,9 +618,6 @@ pub export fn updateAndRender(
             const shadow_color = Color.new(1, 1, 1, math.clampf01(1 - 0.5 * entity.position.z()));
             var move_spec = sim.MoveSpec{};
             var acceleration = Vector3.zero();
-
-            var basis = transient_state.arena.pushStruct(RenderBasis);
-            render_group.default_basis = basis;
 
             const camera_relative_ground_position = entity.getGroundPoint().minus(camera_position);
             const fade_top_end_z: f32 = 0.75 * state.typical_floor_height;
@@ -653,6 +640,7 @@ pub export fn updateAndRender(
                 );
             }
 
+            // Pre-physics entity work.
             switch (entity.type) {
                 .Hero => {
                     for (state.controlled_heroes) |controlled_hero| {
@@ -688,15 +676,6 @@ pub export fn updateAndRender(
                             }
                         }
                     }
-
-                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    const hero_scale = 2.5;
-                    render_group.pushBitmap(&state.shadow, hero_scale * 1.0, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
-                    render_group.pushBitmap(&hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
-                    render_group.pushBitmap(&hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
-
-                    drawHitPoints(entity, render_group);
                 },
                 .Sword => {
                     move_spec = sim.MoveSpec{
@@ -710,29 +689,6 @@ pub export fn updateAndRender(
                         clearCollisionRulesFor(state, entity.storage_index);
                         continue;
                     }
-
-                    render_group.pushBitmap(&state.shadow, 0.25, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&state.sword, 0.5, Vector3.zero(), Color.white());
-                },
-                .Wall => {
-                    render_group.pushBitmap(&state.tree, 2.5, Vector3.zero(), Color.white());
-                },
-                .Stairwell => {
-                    const stairwell_color1 = Color.new(1, 0.5, 0, 1);
-                    const stairwell_color2 = Color.new(1, 1, 0, 1);
-                    render_group.pushRectangle(entity.walkable_dimension, Vector3.zero(), stairwell_color1);
-                    render_group.pushRectangle(
-                        entity.walkable_dimension,
-                        Vector3.new(0, 0, entity.walkable_height),
-                        stairwell_color2,
-                    );
-                },
-                .Monster => {
-                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&state.shadow, 4.5, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
-
-                    drawHitPoints(entity, render_group);
                 },
                 .Familiar => {
                     var closest_hero: ?*sim.SimEntity = null;
@@ -764,7 +720,68 @@ pub export fn updateAndRender(
                         .drag = 8,
                         .unit_max_acceleration = true,
                     };
+                },
+                .Wall => {},
+                .Stairwell => {},
+                .Monster => {},
+                .Space => {},
+                else => {
+                    unreachable;
+                },
+            }
 
+            if (!entity.isSet(sim.SimEntityFlags.Nonspatial.toInt()) and
+                entity.isSet(sim.SimEntityFlags.Movable.toInt()))
+            {
+                sim.moveEntity(
+                    state,
+                    screen_sim_region,
+                    entity,
+                    delta_time,
+                    acceleration,
+                    &move_spec,
+                );
+            }
+
+            render_group.transform.offset_position = entity.getGroundPoint();
+
+            // Post-physics entity work.
+            switch (entity.type) {
+                .Hero => {
+                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
+                    const hero_scale = 2.5;
+                    render_group.pushBitmap(&state.shadow, hero_scale * 1.0, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
+                    render_group.pushBitmap(&hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
+
+                    drawHitPoints(entity, render_group);
+                },
+                .Sword => {
+                    render_group.pushBitmap(&state.shadow, 0.25, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&state.sword, 0.5, Vector3.zero(), Color.white());
+                },
+                .Wall => {
+                    render_group.pushBitmap(&state.tree, 2.5, Vector3.zero(), Color.white());
+                },
+                .Stairwell => {
+                    const stairwell_color1 = Color.new(1, 0.5, 0, 1);
+                    const stairwell_color2 = Color.new(1, 1, 0, 1);
+                    render_group.pushRectangle(entity.walkable_dimension, Vector3.zero(), stairwell_color1);
+                    render_group.pushRectangle(
+                        entity.walkable_dimension,
+                        Vector3.new(0, 0, entity.walkable_height),
+                        stairwell_color2,
+                    );
+                },
+                .Monster => {
+                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
+                    render_group.pushBitmap(&state.shadow, 4.5, Vector3.zero(), shadow_color);
+                    render_group.pushBitmap(&hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
+
+                    drawHitPoints(entity, render_group);
+                },
+                .Familiar => {
                     // Update head bob.
                     entity.head_bob_time += delta_time * 2;
                     if (entity.head_bob_time > shared.TAU32) {
@@ -795,21 +812,6 @@ pub export fn updateAndRender(
                     unreachable;
                 },
             }
-
-            if (!entity.isSet(sim.SimEntityFlags.Nonspatial.toInt()) and
-                entity.isSet(sim.SimEntityFlags.Movable.toInt()))
-            {
-                sim.moveEntity(
-                    state,
-                    screen_sim_region,
-                    entity,
-                    delta_time,
-                    acceleration,
-                    &move_spec,
-                );
-            }
-
-            basis.position = entity.getGroundPoint();
         }
     }
 
@@ -1239,7 +1241,7 @@ fn fillGroundChunk(
 
     ground_buffer.position = chunk_position.*;
 
-    if (false) {
+    if (true) {
         const width: f32 = state.world.chunk_dimension_in_meters.x();
         const height: f32 = state.world.chunk_dimension_in_meters.y();
         var half_dim = Vector2.new(width, height).scaledTo(0.5);

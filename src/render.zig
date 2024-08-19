@@ -59,15 +59,6 @@ const BilinearSample = struct {
     d: u32,
 };
 
-pub const RenderBasis = extern struct {
-    position: Vector3,
-};
-
-pub const RenderEntityBasis = extern struct {
-    basis: *RenderBasis,
-    offset: Vector3,
-};
-
 pub const RenderEntityBasisResult = extern struct {
     position: Vector2 = Vector2.zero(),
     scale: f32 = 0,
@@ -95,14 +86,14 @@ pub const RenderEntrySaturation = extern struct {
 };
 
 pub const RenderEntryBitmap = extern struct {
-    entity_basis: RenderEntityBasis,
     bitmap: ?*const LoadedBitmap,
+    position: Vector2,
     size: Vector2,
     color: Color,
 };
 
 pub const RenderEntryRectangle = extern struct {
-    entity_basis: RenderEntityBasis,
+    position: Vector2,
     dimension: Vector2 = Vector2.zero(),
     color: Color,
 };
@@ -117,14 +108,22 @@ pub const RenderEntryCoordinateSystem = extern struct {
     texture: *LoadedBitmap,
     normal_map: ?*LoadedBitmap,
 
+    pixels_to_meters: f32,
+
     top: *EnvironmentMap,
     middle: *EnvironmentMap,
     bottom: *EnvironmentMap,
 };
 
-const RenderGroupCamera = extern struct {
+const RenderTransform = extern struct {
+    meters_to_pixels: f32,
+    screen_center: Vector2,
+
     focal_length: f32,
     distance_above_target: f32,
+
+    offset_position: Vector3,
+    scale: f32,
 };
 
 const TileRenderWork = struct {
@@ -141,15 +140,38 @@ pub fn doTileRenderWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) call
     work.group.renderTo(work.output_target, work.clip_rect, false);
 }
 
+fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: Vector3) RenderEntityBasisResult {
+    var result = RenderEntityBasisResult{};
+
+    const position = original_position.xy().toVector3(0).plus(transform.offset_position);
+    const offset_z: f32 = 0;
+    var distance_above_target = transform.distance_above_target;
+    if (false) {
+        // TODO: How do we want to control the debug camera?
+        distance_above_target += 50;
+    }
+
+    const distance_to_position_z = distance_above_target - position.z();
+    const near_clip_plane = 0.2;
+
+    const raw_xy = position.xy().toVector3(1);
+
+    if (distance_to_position_z > near_clip_plane) {
+        const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * transform.focal_length);
+        result.scale = projected_xy.z() * transform.meters_to_pixels;
+        result.position = transform.screen_center.plus(projected_xy.xy().scaledTo(transform.meters_to_pixels))
+            .plus(Vector2.new(0, result.scale * offset_z));
+        result.valid = true;
+    }
+
+    return result;
+}
+
 pub const RenderGroup = extern struct {
-    game_camera: RenderGroupCamera,
-    render_camera: RenderGroupCamera,
-    meters_to_pixels: f32,
+    global_alpha: f32,
     monitor_half_dim_in_meters: Vector2,
 
-    global_alpha: f32,
-
-    default_basis: *RenderBasis,
+    transform: RenderTransform,
 
     max_push_buffer_size: u32,
     push_buffer_size: u32,
@@ -166,25 +188,26 @@ pub const RenderGroup = extern struct {
         result.max_push_buffer_size = max_push_buffer_size;
         result.push_buffer_size = 0;
         result.push_buffer_base = @ptrCast(arena.pushSize(result.max_push_buffer_size, @alignOf(u8)));
-        result.default_basis = arena.pushStruct(RenderBasis);
-        result.default_basis.position = Vector3.zero();
 
+        result.global_alpha = 1;
         const width_of_monitor_in_meters = 0.635;
-        result.game_camera.focal_length = 0.6;
-        result.game_camera.distance_above_target = 9.0;
-
-        result.render_camera = result.game_camera;
-        // result.render_camera.distance_above_target = 50.0;
-
-        result.meters_to_pixels = @as(f32, @floatFromInt(resolution_pixels_x)) * width_of_monitor_in_meters;
-
-        const pixels_to_meters = 1.0 / result.meters_to_pixels;
+        const meters_to_pixels: f32 = @as(f32, @floatFromInt(resolution_pixels_x)) * width_of_monitor_in_meters;
+        const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
         result.monitor_half_dim_in_meters = Vector2.new(
             0.5 * @as(f32, @floatFromInt(resolution_pixels_x)) * pixels_to_meters,
             0.5 * @as(f32, @floatFromInt(resolution_pixels_y)) * pixels_to_meters,
         );
 
-        result.global_alpha = 1;
+        // Default transform.
+        result.transform.meters_to_pixels = meters_to_pixels;
+        result.transform.screen_center = Vector2.new(
+            0.5 * @as(f32, @floatFromInt(resolution_pixels_x)),
+            0.5 * @as(f32, @floatFromInt(resolution_pixels_y)),
+        );
+        result.transform.focal_length = 0.6;
+        result.transform.distance_above_target = 9.0;
+        result.transform.offset_position = Vector3.zero();
+        result.transform.scale = 1;
 
         return result;
     }
@@ -221,34 +244,9 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-    fn getRenderEntityBasisPosition(
-        self: *RenderGroup,
-        entity_basis: *RenderEntityBasis,
-        screen_dimension: Vector2,
-    ) RenderEntityBasisResult {
-        var result = RenderEntityBasisResult{};
-
-        const screen_center = screen_dimension.scaledTo(0.5);
-        const entity_base_position = entity_basis.basis.position;
-
-        const distance_to_position_z = self.render_camera.distance_above_target - entity_base_position.z();
-        const near_clip_plane = 0.2;
-
-        const raw_xy = entity_base_position.xy().plus(entity_basis.offset.xy()).toVector3(1);
-
-        if (distance_to_position_z > near_clip_plane) {
-            const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * self.render_camera.focal_length);
-            result.position = screen_center.plus(projected_xy.xy().scaledTo(self.meters_to_pixels));
-            result.scale = projected_xy.z() * self.meters_to_pixels;
-            result.valid = true;
-        }
-
-        return result;
-    }
-
     // Renderer API.
     pub fn unproject(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
-        return projected_xy.scaledTo(distance_from_camera / self.game_camera.focal_length);
+        return projected_xy.scaledTo(distance_from_camera / self.transform.focal_length);
     }
 
     pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle2 {
@@ -257,7 +255,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn getCameraRectangleAtTarget(self: *RenderGroup) Rectangle2 {
-        return self.getCameraRectangleAtDistance(self.game_camera.distance_above_target);
+        return self.getCameraRectangleAtDistance(self.transform.distance_above_target);
     }
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
@@ -279,13 +277,18 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
     ) void {
-        if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
-            entry.bitmap = bitmap;
-            entry.entity_basis.basis = self.default_basis;
-            entry.size = Vector2.new(height * bitmap.width_over_height, height);
-            const alignment = bitmap.alignment_percentage.hadamardProduct(entry.size);
-            entry.entity_basis.offset = offset.minus(alignment.toVector3(0));
-            entry.color = color.scaledTo(self.global_alpha);
+        const size = Vector2.new(height * bitmap.width_over_height, height);
+        const alignment = bitmap.alignment_percentage.hadamardProduct(size);
+        const position = offset.minus(alignment.toVector3(0));
+
+        const basis = getRenderEntityBasisPosition(&self.transform, position);
+        if (basis.valid) {
+            if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
+                entry.bitmap = bitmap;
+                entry.position = basis.position;
+                entry.size = size.scaledTo(basis.scale);
+                entry.color = color.scaledTo(self.global_alpha);
+            }
         }
     }
 
@@ -295,11 +298,15 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
     ) void {
-        if (self.pushRenderElement(RenderEntryRectangle)) |entry| {
-            entry.entity_basis.basis = self.default_basis;
-            entry.entity_basis.offset = offset.minus(dimension.scaledTo(0.5).toVector3(0));
-            entry.color = color;
-            entry.dimension = dimension;
+        const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
+
+        const basis = getRenderEntityBasisPosition(&self.transform, position);
+        if (basis.valid) {
+            if (self.pushRenderElement(RenderEntryRectangle)) |entry| {
+                entry.position = basis.position;
+                entry.dimension = dimension.scaledTo(basis.scale);
+                entry.color = color;
+            }
         }
     }
 
@@ -344,24 +351,32 @@ pub const RenderGroup = extern struct {
         top: *EnvironmentMap,
         middle: *EnvironmentMap,
         bottom: *EnvironmentMap,
-    ) ?*RenderEntryCoordinateSystem {
-        var result: ?*RenderEntryCoordinateSystem = null;
-
-        if (self.pushRenderElement(RenderEntryCoordinateSystem)) |entry| {
-            entry.origin = origin;
-            entry.x_axis = x_axis;
-            entry.y_axis = y_axis;
-            entry.color = color;
-            entry.texture = texture;
-            entry.normal_map = normal_map;
-            entry.top = top;
-            entry.middle = middle;
-            entry.bottom = bottom;
-
-            result = @alignCast(entry);
-        }
-
-        return result;
+    ) void {
+        _ = self;
+        _ = origin;
+        _ = x_axis;
+        _ = y_axis;
+        _ = color;
+        _ = texture;
+        _ = normal_map;
+        _ = top;
+        _ = middle;
+        _ = bottom;
+        // const basis = getRenderEntityBasisPosition(&entry.entity_basis, screen_dimension);
+        //
+        // if (basis.valid) {
+        //     if (self.pushRenderElement(RenderEntryCoordinateSystem)) |entry| {
+        //         entry.origin = origin;
+        //         entry.x_axis = x_axis;
+        //         entry.y_axis = y_axis;
+        //         entry.color = color;
+        //         entry.texture = texture;
+        //         entry.normal_map = normal_map;
+        //         entry.top = top;
+        //         entry.middle = middle;
+        //         entry.bottom = bottom;
+        //     }
+        // }
     }
 
     pub fn tiledRenderTo(
@@ -370,6 +385,13 @@ pub const RenderGroup = extern struct {
         render_queue: *shared.PlatformWorkQueue,
         output_target: *LoadedBitmap,
     ) void {
+        // TODO
+        // * Make sure that tiles are all cache-aligned.
+        // * Can we get hyperthreads synced so they do interleaved lines?
+        // * How big should the tiles be for performance?
+        // * Actually ballpark the memory bandwith for drawRectangleQuickly.
+        // * Re-test some of our instruction choices.
+
         const tile_count_x = 4;
         const tile_count_y = 4;
         const work_count = tile_count_x * tile_count_y;
@@ -424,11 +446,7 @@ pub const RenderGroup = extern struct {
         shared.beginTimedBlock(.RenderGrouptToOutput);
         defer shared.endTimedBlock(.RenderGrouptToOutput);
 
-        const screen_dimension = Vector2.new(
-            @as(f32, @floatFromInt(output_target.width)),
-            @as(f32, @floatFromInt(output_target.height)),
-        );
-        const pixels_to_meters: f32 = 1.0 / self.meters_to_pixels;
+        const null_pixels_to_meters: f32 = 1.0;
 
         var base_address: u32 = 0;
         while (base_address < self.push_buffer_size) {
@@ -467,38 +485,32 @@ pub const RenderGroup = extern struct {
                 .RenderEntryBitmap => {
                     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                     if (entry.bitmap) |bitmap| {
-                        const basis = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_dimension);
-
                         if (false) {
-                            drawBitmap(output_target, bitmap, basis.position.x(), basis.position.y(), entry.color.a());
+                            drawRectangleSlowly(
+                                output_target,
+                                entry.position,
+                                Vector2.new(entry.size.x(), 0),
+                                Vector2.new(0, entry.size.y()),
+                                entry.color,
+                                @constCast(bitmap),
+                                null,
+                                undefined,
+                                undefined,
+                                undefined,
+                                null_pixels_to_meters,
+                            );
                         } else {
-                            if (false) {
-                                drawRectangleSlowly(
-                                    output_target,
-                                    basis.position,
-                                    Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
-                                    Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
-                                    entry.color,
-                                    @constCast(bitmap),
-                                    null,
-                                    undefined,
-                                    undefined,
-                                    undefined,
-                                    pixels_to_meters,
-                                );
-                            } else {
-                                drawRectangleQuickly(
-                                    output_target,
-                                    basis.position,
-                                    Vector2.new(entry.size.x(), 0).scaledTo(basis.scale),
-                                    Vector2.new(0, entry.size.y()).scaledTo(basis.scale),
-                                    entry.color,
-                                    @constCast(bitmap),
-                                    pixels_to_meters,
-                                    clip_rect,
-                                    even,
-                                );
-                            }
+                            drawRectangleQuickly(
+                                output_target,
+                                entry.position,
+                                Vector2.new(entry.size.x(), 0),
+                                Vector2.new(0, entry.size.y()),
+                                entry.color,
+                                @constCast(bitmap),
+                                null_pixels_to_meters,
+                                clip_rect,
+                                even,
+                            );
                         }
                     }
 
@@ -506,12 +518,11 @@ pub const RenderGroup = extern struct {
                 },
                 .RenderEntryRectangle => {
                     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
-                    const basis = self.getRenderEntityBasisPosition(&entry.entity_basis, screen_dimension);
 
                     drawRectangle(
                         output_target,
-                        basis.position,
-                        basis.position.plus(entry.dimension.scaledTo(basis.scale)),
+                        entry.position,
+                        entry.position.plus(entry.dimension),
                         entry.color,
                         clip_rect,
                         even,
@@ -534,7 +545,7 @@ pub const RenderGroup = extern struct {
                     //     entry.top,
                     //     entry.middle,
                     //     entry.bottom,
-                    //     pixels_to_meters,
+                    //     null_pixels_to_meters,
                     // );
                     //
                     // const color = Color.new(1, 1, 0, 1);
@@ -572,8 +583,8 @@ pub fn drawRectangle(
     var fill_rect = Rectangle2i.new(
         intrinsics.floorReal32ToInt32(min.x()),
         intrinsics.floorReal32ToInt32(min.y()),
-        intrinsics.floorReal32ToInt32(max.x() + 2), // TODO: These magic numbers shouldn't be needed.
-        intrinsics.floorReal32ToInt32(max.y() + 2),
+        intrinsics.floorReal32ToInt32(max.x()),
+        intrinsics.floorReal32ToInt32(max.y()),
     );
     fill_rect = fill_rect.getIntersectionWith(clip_rect);
     if (@intFromBool(!even) == fill_rect.min.y() & 1) {
