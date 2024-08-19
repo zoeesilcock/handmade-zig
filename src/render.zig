@@ -645,11 +645,11 @@ pub fn drawRectangleQuickly(
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
 
-    const mask_ffffffff: @Vector(4, u32) = @splat(0xFFFFFFFF);
-    const one: @Vector(4, f32) = @splat(1);
-    const two: @Vector(4, f32) = @splat(2);
-    const three: @Vector(4, f32) = @splat(3);
-    const four: @Vector(4, f32) = @splat(4);
+    const mask_ffffffff: Vec4u = @splat(0xFFFFFFFF);
+    const one: Vec4f = @splat(1);
+    const two: Vec4f = @splat(2);
+    const three: Vec4f = @splat(3);
+    const four: Vec4f = @splat(4);
     const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
     const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
     const points: [4]Vector2 = .{
@@ -692,14 +692,14 @@ pub fn drawRectangleQuickly(
         var start_clip_mask = mask_ffffffff;
         var end_clip_mask = mask_ffffffff;
 
-        const start_clip_masks: [4]@Vector(4, u32) = .{
+        const start_clip_masks: [4]Vec4u = .{
             start_clip_mask,
             start_clip_mask << one * four,
             start_clip_mask << two * four,
             start_clip_mask << three * four,
         };
 
-        const end_clip_masks: [4]@Vector(4, u32) = .{
+        const end_clip_masks: [4]Vec4u = .{
             end_clip_mask,
             end_clip_mask >> three * four,
             end_clip_mask >> two * four,
@@ -723,33 +723,33 @@ pub fn drawRectangleQuickly(
 
         const texture_pitch: u32 = @intCast(texture.pitch);
         const texture_memory = texture.memory.?;
-        const texture_pitch_4x: @Vector(4, u32) = @splat(texture_pitch);
-        const inv_255: @Vector(4, f32) = @splat(1.0 / 255.0);
-        const max_color_value: @Vector(4, f32) = @splat(255.0 * 255.0);
-        const color_r: @Vector(4, f32) = @splat(color.r());
-        const color_g: @Vector(4, f32) = @splat(color.g());
-        const color_b: @Vector(4, f32) = @splat(color.b());
-        const color_a: @Vector(4, f32) = @splat(color.a());
-        const one_255: @Vector(4, f32) = @splat(255.0);
-        const zero: @Vector(4, f32) = @splat(0);
-        const half: @Vector(4, f32) = @splat(0.5);
-        const zero_to_three: @Vector(4, f32) = .{ 0, 1, 2, 3 };
-        const shift_24: @Vector(4, u32) = @splat(24);
-        const shift_16: @Vector(4, u32) = @splat(16);
-        const shift_8: @Vector(4, u32) = @splat(8);
-        const shift_2: @Vector(4, u32) = @splat(2);
-        const mask_ff: @Vector(4, u32) = @splat(0xFF);
-        const width_m2: @Vector(4, f32) = @splat(@floatFromInt(texture.width - 2));
-        const height_m2: @Vector(4, f32) = @splat(@floatFromInt(texture.height - 2));
+        const texture_pitch_4x: Vec4u = @splat(texture_pitch);
+        const inv_255: Vec4f = @splat(1.0 / 255.0);
+        const max_color_value: Vec4f = @splat(255.0 * 255.0);
+        const color_r: Vec4f = @splat(color.r());
+        const color_g: Vec4f = @splat(color.g());
+        const color_b: Vec4f = @splat(color.b());
+        const color_a: Vec4f = @splat(color.a());
+        const one_255: Vec4f = @splat(255.0);
+        const zero: Vec4f = @splat(0);
+        const half: Vec4f = @splat(0.5);
+        const zero_to_three: Vec4f = .{ 0, 1, 2, 3 };
+        const shift_24: Vec4u = @splat(24);
+        const shift_16: Vec4u = @splat(16);
+        const shift_8: Vec4u = @splat(8);
+        const shift_2: Vec4u = @splat(2);
+        const mask_ff: Vec4u = @splat(0xFF);
+        const width_m2: Vec4f = @splat(@floatFromInt(texture.width - 2));
+        const height_m2: Vec4f = @splat(@floatFromInt(texture.height - 2));
 
         const n_x_axis = x_axis.scaledTo(inv_x_axis_length_squared);
         const n_y_axis = y_axis.scaledTo(inv_y_axis_length_squared);
-        const n_x_axis_x: @Vector(4, f32) = @splat(n_x_axis.x());
-        const n_x_axis_y: @Vector(4, f32) = @splat(n_x_axis.y());
-        const n_y_axis_x: @Vector(4, f32) = @splat(n_y_axis.x());
-        const n_y_axis_y: @Vector(4, f32) = @splat(n_y_axis.y());
-        const origin_x: @Vector(4, f32) = @splat(origin.x());
-        const origin_y: @Vector(4, f32) = @splat(origin.y());
+        const n_x_axis_x: Vec4f = @splat(n_x_axis.x());
+        const n_x_axis_y: Vec4f = @splat(n_x_axis.y());
+        const n_y_axis_x: Vec4f = @splat(n_y_axis.x());
+        const n_y_axis_y: Vec4f = @splat(n_y_axis.y());
+        const origin_x: Vec4f = @splat(origin.x());
+        const origin_y: Vec4f = @splat(origin.y());
 
         const row_advance: usize = @intCast(draw_buffer.pitch * 2);
         var row: [*]u8 = @ptrCast(draw_buffer.memory);
@@ -760,10 +760,10 @@ pub fn drawRectangleQuickly(
         var y: i32 = min_y;
         while (y < max_y) : (y += 2) {
             var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
-            var pixel_position_x: @Vector(4, f32) =
-                @as(@Vector(4, f32), @splat(@floatFromInt(min_x))) - origin_x + zero_to_three;
-            const pixel_position_y: @Vector(4, f32) = @as(@Vector(4, f32), @splat(@floatFromInt(y))) - origin_y;
-            var clip_mask: @Vector(4, u32) = start_clip_mask;
+            var pixel_position_x: Vec4f =
+                @as(Vec4f, @splat(@floatFromInt(min_x))) - origin_x + zero_to_three;
+            const pixel_position_y: Vec4f = @as(Vec4f, @splat(@floatFromInt(y))) - origin_y;
+            var clip_mask: Vec4u = start_clip_mask;
 
             var xi: i32 = min_x;
             while (xi < max_x) : (xi += 4) {
@@ -771,8 +771,8 @@ pub fn drawRectangleQuickly(
                 var u = pixel_position_x * n_x_axis_x + pixel_position_y * n_x_axis_y;
                 var v = pixel_position_x * n_y_axis_x + pixel_position_y * n_y_axis_y;
 
-                const original_dest: @Vector(4, u32) = @as(*align(@alignOf(u32)) @Vector(4, u32), @ptrCast(@alignCast(pixel))).*;
-                var write_mask: @Vector(4, u32) =
+                const original_dest: Vec4u = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(pixel))).*;
+                var write_mask: Vec4u =
                     (@intFromBool(u >= zero) & @intFromBool(u <= one) & @intFromBool(v >= zero) & @intFromBool(v <= one)) * mask_ffffffff;
                 write_mask = write_mask & clip_mask;
 
@@ -782,14 +782,14 @@ pub fn drawRectangleQuickly(
                 v = @max(zero, v);
                 v = @min(one, v);
 
-                const texel_x: @Vector(4, f32) = u * width_m2;
-                const texel_y: @Vector(4, f32) = v * height_m2;
-                var texel_rounded_x: @Vector(4, u32) = @intFromFloat(texel_x + half);
-                var texel_rounded_y: @Vector(4, u32) = @intFromFloat(texel_y + half);
+                const texel_x: Vec4f = u * width_m2;
+                const texel_y: Vec4f = v * height_m2;
+                var texel_rounded_x: Vec4u = @intFromFloat(texel_x + half);
+                var texel_rounded_y: Vec4u = @intFromFloat(texel_y + half);
 
                 // Prepare for bilinear texture blend.
-                const fx = texel_x - @as(@Vector(4, f32), @floatFromInt(texel_rounded_x));
-                const fy = texel_y - @as(@Vector(4, f32), @floatFromInt(texel_rounded_y));
+                const fx = texel_x - @as(Vec4f, @floatFromInt(texel_rounded_x));
+                const fy = texel_y - @as(Vec4f, @floatFromInt(texel_rounded_y));
                 const ifx = one - fx;
                 const ify = one - fy;
                 const l0 = ify * ifx;
@@ -806,25 +806,25 @@ pub fn drawRectangleQuickly(
                 const texel_pointer2 = texture_memory + @as(u32, @intCast(texel_offsets[2]));
                 const texel_pointer3 = texture_memory + @as(u32, @intCast(texel_offsets[3]));
 
-                const sample_a: @Vector(4, u32) = .{
+                const sample_a: Vec4u = .{
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer0))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer1))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer2))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer3))).*,
                 };
-                const sample_b: @Vector(4, u32) = .{
+                const sample_b: Vec4u = .{
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer0 + @sizeOf(u32)))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer1 + @sizeOf(u32)))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer2 + @sizeOf(u32)))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer3 + @sizeOf(u32)))).*,
                 };
-                const sample_c: @Vector(4, u32) = .{
+                const sample_c: Vec4u = .{
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer0 + texture_pitch))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer1 + texture_pitch))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer2 + texture_pitch))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer3 + texture_pitch))).*,
                 };
-                const sample_d: @Vector(4, u32) = .{
+                const sample_d: Vec4u = .{
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer0 + @sizeOf(u32) + texture_pitch))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer1 + @sizeOf(u32) + texture_pitch))).*,
                     @as(*align(@alignOf(u8)) u32, @ptrCast(@alignCast(texel_pointer2 + @sizeOf(u32) + texture_pitch))).*,
@@ -832,31 +832,31 @@ pub fn drawRectangleQuickly(
                 };
 
                 // Load the source.
-                var texel_a_r: @Vector(4, f32) = @floatFromInt((sample_a >> shift_16) & mask_ff);
-                var texel_a_g: @Vector(4, f32) = @floatFromInt((sample_a >> shift_8) & mask_ff);
-                var texel_a_b: @Vector(4, f32) = @floatFromInt((sample_a) & mask_ff);
-                const texel_a_a: @Vector(4, f32) = @floatFromInt((sample_a >> shift_24) & mask_ff);
+                var texel_a_r: Vec4f = @floatFromInt((sample_a >> shift_16) & mask_ff);
+                var texel_a_g: Vec4f = @floatFromInt((sample_a >> shift_8) & mask_ff);
+                var texel_a_b: Vec4f = @floatFromInt((sample_a) & mask_ff);
+                const texel_a_a: Vec4f = @floatFromInt((sample_a >> shift_24) & mask_ff);
 
-                var texel_b_r: @Vector(4, f32) = @floatFromInt((sample_b >> shift_16) & mask_ff);
-                var texel_b_g: @Vector(4, f32) = @floatFromInt((sample_b >> shift_8) & mask_ff);
-                var texel_b_b: @Vector(4, f32) = @floatFromInt((sample_b) & mask_ff);
-                const texel_b_a: @Vector(4, f32) = @floatFromInt((sample_b >> shift_24) & mask_ff);
+                var texel_b_r: Vec4f = @floatFromInt((sample_b >> shift_16) & mask_ff);
+                var texel_b_g: Vec4f = @floatFromInt((sample_b >> shift_8) & mask_ff);
+                var texel_b_b: Vec4f = @floatFromInt((sample_b) & mask_ff);
+                const texel_b_a: Vec4f = @floatFromInt((sample_b >> shift_24) & mask_ff);
 
-                var texel_c_r: @Vector(4, f32) = @floatFromInt((sample_c >> shift_16) & mask_ff);
-                var texel_c_g: @Vector(4, f32) = @floatFromInt((sample_c >> shift_8) & mask_ff);
-                var texel_c_b: @Vector(4, f32) = @floatFromInt((sample_c) & mask_ff);
-                const texel_c_a: @Vector(4, f32) = @floatFromInt((sample_c >> shift_24) & mask_ff);
+                var texel_c_r: Vec4f = @floatFromInt((sample_c >> shift_16) & mask_ff);
+                var texel_c_g: Vec4f = @floatFromInt((sample_c >> shift_8) & mask_ff);
+                var texel_c_b: Vec4f = @floatFromInt((sample_c) & mask_ff);
+                const texel_c_a: Vec4f = @floatFromInt((sample_c >> shift_24) & mask_ff);
 
-                var texel_d_r: @Vector(4, f32) = @floatFromInt((sample_d >> shift_16) & mask_ff);
-                var texel_d_g: @Vector(4, f32) = @floatFromInt((sample_d >> shift_8) & mask_ff);
-                var texel_d_b: @Vector(4, f32) = @floatFromInt((sample_d) & mask_ff);
-                const texel_d_a: @Vector(4, f32) = @floatFromInt((sample_d >> shift_24) & mask_ff);
+                var texel_d_r: Vec4f = @floatFromInt((sample_d >> shift_16) & mask_ff);
+                var texel_d_g: Vec4f = @floatFromInt((sample_d >> shift_8) & mask_ff);
+                var texel_d_b: Vec4f = @floatFromInt((sample_d) & mask_ff);
+                const texel_d_a: Vec4f = @floatFromInt((sample_d >> shift_24) & mask_ff);
 
                 // Load destination.
-                var dest_r: @Vector(4, f32) = @floatFromInt((original_dest >> shift_16) & mask_ff);
-                var dest_g: @Vector(4, f32) = @floatFromInt((original_dest >> shift_8) & mask_ff);
-                var dest_b: @Vector(4, f32) = @floatFromInt((original_dest) & mask_ff);
-                const dest_a: @Vector(4, f32) = @floatFromInt((original_dest >> shift_24) & mask_ff);
+                var dest_r: Vec4f = @floatFromInt((original_dest >> shift_16) & mask_ff);
+                var dest_g: Vec4f = @floatFromInt((original_dest >> shift_8) & mask_ff);
+                var dest_b: Vec4f = @floatFromInt((original_dest) & mask_ff);
+                const dest_a: Vec4f = @floatFromInt((original_dest >> shift_24) & mask_ff);
 
                 // Convert texture from sRGB to linear brightness space.
                 texel_a_r = math.square_v4(texel_a_r);
@@ -904,25 +904,25 @@ pub fn drawRectangleQuickly(
 
                 // Destination blend.
                 const inv_texel_a = one - (inv_255 * texela);
-                var blended_r: @Vector(4, f32) = dest_r * inv_texel_a + texelr;
-                var blended_g: @Vector(4, f32) = dest_g * inv_texel_a + texelg;
-                var blended_b: @Vector(4, f32) = dest_b * inv_texel_a + texelb;
-                const blended_a: @Vector(4, f32) = dest_a * inv_texel_a + texela;
+                var blended_r: Vec4f = dest_r * inv_texel_a + texelr;
+                var blended_g: Vec4f = dest_g * inv_texel_a + texelg;
+                var blended_b: Vec4f = dest_b * inv_texel_a + texelb;
+                const blended_a: Vec4f = dest_a * inv_texel_a + texela;
 
                 // Go from linear brightness space to sRGB.
                 blended_r = @sqrt(blended_r);
                 blended_g = @sqrt(blended_g);
                 blended_b = @sqrt(blended_b);
 
-                const int_r: @Vector(4, u32) = @intFromFloat(blended_r);
-                const int_g: @Vector(4, u32) = @intFromFloat(blended_g);
-                const int_b: @Vector(4, u32) = @intFromFloat(blended_b);
-                const int_a: @Vector(4, u32) = @intFromFloat(blended_a);
+                const int_r: Vec4u = @intFromFloat(blended_r);
+                const int_g: Vec4u = @intFromFloat(blended_g);
+                const int_b: Vec4u = @intFromFloat(blended_b);
+                const int_a: Vec4u = @intFromFloat(blended_a);
 
-                const out: @Vector(4, u32) = int_r << shift_16 | int_g << shift_8 | int_b | int_a << shift_24;
-                const masked_out: @Vector(4, u32) = (write_mask & out) | (~write_mask & original_dest);
+                const out: Vec4u = int_r << shift_16 | int_g << shift_8 | int_b | int_a << shift_24;
+                const masked_out: Vec4u = (write_mask & out) | (~write_mask & original_dest);
 
-                const pixels = @as(*align(@alignOf(u32)) @Vector(4, u32), @ptrCast(@alignCast(pixel)));
+                const pixels = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(pixel)));
                 pixels.* = masked_out;
 
                 pixel += 4;
