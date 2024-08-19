@@ -482,6 +482,12 @@ pub export fn updateAndRender(
     };
     const draw_buffer = &draw_buffer_;
 
+    if (false) {
+        // Enable this to test weird buffer sizes in the renderer.
+        draw_buffer.width = 1279;
+        draw_buffer.height = 719;
+    }
+
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
     var render_group = RenderGroup.allocate(

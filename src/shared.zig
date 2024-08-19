@@ -59,6 +59,10 @@ pub inline fn rdtsc() u64 {
     return (@as(u64, hi) << 32) | @as(u64, low);
 }
 
+pub inline fn align16(value: u32) u32 {
+    return (value + 15) & ~@as(u32, 15);
+}
+
 // Platform.
 pub const PlatformWorkQueueCallback = *const fn (queue: *PlatformWorkQueue, data: *anyopaque) callconv(.C) void;
 

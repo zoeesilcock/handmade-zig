@@ -775,9 +775,9 @@ fn resizeDIBSection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
         .bmiColors = undefined,
     };
 
-    const bitmap_memory_size: usize = @intCast((buffer.width * buffer.height) * BYTES_PER_PIXEL);
+    buffer.pitch = shared.align16(@intCast(buffer.width * BYTES_PER_PIXEL));
+    const bitmap_memory_size: usize = @intCast((@as(i32, @intCast(buffer.pitch)) * buffer.height) + 1);
     buffer.memory = win32.VirtualAlloc(null, bitmap_memory_size, win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 }, win32.PAGE_READWRITE);
-    buffer.pitch = @intCast(buffer.width * BYTES_PER_PIXEL);
 }
 
 fn getGameBuffer() shared.OffscreenBuffer {
@@ -1177,8 +1177,6 @@ pub fn addQueueEntry(queue: *shared.PlatformWorkQueue, callback: shared.Platform
     entry.data = data;
     entry.callback = callback;
     _ = @atomicRmw(u32, &queue.completion_goal, .Add, 1, .monotonic);
-
-    @fence(std.builtin.AtomicOrder.release);
 
     @atomicStore(u32, &queue.next_entry_to_write, new_next_entry_to_write, .release);
     _ = win32.ReleaseSemaphore(queue.semaphore_handle, 1, null);

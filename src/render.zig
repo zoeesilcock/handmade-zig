@@ -379,8 +379,12 @@ pub const RenderGroup = extern struct {
             .clip_rect = undefined,
         }} ** work_count;
 
-        const tile_width = @divFloor(output_target.width, tile_count_x);
+        std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
+
+        var tile_width = @divFloor(output_target.width, tile_count_x);
         const tile_height = @divFloor(output_target.height, tile_count_y);
+
+        tile_width = @divFloor(tile_width + 3, 4) * 4;
 
         var work_index: u32 = 0;
         var tile_y: i32 = 0;
@@ -391,14 +395,25 @@ pub const RenderGroup = extern struct {
                 work_index += 1;
 
                 var clip_rect = Rectangle2i.zero();
-                _ = clip_rect.min.setX(tile_x * tile_width + 4);
-                _ = clip_rect.min.setY(tile_y * tile_height + 4);
-                _ = clip_rect.max.setX(clip_rect.min.x() + tile_width - 4);
-                _ = clip_rect.max.setY(clip_rect.min.y() + tile_height - 4);
+                _ = clip_rect.min.setX(tile_x * tile_width);
+                _ = clip_rect.min.setY(tile_y * tile_height);
+                _ = clip_rect.max.setX(clip_rect.min.x() + tile_width);
+                _ = clip_rect.max.setY(clip_rect.min.y() + tile_height);
+
+                if (tile_x == (tile_count_x - 1)) {
+                    _ = clip_rect.max.setX(output_target.width);
+                }
+                if (tile_y == (tile_count_y - 1)) {
+                    _ = clip_rect.max.setY(output_target.height);
+                }
 
                 work.clip_rect = clip_rect;
 
-                platform.addQueueEntry(render_queue, &doTileRenderWork, work);
+                if (true) {
+                    platform.addQueueEntry(render_queue, &doTileRenderWork, work);
+                } else {
+                    doTileRenderWork(render_queue, work);
+                }
             }
         }
 
@@ -630,6 +645,11 @@ pub fn drawRectangleQuickly(
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
 
+    const mask_ffffffff: @Vector(4, u32) = @splat(0xFFFFFFFF);
+    const one: @Vector(4, f32) = @splat(1);
+    const two: @Vector(4, f32) = @splat(2);
+    const three: @Vector(4, f32) = @splat(3);
+    const four: @Vector(4, f32) = @splat(4);
     const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
     const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
     const points: [4]Vector2 = .{
@@ -669,17 +689,31 @@ pub fn drawRectangleQuickly(
     }
 
     if (fill_rect.hasArea()) {
-        const mask_ffffffff: @Vector(4, u32) = @splat(0xFFFFFFFF);
-        var startup_clip_mask = mask_ffffffff;
-        var fill_width = fill_rect.max.x() - fill_rect.min.x();
-        const fill_width_alignment = fill_width & 3;
-        if (fill_width_alignment > 0) {
-            const adjustment = (4 - fill_width_alignment);
-            fill_width += adjustment;
-            _ = fill_rect.min.setX(fill_rect.max.x() - fill_width);
-            for (0..@intCast(adjustment)) |i| {
-                startup_clip_mask[i] = 0;
-            }
+        var start_clip_mask = mask_ffffffff;
+        var end_clip_mask = mask_ffffffff;
+
+        const start_clip_masks: [4]@Vector(4, u32) = .{
+            start_clip_mask,
+            start_clip_mask << one * four,
+            start_clip_mask << two * four,
+            start_clip_mask << three * four,
+        };
+
+        const end_clip_masks: [4]@Vector(4, u32) = .{
+            end_clip_mask,
+            end_clip_mask >> three * four,
+            end_clip_mask >> two * four,
+            end_clip_mask >> one * four,
+        };
+
+        if (fill_rect.min.x() & 3 == 1) {
+            start_clip_mask = start_clip_masks[@intCast(fill_rect.min.x() & 3)];
+            _ = fill_rect.min.setX(fill_rect.min.x() & ~@as(i32, @intCast(3)));
+        }
+
+        if (fill_rect.max.x() & 3 == 1) {
+            end_clip_mask = end_clip_masks[@intCast(fill_rect.max.x() & 3)];
+            _ = fill_rect.max.setX((fill_rect.max.x() & ~@as(i32, @intCast(3))) + 4);
         }
 
         const min_x = fill_rect.min.x();
@@ -697,8 +731,6 @@ pub fn drawRectangleQuickly(
         const color_b: @Vector(4, f32) = @splat(color.b());
         const color_a: @Vector(4, f32) = @splat(color.a());
         const one_255: @Vector(4, f32) = @splat(255.0);
-        const four: @Vector(4, f32) = @splat(4);
-        const one: @Vector(4, f32) = @splat(1);
         const zero: @Vector(4, f32) = @splat(0);
         const half: @Vector(4, f32) = @splat(0.5);
         const zero_to_three: @Vector(4, f32) = .{ 0, 1, 2, 3 };
@@ -731,7 +763,7 @@ pub fn drawRectangleQuickly(
             var pixel_position_x: @Vector(4, f32) =
                 @as(@Vector(4, f32), @splat(@floatFromInt(min_x))) - origin_x + zero_to_three;
             const pixel_position_y: @Vector(4, f32) = @as(@Vector(4, f32), @splat(@floatFromInt(y))) - origin_y;
-            var clip_mask: @Vector(4, u32) = startup_clip_mask;
+            var clip_mask: @Vector(4, u32) = start_clip_mask;
 
             var xi: i32 = min_x;
             while (xi < max_x) : (xi += 4) {
@@ -895,7 +927,12 @@ pub fn drawRectangleQuickly(
 
                 pixel += 4;
                 pixel_position_x += four;
-                clip_mask = mask_ffffffff;
+
+                if ((xi + 8) < max_x) {
+                    clip_mask = mask_ffffffff;
+                } else {
+                    clip_mask = end_clip_mask;
+                }
 
                 asm volatile ("# LLVM-MCA-END ProcessPixel");
             }
