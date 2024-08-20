@@ -1167,6 +1167,36 @@ fn endInputPlayback(state: *Win32State) void {
     state.playback_handle = undefined;
 }
 
+fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: i32) void {
+    const initial_count = 0;
+    const opt_semaphore_handle = win32.CreateSemaphoreEx(null,
+        initial_count,
+        thread_count,
+        null,
+        0,
+        0x1F0003, // win32.SEMAPHORE_ALL_ACCESS,
+    );
+
+    if (opt_semaphore_handle) |semaphore_handle| {
+        queue.semaphore_handle = semaphore_handle;
+
+        var thread_index: u32 = 0;
+        while (thread_index < thread_count) : (thread_index += 1) {
+            var thread_id: std.os.windows.DWORD = undefined;
+            const thread_handle = win32.CreateThread(
+                null,
+                0,
+                threadProc,
+                @ptrCast(@constCast(queue)),
+                win32.THREAD_CREATE_RUN_IMMEDIATELY,
+                &thread_id,
+            );
+
+            _ = win32.CloseHandle(thread_handle);
+        }
+    }
+}
+
 pub fn addQueueEntry(queue: *shared.PlatformWorkQueue, callback: shared.PlatformWorkQueueCallback, data: *anyopaque,) callconv(.C) void {
     const original_next_entry_to_write = @atomicLoad(u32, &queue.next_entry_to_write, .acquire);
     const original_next_entry_to_read = @atomicLoad(u32, &queue.next_entry_to_read, .acquire);
@@ -1216,18 +1246,13 @@ pub fn doNextWorkQueueEntry(queue: *shared.PlatformWorkQueue) bool {
     return should_wait;
 }
 
-const ThreadInfo = struct {
-    logical_thread_index: u32,
-    queue: *shared.PlatformWorkQueue,
-};
-
 fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
     if (lp_parameter) |parameter| {
-        const thread_info: *ThreadInfo = @ptrCast(@alignCast(parameter));
+        const queue: *shared.PlatformWorkQueue = @ptrCast(@alignCast(parameter));
 
         while (true) {
-            if (doNextWorkQueueEntry(thread_info.queue)) {
-                _ = win32.WaitForSingleObjectEx(thread_info.queue.semaphore_handle, std.math.maxInt(u32), 0);
+            if (doNextWorkQueueEntry(queue)) {
+                _ = win32.WaitForSingleObjectEx(queue.semaphore_handle, std.math.maxInt(u32), 0);
             }
         }
     }
@@ -1261,63 +1286,35 @@ pub export fn wWinMain(
     var state = Win32State{};
     getExeFileName(&state);
 
-    const thread_count = 7;
-    const initial_count = 0;
-    const opt_semaphore_handle = win32.CreateSemaphoreEx(null,
-        initial_count,
-        thread_count,
-        null,
-        0,
-        0x1F0003, // win32.SEMAPHORE_ALL_ACCESS,
-    );
-    var queue = shared.PlatformWorkQueue{};
+    var high_priority_queue = shared.PlatformWorkQueue{};
+    makeQueue(&high_priority_queue, 6);
+    var low_priority_queue = shared.PlatformWorkQueue{};
+    makeQueue(&low_priority_queue, 2);
 
-    if (opt_semaphore_handle) |semaphore_handle| {
-        queue.semaphore_handle = semaphore_handle;
+    if (false) {
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A0")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A1")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A2")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A3")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A4")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A5")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A6")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A7")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A8")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A9")));
 
-        var thread_infos: [thread_count]ThreadInfo = [1]ThreadInfo{undefined} ** thread_count;
-        var thread_index: u32 = 0;
-        while (thread_index < thread_infos.len) : (thread_index += 1) {
-            thread_infos[thread_index] = ThreadInfo{
-                .queue = &queue,
-                .logical_thread_index = thread_index,
-            };
-            var thread_id: std.os.windows.DWORD = undefined;
-            const thread_handle = win32.CreateThread(
-                null,
-                0,
-                threadProc,
-                @ptrCast(@constCast(&thread_infos[thread_index])),
-                win32.THREAD_CREATE_RUN_IMMEDIATELY,
-                &thread_id,
-            );
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B0")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B1")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B2")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B3")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B4")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B5")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B6")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B7")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B8")));
+        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B9")));
 
-            _ = win32.CloseHandle(thread_handle);
-        }
-
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A0")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A1")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A2")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A3")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A4")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A5")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A6")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A7")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A8")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String A9")));
-
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B0")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B1")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B2")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B3")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B4")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B5")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B6")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B7")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B8")));
-        addQueueEntry(&queue, &doWorkerWork, @ptrCast(@constCast("String B9")));
-
-        completeAllQueuedWork(&queue);
+        completeAllQueuedWork(&high_priority_queue);
     }
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
@@ -1432,7 +1429,8 @@ pub export fn wWinMain(
                 .permanent_storage = null,
                 .transient_storage_size = shared.megabytes(256),
                 .transient_storage = null,
-                .high_priority_queue = &queue,
+                .high_priority_queue = &high_priority_queue,
+                .low_priority_queue = &low_priority_queue,
                 .counters = if (DEBUG) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 

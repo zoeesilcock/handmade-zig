@@ -247,6 +247,7 @@ fn GameMemory() type {
         transient_storage: ?[*]void,
 
         high_priority_queue: *PlatformWorkQueue,
+        low_priority_queue: *PlatformWorkQueue,
 
         counters: if (DEBUG) [DEBUG_CYCLE_COUNTERS_COUNT]DebugCycleCounter else void,
 
@@ -388,7 +389,8 @@ pub const TransientState = struct {
     ground_buffer_count: u32 = 0,
     ground_buffers: [*]GroundBuffer = undefined,
 
-    render_queue: *PlatformWorkQueue,
+    high_priority_queue: *PlatformWorkQueue,
+    low_priority_queue: *PlatformWorkQueue,
 
     env_map_width: i32,
     env_map_height: i32,
