@@ -717,12 +717,12 @@ pub fn drawRectangleQuickly(
             end_clip_mask >> one * four,
         };
 
-        if (fill_rect.min.x() & 3 == 1) {
+        if (fill_rect.min.x() & 3 != 0) {
             start_clip_mask = start_clip_masks[@intCast(fill_rect.min.x() & 3)];
             _ = fill_rect.min.setX(fill_rect.min.x() & ~@as(i32, @intCast(3)));
         }
 
-        if (fill_rect.max.x() & 3 == 1) {
+        if (fill_rect.max.x() & 3 != 0) {
             end_clip_mask = end_clip_masks[@intCast(fill_rect.max.x() & 3)];
             _ = fill_rect.max.setX((fill_rect.max.x() & ~@as(i32, @intCast(3))) + 4);
         }
