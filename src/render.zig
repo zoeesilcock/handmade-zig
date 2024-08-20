@@ -832,10 +832,11 @@ pub fn drawRectangleQuickly(
                 v = @max(zero, v);
                 v = @min(one, v);
 
-                const texel_x: Vec4f = u * width_m2;
-                const texel_y: Vec4f = v * height_m2;
-                var texel_rounded_x: Vec4u = @intFromFloat(texel_x + half);
-                var texel_rounded_y: Vec4u = @intFromFloat(texel_y + half);
+                // Bias texture coordinates to start on the boundary between the 0,0 and 1,1 pixels.
+                const texel_x: Vec4f = (u * width_m2) + half;
+                const texel_y: Vec4f = (v * height_m2) + half;
+                var texel_rounded_x: Vec4u = @intFromFloat(texel_x);
+                var texel_rounded_y: Vec4u = @intFromFloat(texel_y);
 
                 // Prepare for bilinear texture blend.
                 const fx = texel_x - @as(Vec4f, @floatFromInt(texel_rounded_x));
