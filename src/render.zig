@@ -116,6 +116,8 @@ pub const RenderEntryCoordinateSystem = extern struct {
 };
 
 const RenderTransform = extern struct {
+    orthographic: bool,
+
     meters_to_pixels: f32,
     screen_center: Vector2,
 
@@ -144,24 +146,31 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
     var result = RenderEntityBasisResult{};
 
     const position = original_position.xy().toVector3(0).plus(transform.offset_position);
-    const offset_z: f32 = 0;
-    var distance_above_target = transform.distance_above_target;
-    if (false) {
-        // TODO: How do we want to control the debug camera?
-        distance_above_target += 50;
-    }
 
-    const distance_to_position_z = distance_above_target - position.z();
-    const near_clip_plane = 0.2;
-
-    const raw_xy = position.xy().toVector3(1);
-
-    if (distance_to_position_z > near_clip_plane) {
-        const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * transform.focal_length);
-        result.scale = projected_xy.z() * transform.meters_to_pixels;
-        result.position = transform.screen_center.plus(projected_xy.xy().scaledTo(transform.meters_to_pixels))
-            .plus(Vector2.new(0, result.scale * offset_z));
+    if (transform.orthographic) {
+        result.position = transform.screen_center.plus(position.xy().scaledTo(transform.meters_to_pixels));
+        result.scale = transform.meters_to_pixels;
         result.valid = true;
+    } else {
+        const offset_z: f32 = 0;
+        var distance_above_target = transform.distance_above_target;
+        if (false) {
+            // TODO: How do we want to control the debug camera?
+            distance_above_target += 50;
+        }
+
+        const distance_to_position_z = distance_above_target - position.z();
+        const near_clip_plane = 0.2;
+
+        const raw_xy = position.xy().toVector3(1);
+
+        if (distance_to_position_z > near_clip_plane) {
+            const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * transform.focal_length);
+            result.scale = projected_xy.z() * transform.meters_to_pixels;
+            result.position = transform.screen_center.plus(projected_xy.xy().scaledTo(transform.meters_to_pixels))
+                .plus(Vector2.new(0, result.scale * offset_z));
+            result.valid = true;
+        }
     }
 
     return result;
@@ -180,8 +189,6 @@ pub const RenderGroup = extern struct {
     pub fn allocate(
         arena: *shared.MemoryArena,
         max_push_buffer_size: u32,
-        resolution_pixels_x: i32,
-        resolution_pixels_y: i32,
     ) *RenderGroup {
         var result = arena.pushStruct(RenderGroup);
 
@@ -190,26 +197,58 @@ pub const RenderGroup = extern struct {
         result.push_buffer_base = @ptrCast(arena.pushSize(result.max_push_buffer_size, @alignOf(u8)));
 
         result.global_alpha = 1;
-        const width_of_monitor_in_meters = 0.635;
-        const meters_to_pixels: f32 = @as(f32, @floatFromInt(resolution_pixels_x)) * width_of_monitor_in_meters;
-        const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
-        result.monitor_half_dim_in_meters = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(resolution_pixels_x)) * pixels_to_meters,
-            0.5 * @as(f32, @floatFromInt(resolution_pixels_y)) * pixels_to_meters,
-        );
 
         // Default transform.
-        result.transform.meters_to_pixels = meters_to_pixels;
-        result.transform.screen_center = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(resolution_pixels_x)),
-            0.5 * @as(f32, @floatFromInt(resolution_pixels_y)),
-        );
-        result.transform.focal_length = 0.6;
-        result.transform.distance_above_target = 9.0;
         result.transform.offset_position = Vector3.zero();
         result.transform.scale = 1;
 
         return result;
+    }
+
+    pub fn perspectiveMode(
+        self: *RenderGroup,
+        pixel_width: i32,
+        pixel_height: i32,
+        meters_to_pixels: f32,
+        focal_length: f32,
+        distance_above_target: f32,
+    ) void {
+        const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
+        self.monitor_half_dim_in_meters = Vector2.new(
+            0.5 * @as(f32, @floatFromInt(pixel_width)) * pixels_to_meters,
+            0.5 * @as(f32, @floatFromInt(pixel_height)) * pixels_to_meters,
+        );
+
+        self.transform.meters_to_pixels = meters_to_pixels;
+        self.transform.focal_length = focal_length;
+        self.transform.distance_above_target = distance_above_target;
+        self.transform.screen_center = Vector2.new(
+            0.5 * @as(f32, @floatFromInt(pixel_width)),
+            0.5 * @as(f32, @floatFromInt(pixel_height)),
+        );
+        self.transform.orthographic = false;
+    }
+
+    pub fn orthographicMode(
+        self: *RenderGroup,
+        pixel_width: i32,
+        pixel_height: i32,
+        meters_to_pixels: f32,
+    ) void {
+        const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
+        self.monitor_half_dim_in_meters = Vector2.new(
+            0.5 * @as(f32, @floatFromInt(pixel_width)) * pixels_to_meters,
+            0.5 * @as(f32, @floatFromInt(pixel_height)) * pixels_to_meters,
+        );
+
+        self.transform.meters_to_pixels = meters_to_pixels;
+        self.transform.focal_length = 1;
+        self.transform.distance_above_target = 1;
+        self.transform.screen_center = Vector2.new(
+            0.5 * @as(f32, @floatFromInt(pixel_width)),
+            0.5 * @as(f32, @floatFromInt(pixel_height)),
+        );
+        self.transform.orthographic = true;
     }
 
     fn pushRenderElement(self: *RenderGroup, comptime T: type) ?*T {
