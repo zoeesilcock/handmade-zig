@@ -30,6 +30,16 @@
             "cwd": "${workspaceFolder}/data",
             "preLaunchTask": "build with timing",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Launch release",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/${workspaceFolderBasename}.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}/data",
+            "preLaunchTask": "build release",
+            "console": "integratedTerminal"
         }
     ]
 }

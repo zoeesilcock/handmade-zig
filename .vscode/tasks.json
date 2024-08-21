@@ -30,6 +30,16 @@
                 "kind": "build",
                 "isDefault": true
             }
-        }
+        },
+        {
+            "label": "build release",
+            "type": "shell",
+            "command": "zig build -Doptimize=ReleaseFast",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
     ]
 }
