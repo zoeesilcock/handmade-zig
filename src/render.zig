@@ -134,7 +134,7 @@ const TileRenderWork = struct {
     clip_rect: Rectangle2i,
 };
 
-pub fn doTileRenderWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
     _ = queue;
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
 
@@ -192,7 +192,12 @@ pub const RenderGroup = extern struct {
     ) *RenderGroup {
         var result = arena.pushStruct(RenderGroup);
 
-        result.max_push_buffer_size = max_push_buffer_size;
+        if (max_push_buffer_size == 0) {
+            result.max_push_buffer_size = @intCast(arena.getRemainingSize(4));
+        } else {
+            result.max_push_buffer_size = max_push_buffer_size;
+        }
+
         result.push_buffer_size = 0;
         result.push_buffer_base = @ptrCast(arena.pushSize(result.max_push_buffer_size, @alignOf(u8)));
 
@@ -416,6 +421,22 @@ pub const RenderGroup = extern struct {
         //         entry.bottom = bottom;
         //     }
         // }
+    }
+
+    pub fn singleRenderTo(
+        self: *RenderGroup,
+        output_target: *LoadedBitmap,
+    ) void {
+        std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
+
+        const clip_rect = Rectangle2i.new(0, 0, output_target.width, output_target.height);
+        var work = TileRenderWork{
+            .group = self,
+            .output_target = output_target,
+            .clip_rect = clip_rect,
+        };
+
+        doTileRenderWork(null, @ptrCast(&work));
     }
 
     pub fn tiledRenderTo(

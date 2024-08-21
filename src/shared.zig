@@ -281,15 +281,36 @@ pub const MemoryArena = struct {
         self.temp_count = 0;
     }
 
-    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, alignment: u32) [*]u8 {
-        const address = @intFromPtr(self.base + self.used);
-        const aligned_address = std.mem.alignForward(usize, address, alignment);
-        const aligned_offset = aligned_address - address;
-        const aligned_size = size + aligned_offset;
+    fn getAlignmentOffset(self: *MemoryArena, alignment: MemoryIndex) MemoryIndex {
+        var alignment_offset: MemoryIndex = 0;
+        const result_pointer: MemoryIndex = @intFromPtr(self.base + self.used);
+        const alignment_mask: MemoryIndex = alignment - 1;
+
+        if (result_pointer & alignment_mask != 0) {
+            alignment_offset = alignment - (result_pointer & alignment_mask);
+        }
+
+        return alignment_offset;
+    }
+
+    pub fn getRemainingSize(self: *MemoryArena, alignent: MemoryIndex) MemoryIndex {
+        return self.size - (self.used + self.getAlignmentOffset(alignent));
+    }
+
+    pub fn makeSubArena(self: *MemoryArena, arena: *MemoryArena, size: MemoryIndex, alignment: MemoryIndex) void {
+        arena.size = size;
+        arena.base = self.pushSize(size, alignment);
+        arena.used = 0;
+        arena.temp_count = 0;
+    }
+
+    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, alignment: MemoryIndex) [*]u8 {
+        const alignment_offset = self.getAlignmentOffset(alignment);
+        const aligned_size = size + alignment_offset;
 
         std.debug.assert((self.used + aligned_size) <= self.size);
 
-        const result: [*]u8 = @ptrFromInt(aligned_address);
+        const result: [*]u8 = @ptrCast(self.base + self.used + alignment_offset);
         self.used += aligned_size;
 
         return result;
@@ -383,9 +404,18 @@ pub const State = struct {
     test_normal: LoadedBitmap,
 };
 
+pub const TaskWithMemory = struct {
+    being_used: bool,
+    arena: MemoryArena,
+
+    memory_flush: TemporaryMemory,
+};
+
 pub const TransientState = struct {
     is_initialized: bool = false,
     arena: MemoryArena = undefined,
+    tasks: [4]TaskWithMemory = [1]TaskWithMemory{undefined} ** 4,
+
     ground_buffer_count: u32 = 0,
     ground_buffers: [*]GroundBuffer = undefined,
 

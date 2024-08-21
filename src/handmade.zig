@@ -362,12 +362,21 @@ pub export fn updateAndRender(
     std.debug.assert(@sizeOf(TransientState) <= memory.transient_storage_size);
     var transient_state: *TransientState = @ptrCast(@alignCast(memory.transient_storage));
     if (!transient_state.is_initialized) {
-        transient_state.high_priority_queue = memory.high_priority_queue;
-        transient_state.low_priority_queue = memory.low_priority_queue;
         transient_state.arena.initialize(
             memory.transient_storage_size - @sizeOf(TransientState),
             memory.transient_storage.? + @sizeOf(TransientState),
         );
+
+        var task_index: u32 = 0;
+        while (task_index < transient_state.tasks.len) : (task_index += 1) {
+            var task: *shared.TaskWithMemory = &transient_state.tasks[task_index];
+
+            task.being_used = false;
+            transient_state.arena.makeSubArena(&task.arena, shared.megabytes(1), 16);
+        }
+
+        transient_state.high_priority_queue = memory.high_priority_queue;
+        transient_state.low_priority_queue = memory.low_priority_queue;
 
         transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
@@ -393,7 +402,12 @@ pub export fn updateAndRender(
         //     Vector2.newI(state.test_diffuse.width, state.test_diffuse.height),
         //     Color.new(0.5, 0.5, 0.5, 1),
         // );
-        state.test_normal = makeEmptyBitmap(&transient_state.arena, state.test_diffuse.width, state.test_diffuse.height, false);
+        state.test_normal = makeEmptyBitmap(
+            &transient_state.arena,
+            state.test_diffuse.width,
+            state.test_diffuse.height,
+            false,
+        );
 
         makeSphereNormalMap(&state.test_normal, 0, 1, 1);
         makeSphereDiffuseMap(&state.test_diffuse, 1, 1);
@@ -491,7 +505,7 @@ pub export fn updateAndRender(
 
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4));
+    var render_group = RenderGroup.allocate(&transient_state.arena, @intCast(shared.megabytes(4)));
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
@@ -592,7 +606,6 @@ pub export fn updateAndRender(
                         fillGroundChunk(
                             state,
                             &platform,
-                            transient_state.low_priority_queue,
                             transient_state,
                             furthest_buffer,
                             &chunk_center,
@@ -1236,105 +1249,150 @@ pub export fn getSoundSamples(
     outputSound(sound_buffer, shared.MIDDLE_C, state);
 }
 
+fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMemory {
+    var found_task: ?*shared.TaskWithMemory = null;
+
+    var task_index: u32 = 0;
+    while (task_index < transient_state.tasks.len) : (task_index += 1) {
+        var task = &transient_state.tasks[task_index];
+
+        if (!task.being_used) {
+            task.being_used = true;
+            task.memory_flush = task.arena.beginTemporaryMemory();
+
+            found_task = task;
+
+            break;
+        }
+    }
+
+    return found_task;
+}
+
+const FillGroundChunkWork = struct {
+    render_group: *render.RenderGroup,
+    task: *shared.TaskWithMemory,
+    buffer: *LoadedBitmap,
+};
+
+inline fn endTaskWithMemory(task: *shared.TaskWithMemory) void {
+    task.arena.endTemporaryMemory(task.memory_flush);
+    @atomicStore(bool, &task.being_used, false, .release);
+}
+
+pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+    _ = queue;
+
+    const work: *FillGroundChunkWork = @ptrCast(@alignCast(data));
+
+    work.render_group.singleRenderTo(work.buffer);
+
+    endTaskWithMemory(work.task);
+}
+
 fn fillGroundChunk(
     state: *State,
     platform: *const shared.Platform,
-    render_queue: *shared.PlatformWorkQueue,
     transient_state: *TransientState,
     ground_buffer: *shared.GroundBuffer,
     chunk_position: *const world.WorldPosition,
 ) void {
-    const render_memory = transient_state.arena.beginTemporaryMemory();
-    ground_buffer.position = chunk_position.*;
+    if (beginTaskWithMemory(transient_state)) |task| {
+        var work: *FillGroundChunkWork = task.arena.pushStruct(FillGroundChunkWork);
+        ground_buffer.position = chunk_position.*;
 
-    const buffer = &ground_buffer.bitmap;
-    buffer.alignment_percentage = Vector2.new(0.5, 0.5);
-    buffer.width_over_height = 1.0;
+        const buffer = &ground_buffer.bitmap;
+        buffer.alignment_percentage = Vector2.new(0.5, 0.5);
+        buffer.width_over_height = 1.0;
 
-    const width: f32 = state.world.chunk_dimension_in_meters.x();
-    const height: f32 = state.world.chunk_dimension_in_meters.y();
-    std.debug.assert(width == height);
-    var half_dim = Vector2.new(width, height).scaledTo(0.5);
+        const width: f32 = state.world.chunk_dimension_in_meters.x();
+        const height: f32 = state.world.chunk_dimension_in_meters.y();
+        std.debug.assert(width == height);
+        var half_dim = Vector2.new(width, height).scaledTo(0.5);
 
-    const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-    var render_group = RenderGroup.allocate(&transient_state.arena, shared.megabytes(4));
-    render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
-    render_group.pushClear(Color.new(1, 0, 1, 1));
+        const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
+        var render_group = RenderGroup.allocate(&task.arena, 0);
+        render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
+        render_group.pushClear(Color.new(1, 0, 1, 1));
 
-    var chunk_offset_y: i32 = -1;
-    while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
-        var chunk_offset_x: i32 = -1;
-        while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
-            const chunk_x = chunk_position.chunk_x + chunk_offset_x;
-            const chunk_y = chunk_position.chunk_y + chunk_offset_y;
-            const chunk_z = chunk_position.chunk_z;
-            const center = Vector2.new(
-                @as(f32, @floatFromInt(chunk_offset_x)) * width,
-                @as(f32, @floatFromInt(chunk_offset_y)) * height,
-            );
+        var chunk_offset_y: i32 = -1;
+        while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
+            var chunk_offset_x: i32 = -1;
+            while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
+                const chunk_x = chunk_position.chunk_x + chunk_offset_x;
+                const chunk_y = chunk_position.chunk_y + chunk_offset_y;
+                const chunk_z = chunk_position.chunk_z;
+                const center = Vector2.new(
+                    @as(f32, @floatFromInt(chunk_offset_x)) * width,
+                    @as(f32, @floatFromInt(chunk_offset_y)) * height,
+                );
 
-            const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
-            const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
-            var series = random.Series.seed(seed);
+                const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
+                const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
+                var series = random.Series.seed(seed);
 
-            const color = Color.white();
-            // var color = Color.new(1, 0, 0, 1);
-            // if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
-            //     color = Color.new(0, 0, 1, 1);
-            // }
+                const color = Color.white();
+                // var color = Color.new(1, 0, 0, 1);
+                // if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
+                //     color = Color.new(0, 0, 1, 1);
+                // }
 
-            var grass_index: u32 = 0;
-            while (grass_index < 100) : (grass_index += 1) {
-                var stamp: *LoadedBitmap = undefined;
+                var grass_index: u32 = 0;
+                while (grass_index < 100) : (grass_index += 1) {
+                    var stamp: *LoadedBitmap = undefined;
 
-                if (series.randomChoice(2) == 1) {
-                    stamp = &state.grass[series.randomChoice(state.grass.len)];
-                } else {
-                    stamp = &state.stone[series.randomChoice(state.stone.len)];
+                    if (series.randomChoice(2) == 1) {
+                        stamp = &state.grass[series.randomChoice(state.grass.len)];
+                    } else {
+                        stamp = &state.stone[series.randomChoice(state.stone.len)];
+                    }
+
+                    const offset = half_dim.hadamardProduct(
+                        Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                    );
+                    const position = center.plus(offset);
+
+                    render_group.pushBitmap(stamp, 2, position.toVector3(0), color);
                 }
-
-                const offset = half_dim.hadamardProduct(
-                    Vector2.new(series.randomBilateral(), series.randomBilateral()),
-                );
-                const position = center.plus(offset);
-
-                render_group.pushBitmap(stamp, 2, position.toVector3(0), color);
             }
         }
-    }
 
-    chunk_offset_y = -1;
-    while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
-        var chunk_offset_x: i32 = -1;
-        while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
-            const chunk_x = chunk_position.chunk_x + chunk_offset_x;
-            const chunk_y = chunk_position.chunk_y + chunk_offset_y;
-            const chunk_z = chunk_position.chunk_z;
-            const center = Vector2.new(
-                @as(f32, @floatFromInt(chunk_offset_x)) * width,
-                @as(f32, @floatFromInt(chunk_offset_y)) * height,
-            );
-
-            const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
-            const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
-            var series = random.Series.seed(seed);
-
-            var grass_index: u32 = 0;
-            while (grass_index < 50) : (grass_index += 1) {
-                const stamp: *LoadedBitmap = &state.tuft[series.randomChoice(state.tuft.len)];
-
-                const offset = half_dim.hadamardProduct(
-                    Vector2.new(series.randomBilateral(), series.randomBilateral()),
+        chunk_offset_y = -1;
+        while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
+            var chunk_offset_x: i32 = -1;
+            while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
+                const chunk_x = chunk_position.chunk_x + chunk_offset_x;
+                const chunk_y = chunk_position.chunk_y + chunk_offset_y;
+                const chunk_z = chunk_position.chunk_z;
+                const center = Vector2.new(
+                    @as(f32, @floatFromInt(chunk_offset_x)) * width,
+                    @as(f32, @floatFromInt(chunk_offset_y)) * height,
                 );
-                const position = center.plus(offset);
 
-                render_group.pushBitmap(stamp, 0.1, position.toVector3(0), Color.white());
+                const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
+                const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
+                var series = random.Series.seed(seed);
+
+                var grass_index: u32 = 0;
+                while (grass_index < 50) : (grass_index += 1) {
+                    const stamp: *LoadedBitmap = &state.tuft[series.randomChoice(state.tuft.len)];
+
+                    const offset = half_dim.hadamardProduct(
+                        Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                    );
+                    const position = center.plus(offset);
+
+                    render_group.pushBitmap(stamp, 0.1, position.toVector3(0), Color.white());
+                }
             }
-        }
-    }
 
-    render_group.tiledRenderTo(platform, render_queue, buffer);
-    transient_state.arena.endTemporaryMemory(render_memory);
+            work.render_group = render_group;
+            work.buffer = buffer;
+            work.task = task;
+        }
+
+        platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
+    }
 }
 
 fn clearBitmap(bitmap: *LoadedBitmap) void {
@@ -1352,7 +1410,7 @@ fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to
     result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
 
     const total_bitmap_size: u32 = @intCast(result.width * result.height * shared.BITMAP_BYTES_PER_PIXEL);
-    result.memory = @ptrCast(arena.pushSize(total_bitmap_size, @alignOf(u8)));
+    result.memory = @ptrCast(arena.pushSize(total_bitmap_size, 16));
 
     if (clear_to_zero) {
         clearBitmap(result);
