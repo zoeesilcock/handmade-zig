@@ -183,7 +183,7 @@ pub const GameInput = extern struct {
     executable_reloaded: bool = false,
     frame_delta_time: f32 = 0,
 
-    controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{undefined} ** MAX_CONTROLLER_COUNT,
+    controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{ControllerInput{}} ** MAX_CONTROLLER_COUNT,
 };
 
 pub const ControllerInput = extern struct {
@@ -193,21 +193,21 @@ pub const ControllerInput = extern struct {
     stick_average_x: f32 = 0,
     stick_average_y: f32 = 0,
 
-    move_up: ControllerButtonState,
-    move_down: ControllerButtonState,
-    move_left: ControllerButtonState,
-    move_right: ControllerButtonState,
+    move_up: ControllerButtonState = ControllerButtonState{},
+    move_down: ControllerButtonState = ControllerButtonState{},
+    move_left: ControllerButtonState = ControllerButtonState{},
+    move_right: ControllerButtonState = ControllerButtonState{},
 
-    action_up: ControllerButtonState,
-    action_down: ControllerButtonState,
-    action_left: ControllerButtonState,
-    action_right: ControllerButtonState,
+    action_up: ControllerButtonState = ControllerButtonState{},
+    action_down: ControllerButtonState = ControllerButtonState{},
+    action_left: ControllerButtonState = ControllerButtonState{},
+    action_right: ControllerButtonState = ControllerButtonState{},
 
-    left_shoulder: ControllerButtonState,
-    right_shoulder: ControllerButtonState,
+    left_shoulder: ControllerButtonState = ControllerButtonState{},
+    right_shoulder: ControllerButtonState = ControllerButtonState{},
 
-    start_button: ControllerButtonState,
-    back_button: ControllerButtonState,
+    start_button: ControllerButtonState = ControllerButtonState{},
+    back_button: ControllerButtonState = ControllerButtonState{},
 
     pub fn copyButtonStatesTo(self: *ControllerInput, target: *ControllerInput) void {
         target.move_up.ended_down = self.move_up.ended_down;
