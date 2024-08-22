@@ -404,12 +404,44 @@ pub const GameAssetId = enum(u32) {
 
 pub const GAME_ASSET_ID_COUNT = @typeInfo(GameAssetId).Enum.fields.len;
 
+pub const AssetState = enum(u8) {
+    Unloaded,
+    Queued,
+    Loaded,
+    Locked,
+};
+
+pub const AssetTag = struct {
+    id: u32,
+    value: f32,
+};
+
+pub const AssetBitmapInfo = struct {
+    alignment_percentage: Vector2 = Vector2.zero(),
+    width_over_height: f32 = 0,
+    width: i32 = 0,
+    height: i32 = 0,
+
+    first_tag_index: u32,
+    one_past_last_index: u32,
+};
+
+pub const AssetGroup = struct {
+    first_tag_index: u32,
+    one_past_last_index: u32,
+};
+
+pub const AssetSlot = struct {
+    state: AssetState = .Unloaded,
+    bitmap: ?*LoadedBitmap = null,
+};
+
 pub const GameAssets = struct {
     transient_state: *TransientState,
     arena: MemoryArena,
     platform: Platform,
 
-    bitmaps: [GAME_ASSET_ID_COUNT]?*LoadedBitmap = [1]?*LoadedBitmap{null} ** GAME_ASSET_ID_COUNT,
+    bitmaps: [GAME_ASSET_ID_COUNT]AssetSlot = [1]AssetSlot{AssetSlot{}} ** GAME_ASSET_ID_COUNT,
 
     // Array asseets.
     grass: [2]LoadedBitmap,
@@ -420,11 +452,11 @@ pub const GameAssets = struct {
     hero_bitmaps: [4]HeroBitmaps,
 
     pub fn setBitmap(self: *GameAssets, id: GameAssetId, bitmap: *LoadedBitmap) void {
-        self.bitmaps[@intFromEnum(id)] = bitmap;
+        self.bitmaps[@intFromEnum(id)].bitmap = bitmap;
     }
 
     pub fn getBitmap(self: *GameAssets, id: GameAssetId) ?*LoadedBitmap {
-        return self.bitmaps[@intFromEnum(id)];
+        return self.bitmaps[@intFromEnum(id)].bitmap;
     }
 };
 

@@ -983,6 +983,8 @@ const LoadAssetWork = struct {
     has_alignment: bool,
     align_x: i32,
     top_down_align_y: i32,
+
+    final_state: shared.AssetState,
 };
 
 pub fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
@@ -992,12 +994,19 @@ pub fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callc
     var thread = shared.ThreadContext{ .placeholder = 0 };
 
     if (work.has_alignment) {
-        work.bitmap.* = debugLoadBMPAligned(&thread, work.assets.platform, work.file_name, work.align_x, work.top_down_align_y,);
+        work.bitmap.* = debugLoadBMPAligned(
+            &thread,
+            work.assets.platform,
+            work.file_name,
+            work.align_x,
+            work.top_down_align_y,
+        );
     } else {
         work.bitmap.* = debugLoadBMP(&thread, work.assets.platform, work.file_name);
     }
 
     work.assets.setBitmap(work.id, work.bitmap);
+    work.assets.bitmaps[@intFromEnum(work.id)].state = work.final_state;
 
     endTaskWithMemory(work.task);
 }
@@ -1006,43 +1015,55 @@ pub fn loadAsset(
     assets: *shared.GameAssets,
     id: shared.GameAssetId,
 ) void {
-    if (beginTaskWithMemory(assets.transient_state)) |task| {
-        var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+    if (@cmpxchgStrong(
+        shared.AssetState,
+        &assets.bitmaps[@intFromEnum(id)].state,
+        .Unloaded,
+        .Queued,
+        .seq_cst,
+        .seq_cst,
+    ) == null) {
+        if (beginTaskWithMemory(assets.transient_state)) |task| {
+            var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
 
-        work.assets = assets;
-        work.id = id;
-        work.task = task;
-        work.bitmap = assets.arena.pushStruct(LoadedBitmap);
-        work.has_alignment = false;
+            work.assets = assets;
+            work.id = id;
+            work.task = task;
+            work.bitmap = assets.arena.pushStruct(LoadedBitmap);
+            work.has_alignment = false;
+            work.final_state = .Loaded;
 
-        switch (id) {
-            .Backdrop => {
-                work.file_name = "test/test_background.bmp";
-            },
-            .Shadow => {
-                work.file_name = "test/test_hero_shadow.bmp";
-                work.has_alignment = true;
-                work.align_x = 72;
-                work.top_down_align_y = 182;
-            },
-            .Tree => {
-                work.file_name = "test2/tree00.bmp";
-                work.has_alignment = true;
-                work.align_x = 40;
-                work.top_down_align_y = 80;
-            },
-            .Sword => {
-                work.file_name = "test2/rock03.bmp";
-                work.has_alignment = true;
-                work.align_x = 29;
-                work.top_down_align_y = 10;
-            },
-            .Stairwell => {
-                work.file_name = "test2/rock02.bmp";
-            },
+            switch (id) {
+                .Backdrop => {
+                    work.file_name = "test/test_background.bmp";
+                },
+                .Shadow => {
+                    work.file_name = "test/test_hero_shadow.bmp";
+                    work.has_alignment = true;
+                    work.align_x = 72;
+                    work.top_down_align_y = 182;
+                },
+                .Tree => {
+                    work.file_name = "test2/tree00.bmp";
+                    work.has_alignment = true;
+                    work.align_x = 40;
+                    work.top_down_align_y = 80;
+                },
+                .Sword => {
+                    work.file_name = "test2/rock03.bmp";
+                    work.has_alignment = true;
+                    work.align_x = 29;
+                    work.top_down_align_y = 10;
+                },
+                .Stairwell => {
+                    work.file_name = "test2/rock02.bmp";
+                },
+            }
+
+            assets.platform.addQueueEntry(assets.transient_state.low_priority_queue, doLoadAssetWork, work);
+        } else {
+            @atomicStore(shared.AssetState, &assets.bitmaps[@intFromEnum(id)].state, .Unloaded, .release);
         }
-
-        assets.platform.addQueueEntry(assets.transient_state.low_priority_queue, doLoadAssetWork, work);
     }
 }
 
@@ -1369,6 +1390,38 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
     endTaskWithMemory(work.task);
 }
 
+fn pickBest(
+    info_count: i32,
+    infos: [*]shared.AssetBitmapInfo,
+    tags: [*]shared.AssetTag,
+    match_vector: [*]f32,
+    weight_vector: [*]f32,
+) i32 {
+    var best_diff: f32 = std.math.maxFloat(f32);
+    var best_index: i32 = 0;
+
+    var info_index: u32 = 0;
+    while (info_index < info_count) : (info_index += 1) {
+        const info = infos + info_index;
+
+        var total_weighted_diff: f32 = 0;
+        var tag_index: u32 = info.first_tag_index;
+        while (tag_index < info.one_past_last_tag_index) : (tag_index += 1) {
+            const tag = tags + tag_index;
+            const difference = match_vector[tag.id] - tag.value;
+            const weighted = weight_vector[tag.id] * intrinsics.absoluteValue(difference);
+            total_weighted_diff += weighted;
+        }
+
+        if (best_diff > total_weighted_diff) {
+            best_diff = total_weighted_diff;
+            best_index = info_index;
+        }
+    }
+
+    return best_index;
+}
+
 fn fillGroundChunk(
     state: *State,
     platform: *const shared.Platform,
@@ -1464,13 +1517,15 @@ fn fillGroundChunk(
                     render_group.pushBitmap(stamp, 0.1, position.toVector3(0), Color.white());
                 }
             }
-
-            work.render_group = render_group;
-            work.buffer = buffer;
-            work.task = task;
         }
 
-        platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
+        if (render_group.allResourcesPresent()) {
+            work.buffer = buffer;
+            work.render_group = render_group;
+            work.task = task;
+
+            platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
+        }
     }
 }
 

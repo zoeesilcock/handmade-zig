@@ -190,6 +190,8 @@ pub const RenderGroup = extern struct {
     push_buffer_size: u32,
     push_buffer_base: [*]u8,
 
+    missing_resource_count: u32,
+
     pub fn allocate(
         assets: *shared.GameAssets,
         arena: *shared.MemoryArena,
@@ -208,12 +210,17 @@ pub const RenderGroup = extern struct {
 
         result.assets = assets;
         result.global_alpha = 1;
+        result.missing_resource_count = 0;
 
         // Default transform.
         result.transform.offset_position = Vector3.zero();
         result.transform.scale = 1;
 
         return result;
+    }
+
+    pub fn allResourcesPresent(self: *RenderGroup) bool {
+        return self.missing_resource_count == 0;
     }
 
     pub fn perspectiveMode(
@@ -353,6 +360,7 @@ pub const RenderGroup = extern struct {
             self.pushBitmap(bitmap, height, offset, color);
         } else {
             loadAsset(self.assets, id);
+            self.missing_resource_count += 1;
         }
     }
 
