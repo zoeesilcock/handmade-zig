@@ -979,6 +979,10 @@ const LoadAssetWork = struct {
     file_name: [*:0]const u8,
     task: *shared.TaskWithMemory,
     bitmap: *LoadedBitmap,
+
+    has_alignment: bool,
+    align_x: i32,
+    top_down_align_y: i32,
 };
 
 pub fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
@@ -986,7 +990,12 @@ pub fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callc
 
     const work: *LoadAssetWork = @ptrCast(@alignCast(data));
     var thread = shared.ThreadContext{ .placeholder = 0 };
-    work.bitmap.* = debugLoadBMP(&thread, work.assets.platform, work.file_name);
+
+    if (work.has_alignment) {
+        work.bitmap.* = debugLoadBMPAligned(&thread, work.assets.platform, work.file_name, work.align_x, work.top_down_align_y,);
+    } else {
+        work.bitmap.* = debugLoadBMP(&thread, work.assets.platform, work.file_name);
+    }
 
     work.assets.setBitmap(work.id, work.bitmap);
 
@@ -1004,21 +1013,29 @@ pub fn loadAsset(
         work.id = id;
         work.task = task;
         work.bitmap = assets.arena.pushStruct(LoadedBitmap);
+        work.has_alignment = false;
+
         switch (id) {
             .Backdrop => {
                 work.file_name = "test/test_background.bmp";
             },
             .Shadow => {
                 work.file_name = "test/test_hero_shadow.bmp";
-                // 72, 182
+                work.has_alignment = true;
+                work.align_x = 72;
+                work.top_down_align_y = 182;
             },
             .Tree => {
                 work.file_name = "test2/tree00.bmp";
-                // 40, 80
+                work.has_alignment = true;
+                work.align_x = 40;
+                work.top_down_align_y = 80;
             },
             .Sword => {
                 work.file_name = "test2/rock03.bmp";
-                // 29, 10
+                work.has_alignment = true;
+                work.align_x = 29;
+                work.top_down_align_y = 10;
             },
             .Stairwell => {
                 work.file_name = "test2/rock02.bmp";
