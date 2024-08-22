@@ -293,19 +293,19 @@ pub const MemoryArena = struct {
         return alignment_offset;
     }
 
-    pub fn getRemainingSize(self: *MemoryArena, alignent: MemoryIndex) MemoryIndex {
-        return self.size - (self.used + self.getAlignmentOffset(alignent));
+    pub fn getRemainingSize(self: *MemoryArena, alignent: ?MemoryIndex) MemoryIndex {
+        return self.size - (self.used + self.getAlignmentOffset(alignent orelse 4));
     }
 
-    pub fn makeSubArena(self: *MemoryArena, arena: *MemoryArena, size: MemoryIndex, alignment: MemoryIndex) void {
+    pub fn makeSubArena(self: *MemoryArena, arena: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) void {
         arena.size = size;
-        arena.base = self.pushSize(size, alignment);
+        arena.base = self.pushSize(size, alignment orelse 16);
         arena.used = 0;
         arena.temp_count = 0;
     }
 
-    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, alignment: MemoryIndex) [*]u8 {
-        const alignment_offset = self.getAlignmentOffset(alignment);
+    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) [*]u8 {
+        const alignment_offset = self.getAlignmentOffset(alignment orelse 4);
         const aligned_size = size + alignment_offset;
 
         std.debug.assert((self.used + aligned_size) <= self.size);
@@ -376,16 +376,6 @@ pub const State = struct {
     low_entity_count: u32 = 0,
     low_entities: [90000]LowEntity = [1]LowEntity{undefined} ** 90000,
 
-    hero_bitmaps: [4]HeroBitmaps,
-    backdrop: LoadedBitmap,
-    shadow: LoadedBitmap,
-    tree: LoadedBitmap,
-    sword: LoadedBitmap,
-    stairwell: LoadedBitmap,
-    grass: [2]LoadedBitmap,
-    stone: [4]LoadedBitmap,
-    tuft: [3]LoadedBitmap,
-
     collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
 
@@ -402,6 +392,40 @@ pub const State = struct {
 
     test_diffuse: LoadedBitmap,
     test_normal: LoadedBitmap,
+};
+
+pub const GameAssetId = enum(u32) {
+    Backdrop,
+    Shadow,
+    Tree,
+    Sword,
+    Stairwell,
+};
+
+pub const GAME_ASSET_ID_COUNT = @typeInfo(GameAssetId).Enum.fields.len;
+
+pub const GameAssets = struct {
+    transient_state: *TransientState,
+    arena: MemoryArena,
+    platform: Platform,
+
+    bitmaps: [GAME_ASSET_ID_COUNT]?*LoadedBitmap = [1]?*LoadedBitmap{null} ** GAME_ASSET_ID_COUNT,
+
+    // Array asseets.
+    grass: [2]LoadedBitmap,
+    stone: [4]LoadedBitmap,
+    tuft: [3]LoadedBitmap,
+
+    // Structured assets.
+    hero_bitmaps: [4]HeroBitmaps,
+
+    pub fn setBitmap(self: *GameAssets, id: GameAssetId, bitmap: *LoadedBitmap) void {
+        self.bitmaps[@intFromEnum(id)] = bitmap;
+    }
+
+    pub fn getBitmap(self: *GameAssets, id: GameAssetId) ?*LoadedBitmap {
+        return self.bitmaps[@intFromEnum(id)];
+    }
 };
 
 pub const TaskWithMemory = struct {
@@ -425,6 +449,8 @@ pub const TransientState = struct {
     env_map_width: i32,
     env_map_height: i32,
     env_maps: [3]render.EnvironmentMap = [1]render.EnvironmentMap{undefined} ** 3,
+
+    assets: GameAssets,
 };
 
 pub const GroundBuffer = extern struct {

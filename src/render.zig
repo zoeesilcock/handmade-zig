@@ -21,6 +21,8 @@ const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
 
+const loadAsset = @import("handmade.zig").loadAsset;
+
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 
 // Types.
@@ -177,7 +179,9 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
 }
 
 pub const RenderGroup = extern struct {
+    assets: *shared.GameAssets,
     global_alpha: f32,
+
     monitor_half_dim_in_meters: Vector2,
 
     transform: RenderTransform,
@@ -187,13 +191,14 @@ pub const RenderGroup = extern struct {
     push_buffer_base: [*]u8,
 
     pub fn allocate(
+        assets: *shared.GameAssets,
         arena: *shared.MemoryArena,
         max_push_buffer_size: u32,
     ) *RenderGroup {
         var result = arena.pushStruct(RenderGroup);
 
         if (max_push_buffer_size == 0) {
-            result.max_push_buffer_size = @intCast(arena.getRemainingSize(4));
+            result.max_push_buffer_size = @intCast(arena.getRemainingSize(null));
         } else {
             result.max_push_buffer_size = max_push_buffer_size;
         }
@@ -201,6 +206,7 @@ pub const RenderGroup = extern struct {
         result.push_buffer_size = 0;
         result.push_buffer_base = @ptrCast(arena.pushSize(result.max_push_buffer_size, @alignOf(u8)));
 
+        result.assets = assets;
         result.global_alpha = 1;
 
         // Default transform.
@@ -333,6 +339,20 @@ pub const RenderGroup = extern struct {
                 entry.size = size.scaledTo(basis.scale);
                 entry.color = color.scaledTo(self.global_alpha);
             }
+        }
+    }
+
+    pub fn pushBitmapId(
+        self: *RenderGroup,
+        id: shared.GameAssetId,
+        height: f32,
+        offset: Vector3,
+        color: Color,
+    ) void {
+        if (self.assets.getBitmap(id)) |bitmap| {
+            self.pushBitmap(bitmap, height, offset, color);
+        } else {
+            loadAsset(self.assets, id);
         }
     }
 

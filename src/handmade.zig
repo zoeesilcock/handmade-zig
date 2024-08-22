@@ -10,6 +10,8 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
+/// * Asset streaming.
+///
 /// * Rendering.
 ///     * Straighten out all coordinate systems!
 ///         * Screen.
@@ -18,7 +20,6 @@ const std = @import("std");
 ///     * Particle systems.
 ///     * Lighting.
 ///     * Final optimization.
-/// * Asset streaming.
 ///
 /// * Debug code.
 ///     * Fonts.
@@ -104,6 +105,7 @@ fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
         math.safeRatio0(flipped_y, @floatFromInt(bitmap.height)),
     );
 }
+
 fn setTopDownAligned(bitmaps: *shared.HeroBitmaps, in_alignment: Vector2) void {
     const alignment = topDownAligned(&bitmaps.head, in_alignment);
 
@@ -136,55 +138,9 @@ pub export fn updateAndRender(
     if (!memory.is_initialized) {
         state.* = State{
             .camera_position = WorldPosition.zero(),
-            .hero_bitmaps = .{
-                shared.HeroBitmaps{
-                    .head = debugLoadBMP(thread, platform, "test/test_hero_right_head.bmp"),
-                    .torso = debugLoadBMP(thread, platform, "test/test_hero_right_torso.bmp"),
-                    .cape = debugLoadBMP(thread, platform, "test/test_hero_right_cape.bmp"),
-                },
-                shared.HeroBitmaps{
-                    .head = debugLoadBMP(thread, platform, "test/test_hero_back_head.bmp"),
-                    .torso = debugLoadBMP(thread, platform, "test/test_hero_back_torso.bmp"),
-                    .cape = debugLoadBMP(thread, platform, "test/test_hero_back_cape.bmp"),
-                },
-                shared.HeroBitmaps{
-                    .head = debugLoadBMP(thread, platform, "test/test_hero_left_head.bmp"),
-                    .torso = debugLoadBMP(thread, platform, "test/test_hero_left_torso.bmp"),
-                    .cape = debugLoadBMP(thread, platform, "test/test_hero_left_cape.bmp"),
-                },
-                shared.HeroBitmaps{
-                    .head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
-                    .torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
-                    .cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
-                },
-            },
-            .backdrop = debugLoadBMP(thread, platform, "test/test_background.bmp"),
-            .shadow = debugLoadBMPAligned(thread, platform, "test/test_hero_shadow.bmp", 72, 182),
-            .tree = debugLoadBMPAligned(thread, platform, "test2/tree00.bmp", 40, 80),
-            .sword = debugLoadBMPAligned(thread, platform, "test2/rock03.bmp", 29, 10),
-            .stairwell = debugLoadBMP(thread, platform, "test2/rock02.bmp"),
-            .grass = .{
-                debugLoadBMP(thread, platform, "test2/grass00.bmp"),
-                debugLoadBMP(thread, platform, "test2/grass01.bmp"),
-            },
-            .stone = .{
-                debugLoadBMP(thread, platform, "test2/ground00.bmp"),
-                debugLoadBMP(thread, platform, "test2/ground01.bmp"),
-                debugLoadBMP(thread, platform, "test2/ground02.bmp"),
-                debugLoadBMP(thread, platform, "test2/ground03.bmp"),
-            },
-            .tuft = .{
-                debugLoadBMP(thread, platform, "test2/tuft00.bmp"),
-                debugLoadBMP(thread, platform, "test2/tuft01.bmp"),
-                debugLoadBMP(thread, platform, "test2/tuft02.bmp"),
-            },
             .test_diffuse = undefined,
             .test_normal = undefined,
         };
-
-        for (&state.hero_bitmaps) |*bitmaps| {
-            setTopDownAligned(bitmaps, Vector2.new(72, 182));
-        }
 
         state.world_arena.initialize(
             memory.permanent_storage_size - @sizeOf(State),
@@ -372,7 +328,7 @@ pub export fn updateAndRender(
             var task: *shared.TaskWithMemory = &transient_state.tasks[task_index];
 
             task.being_used = false;
-            transient_state.arena.makeSubArena(&task.arena, shared.megabytes(1), 16);
+            transient_state.arena.makeSubArena(&task.arena, shared.megabytes(1), null);
         }
 
         transient_state.high_priority_queue = memory.high_priority_queue;
@@ -425,6 +381,56 @@ pub export fn updateAndRender(
                 width >>= 1;
                 height >>= 1;
             }
+        }
+
+        // Load game assets.
+        transient_state.assets = shared.GameAssets{
+            .transient_state = transient_state,
+            .arena = undefined,
+            .platform = platform,
+            .hero_bitmaps = .{
+                shared.HeroBitmaps{
+                    .head = debugLoadBMP(thread, platform, "test/test_hero_right_head.bmp"),
+                    .torso = debugLoadBMP(thread, platform, "test/test_hero_right_torso.bmp"),
+                    .cape = debugLoadBMP(thread, platform, "test/test_hero_right_cape.bmp"),
+                },
+                shared.HeroBitmaps{
+                    .head = debugLoadBMP(thread, platform, "test/test_hero_back_head.bmp"),
+                    .torso = debugLoadBMP(thread, platform, "test/test_hero_back_torso.bmp"),
+                    .cape = debugLoadBMP(thread, platform, "test/test_hero_back_cape.bmp"),
+                },
+                shared.HeroBitmaps{
+                    .head = debugLoadBMP(thread, platform, "test/test_hero_left_head.bmp"),
+                    .torso = debugLoadBMP(thread, platform, "test/test_hero_left_torso.bmp"),
+                    .cape = debugLoadBMP(thread, platform, "test/test_hero_left_cape.bmp"),
+                },
+                shared.HeroBitmaps{
+                    .head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
+                    .torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
+                    .cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
+                },
+            },
+            .grass = .{
+                debugLoadBMP(thread, platform, "test2/grass00.bmp"),
+                debugLoadBMP(thread, platform, "test2/grass01.bmp"),
+            },
+            .stone = .{
+                debugLoadBMP(thread, platform, "test2/ground00.bmp"),
+                debugLoadBMP(thread, platform, "test2/ground01.bmp"),
+                debugLoadBMP(thread, platform, "test2/ground02.bmp"),
+                debugLoadBMP(thread, platform, "test2/ground03.bmp"),
+            },
+            .tuft = .{
+                debugLoadBMP(thread, platform, "test2/tuft00.bmp"),
+                debugLoadBMP(thread, platform, "test2/tuft01.bmp"),
+                debugLoadBMP(thread, platform, "test2/tuft02.bmp"),
+            },
+        };
+
+        transient_state.arena.makeSubArena(&transient_state.assets.arena, shared.megabytes(64), null);
+
+        for (&transient_state.assets.hero_bitmaps) |*bitmaps| {
+            setTopDownAligned(bitmaps, Vector2.new(72, 182));
         }
 
         transient_state.is_initialized = true;
@@ -505,7 +511,7 @@ pub export fn updateAndRender(
 
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(&transient_state.arena, @intCast(shared.megabytes(4)));
+    var render_group = RenderGroup.allocate(&transient_state.assets, &transient_state.arena, @intCast(shared.megabytes(4)));
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
@@ -775,9 +781,9 @@ pub export fn updateAndRender(
             // Post-physics entity work.
             switch (entity.type) {
                 .Hero => {
-                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
+                    var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
                     const hero_scale = 2.5;
-                    render_group.pushBitmap(&state.shadow, hero_scale * 1.0, Vector3.zero(), shadow_color);
+                    render_group.pushBitmapId(.Shadow, hero_scale * 1.0, Vector3.zero(), shadow_color);
                     render_group.pushBitmap(&hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
                     render_group.pushBitmap(&hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
                     render_group.pushBitmap(&hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
@@ -785,11 +791,11 @@ pub export fn updateAndRender(
                     drawHitPoints(entity, render_group);
                 },
                 .Sword => {
-                    render_group.pushBitmap(&state.shadow, 0.25, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&state.sword, 0.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(.Shadow, 0.25, Vector3.zero(), shadow_color);
+                    render_group.pushBitmapId(.Sword, 0.5, Vector3.zero(), Color.white());
                 },
                 .Wall => {
-                    render_group.pushBitmap(&state.tree, 2.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(.Tree, 2.5, Vector3.zero(), Color.white());
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
@@ -802,8 +808,8 @@ pub export fn updateAndRender(
                     );
                 },
                 .Monster => {
-                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&state.shadow, 4.5, Vector3.zero(), shadow_color);
+                    var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
+                    render_group.pushBitmapId(.Shadow, 4.5, Vector3.zero(), shadow_color);
                     render_group.pushBitmap(&hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
@@ -819,8 +825,8 @@ pub export fn updateAndRender(
                     const head_z = 0.25 * head_bob_sine;
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
-                    var hero_bitmaps = state.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmap(&state.shadow, 2.5, Vector3.zero(), head_shadow_color);
+                    var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
+                    render_group.pushBitmapId(.Shadow, 2.5, Vector3.zero(), head_shadow_color);
                     render_group.pushBitmap(&hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
                 },
                 .Space => {
@@ -965,6 +971,62 @@ pub export fn updateAndRender(
 
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
+}
+
+const LoadAssetWork = struct {
+    assets: *shared.GameAssets,
+    id: shared.GameAssetId,
+    file_name: [*:0]const u8,
+    task: *shared.TaskWithMemory,
+    bitmap: *LoadedBitmap,
+};
+
+pub fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+    _ = queue;
+
+    const work: *LoadAssetWork = @ptrCast(@alignCast(data));
+    var thread = shared.ThreadContext{ .placeholder = 0 };
+    work.bitmap.* = debugLoadBMP(&thread, work.assets.platform, work.file_name);
+
+    work.assets.setBitmap(work.id, work.bitmap);
+
+    endTaskWithMemory(work.task);
+}
+
+pub fn loadAsset(
+    assets: *shared.GameAssets,
+    id: shared.GameAssetId,
+) void {
+    if (beginTaskWithMemory(assets.transient_state)) |task| {
+        var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+
+        work.assets = assets;
+        work.id = id;
+        work.task = task;
+        work.bitmap = assets.arena.pushStruct(LoadedBitmap);
+        switch (id) {
+            .Backdrop => {
+                work.file_name = "test/test_background.bmp";
+            },
+            .Shadow => {
+                work.file_name = "test/test_hero_shadow.bmp";
+                // 72, 182
+            },
+            .Tree => {
+                work.file_name = "test2/tree00.bmp";
+                // 40, 80
+            },
+            .Sword => {
+                work.file_name = "test2/rock03.bmp";
+                // 29, 10
+            },
+            .Stairwell => {
+                work.file_name = "test2/rock02.bmp";
+            },
+        }
+
+        assets.platform.addQueueEntry(assets.transient_state.low_priority_queue, doLoadAssetWork, work);
+    }
 }
 
 pub fn chunkPositionFromTilePosition(
@@ -1311,7 +1373,7 @@ fn fillGroundChunk(
         var half_dim = Vector2.new(width, height).scaledTo(0.5);
 
         const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-        var render_group = RenderGroup.allocate(&task.arena, 0);
+        var render_group = RenderGroup.allocate(&transient_state.assets, &task.arena, 0);
         render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
         render_group.pushClear(Color.new(1, 0, 1, 1));
 
@@ -1342,9 +1404,9 @@ fn fillGroundChunk(
                     var stamp: *LoadedBitmap = undefined;
 
                     if (series.randomChoice(2) == 1) {
-                        stamp = &state.grass[series.randomChoice(state.grass.len)];
+                        stamp = &transient_state.assets.grass[series.randomChoice(transient_state.assets.grass.len)];
                     } else {
-                        stamp = &state.stone[series.randomChoice(state.stone.len)];
+                        stamp = &transient_state.assets.stone[series.randomChoice(transient_state.assets.stone.len)];
                     }
 
                     const offset = half_dim.hadamardProduct(
@@ -1375,7 +1437,7 @@ fn fillGroundChunk(
 
                 var grass_index: u32 = 0;
                 while (grass_index < 50) : (grass_index += 1) {
-                    const stamp: *LoadedBitmap = &state.tuft[series.randomChoice(state.tuft.len)];
+                    const stamp: *LoadedBitmap = &transient_state.assets.tuft[series.randomChoice(transient_state.assets.tuft.len)];
 
                     const offset = half_dim.hadamardProduct(
                         Vector2.new(series.randomBilateral(), series.randomBilateral()),
