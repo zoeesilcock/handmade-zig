@@ -149,7 +149,7 @@ pub inline fn safeTruncateI64(value: i64) u32 {
     return @as(u32, @intCast(value));
 }
 
-fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
+fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
     var result = shared.DebugReadFileResult{};
 
     const file_handle: win32.HANDLE = win32.CreateFileA(
@@ -187,7 +187,7 @@ fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) 
                     result.contents = file_contents;
                     result.content_size = file_size32;
                 } else {
-                    debugFreeFileMemory(thread, result.contents);
+                    debugFreeFileMemory(result.contents);
                     result.contents = undefined;
                 }
             }
@@ -199,9 +199,7 @@ fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) 
     return result;
 }
 
-fn debugWriteEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
-    _ = thread;
-
+fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
     var result: bool = false;
 
     const file_handle: win32.HANDLE = win32.CreateFileA(
@@ -228,8 +226,7 @@ fn debugWriteEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8,
     return result;
 }
 
-fn debugFreeFileMemory(thread: *shared.ThreadContext, memory: *anyopaque) callconv(.C) void {
-    _ = thread;
+fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
     _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
 }
 
@@ -1282,7 +1279,6 @@ pub export fn wWinMain(
     _ = cmd_line;
     _ = cmd_show;
 
-    var thread = shared.ThreadContext{};
     var state = Win32State{};
     getExeFileName(&state);
 
@@ -1563,7 +1559,7 @@ pub export fn wWinMain(
                     }
 
                     // Send all input to game.
-                    game.updateAndRender(&thread, platform, &game_memory, new_input.*, &game_buffer);
+                    game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
                     handleDebugCycleCounters(&game_memory);
 
                     // Output sound.
@@ -1637,7 +1633,7 @@ pub export fn wWinMain(
                                 .samples_per_second = sound_output.samples_per_second,
                             };
 
-                            game.getSoundSamples(&thread, &game_memory, &sound_output_info.output_buffer);
+                            game.getSoundSamples(&game_memory, &sound_output_info.output_buffer);
 
                             if (DEBUG) {
                                 var marker = &debug_time_markers[debug_time_marker_index];

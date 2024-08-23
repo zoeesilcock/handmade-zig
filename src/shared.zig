@@ -19,6 +19,7 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
 const LoadedBitmap = render.LoadedBitmap;
+const Assets = @import("asset.zig").Assets;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -81,15 +82,27 @@ pub const PlatformWorkQueue = extern struct {
 
     entries: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{}} ** 256,
 };
+const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
+const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;
+const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult;
+const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
+const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
 pub const Platform = extern struct {
-    debugFreeFileMemory: *const fn (thread: *ThreadContext, memory: *anyopaque) callconv(.C) void = undefined,
-    debugWriteEntireFile: *const fn (thread: *ThreadContext, file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool = undefined,
-    debugReadEntireFile: *const fn (thread: *ThreadContext, file_name: [*:0]const u8) callconv(.C) DebugReadFileResult = undefined,
+    debugFreeFileMemory: *const debugFreeFileMemoryType = undefined,
+    debugWriteEntireFile: *const debugWriteEntireFileType = undefined,
+    debugReadEntireFile: *const debugReadEntireFileType = undefined,
 
-    addQueueEntry: *const fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void = undefined,
-    completeAllQueuedWork: *const fn (queue: *PlatformWorkQueue) callconv(.C) void = undefined,
+    addQueueEntry: *const addQueueEntryType = undefined,
+    completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
 };
+
+pub var debugFreeFileMemory: *const debugFreeFileMemoryType = undefined;
+pub var debugWriteEntireFile: *const debugWriteEntireFileType = undefined;
+pub var debugReadEntireFile: *const debugReadEntireFileType = undefined;
+
+pub var addQueueEntry: *const addQueueEntryType = undefined;
+pub var completeAllQueuedWork: *const completeAllQueuedWorkType = undefined;
 
 pub const DebugReadFileResult = extern struct {
     contents: *anyopaque = undefined,
@@ -151,16 +164,12 @@ pub const DebugCycleCounter = extern struct {
 };
 
 // Data from platform.
-pub fn updateAndRenderStub(_: *ThreadContext, _: Platform, _: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) void {
+pub fn updateAndRenderStub(_: Platform, _: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) void {
     return;
 }
-pub fn getSoundSamplesStub(_: *ThreadContext, _: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
+pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
     return;
 }
-
-pub const ThreadContext = extern struct {
-    placeholder: i32 = 0,
-};
 
 pub const OffscreenBuffer = extern struct {
     memory: ?*anyopaque = undefined,
@@ -363,6 +372,7 @@ pub fn zeroStruct(comptime T: type, ptr: *T) void {
 
 // Game state.
 pub const State = struct {
+    is_initialized: bool = false,
     world_arena: MemoryArena = undefined,
     world: *world.World = undefined,
 
@@ -394,72 +404,6 @@ pub const State = struct {
     test_normal: LoadedBitmap,
 };
 
-pub const GameAssetId = enum(u32) {
-    Backdrop,
-    Shadow,
-    Tree,
-    Sword,
-    Stairwell,
-};
-
-pub const GAME_ASSET_ID_COUNT = @typeInfo(GameAssetId).Enum.fields.len;
-
-pub const AssetState = enum(u8) {
-    Unloaded,
-    Queued,
-    Loaded,
-    Locked,
-};
-
-pub const AssetTag = struct {
-    id: u32,
-    value: f32,
-};
-
-pub const AssetBitmapInfo = struct {
-    alignment_percentage: Vector2 = Vector2.zero(),
-    width_over_height: f32 = 0,
-    width: i32 = 0,
-    height: i32 = 0,
-
-    first_tag_index: u32,
-    one_past_last_index: u32,
-};
-
-pub const AssetGroup = struct {
-    first_tag_index: u32,
-    one_past_last_index: u32,
-};
-
-pub const AssetSlot = struct {
-    state: AssetState = .Unloaded,
-    bitmap: ?*LoadedBitmap = null,
-};
-
-pub const GameAssets = struct {
-    transient_state: *TransientState,
-    arena: MemoryArena,
-    platform: Platform,
-
-    bitmaps: [GAME_ASSET_ID_COUNT]AssetSlot = [1]AssetSlot{AssetSlot{}} ** GAME_ASSET_ID_COUNT,
-
-    // Array asseets.
-    grass: [2]LoadedBitmap,
-    stone: [4]LoadedBitmap,
-    tuft: [3]LoadedBitmap,
-
-    // Structured assets.
-    hero_bitmaps: [4]HeroBitmaps,
-
-    pub fn setBitmap(self: *GameAssets, id: GameAssetId, bitmap: *LoadedBitmap) void {
-        self.bitmaps[@intFromEnum(id)].bitmap = bitmap;
-    }
-
-    pub fn getBitmap(self: *GameAssets, id: GameAssetId) ?*LoadedBitmap {
-        return self.bitmaps[@intFromEnum(id)].bitmap;
-    }
-};
-
 pub const TaskWithMemory = struct {
     being_used: bool,
     arena: MemoryArena,
@@ -470,19 +414,19 @@ pub const TaskWithMemory = struct {
 pub const TransientState = struct {
     is_initialized: bool = false,
     arena: MemoryArena = undefined,
+
+    high_priority_queue: *PlatformWorkQueue,
+    low_priority_queue: *PlatformWorkQueue,
     tasks: [4]TaskWithMemory = [1]TaskWithMemory{undefined} ** 4,
+
+    assets: *Assets,
 
     ground_buffer_count: u32 = 0,
     ground_buffers: [*]GroundBuffer = undefined,
 
-    high_priority_queue: *PlatformWorkQueue,
-    low_priority_queue: *PlatformWorkQueue,
-
     env_map_width: i32,
     env_map_height: i32,
     env_maps: [3]render.EnvironmentMap = [1]render.EnvironmentMap{undefined} ** 3,
-
-    assets: GameAssets,
 };
 
 pub const GroundBuffer = extern struct {
@@ -529,12 +473,6 @@ pub const LowEntity = struct {
 pub const AddLowEntityResult = struct {
     low: *LowEntity,
     low_index: u32,
-};
-
-pub const HeroBitmaps = struct {
-    head: LoadedBitmap,
-    torso: LoadedBitmap,
-    cape: LoadedBitmap,
 };
 
 // Data structures.

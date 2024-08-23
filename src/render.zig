@@ -18,10 +18,9 @@
 
 const shared = @import("shared.zig");
 const math = @import("math.zig");
+const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
-
-const loadAsset = @import("handmade.zig").loadAsset;
 
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 
@@ -179,7 +178,7 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
 }
 
 pub const RenderGroup = extern struct {
-    assets: *shared.GameAssets,
+    assets: *asset.Assets,
     global_alpha: f32,
 
     monitor_half_dim_in_meters: Vector2,
@@ -193,7 +192,7 @@ pub const RenderGroup = extern struct {
     missing_resource_count: u32,
 
     pub fn allocate(
-        assets: *shared.GameAssets,
+        assets: *asset.Assets,
         arena: *shared.MemoryArena,
         max_push_buffer_size: u32,
     ) *RenderGroup {
@@ -351,16 +350,18 @@ pub const RenderGroup = extern struct {
 
     pub fn pushBitmapId(
         self: *RenderGroup,
-        id: shared.GameAssetId,
+        opt_id: ?asset.BitmapId,
         height: f32,
         offset: Vector3,
         color: Color,
     ) void {
-        if (self.assets.getBitmap(id)) |bitmap| {
-            self.pushBitmap(bitmap, height, offset, color);
-        } else {
-            loadAsset(self.assets, id);
-            self.missing_resource_count += 1;
+        if (opt_id) |id| {
+            if (self.assets.getBitmap(id)) |bitmap| {
+                self.pushBitmap(bitmap, height, offset, color);
+            } else {
+                asset.loadBitmap(self.assets, id);
+                self.missing_resource_count += 1;
+            }
         }
     }
 
@@ -469,7 +470,6 @@ pub const RenderGroup = extern struct {
 
     pub fn tiledRenderTo(
         self: *RenderGroup,
-        platform: *const shared.Platform,
         render_queue: *shared.PlatformWorkQueue,
         output_target: *LoadedBitmap,
     ) void {
@@ -520,14 +520,14 @@ pub const RenderGroup = extern struct {
                 work.clip_rect = clip_rect;
 
                 if (true) {
-                    platform.addQueueEntry(render_queue, &doTileRenderWork, work);
+                    shared.addQueueEntry(render_queue, &doTileRenderWork, work);
                 } else {
                     doTileRenderWork(render_queue, work);
                 }
             }
         }
 
-        platform.completeAllQueuedWork(render_queue);
+        shared.completeAllQueuedWork(render_queue);
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {

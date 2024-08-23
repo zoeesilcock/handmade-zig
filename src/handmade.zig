@@ -3,6 +3,7 @@ const world = @import("world.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const render = @import("render.zig");
+const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
@@ -97,30 +98,23 @@ const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
 const RenderGroupEntry = render.RenderGroupEntry;
 const RenderGroup = render.RenderGroup;
-
-fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
-    const flipped_y = @as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y();
-    return Vector2.new(
-        math.safeRatio0(alignment.x(), @floatFromInt(bitmap.width)),
-        math.safeRatio0(flipped_y, @floatFromInt(bitmap.height)),
-    );
-}
-
-fn setTopDownAligned(bitmaps: *shared.HeroBitmaps, in_alignment: Vector2) void {
-    const alignment = topDownAligned(&bitmaps.head, in_alignment);
-
-    bitmaps.head.alignment_percentage = alignment;
-    bitmaps.cape.alignment_percentage = alignment;
-    bitmaps.torso.alignment_percentage = alignment;
-}
+const Assets = asset.Assets;
+const AssetTypeId = asset.AssetTypeId;
+const HeroBitmaps = asset.HeroBitmaps;
 
 pub export fn updateAndRender(
-    thread: *shared.ThreadContext,
     platform: shared.Platform,
     memory: *shared.Memory,
     input: shared.GameInput,
     buffer: *shared.OffscreenBuffer,
 ) void {
+    shared.debugFreeFileMemory = platform.debugFreeFileMemory;
+    shared.debugWriteEntireFile = platform.debugWriteEntireFile;
+    shared.debugReadEntireFile = platform.debugReadEntireFile;
+
+    shared.addQueueEntry = platform.addQueueEntry;
+    shared.completeAllQueuedWork = platform.completeAllQueuedWork;
+
     if (shared.DEBUG) {
         shared.debug_global_memory = memory;
     }
@@ -135,7 +129,7 @@ pub export fn updateAndRender(
 
     std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
-    if (!memory.is_initialized) {
+    if (!state.is_initialized) {
         state.* = State{
             .camera_position = WorldPosition.zero(),
             .test_diffuse = undefined,
@@ -311,7 +305,7 @@ pub export fn updateAndRender(
             _ = addFamiliar(state, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
         }
 
-        memory.is_initialized = true;
+        state.is_initialized = true;
     }
 
     // Transient initialization.
@@ -323,6 +317,9 @@ pub export fn updateAndRender(
             memory.transient_storage.? + @sizeOf(TransientState),
         );
 
+        transient_state.high_priority_queue = memory.high_priority_queue;
+        transient_state.low_priority_queue = memory.low_priority_queue;
+
         var task_index: u32 = 0;
         while (task_index < transient_state.tasks.len) : (task_index += 1) {
             var task: *shared.TaskWithMemory = &transient_state.tasks[task_index];
@@ -331,8 +328,11 @@ pub export fn updateAndRender(
             transient_state.arena.makeSubArena(&task.arena, shared.megabytes(1), null);
         }
 
-        transient_state.high_priority_queue = memory.high_priority_queue;
-        transient_state.low_priority_queue = memory.low_priority_queue;
+        transient_state.assets = Assets.allocate(
+            &transient_state.arena,
+            shared.megabytes(64),
+            transient_state,
+        );
 
         transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
@@ -381,56 +381,6 @@ pub export fn updateAndRender(
                 width >>= 1;
                 height >>= 1;
             }
-        }
-
-        // Load game assets.
-        transient_state.assets = shared.GameAssets{
-            .transient_state = transient_state,
-            .arena = undefined,
-            .platform = platform,
-            .hero_bitmaps = .{
-                shared.HeroBitmaps{
-                    .head = debugLoadBMP(thread, platform, "test/test_hero_right_head.bmp"),
-                    .torso = debugLoadBMP(thread, platform, "test/test_hero_right_torso.bmp"),
-                    .cape = debugLoadBMP(thread, platform, "test/test_hero_right_cape.bmp"),
-                },
-                shared.HeroBitmaps{
-                    .head = debugLoadBMP(thread, platform, "test/test_hero_back_head.bmp"),
-                    .torso = debugLoadBMP(thread, platform, "test/test_hero_back_torso.bmp"),
-                    .cape = debugLoadBMP(thread, platform, "test/test_hero_back_cape.bmp"),
-                },
-                shared.HeroBitmaps{
-                    .head = debugLoadBMP(thread, platform, "test/test_hero_left_head.bmp"),
-                    .torso = debugLoadBMP(thread, platform, "test/test_hero_left_torso.bmp"),
-                    .cape = debugLoadBMP(thread, platform, "test/test_hero_left_cape.bmp"),
-                },
-                shared.HeroBitmaps{
-                    .head = debugLoadBMP(thread, platform, "test/test_hero_front_head.bmp"),
-                    .torso = debugLoadBMP(thread, platform, "test/test_hero_front_torso.bmp"),
-                    .cape = debugLoadBMP(thread, platform, "test/test_hero_front_cape.bmp"),
-                },
-            },
-            .grass = .{
-                debugLoadBMP(thread, platform, "test2/grass00.bmp"),
-                debugLoadBMP(thread, platform, "test2/grass01.bmp"),
-            },
-            .stone = .{
-                debugLoadBMP(thread, platform, "test2/ground00.bmp"),
-                debugLoadBMP(thread, platform, "test2/ground01.bmp"),
-                debugLoadBMP(thread, platform, "test2/ground02.bmp"),
-                debugLoadBMP(thread, platform, "test2/ground03.bmp"),
-            },
-            .tuft = .{
-                debugLoadBMP(thread, platform, "test2/tuft00.bmp"),
-                debugLoadBMP(thread, platform, "test2/tuft01.bmp"),
-                debugLoadBMP(thread, platform, "test2/tuft02.bmp"),
-            },
-        };
-
-        transient_state.arena.makeSubArena(&transient_state.assets.arena, shared.megabytes(64), null);
-
-        for (&transient_state.assets.hero_bitmaps) |*bitmaps| {
-            setTopDownAligned(bitmaps, Vector2.new(72, 182));
         }
 
         transient_state.is_initialized = true;
@@ -511,7 +461,7 @@ pub export fn updateAndRender(
 
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(&transient_state.assets, &transient_state.arena, @intCast(shared.megabytes(4)));
+    var render_group = RenderGroup.allocate(transient_state.assets, &transient_state.arena, @intCast(shared.megabytes(4)));
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
@@ -611,7 +561,6 @@ pub export fn updateAndRender(
                     if (opt_furthest_buffer) |furthest_buffer| {
                         fillGroundChunk(
                             state,
-                            &platform,
                             transient_state,
                             furthest_buffer,
                             &chunk_center,
@@ -783,7 +732,7 @@ pub export fn updateAndRender(
                 .Hero => {
                     var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
                     const hero_scale = 2.5;
-                    render_group.pushBitmapId(.Shadow, hero_scale * 1.0, Vector3.zero(), shadow_color);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), hero_scale * 1.0, Vector3.zero(), shadow_color);
                     render_group.pushBitmap(&hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
                     render_group.pushBitmap(&hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
                     render_group.pushBitmap(&hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
@@ -791,11 +740,11 @@ pub export fn updateAndRender(
                     drawHitPoints(entity, render_group);
                 },
                 .Sword => {
-                    render_group.pushBitmapId(.Shadow, 0.25, Vector3.zero(), shadow_color);
-                    render_group.pushBitmapId(.Sword, 0.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), 0.25, Vector3.zero(), shadow_color);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Sword), 0.5, Vector3.zero(), Color.white());
                 },
                 .Wall => {
-                    render_group.pushBitmapId(.Tree, 2.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Tree), 2.5, Vector3.zero(), Color.white());
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
@@ -809,7 +758,7 @@ pub export fn updateAndRender(
                 },
                 .Monster => {
                     var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmapId(.Shadow, 4.5, Vector3.zero(), shadow_color);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), 4.5, Vector3.zero(), shadow_color);
                     render_group.pushBitmap(&hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
@@ -826,7 +775,7 @@ pub export fn updateAndRender(
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
                     var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
-                    render_group.pushBitmapId(.Shadow, 2.5, Vector3.zero(), head_shadow_color);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), 2.5, Vector3.zero(), head_shadow_color);
                     render_group.pushBitmap(&hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
                 },
                 .Space => {
@@ -963,7 +912,7 @@ pub export fn updateAndRender(
         }
     }
 
-    render_group.tiledRenderTo(&platform, transient_state.high_priority_queue, draw_buffer);
+    render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
@@ -971,100 +920,6 @@ pub export fn updateAndRender(
 
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
-}
-
-const LoadAssetWork = struct {
-    assets: *shared.GameAssets,
-    id: shared.GameAssetId,
-    file_name: [*:0]const u8,
-    task: *shared.TaskWithMemory,
-    bitmap: *LoadedBitmap,
-
-    has_alignment: bool,
-    align_x: i32,
-    top_down_align_y: i32,
-
-    final_state: shared.AssetState,
-};
-
-pub fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
-    _ = queue;
-
-    const work: *LoadAssetWork = @ptrCast(@alignCast(data));
-    var thread = shared.ThreadContext{ .placeholder = 0 };
-
-    if (work.has_alignment) {
-        work.bitmap.* = debugLoadBMPAligned(
-            &thread,
-            work.assets.platform,
-            work.file_name,
-            work.align_x,
-            work.top_down_align_y,
-        );
-    } else {
-        work.bitmap.* = debugLoadBMP(&thread, work.assets.platform, work.file_name);
-    }
-
-    work.assets.setBitmap(work.id, work.bitmap);
-    work.assets.bitmaps[@intFromEnum(work.id)].state = work.final_state;
-
-    endTaskWithMemory(work.task);
-}
-
-pub fn loadAsset(
-    assets: *shared.GameAssets,
-    id: shared.GameAssetId,
-) void {
-    if (@cmpxchgStrong(
-        shared.AssetState,
-        &assets.bitmaps[@intFromEnum(id)].state,
-        .Unloaded,
-        .Queued,
-        .seq_cst,
-        .seq_cst,
-    ) == null) {
-        if (beginTaskWithMemory(assets.transient_state)) |task| {
-            var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
-
-            work.assets = assets;
-            work.id = id;
-            work.task = task;
-            work.bitmap = assets.arena.pushStruct(LoadedBitmap);
-            work.has_alignment = false;
-            work.final_state = .Loaded;
-
-            switch (id) {
-                .Backdrop => {
-                    work.file_name = "test/test_background.bmp";
-                },
-                .Shadow => {
-                    work.file_name = "test/test_hero_shadow.bmp";
-                    work.has_alignment = true;
-                    work.align_x = 72;
-                    work.top_down_align_y = 182;
-                },
-                .Tree => {
-                    work.file_name = "test2/tree00.bmp";
-                    work.has_alignment = true;
-                    work.align_x = 40;
-                    work.top_down_align_y = 80;
-                },
-                .Sword => {
-                    work.file_name = "test2/rock03.bmp";
-                    work.has_alignment = true;
-                    work.align_x = 29;
-                    work.top_down_align_y = 10;
-                },
-                .Stairwell => {
-                    work.file_name = "test2/rock02.bmp";
-                },
-            }
-
-            assets.platform.addQueueEntry(assets.transient_state.low_priority_queue, doLoadAssetWork, work);
-        } else {
-            @atomicStore(shared.AssetState, &assets.bitmaps[@intFromEnum(id)].state, .Unloaded, .release);
-        }
-    }
 }
 
 pub fn chunkPositionFromTilePosition(
@@ -1339,17 +1194,14 @@ fn drawHitPoints(entity: *sim.SimEntity, render_group: *RenderGroup) void {
 }
 
 pub export fn getSoundSamples(
-    thread: *shared.ThreadContext,
     memory: *shared.Memory,
     sound_buffer: *shared.SoundOutputBuffer,
 ) void {
-    _ = thread;
-
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
     outputSound(sound_buffer, shared.MIDDLE_C, state);
 }
 
-fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMemory {
+pub fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMemory {
     var found_task: ?*shared.TaskWithMemory = null;
 
     var task_index: u32 = 0;
@@ -1369,16 +1221,16 @@ fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMemory
     return found_task;
 }
 
+pub fn endTaskWithMemory(task: *shared.TaskWithMemory) void {
+    task.arena.endTemporaryMemory(task.memory_flush);
+    @atomicStore(bool, &task.being_used, false, .release);
+}
+
 const FillGroundChunkWork = struct {
     render_group: *render.RenderGroup,
     task: *shared.TaskWithMemory,
     buffer: *LoadedBitmap,
 };
-
-inline fn endTaskWithMemory(task: *shared.TaskWithMemory) void {
-    task.arena.endTemporaryMemory(task.memory_flush);
-    @atomicStore(bool, &task.being_used, false, .release);
-}
 
 pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
     _ = queue;
@@ -1390,41 +1242,8 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
     endTaskWithMemory(work.task);
 }
 
-fn pickBest(
-    info_count: i32,
-    infos: [*]shared.AssetBitmapInfo,
-    tags: [*]shared.AssetTag,
-    match_vector: [*]f32,
-    weight_vector: [*]f32,
-) i32 {
-    var best_diff: f32 = std.math.maxFloat(f32);
-    var best_index: i32 = 0;
-
-    var info_index: u32 = 0;
-    while (info_index < info_count) : (info_index += 1) {
-        const info = infos + info_index;
-
-        var total_weighted_diff: f32 = 0;
-        var tag_index: u32 = info.first_tag_index;
-        while (tag_index < info.one_past_last_tag_index) : (tag_index += 1) {
-            const tag = tags + tag_index;
-            const difference = match_vector[tag.id] - tag.value;
-            const weighted = weight_vector[tag.id] * intrinsics.absoluteValue(difference);
-            total_weighted_diff += weighted;
-        }
-
-        if (best_diff > total_weighted_diff) {
-            best_diff = total_weighted_diff;
-            best_index = info_index;
-        }
-    }
-
-    return best_index;
-}
-
 fn fillGroundChunk(
     state: *State,
-    platform: *const shared.Platform,
     transient_state: *TransientState,
     ground_buffer: *shared.GroundBuffer,
     chunk_position: *const world.WorldPosition,
@@ -1443,7 +1262,7 @@ fn fillGroundChunk(
         var half_dim = Vector2.new(width, height).scaledTo(0.5);
 
         const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-        var render_group = RenderGroup.allocate(&transient_state.assets, &task.arena, 0);
+        var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0);
         render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
         render_group.pushClear(Color.new(1, 0, 1, 1));
 
@@ -1524,7 +1343,7 @@ fn fillGroundChunk(
             work.render_group = render_group;
             work.task = task;
 
-            platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
+            shared.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
         }
     }
 }
@@ -1679,90 +1498,6 @@ fn makePyramidNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
 
         row += @as(usize, @intCast(bitmap.pitch));
     }
-}
-
-fn debugLoadBMP(
-    thread: *shared.ThreadContext,
-    platform: shared.Platform,
-    file_name: [*:0]const u8,
-) LoadedBitmap {
-    var result = debugLoadBMPAligned(thread, platform, file_name, 0, 0);
-    result.alignment_percentage = Vector2.new(0.5, 0.5);
-    return result;
-}
-
-fn debugLoadBMPAligned(
-    thread: *shared.ThreadContext,
-    platform: shared.Platform,
-    file_name: [*:0]const u8,
-    align_x: i32,
-    top_down_align_y: i32,
-) LoadedBitmap {
-    var result: LoadedBitmap = undefined;
-    const read_result = platform.debugReadEntireFile(thread, file_name);
-
-    if (read_result.content_size > 0) {
-        const header = @as(*shared.BitmapHeader, @ptrCast(@alignCast(read_result.contents)));
-
-        std.debug.assert(header.height >= 0);
-        std.debug.assert(header.compression == 3);
-
-        result.memory = @as([*]void, @ptrCast(read_result.contents)) + header.bitmap_offset;
-        result.width = header.width;
-        result.height = header.height;
-        result.alignment_percentage = topDownAligned(&result, Vector2.newI(align_x, top_down_align_y));
-        result.width_over_height = math.safeRatio0(@floatFromInt(result.width), @floatFromInt(result.height));
-
-        const alpha_mask = ~(header.red_mask | header.green_mask | header.blue_mask);
-        const alpha_scan = intrinsics.findLeastSignificantSetBit(alpha_mask);
-        const red_scan = intrinsics.findLeastSignificantSetBit(header.red_mask);
-        const green_scan = intrinsics.findLeastSignificantSetBit(header.green_mask);
-        const blue_scan = intrinsics.findLeastSignificantSetBit(header.blue_mask);
-
-        std.debug.assert(alpha_scan.found);
-        std.debug.assert(red_scan.found);
-        std.debug.assert(green_scan.found);
-        std.debug.assert(blue_scan.found);
-
-        const red_shift_down = @as(u5, @intCast(red_scan.index));
-        const green_shift_down = @as(u5, @intCast(green_scan.index));
-        const blue_shift_down = @as(u5, @intCast(blue_scan.index));
-        const alpha_shift_down = @as(u5, @intCast(alpha_scan.index));
-
-        var source_dest: [*]align(@alignOf(u8)) u32 = @ptrCast(result.memory);
-        var x: u32 = 0;
-        while (x < header.width) : (x += 1) {
-            var y: u32 = 0;
-            while (y < header.height) : (y += 1) {
-                const color = source_dest[0];
-                var texel = Color.new(
-                    @floatFromInt((color & header.red_mask) >> red_shift_down),
-                    @floatFromInt((color & header.green_mask) >> green_shift_down),
-                    @floatFromInt((color & header.blue_mask) >> blue_shift_down),
-                    @floatFromInt((color & alpha_mask) >> alpha_shift_down),
-                );
-                texel = render.sRGB255ToLinear1(texel);
-
-                _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
-
-                texel = render.linear1ToSRGB255(texel);
-
-                source_dest[0] = texel.packColor1();
-
-                source_dest += 1;
-            }
-        }
-    }
-
-    result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
-
-    if (false) {
-        result.pitch = -result.width * shared.BITMAP_BYTES_PER_PIXEL;
-        const offset: usize = @intCast(-result.pitch * (result.height - 1));
-        result.memory = @ptrCast(@as([*]u8, @ptrCast(result.memory)) + offset);
-    }
-
-    return result;
 }
 
 fn outputSound(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, state: *State) void {
