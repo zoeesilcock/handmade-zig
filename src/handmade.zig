@@ -1250,7 +1250,6 @@ fn fillGroundChunk(
 ) void {
     if (beginTaskWithMemory(transient_state)) |task| {
         var work: *FillGroundChunkWork = task.arena.pushStruct(FillGroundChunkWork);
-        ground_buffer.position = chunk_position.*;
 
         const buffer = &ground_buffer.bitmap;
         buffer.alignment_percentage = Vector2.new(0.5, 0.5);
@@ -1265,6 +1264,10 @@ fn fillGroundChunk(
         var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0);
         render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
         render_group.pushClear(Color.new(1, 0, 1, 1));
+
+        work.buffer = buffer;
+        work.render_group = render_group;
+        work.task = task;
 
         var chunk_offset_y: i32 = -1;
         while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
@@ -1290,20 +1293,19 @@ fn fillGroundChunk(
 
                 var grass_index: u32 = 0;
                 while (grass_index < 100) : (grass_index += 1) {
-                    var stamp: *LoadedBitmap = undefined;
-
-                    if (series.randomChoice(2) == 1) {
-                        stamp = &transient_state.assets.grass[series.randomChoice(transient_state.assets.grass.len)];
-                    } else {
-                        stamp = &transient_state.assets.stone[series.randomChoice(transient_state.assets.stone.len)];
-                    }
-
-                    const offset = half_dim.hadamardProduct(
-                        Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                    const opt_stamp = transient_state.assets.getRandomAsset(
+                        if (series.randomChoice(2) == 1) .Grass else .Stone,
+                        &series,
                     );
-                    const position = center.plus(offset);
 
-                    render_group.pushBitmap(stamp, 2, position.toVector3(0), color);
+                    if (opt_stamp) |stamp| {
+                        const offset = half_dim.hadamardProduct(
+                            Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                        );
+                        const position = center.plus(offset);
+
+                        render_group.pushBitmapId(stamp, 2, position.toVector3(0), color);
+                    }
                 }
             }
         }
@@ -1326,24 +1328,25 @@ fn fillGroundChunk(
 
                 var grass_index: u32 = 0;
                 while (grass_index < 50) : (grass_index += 1) {
-                    const stamp: *LoadedBitmap = &transient_state.assets.tuft[series.randomChoice(transient_state.assets.tuft.len)];
+                    const opt_stamp = transient_state.assets.getRandomAsset(.Tuft, &series);
 
-                    const offset = half_dim.hadamardProduct(
-                        Vector2.new(series.randomBilateral(), series.randomBilateral()),
-                    );
-                    const position = center.plus(offset);
+                    if (opt_stamp) |stamp| {
+                        const offset = half_dim.hadamardProduct(
+                            Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                        );
+                        const position = center.plus(offset);
 
-                    render_group.pushBitmap(stamp, 0.1, position.toVector3(0), Color.white());
+                        render_group.pushBitmapId(stamp, 0.1, position.toVector3(0), Color.white());
+                    }
                 }
             }
         }
 
         if (render_group.allResourcesPresent()) {
-            work.buffer = buffer;
-            work.render_group = render_group;
-            work.task = task;
-
+            ground_buffer.position = chunk_position.*;
             shared.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
+        } else {
+            endTaskWithMemory(work.task);
         }
     }
 }

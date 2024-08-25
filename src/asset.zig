@@ -1,5 +1,6 @@
 const shared = @import("shared.zig");
 const math = @import("math.zig");
+const random = @import("random.zig");
 const render = @import("render.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
@@ -16,12 +17,14 @@ const Platform = shared.Platform;
 
 pub const AssetTypeId = enum(u32) {
     None,
-    Backdrop,
     Shadow,
     Tree,
     Sword,
-    Stairwell,
     Rock,
+
+    Grass,
+    Tuft,
+    Stone,
 
     pub fn toInt(self: AssetTypeId) u32 {
         return @intFromEnum(self);
@@ -73,10 +76,8 @@ pub const BitmapId = struct {
 };
 
 const AssetBitmapInfo = struct {
+    file_name: [*:0]const u8 = undefined,
     alignment_percentage: Vector2 = Vector2.zero(),
-    width_over_height: f32 = 0,
-    width: i32 = 0,
-    height: i32 = 0,
 };
 
 pub const HeroBitmaps = struct {
@@ -95,6 +96,7 @@ pub const Assets = struct {
 
     bitmap_count: u32,
     bitmaps: [*]AssetSlot,
+    bitmap_infos: [*]AssetBitmapInfo,
 
     sound_count: u32,
     sounds: [*]AssetSlot,
@@ -105,15 +107,55 @@ pub const Assets = struct {
     tag_count: u32,
     tags: [*]AssetTag,
 
-    asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
+    debug_used_bitmap_count: u32,
+    debug_used_asset_count: u32,
+    debug_asset_type: ?*AssetType,
 
-    // Array assets.
-    grass: [2]LoadedBitmap,
-    stone: [4]LoadedBitmap,
-    tuft: [3]LoadedBitmap,
+    asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
 
     // Structured assets.
     hero_bitmaps: [4]HeroBitmaps,
+
+    fn debugAddBitmapInfo(self: *Assets, file_name: [*:0]const u8, alignment_percentage: Vector2) BitmapId {
+        std.debug.assert(self.debug_used_bitmap_count < self.bitmap_count);
+
+        const bitmap_id = BitmapId{ .value = self.debug_used_bitmap_count };
+        self.debug_used_bitmap_count += 1;
+
+        var info = &self.bitmap_infos[bitmap_id.value];
+        info.alignment_percentage = alignment_percentage;
+        info.file_name = file_name;
+
+        return bitmap_id;
+    }
+
+    fn beginAssetType(self: *Assets, type_id: AssetTypeId) void {
+        std.debug.assert(self.debug_asset_type == null);
+
+        self.debug_asset_type = &self.asset_types[@intFromEnum(type_id)];
+        self.debug_asset_type.?.first_asset_index = self.debug_used_asset_count;
+        self.debug_asset_type.?.one_past_last_asset_index = self.debug_asset_type.?.first_asset_index;
+    }
+
+    fn addBitmapAsset(self: *Assets, file_name: [*:0]const u8, alignment_percentage: ?Vector2) void {
+        std.debug.assert(self.debug_asset_type != null);
+
+        if (self.debug_asset_type) |asset_type| {
+            const asset: *Asset = &self.assets[asset_type.one_past_last_asset_index];
+            self.debug_asset_type.?.one_past_last_asset_index += 1;
+
+            asset.first_tag_index = 0;
+            asset.one_past_last_index = 0;
+            asset.slot_id = self.debugAddBitmapInfo(file_name, alignment_percentage orelse Vector2.splat(0.5)).value;
+        }
+    }
+
+    fn endAssetType(self: *Assets) void {
+        if (self.debug_asset_type) |asset_type| {
+            self.debug_used_asset_count = asset_type.one_past_last_asset_index;
+            self.debug_asset_type = null;
+        }
+    }
 
     pub fn allocate(
         arena: *MemoryArena,
@@ -128,8 +170,9 @@ pub const Assets = struct {
         arena.makeSubArena(&result.arena, memory_size, null);
 
         // Load game assets.
-        result.bitmap_count = ASSET_TYPE_ID_COUNT;
+        result.bitmap_count = 256 * ASSET_TYPE_ID_COUNT;
         result.bitmaps = result.arena.pushArray(result.bitmap_count, AssetSlot);
+        result.bitmap_infos = result.arena.pushArray(result.bitmap_count, AssetBitmapInfo);
 
         result.sound_count = 1;
         result.sounds = result.arena.pushArray(result.sound_count, AssetSlot);
@@ -137,58 +180,64 @@ pub const Assets = struct {
         result.tag_count = 0;
         result.tags = result.arena.pushArray(result.tag_count, AssetTag);
 
-        result.asset_count = result.bitmap_count;
+        result.asset_count = result.bitmap_count + result.sound_count;
         result.assets = result.arena.pushArray(result.asset_count, Asset);
 
-        var asset_id: u32 = 0;
-        while (asset_id < ASSET_TYPE_ID_COUNT) : (asset_id += 1) {
-            const asset_type: *AssetType = &result.asset_types[asset_id];
-            asset_type.first_asset_index = asset_id;
-            asset_type.one_past_last_asset_index = asset_id + 1;
+        result.debug_used_bitmap_count = 1;
+        result.debug_used_asset_count = 1;
 
-            const asset: *Asset = &result.assets[asset_type.first_asset_index];
-            asset.first_tag_index = 0;
-            asset.one_past_last_index = 0;
-            asset.slot_id = asset_type.first_asset_index;
-        }
+        result.beginAssetType(.Shadow);
+        result.addBitmapAsset("test/test_hero_shadow.bmp", Vector2.new(0.5, 0.15668203));
+        result.endAssetType();
+
+        result.beginAssetType(.Tree);
+        result.addBitmapAsset("test2/tree00.bmp", Vector2.new(0.49382716, 0.29565218));
+        result.endAssetType();
+
+        result.beginAssetType(.Sword);
+        result.addBitmapAsset("test2/rock03.bmp", Vector2.new(0.5, 0.65625));
+        result.endAssetType();
 
         result.hero_bitmaps = .{
             HeroBitmaps{
-                .head = debugLoadBMP("test/test_hero_right_head.bmp"),
-                .torso = debugLoadBMP("test/test_hero_right_torso.bmp"),
-                .cape = debugLoadBMP("test/test_hero_right_cape.bmp"),
+                .head = debugLoadBMP("test/test_hero_right_head.bmp", null),
+                .torso = debugLoadBMP("test/test_hero_right_torso.bmp", null),
+                .cape = debugLoadBMP("test/test_hero_right_cape.bmp", null),
             },
             HeroBitmaps{
-                .head = debugLoadBMP("test/test_hero_back_head.bmp"),
-                .torso = debugLoadBMP("test/test_hero_back_torso.bmp"),
-                .cape = debugLoadBMP("test/test_hero_back_cape.bmp"),
+                .head = debugLoadBMP("test/test_hero_back_head.bmp", null),
+                .torso = debugLoadBMP("test/test_hero_back_torso.bmp", null),
+                .cape = debugLoadBMP("test/test_hero_back_cape.bmp", null),
             },
             HeroBitmaps{
-                .head = debugLoadBMP("test/test_hero_left_head.bmp"),
-                .torso = debugLoadBMP("test/test_hero_left_torso.bmp"),
-                .cape = debugLoadBMP("test/test_hero_left_cape.bmp"),
+                .head = debugLoadBMP("test/test_hero_left_head.bmp", null),
+                .torso = debugLoadBMP("test/test_hero_left_torso.bmp", null),
+                .cape = debugLoadBMP("test/test_hero_left_cape.bmp", null),
             },
             HeroBitmaps{
-                .head = debugLoadBMP("test/test_hero_front_head.bmp"),
-                .torso = debugLoadBMP("test/test_hero_front_torso.bmp"),
-                .cape = debugLoadBMP("test/test_hero_front_cape.bmp"),
+                .head = debugLoadBMP("test/test_hero_front_head.bmp", null),
+                .torso = debugLoadBMP("test/test_hero_front_torso.bmp", null),
+                .cape = debugLoadBMP("test/test_hero_front_cape.bmp", null),
             },
         };
-        result.grass = .{
-            debugLoadBMP("test2/grass00.bmp"),
-            debugLoadBMP("test2/grass01.bmp"),
-        };
-        result.stone = .{
-            debugLoadBMP("test2/ground00.bmp"),
-            debugLoadBMP("test2/ground01.bmp"),
-            debugLoadBMP("test2/ground02.bmp"),
-            debugLoadBMP("test2/ground03.bmp"),
-        };
-        result.tuft = .{
-            debugLoadBMP("test2/tuft00.bmp"),
-            debugLoadBMP("test2/tuft01.bmp"),
-            debugLoadBMP("test2/tuft02.bmp"),
-        };
+
+        result.beginAssetType(.Grass);
+        result.addBitmapAsset("test2/grass00.bmp", null);
+        result.addBitmapAsset("test2/grass01.bmp", null);
+        result.endAssetType();
+
+        result.beginAssetType(.Stone);
+        result.addBitmapAsset("test2/ground00.bmp", null);
+        result.addBitmapAsset("test2/ground01.bmp", null);
+        result.addBitmapAsset("test2/ground02.bmp", null);
+        result.addBitmapAsset("test2/ground03.bmp", null);
+        result.endAssetType();
+
+        result.beginAssetType(.Tuft);
+        result.addBitmapAsset("test2/tuft00.bmp", null);
+        result.addBitmapAsset("test2/tuft01.bmp", null);
+        result.addBitmapAsset("test2/tuft02.bmp", null);
+        result.endAssetType();
 
         for (&result.hero_bitmaps) |*bitmaps| {
             setTopDownAligned(bitmaps, Vector2.new(72, 182));
@@ -214,18 +263,27 @@ pub const Assets = struct {
 
         return result;
     }
+
+    pub fn getRandomAsset(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?BitmapId {
+        var result: ?BitmapId = null;
+        const asset_type: *AssetType = &self.asset_types[@intFromEnum(type_id)];
+
+        if (asset_type.first_asset_index != asset_type.one_past_last_asset_index) {
+            const count: u32 = asset_type.one_past_last_asset_index - asset_type.first_asset_index;
+            const choice = series.randomChoice(count);
+            const asset = self.assets[asset_type.first_asset_index + choice];
+            result = BitmapId{ .value = asset.slot_id };
+        }
+
+        return result;
+    }
 };
 
 const LoadBitmapWork = struct {
     assets: *Assets,
     id: BitmapId,
-    file_name: [*:0]const u8,
     task: *shared.TaskWithMemory,
     bitmap: *LoadedBitmap,
-
-    has_alignment: bool,
-    align_x: i32,
-    top_down_align_y: i32,
 
     final_state: AssetState,
 };
@@ -234,17 +292,9 @@ fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(
     _ = queue;
 
     const work: *LoadBitmapWork = @ptrCast(@alignCast(data));
+    const info = work.assets.bitmap_infos[work.id.value];
 
-    if (work.has_alignment) {
-        work.bitmap.* = debugLoadBMPAligned(
-            work.file_name,
-            work.align_x,
-            work.top_down_align_y,
-        );
-    } else {
-        work.bitmap.* = debugLoadBMP(work.file_name);
-    }
-
+    work.bitmap.* = debugLoadBMP(info.file_name, info.alignment_percentage);
     work.assets.bitmaps[work.id.value].bitmap = work.bitmap;
     work.assets.bitmaps[work.id.value].state = work.final_state;
 
@@ -270,37 +320,7 @@ pub fn loadBitmap(
             work.id = id;
             work.task = task;
             work.bitmap = assets.arena.pushStruct(LoadedBitmap);
-            work.has_alignment = false;
             work.final_state = .Loaded;
-
-            switch (@as(AssetTypeId, @enumFromInt(id.value))) {
-                .None => {},
-                .Backdrop => {
-                    work.file_name = "test/test_background.bmp";
-                },
-                .Shadow => {
-                    work.file_name = "test/test_hero_shadow.bmp";
-                    work.has_alignment = true;
-                    work.align_x = 72;
-                    work.top_down_align_y = 182;
-                },
-                .Tree => {
-                    work.file_name = "test2/tree00.bmp";
-                    work.has_alignment = true;
-                    work.align_x = 40;
-                    work.top_down_align_y = 80;
-                },
-                .Sword => {
-                    work.file_name = "test2/rock03.bmp";
-                    work.has_alignment = true;
-                    work.align_x = 29;
-                    work.top_down_align_y = 10;
-                },
-                .Stairwell => {
-                    work.file_name = "test2/rock02.bmp";
-                },
-                .Rock => {},
-            }
 
             shared.addQueueEntry(assets.transient_state.low_priority_queue, doLoadAssetWork, work);
         } else {
@@ -335,16 +355,7 @@ fn setTopDownAligned(bitmaps: *HeroBitmaps, in_alignment: Vector2) void {
 
 fn debugLoadBMP(
     file_name: [*:0]const u8,
-) LoadedBitmap {
-    var result = debugLoadBMPAligned(file_name, 0, 0);
-    result.alignment_percentage = Vector2.new(0.5, 0.5);
-    return result;
-}
-
-fn debugLoadBMPAligned(
-    file_name: [*:0]const u8,
-    align_x: i32,
-    top_down_align_y: i32,
+    alignment_percentage: ?Vector2,
 ) LoadedBitmap {
     var result: LoadedBitmap = undefined;
     const read_result = shared.debugReadEntireFile(file_name);
@@ -358,7 +369,7 @@ fn debugLoadBMPAligned(
         result.memory = @as([*]void, @ptrCast(read_result.contents)) + header.bitmap_offset;
         result.width = header.width;
         result.height = header.height;
-        result.alignment_percentage = topDownAligned(&result, Vector2.newI(align_x, top_down_align_y));
+        result.alignment_percentage = alignment_percentage orelse Vector2.splat(0.5);
         result.width_over_height = math.safeRatio0(@floatFromInt(result.width), @floatFromInt(result.height));
 
         const alpha_mask = ~(header.red_mask | header.green_mask | header.blue_mask);
