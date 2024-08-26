@@ -1,6 +1,6 @@
 // Constants.
-pub const PI32: f32 = 3.1415926535897932384626433;
-pub const TAU32: f32 = PI32 * 2.0;
+pub const PI32: f32 = 3.14159265359;
+pub const TAU32: f32 = 6.28318530717958647692;
 pub const MIDDLE_C: u32 = 261;
 pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
@@ -20,6 +20,7 @@ const Vector3 = math.Vector3;
 const Color = math.Color;
 const LoadedBitmap = render.LoadedBitmap;
 const Assets = @import("asset.zig").Assets;
+const BitmapId = @import("asset.zig").BitmapId;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -402,6 +403,12 @@ pub const State = struct {
 
     test_diffuse: LoadedBitmap,
     test_normal: LoadedBitmap,
+};
+
+pub const HeroBitmapIds = struct {
+    head: ?BitmapId,
+    torso: ?BitmapId,
+    cape: ?BitmapId,
 };
 
 pub const TaskWithMemory = struct {

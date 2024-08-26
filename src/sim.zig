@@ -84,7 +84,7 @@ pub const SimEntity = extern struct {
 
     distance_limit: f32 = 0,
 
-    facing_direction: u32 = undefined,
+    facing_direction: f32 = 0,
     head_bob_time: f32 = 0,
 
     abs_tile_z_delta: i32 = 0,
@@ -783,18 +783,8 @@ pub fn moveEntity(
     // Update facing direction based on velocity.
     if (entity.velocity.x() == 0 and entity.velocity.y() == 0) {
         // Keep existing facing direction when velocity is zero.
-    } else if (intrinsics.absoluteValue(entity.velocity.x()) > intrinsics.absoluteValue(entity.velocity.y())) {
-        if (entity.velocity.x() > 0) {
-            entity.facing_direction = 0;
-        } else {
-            entity.facing_direction = 2;
-        }
-    } else if (intrinsics.absoluteValue(entity.velocity.x()) < intrinsics.absoluteValue(entity.velocity.y())) {
-        if (entity.velocity.y() > 0) {
-            entity.facing_direction = 1;
-        } else {
-            entity.facing_direction = 3;
-        }
+    } else {
+        entity.facing_direction = intrinsics.atan2(entity.velocity.y(), entity.velocity.x());
     }
 }
 

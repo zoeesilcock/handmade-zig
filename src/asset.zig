@@ -26,6 +26,10 @@ pub const AssetTypeId = enum(u32) {
     Tuft,
     Stone,
 
+    Head,
+    Cape,
+    Torso,
+
     pub fn toInt(self: AssetTypeId) u32 {
         return @intFromEnum(self);
     }
@@ -38,9 +42,14 @@ const AssetType = struct {
     one_past_last_asset_index: u32,
 };
 
-const AssetTagId = enum(u8) {
+pub const AssetTagId = enum(u32) {
     Smoothness,
     Flatness,
+    FacingDirection, // Angles in radians off of due right.
+
+    pub fn toInt(self: AssetTagId) u32 {
+        return @intFromEnum(self);
+    }
 };
 
 const AssetTag = struct {
@@ -50,8 +59,12 @@ const AssetTag = struct {
 
 const Asset = struct {
     first_tag_index: u32,
-    one_past_last_index: u32,
+    one_past_last_tag_index: u32,
     slot_id: u32,
+};
+
+pub const AssetVector = struct {
+    e: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{0} ** ASSET_TYPE_ID_COUNT,
 };
 
 const AssetState = enum(u8) {
@@ -80,12 +93,6 @@ const AssetBitmapInfo = struct {
     alignment_percentage: Vector2 = Vector2.zero(),
 };
 
-pub const HeroBitmaps = struct {
-    head: LoadedBitmap,
-    torso: LoadedBitmap,
-    cape: LoadedBitmap,
-};
-
 pub const SoundId = struct {
     value: u32,
 };
@@ -109,12 +116,11 @@ pub const Assets = struct {
 
     debug_used_bitmap_count: u32,
     debug_used_asset_count: u32,
+    debug_used_tag_count: u32,
     debug_asset_type: ?*AssetType,
+    debug_asset: ?*Asset,
 
     asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
-
-    // Structured assets.
-    hero_bitmaps: [4]HeroBitmaps,
 
     fn debugAddBitmapInfo(self: *Assets, file_name: [*:0]const u8, alignment_percentage: Vector2) BitmapId {
         std.debug.assert(self.debug_used_bitmap_count < self.bitmap_count);
@@ -132,7 +138,7 @@ pub const Assets = struct {
     fn beginAssetType(self: *Assets, type_id: AssetTypeId) void {
         std.debug.assert(self.debug_asset_type == null);
 
-        self.debug_asset_type = &self.asset_types[@intFromEnum(type_id)];
+        self.debug_asset_type = &self.asset_types[type_id.toInt()];
         self.debug_asset_type.?.first_asset_index = self.debug_used_asset_count;
         self.debug_asset_type.?.one_past_last_asset_index = self.debug_asset_type.?.first_asset_index;
     }
@@ -141,12 +147,27 @@ pub const Assets = struct {
         std.debug.assert(self.debug_asset_type != null);
 
         if (self.debug_asset_type) |asset_type| {
+            std.debug.assert(asset_type.one_past_last_asset_index < ASSET_TYPE_ID_COUNT);
+
             const asset: *Asset = &self.assets[asset_type.one_past_last_asset_index];
             self.debug_asset_type.?.one_past_last_asset_index += 1;
 
-            asset.first_tag_index = 0;
-            asset.one_past_last_index = 0;
+            asset.first_tag_index = self.debug_used_tag_count;
+            asset.one_past_last_tag_index = self.debug_used_tag_count;
             asset.slot_id = self.debugAddBitmapInfo(file_name, alignment_percentage orelse Vector2.splat(0.5)).value;
+
+            self.debug_asset = asset;
+        }
+    }
+
+    fn addTag(self: *Assets, tag_id: AssetTagId, value: f32) void {
+        if (self.debug_asset) |asset| {
+            asset.one_past_last_tag_index += 1;
+            const tag: *AssetTag = &self.tags[self.debug_used_tag_count];
+            self.debug_used_tag_count += 1;
+
+            tag.id = tag_id.toInt();
+            tag.value = value;
         }
     }
 
@@ -154,6 +175,7 @@ pub const Assets = struct {
         if (self.debug_asset_type) |asset_type| {
             self.debug_used_asset_count = asset_type.one_past_last_asset_index;
             self.debug_asset_type = null;
+            self.debug_asset = null;
         }
     }
 
@@ -177,7 +199,7 @@ pub const Assets = struct {
         result.sound_count = 1;
         result.sounds = result.arena.pushArray(result.sound_count, AssetSlot);
 
-        result.tag_count = 0;
+        result.tag_count = 1024 * ASSET_TYPE_ID_COUNT;
         result.tags = result.arena.pushArray(result.tag_count, AssetTag);
 
         result.asset_count = result.bitmap_count + result.sound_count;
@@ -198,29 +220,6 @@ pub const Assets = struct {
         result.addBitmapAsset("test2/rock03.bmp", Vector2.new(0.5, 0.65625));
         result.endAssetType();
 
-        result.hero_bitmaps = .{
-            HeroBitmaps{
-                .head = debugLoadBMP("test/test_hero_right_head.bmp", null),
-                .torso = debugLoadBMP("test/test_hero_right_torso.bmp", null),
-                .cape = debugLoadBMP("test/test_hero_right_cape.bmp", null),
-            },
-            HeroBitmaps{
-                .head = debugLoadBMP("test/test_hero_back_head.bmp", null),
-                .torso = debugLoadBMP("test/test_hero_back_torso.bmp", null),
-                .cape = debugLoadBMP("test/test_hero_back_cape.bmp", null),
-            },
-            HeroBitmaps{
-                .head = debugLoadBMP("test/test_hero_left_head.bmp", null),
-                .torso = debugLoadBMP("test/test_hero_left_torso.bmp", null),
-                .cape = debugLoadBMP("test/test_hero_left_cape.bmp", null),
-            },
-            HeroBitmaps{
-                .head = debugLoadBMP("test/test_hero_front_head.bmp", null),
-                .torso = debugLoadBMP("test/test_hero_front_torso.bmp", null),
-                .cape = debugLoadBMP("test/test_hero_front_cape.bmp", null),
-            },
-        };
-
         result.beginAssetType(.Grass);
         result.addBitmapAsset("test2/grass00.bmp", null);
         result.addBitmapAsset("test2/grass01.bmp", null);
@@ -239,10 +238,47 @@ pub const Assets = struct {
         result.addBitmapAsset("test2/tuft02.bmp", null);
         result.endAssetType();
 
-        for (&result.hero_bitmaps) |*bitmaps| {
-            setTopDownAligned(bitmaps, Vector2.new(72, 182));
-        }
+        const angle_right: f32 = 0;
+        const angle_front: f32 = 0.25 * shared.TAU32;
+        const angle_left: f32 = 0.5 * shared.TAU32;
+        const angle_back: f32 = 0.75 * shared.TAU32;
 
+        result.beginAssetType(.Head);
+        result.addBitmapAsset("test/test_hero_right_head.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_right);
+        result.addBitmapAsset("test/test_hero_back_head.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_back);
+        result.addBitmapAsset("test/test_hero_left_head.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_left);
+        result.addBitmapAsset("test/test_hero_front_head.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_front);
+        result.endAssetType();
+
+        result.beginAssetType(.Cape);
+        result.addBitmapAsset("test/test_hero_right_cape.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_right);
+        result.addBitmapAsset("test/test_hero_back_cape.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_back);
+        result.addBitmapAsset("test/test_hero_left_cape.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_left);
+        result.addBitmapAsset("test/test_hero_front_cape.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_front);
+        result.endAssetType();
+
+        result.beginAssetType(.Torso);
+        result.addBitmapAsset("test/test_hero_right_torso.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_right);
+        result.addBitmapAsset("test/test_hero_back_torso.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_back);
+        result.addBitmapAsset("test/test_hero_left_torso.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_left);
+        result.addBitmapAsset("test/test_hero_front_torso.bmp", Vector2.new(0.5, 0.65625));
+        result.addTag(.FacingDirection, angle_front);
+        result.endAssetType();
+
+        // for (&result.hero_bitmaps) |*bitmaps| {
+        //     setTopDownAligned(bitmaps, Vector2.new(72, 182));
+        // }
 
         return result;
     }
@@ -251,10 +287,9 @@ pub const Assets = struct {
         return self.bitmaps[id.value].bitmap;
     }
 
-    // TODO: This should probably return an optional.
     pub fn getFirstBitmapId(self: *Assets, type_id: AssetTypeId) ?BitmapId {
         var result: ?BitmapId = null;
-        const asset_type: *AssetType = &self.asset_types[@intFromEnum(type_id)];
+        const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
 
         if (asset_type.first_asset_index != asset_type.one_past_last_asset_index) {
             const asset = self.assets[asset_type.first_asset_index];
@@ -266,13 +301,45 @@ pub const Assets = struct {
 
     pub fn getRandomAsset(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?BitmapId {
         var result: ?BitmapId = null;
-        const asset_type: *AssetType = &self.asset_types[@intFromEnum(type_id)];
+        const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
 
         if (asset_type.first_asset_index != asset_type.one_past_last_asset_index) {
             const count: u32 = asset_type.one_past_last_asset_index - asset_type.first_asset_index;
             const choice = series.randomChoice(count);
             const asset = self.assets[asset_type.first_asset_index + choice];
             result = BitmapId{ .value = asset.slot_id };
+        }
+
+        return result;
+    }
+
+    pub fn getBestMatchAsset(
+        self: *Assets,
+        type_id: AssetTypeId,
+        match_vector: *AssetVector,
+        weight_vector: *AssetVector,
+    ) ?BitmapId {
+        var result: ?BitmapId = null;
+        var best_diff: f32 = std.math.floatMax(f32);
+        const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
+
+        var asset_index: u32 = asset_type.first_asset_index;
+        while (asset_index < asset_type.one_past_last_asset_index) : (asset_index += 1) {
+            const asset = self.assets[asset_index];
+
+            var total_weighted_diff: f32 = 0;
+            var tag_index: u32 = asset.first_tag_index;
+            while (tag_index < asset.one_past_last_tag_index) : (tag_index += 1) {
+                const tag: *AssetTag = &self.tags[tag_index];
+                const difference = match_vector.e[tag.id] - tag.value;
+                const weighted = weight_vector.e[tag.id] * intrinsics.absoluteValue(difference);
+                total_weighted_diff += weighted;
+            }
+
+            if (best_diff > total_weighted_diff) {
+                best_diff = total_weighted_diff;
+                result = BitmapId{ .value = asset.slot_id };
+            }
         }
 
         return result;
@@ -337,21 +404,21 @@ pub fn loadSound(
     _ = id;
 }
 
-fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
-    const flipped_y = @as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y();
-    return Vector2.new(
-        math.safeRatio0(alignment.x(), @floatFromInt(bitmap.width)),
-        math.safeRatio0(flipped_y, @floatFromInt(bitmap.height)),
-    );
-}
-
-fn setTopDownAligned(bitmaps: *HeroBitmaps, in_alignment: Vector2) void {
-    const alignment = topDownAligned(&bitmaps.head, in_alignment);
-
-    bitmaps.head.alignment_percentage = alignment;
-    bitmaps.cape.alignment_percentage = alignment;
-    bitmaps.torso.alignment_percentage = alignment;
-}
+// fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
+//     const flipped_y = @as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y();
+//     return Vector2.new(
+//         math.safeRatio0(alignment.x(), @floatFromInt(bitmap.width)),
+//         math.safeRatio0(flipped_y, @floatFromInt(bitmap.height)),
+//     );
+// }
+//
+// fn setTopDownAligned(bitmaps: *HeroBitmaps, in_alignment: Vector2) void {
+//     const alignment = topDownAligned(&bitmaps.head, in_alignment);
+//
+//     bitmaps.head.alignment_percentage = alignment;
+//     bitmaps.cape.alignment_percentage = alignment;
+//     bitmaps.torso.alignment_percentage = alignment;
+// }
 
 fn debugLoadBMP(
     file_name: [*:0]const u8,
@@ -422,37 +489,5 @@ fn debugLoadBMP(
     }
 
     return result;
-}
-
-fn pickBestAsset(
-    info_count: i32,
-    infos: [*]AssetBitmapInfo,
-    tags: [*]AssetTag,
-    match_vector: [*]f32,
-    weight_vector: [*]f32,
-) i32 {
-    var best_diff: f32 = std.math.maxFloat(f32);
-    var best_index: i32 = 0;
-
-    var info_index: u32 = 0;
-    while (info_index < info_count) : (info_index += 1) {
-        const info = infos + info_index;
-
-        var total_weighted_diff: f32 = 0;
-        var tag_index: u32 = info.first_tag_index;
-        while (tag_index < info.one_past_last_tag_index) : (tag_index += 1) {
-            const tag = tags + tag_index;
-            const difference = match_vector[tag.id] - tag.value;
-            const weighted = weight_vector[tag.id] * intrinsics.absoluteValue(difference);
-            total_weighted_diff += weighted;
-        }
-
-        if (best_diff > total_weighted_diff) {
-            best_diff = total_weighted_diff;
-            best_index = info_index;
-        }
-    }
-
-    return best_index;
 }
 

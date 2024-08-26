@@ -100,6 +100,7 @@ const RenderGroupEntry = render.RenderGroupEntry;
 const RenderGroup = render.RenderGroup;
 const Assets = asset.Assets;
 const AssetTypeId = asset.AssetTypeId;
+const AssetTagId = asset.AssetTagId;
 const HeroBitmaps = asset.HeroBitmaps;
 
 pub export fn updateAndRender(
@@ -727,15 +728,26 @@ pub export fn updateAndRender(
 
             render_group.transform.offset_position = entity.getGroundPoint();
 
+            var match_vector = asset.AssetVector{};
+            match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
+            var weight_vector = asset.AssetVector{};
+            weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
+
+            const hero_bitmaps = shared.HeroBitmapIds{
+                .head = transient_state.assets.getBestMatchAsset(.Head, &match_vector, &weight_vector),
+                .cape = transient_state.assets.getBestMatchAsset(.Cape, &match_vector, &weight_vector),
+                .torso = transient_state.assets.getBestMatchAsset(.Torso, &match_vector, &weight_vector),
+            };
+
             // Post-physics entity work.
             switch (entity.type) {
                 .Hero => {
-                    var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
                     const hero_scale = 2.5;
+
                     render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), hero_scale * 1.0, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
-                    render_group.pushBitmap(&hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
-                    render_group.pushBitmap(&hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
                 },
@@ -757,9 +769,8 @@ pub export fn updateAndRender(
                     );
                 },
                 .Monster => {
-                    var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
                     render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), 4.5, Vector3.zero(), shadow_color);
-                    render_group.pushBitmap(&hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
                 },
@@ -774,9 +785,8 @@ pub export fn updateAndRender(
                     const head_z = 0.25 * head_bob_sine;
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
-                    var hero_bitmaps = transient_state.assets.hero_bitmaps[entity.facing_direction];
                     render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), 2.5, Vector3.zero(), head_shadow_color);
-                    render_group.pushBitmap(&hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
+                    render_group.pushBitmapId(hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
                 },
                 .Space => {
                     const space_color = Color.new(0, 0.5, 1, 1);

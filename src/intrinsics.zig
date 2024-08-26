@@ -53,11 +53,7 @@ pub inline fn cos(angle: f32) f32 {
 }
 
 pub inline fn atan2(y: f32, x: f32) f32 {
-    // TODO: Implement this.
-    _ = y;
-    _ = x;
-
-    return 0.0;
+    return std.math.atan2(y, x);
 }
 
 pub const BitScanResult = struct {
