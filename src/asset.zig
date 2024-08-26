@@ -79,9 +79,17 @@ const AssetGroup = struct {
     one_past_last_index: u32,
 };
 
+const AssetSlotType = enum {
+    bitmap,
+    sound,
+};
+
 const AssetSlot = struct {
     state: AssetState = .Unloaded,
-    bitmap: ?*LoadedBitmap = null,
+    data: union(AssetSlotType) {
+        bitmap: ?*LoadedBitmap,
+        sound: ?*LoadedSound,
+    }
 };
 
 pub const BitmapId = struct {
@@ -97,6 +105,10 @@ pub const SoundId = struct {
     value: u32,
 };
 
+const AssetSoundInfo = struct {
+    file_name: [*:0]const u8 = undefined,
+};
+
 pub const Assets = struct {
     transient_state: *TransientState,
     arena: MemoryArena,
@@ -107,6 +119,7 @@ pub const Assets = struct {
 
     sound_count: u32,
     sounds: [*]AssetSlot,
+    sound_infos: [*]AssetSoundInfo,
 
     asset_count: u32,
     assets: [*]Asset,
@@ -283,7 +296,13 @@ pub const Assets = struct {
     }
 
     pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
-        return self.bitmaps[id.value].bitmap;
+        var result: ?*LoadedBitmap = null;
+
+        if (self.bitmaps[id.value].data.bitmap) |bitmap| {
+            result = bitmap;
+        }
+
+        return result;
     }
 
     pub fn getFirstBitmapId(self: *Assets, type_id: AssetTypeId) ?BitmapId {
@@ -360,14 +379,14 @@ const LoadBitmapWork = struct {
     final_state: AssetState,
 };
 
-fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+fn doLoadBitmapWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
     _ = queue;
 
     const work: *LoadBitmapWork = @ptrCast(@alignCast(data));
     const info = work.assets.bitmap_infos[work.id.value];
 
     work.bitmap.* = debugLoadBMP(info.file_name, info.alignment_percentage);
-    work.assets.bitmaps[work.id.value].bitmap = work.bitmap;
+    work.assets.bitmaps[work.id.value].data.bitmap = work.bitmap;
     work.assets.bitmaps[work.id.value].state = work.final_state;
 
     handmade.endTaskWithMemory(work.task);
@@ -394,20 +413,88 @@ pub fn loadBitmap(
             work.bitmap = assets.arena.pushStruct(LoadedBitmap);
             work.final_state = .Loaded;
 
-            shared.addQueueEntry(assets.transient_state.low_priority_queue, doLoadAssetWork, work);
+            shared.addQueueEntry(assets.transient_state.low_priority_queue, doLoadBitmapWork, work);
         } else {
             @atomicStore(AssetState, &assets.bitmaps[id.value].state, .Unloaded, .release);
         }
     }
 }
 
+pub const LoadedSound = extern struct {
+    sample_count: i32,
+    memory: ?[*]void,
+};
+
+const LoadSoundWork = struct {
+    assets: *Assets,
+    id: BitmapId,
+    task: *shared.TaskWithMemory,
+    sound: *LoadedSound,
+
+    final_state: AssetState,
+};
+
+fn doLoadSoundWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+    _ = queue;
+
+    const work: *LoadSoundWork = @ptrCast(@alignCast(data));
+    const info = work.assets.sound_infos[work.id.value];
+
+    work.sound.* = debugLoadWAV(info.file_name);
+    work.assets.sounds[work.id.value].data.sound = work.sound;
+    work.assets.sounds[work.id.value].state = work.final_state;
+
+    handmade.endTaskWithMemory(work.task);
+}
 pub fn loadSound(
     assets: *Assets,
     id: SoundId,
 ) void {
-    _ = assets;
-    _ = id;
+    if (id.value != 0 and @cmpxchgStrong(
+        AssetState,
+        &assets.sounds[id.value].state,
+        .Unloaded,
+        .Queued,
+        .seq_cst,
+        .seq_cst,
+    ) == null) {
+        if (handmade.beginTaskWithMemory(assets.transient_state)) |task| {
+            var work: *LoadSoundWork = task.arena.pushStruct(LoadSoundWork);
+
+            work.assets = assets;
+            work.id = id;
+            work.task = task;
+            work.sound = assets.arena.pushStruct(LoadedSound);
+            work.final_state = .Loaded;
+
+            shared.addQueueEntry(assets.transient_state.low_priority_queue, doLoadSoundWork, work);
+        } else {
+            @atomicStore(AssetState, &assets.bitmaps[id.value].state, .Unloaded, .release);
+        }
+    }
 }
+
+const BitmapHeader = packed struct {
+    file_type: u16,
+    file_size: u32,
+    reserved1: u16,
+    reserved2: u16,
+    bitmap_offset: u32,
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bits_per_pxel: u16,
+    compression: u32,
+    size_of_bitmap: u32,
+    horz_resolution: i32,
+    vert_resolution: i32,
+    colors_used: u32,
+    colors_important: u32,
+    red_mask: u32,
+    green_mask: u32,
+    blue_mask: u32,
+};
 
 fn debugLoadBMP(
     file_name: [*:0]const u8,
@@ -417,7 +504,7 @@ fn debugLoadBMP(
     const read_result = shared.debugReadEntireFile(file_name);
 
     if (read_result.content_size > 0) {
-        const header = @as(*shared.BitmapHeader, @ptrCast(@alignCast(read_result.contents)));
+        const header = @as(*BitmapHeader, @ptrCast(@alignCast(read_result.contents)));
 
         std.debug.assert(header.height >= 0);
         std.debug.assert(header.compression == 3);
@@ -480,3 +567,52 @@ fn debugLoadBMP(
     return result;
 }
 
+const WaveHeader = packed struct {
+    riff_id: u32,
+    size: u32,
+    wave_id: u32,
+};
+
+fn riffCode(a: u8, b: u8, c: u8, d: u8) u32 {
+    return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, c << 16) | @as(u32, d << 24);
+}
+
+const WaveChunkIds = enum(u32) {
+    ChunkID_fmt = riffCode('f', 'm', 't', ' '),
+    ChunkID_RIFF = riffCode('R', 'I', 'F', 'F'),
+    ChunkID_WAVE = riffCode('W', 'A', 'V', 'E'),
+};
+
+const WaveChunk = packed struct {
+    id: u32,
+    size: u32,
+};
+
+const WaveFmt = packed struct {
+    w_format_tag: u16,
+    channels: u16,
+    n_samples_per_second: u32,
+    n_avg_bytes_per_second: u32,
+    n_block_align: u32,
+    bits_per_sample: u16,
+    cb_size: u16,
+    w_valid_width_per_sample: u16,
+    dw_channel_mask: u32,
+    sub_format: [16]u8,
+};
+
+fn debugLoadWAV(file_name: [*:0]const u8) LoadedSound {
+    var result: LoadedSound = undefined;
+    const read_result = shared.debugReadEntireFile(file_name);
+
+    if (read_result.content_size > 0) {
+        const header = @as(*WaveHeader, @ptrCast(@alignCast(read_result.contents)));
+
+        std.debug.assert(header.riff_id == WaveChunkIds.ChunkID_RIFF);
+        std.debug.assert(header.wave_id == WaveChunkIds.ChunkID_WAVE);
+
+        result.memory = undefined;
+    }
+
+    return result;
+}

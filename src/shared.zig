@@ -482,25 +482,3 @@ pub const AddLowEntityResult = struct {
     low_index: u32,
 };
 
-// Data structures.
-pub const BitmapHeader = packed struct {
-    file_type: u16,
-    file_size: u32,
-    reserved1: u16,
-    reserved2: u16,
-    bitmap_offset: u32,
-    size: u32,
-    width: i32,
-    height: i32,
-    planes: u16,
-    bits_per_pxel: u16,
-    compression: u32,
-    size_of_bitmap: u32,
-    horz_resolution: i32,
-    vert_resolution: i32,
-    colors_used: u32,
-    colors_important: u32,
-    red_mask: u32,
-    green_mask: u32,
-    blue_mask: u32,
-};
