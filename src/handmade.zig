@@ -11,7 +11,14 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
+/// * Audio.
+///     * Sound effect triggers.
+///     * Ambient sounds.
+///     * Music.
+///
 /// * Asset streaming.
+///     * File format.
+///     * Memory management.
 ///
 /// * Rendering.
 ///     * Straighten out all coordinate systems!
@@ -29,11 +36,6 @@ const std = @import("std");
 ///     * Switches, sliders etc.
 ///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
 ///     * Thread visualization.
-///
-/// * Audio.
-///     * Sound effect triggers.
-///     * Ambient sounds.
-///     * Music.
 ///
 /// Architecture exploration:
 ///

@@ -113,6 +113,7 @@ pub const Assets = struct {
 
     tag_count: u32,
     tags: [*]AssetTag,
+    tag_range: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{1000000} ** ASSET_TYPE_ID_COUNT,
 
     debug_used_bitmap_count: u32,
     debug_used_asset_count: u32,
@@ -204,6 +205,7 @@ pub const Assets = struct {
 
         result.asset_count = result.bitmap_count + result.sound_count;
         result.assets = result.arena.pushArray(result.asset_count, Asset);
+        result.tag_range[AssetTagId.FacingDirection.toInt()] = shared.TAU32;
 
         result.debug_used_bitmap_count = 1;
         result.debug_used_asset_count = 1;
@@ -239,46 +241,43 @@ pub const Assets = struct {
         result.endAssetType();
 
         const angle_right: f32 = 0;
-        const angle_front: f32 = 0.25 * shared.TAU32;
+        const angle_back: f32 = 0.25 * shared.TAU32;
         const angle_left: f32 = 0.5 * shared.TAU32;
-        const angle_back: f32 = 0.75 * shared.TAU32;
+        const angle_front: f32 = 0.75 * shared.TAU32;
+        const hero_align = Vector2.new(0.5, 0.156682029);
 
         result.beginAssetType(.Head);
-        result.addBitmapAsset("test/test_hero_right_head.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_right_head.bmp", hero_align);
         result.addTag(.FacingDirection, angle_right);
-        result.addBitmapAsset("test/test_hero_back_head.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_back_head.bmp", hero_align);
         result.addTag(.FacingDirection, angle_back);
-        result.addBitmapAsset("test/test_hero_left_head.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_left_head.bmp", hero_align);
         result.addTag(.FacingDirection, angle_left);
-        result.addBitmapAsset("test/test_hero_front_head.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_front_head.bmp", hero_align);
         result.addTag(.FacingDirection, angle_front);
         result.endAssetType();
 
         result.beginAssetType(.Cape);
-        result.addBitmapAsset("test/test_hero_right_cape.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_right_cape.bmp", hero_align);
         result.addTag(.FacingDirection, angle_right);
-        result.addBitmapAsset("test/test_hero_back_cape.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_back_cape.bmp", hero_align);
         result.addTag(.FacingDirection, angle_back);
-        result.addBitmapAsset("test/test_hero_left_cape.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_left_cape.bmp", hero_align);
         result.addTag(.FacingDirection, angle_left);
-        result.addBitmapAsset("test/test_hero_front_cape.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_front_cape.bmp", hero_align);
         result.addTag(.FacingDirection, angle_front);
         result.endAssetType();
 
         result.beginAssetType(.Torso);
-        result.addBitmapAsset("test/test_hero_right_torso.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_right_torso.bmp", hero_align);
         result.addTag(.FacingDirection, angle_right);
-        result.addBitmapAsset("test/test_hero_back_torso.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_back_torso.bmp", hero_align);
         result.addTag(.FacingDirection, angle_back);
-        result.addBitmapAsset("test/test_hero_left_torso.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_left_torso.bmp", hero_align);
         result.addTag(.FacingDirection, angle_left);
-        result.addBitmapAsset("test/test_hero_front_torso.bmp", Vector2.new(0.5, 0.65625));
+        result.addBitmapAsset("test/test_hero_front_torso.bmp", hero_align);
         result.addTag(.FacingDirection, angle_front);
         result.endAssetType();
-
-        // for (&result.hero_bitmaps) |*bitmaps| {
-        //     setTopDownAligned(bitmaps, Vector2.new(72, 182));
-        // }
 
         return result;
     }
@@ -331,7 +330,13 @@ pub const Assets = struct {
             var tag_index: u32 = asset.first_tag_index;
             while (tag_index < asset.one_past_last_tag_index) : (tag_index += 1) {
                 const tag: *AssetTag = &self.tags[tag_index];
-                const difference = match_vector.e[tag.id] - tag.value;
+
+                const a: f32 = match_vector.e[tag.id];
+                const b: f32 = tag.value;
+                const d0 = intrinsics.absoluteValue(a - b);
+                const d1 = intrinsics.absoluteValue((a - (self.tag_range[tag.id] * intrinsics.signOfF32(a))) - b);
+                const difference = @min(d0, d1);
+
                 const weighted = weight_vector.e[tag.id] * intrinsics.absoluteValue(difference);
                 total_weighted_diff += weighted;
             }
@@ -403,22 +408,6 @@ pub fn loadSound(
     _ = assets;
     _ = id;
 }
-
-// fn topDownAligned(bitmap: *LoadedBitmap, alignment: Vector2) Vector2 {
-//     const flipped_y = @as(f32, @floatFromInt((bitmap.height - 1))) - alignment.y();
-//     return Vector2.new(
-//         math.safeRatio0(alignment.x(), @floatFromInt(bitmap.width)),
-//         math.safeRatio0(flipped_y, @floatFromInt(bitmap.height)),
-//     );
-// }
-//
-// fn setTopDownAligned(bitmaps: *HeroBitmaps, in_alignment: Vector2) void {
-//     const alignment = topDownAligned(&bitmaps.head, in_alignment);
-//
-//     bitmaps.head.alignment_percentage = alignment;
-//     bitmaps.cape.alignment_percentage = alignment;
-//     bitmaps.torso.alignment_percentage = alignment;
-// }
 
 fn debugLoadBMP(
     file_name: [*:0]const u8,
