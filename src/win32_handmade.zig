@@ -1388,7 +1388,7 @@ pub export fn wWinMain(
                 monitor_refresh_hz = device_refresh_rate;
             }
 
-            const game_update_hz: f32 = @as(f32, @floatFromInt(monitor_refresh_hz)); // / 2.0;
+            const game_update_hz: f32 = @as(f32, @floatFromInt(monitor_refresh_hz)) / 2.0;
             const target_seconds_per_frame: f32 = 1.0 / game_update_hz;
 
             var sound_output = SoundOutput{

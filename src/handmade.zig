@@ -137,6 +137,7 @@ pub export fn updateAndRender(
             .camera_position = WorldPosition.zero(),
             .test_diffuse = undefined,
             .test_normal = undefined,
+            .test_sound = asset.debugLoadWAV("test3/music_test.wav"),
         };
 
         state.world_arena.initialize(
@@ -1210,7 +1211,20 @@ pub export fn getSoundSamples(
     sound_buffer: *shared.SoundOutputBuffer,
 ) void {
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
-    outputSound(sound_buffer, shared.MIDDLE_C, state);
+    // outputSineWave(sound_buffer, shared.MIDDLE_C, state);
+
+    var sample_out: [*]i16 = sound_buffer.samples;
+    var sample_index: u32 = 0;
+    while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
+        const sample_value = state.test_sound.samples[0].?[@mod(state.test_sample_index + sample_index, state.test_sound.sample_count)];
+
+        sample_out += 1;
+        sample_out[0] = sample_value;
+        sample_out += 1;
+        sample_out[0] = sample_value;
+    }
+
+    state.test_sample_index += sound_buffer.sample_count;
 }
 
 pub fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMemory {
@@ -1515,33 +1529,28 @@ fn makePyramidNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
     }
 }
 
-fn outputSound(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, state: *State) void {
-    _ = sound_buffer;
-    _ = tone_hz;
-    _ = state;
+fn outputSineWave(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, state: *State) void {
+    const tone_volume = 3000;
+    const wave_period = @divFloor(sound_buffer.samples_per_second, tone_hz);
 
-    // const tone_volume = 3000;
-    // const wave_period = @divFloor(sound_buffer.samples_per_second, tone_hz);
-    //
-    // var sample_out: [*]i16 = sound_buffer.samples;
-    // var sample_index: u32 = 0;
-    // while (sample_index < sound_buffer.sample_count) {
-    //     var sample_value: i16 = 0;
-    //
-    //     if (!shared.DEBUG) {
-    //         const sine_value: f32 = @sin(t_sine.*);
-    //         sample_value = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
-    //     }
-    //
-    //     sample_out += 1;
-    //     sample_out[0] = sample_value;
-    //     sample_out += 1;
-    //     sample_out[0] = sample_value;
-    //
-    //     sample_index += 1;
-    //     t_sine.* += shared.TAU32 / @as(f32, @floatFromInt(wave_period));
-    //     if (t_sine.* > shared.TAU32) {
-    //         t_sine.* -= shared.TAU32;
-    //     }
-    // }
+    var sample_out: [*]i16 = sound_buffer.samples;
+    var sample_index: u32 = 0;
+    while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
+        var sample_value: i16 = 0;
+
+        // if (!shared.DEBUG) {
+            const sine_value: f32 = @sin(state.t_sine);
+            sample_value = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
+        // }
+
+        sample_out += 1;
+        sample_out[0] = sample_value;
+        sample_out += 1;
+        sample_out[0] = sample_value;
+
+        state.t_sine += shared.TAU32 / @as(f32, @floatFromInt(wave_period));
+        if (state.t_sine > shared.TAU32) {
+            state.t_sine -= shared.TAU32;
+        }
+    }
 }

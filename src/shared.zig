@@ -19,6 +19,7 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
 const LoadedBitmap = render.LoadedBitmap;
+const LoadedSound = @import("asset.zig").LoadedSound;
 const Assets = @import("asset.zig").Assets;
 const BitmapId = @import("asset.zig").BitmapId;
 
@@ -403,6 +404,10 @@ pub const State = struct {
 
     test_diffuse: LoadedBitmap,
     test_normal: LoadedBitmap,
+
+    t_sine: f32 = 0,
+    test_sound: LoadedSound,
+    test_sample_index: u32 = 0,
 };
 
 pub const HeroBitmapIds = struct {

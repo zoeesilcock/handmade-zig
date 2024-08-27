@@ -161,7 +161,7 @@ pub const Assets = struct {
         std.debug.assert(self.debug_asset_type != null);
 
         if (self.debug_asset_type) |asset_type| {
-            std.debug.assert(asset_type.one_past_last_asset_index < ASSET_TYPE_ID_COUNT);
+            std.debug.assert(asset_type.one_past_last_asset_index < self.asset_count);
 
             const asset: *Asset = &self.assets[asset_type.one_past_last_asset_index];
             self.debug_asset_type.?.one_past_last_asset_index += 1;
@@ -207,17 +207,17 @@ pub const Assets = struct {
 
         // Load game assets.
         result.bitmap_count = 256 * ASSET_TYPE_ID_COUNT;
-        result.bitmaps = result.arena.pushArray(result.bitmap_count, AssetSlot);
-        result.bitmap_infos = result.arena.pushArray(result.bitmap_count, AssetBitmapInfo);
+        result.bitmaps = arena.pushArray(result.bitmap_count, AssetSlot);
+        result.bitmap_infos = arena.pushArray(result.bitmap_count, AssetBitmapInfo);
 
         result.sound_count = 1;
-        result.sounds = result.arena.pushArray(result.sound_count, AssetSlot);
+        result.sounds = arena.pushArray(result.sound_count, AssetSlot);
 
         result.tag_count = 1024 * ASSET_TYPE_ID_COUNT;
-        result.tags = result.arena.pushArray(result.tag_count, AssetTag);
+        result.tags = arena.pushArray(result.tag_count, AssetTag);
 
         result.asset_count = result.bitmap_count + result.sound_count;
-        result.assets = result.arena.pushArray(result.asset_count, Asset);
+        result.assets = arena.pushArray(result.asset_count, Asset);
         result.tag_range[AssetTagId.FacingDirection.toInt()] = shared.TAU32;
 
         result.debug_used_bitmap_count = 1;
@@ -421,8 +421,9 @@ pub fn loadBitmap(
 }
 
 pub const LoadedSound = extern struct {
-    sample_count: i32,
-    memory: ?[*]void,
+    sample_count: u32,
+    channel_count: u32,
+    samples: [2]?[*]i16,
 };
 
 const LoadSoundWork = struct {
@@ -567,33 +568,23 @@ fn debugLoadBMP(
     return result;
 }
 
-const WaveHeader = packed struct {
+const WaveHeader = extern struct {
     riff_id: u32,
     size: u32,
     wave_id: u32,
 };
 
-fn riffCode(a: u8, b: u8, c: u8, d: u8) u32 {
-    return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, c << 16) | @as(u32, d << 24);
-}
-
-const WaveChunkIds = enum(u32) {
-    ChunkID_fmt = riffCode('f', 'm', 't', ' '),
-    ChunkID_RIFF = riffCode('R', 'I', 'F', 'F'),
-    ChunkID_WAVE = riffCode('W', 'A', 'V', 'E'),
-};
-
-const WaveChunk = packed struct {
+const WaveChunk = extern struct {
     id: u32,
     size: u32,
 };
 
-const WaveFmt = packed struct {
+const WaveFmt = extern struct {
     w_format_tag: u16,
     channels: u16,
     n_samples_per_second: u32,
     n_avg_bytes_per_second: u32,
-    n_block_align: u32,
+    n_block_align: u16,
     bits_per_sample: u16,
     cb_size: u16,
     w_valid_width_per_sample: u16,
@@ -601,18 +592,122 @@ const WaveFmt = packed struct {
     sub_format: [16]u8,
 };
 
-fn debugLoadWAV(file_name: [*:0]const u8) LoadedSound {
+fn riffCode(a: u32, b: u32, c: u32, d: u32) u32 {
+    return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, c << 16) | @as(u32, d << 24);
+}
+
+const WaveChunkId = enum(u32) {
+    ChunkID_fmt = riffCode('f', 'm', 't', ' '),
+    ChunkID_data = riffCode('d', 'a', 't', 'a'),
+    ChunkID_RIFF = riffCode('R', 'I', 'F', 'F'),
+    ChunkID_WAVE = riffCode('W', 'A', 'V', 'E'),
+};
+
+const RiffIterator = struct {
+    at: [*]u8,
+    stop: [*]u8,
+
+    fn nextChunk(self: RiffIterator) RiffIterator {
+        const chunk: *WaveChunk = @ptrCast(@alignCast(self.at));
+        const size = (chunk.size + 1) & ~@as(u32, @intCast(1));
+        return RiffIterator{ .at = self.at + @sizeOf(WaveChunk) + size, .stop = self.stop };
+    }
+
+    fn isValid(self: RiffIterator) bool {
+        return @intFromPtr(self.at) < @intFromPtr(self.stop);
+    }
+
+    fn getType(self: RiffIterator) WaveChunkId {
+        const chunk: *WaveChunk = @ptrCast(@alignCast(self.at));
+        return @enumFromInt(chunk.id);
+    }
+
+    fn getChunkData(self: RiffIterator) *void {
+        return @ptrCast(self.at + @sizeOf(WaveChunk));
+    }
+
+    fn getChunkDataSize(self: RiffIterator) u32 {
+        const chunk: *WaveChunk = @ptrCast(@alignCast(self.at));
+        return chunk.size;
+    }
+};
+
+fn parseChunkAt(at: *void, stop: *void) RiffIterator {
+    return RiffIterator{ .at = @ptrCast(at), .stop = @ptrCast(stop) };
+}
+
+pub fn debugLoadWAV(file_name: [*:0]const u8) LoadedSound {
     var result: LoadedSound = undefined;
     const read_result = shared.debugReadEntireFile(file_name);
 
     if (read_result.content_size > 0) {
         const header = @as(*WaveHeader, @ptrCast(@alignCast(read_result.contents)));
 
-        std.debug.assert(header.riff_id == WaveChunkIds.ChunkID_RIFF);
-        std.debug.assert(header.wave_id == WaveChunkIds.ChunkID_WAVE);
+        std.debug.assert(header.riff_id == @intFromEnum(WaveChunkId.ChunkID_RIFF));
+        std.debug.assert(header.wave_id == @intFromEnum(WaveChunkId.ChunkID_WAVE));
 
-        result.memory = undefined;
+        var channel_count: ?u16 = null;
+        var sample_data: ?[*]i16 = null;
+        var sample_data_size: ?u32 = null;
+
+        const chunk_address = @intFromPtr(header) + @sizeOf(WaveHeader);
+        var iterator = parseChunkAt(@ptrFromInt(chunk_address), @ptrFromInt(chunk_address + header.size - 4));
+        while (iterator.isValid()) : (iterator = iterator.nextChunk()) {
+            switch (iterator.getType()) {
+                .ChunkID_fmt => {
+                    const fmt: *WaveFmt = @ptrCast(@alignCast(iterator.getChunkData()));
+
+                    std.debug.assert(fmt.w_format_tag == 1);
+                    std.debug.assert(fmt.n_samples_per_second == 48000);
+                    std.debug.assert(fmt.bits_per_sample == 16);
+                    std.debug.assert(fmt.n_block_align == (@sizeOf(i16) * fmt.channels));
+
+                    channel_count = fmt.channels;
+                },
+                .ChunkID_data => {
+                    sample_data = @ptrCast(@alignCast(iterator.getChunkData()));
+                    sample_data_size = iterator.getChunkDataSize();
+                },
+                else => {},
+            }
+        }
+
+        std.debug.assert(channel_count != null and sample_data != null and sample_data_size != null);
+
+        result.channel_count = channel_count.?;
+        result.sample_count = sample_data_size.? / (channel_count.? * @sizeOf(i16));
+
+        if (sample_data) |data| {
+            if (channel_count == 1) {
+                result.samples[0] = @ptrCast(data);
+                result.samples[1] = null;
+            } else if (channel_count == 2) {
+                result.samples[0] = @ptrCast(data);
+                result.samples[1] = @ptrCast(data + result.sample_count);
+
+                if (false) {
+                    var i: i16 = 0;
+                    while (i < result.sample_count) : (i += 1) {
+                        data[2 * @as(usize, @intCast(i)) + 0] = i;
+                        data[2 * @as(usize, @intCast(i)) + 1] = i;
+                    }
+                }
+
+                var sample_index: u32 = 0;
+                while (sample_index < result.sample_count) : (sample_index += 1) {
+                    const source = data[2 * sample_index];
+                    data[2 * sample_index] = data[sample_index];
+                    data[sample_index] = source;
+                }
+            } else {
+                // Invalid channel count in WAV file.
+                unreachable;
+            }
+        }
     }
+
+    // TODO: Load right channels.
+    result.channel_count = 1;
 
     return result;
 }
