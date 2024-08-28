@@ -135,9 +135,9 @@ pub export fn updateAndRender(
     if (!state.is_initialized) {
         state.* = State{
             .camera_position = WorldPosition.zero(),
+            .general_entropy = random.Series.seed(1234),
             .test_diffuse = undefined,
             .test_normal = undefined,
-            .test_sound = asset.debugLoadWAV("test3/music_test.wav"),
         };
 
         state.world_arena.initialize(
@@ -172,7 +172,7 @@ pub export fn updateAndRender(
             state,
             tile_side_in_meters,
             tile_side_in_meters,
-            tile_depth_in_meters,
+            tile_depth_in_meters - 0.1,
         );
         state.stair_collsion = makeSimpleGroundedCollision(
             state,
@@ -337,6 +337,8 @@ pub export fn updateAndRender(
             shared.megabytes(64),
             transient_state,
         );
+
+        _ = playSound(state, transient_state.assets.getFirstSound(.Music));
 
         transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
@@ -657,6 +659,10 @@ pub export fn updateAndRender(
                                             ),
                                         );
                                         addCollisionRule(state, sword.storage_index, entity.storage_index, false);
+                                        _ = playSound(
+                                            state,
+                                            transient_state.assets.getRandomSound(.Bloop, &state.general_entropy),
+                                        );
                                     }
                                 }
                             }
@@ -737,9 +743,9 @@ pub export fn updateAndRender(
             weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
 
             const hero_bitmaps = shared.HeroBitmapIds{
-                .head = transient_state.assets.getBestMatchAsset(.Head, &match_vector, &weight_vector),
-                .cape = transient_state.assets.getBestMatchAsset(.Cape, &match_vector, &weight_vector),
-                .torso = transient_state.assets.getBestMatchAsset(.Torso, &match_vector, &weight_vector),
+                .head = transient_state.assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector),
+                .cape = transient_state.assets.getBestMatchBitmap(.Cape, &match_vector, &weight_vector),
+                .torso = transient_state.assets.getBestMatchBitmap(.Torso, &match_vector, &weight_vector),
             };
 
             // Post-physics entity work.
@@ -747,7 +753,7 @@ pub export fn updateAndRender(
                 .Hero => {
                     const hero_scale = 2.5;
 
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), hero_scale * 1.0, Vector3.zero(), shadow_color);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), hero_scale * 1.0, Vector3.zero(), shadow_color);
                     render_group.pushBitmapId(hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
                     render_group.pushBitmapId(hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
                     render_group.pushBitmapId(hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
@@ -755,11 +761,11 @@ pub export fn updateAndRender(
                     drawHitPoints(entity, render_group);
                 },
                 .Sword => {
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), 0.25, Vector3.zero(), shadow_color);
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Sword), 0.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 0.25, Vector3.zero(), shadow_color);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Sword), 0.5, Vector3.zero(), Color.white());
                 },
                 .Wall => {
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Tree), 2.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Tree), 2.5, Vector3.zero(), Color.white());
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
@@ -772,7 +778,7 @@ pub export fn updateAndRender(
                     );
                 },
                 .Monster => {
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), 4.5, Vector3.zero(), shadow_color);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 4.5, Vector3.zero(), shadow_color);
                     render_group.pushBitmapId(hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
@@ -788,7 +794,7 @@ pub export fn updateAndRender(
                     const head_z = 0.25 * head_bob_sine;
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmapId(.Shadow), 2.5, Vector3.zero(), head_shadow_color);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 2.5, Vector3.zero(), head_shadow_color);
                     render_group.pushBitmapId(hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
                 },
                 .Space => {
@@ -1211,20 +1217,123 @@ pub export fn getSoundSamples(
     sound_buffer: *shared.SoundOutputBuffer,
 ) void {
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
+    const transient_state: *TransientState = @ptrCast(@alignCast(memory.transient_storage));
     // outputSineWave(sound_buffer, shared.MIDDLE_C, state);
 
-    var sample_out: [*]i16 = sound_buffer.samples;
-    var sample_index: u32 = 0;
-    while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
-        const sample_value = state.test_sound.samples[0].?[@mod(state.test_sample_index + sample_index, state.test_sound.sample_count)];
+    const mixer_memory = transient_state.arena.beginTemporaryMemory();
+    defer transient_state.arena.endTemporaryMemory(mixer_memory);
 
-        sample_out += 1;
-        sample_out[0] = sample_value;
-        sample_out += 1;
-        sample_out[0] = sample_value;
+    const real_channel0: [*]f32 = transient_state.arena.pushArray(sound_buffer.sample_count, f32);
+    const real_channel1: [*]f32 = transient_state.arena.pushArray(sound_buffer.sample_count, f32);
+
+    // Clear out the mixer channels.
+    {
+        var dest0: [*]f32 = real_channel0;
+        var dest1: [*]f32 = real_channel1;
+        var sample_index: u32 = 0;
+        while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
+            dest0[0] = 0;
+            dest0 += 1;
+            dest1[0] = 0;
+            dest1 += 1;
+        }
     }
 
-    state.test_sample_index += sound_buffer.sample_count;
+    // Sum all sounds.
+    var sound_finished = false;
+    var opt_playing_sound = &state.first_playing_sound;
+    while (opt_playing_sound.* != null) {
+        if (opt_playing_sound.*) |playing_sound| {
+            const opt_loaded_sound = transient_state.assets.getSound(playing_sound.id);
+
+            if (opt_loaded_sound) |loaded_sound| {
+                const volume0 = playing_sound.volume[0];
+                const volume1 = playing_sound.volume[1];
+                var dest0: [*]f32 = real_channel0;
+                var dest1: [*]f32 = real_channel1;
+
+                std.debug.assert(playing_sound.samples_played >= 0);
+
+                var samples_to_mix: i32 = @intCast(sound_buffer.sample_count);
+                const samples_remaining_in_sound: i32 =
+                    @as(i32, @intCast(loaded_sound.sample_count)) - playing_sound.samples_played;
+
+                if (samples_to_mix > samples_remaining_in_sound) {
+                    samples_to_mix = samples_remaining_in_sound;
+                }
+
+                var sample_index: u32 = @intCast(playing_sound.samples_played);
+                const end_sample_index = playing_sound.samples_played + samples_to_mix;
+                while (sample_index < end_sample_index) : (sample_index += 1) {
+                    const sample_value = loaded_sound.samples[0].?[sample_index];
+
+                    dest0[0] += volume0 * @as(f32, @floatFromInt(sample_value));
+                    dest0 += 1;
+                    dest1[0] += volume1 * @as(f32, @floatFromInt(sample_value));
+                    dest1 += 1;
+                }
+
+                playing_sound.samples_played += samples_to_mix;
+                sound_finished = (playing_sound.samples_played == loaded_sound.sample_count);
+            } else {
+                asset.loadSound(transient_state.assets, playing_sound.id);
+            }
+
+            if (sound_finished) {
+                opt_playing_sound.* = playing_sound.next;
+                playing_sound.next = state.first_free_playing_sound;
+                state.first_free_playing_sound = playing_sound;
+            } else {
+                opt_playing_sound = &opt_playing_sound.*.?.next;
+            }
+        }
+    }
+
+    // Convert back to 16-bit.
+    {
+        var source0: [*]f32 = real_channel0;
+        var source1: [*]f32 = real_channel1;
+
+        var sample_out: [*]i16 = sound_buffer.samples;
+        var sample_index: u32 = 0;
+        while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
+            sample_out[0] = @intFromFloat(source0[0] + 0.5);
+            sample_out += 1;
+            source0 += 1;
+
+            sample_out[0] = @intFromFloat(source1[0] + 0.5);
+            sample_out += 1;
+            source1 += 1;
+        }
+    }
+}
+
+fn playSound(state: *State, opt_sound_id: ?asset.SoundId) ?*shared.PlayingSound {
+    var result: ?*shared.PlayingSound = null;
+
+    if (opt_sound_id) |sound_id| {
+        if (state.first_free_playing_sound == null) {
+            state.first_free_playing_sound = state.world_arena.pushStruct(shared.PlayingSound);
+            state.first_free_playing_sound.?.next = null;
+        }
+
+        if (state.first_free_playing_sound) |first_free_sound| {
+            const playing_sound = first_free_sound;
+            state.first_free_playing_sound = state.first_free_playing_sound.?.next;
+
+            playing_sound.samples_played = 0;
+            playing_sound.volume[0] = 1;
+            playing_sound.volume[1] = 1;
+            playing_sound.id = sound_id;
+
+            playing_sound.next = state.first_playing_sound;
+            state.first_playing_sound = playing_sound;
+
+            result = playing_sound;
+        }
+    }
+
+    return result;
 }
 
 pub fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMemory {
@@ -1319,7 +1428,7 @@ fn fillGroundChunk(
 
                 var grass_index: u32 = 0;
                 while (grass_index < 100) : (grass_index += 1) {
-                    const opt_stamp = transient_state.assets.getRandomAsset(
+                    const opt_stamp = transient_state.assets.getRandomBitmap(
                         if (series.randomChoice(2) == 1) .Grass else .Stone,
                         &series,
                     );
@@ -1354,7 +1463,7 @@ fn fillGroundChunk(
 
                 var grass_index: u32 = 0;
                 while (grass_index < 50) : (grass_index += 1) {
-                    const opt_stamp = transient_state.assets.getRandomAsset(.Tuft, &series);
+                    const opt_stamp = transient_state.assets.getRandomBitmap(.Tuft, &series);
 
                     if (opt_stamp) |stamp| {
                         const offset = half_dim.hadamardProduct(

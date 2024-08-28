@@ -560,7 +560,7 @@ pub fn moveEntity(
         distance_remaining = 10000;
     }
 
-    const overlap_epsilon = 0.001;
+    const overlap_epsilon = Vector3.splat(0.001);
     const time_epsilon = 0.001;
 
     var iterations: u32 = 0;
@@ -587,7 +587,7 @@ pub fn moveEntity(
                     const test_entity = &sim_region.entities[test_entity_index];
 
                     if ((test_entity.isSet(SimEntityFlags.Traversable.toInt()) and
-                        entitiesOverlap(entity, test_entity, Vector3.splat(overlap_epsilon))) or
+                        entitiesOverlap(entity, test_entity, overlap_epsilon)) or
                         canCollide(state, entity, test_entity))
                     {
                         var entity_volume_index: u32 = 0;

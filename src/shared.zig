@@ -12,6 +12,7 @@ const math = @import("math.zig");
 const world = @import("world.zig");
 const sim = @import("sim.zig");
 const render = @import("render.zig");
+const random = @import("random.zig");
 const std = @import("std");
 
 // Types.
@@ -21,6 +22,7 @@ const Color = math.Color;
 const LoadedBitmap = render.LoadedBitmap;
 const LoadedSound = @import("asset.zig").LoadedSound;
 const Assets = @import("asset.zig").Assets;
+const SoundId = @import("asset.zig").SoundId;
 const BitmapId = @import("asset.zig").BitmapId;
 
 // Build options.
@@ -153,7 +155,7 @@ pub const DEBUG_CYCLE_COUNTER_NAMES: [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 = 
 
 fn buildDebugCycleCounterNames() [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 {
     var names: [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 = undefined;
-    for(0..DEBUG_CYCLE_COUNTERS_COUNT) |counter_index| {
+    for (0..DEBUG_CYCLE_COUNTERS_COUNT) |counter_index| {
         names[counter_index] = @typeInfo(DebugCycleCounters).Enum.fields[counter_index].name;
     }
     return names;
@@ -247,7 +249,6 @@ pub const ControllerButtonState = extern struct {
 // Memory.
 pub const MemoryIndex = usize;
 
-
 pub const Memory = GameMemory();
 fn GameMemory() type {
     return extern struct {
@@ -270,7 +271,7 @@ fn GameMemory() type {
                     return &self.counters[@intFromEnum(counter_id)];
                 }
             },
-            inline else => struct {}
+            inline else => struct {},
         };
     };
 }
@@ -376,6 +377,7 @@ pub fn zeroStruct(comptime T: type, ptr: *T) void {
 pub const State = struct {
     is_initialized: bool = false,
     world_arena: MemoryArena = undefined,
+    meta_arena: MemoryArena = undefined,
     world: *world.World = undefined,
 
     typical_floor_height: f32 = 0,
@@ -406,8 +408,17 @@ pub const State = struct {
     test_normal: LoadedBitmap,
 
     t_sine: f32 = 0,
-    test_sound: LoadedSound,
-    test_sample_index: u32 = 0,
+
+    first_playing_sound: ?*PlayingSound = undefined,
+    first_free_playing_sound: ?*PlayingSound = undefined,
+    general_entropy: random.Series,
+};
+
+pub const PlayingSound = struct {
+    id: SoundId,
+    volume: [2]f32,
+    samples_played: i32,
+    next: ?*PlayingSound,
 };
 
 pub const HeroBitmapIds = struct {
@@ -486,4 +497,3 @@ pub const AddLowEntityResult = struct {
     low: *LowEntity,
     low_index: u32,
 };
-
