@@ -1,5 +1,6 @@
 const shared = @import("shared.zig");
 const asset = @import("asset.zig");
+const math = @import("math.zig");
 const std = @import("std");
 
 // Types.
@@ -8,10 +9,15 @@ const MemoryArena = shared.MemoryArena;
 const SoundId = asset.SoundId;
 const SoundOutputBuffer = shared.SoundOutputBuffer;
 const Assets = asset.Assets;
+const Vector2 = math.Vector2;
 
 pub const PlayingSound = struct {
     id: SoundId,
-    volume: [2]f32,
+
+    current_volume: Vector2,
+    current_volume_velocity: Vector2,
+    target_volume: Vector2,
+
     samples_played: i32,
     next: ?*PlayingSound,
 };
@@ -20,9 +26,11 @@ pub const AudioState = struct {
     permanent_arena: *MemoryArena,
     first_playing_sound: ?*PlayingSound = null,
     first_free_playing_sound: ?*PlayingSound = null,
+    master_volume: Vector2,
 
     pub fn initialize(self: *AudioState, arena: *MemoryArena) void {
         self.permanent_arena = arena;
+        self.master_volume = Vector2.one();
     }
 
     pub fn playSound(self: *AudioState, opt_sound_id: ?SoundId) ?*PlayingSound {
@@ -39,8 +47,9 @@ pub const AudioState = struct {
                 self.first_free_playing_sound = self.first_free_playing_sound.?.next;
 
                 playing_sound.samples_played = 0;
-                playing_sound.volume[0] = 1;
-                playing_sound.volume[1] = 1;
+                playing_sound.current_volume = Vector2.one();
+                playing_sound.current_volume_velocity = Vector2.zero();
+                playing_sound.target_volume = Vector2.one();
                 playing_sound.id = sound_id;
 
                 playing_sound.next = self.first_playing_sound;
@@ -51,6 +60,25 @@ pub const AudioState = struct {
         }
 
         return result;
+    }
+
+    pub fn changeVolume(
+        self: *AudioState,
+        sound: *PlayingSound,
+        fade_duration_in_seconds: f32,
+        volume: Vector2,
+    ) void {
+        _ = self;
+
+        if (fade_duration_in_seconds <= 0) {
+            sound.target_volume = volume;
+            sound.current_volume = volume;
+        } else {
+            const one_over_fade = 1.0 / fade_duration_in_seconds;
+
+            sound.target_volume = volume;
+            sound.current_volume_velocity = sound.target_volume.minus(sound.current_volume).scaledTo(one_over_fade);
+        }
     }
 
     pub fn outputPlayingSounds(
@@ -64,6 +92,9 @@ pub const AudioState = struct {
 
         const real_channel0: [*]f32 = temp_arena.pushArray(sound_buffer.sample_count, f32);
         const real_channel1: [*]f32 = temp_arena.pushArray(sound_buffer.sample_count, f32);
+
+        const seconds_per_sample = 1.0 / @as(f32, @floatFromInt(sound_buffer.samples_per_second));
+        const output_channel_count = 2;
 
         // Clear out the mixer channels.
         {
@@ -94,8 +125,8 @@ pub const AudioState = struct {
                         const info = assets.getSoundInfo(playing_sound.id);
                         assets.prefetchSound(info.next_id_to_play);
 
-                        const volume0 = playing_sound.volume[0];
-                        const volume1 = playing_sound.volume[1];
+                        var volume = playing_sound.current_volume;
+                        const volume_velocity = playing_sound.current_volume_velocity.scaledTo(seconds_per_sample);
 
                         std.debug.assert(playing_sound.samples_played >= 0);
 
@@ -107,16 +138,56 @@ pub const AudioState = struct {
                             samples_to_mix = samples_remaining_in_sound;
                         }
 
+                        var volume_ended: [output_channel_count]bool = [1]bool{false} ** output_channel_count;
+
+                        // Limit the output to the end of the current volume fade.
+                        {
+                            var channel_index: u32 = 0;
+                            while (channel_index < output_channel_count) : (channel_index += 1) {
+                                if (volume_velocity.values[channel_index] != 0) {
+                                    const delta_volume: f32 = playing_sound.target_volume.values[channel_index] -
+                                        volume.values[channel_index];
+
+                                    if (delta_volume != 0) {
+                                        const volume_sample_count: u32 =
+                                            @intFromFloat((delta_volume / volume_velocity.values[channel_index]) + 0.5);
+                                        if (samples_to_mix > volume_sample_count) {
+                                            samples_to_mix = @intCast(volume_sample_count);
+                                            volume_ended[channel_index] = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // TODO: Handle stereo.
                         var sample_index: u32 = @intCast(playing_sound.samples_played);
                         const end_sample_index = playing_sound.samples_played + samples_to_mix;
                         while (sample_index < end_sample_index) : (sample_index += 1) {
                             const sample_value = loaded_sound.samples[0].?[sample_index];
 
-                            dest0[0] += volume0 * @as(f32, @floatFromInt(sample_value));
+                            dest0[0] += self.master_volume.values[0] * volume.values[0] * @as(f32, @floatFromInt(sample_value));
                             dest0 += 1;
-                            dest1[0] += volume1 * @as(f32, @floatFromInt(sample_value));
+                            dest1[0] += self.master_volume.values[1] * volume.values[1] * @as(f32, @floatFromInt(sample_value));
                             dest1 += 1;
+
+                            // Update volume.
+                            volume = volume.plus(volume_velocity);
                         }
+
+                        // Stop any volume fades that ended.
+                        {
+                            var channel_index: u32 = 0;
+                            while (channel_index < output_channel_count) : (channel_index += 1) {
+                                if (volume_ended[channel_index]) {
+                                    playing_sound.current_volume.values[channel_index] =
+                                        playing_sound.target_volume.values[channel_index];
+                                    playing_sound.current_volume_velocity.values[channel_index] = 0;
+                                }
+                            }
+                        }
+
+                        playing_sound.current_volume = volume;
 
                         std.debug.assert(total_samples_to_mix >= samples_to_mix);
                         playing_sound.samples_played += samples_to_mix;
@@ -133,8 +204,6 @@ pub const AudioState = struct {
                             } else {
                                 sound_finished = true;
                             }
-                        } else {
-                            std.debug.assert(total_samples_to_mix == 0);
                         }
                     } else {
                         assets.loadSound(playing_sound.id);
@@ -180,11 +249,8 @@ pub fn outputSineWave(sound_buffer: *SoundOutputBuffer, tone_hz: u32, state: *St
     var sample_index: u32 = 0;
     while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
         var sample_value: i16 = 0;
-
-        // if (!shared.DEBUG) {
         const sine_value: f32 = @sin(state.t_sine);
         sample_value = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
-        // }
 
         sample_out += 1;
         sample_out[0] = sample_value;

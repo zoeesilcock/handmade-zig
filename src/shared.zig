@@ -413,6 +413,8 @@ pub const State = struct {
     t_sine: f32 = 0,
 
     audio_state: audio.AudioState = undefined,
+    music: *PlayingSound = undefined,
+
     general_entropy: random.Series,
 };
 

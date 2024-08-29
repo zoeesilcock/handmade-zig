@@ -341,7 +341,9 @@ pub export fn updateAndRender(
             transient_state,
         );
 
-        _ = state.audio_state.playSound(transient_state.assets.getFirstSound(.Music));
+        if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
+            state.music = music;
+        }
 
         transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
@@ -440,15 +442,19 @@ pub export fn updateAndRender(
 
             if (controller.action_up.ended_down) {
                 controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
+                state.audio_state.changeVolume(state.music, 10, Vector2.one());
             }
             if (controller.action_down.ended_down) {
                 controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
+                state.audio_state.changeVolume(state.music, 10, Vector2.zero());
             }
             if (controller.action_left.ended_down) {
                 controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
+                state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
             }
             if (controller.action_right.ended_down) {
                 controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
+                state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
             }
         }
     }
