@@ -12,6 +12,8 @@ const math = @import("math.zig");
 const world = @import("world.zig");
 const sim = @import("sim.zig");
 const render = @import("render.zig");
+const asset = @import("asset.zig");
+const audio = @import("audio.zig");
 const random = @import("random.zig");
 const std = @import("std");
 
@@ -19,11 +21,12 @@ const std = @import("std");
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
-const LoadedBitmap = render.LoadedBitmap;
-const LoadedSound = @import("asset.zig").LoadedSound;
-const Assets = @import("asset.zig").Assets;
-const SoundId = @import("asset.zig").SoundId;
-const BitmapId = @import("asset.zig").BitmapId;
+const LoadedBitmap = asset.LoadedBitmap;
+const LoadedSound = asset.LoadedSound;
+const Assets = asset.Assets;
+const BitmapId = asset.BitmapId;
+const SoundId = asset.SoundId;
+const PlayingSound = audio.PlayingSound;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -409,16 +412,8 @@ pub const State = struct {
 
     t_sine: f32 = 0,
 
-    first_playing_sound: ?*PlayingSound = undefined,
-    first_free_playing_sound: ?*PlayingSound = undefined,
+    audio_state: audio.AudioState = undefined,
     general_entropy: random.Series,
-};
-
-pub const PlayingSound = struct {
-    id: SoundId,
-    volume: [2]f32,
-    samples_played: i32,
-    next: ?*PlayingSound,
 };
 
 pub const HeroBitmapIds = struct {

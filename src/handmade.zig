@@ -4,6 +4,7 @@ const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const render = @import("render.zig");
 const asset = @import("asset.zig");
+const audio = @import("audio.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
@@ -93,7 +94,7 @@ const Vector3 = math.Vector3;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const Color3 = math.Color3;
-const LoadedBitmap = render.LoadedBitmap;
+const LoadedBitmap = asset.LoadedBitmap;
 const State = shared.State;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
@@ -144,6 +145,8 @@ pub export fn updateAndRender(
             memory.permanent_storage_size - @sizeOf(State),
             memory.permanent_storage.? + @sizeOf(State),
         );
+
+        state.audio_state.initialize(&state.world_arena);
 
         _ = addLowEntity(state, .Null, WorldPosition.nullPosition());
 
@@ -338,7 +341,7 @@ pub export fn updateAndRender(
             transient_state,
         );
 
-        _ = playSound(state, transient_state.assets.getFirstSound(.Music));
+        _ = state.audio_state.playSound(transient_state.assets.getFirstSound(.Music));
 
         transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
@@ -659,8 +662,7 @@ pub export fn updateAndRender(
                                             ),
                                         );
                                         addCollisionRule(state, sword.storage_index, entity.storage_index, false);
-                                        _ = playSound(
-                                            state,
+                                        _ = state.audio_state.playSound(
                                             transient_state.assets.getRandomSound(.Bloop, &state.general_entropy),
                                         );
                                     }
@@ -1218,122 +1220,9 @@ pub export fn getSoundSamples(
 ) void {
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
     const transient_state: *TransientState = @ptrCast(@alignCast(memory.transient_storage));
-    // outputSineWave(sound_buffer, shared.MIDDLE_C, state);
 
-    const mixer_memory = transient_state.arena.beginTemporaryMemory();
-    defer transient_state.arena.endTemporaryMemory(mixer_memory);
-
-    const real_channel0: [*]f32 = transient_state.arena.pushArray(sound_buffer.sample_count, f32);
-    const real_channel1: [*]f32 = transient_state.arena.pushArray(sound_buffer.sample_count, f32);
-
-    // Clear out the mixer channels.
-    {
-        var dest0: [*]f32 = real_channel0;
-        var dest1: [*]f32 = real_channel1;
-        var sample_index: u32 = 0;
-        while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
-            dest0[0] = 0;
-            dest0 += 1;
-            dest1[0] = 0;
-            dest1 += 1;
-        }
-    }
-
-    // Sum all sounds.
-    var sound_finished = false;
-    var opt_playing_sound = &state.first_playing_sound;
-    while (opt_playing_sound.* != null) {
-        if (opt_playing_sound.*) |playing_sound| {
-            const opt_loaded_sound = transient_state.assets.getSound(playing_sound.id);
-
-            if (opt_loaded_sound) |loaded_sound| {
-                const volume0 = playing_sound.volume[0];
-                const volume1 = playing_sound.volume[1];
-                var dest0: [*]f32 = real_channel0;
-                var dest1: [*]f32 = real_channel1;
-
-                std.debug.assert(playing_sound.samples_played >= 0);
-
-                var samples_to_mix: i32 = @intCast(sound_buffer.sample_count);
-                const samples_remaining_in_sound: i32 =
-                    @as(i32, @intCast(loaded_sound.sample_count)) - playing_sound.samples_played;
-
-                if (samples_to_mix > samples_remaining_in_sound) {
-                    samples_to_mix = samples_remaining_in_sound;
-                }
-
-                var sample_index: u32 = @intCast(playing_sound.samples_played);
-                const end_sample_index = playing_sound.samples_played + samples_to_mix;
-                while (sample_index < end_sample_index) : (sample_index += 1) {
-                    const sample_value = loaded_sound.samples[0].?[sample_index];
-
-                    dest0[0] += volume0 * @as(f32, @floatFromInt(sample_value));
-                    dest0 += 1;
-                    dest1[0] += volume1 * @as(f32, @floatFromInt(sample_value));
-                    dest1 += 1;
-                }
-
-                playing_sound.samples_played += samples_to_mix;
-                sound_finished = (playing_sound.samples_played == loaded_sound.sample_count);
-            } else {
-                asset.loadSound(transient_state.assets, playing_sound.id);
-            }
-
-            if (sound_finished) {
-                opt_playing_sound.* = playing_sound.next;
-                playing_sound.next = state.first_free_playing_sound;
-                state.first_free_playing_sound = playing_sound;
-            } else {
-                opt_playing_sound = &opt_playing_sound.*.?.next;
-            }
-        }
-    }
-
-    // Convert back to 16-bit.
-    {
-        var source0: [*]f32 = real_channel0;
-        var source1: [*]f32 = real_channel1;
-
-        var sample_out: [*]i16 = sound_buffer.samples;
-        var sample_index: u32 = 0;
-        while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
-            sample_out[0] = @intFromFloat(source0[0] + 0.5);
-            sample_out += 1;
-            source0 += 1;
-
-            sample_out[0] = @intFromFloat(source1[0] + 0.5);
-            sample_out += 1;
-            source1 += 1;
-        }
-    }
-}
-
-fn playSound(state: *State, opt_sound_id: ?asset.SoundId) ?*shared.PlayingSound {
-    var result: ?*shared.PlayingSound = null;
-
-    if (opt_sound_id) |sound_id| {
-        if (state.first_free_playing_sound == null) {
-            state.first_free_playing_sound = state.world_arena.pushStruct(shared.PlayingSound);
-            state.first_free_playing_sound.?.next = null;
-        }
-
-        if (state.first_free_playing_sound) |first_free_sound| {
-            const playing_sound = first_free_sound;
-            state.first_free_playing_sound = state.first_free_playing_sound.?.next;
-
-            playing_sound.samples_played = 0;
-            playing_sound.volume[0] = 1;
-            playing_sound.volume[1] = 1;
-            playing_sound.id = sound_id;
-
-            playing_sound.next = state.first_playing_sound;
-            state.first_playing_sound = playing_sound;
-
-            result = playing_sound;
-        }
-    }
-
-    return result;
+    state.audio_state.outputPlayingSounds(sound_buffer, transient_state.assets, &transient_state.arena);
+    // audio.outputSineWave(sound_buffer, shared.MIDDLE_C, state);
 }
 
 pub fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMemory {
@@ -1638,28 +1527,3 @@ fn makePyramidNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
     }
 }
 
-fn outputSineWave(sound_buffer: *shared.SoundOutputBuffer, tone_hz: u32, state: *State) void {
-    const tone_volume = 3000;
-    const wave_period = @divFloor(sound_buffer.samples_per_second, tone_hz);
-
-    var sample_out: [*]i16 = sound_buffer.samples;
-    var sample_index: u32 = 0;
-    while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
-        var sample_value: i16 = 0;
-
-        // if (!shared.DEBUG) {
-            const sine_value: f32 = @sin(state.t_sine);
-            sample_value = @intFromFloat(sine_value * @as(f32, @floatFromInt(tone_volume)));
-        // }
-
-        sample_out += 1;
-        sample_out[0] = sample_value;
-        sample_out += 1;
-        sample_out[0] = sample_value;
-
-        state.t_sine += shared.TAU32 / @as(f32, @floatFromInt(wave_period));
-        if (state.t_sine > shared.TAU32) {
-            state.t_sine -= shared.TAU32;
-        }
-    }
-}

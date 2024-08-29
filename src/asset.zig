@@ -10,7 +10,6 @@ const std = @import("std");
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
-const LoadedBitmap = render.LoadedBitmap;
 const TransientState = shared.TransientState;
 const MemoryArena = shared.MemoryArena;
 const Platform = shared.Platform;
@@ -104,6 +103,10 @@ const AssetSlot = struct {
 
 pub const BitmapId = struct {
     value: u32,
+
+    pub fn isValid(self: *const BitmapId) bool {
+        return self.value != 0;
+    }
 };
 
 const AssetBitmapInfo = struct {
@@ -113,10 +116,17 @@ const AssetBitmapInfo = struct {
 
 pub const SoundId = struct {
     value: u32,
+
+    pub fn isValid(self: *const SoundId) bool {
+        return self.value != 0;
+    }
 };
 
 const AssetSoundInfo = struct {
-    file_name: [*:0]const u8 = undefined,
+    file_name: [*:0]const u8,
+    first_sample_index: u32,
+    sample_count: u32,
+    next_id_to_play: ?SoundId,
 };
 
 pub const Assets = struct {
@@ -185,7 +195,7 @@ pub const Assets = struct {
         }
     }
 
-    fn debugAddSoundInfo(self: *Assets, file_name: [*:0]const u8) SoundId {
+    fn debugAddSoundInfo(self: *Assets, file_name: [*:0]const u8, first_sample_index: u32, sample_count: u32) SoundId {
         std.debug.assert(self.debug_used_sound_count < self.sound_count);
 
         const sound_id = SoundId{ .value = self.debug_used_sound_count };
@@ -193,12 +203,21 @@ pub const Assets = struct {
 
         var info = &self.sound_infos[sound_id.value];
         info.file_name = file_name;
+        info.first_sample_index = first_sample_index;
+        info.sample_count = sample_count;
+        info.next_id_to_play = null;
 
         return sound_id;
     }
 
     fn addSoundAsset(self: *Assets, file_name: [*:0]const u8) void {
+        _ = self.addSoundSectionAsset(file_name, 0, 0);
+    }
+
+    fn addSoundSectionAsset(self: *Assets, file_name: [*:0]const u8, first_sample_index: u32, sample_count: u32) ?*Asset {
         std.debug.assert(self.debug_asset_type != null);
+
+        var result: ?*Asset = null;
 
         if (self.debug_asset_type) |asset_type| {
             std.debug.assert(asset_type.one_past_last_asset_index < self.asset_count);
@@ -208,10 +227,13 @@ pub const Assets = struct {
 
             asset.first_tag_index = self.debug_used_tag_count;
             asset.one_past_last_tag_index = self.debug_used_tag_count;
-            asset.slot_id = self.debugAddSoundInfo(file_name).value;
+            asset.slot_id = self.debugAddSoundInfo(file_name, first_sample_index, sample_count).value;
 
             self.debug_asset = asset;
+            result = asset;
         }
+
+        return result;
     }
 
     fn addTag(self: *Assets, tag_id: AssetTagId, value: f32) void {
@@ -354,7 +376,25 @@ pub const Assets = struct {
         result.endAssetType();
 
         result.beginAssetType(.Music);
-        result.addSoundAsset("test3/music_test.wav");
+        const one_music_chunk = 2 * 48000;
+        const total_music_sample_count = 7468095;
+        var first_sample_index: u32 = 0;
+        var last_music: ?*Asset = null;
+        while (first_sample_index < total_music_sample_count) : (first_sample_index += one_music_chunk) {
+            var sample_count = total_music_sample_count - first_sample_index;
+            if (sample_count > one_music_chunk) {
+                sample_count = one_music_chunk;
+            }
+
+            const this_music = result.addSoundSectionAsset("test3/music_test.wav", first_sample_index, sample_count);
+            if (last_music) |last| {
+                if (this_music) |this| {
+                    result.sound_infos[last.slot_id].next_id_to_play = SoundId{ .value = this.slot_id };
+                }
+            }
+
+            last_music = this_music;
+        }
         result.endAssetType();
 
         result.beginAssetType(.Glide);
@@ -429,6 +469,48 @@ pub const Assets = struct {
         return result;
     }
 
+    pub fn getBitamapInfo(self: *Assets, id: BitmapId) *AssetBitmapInfo {
+        std.debug.assert(id.value <= self.bitmap_count);
+        return &self.bitmap_infos[id.value];
+    }
+
+    pub fn prefetchBitmap(
+        self: *Assets,
+        opt_id: ?BitmapId,
+    ) void {
+        self.loadBitmap(opt_id);
+    }
+
+    pub fn loadBitmap(
+        self: *Assets,
+        opt_id: ?BitmapId,
+    ) void {
+        if (opt_id) |id| {
+            if (id.isValid() and @cmpxchgStrong(
+                AssetState,
+                &self.bitmaps[id.value].state,
+                .Unloaded,
+                .Queued,
+                .seq_cst,
+                .seq_cst,
+            ) == null) {
+                if (handmade.beginTaskWithMemory(self.transient_state)) |task| {
+                    var work: *LoadBitmapWork = task.arena.pushStruct(LoadBitmapWork);
+
+                    work.assets = self;
+                    work.id = id;
+                    work.task = task;
+                    work.bitmap = self.arena.pushStruct(LoadedBitmap);
+                    work.final_state = .Loaded;
+
+                    shared.addQueueEntry(self.transient_state.low_priority_queue, doLoadBitmapWork, work);
+                } else {
+                    @atomicStore(AssetState, &self.bitmaps[id.value].state, .Unloaded, .release);
+                }
+            }
+        }
+    }
+
     pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
         var result: ?*LoadedBitmap = null;
 
@@ -472,6 +554,48 @@ pub const Assets = struct {
         }
 
         return result;
+    }
+
+    pub fn getSoundInfo(self: *Assets, id: SoundId) *AssetSoundInfo {
+        std.debug.assert(id.value <= self.sound_count);
+        return &self.sound_infos[id.value];
+    }
+
+    pub fn prefetchSound(
+        self: *Assets,
+        opt_id: ?SoundId,
+    ) void {
+        self.loadSound(opt_id);
+    }
+
+    pub fn loadSound(
+        self: *Assets,
+        opt_id: ?SoundId,
+    ) void {
+        if (opt_id) |id| {
+            if (id.isValid() and @cmpxchgStrong(
+                    AssetState,
+                    &self.sounds[id.value].state,
+                    .Unloaded,
+                    .Queued,
+                    .seq_cst,
+                    .seq_cst,
+            ) == null) {
+                if (handmade.beginTaskWithMemory(self.transient_state)) |task| {
+                    var work: *LoadSoundWork = task.arena.pushStruct(LoadSoundWork);
+
+                    work.assets = self;
+                    work.id = id;
+                    work.task = task;
+                    work.sound = self.arena.pushStruct(LoadedSound);
+                    work.final_state = .Loaded;
+
+                    shared.addQueueEntry(self.transient_state.low_priority_queue, doLoadSoundWork, work);
+                } else {
+                    @atomicStore(AssetState, &self.sounds[id.value].state, .Unloaded, .release);
+                }
+            }
+        }
     }
 
     pub fn getSound(self: *Assets, id: SoundId) ?*LoadedSound {
@@ -522,6 +646,16 @@ pub const Assets = struct {
     }
 };
 
+pub const LoadedBitmap = extern struct {
+    alignment_percentage: Vector2 = Vector2.zero(),
+    width_over_height: f32 = 0,
+
+    width: i32 = 0,
+    height: i32 = 0,
+    pitch: i32 = 0,
+    memory: ?[*]void,
+};
+
 const LoadBitmapWork = struct {
     assets: *Assets,
     id: BitmapId,
@@ -546,35 +680,7 @@ fn doLoadBitmapWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv
     handmade.endTaskWithMemory(work.task);
 }
 
-pub fn loadBitmap(
-    assets: *Assets,
-    id: BitmapId,
-) void {
-    if (id.value != 0 and @cmpxchgStrong(
-        AssetState,
-        &assets.bitmaps[id.value].state,
-        .Unloaded,
-        .Queued,
-        .seq_cst,
-        .seq_cst,
-    ) == null) {
-        if (handmade.beginTaskWithMemory(assets.transient_state)) |task| {
-            var work: *LoadBitmapWork = task.arena.pushStruct(LoadBitmapWork);
-
-            work.assets = assets;
-            work.id = id;
-            work.task = task;
-            work.bitmap = assets.arena.pushStruct(LoadedBitmap);
-            work.final_state = .Loaded;
-
-            shared.addQueueEntry(assets.transient_state.low_priority_queue, doLoadBitmapWork, work);
-        } else {
-            @atomicStore(AssetState, &assets.bitmaps[id.value].state, .Unloaded, .release);
-        }
-    }
-}
-
-pub const LoadedSound = extern struct {
+pub const LoadedSound = struct {
     sample_count: u32,
     channel_count: u32,
     samples: [2]?[*]i16,
@@ -595,40 +701,13 @@ fn doLoadSoundWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(
     const work: *LoadSoundWork = @ptrCast(@alignCast(data));
     const info = work.assets.sound_infos[work.id.value];
 
-    work.sound.* = debugLoadWAV(info.file_name);
+    work.sound.* = debugLoadWAV(info.file_name, info.first_sample_index, info.sample_count);
     work.assets.sounds[work.id.value] = AssetSlot{
         .data = .{ .sound = work.sound },
         .state = work.final_state,
     };
 
     handmade.endTaskWithMemory(work.task);
-}
-pub fn loadSound(
-    assets: *Assets,
-    id: SoundId,
-) void {
-    if (id.value != 0 and @cmpxchgStrong(
-        AssetState,
-        &assets.sounds[id.value].state,
-        .Unloaded,
-        .Queued,
-        .seq_cst,
-        .seq_cst,
-    ) == null) {
-        if (handmade.beginTaskWithMemory(assets.transient_state)) |task| {
-            var work: *LoadSoundWork = task.arena.pushStruct(LoadSoundWork);
-
-            work.assets = assets;
-            work.id = id;
-            work.task = task;
-            work.sound = assets.arena.pushStruct(LoadedSound);
-            work.final_state = .Loaded;
-
-            shared.addQueueEntry(assets.transient_state.low_priority_queue, doLoadSoundWork, work);
-        } else {
-            @atomicStore(AssetState, &assets.sounds[id.value].state, .Unloaded, .release);
-        }
-    }
 }
 
 const BitmapHeader = packed struct {
@@ -789,11 +868,11 @@ const RiffIterator = struct {
     }
 };
 
-fn parseChunkAt(at: *void, stop: *void) RiffIterator {
+fn parseWaveChunkAt(at: *void, stop: *void) RiffIterator {
     return RiffIterator{ .at = @ptrCast(at), .stop = @ptrCast(stop) };
 }
 
-pub fn debugLoadWAV(file_name: [*:0]const u8) LoadedSound {
+pub fn debugLoadWAV(file_name: [*:0]const u8, section_first_sample_index: u32, section_sample_count: u32) LoadedSound {
     var result: LoadedSound = undefined;
     const read_result = shared.debugReadEntireFile(file_name);
 
@@ -808,7 +887,7 @@ pub fn debugLoadWAV(file_name: [*:0]const u8) LoadedSound {
         var sample_data_size: ?u32 = null;
 
         const chunk_address = @intFromPtr(header) + @sizeOf(WaveHeader);
-        var iterator = parseChunkAt(@ptrFromInt(chunk_address), @ptrFromInt(chunk_address + header.size - 4));
+        var iterator = parseWaveChunkAt(@ptrFromInt(chunk_address), @ptrFromInt(chunk_address + header.size - 4));
         while (iterator.isValid()) : (iterator = iterator.nextChunk()) {
             if (iterator.getType()) |chunk_type| {
                 switch (chunk_type) {
@@ -863,10 +942,21 @@ pub fn debugLoadWAV(file_name: [*:0]const u8) LoadedSound {
                 unreachable;
             }
         }
-    }
 
-    // TODO: Load right channels.
-    result.channel_count = 1;
+        // TODO: Load right channels.
+        result.channel_count = 1;
+
+        if (section_sample_count != 0) {
+            std.debug.assert((section_first_sample_index + section_sample_count) <= result.sample_count);
+
+            result.sample_count = section_sample_count;
+
+            var channel_index: u32 = 0;
+            while (channel_index < result.channel_count) : (channel_index += 1) {
+                result.samples[channel_index].? += section_first_sample_index;
+            }
+        }
+    }
 
     return result;
 }

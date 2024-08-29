@@ -33,20 +33,11 @@ const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
+const LoadedBitmap = asset.LoadedBitmap;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
 const Vec4i = math.Vec4i;
-
-pub const LoadedBitmap = extern struct {
-    alignment_percentage: Vector2 = Vector2.zero(),
-    width_over_height: f32 = 0,
-
-    width: i32 = 0,
-    height: i32 = 0,
-    pitch: i32 = 0,
-    memory: ?[*]void,
-};
 
 pub const EnvironmentMap = extern struct {
     lod: [4]LoadedBitmap,
@@ -359,7 +350,7 @@ pub const RenderGroup = extern struct {
             if (self.assets.getBitmap(id)) |bitmap| {
                 self.pushBitmap(bitmap, height, offset, color);
             } else {
-                asset.loadBitmap(self.assets, id);
+                self.assets.loadBitmap(id);
                 self.missing_resource_count += 1;
             }
         }
@@ -1475,7 +1466,6 @@ pub fn drawBitmapMatte(
 pub inline fn sRGB255ToLinear1(color: Color) Color {
     const inverse_255: f32 = 1.0 / 255.0;
 
-    // TODO: Test using .values directly instead of creating a new Color.
     return Color.new(
         math.square(inverse_255 * color.r()),
         math.square(inverse_255 * color.g()),
