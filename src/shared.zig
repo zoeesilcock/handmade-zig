@@ -340,6 +340,27 @@ pub const MemoryArena = struct {
         return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, @alignOf(T)))));
     }
 
+    pub fn pushString(self: *MemoryArena, source: [*:0]const u8) [*:0]const u8 {
+        var size: u32 = 0;
+
+        var char_index: u32 = 0;
+        while (source[char_index] != 0) : (char_index += 1) {
+            size += 1;
+        }
+
+        // Include the sentinel.
+        size += 1;
+
+        var dest = self.pushSize(size, null);
+
+        char_index = 0;
+        while (char_index < size) : (char_index += 1) {
+            dest[char_index] = source[char_index];
+        }
+
+        return @ptrCast(dest);
+    }
+
     pub fn beginTemporaryMemory(self: *MemoryArena) TemporaryMemory {
         const result = TemporaryMemory{
             .used = self.used,

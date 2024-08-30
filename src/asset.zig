@@ -165,7 +165,7 @@ pub const Assets = struct {
 
         var info = &self.bitmap_infos[bitmap_id.value];
         info.alignment_percentage = alignment_percentage;
-        info.file_name = file_name;
+        info.file_name = self.arena.pushString(file_name);
 
         return bitmap_id;
     }
@@ -202,7 +202,7 @@ pub const Assets = struct {
         self.debug_used_sound_count += 1;
 
         var info = &self.sound_infos[sound_id.value];
-        info.file_name = file_name;
+        info.file_name = self.arena.pushString(file_name);
         info.first_sample_index = first_sample_index;
         info.sample_count = sample_count;
         info.next_id_to_play = null;

@@ -1527,6 +1527,9 @@ pub export fn wWinMain(
                     const last_dll_write_time = getLastWriteTime(&source_dll_path);
                     new_input.executable_reloaded = false;
                     if (win32.CompareFileTime(&last_dll_write_time, &game.last_write_time) != 0) {
+                        completeAllQueuedWork(&high_priority_queue);
+                        completeAllQueuedWork(&low_priority_queue);
+
                         unloadGameCode(&game);
                         game = loadGameCode(&source_dll_path, &temp_dll_path);
                         new_input.executable_reloaded = true;
