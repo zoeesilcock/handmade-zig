@@ -623,12 +623,17 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
                     // Create the secondary buffer.
                     var buffer_description = win32.DSBUFFERDESC{
                         .dwSize = @sizeOf(win32.DSBUFFERDESC),
-                        .dwFlags = 0,
+                        .dwFlags = win32.DSBCAPS_GETCURRENTPOSITION2,
                         .dwBufferBytes = buffer_size,
                         .dwReserved = 0,
                         .lpwfxFormat = &wave_format,
                         .guid3DAlgorithm = win32.Guid.initString("00000000-0000-0000-0000-000000000000"),
                     };
+
+                    if (DEBUG) {
+                        buffer_description.dwFlags |= win32.DSBCAPS_GLOBALFOCUS;
+                    }
+
                     if (win32.SUCCEEDED(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_secondary_buffer, null))) {
                         if (opt_secondary_buffer) |secondary_buffer| {
                             _ = secondary_buffer;

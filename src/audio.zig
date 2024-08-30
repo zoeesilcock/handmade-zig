@@ -1,6 +1,7 @@
 const shared = @import("shared.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
+const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
 
 // Types.
@@ -18,7 +19,9 @@ pub const PlayingSound = struct {
     current_volume_velocity: Vector2,
     target_volume: Vector2,
 
-    samples_played: i32,
+    sample_velocity: f32,
+
+    samples_played: f32,
     next: ?*PlayingSound,
 };
 
@@ -51,6 +54,7 @@ pub const AudioState = struct {
                 playing_sound.current_volume_velocity = Vector2.zero();
                 playing_sound.target_volume = Vector2.one();
                 playing_sound.id = sound_id;
+                playing_sound.sample_velocity = 1;
 
                 playing_sound.next = self.first_playing_sound;
                 self.first_playing_sound = playing_sound;
@@ -79,6 +83,15 @@ pub const AudioState = struct {
             sound.target_volume = volume;
             sound.current_volume_velocity = sound.target_volume.minus(sound.current_volume).scaledTo(one_over_fade);
         }
+    }
+
+    pub fn changePitch(
+        self: *AudioState,
+        sound: *PlayingSound,
+        sample_velocity: f32,
+    ) void {
+        _ = self;
+        sound.sample_velocity = sample_velocity;
     }
 
     pub fn outputPlayingSounds(
@@ -127,12 +140,18 @@ pub const AudioState = struct {
 
                         var volume = playing_sound.current_volume;
                         const volume_velocity = playing_sound.current_volume_velocity.scaledTo(seconds_per_sample);
+                        const sample_velocity = playing_sound.sample_velocity;
 
                         std.debug.assert(playing_sound.samples_played >= 0);
 
                         var samples_to_mix = total_samples_to_mix;
+                        const samples_remaining: i32 =
+                            @as(i32, @intCast(loaded_sound.sample_count)) -
+                            intrinsics.roundReal32ToInt32(playing_sound.samples_played);
+                        const float_samples_remaining_in_sound =
+                            @as(f32, @floatFromInt(samples_remaining)) / sample_velocity;
                         const samples_remaining_in_sound: i32 =
-                            @as(i32, @intCast(loaded_sound.sample_count)) - playing_sound.samples_played;
+                            intrinsics.roundReal32ToInt32(float_samples_remaining_in_sound);
 
                         if (samples_to_mix > samples_remaining_in_sound) {
                             samples_to_mix = samples_remaining_in_sound;
@@ -161,18 +180,28 @@ pub const AudioState = struct {
                         }
 
                         // TODO: Handle stereo.
-                        var sample_index: u32 = @intCast(playing_sound.samples_played);
-                        const end_sample_index = playing_sound.samples_played + samples_to_mix;
-                        while (sample_index < end_sample_index) : (sample_index += 1) {
-                            const sample_value = loaded_sound.samples[0].?[sample_index];
+                        var sample_position: f32 = playing_sound.samples_played;
+                        var loop_index: u32 = 0;
+                        while (loop_index < samples_to_mix) : (loop_index += 1) {
+                            const sample_index = intrinsics.floorReal32ToUInt32(sample_position);
+                            const fraction: f32 = sample_position - @as(f32, @floatFromInt(sample_index));
+                            const sample0: f32 = @floatFromInt(loaded_sound.samples[0].?[sample_index]);
+                            const sample1: f32 = @floatFromInt(loaded_sound.samples[0].?[sample_index + 1]);
+                            const sample_value = math.lerpf(sample0, sample1, fraction);
 
-                            dest0[0] += self.master_volume.values[0] * volume.values[0] * @as(f32, @floatFromInt(sample_value));
+                            // const sample_index = intrinsics.roundReal32ToUInt32(sample_position);
+                            // const sample_value = @as(f32, @floatFromInt(loaded_sound.samples[0].?[sample_index]));
+
+                            dest0[0] +=
+                                self.master_volume.values[0] * volume.values[0] * sample_value;
                             dest0 += 1;
-                            dest1[0] += self.master_volume.values[1] * volume.values[1] * @as(f32, @floatFromInt(sample_value));
+                            dest1[0] +=
+                                self.master_volume.values[1] * volume.values[1] * sample_value;
                             dest1 += 1;
 
                             // Update volume.
                             volume = volume.plus(volume_velocity);
+                            sample_position += sample_velocity;
                         }
 
                         // Stop any volume fades that ended.
@@ -190,10 +219,13 @@ pub const AudioState = struct {
                         playing_sound.current_volume = volume;
 
                         std.debug.assert(total_samples_to_mix >= samples_to_mix);
-                        playing_sound.samples_played += samples_to_mix;
+                        playing_sound.samples_played = sample_position;
+                        if (playing_sound.samples_played > @as(f32, @floatFromInt(loaded_sound.sample_count))) {
+                            playing_sound.samples_played = @as(f32, @floatFromInt(loaded_sound.sample_count));
+                        }
                         total_samples_to_mix -= samples_to_mix;
 
-                        if (playing_sound.samples_played == loaded_sound.sample_count) {
+                        if (@as(u32, @intFromFloat(playing_sound.samples_played)) == loaded_sound.sample_count) {
                             if (info.next_id_to_play) |next_id| {
                                 if (next_id.isValid()) {
                                     playing_sound.id = next_id;
