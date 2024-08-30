@@ -119,7 +119,7 @@ pub export fn updateAndRender(
     shared.addQueueEntry = platform.addQueueEntry;
     shared.completeAllQueuedWork = platform.completeAllQueuedWork;
 
-    if (shared.DEBUG) {
+    if (shared.INTERNAL) {
         shared.debug_global_memory = memory;
     }
     shared.beginTimedBlock(.GameUpdateAndRender);

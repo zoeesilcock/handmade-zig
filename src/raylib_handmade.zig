@@ -14,7 +14,7 @@ const DEBUG_WINDOW_ACTIVE_OPACITY = 1.0;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 0.25;
 
 // Build options.
-const DEBUG = shared.DEBUG;
+const INTERNAL = shared.INTERNAL;
 
 var back_buffer: OffscreenBuffer = .{
     .width = WIDTH,
@@ -158,10 +158,10 @@ pub fn main() anyerror!void {
         .transient_storage_size = shared.megabytes(256),
         .transient_storage = null,
         .high_priority_queue = &queue,
-        .counters = if (DEBUG) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
+        .counters = if (INTERNAL) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
     };
     const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
-    // const base_address = if (DEBUG) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
+    // const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
     game_memory.permanent_storage = @as([*]void, @ptrCast(rl.memAlloc(@intCast(total_size))));
     game_memory.transient_storage = game_memory.permanent_storage.? + game_memory.permanent_storage_size;
 
@@ -177,11 +177,11 @@ pub fn main() anyerror!void {
     };
 
     // Create the window.
-    const window_width: i32 = if (DEBUG) DEBUG_WINDOW_WIDTH else WIDTH;
-    const window_height: i32 = if (DEBUG) DEBUG_WINDOW_HEIGHT else HEIGHT;
+    const window_width: i32 = if (INTERNAL) DEBUG_WINDOW_WIDTH else WIDTH;
+    const window_height: i32 = if (INTERNAL) DEBUG_WINDOW_HEIGHT else HEIGHT;
     rl.initWindow(window_width, window_height, "Handmade Zig");
 
-    if (DEBUG) {
+    if (INTERNAL) {
         rl.setWindowPosition(DEBUG_WINDOW_POS_X, DEBUG_WINDOW_POS_Y);
         rl.setWindowState(rl.ConfigFlags{ .window_transparent = true });
     }
@@ -237,7 +237,7 @@ pub fn main() anyerror!void {
         new_input = old_input;
         old_input = temp;
 
-        if (DEBUG) {
+        if (INTERNAL) {
             const window_is_focused = rl.isWindowFocused();
             if (window_was_focused != window_is_focused) {
                 rl.setWindowOpacity(if (window_is_focused) DEBUG_WINDOW_ACTIVE_OPACITY else DEBUG_WINDOW_INACTIVE_OPACITY);

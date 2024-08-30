@@ -41,7 +41,7 @@ const shared = @import("shared.zig");
 
 // Build options.
 const OUTPUT_TIMING = @import("build_options").timing;
-const DEBUG = shared.DEBUG;
+const INTERNAL = shared.INTERNAL;
 
 const std = @import("std");
 const win32 = struct {
@@ -70,7 +70,7 @@ var running: bool = false;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
-var show_debug_cursor = DEBUG;
+var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 
 const OffscreenBuffer = struct {
@@ -630,7 +630,7 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
                         .guid3DAlgorithm = win32.Guid.initString("00000000-0000-0000-0000-000000000000"),
                     };
 
-                    if (DEBUG) {
+                    if (INTERNAL) {
                         buffer_description.dwFlags |= win32.DSBCAPS_GLOBALFOCUS;
                     }
 
@@ -845,7 +845,7 @@ fn windowProcedure(
         },
         win32.WM_SIZE => {},
         win32.WM_ACTIVATEAPP => {
-            if (DEBUG) {
+            if (INTERNAL) {
                 const active = (w_param != 0);
                 _ = win32.SetLayeredWindowAttributes(window, 0, if (active) DEBUG_WINDOW_ACTIVE_OPACITY else DEBUG_WINDOW_INACTIVE_OPACITY, win32.LWA_ALPHA);
             }
@@ -1011,7 +1011,7 @@ fn debugSyncDisplay(
 }
 
 fn handleDebugCycleCounters(memory: *shared.Memory) void {
-    if (DEBUG) {
+    if (INTERNAL) {
         win32.OutputDebugStringA("DEBUG CYCLE COUNTERS:\n");
         var total_cycles: u64 = 0;
 
@@ -1359,8 +1359,8 @@ pub export fn wWinMain(
     if (win32.RegisterClassW(&window_class) != 0) {
         const opt_window_handle: ?win32.HWND = win32.CreateWindowExW(
             .{
-                // .TOPMOST = if (DEBUG) 1 else 0,
-                // .LAYERED = if (DEBUG) 1 else 0,
+                // .TOPMOST = if (INTERNAL) 1 else 0,
+                // .LAYERED = if (INTERNAL) 1 else 0,
             },
             window_class.lpszClassName,
             win32.L("Handmade Zig"),
@@ -1373,10 +1373,10 @@ pub export fn wWinMain(
                 .DLGFRAME = 1,
                 .BORDER = 1,
             },
-            if (DEBUG) DEBUG_WINDOW_POS_X else win32.CW_USEDEFAULT,
-            if (DEBUG) DEBUG_WINDOW_POS_Y else win32.CW_USEDEFAULT,
-            if (DEBUG) DEBUG_WINDOW_WIDTH else WIDTH + WINDOW_DECORATION_WIDTH,
-            if (DEBUG) DEBUG_WINDOW_HEIGHT else HEIGHT + WINDOW_DECORATION_HEIGHT,
+            if (INTERNAL) DEBUG_WINDOW_POS_X else win32.CW_USEDEFAULT,
+            if (INTERNAL) DEBUG_WINDOW_POS_Y else win32.CW_USEDEFAULT,
+            if (INTERNAL) DEBUG_WINDOW_WIDTH else WIDTH + WINDOW_DECORATION_WIDTH,
+            if (INTERNAL) DEBUG_WINDOW_HEIGHT else HEIGHT + WINDOW_DECORATION_HEIGHT,
             null,
             null,
             instance,
@@ -1384,7 +1384,7 @@ pub export fn wWinMain(
         );
 
         if (opt_window_handle) |window_handle| {
-            if (DEBUG) {
+            if (INTERNAL) {
                 _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);
             }
 
@@ -1434,11 +1434,11 @@ pub export fn wWinMain(
                 .transient_storage = null,
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
-                .counters = if (DEBUG) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
+                .counters = if (INTERNAL) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 
             state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
-            const base_address = if (DEBUG) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
+            const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
             state.game_memory_block = win32.VirtualAlloc(
                 base_address,
                 state.total_size,
@@ -1642,7 +1642,7 @@ pub export fn wWinMain(
 
                             game.getSoundSamples(&game_memory, &sound_output_info.output_buffer);
 
-                            if (DEBUG) {
+                            if (INTERNAL) {
                                 var marker = &debug_time_markers[debug_time_marker_index];
                                 marker.output_play_cursor = play_cursor;
                                 marker.output_write_cursor = write_cursor;
@@ -1706,7 +1706,7 @@ pub export fn wWinMain(
                     const time_per_frame = getSecondsElapsed(last_counter, end_counter);
                     last_counter = end_counter;
 
-                    if (DEBUG) {
+                    if (INTERNAL) {
                         if (false) {
                             var marker_index = debug_time_marker_index;
                             if (marker_index > 1) {
@@ -1732,7 +1732,7 @@ pub export fn wWinMain(
                     flip_wall_clock = getWallClock();
 
                     // Output debug markers for the sound cursor positions.
-                    if (DEBUG) {
+                    if (INTERNAL) {
                         if (opt_secondary_buffer) |secondary_buffer| {
                             var play_cursor: std.os.windows.DWORD = undefined;
                             var write_cursor: std.os.windows.DWORD = undefined;
@@ -1777,7 +1777,7 @@ pub export fn wWinMain(
 
                     last_cycle_count = end_cycle_count;
 
-                    if (DEBUG) {
+                    if (INTERNAL) {
                         debug_time_marker_index += 1;
                         if (debug_time_marker_index == debug_time_markers.len) {
                             debug_time_marker_index = 0;

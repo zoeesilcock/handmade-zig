@@ -30,6 +30,7 @@ const PlayingSound = audio.PlayingSound;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
+pub const INTERNAL = @import("build_options").internal;
 
 // Helper functions.
 pub inline fn kilobytes(value: u32) u64 {
@@ -118,14 +119,14 @@ pub const DebugReadFileResult = extern struct {
 
 pub var debug_global_memory: ?*Memory = null;
 pub inline fn beginTimedBlock(counter_id: DebugCycleCounters) void {
-    if (DEBUG) {
+    if (INTERNAL) {
         if (debug_global_memory) |memory| {
             memory.getCycleCounter(counter_id).last_cycle_start = rdtsc();
         }
     }
 }
 pub inline fn endTimedBlock(counter_id: DebugCycleCounters) void {
-    if (DEBUG) {
+    if (INTERNAL) {
         if (debug_global_memory) |memory| {
             const counter = memory.getCycleCounter(counter_id);
             counter.cycle_count +%= rdtsc() -% counter.last_cycle_start;
@@ -135,7 +136,7 @@ pub inline fn endTimedBlock(counter_id: DebugCycleCounters) void {
 }
 
 pub inline fn endTimedBlockCounted(counter_id: DebugCycleCounters, hit_count: u32) void {
-    if (DEBUG) {
+    if (INTERNAL) {
         if (debug_global_memory) |memory| {
             const counter = memory.getCycleCounter(counter_id);
             counter.cycle_count +%= rdtsc() -% counter.last_cycle_start;
@@ -264,11 +265,11 @@ fn GameMemory() type {
         high_priority_queue: *PlatformWorkQueue,
         low_priority_queue: *PlatformWorkQueue,
 
-        counters: if (DEBUG) [DEBUG_CYCLE_COUNTERS_COUNT]DebugCycleCounter else void,
+        counters: if (INTERNAL) [DEBUG_CYCLE_COUNTERS_COUNT]DebugCycleCounter else void,
 
         const Self = @This();
 
-        pub usingnamespace switch (DEBUG) {
+        pub usingnamespace switch (INTERNAL) {
             inline true => struct {
                 pub fn getCycleCounter(self: *Self, counter_id: DebugCycleCounters) *DebugCycleCounter {
                     return &self.counters[@intFromEnum(counter_id)];

@@ -20,6 +20,7 @@ pub fn build(b: *std.Build) void {
     // Build options.
     const build_options = b.addOptions();
     build_options.addOption(bool, "timing", b.option(bool, "timing", "print timing info to debug output") orelse false);
+    build_options.addOption(bool, "internal", b.option(bool, "internal", "use this for internal builds") orelse true);
     build_options.addOption(Backend, "backend", backend);
     exe.root_module.addOptions("build_options", build_options);
 
@@ -58,6 +59,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
+    lib_handmade.root_module.addOptions("build_options", build_options);
 
     // Emit generated assembly of the library.
     const lib_assembly_file = b.addInstallFile(lib_handmade.getEmittedAsm(), "bin/handmade-dll.asm");
