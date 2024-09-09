@@ -1410,9 +1410,10 @@ pub export fn wWinMain(
             sound_output.safety_bytes = @intFromFloat(@as(f32, @floatFromInt(sound_output.secondary_buffer_size)) / game_update_hz / 2.0);
             var sound_output_info = SoundOutputInfo{ .output_buffer = undefined };
 
+            const max_possible_overrun = 2 * 4 * @sizeOf(u16);
             const samples: ?[*]i16 = @ptrCast(@alignCast(win32.VirtualAlloc(
                 null,
-                sound_output.secondary_buffer_size,
+                sound_output.secondary_buffer_size + max_possible_overrun,
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
                 win32.PAGE_READWRITE,
             )));

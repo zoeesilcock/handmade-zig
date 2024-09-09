@@ -11,6 +11,8 @@ const SoundId = asset.SoundId;
 const SoundOutputBuffer = shared.SoundOutputBuffer;
 const Assets = asset.Assets;
 const Vector2 = math.Vector2;
+const Vec4f = math.Vec4f;
+const Vec4i = math.Vec4i;
 
 pub const PlayingSound = struct {
     id: SoundId,
@@ -103,21 +105,25 @@ pub const AudioState = struct {
         const mixer_memory = temp_arena.beginTemporaryMemory();
         defer temp_arena.endTemporaryMemory(mixer_memory);
 
-        const real_channel0: [*]f32 = temp_arena.pushArray(sound_buffer.sample_count, f32);
-        const real_channel1: [*]f32 = temp_arena.pushArray(sound_buffer.sample_count, f32);
+        const sample_count_align4 = shared.align4(sound_buffer.sample_count);
+        const sample_count4 = sample_count_align4 / 4;
+
+        const real_channel0: [*]Vec4f = temp_arena.pushArrayAligned(sample_count4, Vec4f, 16);
+        const real_channel1: [*]Vec4f = temp_arena.pushArrayAligned(sample_count4, Vec4f, 16);
 
         const seconds_per_sample = 1.0 / @as(f32, @floatFromInt(sound_buffer.samples_per_second));
         const output_channel_count = 2;
+        const zero: Vec4f = @splat(0);
 
         // Clear out the mixer channels.
         {
-            var dest0: [*]f32 = real_channel0;
-            var dest1: [*]f32 = real_channel1;
+            var dest0: [*]Vec4f = real_channel0;
+            var dest1: [*]Vec4f = real_channel1;
             var sample_index: u32 = 0;
-            while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
-                dest0[0] = 0;
+            while (sample_index < sample_count4) : (sample_index += 1) {
+                dest0[0] = zero;
                 dest0 += 1;
-                dest1[0] = 0;
+                dest1[0] = zero;
                 dest1 += 1;
             }
         }
@@ -129,8 +135,8 @@ pub const AudioState = struct {
                 var sound_finished = false;
 
                 var total_samples_to_mix: i32 = @intCast(sound_buffer.sample_count);
-                var dest0: [*]f32 = real_channel0;
-                var dest1: [*]f32 = real_channel1;
+                var dest0: [*]f32 = @ptrCast(&real_channel0[0]);
+                var dest1: [*]f32 = @ptrCast(&real_channel1[0]);
 
                 while (total_samples_to_mix > 0 and !sound_finished) {
                     const opt_loaded_sound = assets.getSound(playing_sound.id);
@@ -255,19 +261,19 @@ pub const AudioState = struct {
 
         // Convert back to 16-bit.
         {
-            var source0: [*]f32 = real_channel0;
-            var source1: [*]f32 = real_channel1;
+            const source0: [*]Vec4f = real_channel0;
+            const source1: [*]Vec4f = real_channel1;
+            var sample_out: [*]@Vector(8, i16) = @ptrCast(@alignCast(sound_buffer.samples));
 
-            var sample_out: [*]i16 = sound_buffer.samples;
             var sample_index: u32 = 0;
-            while (sample_index < sound_buffer.sample_count) : (sample_index += 1) {
-                sample_out[0] = @intFromFloat(source0[0] + 0.5);
-                sample_out += 1;
-                source0 += 1;
+            while (sample_index < sample_count4) : (sample_index += 1) {
+                const l: Vec4i = @intFromFloat(source0[sample_index]);
+                const r: Vec4i = @intFromFloat(source1[sample_index]);
+                const lr0: Vec4i = @shuffle(i32, l, r, Vec4i{0, -1, 1, -2});
+                const lr1: Vec4i = @shuffle(i32, l, r, Vec4i{2, -3, 3, -4});
+                const s01: @Vector(8, i16) = @intCast(std.simd.join(lr0, lr1));
 
-                sample_out[0] = @intFromFloat(source1[0] + 0.5);
-                sample_out += 1;
-                source1 += 1;
+                sample_out[sample_index] = s01;
             }
         }
     }

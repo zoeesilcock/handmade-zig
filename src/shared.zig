@@ -68,6 +68,14 @@ pub inline fn rdtsc() u64 {
     return (@as(u64, hi) << 32) | @as(u64, low);
 }
 
+pub inline fn alignPow2(value: u32, alignment: u32) u32 {
+    return (value + (alignment - 1)) & ~@as(u32, alignment - 1);
+}
+
+pub inline fn align4(value: u32) u32 {
+    return (value + 3) & ~@as(u32, 3);
+}
+
 pub inline fn align16(value: u32) u32 {
     return (value + 15) & ~@as(u32, 15);
 }
@@ -187,6 +195,7 @@ pub const OffscreenBuffer = extern struct {
 };
 
 pub const SoundOutputBuffer = extern struct {
+    // IMPORTANT: Samples must be padded to a multiple of 4 samples.
     samples: [*]i16,
     samples_per_second: u32,
     sample_count: u32,
@@ -338,6 +347,10 @@ pub const MemoryArena = struct {
 
     pub fn pushArray(self: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
         return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, @alignOf(T)))));
+    }
+
+    pub fn pushArrayAligned(self: *MemoryArena, count: MemoryIndex, comptime T: type, alignment: MemoryIndex) [*]T {
+        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, alignment))));
     }
 
     pub fn pushString(self: *MemoryArena, source: [*:0]const u8) [*:0]const u8 {

@@ -407,6 +407,13 @@ pub export fn updateAndRender(
     }
 
     // Handle input.
+    // TODO: This causes a crash in the audio processing code: audio.zig:178
+    // {
+    //     var music_volume = Vector2.zero();
+    //     _ = music_volume.setY(math.safeRatio0(@as(f32, @floatFromInt(input.mouse_x)), @as(f32, @floatFromInt(buffer.width))));
+    //     _ = music_volume.setX(1.0 - music_volume.y());
+    //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
+    // }
     for (&input.controllers, 0..) |controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
         controlled_hero.movement_direction = Vector2.zero();
