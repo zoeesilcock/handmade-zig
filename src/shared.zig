@@ -76,6 +76,10 @@ pub inline fn align4(value: u32) u32 {
     return (value + 3) & ~@as(u32, 3);
 }
 
+pub inline fn align8(value: u32) u32 {
+    return (value + 7) & ~@as(u32, 7);
+}
+
 pub inline fn align16(value: u32) u32 {
     return (value + 15) & ~@as(u32, 15);
 }

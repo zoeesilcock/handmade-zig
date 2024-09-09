@@ -913,7 +913,7 @@ pub fn debugLoadWAV(file_name: [*:0]const u8, section_first_sample_index: u32, s
         std.debug.assert(channel_count != null and sample_data != null and sample_data_size != null);
 
         result.channel_count = channel_count.?;
-        result.sample_count = sample_data_size.? / (channel_count.? * @sizeOf(i16));
+        var sample_count = sample_data_size.? / (channel_count.? * @sizeOf(i16));
 
         if (sample_data) |data| {
             if (channel_count == 1) {
@@ -921,18 +921,18 @@ pub fn debugLoadWAV(file_name: [*:0]const u8, section_first_sample_index: u32, s
                 result.samples[1] = null;
             } else if (channel_count == 2) {
                 result.samples[0] = @ptrCast(data);
-                result.samples[1] = @ptrCast(data + result.sample_count);
+                result.samples[1] = @ptrCast(data + sample_count);
 
                 if (false) {
                     var i: i16 = 0;
-                    while (i < result.sample_count) : (i += 1) {
+                    while (i < sample_count) : (i += 1) {
                         data[2 * @as(usize, @intCast(i)) + 0] = i;
                         data[2 * @as(usize, @intCast(i)) + 1] = i;
                     }
                 }
 
                 var sample_index: u32 = 0;
-                while (sample_index < result.sample_count) : (sample_index += 1) {
+                while (sample_index < sample_count) : (sample_index += 1) {
                     const source = data[2 * sample_index];
                     data[2 * sample_index] = data[sample_index];
                     data[sample_index] = source;
@@ -946,16 +946,30 @@ pub fn debugLoadWAV(file_name: [*:0]const u8, section_first_sample_index: u32, s
         // TODO: Load right channels.
         result.channel_count = 1;
 
+        var at_end = true;
         if (section_sample_count != 0) {
-            std.debug.assert((section_first_sample_index + section_sample_count) <= result.sample_count);
+            std.debug.assert((section_first_sample_index + section_sample_count) <= sample_count);
 
-            result.sample_count = section_sample_count;
+            at_end = (section_first_sample_index + section_sample_count) == sample_count;
+            sample_count = section_sample_count;
 
             var channel_index: u32 = 0;
             while (channel_index < result.channel_count) : (channel_index += 1) {
                 result.samples[channel_index].? += section_first_sample_index;
             }
         }
+
+        if (at_end) {
+            var channel_index: u32 = 0;
+            while (channel_index < result.channel_count) : (channel_index += 1) {
+                var sample_index: u32 = sample_count;
+                while (sample_index < (sample_count + 8)) : (sample_index += 1) {
+                    result.samples[channel_index].?[sample_index] = 0;
+                }
+            }
+        }
+
+        result.sample_count = sample_count;
     }
 
     return result;

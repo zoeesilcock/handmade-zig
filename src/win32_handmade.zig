@@ -1410,7 +1410,7 @@ pub export fn wWinMain(
             sound_output.safety_bytes = @intFromFloat(@as(f32, @floatFromInt(sound_output.secondary_buffer_size)) / game_update_hz / 2.0);
             var sound_output_info = SoundOutputInfo{ .output_buffer = undefined };
 
-            const max_possible_overrun = 2 * 4 * @sizeOf(u16);
+            const max_possible_overrun = 2 * 8 * @sizeOf(u16);
             const samples: ?[*]i16 = @ptrCast(@alignCast(win32.VirtualAlloc(
                 null,
                 sound_output.secondary_buffer_size + max_possible_overrun,
@@ -1640,9 +1640,10 @@ pub export fn wWinMain(
 
                             sound_output_info.output_buffer = shared.SoundOutputBuffer{
                                 .samples = samples.?,
-                                .sample_count = @divFloor(sound_output_info.bytes_to_write, sound_output.bytes_per_sample),
+                                .sample_count = shared.align8(@divFloor(sound_output_info.bytes_to_write, sound_output.bytes_per_sample)),
                                 .samples_per_second = sound_output.samples_per_second,
                             };
+                            sound_output_info.bytes_to_write = sound_output_info.output_buffer.sample_count * sound_output.bytes_per_sample;
 
                             game.getSoundSamples(&game_memory, &sound_output_info.output_buffer);
 
