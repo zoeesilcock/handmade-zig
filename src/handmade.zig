@@ -407,7 +407,6 @@ pub export fn updateAndRender(
     }
 
     // Handle input.
-    // TODO: This causes a crash in the audio processing code: audio.zig:178
     // {
     //     var music_volume = Vector2.zero();
     //     _ = music_volume.setY(math.safeRatio0(@as(f32, @floatFromInt(input.mouse_x)), @as(f32, @floatFromInt(buffer.width))));
