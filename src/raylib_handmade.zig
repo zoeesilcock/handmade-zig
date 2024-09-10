@@ -35,11 +35,11 @@ const ThreadInfo = struct {
 
 fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u8 {
     if (lp_parameter) |parameter| {
-        const thread_info: *ThreadInfo = @ptrCast(@alignCast(parameter));
+        const queue: *shared.PlatformWorkQueue = @ptrCast(@alignCast(parameter));
 
         while (true) {
-            if (doNextWorkQueueEntry(thread_info.queue)) {
-                @as(*std.Thread.Semaphore, @ptrCast(@alignCast(thread_info.queue.semaphore_handle.?))).wait();
+            if (doNextWorkQueueEntry(queue)) {
+                @as(*std.Thread.Semaphore, @ptrCast(@alignCast(queue.semaphore_handle.?))).wait();
             }
         }
     }
@@ -72,9 +72,7 @@ pub fn doNextWorkQueueEntry(queue: *shared.PlatformWorkQueue) bool {
     return should_wait;
 }
 
-fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
-    _ = thread;
-
+fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
     var result = shared.DebugReadFileResult{};
 
     if (rl.loadFileData(std.mem.span(file_name))) |data| {
@@ -85,16 +83,12 @@ fn debugReadEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8) 
     return result;
 }
 
-fn debugWriteEntireFile(thread: *shared.ThreadContext, file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
-    _ = thread;
-
+fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
     const data: []u8 = @as([*]u8, @ptrCast(@alignCast(memory)))[0..memory_size];
     return rl.saveFileData(std.mem.span(file_name), data);
 }
 
-fn debugFreeFileMemory(thread: *shared.ThreadContext, memory: *anyopaque) callconv(.C) void {
-    _ = thread;
-
+fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
     rl.memFree(memory);
 }
 
@@ -125,8 +119,16 @@ fn completeAllQueuedWork (queue: *shared.PlatformWorkQueue) callconv(.C) void {
     @atomicStore(u32, &queue.completion_count, 0, .release);
 }
 
+fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: u32) !void {
+    var semaphore = std.Thread.Semaphore{};
+    queue.semaphore_handle = @ptrCast(&semaphore);
+    var thread_index: u32 = 0;
+    while (thread_index < thread_count) : (thread_index += 1) {
+        _ = try std.Thread.spawn(std.Thread.SpawnConfig{}, threadProc, .{ queue });
+    }
+}
+
 pub fn main() anyerror!void {
-    var thread = shared.ThreadContext{};
     const platform = shared.Platform{
         .debugReadEntireFile = debugReadEntireFile,
         .debugWriteEntireFile = debugWriteEntireFile,
@@ -137,18 +139,10 @@ pub fn main() anyerror!void {
     };
 
     // Setup work queue.
-    const thread_count = 7;
-    var semaphore = std.Thread.Semaphore{};
-    var queue = shared.PlatformWorkQueue{ .semaphore_handle = @ptrCast(&semaphore) };
-    var thread_infos: [thread_count]ThreadInfo = [1]ThreadInfo{undefined} ** thread_count;
-    var thread_index: u32 = 0;
-    while (thread_index < thread_infos.len) : (thread_index += 1) {
-        thread_infos[thread_index] = ThreadInfo{
-            .queue = &queue,
-            .logical_thread_index = thread_index,
-        };
-        _ = try std.Thread.spawn(std.Thread.SpawnConfig{}, threadProc, .{ &thread_infos[thread_index] });
-    }
+    var high_priority_queue = shared.PlatformWorkQueue{};
+    try makeQueue(&high_priority_queue, 6);
+    var low_priority_queue = shared.PlatformWorkQueue{};
+    try makeQueue(&low_priority_queue, 2);
 
     // Allocate game memory.
     var game_memory: shared.Memory = shared.Memory{
@@ -157,7 +151,8 @@ pub fn main() anyerror!void {
         .permanent_storage = null,
         .transient_storage_size = shared.megabytes(256),
         .transient_storage = null,
-        .high_priority_queue = &queue,
+        .high_priority_queue = &high_priority_queue,
+        .low_priority_queue = &low_priority_queue,
         .counters = if (INTERNAL) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
     };
     const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
@@ -226,7 +221,7 @@ pub fn main() anyerror!void {
 
         rl.clearBackground(rl.Color.black);
 
-        game.updateAndRender(&thread, platform, &game_memory, new_input.*, &game_buffer);
+        game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
 
         displayBufferInWindow(&back_buffer, rl.getScreenWidth(), rl.getScreenHeight());
 
