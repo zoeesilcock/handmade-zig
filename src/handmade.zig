@@ -4,6 +4,7 @@ const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const render = @import("render.zig");
 const asset = @import("asset.zig");
+const asset_type_id = @import("asset_type_id.zig");
 const audio = @import("audio.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
@@ -103,8 +104,8 @@ const RenderGroupEntry = render.RenderGroupEntry;
 const RenderGroup = render.RenderGroup;
 const Assets = asset.Assets;
 const AssetTypeId = asset.AssetTypeId;
-const AssetTagId = asset.AssetTagId;
 const HeroBitmaps = asset.HeroBitmaps;
+const AssetTagId = asset_type_id.AssetTagId;
 
 pub export fn updateAndRender(
     platform: shared.Platform,

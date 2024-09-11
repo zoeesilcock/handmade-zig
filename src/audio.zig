@@ -183,14 +183,12 @@ pub const AudioState = struct {
                             @as(f32, @floatFromInt(chunks_remaining)) / sample_velocity_chunk;
                         const chunks_remaining_in_sound: i32 =
                             intrinsics.roundReal32ToInt32(float_chunks_remaining_in_sound);
-                        var input_samples_ended = false;
 
                         if (chunks_to_mix > chunks_remaining_in_sound) {
                             chunks_to_mix = chunks_remaining_in_sound;
-                            input_samples_ended = true;
                         }
 
-                        var volume_ended: [output_channel_count]bool = [1]bool{false} ** output_channel_count;
+                        var volume_ends_at: [output_channel_count]u32 = [1]u32{0} ** output_channel_count;
 
                         // Limit the output to the end of the current volume fade.
                         {
@@ -205,7 +203,7 @@ pub const AudioState = struct {
                                             @intFromFloat((delta_volume / volume_velocity_chunk.values[channel_index]) + 0.5);
                                         if (chunks_to_mix > volume_chunk_count) {
                                             chunks_to_mix = @intCast(volume_chunk_count);
-                                            volume_ended[channel_index] = true;
+                                            volume_ends_at[channel_index] = volume_chunk_count;
                                         }
                                     }
                                 }
@@ -278,7 +276,7 @@ pub const AudioState = struct {
                         {
                             var channel_index: u32 = 0;
                             while (channel_index < output_channel_count) : (channel_index += 1) {
-                                if (volume_ended[channel_index]) {
+                                if (chunks_to_mix == volume_ends_at[channel_index]) {
                                     playing_sound.current_volume.values[channel_index] =
                                         playing_sound.target_volume.values[channel_index];
                                     playing_sound.current_volume_velocity.values[channel_index] = 0;
@@ -290,13 +288,14 @@ pub const AudioState = struct {
                         std.debug.assert(total_chunks_to_mix >= chunks_to_mix);
                         total_chunks_to_mix -= chunks_to_mix;
 
-                        if (input_samples_ended) {
+                        if (chunks_to_mix == chunks_remaining_in_sound) {
                             if (info.next_id_to_play) |next_id| {
                                 if (next_id.isValid()) {
                                     playing_sound.id = next_id;
 
                                     // TODO: This assertion fires, but everything seems to work without it.
                                     // std.debug.assert(playing_sound.samples_played >= @as(f32, @floatFromInt(loaded_sound.sample_count)));
+
                                     playing_sound.samples_played -= @floatFromInt(loaded_sound.sample_count);
 
                                     if (playing_sound.samples_played < 0) {

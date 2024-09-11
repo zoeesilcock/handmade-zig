@@ -14,23 +14,14 @@ const Color = math.Color;
 const TransientState = shared.TransientState;
 const MemoryArena = shared.MemoryArena;
 const Platform = shared.Platform;
-const AssetTypeId = asset_type_id.AssetTypeId;
 
-const ASSET_TYPE_ID_COUNT = asset_type_id.COUNT;
+pub const AssetTypeId = asset_type_id.AssetTypeId;
+pub const AssetTagId = asset_type_id.AssetTagId;
+pub const ASSET_TYPE_ID_COUNT = asset_type_id.COUNT;
 
 const AssetType = struct {
     first_asset_index: u32,
     one_past_last_asset_index: u32,
-};
-
-pub const AssetTagId = enum(u32) {
-    Smoothness,
-    Flatness,
-    FacingDirection, // Angles in radians off of due right.
-
-    pub fn toInt(self: AssetTagId) u32 {
-        return @intFromEnum(self);
-    }
 };
 
 const AssetTag = struct {
@@ -118,8 +109,6 @@ pub const Assets = struct {
     tags: [*]AssetTag,
     tag_range: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{1000000} ** ASSET_TYPE_ID_COUNT,
 
-    debug_used_bitmap_count: u32,
-    debug_used_sound_count: u32,
     debug_used_asset_count: u32,
     debug_used_tag_count: u32,
     debug_asset_type: ?*AssetType,
@@ -234,8 +223,6 @@ pub const Assets = struct {
         result.assets = arena.pushArray(result.asset_count, Asset);
         result.slots = arena.pushArray(result.asset_count, AssetSlot);
 
-        result.debug_used_bitmap_count = 1;
-        result.debug_used_sound_count = 1;
         result.debug_used_asset_count = 1;
 
         result.beginAssetType(.Shadow);

@@ -1,3 +1,12 @@
+pub const AssetTagId = enum(u32) {
+    Smoothness,
+    Flatness,
+    FacingDirection, // Angles in radians off of due right.
+
+    pub fn toInt(self: AssetTagId) u32 {
+        return @intFromEnum(self);
+    }
+};
 pub const AssetTypeId = enum(u32) {
     None,
 

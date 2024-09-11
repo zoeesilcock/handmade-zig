@@ -88,7 +88,15 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const shared_module = b.addModule("shared", .{
+        .root_source_file = b.path("src/shared.zig"),
+    });
+    const file_formats_module = b.addModule("file_formats", .{
+        .root_source_file = b.path("src/file_formats.zig"),
+    });
     asset_builder_exe.root_module.addOptions("build_options", build_options);
+    asset_builder_exe.root_module.addImport("shared", shared_module);
+    asset_builder_exe.root_module.addImport("file_formats", file_formats_module);
     b.installArtifact(asset_builder_exe);
 
     const run_asset_builder = b.addRunArtifact(asset_builder_exe);

@@ -28,6 +28,11 @@ const BitmapId = asset.BitmapId;
 const SoundId = asset.SoundId;
 const PlayingSound = audio.PlayingSound;
 
+// Exposed types.
+pub const AssetTypeId = asset.AssetTypeId;
+pub const AssetTagId = asset.AssetTagId;
+pub const ASSET_TYPE_ID_COUNT = asset.ASSET_TYPE_ID_COUNT;
+
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
