@@ -4,6 +4,7 @@ const random = @import("random.zig");
 const render = @import("render.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
+const asset_type_id = @import("asset_type_id.zig");
 const std = @import("std");
 
 // Types.
@@ -13,38 +14,9 @@ const Color = math.Color;
 const TransientState = shared.TransientState;
 const MemoryArena = shared.MemoryArena;
 const Platform = shared.Platform;
+const AssetTypeId = asset_type_id.AssetTypeId;
 
-pub const AssetTypeId = enum(u32) {
-    None,
-
-    // Bitmaps.
-    Shadow,
-    Tree,
-    Sword,
-    Rock,
-
-    Grass,
-    Tuft,
-    Stone,
-
-    Head,
-    Cape,
-    Torso,
-
-    // Sounds.
-    Bloop,
-    Crack,
-    Drop,
-    Glide,
-    Music,
-    Puhp,
-
-    pub fn toInt(self: AssetTypeId) u32 {
-        return @intFromEnum(self);
-    }
-};
-
-const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeId).Enum.fields.len;
+const ASSET_TYPE_ID_COUNT = asset_type_id.COUNT;
 
 const AssetType = struct {
     first_asset_index: u32,
@@ -69,7 +41,10 @@ const AssetTag = struct {
 const Asset = struct {
     first_tag_index: u32,
     one_past_last_tag_index: u32,
-    slot_id: u32,
+    info: union {
+        bitmap: AssetBitmapInfo,
+        sound: AssetSoundInfo,
+    }
 };
 
 pub const AssetVector = struct {
@@ -133,16 +108,11 @@ pub const Assets = struct {
     transient_state: *TransientState,
     arena: MemoryArena,
 
-    bitmap_count: u32,
-    bitmaps: [*]AssetSlot,
-    bitmap_infos: [*]AssetBitmapInfo,
-
-    sound_count: u32,
-    sounds: [*]AssetSlot,
-    sound_infos: [*]AssetSoundInfo,
-
     asset_count: u32,
     assets: [*]Asset,
+    asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
+
+    slots: [*]AssetSlot,
 
     tag_count: u32,
     tags: [*]AssetTag,
@@ -155,21 +125,6 @@ pub const Assets = struct {
     debug_asset_type: ?*AssetType,
     debug_asset: ?*Asset,
 
-    asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
-
-    fn debugAddBitmapInfo(self: *Assets, file_name: [*:0]const u8, alignment_percentage: Vector2) BitmapId {
-        std.debug.assert(self.debug_used_bitmap_count < self.bitmap_count);
-
-        const bitmap_id = BitmapId{ .value = self.debug_used_bitmap_count };
-        self.debug_used_bitmap_count += 1;
-
-        var info = &self.bitmap_infos[bitmap_id.value];
-        info.alignment_percentage = alignment_percentage;
-        info.file_name = self.arena.pushString(file_name);
-
-        return bitmap_id;
-    }
-
     fn beginAssetType(self: *Assets, type_id: AssetTypeId) void {
         std.debug.assert(self.debug_asset_type == null);
 
@@ -178,59 +133,63 @@ pub const Assets = struct {
         self.debug_asset_type.?.one_past_last_asset_index = self.debug_asset_type.?.first_asset_index;
     }
 
-    fn addBitmapAsset(self: *Assets, file_name: [*:0]const u8, alignment_percentage: ?Vector2) void {
+    fn addBitmapAsset(self: *Assets, file_name: [*:0]const u8, alignment_percentage: ?Vector2) ?BitmapId {
         std.debug.assert(self.debug_asset_type != null);
+
+        var result: ?BitmapId = null;
 
         if (self.debug_asset_type) |asset_type| {
             std.debug.assert(asset_type.one_past_last_asset_index < self.asset_count);
 
-            const asset: *Asset = &self.assets[asset_type.one_past_last_asset_index];
+            result = BitmapId{ .value = asset_type.one_past_last_asset_index };
+            const asset: *Asset = &self.assets[result.?.value];
             self.debug_asset_type.?.one_past_last_asset_index += 1;
 
             asset.first_tag_index = self.debug_used_tag_count;
             asset.one_past_last_tag_index = self.debug_used_tag_count;
-            asset.slot_id = self.debugAddBitmapInfo(file_name, alignment_percentage orelse Vector2.splat(0.5)).value;
+
+            asset.info = .{
+                .bitmap = AssetBitmapInfo{
+                    .alignment_percentage = alignment_percentage orelse Vector2.splat(0.5),
+                    .file_name = self.arena.pushString(file_name),
+                },
+            };
 
             self.debug_asset = asset;
         }
+
+        return result;
     }
 
-    fn debugAddSoundInfo(self: *Assets, file_name: [*:0]const u8, first_sample_index: u32, sample_count: u32) SoundId {
-        std.debug.assert(self.debug_used_sound_count < self.sound_count);
-
-        const sound_id = SoundId{ .value = self.debug_used_sound_count };
-        self.debug_used_sound_count += 1;
-
-        var info = &self.sound_infos[sound_id.value];
-        info.file_name = self.arena.pushString(file_name);
-        info.first_sample_index = first_sample_index;
-        info.sample_count = sample_count;
-        info.next_id_to_play = null;
-
-        return sound_id;
+    fn addSoundAsset(self: *Assets, file_name: [*:0]const u8) ?SoundId {
+        return self.addSoundSectionAsset(file_name, 0, 0);
     }
 
-    fn addSoundAsset(self: *Assets, file_name: [*:0]const u8) void {
-        _ = self.addSoundSectionAsset(file_name, 0, 0);
-    }
-
-    fn addSoundSectionAsset(self: *Assets, file_name: [*:0]const u8, first_sample_index: u32, sample_count: u32) ?*Asset {
+    fn addSoundSectionAsset(self: *Assets, file_name: [*:0]const u8, first_sample_index: u32, sample_count: u32) ?SoundId {
         std.debug.assert(self.debug_asset_type != null);
 
-        var result: ?*Asset = null;
+        var result: ?SoundId = null;
 
         if (self.debug_asset_type) |asset_type| {
             std.debug.assert(asset_type.one_past_last_asset_index < self.asset_count);
 
-            const asset: *Asset = &self.assets[asset_type.one_past_last_asset_index];
+            result = SoundId { .value = asset_type.one_past_last_asset_index };
+            const asset: *Asset = &self.assets[result.?.value];
             self.debug_asset_type.?.one_past_last_asset_index += 1;
 
             asset.first_tag_index = self.debug_used_tag_count;
             asset.one_past_last_tag_index = self.debug_used_tag_count;
-            asset.slot_id = self.debugAddSoundInfo(file_name, first_sample_index, sample_count).value;
+
+            asset.info = .{
+                .sound = AssetSoundInfo{
+                    .file_name = self.arena.pushString(file_name),
+                    .first_sample_index = first_sample_index,
+                    .sample_count = sample_count,
+                    .next_id_to_play = null,
+                },
+            };
 
             self.debug_asset = asset;
-            result = asset;
         }
 
         return result;
@@ -267,54 +226,46 @@ pub const Assets = struct {
 
         arena.makeSubArena(&result.arena, memory_size, null);
 
-        // Load game assets.
-        result.bitmap_count = 256 * ASSET_TYPE_ID_COUNT;
-        result.bitmaps = arena.pushArray(result.bitmap_count, AssetSlot);
-        result.bitmap_infos = arena.pushArray(result.bitmap_count, AssetBitmapInfo);
-
-        result.sound_count = 256 * ASSET_TYPE_ID_COUNT;
-        result.sounds = arena.pushArray(result.sound_count, AssetSlot);
-        result.sound_infos = arena.pushArray(result.sound_count, AssetSoundInfo);
-
         result.tag_count = 1024 * ASSET_TYPE_ID_COUNT;
         result.tags = arena.pushArray(result.tag_count, AssetTag);
-
-        result.asset_count = result.bitmap_count + result.sound_count;
-        result.assets = arena.pushArray(result.asset_count, Asset);
         result.tag_range[AssetTagId.FacingDirection.toInt()] = shared.TAU32;
+
+        result.asset_count = 2 * 256 * ASSET_TYPE_ID_COUNT;
+        result.assets = arena.pushArray(result.asset_count, Asset);
+        result.slots = arena.pushArray(result.asset_count, AssetSlot);
 
         result.debug_used_bitmap_count = 1;
         result.debug_used_sound_count = 1;
         result.debug_used_asset_count = 1;
 
         result.beginAssetType(.Shadow);
-        result.addBitmapAsset("test/test_hero_shadow.bmp", Vector2.new(0.5, 0.15668203));
+        _ = result.addBitmapAsset("test/test_hero_shadow.bmp", Vector2.new(0.5, 0.15668203));
         result.endAssetType();
 
         result.beginAssetType(.Tree);
-        result.addBitmapAsset("test2/tree00.bmp", Vector2.new(0.49382716, 0.29565218));
+        _ = result.addBitmapAsset("test2/tree00.bmp", Vector2.new(0.49382716, 0.29565218));
         result.endAssetType();
 
         result.beginAssetType(.Sword);
-        result.addBitmapAsset("test2/rock03.bmp", Vector2.new(0.5, 0.65625));
+        _ = result.addBitmapAsset("test2/rock03.bmp", Vector2.new(0.5, 0.65625));
         result.endAssetType();
 
         result.beginAssetType(.Grass);
-        result.addBitmapAsset("test2/grass00.bmp", null);
-        result.addBitmapAsset("test2/grass01.bmp", null);
+        _ = result.addBitmapAsset("test2/grass00.bmp", null);
+        _ = result.addBitmapAsset("test2/grass01.bmp", null);
         result.endAssetType();
 
         result.beginAssetType(.Stone);
-        result.addBitmapAsset("test2/ground00.bmp", null);
-        result.addBitmapAsset("test2/ground01.bmp", null);
-        result.addBitmapAsset("test2/ground02.bmp", null);
-        result.addBitmapAsset("test2/ground03.bmp", null);
+        _ = result.addBitmapAsset("test2/ground00.bmp", null);
+        _ = result.addBitmapAsset("test2/ground01.bmp", null);
+        _ = result.addBitmapAsset("test2/ground02.bmp", null);
+        _ = result.addBitmapAsset("test2/ground03.bmp", null);
         result.endAssetType();
 
         result.beginAssetType(.Tuft);
-        result.addBitmapAsset("test2/tuft00.bmp", null);
-        result.addBitmapAsset("test2/tuft01.bmp", null);
-        result.addBitmapAsset("test2/tuft02.bmp", null);
+        _ = result.addBitmapAsset("test2/tuft00.bmp", null);
+        _ = result.addBitmapAsset("test2/tuft01.bmp", null);
+        _ = result.addBitmapAsset("test2/tuft02.bmp", null);
         result.endAssetType();
 
         const angle_right: f32 = 0;
@@ -324,62 +275,62 @@ pub const Assets = struct {
         const hero_align = Vector2.new(0.5, 0.156682029);
 
         result.beginAssetType(.Head);
-        result.addBitmapAsset("test/test_hero_right_head.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_right_head.bmp", hero_align);
         result.addTag(.FacingDirection, angle_right);
-        result.addBitmapAsset("test/test_hero_back_head.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_back_head.bmp", hero_align);
         result.addTag(.FacingDirection, angle_back);
-        result.addBitmapAsset("test/test_hero_left_head.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_left_head.bmp", hero_align);
         result.addTag(.FacingDirection, angle_left);
-        result.addBitmapAsset("test/test_hero_front_head.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_front_head.bmp", hero_align);
         result.addTag(.FacingDirection, angle_front);
         result.endAssetType();
 
         result.beginAssetType(.Cape);
-        result.addBitmapAsset("test/test_hero_right_cape.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_right_cape.bmp", hero_align);
         result.addTag(.FacingDirection, angle_right);
-        result.addBitmapAsset("test/test_hero_back_cape.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_back_cape.bmp", hero_align);
         result.addTag(.FacingDirection, angle_back);
-        result.addBitmapAsset("test/test_hero_left_cape.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_left_cape.bmp", hero_align);
         result.addTag(.FacingDirection, angle_left);
-        result.addBitmapAsset("test/test_hero_front_cape.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_front_cape.bmp", hero_align);
         result.addTag(.FacingDirection, angle_front);
         result.endAssetType();
 
         result.beginAssetType(.Torso);
-        result.addBitmapAsset("test/test_hero_right_torso.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_right_torso.bmp", hero_align);
         result.addTag(.FacingDirection, angle_right);
-        result.addBitmapAsset("test/test_hero_back_torso.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_back_torso.bmp", hero_align);
         result.addTag(.FacingDirection, angle_back);
-        result.addBitmapAsset("test/test_hero_left_torso.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_left_torso.bmp", hero_align);
         result.addTag(.FacingDirection, angle_left);
-        result.addBitmapAsset("test/test_hero_front_torso.bmp", hero_align);
+        _ = result.addBitmapAsset("test/test_hero_front_torso.bmp", hero_align);
         result.addTag(.FacingDirection, angle_front);
         result.endAssetType();
 
         result.beginAssetType(.Bloop);
-        result.addSoundAsset("test3/bloop_00.wav");
-        result.addSoundAsset("test3/bloop_01.wav");
-        result.addSoundAsset("test3/bloop_02.wav");
-        result.addSoundAsset("test3/bloop_03.wav");
+        _ = result.addSoundAsset("test3/bloop_00.wav");
+        _ = result.addSoundAsset("test3/bloop_01.wav");
+        _ = result.addSoundAsset("test3/bloop_02.wav");
+        _ = result.addSoundAsset("test3/bloop_03.wav");
         result.endAssetType();
 
         result.beginAssetType(.Crack);
-        result.addSoundAsset("test3/crack_00.wav");
+        _ = result.addSoundAsset("test3/crack_00.wav");
         result.endAssetType();
 
         result.beginAssetType(.Drop);
-        result.addSoundAsset("test3/drop_00.wav");
+        _ = result.addSoundAsset("test3/drop_00.wav");
         result.endAssetType();
 
         result.beginAssetType(.Glide);
-        result.addSoundAsset("test3/glide_00.wav");
+        _ = result.addSoundAsset("test3/glide_00.wav");
         result.endAssetType();
 
         result.beginAssetType(.Music);
         const one_music_chunk = 2 * 48000;
         const total_music_sample_count = 7468095;
         var first_sample_index: u32 = 0;
-        var last_music: ?*Asset = null;
+        var last_music: ?SoundId = null;
         while (first_sample_index < total_music_sample_count) : (first_sample_index += one_music_chunk) {
             var sample_count = total_music_sample_count - first_sample_index;
             if (sample_count > one_music_chunk) {
@@ -389,7 +340,7 @@ pub const Assets = struct {
             const this_music = result.addSoundSectionAsset("test3/music_test.wav", first_sample_index, sample_count);
             if (last_music) |last| {
                 if (this_music) |this| {
-                    result.sound_infos[last.slot_id].next_id_to_play = SoundId{ .value = this.slot_id };
+                    result.assets[last.value].info.sound.next_id_to_play = this;
                 }
             }
 
@@ -398,8 +349,8 @@ pub const Assets = struct {
         result.endAssetType();
 
         result.beginAssetType(.Glide);
-        result.addSoundAsset("test3/puhp_00.wav");
-        result.addSoundAsset("test3/puhp_01.wav");
+        _ = result.addSoundAsset("test3/puhp_00.wav");
+        _ = result.addSoundAsset("test3/puhp_01.wav");
         result.endAssetType();
 
         return result;
@@ -410,8 +361,7 @@ pub const Assets = struct {
         const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
 
         if (asset_type.first_asset_index != asset_type.one_past_last_asset_index) {
-            const asset = self.assets[asset_type.first_asset_index];
-            result = asset.slot_id;
+            result = asset_type.first_asset_index;
         }
 
         return result;
@@ -424,8 +374,7 @@ pub const Assets = struct {
         if (asset_type.first_asset_index != asset_type.one_past_last_asset_index) {
             const count: u32 = asset_type.one_past_last_asset_index - asset_type.first_asset_index;
             const choice = series.randomChoice(count);
-            const asset = self.assets[asset_type.first_asset_index + choice];
-            result = asset.slot_id;
+            result = asset_type.first_asset_index + choice;
         }
 
         return result;
@@ -462,7 +411,7 @@ pub const Assets = struct {
 
             if (best_diff > total_weighted_diff) {
                 best_diff = total_weighted_diff;
-                result = asset.slot_id;
+                result = asset_index;
             }
         }
 
@@ -470,8 +419,8 @@ pub const Assets = struct {
     }
 
     pub fn getBitamapInfo(self: *Assets, id: BitmapId) *AssetBitmapInfo {
-        std.debug.assert(id.value <= self.bitmap_count);
-        return &self.bitmap_infos[id.value];
+        std.debug.assert(id.value <= self.asset_count);
+        return &self.assets[id.value].info.bitmap;
     }
 
     pub fn prefetchBitmap(
@@ -488,7 +437,7 @@ pub const Assets = struct {
         if (opt_id) |id| {
             if (id.isValid() and @cmpxchgStrong(
                 AssetState,
-                &self.bitmaps[id.value].state,
+                &self.slots[id.value].state,
                 .Unloaded,
                 .Queued,
                 .seq_cst,
@@ -505,7 +454,7 @@ pub const Assets = struct {
 
                     shared.addQueueEntry(self.transient_state.low_priority_queue, doLoadBitmapWork, work);
                 } else {
-                    @atomicStore(AssetState, &self.bitmaps[id.value].state, .Unloaded, .release);
+                    @atomicStore(AssetState, &self.slots[id.value].state, .Unloaded, .release);
                 }
             }
         }
@@ -514,7 +463,7 @@ pub const Assets = struct {
     pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
         var result: ?*LoadedBitmap = null;
 
-        if (self.bitmaps[id.value].data.bitmap) |bitmap| {
+        if (self.slots[id.value].data.bitmap) |bitmap| {
             result = bitmap;
         }
 
@@ -557,8 +506,8 @@ pub const Assets = struct {
     }
 
     pub fn getSoundInfo(self: *Assets, id: SoundId) *AssetSoundInfo {
-        std.debug.assert(id.value <= self.sound_count);
-        return &self.sound_infos[id.value];
+        std.debug.assert(id.value <= self.asset_count);
+        return &self.assets[id.value].info.sound;
     }
 
     pub fn prefetchSound(
@@ -575,7 +524,7 @@ pub const Assets = struct {
         if (opt_id) |id| {
             if (id.isValid() and @cmpxchgStrong(
                     AssetState,
-                    &self.sounds[id.value].state,
+                    &self.slots[id.value].state,
                     .Unloaded,
                     .Queued,
                     .seq_cst,
@@ -592,7 +541,7 @@ pub const Assets = struct {
 
                     shared.addQueueEntry(self.transient_state.low_priority_queue, doLoadSoundWork, work);
                 } else {
-                    @atomicStore(AssetState, &self.sounds[id.value].state, .Unloaded, .release);
+                    @atomicStore(AssetState, &self.slots[id.value].state, .Unloaded, .release);
                 }
             }
         }
@@ -601,8 +550,8 @@ pub const Assets = struct {
     pub fn getSound(self: *Assets, id: SoundId) ?*LoadedSound {
         var result: ?*LoadedSound = null;
 
-        if (self.sounds[id.value].state == .Loaded) {
-            if (self.sounds[id.value].data.sound) |sound| {
+        if (self.slots[id.value].state == .Loaded) {
+            if (self.slots[id.value].data.sound) |sound| {
                 result = sound;
             }
         }
@@ -669,10 +618,10 @@ fn doLoadBitmapWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv
     _ = queue;
 
     const work: *LoadBitmapWork = @ptrCast(@alignCast(data));
-    const info = work.assets.bitmap_infos[work.id.value];
+    const info = work.assets.assets[work.id.value].info.bitmap;
 
     work.bitmap.* = debugLoadBMP(info.file_name, info.alignment_percentage);
-    work.assets.bitmaps[work.id.value] = AssetSlot{
+    work.assets.slots[work.id.value] = AssetSlot{
         .data = .{ .bitmap = work.bitmap },
         .state = work.final_state,
     };
@@ -699,10 +648,10 @@ fn doLoadSoundWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(
     _ = queue;
 
     const work: *LoadSoundWork = @ptrCast(@alignCast(data));
-    const info = work.assets.sound_infos[work.id.value];
+    const info = work.assets.assets[work.id.value].info.sound;
 
     work.sound.* = debugLoadWAV(info.file_name, info.first_sample_index, info.sample_count);
-    work.assets.sounds[work.id.value] = AssetSlot{
+    work.assets.slots[work.id.value] = AssetSlot{
         .data = .{ .sound = work.sound },
         .state = work.final_state,
     };

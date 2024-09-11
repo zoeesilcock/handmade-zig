@@ -80,4 +80,19 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the application");
     run_exe.setCwd(b.path("data/"));
     run_step.dependOn(&run_exe.step);
+
+    // Test asset builder.
+    const asset_builder_exe = b.addExecutable(.{
+        .name = "test-asset-builder",
+        .root_source_file = b.path("tools/test_asset_builder.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    asset_builder_exe.root_module.addOptions("build_options", build_options);
+    b.installArtifact(asset_builder_exe);
+
+    const run_asset_builder = b.addRunArtifact(asset_builder_exe);
+    const asset_builder_run_step = b.step("build-assets", "Run the test asset builder");
+    run_asset_builder.setCwd(b.path("data/"));
+    asset_builder_run_step.dependOn(&run_asset_builder.step);
 }
