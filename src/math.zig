@@ -683,3 +683,24 @@ pub inline fn safeRatio0(numerator: f32, divisor: f32) f32 {
 pub inline fn safeRatio1(numerator: f32, divisor: f32) f32 {
     return safeRatioN(numerator, divisor, 1);
 }
+
+pub inline fn sRGB255ToLinear1(color: Color) Color {
+    const inverse_255: f32 = 1.0 / 255.0;
+
+    return Color.new(
+        square(inverse_255 * color.r()),
+        square(inverse_255 * color.g()),
+        square(inverse_255 * color.b()),
+        inverse_255 * color.a(),
+    );
+}
+
+pub inline fn linear1ToSRGB255(color: Color) Color {
+    return Color.new(
+        255.0 * @sqrt(color.r()),
+        255.0 * @sqrt(color.g()),
+        255.0 * @sqrt(color.b()),
+        255.0 * color.a(),
+    );
+}
+

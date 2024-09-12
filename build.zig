@@ -10,18 +10,28 @@ pub fn build(b: *std.Build) void {
     const backend = b.option(Backend, "backend", "win32 or raylib") orelse .Win32;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const exe = b.addExecutable(.{
-        .name = "handmade-zig",
-        .root_source_file = if (backend == .Win32) b.path("src/win32_handmade.zig") else b.path("src/raylib_handmade.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
 
     // Build options.
     const build_options = b.addOptions();
     build_options.addOption(bool, "timing", b.option(bool, "timing", "print timing info to debug output") orelse false);
     build_options.addOption(bool, "internal", b.option(bool, "internal", "use this for internal builds") orelse true);
     build_options.addOption(Backend, "backend", backend);
+
+    // Modules.
+    const shared_module = b.addModule("shared", .{
+        .root_source_file = b.path("src/shared.zig"),
+    });
+    const file_formats_module = b.addModule("file_formats", .{
+        .root_source_file = b.path("src/file_formats.zig"),
+    });
+
+    // Main executable ------------------------------------------------------------------------------------------------
+    const exe = b.addExecutable(.{
+        .name = "handmade-zig",
+        .root_source_file = if (backend == .Win32) b.path("src/win32_handmade.zig") else b.path("src/raylib_handmade.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     exe.root_module.addOptions("build_options", build_options);
 
     if (backend == .Win32) {
@@ -51,7 +61,13 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
-    // Build the game library.
+    // Allow running main executable from build command.
+    const run_exe = b.addRunArtifact(exe);
+    const run_step = b.step("run", "Run the application");
+    run_exe.setCwd(b.path("data/"));
+    run_step.dependOn(&run_exe.step);
+
+    // Game library ---------------------------------------------------------------------------------------------------
     const lib_handmade = b.addSharedLibrary(.{
         .name = "handmade",
         .root_source_file = b.path("src/handmade.zig"),
@@ -60,6 +76,7 @@ pub fn build(b: *std.Build) void {
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
     lib_handmade.root_module.addOptions("build_options", build_options);
+    lib_handmade.root_module.addImport("file_formats", file_formats_module);
 
     // Emit generated assembly of the library.
     const lib_assembly_file = b.addInstallFile(lib_handmade.getEmittedAsm(), "bin/handmade-dll.asm");
@@ -75,30 +92,19 @@ pub fn build(b: *std.Build) void {
         b.getInstallStep().dependOn(&install_dll.step);
     }
 
-    // Allow running from build command.
-    const run_exe = b.addRunArtifact(exe);
-    const run_step = b.step("run", "Run the application");
-    run_exe.setCwd(b.path("data/"));
-    run_step.dependOn(&run_exe.step);
-
-    // Test asset builder.
+    // Test asset builder ---------------------------------------------------------------------------------------------
     const asset_builder_exe = b.addExecutable(.{
         .name = "test-asset-builder",
         .root_source_file = b.path("tools/test_asset_builder.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const shared_module = b.addModule("shared", .{
-        .root_source_file = b.path("src/shared.zig"),
-    });
-    const file_formats_module = b.addModule("file_formats", .{
-        .root_source_file = b.path("src/file_formats.zig"),
-    });
     asset_builder_exe.root_module.addOptions("build_options", build_options);
     asset_builder_exe.root_module.addImport("shared", shared_module);
     asset_builder_exe.root_module.addImport("file_formats", file_formats_module);
     b.installArtifact(asset_builder_exe);
 
+    // Allow running asset builder from build command.
     const run_asset_builder = b.addRunArtifact(asset_builder_exe);
     const asset_builder_run_step = b.step("build-assets", "Run the test asset builder");
     run_asset_builder.setCwd(b.path("data/"));

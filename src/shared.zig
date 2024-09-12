@@ -7,8 +7,8 @@ pub const MAX_CONTROLLER_COUNT: u8 = 5;
 pub const HIT_POINT_SUB_COUNT = 4;
 pub const BITMAP_BYTES_PER_PIXEL = 4;
 
-const intrinsics = @import("intrinsics.zig");
-const math = @import("math.zig");
+pub const intrinsics = @import("intrinsics.zig");
+pub const math = @import("math.zig");
 const world = @import("world.zig");
 const sim = @import("sim.zig");
 const render = @import("render.zig");

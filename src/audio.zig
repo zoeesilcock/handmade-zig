@@ -148,7 +148,7 @@ pub const AudioState = struct {
                         const volume = playing_sound.current_volume;
                         const volume_velocity = playing_sound.current_volume_velocity.scaledTo(seconds_per_sample);
                         const volume_velocity_chunk = volume_velocity.scaledTo(4.0);
-                        const sample_velocity: f32 = playing_sound.sample_velocity * 1.9;
+                        const sample_velocity: f32 = playing_sound.sample_velocity;
                         const sample_velocity_chunk: f32 = sample_velocity * 4.0;
 
                         // Channel 0.

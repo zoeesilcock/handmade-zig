@@ -1243,10 +1243,10 @@ pub fn drawRectangleSlowly(
                 _ = texel.setRGB(texel.rgb().clamp01());
 
                 var dest = Color.unpackColor(pixel[0]);
-                dest = sRGB255ToLinear1(dest);
+                dest = math.sRGB255ToLinear1(dest);
 
                 const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
-                const blended255 = linear1ToSRGB255(blended);
+                const blended255 = math.linear1ToSRGB255(blended);
 
                 pixel[0] = blended255.packColor1();
             }
@@ -1358,15 +1358,15 @@ pub fn drawBitmap(
         while (x < max_x) : (x += 1) {
             var texel = Color.unpackColor(source[0]);
 
-            texel = sRGB255ToLinear1(texel);
+            texel = math.sRGB255ToLinear1(texel);
             texel = texel.scaledTo(alpha);
 
             var d = Color.unpackColor(dest[0]);
 
-            d = sRGB255ToLinear1(d);
+            d = math.sRGB255ToLinear1(d);
 
             var result = d.scaledTo(1.0 - texel.a()).plus(texel);
-            result = linear1ToSRGB255(result);
+            result = math.linear1ToSRGB255(result);
 
             dest[0] = result.packColor1();
 
@@ -1463,36 +1463,16 @@ pub fn drawBitmapMatte(
     }
 }
 
-pub inline fn sRGB255ToLinear1(color: Color) Color {
-    const inverse_255: f32 = 1.0 / 255.0;
-
-    return Color.new(
-        math.square(inverse_255 * color.r()),
-        math.square(inverse_255 * color.g()),
-        math.square(inverse_255 * color.b()),
-        inverse_255 * color.a(),
-    );
-}
-
-pub inline fn linear1ToSRGB255(color: Color) Color {
-    return Color.new(
-        255.0 * @sqrt(color.r()),
-        255.0 * @sqrt(color.g()),
-        255.0 * @sqrt(color.b()),
-        255.0 * color.a(),
-    );
-}
-
 inline fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color {
     var texel_a = Color.unpackColor(texel_sample.a);
     var texel_b = Color.unpackColor(texel_sample.b);
     var texel_c = Color.unpackColor(texel_sample.c);
     var texel_d = Color.unpackColor(texel_sample.d);
 
-    texel_a = sRGB255ToLinear1(texel_a);
-    texel_b = sRGB255ToLinear1(texel_b);
-    texel_c = sRGB255ToLinear1(texel_c);
-    texel_d = sRGB255ToLinear1(texel_d);
+    texel_a = math.sRGB255ToLinear1(texel_a);
+    texel_b = math.sRGB255ToLinear1(texel_b);
+    texel_c = math.sRGB255ToLinear1(texel_c);
+    texel_d = math.sRGB255ToLinear1(texel_d);
 
     return texel_a.lerp(texel_b, x).lerp(
         texel_c.lerp(texel_d, x),
