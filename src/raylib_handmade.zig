@@ -39,7 +39,10 @@ fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u8 {
 
         while (true) {
             if (doNextWorkQueueEntry(queue)) {
-                @as(*std.Thread.Semaphore, @ptrCast(@alignCast(queue.semaphore_handle.?))).wait();
+                if (queue.semaphore_handle) |handle| {
+                    const semaphore = @as(*std.Thread.Semaphore, @ptrCast(@alignCast(handle)));
+                    semaphore.wait();
+                }
             }
         }
     }
@@ -120,7 +123,7 @@ fn completeAllQueuedWork (queue: *shared.PlatformWorkQueue) callconv(.C) void {
 }
 
 fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: u32) !void {
-    var semaphore = std.Thread.Semaphore{};
+    var semaphore = std.Thread.Semaphore{ .permits = thread_count };
     queue.semaphore_handle = @ptrCast(&semaphore);
     var thread_index: u32 = 0;
     while (thread_index < thread_count) : (thread_index += 1) {
