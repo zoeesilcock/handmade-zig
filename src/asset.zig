@@ -23,6 +23,7 @@ const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
+const PlatformFileHandle = shared.PlatformFileHandle;
 
 pub const AssetTypeId = asset_type_id.AssetTypeId;
 pub const AssetTagId = asset_type_id.AssetTagId;
@@ -62,6 +63,13 @@ const AssetSlot = struct {
     },
 };
 
+const AssetFile = struct {
+    handle: PlatformFileHandle,
+    header: HHAHeader,
+    asset_type_array: [*]HHAAssetType,
+    tag_base: u32,
+};
+
 pub const Assets = struct {
     transient_state: *TransientState,
     arena: MemoryArena,
@@ -76,12 +84,16 @@ pub const Assets = struct {
     tags: [*]HHATag,
     tag_range: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{1000000} ** ASSET_TYPE_ID_COUNT,
 
+    file_count: u32,
+    files: [*]AssetFile,
+
     hha_contents: [*]u8,
 
     pub fn allocate(
         arena: *MemoryArena,
         memory_size: shared.MemoryIndex,
         transient_state: *shared.TransientState,
+        platform: shared.Platform,
     ) *Assets {
         var result = arena.pushStruct(Assets);
 
@@ -89,6 +101,91 @@ pub const Assets = struct {
         result.arena = undefined;
 
         arena.makeSubArena(&result.arena, memory_size, null);
+
+
+        _ = platform;
+        // result.tag_count = 0;
+        // result.asset_count = 0;
+        //
+        // {
+        //     const file_group = platform.getAllFilesOfTypeBegin("hha");
+        //     defer.platform.getAllFilesOfTypeEnd(file_group);
+        //
+        //     result.file_count = file_group.file_count;
+        //     result.files = arena.pushArray(result.file_count, AssetFile);
+        //
+        //     var file_index: u32 = 0;
+        //     while (file_index < result.file_count) : (file_index += 1) {
+        //         const file: [*]AssetFile = result.files + file_index;
+        //         file.handle = platform.openFile(file_group, file_index);
+        //
+        //         platform.readDataFromFile(file.handle, 0, @sizeOf(HHAHeader), &file.header);
+        //
+        //         const asset_type_array_size: u32 = file.header.asset_type_count * @sizeOf(HHAAssetType);
+        //         file.asset_type_array = arena.pushSize(asset_type_array_size);
+        //         platform.readDataFromFile(
+        //             file.handle,
+        //             file.header.asset_types,
+        //             asset_type_array_size,
+        //             &file.asset_type_array,
+        //         );
+        //
+        //         if (file.header.magic_value != file_formats.HHA_MAGIC_VALUE) {
+        //             platform.fileError(file.handle, "HHA file has an invalid magic value.");
+        //         }
+        //
+        //         if (file.header.version > file_formats.HHA_VERSION) {
+        //             platform.fileError(file.handle, "HHA file is of a later version.");
+        //         }
+        //
+        //         if (platform.noFileErrors(file.handle)) {
+        //             result.tag_count += file.header.tag_count;
+        //             result.asset_count += file.header.asset_count;
+        //         } else {
+        //             std.debug.assert(true);
+        //         }
+        //     }
+        // }
+        //
+        // result.assets = arena.pushArray(result.asset_count, HHAAsset);
+        // result.slots = arena.pushArray(result.asset_count, AssetSlot);
+        // result.tags = arena.pushArray(result.tag_count, HHATag);
+        //
+        //
+        // var asset_count: u32 = 0;
+        // var tag_count: u32 = 0;
+        //
+        // var dest_type_id: u32 = 0;
+        // while (dest_type_id < ASSET_TYPE_ID_COUNT) : (dest_type_id += 1) {
+        //     var dest_type = result.asset_types + dest_type_id;
+        //
+        //     dest_type.first_asset_index = asset_count;
+        //     dest_type.one_past_last_asset_index = asset_count;
+        //
+        //     var file_index: u32 = 0;
+        //     while (file_index < result.file_count) : (file_index += 1) {
+        //         const file: [*]AssetFile = result.files + file_index;
+        //
+        //         if (platform.noFileErrors(file.handle)) {
+        //             var source_index: u32 = 0;
+        //             while (source_index < file.header.asset_type_count) : (source_index += 1) {
+        //                 const source_type: [*]HHAAsset = file.asset_type_array + source_index;
+        //                 if (source_type.type_id == dest_type_id) {
+        //                     platforrm.readDataFromFile();
+        //                     asset_count +=
+        //                 }
+        //             }
+        //         }
+        //     }
+        //
+        //     dest_type.one_past_last_asset_index = asset_count;
+        // }
+        //
+        // std.debug.assert(asset_count == result.asset_count);
+        // std.debug.assert(tag_count == result.tag_count);
+
+
+
 
         const read_result = shared.debugReadEntireFile("test.hha");
         if (read_result.content_size != 0) {

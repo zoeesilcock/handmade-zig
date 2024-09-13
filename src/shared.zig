@@ -91,6 +91,11 @@ pub inline fn align16(value: u32) u32 {
 }
 
 // Platform.
+pub const DebugReadFileResult = extern struct {
+    contents: *anyopaque = undefined,
+    content_size: u32 = 0,
+};
+
 pub const PlatformWorkQueueCallback = *const fn (queue: *PlatformWorkQueue, data: *anyopaque) callconv(.C) void;
 
 pub const WorkQueueEntry = extern struct {
@@ -108,6 +113,14 @@ pub const PlatformWorkQueue = extern struct {
 
     entries: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{}} ** 256,
 };
+
+pub const PlatformFileHandle = extern struct {
+    pub fn isValid(self: *PlatformFileHandle) bool {
+        _ = self;
+        return false;
+    }
+};
+
 const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
 const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;
 const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult;
@@ -123,17 +136,16 @@ pub const Platform = extern struct {
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
 };
 
+// Debug file reading.
 pub var debugFreeFileMemory: *const debugFreeFileMemoryType = undefined;
 pub var debugWriteEntireFile: *const debugWriteEntireFileType = undefined;
 pub var debugReadEntireFile: *const debugReadEntireFileType = undefined;
 
+// Work queues.
 pub var addQueueEntry: *const addQueueEntryType = undefined;
 pub var completeAllQueuedWork: *const completeAllQueuedWorkType = undefined;
 
-pub const DebugReadFileResult = extern struct {
-    contents: *anyopaque = undefined,
-    content_size: u32 = 0,
-};
+// Production file reading.
 
 pub var debug_global_memory: ?*Memory = null;
 pub inline fn beginTimedBlock(counter_id: DebugCycleCounters) void {

@@ -340,6 +340,7 @@ pub export fn updateAndRender(
             &transient_state.arena,
             shared.megabytes(64),
             transient_state,
+            platform
         );
 
         if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
