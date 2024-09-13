@@ -14,6 +14,10 @@ pub const HHAHeader = extern struct {
     assets: u64 = undefined,      // [asset_count]HHAAsset
 };
 
+fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {
+    return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, c << 16) | @as(u32, d << 24);
+}
+
 pub const HHATag = extern struct {
     id: u32,
     value: f32,
@@ -44,9 +48,21 @@ pub const HHABitmap = extern struct {
 pub const HHASound = extern struct {
     sample_count: u32,
     channel_count: u32,
-    next_id_to_play: u32,
+    next_id_to_play: SoundId,
 };
 
-fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {
-    return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, c << 16) | @as(u32, d << 24);
-}
+pub const BitmapId = extern struct {
+    value: u32,
+
+    pub fn isValid(self: *const BitmapId) bool {
+        return self.value != 0;
+    }
+};
+
+pub const SoundId = extern struct {
+    value: u32,
+
+    pub fn isValid(self: *const SoundId) bool {
+        return self.value != 0;
+    }
+};

@@ -2,12 +2,13 @@ const shared = @import("shared.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
+const file_formats = @import("file_formats");
 const std = @import("std");
 
 // Types.
 const State = shared.State;
 const MemoryArena = shared.MemoryArena;
-const SoundId = asset.SoundId;
+const SoundId = file_formats.SoundId;
 const SoundOutputBuffer = shared.SoundOutputBuffer;
 const Assets = asset.Assets;
 const Vector2 = math.Vector2;
@@ -289,20 +290,16 @@ pub const AudioState = struct {
                         total_chunks_to_mix -= chunks_to_mix;
 
                         if (chunks_to_mix == chunks_remaining_in_sound) {
-                            if (info.next_id_to_play) |next_id| {
-                                if (next_id.isValid()) {
-                                    playing_sound.id = next_id;
+                            if (info.next_id_to_play.isValid()) {
+                                playing_sound.id = info.next_id_to_play;
 
-                                    // TODO: This assertion fires, but everything seems to work without it.
-                                    // std.debug.assert(playing_sound.samples_played >= @as(f32, @floatFromInt(loaded_sound.sample_count)));
+                                // TODO: This assertion fires, but everything seems to work without it.
+                                // std.debug.assert(playing_sound.samples_played >= @as(f32, @floatFromInt(loaded_sound.sample_count)));
 
-                                    playing_sound.samples_played -= @floatFromInt(loaded_sound.sample_count);
+                                playing_sound.samples_played -= @floatFromInt(loaded_sound.sample_count);
 
-                                    if (playing_sound.samples_played < 0) {
-                                        playing_sound.samples_played = 0;
-                                    }
-                                } else {
-                                    sound_finished = true;
+                                if (playing_sound.samples_played < 0) {
+                                    playing_sound.samples_played = 0;
                                 }
                             } else {
                                 sound_finished = true;

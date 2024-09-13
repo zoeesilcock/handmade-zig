@@ -21,6 +21,8 @@ const HHAAssetType = file_formats.HHAAssetType;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
+const BitmapId = file_formats.BitmapId;
+const SoundId = file_formats.SoundId;
 
 pub const AssetTypeId = asset_type_id.AssetTypeId;
 pub const AssetTagId = asset_type_id.AssetTagId;
@@ -29,20 +31,6 @@ pub const ASSET_TYPE_ID_COUNT = asset_type_id.COUNT;
 const AssetType = struct {
     first_asset_index: u32,
     one_past_last_asset_index: u32,
-};
-
-const AssetTag = struct {
-    id: u32,
-    value: f32,
-};
-
-const Asset = struct {
-    first_tag_index: u32,
-    one_past_last_tag_index: u32,
-    info: union {
-        bitmap: AssetBitmapInfo,
-        sound: AssetSoundInfo,
-    }
 };
 
 pub const AssetVector = struct {
@@ -74,47 +62,21 @@ const AssetSlot = struct {
     },
 };
 
-pub const BitmapId = struct {
-    value: u32,
-
-    pub fn isValid(self: *const BitmapId) bool {
-        return self.value != 0;
-    }
-};
-
-const AssetBitmapInfo = struct {
-    file_name: [*:0]const u8 = undefined,
-    alignment_percentage: Vector2 = Vector2.zero(),
-};
-
-pub const SoundId = struct {
-    value: u32,
-
-    pub fn isValid(self: *const SoundId) bool {
-        return self.value != 0;
-    }
-};
-
-const AssetSoundInfo = struct {
-    file_name: [*:0]const u8,
-    first_sample_index: u32,
-    sample_count: u32,
-    next_id_to_play: ?SoundId,
-};
-
 pub const Assets = struct {
     transient_state: *TransientState,
     arena: MemoryArena,
 
     asset_count: u32,
-    assets: [*]Asset,
+    assets: [*]HHAAsset,
     asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
 
     slots: [*]AssetSlot,
 
     tag_count: u32,
-    tags: [*]AssetTag,
+    tags: [*]HHATag,
     tag_range: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{1000000} ** ASSET_TYPE_ID_COUNT,
+
+    hha_contents: [*]u8,
 
     pub fn allocate(
         arena: *MemoryArena,
@@ -135,23 +97,32 @@ pub const Assets = struct {
             std.debug.assert(header.magic_value == file_formats.HHA_MAGIC_VALUE);
             std.debug.assert(header.version == file_formats.HHA_VERSION);
 
-            result.tag_count = header.asset_count;
-            result.tags = arena.pushArray(result.tag_count, AssetTag);
+            result.tag_count = header.tag_count;
+            result.tags = @ptrFromInt(@intFromPtr(read_result.contents) + header.tags);
             result.tag_range[AssetTagId.FacingDirection.toInt()] = shared.TAU32;
 
             result.asset_count = header.asset_count;
-            result.assets = arena.pushArray(result.asset_count, Asset);
+            result.assets = @ptrFromInt(@intFromPtr(read_result.contents) + header.assets);
             result.slots = arena.pushArray(result.asset_count, AssetSlot);
 
-            const hha_tags: [*]HHATag = @ptrFromInt(@intFromPtr(read_result.contents) + header.tags);
-            var tag_index: u32 = 0;
-            while (tag_index < result.tag_count) : (tag_index += 1) {
-                const source: [*]HHATag = hha_tags + tag_index;
-                var dest = result.tags + tag_index;
+            const hha_asset_types: [*]HHAAssetType = @ptrFromInt(@intFromPtr(read_result.contents) + header.asset_types);
 
-                dest[0].id = source[0].id;
-                dest[0].value = source[0].value;
+            var asset_type_index: u32 = 0;
+            while (asset_type_index < header.asset_type_count) : (asset_type_index += 1) {
+                const source: [*]HHAAssetType = hha_asset_types + asset_type_index;
+
+                if (source[0].type_id < ASSET_TYPE_ID_COUNT) {
+                    var dest = &result.asset_types[source[0].type_id];
+
+                    std.debug.assert(dest.first_asset_index == 0);
+                    std.debug.assert(dest.one_past_last_asset_index == 0);
+
+                    dest.first_asset_index = source[0].first_asset_index;
+                    dest.one_past_last_asset_index = source[0].one_past_last_asset_index;
+                }
             }
+
+            result.hha_contents = @ptrCast(@alignCast(read_result.contents));
         }
 
         return result;
@@ -198,7 +169,7 @@ pub const Assets = struct {
             var total_weighted_diff: f32 = 0;
             var tag_index: u32 = asset.first_tag_index;
             while (tag_index < asset.one_past_last_tag_index) : (tag_index += 1) {
-                const tag: *AssetTag = &self.tags[tag_index];
+                const tag: *HHATag = &self.tags[tag_index];
 
                 const a: f32 = match_vector.e[tag.id];
                 const b: f32 = tag.value;
@@ -219,7 +190,7 @@ pub const Assets = struct {
         return result;
     }
 
-    pub fn getBitamapInfo(self: *Assets, id: BitmapId) *AssetBitmapInfo {
+    pub fn getBitamapInfo(self: *Assets, id: BitmapId) *HHABitmap {
         std.debug.assert(id.value <= self.asset_count);
         return &self.assets[id.value].info.bitmap;
     }
@@ -306,7 +277,7 @@ pub const Assets = struct {
         return result;
     }
 
-    pub fn getSoundInfo(self: *Assets, id: SoundId) *AssetSoundInfo {
+    pub fn getSoundInfo(self: *Assets, id: SoundId) *HHASound {
         std.debug.assert(id.value <= self.asset_count);
         return &self.assets[id.value].info.sound;
     }
@@ -419,9 +390,18 @@ fn doLoadBitmapWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv
     _ = queue;
 
     const work: *LoadBitmapWork = @ptrCast(@alignCast(data));
-    const info = work.assets.assets[work.id.value].info.bitmap;
+    const hha_asset = &work.assets.assets[work.id.value];
+    const info = hha_asset.info.bitmap;
 
-    work.bitmap.* = debugLoadBMP(info.file_name, info.alignment_percentage);
+    work.bitmap.* = LoadedBitmap{
+        .alignment_percentage = Vector2.new(info.alignment_percentage[0], info.alignment_percentage[1]),
+        .width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1])),
+        .width = @intCast(info.dim[0]),
+        .height = @intCast(info.dim[1]),
+        .pitch = @intCast(4 * info.dim[0]),
+        .memory = @ptrCast(work.assets.hha_contents + hha_asset.data_offset),
+    };
+
     work.assets.slots[work.id.value] = AssetSlot{
         .data = .{ .bitmap = work.bitmap },
         .state = work.final_state,
@@ -449,32 +429,29 @@ fn doLoadSoundWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(
     _ = queue;
 
     const work: *LoadSoundWork = @ptrCast(@alignCast(data));
-    const info = work.assets.assets[work.id.value].info.sound;
+    const hha_asset = &work.assets.assets[work.id.value];
+    const info = hha_asset.info.sound;
 
-    work.sound.* = debugLoadWAV(info.file_name, info.first_sample_index, info.sample_count);
+
+    work.sound.* = LoadedSound{
+        .channel_count = info.channel_count,
+        .sample_count = info.sample_count,
+        .samples = undefined
+    };
+
+    std.debug.assert(work.sound.channel_count < work.sound.samples.len);
+
+    var sample_data_offset: u64 = hha_asset.data_offset;
+    var channel_index: u32 = 0;
+    while (channel_index < work.sound.channel_count) : (channel_index += 1) {
+        work.sound.samples[channel_index] = @ptrCast(@alignCast(work.assets.hha_contents + sample_data_offset));
+        sample_data_offset += work.sound.sample_count * @sizeOf(i16);
+    }
+
     work.assets.slots[work.id.value] = AssetSlot{
         .data = .{ .sound = work.sound },
         .state = work.final_state,
     };
 
     handmade.endTaskWithMemory(work.task);
-}
-
-fn debugLoadBMP(file_name: [*:0]const u8, alignment_percentage: ?Vector2) LoadedBitmap {
-    _ = file_name;
-    _ = alignment_percentage;
-
-    std.debug.assert(true);
-
-    return LoadedBitmap{ .memory = undefined };
-}
-
-pub fn debugLoadWAV(file_name: [*:0]const u8, section_first_sample_index: u32, section_sample_count: u32) LoadedSound {
-    _ = file_name;
-    _ = section_first_sample_index;
-    _ = section_sample_count;
-
-    std.debug.assert(true);
-
-    return LoadedSound{ .sample_count = 0, .channel_count = 0, .samples = undefined };
 }

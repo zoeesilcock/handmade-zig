@@ -20,6 +20,7 @@ const shared = @import("shared.zig");
 const math = @import("math.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
+const file_formats = @import("file_formats");
 const std = @import("std");
 
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
@@ -341,7 +342,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushBitmapId(
         self: *RenderGroup,
-        opt_id: ?asset.BitmapId,
+        opt_id: ?file_formats.BitmapId,
         height: f32,
         offset: Vector3,
         color: Color,

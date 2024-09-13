@@ -13,6 +13,8 @@ const HHAAssetType = file_formats.HHAAssetType;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
+const BitmapId = file_formats.BitmapId;
+const SoundId = file_formats.SoundId;
 const Color = math.Color;
 
 const ASSET_TYPE_ID_COUNT = shared.ASSET_TYPE_ID_COUNT;
@@ -346,25 +348,9 @@ const BitmapAsset = struct {
     alignment_percentage: [2]f32 = undefined,
 };
 
-pub const BitmapId = struct {
-    value: u32,
-
-    pub fn isValid(self: *const BitmapId) bool {
-        return self.value != 0;
-    }
-};
-
 const AssetBitmapInfo = struct {
     file_name: [*:0]const u8 = undefined,
     alignment_percentage: [2]f32 = undefined,
-};
-
-pub const SoundId = struct {
-    value: u32,
-
-    pub fn isValid(self: *const SoundId) bool {
-        return self.value != 0;
-    }
 };
 
 const AssetSoundInfo = struct {
@@ -457,7 +443,7 @@ pub const Assets = struct {
                 .sound = HHASound{
                     .channel_count = 0,
                     .sample_count = sample_count,
-                    .next_id_to_play = 0,
+                    .next_id_to_play = SoundId{ .value = 0 },
                 },
             };
 
@@ -474,7 +460,7 @@ pub const Assets = struct {
     fn addTag(self: *Assets, tag_id: AssetTagId, value: f32) void {
         std.debug.assert(self.asset_index != 0);
 
-        var hha = self.assets[self.asset_index];
+        var hha = &self.assets[self.asset_index];
         hha.one_past_last_tag_index += 1;
         const tag: *HHATag = &self.tags[self.tag_count];
         self.tag_count += 1;
@@ -607,7 +593,7 @@ pub fn main() anyerror!void {
         const this_music = result.addSoundSectionAsset("test3/music_test.wav", first_sample_index, sample_count);
         if (last_music) |last| {
             if (this_music) |this| {
-                result.assets[last.value].info.sound.next_id_to_play = this.value;
+                result.assets[last.value].info.sound.next_id_to_play = this;
             }
         }
 
@@ -651,14 +637,18 @@ pub fn main() anyerror!void {
         header.tags = @sizeOf(HHAHeader);
         header.asset_types = header.tags + tag_array_size;
         header.assets = header.asset_types + asset_type_array_size;
+        header.assets = (header.assets + @alignOf(HHAAsset) - 1) & ~@as(u32, @alignOf(HHAAsset) - 1);
 
         var bytes_written: usize = 0;
         bytes_written += try out.write(std.mem.asBytes(&header));
         // std.debug.print("Bytes written after header: {d}\n", .{ bytes_written });
-        bytes_written += try out.write(std.mem.asBytes(&result.tags));
+        // std.debug.print("Tags: Expected: {d}, actual: {d}\n", .{header.tags, bytes_written});
+        bytes_written += try out.write(std.mem.asBytes(&result.tags)[0..tag_array_size]);
         // std.debug.print("Bytes written after tags: {d}\n", .{ bytes_written });
+        // std.debug.print("Asset types: Expected: {d}, actual: {d}\n", .{header.asset_types, bytes_written});
         bytes_written += try out.write(std.mem.asBytes(&result.asset_types));
         // std.debug.print("Bytes written after asset types: {d}\n", .{ bytes_written });
+        // std.debug.print("Assets: Expected: {d}, actual: {d}\n", .{header.assets, bytes_written});
 
         try out.seekBy(asset_array_size);
         var asset_index: u32 = 1;
@@ -702,7 +692,7 @@ pub fn main() anyerror!void {
             }
         }
         try out.seekTo(header.assets);
-        bytes_written += try out.write(std.mem.asBytes(&result.assets));
+        bytes_written += try out.write(std.mem.asBytes(&result.assets)[0..asset_array_size]);
 
         if (gpa.detectLeaks()) {
             std.log.debug("Memory leaks detected.\n", .{});

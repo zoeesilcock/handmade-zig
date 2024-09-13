@@ -15,6 +15,7 @@ const render = @import("render.zig");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const random = @import("random.zig");
+const file_formats = @import("file_formats");
 const std = @import("std");
 
 // Types.
@@ -24,8 +25,8 @@ const Color = math.Color;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedSound = asset.LoadedSound;
 const Assets = asset.Assets;
-const BitmapId = asset.BitmapId;
-const SoundId = asset.SoundId;
+const BitmapId = file_formats.BitmapId;
+const SoundId = file_formats.SoundId;
 const PlayingSound = audio.PlayingSound;
 
 // Exposed types.
