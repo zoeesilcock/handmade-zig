@@ -64,7 +64,7 @@ const AssetSlot = struct {
 };
 
 const AssetFile = struct {
-    handle: PlatformFileHandle,
+    handle: *PlatformFileHandle,
     header: HHAHeader,
     asset_type_array: [*]HHAAssetType,
     tag_base: u32,
@@ -93,7 +93,6 @@ pub const Assets = struct {
         arena: *MemoryArena,
         memory_size: shared.MemoryIndex,
         transient_state: *shared.TransientState,
-        platform: shared.Platform,
     ) *Assets {
         var result = arena.pushStruct(Assets);
 
@@ -103,13 +102,15 @@ pub const Assets = struct {
         arena.makeSubArena(&result.arena, memory_size, null);
 
 
-        _ = platform;
+
+
         // result.tag_count = 0;
         // result.asset_count = 0;
         //
+        // // Load asset headers.
         // {
-        //     const file_group = platform.getAllFilesOfTypeBegin("hha");
-        //     defer.platform.getAllFilesOfTypeEnd(file_group);
+        //     const file_group = shared.platform.getAllFilesOfTypeBegin("hha");
+        //     defer shared.platform.getAllFilesOfTypeEnd(file_group);
         //
         //     result.file_count = file_group.file_count;
         //     result.files = arena.pushArray(result.file_count, AssetFile);
@@ -117,30 +118,33 @@ pub const Assets = struct {
         //     var file_index: u32 = 0;
         //     while (file_index < result.file_count) : (file_index += 1) {
         //         const file: [*]AssetFile = result.files + file_index;
-        //         file.handle = platform.openFile(file_group, file_index);
         //
-        //         platform.readDataFromFile(file.handle, 0, @sizeOf(HHAHeader), &file.header);
+        //         var file_handle = shared.platform.openFile(file_group, file_index);
+        //         file[0].tag_base = result.tag_count;
+        //         file[0].handle = &file_handle;
         //
-        //         const asset_type_array_size: u32 = file.header.asset_type_count * @sizeOf(HHAAssetType);
-        //         file.asset_type_array = arena.pushSize(asset_type_array_size);
-        //         platform.readDataFromFile(
-        //             file.handle,
-        //             file.header.asset_types,
+        //         shared.platform.readDataFromFile(file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
+        //
+        //         const asset_type_array_size: u32 = file[0].header.asset_type_count * @sizeOf(HHAAssetType);
+        //         file[0].asset_type_array = @ptrCast(@alignCast(arena.pushSize(asset_type_array_size, null)));
+        //         shared.platform.readDataFromFile(
+        //             file[0].handle,
+        //             file[0].header.asset_types,
         //             asset_type_array_size,
-        //             &file.asset_type_array,
+        //             file[0].asset_type_array,
         //         );
         //
-        //         if (file.header.magic_value != file_formats.HHA_MAGIC_VALUE) {
-        //             platform.fileError(file.handle, "HHA file has an invalid magic value.");
+        //         if (file[0].header.magic_value != file_formats.HHA_MAGIC_VALUE) {
+        //             shared.platform.fileError(file[0].handle, "HHA file has an invalid magic value.");
         //         }
         //
-        //         if (file.header.version > file_formats.HHA_VERSION) {
-        //             platform.fileError(file.handle, "HHA file is of a later version.");
+        //         if (file[0].header.version > file_formats.HHA_VERSION) {
+        //             shared.platform.fileError(file[0].handle, "HHA file is of a later version.");
         //         }
         //
-        //         if (platform.noFileErrors(file.handle)) {
-        //             result.tag_count += file.header.tag_count;
-        //             result.asset_count += file.header.asset_count;
+        //         if (shared.platform.noFileErrors(file[0].handle)) {
+        //             result.tag_count += file[0].header.tag_count;
+        //             result.asset_count += file[0].header.asset_count;
         //         } else {
         //             std.debug.assert(true);
         //         }
@@ -151,13 +155,30 @@ pub const Assets = struct {
         // result.slots = arena.pushArray(result.asset_count, AssetSlot);
         // result.tags = arena.pushArray(result.tag_count, HHATag);
         //
+        // // Load tags.
+        // {
+        //     var file_index: u32 = 0;
+        //     while (file_index < result.file_count) : (file_index += 1) {
+        //         const file: [*]AssetFile = result.files + file_index;
+        //         if (shared.platform.noFileErrors(file[0].handle)) {
+        //             const tag_array_size = @sizeOf(HHATag) * file[0].header.tag_count;
+        //             shared.platform.readDataFromFile(
+        //                 file[0].handle,
+        //                 file[0].header.tags,
+        //                 tag_array_size,
+        //                 result.tags + file[0].tag_base,
+        //             );
+        //         }
+        //     }
+        // }
+        //
         //
         // var asset_count: u32 = 0;
-        // var tag_count: u32 = 0;
         //
+        // // Load assets.
         // var dest_type_id: u32 = 0;
         // while (dest_type_id < ASSET_TYPE_ID_COUNT) : (dest_type_id += 1) {
-        //     var dest_type = result.asset_types + dest_type_id;
+        //     var dest_type = result.asset_types[dest_type_id];
         //
         //     dest_type.first_asset_index = asset_count;
         //     dest_type.one_past_last_asset_index = asset_count;
@@ -166,13 +187,30 @@ pub const Assets = struct {
         //     while (file_index < result.file_count) : (file_index += 1) {
         //         const file: [*]AssetFile = result.files + file_index;
         //
-        //         if (platform.noFileErrors(file.handle)) {
+        //         if (shared.platform.noFileErrors(file[0].handle)) {
         //             var source_index: u32 = 0;
-        //             while (source_index < file.header.asset_type_count) : (source_index += 1) {
-        //                 const source_type: [*]HHAAsset = file.asset_type_array + source_index;
-        //                 if (source_type.type_id == dest_type_id) {
-        //                     platforrm.readDataFromFile();
-        //                     asset_count +=
+        //             while (source_index < file[0].header.asset_type_count) : (source_index += 1) {
+        //                 const source_type: [*]HHAAssetType = file[0].asset_type_array + source_index;
+        //                 if (source_type[0].type_id == dest_type_id) {
+        //                     const asset_count_for_type =
+        //                         source_type[0].one_past_last_asset_index - source_type[0].first_asset_index;
+        //                     shared.platform.readDataFromFile(
+        //                         file[0].handle,
+        //                         file[0].header.assets + source_type[0].first_asset_index * @sizeOf(HHAAsset),
+        //                         asset_count_for_type * @sizeOf(HHAAsset),
+        //                         result.assets + asset_count
+        //                     );
+        //
+        //                     // Rebase tag indexes.
+        //                     var asset_index: u32 = asset_count;
+        //                     while (asset_index < (asset_count + asset_count_for_type)) : (asset_index += 1) {
+        //                         const asset = result.assets + asset_index;
+        //                         asset[0].first_tag_index += file[0].tag_base;
+        //                         asset[0].one_past_last_tag_index += file[0].tag_base;
+        //                     }
+        //
+        //                     asset_count += asset_count_for_type;
+        //                     std.debug.assert(asset_count < result.asset_count);
         //                 }
         //             }
         //         }
@@ -182,12 +220,11 @@ pub const Assets = struct {
         // }
         //
         // std.debug.assert(asset_count == result.asset_count);
-        // std.debug.assert(tag_count == result.tag_count);
 
 
 
 
-        const read_result = shared.debugReadEntireFile("test.hha");
+        const read_result = shared.platform.debugReadEntireFile("test.hha");
         if (read_result.content_size != 0) {
             const header: *HHAHeader = @ptrCast(@alignCast(read_result.contents));
 
@@ -313,15 +350,33 @@ pub const Assets = struct {
                 .seq_cst,
             ) == null) {
                 if (handmade.beginTaskWithMemory(self.transient_state)) |task| {
-                    var work: *LoadBitmapWork = task.arena.pushStruct(LoadBitmapWork);
 
-                    work.assets = self;
-                    work.id = id;
+                    const hha_asset = &self.assets[id.value];
+                    const info = hha_asset.info.bitmap;
+
+                    var bitmap: *LoadedBitmap = self.arena.pushStruct(LoadedBitmap);
+
+                    bitmap.alignment_percentage = Vector2.new(info.alignment_percentage[0], info.alignment_percentage[1]);
+                    bitmap.width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1]));
+                    bitmap.width = @intCast(info.dim[0]);
+                    bitmap.height = @intCast(info.dim[1]);
+                    bitmap.pitch = @intCast(4 * info.dim[0]);
+
+                    const memory_size: usize = @intCast(bitmap.pitch * bitmap.height);
+                    bitmap.memory = @ptrCast(@alignCast(self.arena.pushSize(memory_size, null)));
+
+                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
                     work.task = task;
-                    work.bitmap = self.arena.pushStruct(LoadedBitmap);
+                    work.slot = &self.slots[id.value];
+                    // work.handle =
+                    work.offset = hha_asset.data_offset;
+                    work.size = memory_size;
                     work.final_state = .Loaded;
+                    work.slot.data.bitmap = bitmap;
 
-                    shared.addQueueEntry(self.transient_state.low_priority_queue, doLoadBitmapWork, work);
+                    bitmap.memory = @ptrCast(@alignCast(self.hha_contents + hha_asset.data_offset));
+
+                    shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
                     @atomicStore(AssetState, &self.slots[id.value].state, .Unloaded, .release);
                 }
@@ -332,8 +387,12 @@ pub const Assets = struct {
     pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
         var result: ?*LoadedBitmap = null;
 
-        if (self.slots[id.value].data.bitmap) |bitmap| {
-            result = bitmap;
+        const slot = self.slots[id.value];
+
+        if (slot.data.bitmap) |bitmap| {
+            if (slot.state == .Loaded) {
+                result = bitmap;
+            }
         }
 
         return result;
@@ -408,7 +467,7 @@ pub const Assets = struct {
                     work.sound = self.arena.pushStruct(LoadedSound);
                     work.final_state = .Loaded;
 
-                    shared.addQueueEntry(self.transient_state.low_priority_queue, doLoadSoundWork, work);
+                    shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadSoundWork, work);
                 } else {
                     @atomicStore(AssetState, &self.slots[id.value].state, .Unloaded, .release);
                 }
@@ -418,11 +477,17 @@ pub const Assets = struct {
 
     pub fn getSound(self: *Assets, id: SoundId) ?*LoadedSound {
         var result: ?*LoadedSound = null;
+        const slot = self.slots[id.value];
 
-        if (self.slots[id.value].state == .Loaded) {
-            if (self.slots[id.value].data.sound) |sound| {
-                result = sound;
-            }
+        switch (slot.data) {
+            AssetSlotType.sound => {
+                if (slot.data.sound) |sound| {
+                    if (slot.state == .Loaded) {
+                        result = sound;
+                    }
+                }
+            },
+            AssetSlotType.bitmap => {},
         }
 
         return result;
@@ -474,35 +539,29 @@ pub const LoadedBitmap = extern struct {
     memory: ?[*]void,
 };
 
-const LoadBitmapWork = struct {
-    assets: *Assets,
-    id: BitmapId,
+const LoadAssetWork = struct {
     task: *shared.TaskWithMemory,
-    bitmap: *LoadedBitmap,
+    slot: *AssetSlot,
+
+    handle: *PlatformFileHandle = undefined,
+    offset: u64,
+    size: u64,
+    destination: *anyopaque,
 
     final_state: AssetState,
 };
 
-fn doLoadBitmapWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
     _ = queue;
 
-    const work: *LoadBitmapWork = @ptrCast(@alignCast(data));
-    const hha_asset = &work.assets.assets[work.id.value];
-    const info = hha_asset.info.bitmap;
+    const work: *LoadAssetWork = @ptrCast(@alignCast(data));
 
-    work.bitmap.* = LoadedBitmap{
-        .alignment_percentage = Vector2.new(info.alignment_percentage[0], info.alignment_percentage[1]),
-        .width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1])),
-        .width = @intCast(info.dim[0]),
-        .height = @intCast(info.dim[1]),
-        .pitch = @intCast(4 * info.dim[0]),
-        .memory = @ptrCast(work.assets.hha_contents + hha_asset.data_offset),
-    };
+    // shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);
 
-    work.assets.slots[work.id.value] = AssetSlot{
-        .data = .{ .bitmap = work.bitmap },
-        .state = work.final_state,
-    };
+    // if (shared.platform.noFileErrors(work.handle))
+    {
+        work.slot.state = work.final_state;
+    }
 
     handmade.endTaskWithMemory(work.task);
 }
@@ -528,7 +587,6 @@ fn doLoadSoundWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(
     const work: *LoadSoundWork = @ptrCast(@alignCast(data));
     const hha_asset = &work.assets.assets[work.id.value];
     const info = hha_asset.info.sound;
-
 
     work.sound.* = LoadedSound{
         .channel_count = info.channel_count,

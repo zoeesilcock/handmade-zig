@@ -512,14 +512,14 @@ pub const RenderGroup = extern struct {
                 work.clip_rect = clip_rect;
 
                 if (true) {
-                    shared.addQueueEntry(render_queue, &doTileRenderWork, work);
+                    shared.platform.addQueueEntry(render_queue, &doTileRenderWork, work);
                 } else {
                     doTileRenderWork(render_queue, work);
                 }
             }
         }
 
-        shared.completeAllQueuedWork(render_queue);
+        shared.platform.completeAllQueuedWork(render_queue);
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {

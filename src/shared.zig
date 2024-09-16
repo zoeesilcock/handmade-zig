@@ -115,37 +115,55 @@ pub const PlatformWorkQueue = extern struct {
 };
 
 pub const PlatformFileHandle = extern struct {
+    has_errors: bool,
+
     pub fn isValid(self: *PlatformFileHandle) bool {
         _ = self;
         return false;
     }
 };
 
-const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
-const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;
-const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult;
+pub const PlatformFileGroup = extern struct {
+    file_count: u32,
+    data: *void,
+};
+
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
+const getAllFilesOfTypeBegin: type = fn (file_extension: [*:0]const u8) callconv(.C) PlatformFileGroup;
+const getAllFilesOfTypeEnd: type = fn (file_group: PlatformFileGroup) callconv(.C) void;
+const openFile: type = fn (file_group: PlatformFileGroup, file_index: u32) callconv(.C) PlatformFileHandle;
+const readDataFromFile: type = fn (file_handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void;
+const noFileErrors: type = fn (file_handle: *PlatformFileHandle) callconv(.C) bool;
+const fileError: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
+
+const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
+const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;
+const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult;
+
+
+fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
+    return !file_handle.has_errors;
+}
+
 pub const Platform = extern struct {
+    addQueueEntry: *const addQueueEntryType = undefined,
+    completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
+
+    getAllFilesOfTypeBegin: *const getAllFilesOfTypeBegin = undefined,
+    getAllFilesOfTypeEnd: *const getAllFilesOfTypeEnd = undefined,
+    openFile: *const openFile = undefined,
+    readDataFromFile: *const readDataFromFile = undefined,
+    noFileErrors: *const noFileErrors = defaultNoFileErrors,
+    fileError: *const fileError = undefined,
+
     debugFreeFileMemory: *const debugFreeFileMemoryType = undefined,
     debugWriteEntireFile: *const debugWriteEntireFileType = undefined,
     debugReadEntireFile: *const debugReadEntireFileType = undefined,
-
-    addQueueEntry: *const addQueueEntryType = undefined,
-    completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
 };
 
-// Debug file reading.
-pub var debugFreeFileMemory: *const debugFreeFileMemoryType = undefined;
-pub var debugWriteEntireFile: *const debugWriteEntireFileType = undefined;
-pub var debugReadEntireFile: *const debugReadEntireFileType = undefined;
-
-// Work queues.
-pub var addQueueEntry: *const addQueueEntryType = undefined;
-pub var completeAllQueuedWork: *const completeAllQueuedWorkType = undefined;
-
-// Production file reading.
+pub var platform: Platform = undefined;
 
 pub var debug_global_memory: ?*Memory = null;
 pub inline fn beginTimedBlock(counter_id: DebugCycleCounters) void {

@@ -151,6 +151,35 @@ pub inline fn safeTruncateI64(value: i64) u32 {
     return @as(u32, @intCast(value));
 }
 
+fn getAllFilesOfTypeBegin(file_extension: [*:0]const u8) callconv(.C) shared.PlatformFileGroup {
+    _ = file_extension;
+
+    return shared.PlatformFileGroup{ .file_count = 0, .data = undefined };
+}
+
+fn getAllFilesOfTypeEnd(file_group: shared.PlatformFileGroup) callconv(.C) void {
+    _ = file_group;
+}
+
+fn openFile(file_group: shared.PlatformFileGroup, file_index: u32) callconv(.C) shared.PlatformFileHandle {
+    _ = file_group;
+    _ = file_index;
+
+    return shared.PlatformFileHandle{ .has_errors = false };
+}
+
+fn readDataFromFile(file_handle: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void {
+    _ = file_handle;
+    _ = offset;
+    _ = size;
+    _ = dest;
+}
+
+fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) callconv(.C) void {
+    _ = file_handle;
+    _ = message;
+}
+
 fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
     var result = shared.DebugReadFileResult{};
 
@@ -1336,11 +1365,18 @@ pub export fn wWinMain(
     loadXInput();
     resizeDIBSection(&back_buffer, WIDTH, HEIGHT);
     const platform = shared.Platform{
+        .addQueueEntry = addQueueEntry,
+        .completeAllQueuedWork = completeAllQueuedWork,
+
+        .getAllFilesOfTypeBegin = getAllFilesOfTypeBegin,
+        .getAllFilesOfTypeEnd = getAllFilesOfTypeEnd,
+        .openFile = openFile,
+        .readDataFromFile = readDataFromFile,
+        .fileError = fileError,
+
         .debugReadEntireFile = debugReadEntireFile,
         .debugWriteEntireFile = debugWriteEntireFile,
         .debugFreeFileMemory = debugFreeFileMemory,
-        .addQueueEntry = addQueueEntry,
-        .completeAllQueuedWork = completeAllQueuedWork,
     };
 
     const window_class: win32.WNDCLASSW = .{

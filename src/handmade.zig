@@ -113,12 +113,7 @@ pub export fn updateAndRender(
     input: shared.GameInput,
     buffer: *shared.OffscreenBuffer,
 ) void {
-    shared.debugFreeFileMemory = platform.debugFreeFileMemory;
-    shared.debugWriteEntireFile = platform.debugWriteEntireFile;
-    shared.debugReadEntireFile = platform.debugReadEntireFile;
-
-    shared.addQueueEntry = platform.addQueueEntry;
-    shared.completeAllQueuedWork = platform.completeAllQueuedWork;
+    shared.platform = platform;
 
     if (shared.INTERNAL) {
         shared.debug_global_memory = memory;
@@ -340,7 +335,6 @@ pub export fn updateAndRender(
             &transient_state.arena,
             shared.megabytes(64),
             transient_state,
-            platform
         );
 
         if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
@@ -1382,7 +1376,7 @@ fn fillGroundChunk(
 
         if (render_group.allResourcesPresent()) {
             ground_buffer.position = chunk_position.*;
-            shared.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
+            shared.platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
         } else {
             endTaskWithMemory(work.task);
         }
