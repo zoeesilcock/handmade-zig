@@ -52,6 +52,7 @@ const win32 = struct {
     usingnamespace @import("win32").media.audio.direct_sound;
     usingnamespace @import("win32").storage.file_system;
     usingnamespace @import("win32").system.com;
+    usingnamespace @import("win32").system.io;
     usingnamespace @import("win32").system.diagnostics.debug;
     usingnamespace @import("win32").system.library_loader;
     usingnamespace @import("win32").system.memory;
@@ -154,30 +155,92 @@ pub inline fn safeTruncateI64(value: i64) u32 {
 fn getAllFilesOfTypeBegin(file_extension: [*:0]const u8) callconv(.C) shared.PlatformFileGroup {
     _ = file_extension;
 
-    return shared.PlatformFileGroup{ .file_count = 0, .data = undefined };
+    return shared.PlatformFileGroup{ .file_count = 1, .data = undefined };
 }
 
 fn getAllFilesOfTypeEnd(file_group: shared.PlatformFileGroup) callconv(.C) void {
     _ = file_group;
 }
 
-fn openFile(file_group: shared.PlatformFileGroup, file_index: u32) callconv(.C) shared.PlatformFileHandle {
+const Win32PlatformFileHandle = extern struct {
+    platform_handle: shared.PlatformFileHandle,
+    win32_handle: win32.HANDLE,
+};
+
+fn openFile(file_group: shared.PlatformFileGroup, file_index: u32) callconv(.C) *shared.PlatformFileHandle {
     _ = file_group;
     _ = file_index;
 
-    return shared.PlatformFileHandle{ .has_errors = false };
+    const file_name = "test.hha";
+    var result: *Win32PlatformFileHandle = undefined;
+
+    if (win32.VirtualAlloc(
+        null,
+        @sizeOf(Win32PlatformFileHandle),
+        win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+        win32.PAGE_READWRITE,
+    )) |space| {
+        result = @ptrCast(@alignCast(space));
+        result.win32_handle = win32.CreateFileA(
+            file_name,
+            win32.FILE_GENERIC_READ,
+            win32.FILE_SHARE_READ,
+            null,
+            win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+            win32.FILE_FLAGS_AND_ATTRIBUTES{},
+            null,
+        );
+        result.platform_handle.no_errors = (result.win32_handle != win32.INVALID_HANDLE_VALUE);
+    }
+
+    return @ptrCast(&result.platform_handle);
 }
 
-fn readDataFromFile(file_handle: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void {
-    _ = file_handle;
-    _ = offset;
-    _ = size;
-    _ = dest;
+fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void {
+    if (shared.defaultNoFileErrors(source)) {
+        const handle: *Win32PlatformFileHandle = @ptrCast(@alignCast(source));
+
+        var overlapped = win32.OVERLAPPED{
+            .Internal = 0,
+            .InternalHigh = 0,
+            .hEvent = null,
+            .Anonymous = .{
+                .Anonymous = .{
+                    .Offset = @as(u32, @intCast((offset >> 0) & 0xFFFFFFFF)),
+                    .OffsetHigh = @as(u32, @intCast((offset >> 32) & 0xFFFFFFFF)),
+                },
+            },
+        };
+
+        const file_size32 = safeTruncateI64(@intCast(size));
+
+        var bytes_read: u32 = undefined;
+        const read_result = win32.ReadFile(
+            handle.win32_handle,
+            dest,
+            file_size32,
+            &bytes_read,
+            &overlapped,
+        );
+
+        if (read_result != 0 and bytes_read == file_size32) {
+            // File read successfully.
+        } else {
+            const error_number = win32.GetLastError();
+            fileError(&handle.platform_handle, "Read file failed.");
+            _ = error_number;
+        }
+    }
 }
 
 fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) callconv(.C) void {
-    _ = file_handle;
-    _ = message;
+    if (INTERNAL) {
+        win32.OutputDebugStringA("WIN32 FILE ERROR: ");
+        win32.OutputDebugStringA(message);
+        win32.OutputDebugStringA("\n");
+    }
+
+    file_handle.no_errors = false;
 }
 
 fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {

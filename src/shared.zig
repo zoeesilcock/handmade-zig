@@ -115,7 +115,7 @@ pub const PlatformWorkQueue = extern struct {
 };
 
 pub const PlatformFileHandle = extern struct {
-    has_errors: bool,
+    no_errors: bool = false,
 
     pub fn isValid(self: *PlatformFileHandle) bool {
         _ = self;
@@ -133,8 +133,8 @@ const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(
 
 const getAllFilesOfTypeBegin: type = fn (file_extension: [*:0]const u8) callconv(.C) PlatformFileGroup;
 const getAllFilesOfTypeEnd: type = fn (file_group: PlatformFileGroup) callconv(.C) void;
-const openFile: type = fn (file_group: PlatformFileGroup, file_index: u32) callconv(.C) PlatformFileHandle;
-const readDataFromFile: type = fn (file_handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void;
+const openFile: type = fn (file_group: PlatformFileGroup, file_index: u32) callconv(.C) *PlatformFileHandle;
+const readDataFromFile: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void;
 const noFileErrors: type = fn (file_handle: *PlatformFileHandle) callconv(.C) bool;
 const fileError: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
 
@@ -142,9 +142,8 @@ const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
 const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;
 const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult;
 
-
-fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
-    return !file_handle.has_errors;
+pub fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
+    return file_handle.no_errors;
 }
 
 pub const Platform = extern struct {
@@ -449,6 +448,19 @@ pub fn zeroSize(size: MemoryIndex, ptr: [*]void) void {
 
 pub fn zeroStruct(comptime T: type, ptr: *T) void {
     zeroSize(@sizeOf(T), @ptrCast(ptr));
+}
+
+pub fn copy(size: MemoryIndex, source_init: *void, dest_init: *void) void {
+    var source: [*]u8 = @ptrCast(source_init);
+    var dest: [*]u8 = @ptrCast(dest_init);
+
+    var index: MemoryIndex = size;
+    while (index > 0) : (index -= 1) {
+        dest[0] = source[0];
+
+        source += 1;
+        dest += 1;
+    }
 }
 
 // Game state.

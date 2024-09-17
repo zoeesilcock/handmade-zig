@@ -29,6 +29,11 @@ pub const AssetTypeId = asset_type_id.AssetTypeId;
 pub const AssetTagId = asset_type_id.AssetTagId;
 pub const ASSET_TYPE_ID_COUNT = asset_type_id.COUNT;
 
+const Asset = struct {
+    hha: HHAAsset,
+    file_index: u32,
+};
+
 const AssetType = struct {
     first_asset_index: u32,
     one_past_last_asset_index: u32,
@@ -75,7 +80,7 @@ pub const Assets = struct {
     arena: MemoryArena,
 
     asset_count: u32,
-    assets: [*]HHAAsset,
+    assets: [*]Asset,
     asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
 
     slots: [*]AssetSlot,
@@ -86,8 +91,6 @@ pub const Assets = struct {
 
     file_count: u32,
     files: [*]AssetFile,
-
-    hha_contents: [*]u8,
 
     pub fn allocate(
         arena: *MemoryArena,
@@ -101,165 +104,136 @@ pub const Assets = struct {
 
         arena.makeSubArena(&result.arena, memory_size, null);
 
+        result.tag_count = 0;
+        result.asset_count = 0;
 
+        // Load asset headers.
+        {
+            const file_group = shared.platform.getAllFilesOfTypeBegin("hha");
+            defer shared.platform.getAllFilesOfTypeEnd(file_group);
 
+            result.file_count = file_group.file_count;
+            result.files = arena.pushArray(result.file_count, AssetFile);
 
-        // result.tag_count = 0;
-        // result.asset_count = 0;
-        //
-        // // Load asset headers.
-        // {
-        //     const file_group = shared.platform.getAllFilesOfTypeBegin("hha");
-        //     defer shared.platform.getAllFilesOfTypeEnd(file_group);
-        //
-        //     result.file_count = file_group.file_count;
-        //     result.files = arena.pushArray(result.file_count, AssetFile);
-        //
-        //     var file_index: u32 = 0;
-        //     while (file_index < result.file_count) : (file_index += 1) {
-        //         const file: [*]AssetFile = result.files + file_index;
-        //
-        //         var file_handle = shared.platform.openFile(file_group, file_index);
-        //         file[0].tag_base = result.tag_count;
-        //         file[0].handle = &file_handle;
-        //
-        //         shared.platform.readDataFromFile(file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
-        //
-        //         const asset_type_array_size: u32 = file[0].header.asset_type_count * @sizeOf(HHAAssetType);
-        //         file[0].asset_type_array = @ptrCast(@alignCast(arena.pushSize(asset_type_array_size, null)));
-        //         shared.platform.readDataFromFile(
-        //             file[0].handle,
-        //             file[0].header.asset_types,
-        //             asset_type_array_size,
-        //             file[0].asset_type_array,
-        //         );
-        //
-        //         if (file[0].header.magic_value != file_formats.HHA_MAGIC_VALUE) {
-        //             shared.platform.fileError(file[0].handle, "HHA file has an invalid magic value.");
-        //         }
-        //
-        //         if (file[0].header.version > file_formats.HHA_VERSION) {
-        //             shared.platform.fileError(file[0].handle, "HHA file is of a later version.");
-        //         }
-        //
-        //         if (shared.platform.noFileErrors(file[0].handle)) {
-        //             result.tag_count += file[0].header.tag_count;
-        //             result.asset_count += file[0].header.asset_count;
-        //         } else {
-        //             std.debug.assert(true);
-        //         }
-        //     }
-        // }
-        //
-        // result.assets = arena.pushArray(result.asset_count, HHAAsset);
-        // result.slots = arena.pushArray(result.asset_count, AssetSlot);
-        // result.tags = arena.pushArray(result.tag_count, HHATag);
-        //
-        // // Load tags.
-        // {
-        //     var file_index: u32 = 0;
-        //     while (file_index < result.file_count) : (file_index += 1) {
-        //         const file: [*]AssetFile = result.files + file_index;
-        //         if (shared.platform.noFileErrors(file[0].handle)) {
-        //             const tag_array_size = @sizeOf(HHATag) * file[0].header.tag_count;
-        //             shared.platform.readDataFromFile(
-        //                 file[0].handle,
-        //                 file[0].header.tags,
-        //                 tag_array_size,
-        //                 result.tags + file[0].tag_base,
-        //             );
-        //         }
-        //     }
-        // }
-        //
-        //
-        // var asset_count: u32 = 0;
-        //
-        // // Load assets.
-        // var dest_type_id: u32 = 0;
-        // while (dest_type_id < ASSET_TYPE_ID_COUNT) : (dest_type_id += 1) {
-        //     var dest_type = result.asset_types[dest_type_id];
-        //
-        //     dest_type.first_asset_index = asset_count;
-        //     dest_type.one_past_last_asset_index = asset_count;
-        //
-        //     var file_index: u32 = 0;
-        //     while (file_index < result.file_count) : (file_index += 1) {
-        //         const file: [*]AssetFile = result.files + file_index;
-        //
-        //         if (shared.platform.noFileErrors(file[0].handle)) {
-        //             var source_index: u32 = 0;
-        //             while (source_index < file[0].header.asset_type_count) : (source_index += 1) {
-        //                 const source_type: [*]HHAAssetType = file[0].asset_type_array + source_index;
-        //                 if (source_type[0].type_id == dest_type_id) {
-        //                     const asset_count_for_type =
-        //                         source_type[0].one_past_last_asset_index - source_type[0].first_asset_index;
-        //                     shared.platform.readDataFromFile(
-        //                         file[0].handle,
-        //                         file[0].header.assets + source_type[0].first_asset_index * @sizeOf(HHAAsset),
-        //                         asset_count_for_type * @sizeOf(HHAAsset),
-        //                         result.assets + asset_count
-        //                     );
-        //
-        //                     // Rebase tag indexes.
-        //                     var asset_index: u32 = asset_count;
-        //                     while (asset_index < (asset_count + asset_count_for_type)) : (asset_index += 1) {
-        //                         const asset = result.assets + asset_index;
-        //                         asset[0].first_tag_index += file[0].tag_base;
-        //                         asset[0].one_past_last_tag_index += file[0].tag_base;
-        //                     }
-        //
-        //                     asset_count += asset_count_for_type;
-        //                     std.debug.assert(asset_count < result.asset_count);
-        //                 }
-        //             }
-        //         }
-        //     }
-        //
-        //     dest_type.one_past_last_asset_index = asset_count;
-        // }
-        //
-        // std.debug.assert(asset_count == result.asset_count);
+            var file_index: u32 = 0;
+            while (file_index < result.file_count) : (file_index += 1) {
+                const file: [*]AssetFile = result.files + file_index;
 
+                const file_handle = shared.platform.openFile(file_group, file_index);
+                file[0].tag_base = result.tag_count;
+                file[0].handle = file_handle;
 
+                shared.platform.readDataFromFile(file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
 
+                const asset_type_array_size: u32 = file[0].header.asset_type_count * @sizeOf(HHAAssetType);
+                file[0].asset_type_array = @ptrCast(@alignCast(arena.pushSize(asset_type_array_size, null)));
+                shared.platform.readDataFromFile(
+                    file[0].handle,
+                    file[0].header.asset_types,
+                    asset_type_array_size,
+                    file[0].asset_type_array,
+                );
 
-        const read_result = shared.platform.debugReadEntireFile("test.hha");
-        if (read_result.content_size != 0) {
-            const header: *HHAHeader = @ptrCast(@alignCast(read_result.contents));
+                if (file[0].header.magic_value != file_formats.HHA_MAGIC_VALUE) {
+                    shared.platform.fileError(file[0].handle, "HHA file has an invalid magic value.");
+                }
 
-            std.debug.assert(header.magic_value == file_formats.HHA_MAGIC_VALUE);
-            std.debug.assert(header.version == file_formats.HHA_VERSION);
+                if (file[0].header.version > file_formats.HHA_VERSION) {
+                    shared.platform.fileError(file[0].handle, "HHA file is of a later version.");
+                }
 
-            result.tag_count = header.tag_count;
-            result.tags = @ptrFromInt(@intFromPtr(read_result.contents) + header.tags);
-            result.tag_range[AssetTagId.FacingDirection.toInt()] = shared.TAU32;
+                if (shared.platform.noFileErrors(file[0].handle)) {
+                    result.tag_count += file[0].header.tag_count;
+                    result.asset_count += file[0].header.asset_count;
+                } else {
+                    std.debug.assert(true);
+                }
+            }
+        }
 
-            result.asset_count = header.asset_count;
-            result.assets = @ptrFromInt(@intFromPtr(read_result.contents) + header.assets);
-            result.slots = arena.pushArray(result.asset_count, AssetSlot);
+        result.assets = arena.pushArray(result.asset_count, Asset);
+        result.slots = arena.pushArray(result.asset_count, AssetSlot);
+        result.tags = arena.pushArray(result.tag_count, HHATag);
 
-            const hha_asset_types: [*]HHAAssetType = @ptrFromInt(@intFromPtr(read_result.contents) + header.asset_types);
+        // Load tags.
+        {
+            var file_index: u32 = 0;
+            while (file_index < result.file_count) : (file_index += 1) {
+                const file: [*]AssetFile = result.files + file_index;
+                if (shared.platform.noFileErrors(file[0].handle)) {
+                    const tag_array_size = @sizeOf(HHATag) * file[0].header.tag_count;
+                    shared.platform.readDataFromFile(
+                        file[0].handle,
+                        file[0].header.tags,
+                        tag_array_size,
+                        result.tags + file[0].tag_base,
+                    );
+                }
+            }
+        }
 
-            var asset_type_index: u32 = 0;
-            while (asset_type_index < header.asset_type_count) : (asset_type_index += 1) {
-                const source: [*]HHAAssetType = hha_asset_types + asset_type_index;
+        var asset_count: u32 = 0;
 
-                if (source[0].type_id < ASSET_TYPE_ID_COUNT) {
-                    var dest = &result.asset_types[source[0].type_id];
+        // Load assets.
+        var dest_type_id: u32 = 0;
+        while (dest_type_id < ASSET_TYPE_ID_COUNT) : (dest_type_id += 1) {
+            var dest_type = &result.asset_types[dest_type_id];
 
-                    std.debug.assert(dest.first_asset_index == 0);
-                    std.debug.assert(dest.one_past_last_asset_index == 0);
+            dest_type.first_asset_index = asset_count;
 
-                    dest.first_asset_index = source[0].first_asset_index;
-                    dest.one_past_last_asset_index = source[0].one_past_last_asset_index;
+            var file_index: u32 = 0;
+            while (file_index < result.file_count) : (file_index += 1) {
+                const file: [*]AssetFile = result.files + file_index;
+
+                if (shared.platform.noFileErrors(file[0].handle)) {
+                    var source_index: u32 = 0;
+                    while (source_index < file[0].header.asset_type_count) : (source_index += 1) {
+                        const source_type: [*]HHAAssetType = file[0].asset_type_array + source_index;
+                        if (source_type[0].type_id == dest_type_id) {
+                            const asset_count_for_type =
+                                source_type[0].one_past_last_asset_index - source_type[0].first_asset_index;
+
+                            const temp_mem = transient_state.arena.beginTemporaryMemory();
+                            defer transient_state.arena.endTemporaryMemory(temp_mem);
+                            const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(asset_count_for_type, HHAAsset);
+
+                            shared.platform.readDataFromFile(
+                                file[0].handle,
+                                file[0].header.assets + source_type[0].first_asset_index * @sizeOf(HHAAsset),
+                                asset_count_for_type * @sizeOf(HHAAsset),
+                                hha_asset_array,
+                            );
+
+                            // Rebase tag indexes.
+                            var asset_index: u32 = 0;
+                            while (asset_index < asset_count_for_type) : (asset_index += 1) {
+                                const hha_asset = hha_asset_array + asset_index;
+
+                                std.debug.assert(asset_count < result.asset_count);
+                                const asset = result.assets + asset_count;
+                                asset_count += 1;
+
+                                asset[0].file_index = file_index;
+                                asset[0].hha = hha_asset[0];
+                                asset[0].hha.first_tag_index += file[0].tag_base;
+                                asset[0].hha.one_past_last_tag_index += file[0].tag_base;
+                            }
+                        }
+                    }
                 }
             }
 
-            result.hha_contents = @ptrCast(@alignCast(read_result.contents));
+            dest_type.one_past_last_asset_index = asset_count;
         }
 
+        std.debug.assert(asset_count == result.asset_count);
+
         return result;
+    }
+
+    fn getFileHandleFor(self: *Assets, file_index: u32) *shared.PlatformFileHandle {
+        std.debug.assert(file_index < self.file_count);
+        return self.files[file_index].handle;
     }
 
     pub fn getFirstSlot(self: *Assets, type_id: AssetTypeId) ?u32 {
@@ -301,8 +275,8 @@ pub const Assets = struct {
             const asset = self.assets[asset_index];
 
             var total_weighted_diff: f32 = 0;
-            var tag_index: u32 = asset.first_tag_index;
-            while (tag_index < asset.one_past_last_tag_index) : (tag_index += 1) {
+            var tag_index: u32 = asset.hha.first_tag_index;
+            while (tag_index < asset.hha.one_past_last_tag_index) : (tag_index += 1) {
                 const tag: *HHATag = &self.tags[tag_index];
 
                 const a: f32 = match_vector.e[tag.id];
@@ -350,9 +324,8 @@ pub const Assets = struct {
                 .seq_cst,
             ) == null) {
                 if (handmade.beginTaskWithMemory(self.transient_state)) |task| {
-
-                    const hha_asset = &self.assets[id.value];
-                    const info = hha_asset.info.bitmap;
+                    const asset = &self.assets[id.value];
+                    const info = asset.hha.info.bitmap;
 
                     var bitmap: *LoadedBitmap = self.arena.pushStruct(LoadedBitmap);
 
@@ -368,13 +341,14 @@ pub const Assets = struct {
                     var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
                     work.task = task;
                     work.slot = &self.slots[id.value];
-                    // work.handle =
-                    work.offset = hha_asset.data_offset;
+                    work.handle = self.getFileHandleFor(asset.file_index);
+                    work.offset = asset.hha.data_offset;
                     work.size = memory_size;
+                    work.destination = @ptrCast(bitmap.memory);
                     work.final_state = .Loaded;
-                    work.slot.data.bitmap = bitmap;
-
-                    bitmap.memory = @ptrCast(@alignCast(self.hha_contents + hha_asset.data_offset));
+                    work.slot.data = .{
+                        .bitmap = bitmap,
+                    };
 
                     shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
@@ -390,7 +364,8 @@ pub const Assets = struct {
         const slot = self.slots[id.value];
 
         if (slot.data.bitmap) |bitmap| {
-            if (slot.state == .Loaded) {
+            if (@intFromEnum(slot.state) >= @intFromEnum(AssetState.Loaded)) {
+                @fence(.acquire);
                 result = bitmap;
             }
         }
@@ -435,7 +410,7 @@ pub const Assets = struct {
 
     pub fn getSoundInfo(self: *Assets, id: SoundId) *HHASound {
         std.debug.assert(id.value <= self.asset_count);
-        return &self.assets[id.value].info.sound;
+        return &self.assets[id.value].hha.info.sound;
     }
 
     pub fn prefetchSound(
@@ -459,15 +434,36 @@ pub const Assets = struct {
                     .seq_cst,
             ) == null) {
                 if (handmade.beginTaskWithMemory(self.transient_state)) |task| {
-                    var work: *LoadSoundWork = task.arena.pushStruct(LoadSoundWork);
+                    const asset = &self.assets[id.value];
+                    const info = asset.hha.info.sound;
 
-                    work.assets = self;
-                    work.id = id;
+                    const sound = self.arena.pushStruct(LoadedSound);
+                    sound.sample_count = info.sample_count;
+                    sound.channel_count = info.channel_count;
+                    const channel_size: u32 = sound.sample_count * @sizeOf(i16);
+                    const memory_size: u32 = sound.channel_count * channel_size;
+                    const memory = self.arena.pushSize(memory_size, null);
+
+                    var sound_at: [*]i16 = @ptrCast(@alignCast(memory));
+                    var channel_index: u32 = 0;
+                    while (channel_index < sound.channel_count) : (channel_index += 1) {
+                        sound.samples[channel_index] = sound_at;
+                        sound_at += channel_size;
+                    }
+
+                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
                     work.task = task;
-                    work.sound = self.arena.pushStruct(LoadedSound);
+                    work.slot = &self.slots[id.value];
+                    work.handle = self.getFileHandleFor(asset.file_index);
+                    work.offset = asset.hha.data_offset;
+                    work.size = memory_size;
+                    work.destination = memory;
                     work.final_state = .Loaded;
+                    work.slot.data = .{
+                        .sound = sound,
+                    };
 
-                    shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadSoundWork, work);
+                    shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
                     @atomicStore(AssetState, &self.slots[id.value].state, .Unloaded, .release);
                 }
@@ -482,7 +478,8 @@ pub const Assets = struct {
         switch (slot.data) {
             AssetSlotType.sound => {
                 if (slot.data.sound) |sound| {
-                    if (slot.state == .Loaded) {
+                    if (@intFromEnum(slot.state) >= @intFromEnum(AssetState.Loaded)) {
+                        @fence(.acquire);
                         result = sound;
                     }
                 }
@@ -539,6 +536,12 @@ pub const LoadedBitmap = extern struct {
     memory: ?[*]void,
 };
 
+pub const LoadedSound = struct {
+    sample_count: u32,
+    channel_count: u32,
+    samples: [2]?[*]i16,
+};
+
 const LoadAssetWork = struct {
     task: *shared.TaskWithMemory,
     slot: *AssetSlot,
@@ -556,57 +559,12 @@ fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(
 
     const work: *LoadAssetWork = @ptrCast(@alignCast(data));
 
-    // shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);
+    shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);
 
-    // if (shared.platform.noFileErrors(work.handle))
-    {
+    if (shared.platform.noFileErrors(work.handle)) {
         work.slot.state = work.final_state;
     }
 
     handmade.endTaskWithMemory(work.task);
 }
 
-pub const LoadedSound = struct {
-    sample_count: u32,
-    channel_count: u32,
-    samples: [2]?[*]i16,
-};
-
-const LoadSoundWork = struct {
-    assets: *Assets,
-    id: SoundId,
-    task: *shared.TaskWithMemory,
-    sound: *LoadedSound,
-
-    final_state: AssetState,
-};
-
-fn doLoadSoundWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
-    _ = queue;
-
-    const work: *LoadSoundWork = @ptrCast(@alignCast(data));
-    const hha_asset = &work.assets.assets[work.id.value];
-    const info = hha_asset.info.sound;
-
-    work.sound.* = LoadedSound{
-        .channel_count = info.channel_count,
-        .sample_count = info.sample_count,
-        .samples = undefined
-    };
-
-    std.debug.assert(work.sound.channel_count < work.sound.samples.len);
-
-    var sample_data_offset: u64 = hha_asset.data_offset;
-    var channel_index: u32 = 0;
-    while (channel_index < work.sound.channel_count) : (channel_index += 1) {
-        work.sound.samples[channel_index] = @ptrCast(@alignCast(work.assets.hha_contents + sample_data_offset));
-        sample_data_offset += work.sound.sample_count * @sizeOf(i16);
-    }
-
-    work.assets.slots[work.id.value] = AssetSlot{
-        .data = .{ .sound = work.sound },
-        .state = work.final_state,
-    };
-
-    handmade.endTaskWithMemory(work.task);
-}
