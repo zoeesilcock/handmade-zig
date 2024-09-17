@@ -152,50 +152,95 @@ pub inline fn safeTruncateI64(value: i64) u32 {
     return @as(u32, @intCast(value));
 }
 
-fn getAllFilesOfTypeBegin(file_extension: [*:0]const u8) callconv(.C) shared.PlatformFileGroup {
-    _ = file_extension;
-
-    return shared.PlatformFileGroup{ .file_count = 3, .data = undefined };
-}
-
-fn getAllFilesOfTypeEnd(file_group: shared.PlatformFileGroup) callconv(.C) void {
-    _ = file_group;
-}
+const Win32PlatformFileGroup = extern struct {
+    platform_handle: shared.PlatformFileGroup,
+    find_handle: win32.FindFileHandle,
+    find_data: win32.WIN32_FIND_DATAA,
+};
 
 const Win32PlatformFileHandle = extern struct {
     platform_handle: shared.PlatformFileHandle,
     win32_handle: win32.HANDLE,
 };
 
-fn openFile(file_group: shared.PlatformFileGroup, file_index: u32) callconv(.C) *shared.PlatformFileHandle {
-    _ = file_group;
+fn getAllFilesOfTypeBegin(file_extension: [*:0]const u8) callconv(.C) *shared.PlatformFileGroup {
+    var win32_file_group: *Win32PlatformFileGroup = undefined;
 
-    const file_name = switch (file_index) {
-        0 => "test1.hha",
-        1 => "test2.hha",
-        2 => "test3.hha",
-        else => "",
-    };
+    var file_extension_at: [*]const u8 = @ptrCast(file_extension);
 
-    var result: *Win32PlatformFileHandle = undefined;
+    var wildcard: [32]u8 = [1]u8{0} ** 32;
+    wildcard[0] = '*';
+    wildcard[1] = '.';
+    var wildcard_index: u32 = 2;
+    while (wildcard_index < wildcard.len) : (wildcard_index += 1) {
+        wildcard[wildcard_index] = file_extension[wildcard_index - 2];
+        file_extension_at += 1;
+    }
 
     if (win32.VirtualAlloc(
         null,
-        @sizeOf(Win32PlatformFileHandle),
+        @sizeOf(Win32PlatformFileGroup),
         win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
         win32.PAGE_READWRITE,
     )) |space| {
-        result = @ptrCast(@alignCast(space));
-        result.win32_handle = win32.CreateFileA(
-            file_name,
-            win32.FILE_GENERIC_READ,
-            win32.FILE_SHARE_READ,
+        win32_file_group = @ptrCast(@alignCast(space));
+    }
+
+    var find_data: win32.WIN32_FIND_DATAA = undefined;
+    var find_handle = win32.FindFirstFileA(@ptrCast(&wildcard), &find_data);
+
+    while (@as(*anyopaque, @ptrCast(&find_handle)) != win32.INVALID_HANDLE_VALUE) {
+        win32_file_group.platform_handle.file_count += 1;
+
+        if (win32.FindNextFileA(find_handle, &find_data) == 0) {
+            break;
+        }
+    }
+
+    _ = win32.FindClose(find_handle);
+
+    win32_file_group.find_handle = win32.FindFirstFileA(@ptrCast(&wildcard), &win32_file_group.find_data);
+
+    return @ptrCast(&win32_file_group.platform_handle);
+}
+
+fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.C) void {
+    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group));
+
+    _ = win32.FindClose(win32_file_group.find_handle);
+    _ = win32.VirtualFree(win32_file_group, 0, win32.MEM_RELEASE);
+}
+
+fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.C) *shared.PlatformFileHandle {
+    var result: *Win32PlatformFileHandle = undefined;
+    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group));
+
+    if (@as(*anyopaque, @ptrCast(&win32_file_group.find_handle)) != win32.INVALID_HANDLE_VALUE) {
+        const file_name = win32_file_group.find_data.cFileName;
+
+        if (win32.VirtualAlloc(
             null,
-            win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
-            win32.FILE_FLAGS_AND_ATTRIBUTES{},
-            null,
-        );
-        result.platform_handle.no_errors = (result.win32_handle != win32.INVALID_HANDLE_VALUE);
+            @sizeOf(Win32PlatformFileHandle),
+            win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+            win32.PAGE_READWRITE,
+        )) |space| {
+            result = @ptrCast(@alignCast(space));
+            result.win32_handle = win32.CreateFileA(
+                @ptrCast(&file_name),
+                win32.FILE_GENERIC_READ,
+                win32.FILE_SHARE_READ,
+                null,
+                win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+                win32.FILE_FLAGS_AND_ATTRIBUTES{},
+                null,
+            );
+            result.platform_handle.no_errors = (result.win32_handle != win32.INVALID_HANDLE_VALUE);
+
+            if (win32.FindNextFileA(win32_file_group.find_handle, &win32_file_group.find_data) == 0) {
+                _ = win32.FindClose(win32_file_group.find_handle);
+                win32_file_group.find_handle = -1;
+            }
+        }
     }
 
     return @ptrCast(&result.platform_handle);
@@ -1438,7 +1483,7 @@ pub export fn wWinMain(
 
         .getAllFilesOfTypeBegin = getAllFilesOfTypeBegin,
         .getAllFilesOfTypeEnd = getAllFilesOfTypeEnd,
-        .openFile = openFile,
+        .openNextFile = openNextFile,
         .readDataFromFile = readDataFromFile,
         .fileError = fileError,
 

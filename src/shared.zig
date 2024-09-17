@@ -125,15 +125,14 @@ pub const PlatformFileHandle = extern struct {
 
 pub const PlatformFileGroup = extern struct {
     file_count: u32,
-    data: *void,
 };
 
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
-const getAllFilesOfTypeBegin: type = fn (file_extension: [*:0]const u8) callconv(.C) PlatformFileGroup;
-const getAllFilesOfTypeEnd: type = fn (file_group: PlatformFileGroup) callconv(.C) void;
-const openFile: type = fn (file_group: PlatformFileGroup, file_index: u32) callconv(.C) *PlatformFileHandle;
+const getAllFilesOfTypeBegin: type = fn (file_extension: [*:0]const u8) callconv(.C) *PlatformFileGroup;
+const getAllFilesOfTypeEnd: type = fn (file_group: *PlatformFileGroup) callconv(.C) void;
+const openNextFile: type = fn (file_group: *PlatformFileGroup) callconv(.C) *PlatformFileHandle;
 const readDataFromFile: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void;
 const noFileErrors: type = fn (file_handle: *PlatformFileHandle) callconv(.C) bool;
 const fileError: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
@@ -152,7 +151,7 @@ pub const Platform = extern struct {
 
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBegin = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEnd = undefined,
-    openFile: *const openFile = undefined,
+    openNextFile: *const openNextFile = undefined,
     readDataFromFile: *const readDataFromFile = undefined,
     noFileErrors: *const noFileErrors = defaultNoFileErrors,
     fileError: *const fileError = undefined,

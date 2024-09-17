@@ -122,7 +122,7 @@ pub const Assets = struct {
             while (file_index < result.file_count) : (file_index += 1) {
                 const file: [*]AssetFile = result.files + file_index;
 
-                const file_handle = shared.platform.openFile(file_group, file_index);
+                const file_handle = shared.platform.openNextFile(file_group);
                 file[0].tag_base = result.tag_count;
                 file[0].asset_base = result.asset_count;
                 file[0].handle = file_handle;
