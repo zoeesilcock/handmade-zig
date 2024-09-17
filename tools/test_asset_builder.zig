@@ -12,6 +12,7 @@ const HHATag = file_formats.HHATag;
 const HHAAssetType = file_formats.HHAAssetType;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
+const HHASoundChain = file_formats.HHASoundChain;
 const HHASound = file_formats.HHASound;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
@@ -376,6 +377,16 @@ pub const Assets = struct {
     debug_asset_type: ?*HHAAssetType = null,
     asset_index: u32 = 0,
 
+    fn init() Assets {
+        return Assets{
+            .asset_count = 1,
+            .tag_count = 1,
+            .asset_type_count = ASSET_TYPE_ID_COUNT,
+            .debug_asset_type = null,
+            .asset_index = 0,
+        };
+    }
+
     fn beginAssetType(self: *Assets, type_id: AssetTypeId) void {
         std.debug.assert(self.debug_asset_type == null);
 
@@ -443,7 +454,8 @@ pub const Assets = struct {
                 .sound = HHASound{
                     .channel_count = 0,
                     .sample_count = sample_count,
-                    .next_id_to_play = SoundId{ .value = 0 },
+                    .chain = .None,
+                    // .next_id_to_play = SoundId{ .value = 0 },
                 },
             };
 
@@ -482,43 +494,17 @@ pub fn main() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    // Prepare the asset pack.
-    var result = Assets{
-        .asset_count = 1,
-        .tag_count = 1,
-        .debug_asset_type = null,
-        .asset_index = 0,
-    };
+    writeHero(allocator);
+    writeNonHero(allocator);
+    writeSounds(allocator);
 
-    result.beginAssetType(.Shadow);
-    _ = result.addBitmapAsset("test/test_hero_shadow.bmp", 0.5, 0.15668203);
-    result.endAssetType();
+    if (gpa.detectLeaks()) {
+        std.log.debug("Memory leaks detected.\n", .{});
+    }
+}
 
-    result.beginAssetType(.Tree);
-    _ = result.addBitmapAsset("test2/tree00.bmp", 0.49382716, 0.29565218);
-    result.endAssetType();
-
-    result.beginAssetType(.Sword);
-    _ = result.addBitmapAsset("test2/rock03.bmp", 0.5, 0.65625);
-    result.endAssetType();
-
-    result.beginAssetType(.Grass);
-    _ = result.addBitmapAsset("test2/grass00.bmp", null, null);
-    _ = result.addBitmapAsset("test2/grass01.bmp", null, null);
-    result.endAssetType();
-
-    result.beginAssetType(.Stone);
-    _ = result.addBitmapAsset("test2/ground00.bmp", null, null);
-    _ = result.addBitmapAsset("test2/ground01.bmp", null, null);
-    _ = result.addBitmapAsset("test2/ground02.bmp", null, null);
-    _ = result.addBitmapAsset("test2/ground03.bmp", null, null);
-    result.endAssetType();
-
-    result.beginAssetType(.Tuft);
-    _ = result.addBitmapAsset("test2/tuft00.bmp", null, null);
-    _ = result.addBitmapAsset("test2/tuft01.bmp", null, null);
-    _ = result.addBitmapAsset("test2/tuft02.bmp", null, null);
-    result.endAssetType();
+fn writeHero(allocator: std.mem.Allocator) void {
+    var result = Assets.init();
 
     const angle_right: f32 = 0;
     const angle_back: f32 = 0.25 * shared.TAU32;
@@ -560,6 +546,48 @@ pub fn main() anyerror!void {
     result.addTag(.FacingDirection, angle_front);
     result.endAssetType();
 
+    writeHHA("test1.hha", &result, allocator) catch unreachable;
+}
+
+fn writeNonHero(allocator: std.mem.Allocator) void {
+    var result = Assets.init();
+
+    result.beginAssetType(.Shadow);
+    _ = result.addBitmapAsset("test/test_hero_shadow.bmp", 0.5, 0.15668203);
+    result.endAssetType();
+
+    result.beginAssetType(.Tree);
+    _ = result.addBitmapAsset("test2/tree00.bmp", 0.49382716, 0.29565218);
+    result.endAssetType();
+
+    result.beginAssetType(.Sword);
+    _ = result.addBitmapAsset("test2/rock03.bmp", 0.5, 0.65625);
+    result.endAssetType();
+
+    result.beginAssetType(.Grass);
+    _ = result.addBitmapAsset("test2/grass00.bmp", null, null);
+    _ = result.addBitmapAsset("test2/grass01.bmp", null, null);
+    result.endAssetType();
+
+    result.beginAssetType(.Stone);
+    _ = result.addBitmapAsset("test2/ground00.bmp", null, null);
+    _ = result.addBitmapAsset("test2/ground01.bmp", null, null);
+    _ = result.addBitmapAsset("test2/ground02.bmp", null, null);
+    _ = result.addBitmapAsset("test2/ground03.bmp", null, null);
+    result.endAssetType();
+
+    result.beginAssetType(.Tuft);
+    _ = result.addBitmapAsset("test2/tuft00.bmp", null, null);
+    _ = result.addBitmapAsset("test2/tuft01.bmp", null, null);
+    _ = result.addBitmapAsset("test2/tuft02.bmp", null, null);
+    result.endAssetType();
+
+    writeHHA("test2.hha", &result, allocator) catch unreachable;
+}
+
+fn writeSounds(allocator: std.mem.Allocator) void {
+    var result = Assets.init();
+
     result.beginAssetType(.Bloop);
     _ = result.addSoundAsset("test3/bloop_00.wav");
     _ = result.addSoundAsset("test3/bloop_01.wav");
@@ -583,7 +611,6 @@ pub fn main() anyerror!void {
     const one_music_chunk = 2 * 48000;
     const total_music_sample_count = 7468095;
     var first_sample_index: u32 = 0;
-    var last_music: ?SoundId = null;
     while (first_sample_index < total_music_sample_count) : (first_sample_index += one_music_chunk) {
         var sample_count = total_music_sample_count - first_sample_index;
         if (sample_count > one_music_chunk) {
@@ -591,31 +618,30 @@ pub fn main() anyerror!void {
         }
 
         const this_music = result.addSoundSectionAsset("test3/music_test.wav", first_sample_index, sample_count);
-        if (last_music) |last| {
-            if (this_music) |this| {
-                result.assets[last.value].info.sound.next_id_to_play = this;
-            }
+        if (this_music) |this| {
+            result.assets[this.value].info.sound.chain = .Advance;
         }
-
-        last_music = this_music;
     }
     result.endAssetType();
 
-    result.beginAssetType(.Glide);
+    result.beginAssetType(.Puhp);
     _ = result.addSoundAsset("test3/puhp_00.wav");
     _ = result.addSoundAsset("test3/puhp_01.wav");
     result.endAssetType();
 
+    writeHHA("test3.hha", &result, allocator) catch unreachable;
+}
+
+fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator) !void {
     // Open or create a file.
     var opt_out: ?std.fs.File = null;
-    const file_path = "test.hha";
-    if (std.fs.cwd().openFile(file_path, .{ .mode = .write_only })) |file| {
+    if (std.fs.cwd().openFile(file_name, .{ .mode = .write_only })) |file| {
         opt_out = file;
     } else |err| {
-        std.debug.print("Unable to open '{s}': {s}", .{ file_path, @errorName(err) });
+        std.debug.print("Unable to open '{s}': {s}", .{ file_name, @errorName(err) });
 
-        opt_out = std.fs.cwd().createFile(file_path, .{}) catch |create_err| {
-            std.debug.print("Unable to create '{s}': {s}", .{ file_path, @errorName(create_err) });
+        opt_out = std.fs.cwd().createFile(file_name, .{}) catch |create_err| {
+            std.debug.print("Unable to create '{s}': {s}", .{ file_name, @errorName(create_err) });
             std.process.exit(1);
         };
     }
@@ -694,10 +720,6 @@ pub fn main() anyerror!void {
         try out.seekTo(header.assets);
         bytes_written += try out.write(std.mem.asBytes(&result.assets)[0..asset_array_size]);
 
-        if (gpa.detectLeaks()) {
-            std.log.debug("Memory leaks detected.\n", .{});
-        }
-
-        std.debug.print("Bytes written: {d}", .{ bytes_written });
+        std.debug.print("Bytes written: {s} {d}\n", .{ file_name, bytes_written });
     }
 }

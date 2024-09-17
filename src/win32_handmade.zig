@@ -155,7 +155,7 @@ pub inline fn safeTruncateI64(value: i64) u32 {
 fn getAllFilesOfTypeBegin(file_extension: [*:0]const u8) callconv(.C) shared.PlatformFileGroup {
     _ = file_extension;
 
-    return shared.PlatformFileGroup{ .file_count = 1, .data = undefined };
+    return shared.PlatformFileGroup{ .file_count = 3, .data = undefined };
 }
 
 fn getAllFilesOfTypeEnd(file_group: shared.PlatformFileGroup) callconv(.C) void {
@@ -169,9 +169,14 @@ const Win32PlatformFileHandle = extern struct {
 
 fn openFile(file_group: shared.PlatformFileGroup, file_index: u32) callconv(.C) *shared.PlatformFileHandle {
     _ = file_group;
-    _ = file_index;
 
-    const file_name = "test.hha";
+    const file_name = switch (file_index) {
+        0 => "test1.hha",
+        1 => "test2.hha",
+        2 => "test3.hha",
+        else => "",
+    };
+
     var result: *Win32PlatformFileHandle = undefined;
 
     if (win32.VirtualAlloc(

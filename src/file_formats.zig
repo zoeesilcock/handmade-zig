@@ -45,10 +45,16 @@ pub const HHABitmap = extern struct {
     alignment_percentage: [2]f32,
 };
 
+pub const HHASoundChain = enum(u32) {
+    None,
+    Loop,
+    Advance,
+};
+
 pub const HHASound = extern struct {
     sample_count: u32,
     channel_count: u32,
-    next_id_to_play: SoundId,
+    chain: HHASoundChain,
 };
 
 pub const BitmapId = extern struct {

@@ -143,8 +143,8 @@ pub const AudioState = struct {
                 while (total_chunks_to_mix > 0 and !sound_finished) {
                     const opt_loaded_sound = assets.getSound(playing_sound.id);
                     if (opt_loaded_sound) |loaded_sound| {
-                        const info = assets.getSoundInfo(playing_sound.id);
-                        assets.prefetchSound(info.next_id_to_play);
+                        const next_sound_in_chain = assets.getNextSoundInChain(playing_sound.id);
+                        assets.prefetchSound(next_sound_in_chain);
 
                         const volume = playing_sound.current_volume;
                         const volume_velocity = playing_sound.current_volume_velocity.scaledTo(seconds_per_sample);
@@ -290,8 +290,8 @@ pub const AudioState = struct {
                         total_chunks_to_mix -= chunks_to_mix;
 
                         if (chunks_to_mix == chunks_remaining_in_sound) {
-                            if (info.next_id_to_play.isValid()) {
-                                playing_sound.id = info.next_id_to_play;
+                            if (next_sound_in_chain) |next_sound| {
+                                playing_sound.id = next_sound;
 
                                 // TODO: This assertion fires, but everything seems to work without it.
                                 // std.debug.assert(playing_sound.samples_played >= @as(f32, @floatFromInt(loaded_sound.sample_count)));

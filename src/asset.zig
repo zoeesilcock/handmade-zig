@@ -73,6 +73,7 @@ const AssetFile = struct {
     header: HHAHeader,
     asset_type_array: [*]HHAAssetType,
     tag_base: u32,
+    asset_base: u32,
 };
 
 pub const Assets = struct {
@@ -104,8 +105,10 @@ pub const Assets = struct {
 
         arena.makeSubArena(&result.arena, memory_size, null);
 
-        result.tag_count = 0;
-        result.asset_count = 0;
+        result.tag_range[@intFromEnum(AssetTagId.FacingDirection)] = shared.TAU32;
+
+        result.tag_count = 1;
+        result.asset_count = 1;
 
         // Load asset headers.
         {
@@ -121,6 +124,7 @@ pub const Assets = struct {
 
                 const file_handle = shared.platform.openFile(file_group, file_index);
                 file[0].tag_base = result.tag_count;
+                file[0].asset_base = result.asset_count;
                 file[0].handle = file_handle;
 
                 shared.platform.readDataFromFile(file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
@@ -143,8 +147,10 @@ pub const Assets = struct {
                 }
 
                 if (shared.platform.noFileErrors(file[0].handle)) {
-                    result.tag_count += file[0].header.tag_count;
-                    result.asset_count += file[0].header.asset_count;
+                    // The first asset and tag slot in every HHA is a null,
+                    // so we don't count it as something we will need space for.
+                    result.tag_count += (file[0].header.tag_count - 1);
+                    result.asset_count += (file[0].header.asset_count - 1);
                 } else {
                     std.debug.assert(true);
                 }
@@ -155,16 +161,19 @@ pub const Assets = struct {
         result.slots = arena.pushArray(result.asset_count, AssetSlot);
         result.tags = arena.pushArray(result.tag_count, HHATag);
 
+        shared.zeroStruct(HHATag, @ptrCast(result.tags));
+
         // Load tags.
         {
             var file_index: u32 = 0;
             while (file_index < result.file_count) : (file_index += 1) {
                 const file: [*]AssetFile = result.files + file_index;
                 if (shared.platform.noFileErrors(file[0].handle)) {
-                    const tag_array_size = @sizeOf(HHATag) * file[0].header.tag_count;
+                    // Skip the first tag, since it is null.
+                    const tag_array_size = @sizeOf(HHATag) * (file[0].header.tag_count - 1);
                     shared.platform.readDataFromFile(
                         file[0].handle,
-                        file[0].header.tags,
+                        file[0].header.tags + @sizeOf(HHATag),
                         tag_array_size,
                         result.tags + file[0].tag_base,
                     );
@@ -173,6 +182,8 @@ pub const Assets = struct {
         }
 
         var asset_count: u32 = 0;
+        shared.zeroStruct(Asset, @ptrCast(result.assets + asset_count));
+        asset_count += 1;
 
         // Load assets.
         var dest_type_id: u32 = 0;
@@ -215,8 +226,13 @@ pub const Assets = struct {
 
                                 asset[0].file_index = file_index;
                                 asset[0].hha = hha_asset[0];
-                                asset[0].hha.first_tag_index += file[0].tag_base;
-                                asset[0].hha.one_past_last_tag_index += file[0].tag_base;
+
+                                if (asset[0].hha.first_tag_index == 0) {
+                                    asset[0].hha.one_past_last_tag_index = 0;
+                                } else {
+                                    asset[0].hha.first_tag_index += (file[0].tag_base - 1);
+                                    asset[0].hha.one_past_last_tag_index += (file[0].tag_base - 1);
+                                }
                             }
                         }
                     }
@@ -485,6 +501,23 @@ pub const Assets = struct {
                 }
             },
             AssetSlotType.bitmap => {},
+        }
+
+        return result;
+    }
+
+    pub fn getNextSoundInChain(self: *Assets, id: SoundId) ?SoundId {
+        var result: ?SoundId = null;
+
+        const info = self.getSoundInfo(id);
+        switch (info.chain) {
+            .None => {},
+            .Advance => {
+                result = SoundId{ .value = id.value + 1 };
+            },
+            .Loop => {
+                result = id;
+            },
         }
 
         return result;
