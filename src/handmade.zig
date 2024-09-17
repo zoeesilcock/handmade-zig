@@ -13,14 +13,15 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
+/// * Flush all thread queues before reloading DLL.
+///
 /// * Audio.
-///     * Sound effect triggers.
-///     * Ambient sounds.
-///     * Music.
+///     * Fix clicking bug at end of samples.
 ///
 /// * Asset streaming.
-///     * File format.
 ///     * Memory management.
+///
+/// * Particle system.
 ///
 /// * Rendering.
 ///     * Straighten out all coordinate systems!
@@ -80,7 +81,6 @@ const std = @import("std");
 ///
 /// * Animation, should lead into rendering.
 ///     * Skeletal animation.
-///     * Particle system.
 ///
 /// Production:
 ///
@@ -95,17 +95,16 @@ const Vector3 = math.Vector3;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const Color3 = math.Color3;
-const LoadedBitmap = asset.LoadedBitmap;
 const State = shared.State;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
-const RenderGroupEntry = render.RenderGroupEntry;
 const RenderGroup = render.RenderGroup;
 const Assets = asset.Assets;
 const AssetTypeId = asset.AssetTypeId;
-const HeroBitmaps = asset.HeroBitmaps;
 const AssetTagId = asset_type_id.AssetTagId;
+const LoadedBitmap = asset.LoadedBitmap;
+const Particle = shared.Particle;
 
 pub export fn updateAndRender(
     platform: shared.Platform,
@@ -132,7 +131,7 @@ pub export fn updateAndRender(
     if (!state.is_initialized) {
         state.* = State{
             .camera_position = WorldPosition.zero(),
-            .general_entropy = random.Series.seed(1234),
+            .effects_entropy = random.Series.seed(1234),
             .test_diffuse = undefined,
             .test_normal = undefined,
         };
@@ -337,9 +336,9 @@ pub export fn updateAndRender(
             transient_state,
         );
 
-        if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
-            state.music = music;
-        }
+        // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
+        //     state.music = music;
+        // }
 
         transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
@@ -403,12 +402,12 @@ pub export fn updateAndRender(
     }
 
     // Handle input.
-    // {
-    //     var music_volume = Vector2.zero();
-    //     _ = music_volume.setY(math.safeRatio0(@as(f32, @floatFromInt(input.mouse_x)), @as(f32, @floatFromInt(buffer.width))));
-    //     _ = music_volume.setX(1.0 - music_volume.y());
-    //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
-    // }
+    {
+        var music_volume = Vector2.zero();
+        _ = music_volume.setY(math.safeRatio0(@as(f32, @floatFromInt(input.mouse_x)), @as(f32, @floatFromInt(buffer.width))));
+        _ = music_volume.setX(1.0 - music_volume.y());
+        state.audio_state.changeVolume(state.music, 0.01, music_volume);
+    }
     for (&input.controllers, 0..) |controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
         controlled_hero.movement_direction = Vector2.zero();
@@ -671,7 +670,7 @@ pub export fn updateAndRender(
                                         );
                                         addCollisionRule(state, sword.storage_index, entity.storage_index, false);
                                         _ = state.audio_state.playSound(
-                                            transient_state.assets.getRandomSound(.Bloop, &state.general_entropy),
+                                            transient_state.assets.getRandomSound(.Bloop, &state.effects_entropy),
                                         );
                                     }
                                 }
@@ -769,6 +768,60 @@ pub export fn updateAndRender(
                     render_group.pushBitmapId(hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
 
                     drawHitPoints(entity, render_group);
+
+                    // Particle system test.
+                    var particle_spawn_index: u32 = 0;
+                    while (particle_spawn_index < 2) : (particle_spawn_index += 1) {
+                        const particle: *Particle = &state.particles[state.next_particle];
+
+                        state.next_particle += 1;
+                        if (state.next_particle >= state.particles.len) {
+                            state.next_particle = 0;
+                        }
+
+                        particle.position = Vector3.new(
+                            state.effects_entropy.randomFloatBetween(-0.25, 0.25),
+                            0,
+                            0,
+                        );
+                        particle.velocity = Vector3.new(
+                            state.effects_entropy.randomFloatBetween(-0.5, 0.5),
+                            state.effects_entropy.randomFloatBetween(0.7, 1),
+                            0,
+                        );
+                        particle.color = Color.new(
+                            state.effects_entropy.randomFloatBetween(0.75, 1),
+                            state.effects_entropy.randomFloatBetween(0.75, 1),
+                            state.effects_entropy.randomFloatBetween(0.75, 1),
+                            1,
+                        );
+                        particle.color_velocity = Color.new(0, 0, 0, -0.5);
+                    }
+
+                    render_group.global_alpha = 1;
+                    render_group.transform.offset_position = Vector3.zero();
+
+                    var particle_index: u32 = 0;
+                    while (particle_index < state.particles.len) : (particle_index += 1) {
+                        const particle: *Particle = &state.particles[particle_index];
+
+                        // Simulate particle.
+                        particle.position = particle.position.plus(particle.velocity.scaledTo(input.frame_delta_time));
+                        particle.color = particle.color.plus(particle.color_velocity.scaledTo(input.frame_delta_time));
+
+                        var color = particle.color.clamp01();
+                        if (particle.color.a() > 0.9) {
+                            _ = color.setA(0.9 * math.clamp01MapToRange(1, 0.9, color.a()));
+                        }
+
+                        // Render particle.
+                        render_group.pushBitmapId(
+                            transient_state.assets.getFirstBitmap(.Head),
+                            1,
+                            particle.position,
+                            color,
+                        );
+                    }
                 },
                 .Sword => {
                     render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 0.25, Vector3.zero(), shadow_color);
@@ -1534,4 +1587,3 @@ fn makePyramidNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
         row += @as(usize, @intCast(bitmap.pitch));
     }
 }
-

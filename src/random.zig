@@ -36,7 +36,7 @@ pub const Series = struct {
     }
 
     pub fn randomFloatBetween(self: *Series, min: f32, max: f32) f32 {
-        return math.lerp(min, max, self.randomUnilateral());
+        return math.lerpf(min, max, self.randomUnilateral());
     }
 
     pub fn randomIntBetween(self: *Series, min: i32, max: i32) i32 {

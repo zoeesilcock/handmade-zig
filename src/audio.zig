@@ -71,20 +71,22 @@ pub const AudioState = struct {
 
     pub fn changeVolume(
         self: *AudioState,
-        sound: *PlayingSound,
+        opt_sound: ?*PlayingSound,
         fade_duration_in_seconds: f32,
         volume: Vector2,
     ) void {
         _ = self;
 
-        if (fade_duration_in_seconds <= 0) {
-            sound.target_volume = volume;
-            sound.current_volume = volume;
-        } else {
-            const one_over_fade = 1.0 / fade_duration_in_seconds;
+        if (opt_sound) |sound| {
+            if (fade_duration_in_seconds <= 0) {
+                sound.target_volume = volume;
+                sound.current_volume = volume;
+            } else {
+                const one_over_fade = 1.0 / fade_duration_in_seconds;
 
-            sound.target_volume = volume;
-            sound.current_volume_velocity = sound.target_volume.minus(sound.current_volume).scaledTo(one_over_fade);
+                sound.target_volume = volume;
+                sound.current_volume_velocity = sound.target_volume.minus(sound.current_volume).scaledTo(one_over_fade);
+            }
         }
     }
 

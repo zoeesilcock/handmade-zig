@@ -501,13 +501,23 @@ pub const State = struct {
     audio_state: audio.AudioState = undefined,
     music: *PlayingSound = undefined,
 
-    general_entropy: random.Series,
+    effects_entropy: random.Series,
+
+    next_particle: u32 = 0,
+    particles: [256]Particle = [1]Particle{Particle{}} ** 256,
 };
 
 pub const HeroBitmapIds = struct {
     head: ?BitmapId,
     torso: ?BitmapId,
     cape: ?BitmapId,
+};
+
+pub const Particle = struct {
+    position: Vector3 = Vector3.zero(),
+    velocity: Vector3 = Vector3.zero(),
+    color: Color = Color.white(),
+    color_velocity: Color = Color.zero(),
 };
 
 pub const TaskWithMemory = struct {
