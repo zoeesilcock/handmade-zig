@@ -505,7 +505,10 @@ pub const State = struct {
 
     next_particle: u32 = 0,
     particles: [256]Particle = [1]Particle{Particle{}} ** 256,
+    particle_cels: [PARTICLE_CEL_DIM][PARTICLE_CEL_DIM]ParticleCel = undefined,
 };
+
+pub const PARTICLE_CEL_DIM = 32;
 
 pub const HeroBitmapIds = struct {
     head: ?BitmapId,
@@ -513,11 +516,18 @@ pub const HeroBitmapIds = struct {
     cape: ?BitmapId,
 };
 
+pub const ParticleCel = struct {
+    density: f32 = 0,
+    velocity_times_density: Vector3 = Vector3.zero(),
+};
+
 pub const Particle = struct {
     position: Vector3 = Vector3.zero(),
     velocity: Vector3 = Vector3.zero(),
+    acceleration: Vector3 = Vector3.zero(),
     color: Color = Color.white(),
     color_velocity: Color = Color.zero(),
+    bitmap_id: BitmapId = undefined,
 };
 
 pub const TaskWithMemory = struct {
