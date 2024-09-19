@@ -14,6 +14,7 @@ const Vector3 = math.Vector3;
 const Color = math.Color;
 const TransientState = shared.TransientState;
 const MemoryArena = shared.MemoryArena;
+const MemoryIndex = shared.MemoryIndex;
 const Platform = shared.Platform;
 const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
@@ -48,6 +49,17 @@ const AssetState = enum(u32) {
     Queued,
     Loaded,
     Locked,
+    StateMask = 0xFFF,
+
+    // All of this could be avoided by using the tagged union on AssetSlot to know which asset type it is.
+    // But I have opted to use the same approach as Casey to avoid issues down the line.
+    Sound = 0x1000,
+    Bitmap = 0x2000,
+    TypeMask = 0xF000,
+
+    pub fn toInt(self: AssetState) u32 {
+        return @intFromEnum(self);
+    }
 };
 
 const AssetGroup = struct {
@@ -61,11 +73,32 @@ const AssetSlotType = enum {
 };
 
 const AssetSlot = struct {
-    state: AssetState = .Unloaded,
+    state: u32 = 0,
     data: union(AssetSlotType) {
         bitmap: LoadedBitmap,
         sound: LoadedSound,
     },
+
+    pub fn getState(self: *AssetSlot) AssetState {
+        return @enumFromInt(self.state & @intFromEnum(AssetState.StateMask));
+    }
+
+    pub fn getType(self: *AssetSlot) AssetState {
+        return @enumFromInt(self.state & @intFromEnum(AssetState.TypeMask));
+    }
+};
+
+const AssetMemoryHeader = extern struct {
+    next: *AssetMemoryHeader,
+    previous: *AssetMemoryHeader,
+    slot_index: u32,
+    reserved: u32,
+};
+
+const AssetMemorySize = struct {
+    total: u32 = 0,
+    data: u32 = 0,
+    section: u32 = 0,
 };
 
 const AssetFile = struct {
@@ -79,6 +112,10 @@ const AssetFile = struct {
 pub const Assets = struct {
     transient_state: *TransientState,
     arena: MemoryArena,
+
+    target_memory_used: u64,
+    total_memory_used: u64,
+    loaded_asset_sentinel: AssetMemoryHeader,
 
     asset_count: u32,
     assets: [*]Asset,
@@ -95,15 +132,20 @@ pub const Assets = struct {
 
     pub fn allocate(
         arena: *MemoryArena,
-        memory_size: shared.MemoryIndex,
+        memory_size: MemoryIndex,
         transient_state: *shared.TransientState,
     ) *Assets {
         var result = arena.pushStruct(Assets);
 
         result.transient_state = transient_state;
         result.arena = undefined;
-
         arena.makeSubArena(&result.arena, memory_size, null);
+
+        result.total_memory_used = 0;
+        result.target_memory_used = memory_size;
+
+        result.loaded_asset_sentinel.next = &result.loaded_asset_sentinel;
+        result.loaded_asset_sentinel.previous = &result.loaded_asset_sentinel;
 
         result.tag_range[@intFromEnum(AssetTagId.FacingDirection)] = shared.TAU32;
 
@@ -247,6 +289,107 @@ pub const Assets = struct {
         return result;
     }
 
+    fn acquireAssetMemory(self: *Assets, size: MemoryIndex) ?*anyopaque {
+        const result = shared.platform.allocateMemory(size);
+
+        if (result != null) {
+            self.total_memory_used += size;
+        }
+
+        return result;
+    }
+
+    fn releaseAssetMemory(self: *Assets, size: MemoryIndex, memory: ?*anyopaque) void {
+        if (memory != null) {
+            self.total_memory_used -= size;
+        }
+
+        shared.platform.deallocateMemory(memory);
+    }
+
+    pub fn evictAssetsAsNecessary(self: *Assets) void {
+        while (self.total_memory_used > self.target_memory_used) {
+            const opt_header: ?*AssetMemoryHeader = self.loaded_asset_sentinel.previous;
+
+            if (opt_header) |header| {
+                if (header != &self.loaded_asset_sentinel) {
+                    self.evictAsset(header);
+                }
+            } else {
+                unreachable;
+            }
+        }
+    }
+
+    fn evictAsset(self: *Assets, header: *AssetMemoryHeader) void {
+        const slot_index = header.slot_index;
+        const slot: *AssetSlot = &self.slots[slot_index];
+
+        std.debug.assert(slot.state == AssetState.Loaded.toInt());
+
+        const size = self.getSizeOfAsset(slot.getType(), slot_index);
+        slot.state = AssetState.Unloaded.toInt();
+
+        self.removeAssetHeaderFromList(header);
+
+        switch (slot.getType()) {
+            AssetState.Bitmap => {
+                self.releaseAssetMemory(size.total, slot.data.bitmap.memory);
+            },
+            AssetState.Sound => {
+                self.releaseAssetMemory(size.total, @ptrCast(slot.data.sound.samples[0]));
+            },
+            else => unreachable,
+        }
+    }
+
+    fn getSizeOfAsset(self: *Assets, asset_type: AssetState, slot_index: u32) AssetMemorySize {
+        var result = AssetMemorySize{};
+        const asset = &self.assets[slot_index];
+
+        switch (asset_type) {
+            AssetState.Bitmap => {
+                const info = asset.hha.info.bitmap;
+
+                const width = shared.safeTruncateUInt32ToUInt16(info.dim[0]);
+                const height = shared.safeTruncateUInt32ToUInt16(info.dim[1]);
+                result.section = 4 * width;
+                result.data = result.section * height;
+            },
+            AssetState.Sound => {
+                const info = asset.hha.info.sound;
+
+                result.section = info.sample_count * @sizeOf(i16);
+                result.data = info.channel_count * result.section;
+            },
+            else => unreachable,
+        }
+
+        result.data = shared.align8(result.data);
+        result.total = result.data + @sizeOf(AssetMemoryHeader);
+
+        return result;
+    }
+
+    fn addAssetHeaderToList(self: *Assets, slot_index: u32, memory: *anyopaque, size: AssetMemorySize) void {
+        const header: *AssetMemoryHeader = @ptrCast(@alignCast(@as([*]u8, @ptrCast(memory)) + size.data));
+        const sentinel = &self.loaded_asset_sentinel;
+
+        header.slot_index = slot_index;
+
+        header.previous = sentinel;
+        header.next = sentinel.next;
+
+        header.next.previous = header;
+        header.previous.next = header;
+    }
+
+    fn removeAssetHeaderFromList(self: *Assets, header: *AssetMemoryHeader) void {
+        _ = self;
+        header.previous.next = header.next;
+        header.next.previous = header.previous;
+    }
+
     fn getFileHandleFor(self: *Assets, file_index: u32) *shared.PlatformFileHandle {
         std.debug.assert(file_index < self.file_count);
         return self.files[file_index].handle;
@@ -334,40 +477,44 @@ pub const Assets = struct {
             var slot = &self.slots[id.value];
 
             if (id.isValid() and @cmpxchgStrong(
-                AssetState,
+                u32,
                 &slot.state,
-                .Unloaded,
-                .Queued,
+                AssetState.Unloaded.toInt(),
+                AssetState.Queued.toInt(),
                 .seq_cst,
                 .seq_cst,
             ) == null) {
                 if (handmade.beginTaskWithMemory(self.transient_state)) |task| {
                     const asset = &self.assets[id.value];
                     const info = asset.hha.info.bitmap;
-
                     var bitmap: *LoadedBitmap = &slot.data.bitmap;
 
                     bitmap.alignment_percentage = Vector2.new(info.alignment_percentage[0], info.alignment_percentage[1]);
                     bitmap.width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1]));
                     bitmap.width = shared.safeTruncateUInt32ToUInt16(info.dim[0]);
                     bitmap.height = shared.safeTruncateUInt32ToUInt16(info.dim[1]);
-                    bitmap.pitch = shared.safeTruncateUInt32ToUInt16(4 * info.dim[0]);
 
-                    const memory_size: usize = @as(usize, @intCast(bitmap.pitch)) * @as(usize, @intCast(bitmap.height));
-                    bitmap.memory = @ptrCast(@alignCast(self.arena.pushSize(memory_size, null)));
+                    const size: AssetMemorySize = self.getSizeOfAsset(.Bitmap, id.value);
+                    bitmap.pitch = shared.safeTruncateUInt32ToUInt16(size.section);
 
-                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
-                    work.task = task;
-                    work.slot = slot;
-                    work.handle = self.getFileHandleFor(asset.file_index);
-                    work.offset = asset.hha.data_offset;
-                    work.size = memory_size;
-                    work.destination = @ptrCast(bitmap.memory);
-                    work.final_state = .Loaded;
+                    if (self.acquireAssetMemory(size.total)) |memory| {
+                        bitmap.memory = @ptrCast(memory);
 
-                    shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
+                        var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+                        work.task = task;
+                        work.slot = slot;
+                        work.handle = self.getFileHandleFor(asset.file_index);
+                        work.offset = asset.hha.data_offset;
+                        work.size = size.data;
+                        work.destination = @ptrCast(bitmap.memory);
+                        work.final_state = AssetState.Loaded.toInt() | AssetState.Bitmap.toInt();
+
+                        self.addAssetHeaderToList(id.value, memory, size);
+
+                        shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
+                    }
                 } else {
-                    @atomicStore(AssetState, &slot.state, .Unloaded, .release);
+                    @atomicStore(u32, &slot.state, AssetState.Unloaded.toInt(), .release);
                 }
             }
         }
@@ -377,7 +524,7 @@ pub const Assets = struct {
         var result: ?*LoadedBitmap = null;
         var slot = &self.slots[id.value];
 
-        if (@intFromEnum(slot.state) >= @intFromEnum(AssetState.Loaded)) {
+        if (slot.state >= AssetState.Loaded.toInt()) {
             @fence(.acquire);
             result = &slot.data.bitmap;
         }
@@ -440,17 +587,16 @@ pub const Assets = struct {
             var slot = &self.slots[id.value];
 
             if (id.isValid() and @cmpxchgStrong(
-                    AssetState,
+                    u32,
                     &slot.state,
-                    .Unloaded,
-                    .Queued,
+                    AssetState.Unloaded.toInt(),
+                    AssetState.Queued.toInt(),
                     .seq_cst,
                     .seq_cst,
             ) == null) {
                 if (handmade.beginTaskWithMemory(self.transient_state)) |task| {
                     const asset = &self.assets[id.value];
                     const info = asset.hha.info.sound;
-
                     var sound: *LoadedSound = undefined;
                     switch (slot.data) {
                         AssetSlotType.sound => {
@@ -464,29 +610,33 @@ pub const Assets = struct {
 
                     sound.sample_count = info.sample_count;
                     sound.channel_count = info.channel_count;
-                    const channel_size: u32 = sound.sample_count * @sizeOf(i16);
-                    const memory_size: u32 = sound.channel_count * channel_size;
-                    const memory = self.arena.pushSize(memory_size, null);
 
-                    var sound_at: [*]i16 = @ptrCast(@alignCast(memory));
-                    var channel_index: u32 = 0;
-                    while (channel_index < sound.channel_count) : (channel_index += 1) {
-                        sound.samples[channel_index] = sound_at;
-                        sound_at += channel_size;
+                    const size = self.getSizeOfAsset(.Sound, id.value);
+                    const channel_size = size.section;
+
+                    if (self.acquireAssetMemory(size.total)) |memory| {
+                        var sound_at: [*]i16 = @ptrCast(@alignCast(memory));
+                        var channel_index: u32 = 0;
+                        while (channel_index < sound.channel_count) : (channel_index += 1) {
+                            sound.samples[channel_index] = sound_at;
+                            sound_at += channel_size;
+                        }
+
+                        var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+                        work.task = task;
+                        work.slot = slot;
+                        work.handle = self.getFileHandleFor(asset.file_index);
+                        work.offset = asset.hha.data_offset;
+                        work.size = size.data;
+                        work.destination = memory;
+                        work.final_state = AssetState.Loaded.toInt() | AssetState.Sound.toInt();
+
+                        self.addAssetHeaderToList(id.value, memory, size);
+
+                        shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                     }
-
-                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
-                    work.task = task;
-                    work.slot = slot;
-                    work.handle = self.getFileHandleFor(asset.file_index);
-                    work.offset = asset.hha.data_offset;
-                    work.size = memory_size;
-                    work.destination = memory;
-                    work.final_state = .Loaded;
-
-                    shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
-                    @atomicStore(AssetState, &slot.state, .Unloaded, .release);
+                    @atomicStore(u32, &slot.state, AssetState.Unloaded.toInt(), .release);
                 }
             }
         }
@@ -498,7 +648,7 @@ pub const Assets = struct {
 
         switch (slot.data) {
             AssetSlotType.sound => {
-                if (@intFromEnum(slot.state) >= @intFromEnum(AssetState.Loaded)) {
+                if (slot.state >= AssetState.Loaded.toInt()) {
                     @fence(.acquire);
                     result = &slot.data.sound;
                 }
@@ -595,7 +745,7 @@ const LoadAssetWork = struct {
     size: u64,
     destination: *anyopaque,
 
-    final_state: AssetState,
+    final_state: u32,
 };
 
 fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
@@ -605,9 +755,11 @@ fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(
 
     shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);
 
-    if (shared.platform.noFileErrors(work.handle)) {
-        work.slot.state = work.final_state;
+    if (!shared.platform.noFileErrors(work.handle)) {
+        shared.zeroSize(work.size, @ptrCast(work.destination));
     }
+
+    work.slot.state = work.final_state;
 
     handmade.endTaskWithMemory(work.task);
 }

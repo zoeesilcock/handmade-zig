@@ -107,6 +107,12 @@ pub inline fn safeTruncateToUInt16(value: i32) u16 {
     return @as(u16, @intCast(value));
 }
 
+pub inline fn safeTruncateToInt16(value: i32) i16 {
+    std.debug.assert(value <= 32767);
+    std.debug.assert(value >= -32768);
+    return @as(u16, @intCast(value));
+}
+
 // Platform.
 pub const DebugReadFileResult = extern struct {
     contents: *anyopaque = undefined,
@@ -147,12 +153,15 @@ pub const PlatformFileGroup = extern struct {
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
-const getAllFilesOfTypeBegin: type = fn (file_extension: [*:0]const u8) callconv(.C) *PlatformFileGroup;
-const getAllFilesOfTypeEnd: type = fn (file_group: *PlatformFileGroup) callconv(.C) void;
-const openNextFile: type = fn (file_group: *PlatformFileGroup) callconv(.C) *PlatformFileHandle;
-const readDataFromFile: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void;
-const noFileErrors: type = fn (file_handle: *PlatformFileHandle) callconv(.C) bool;
-const fileError: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
+const getAllFilesOfTypeBeginType: type = fn (file_extension: [*:0]const u8) callconv(.C) *PlatformFileGroup;
+const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.C) void;
+const openNextFileType: type = fn (file_group: *PlatformFileGroup) callconv(.C) *PlatformFileHandle;
+const readDataFromFileType: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void;
+const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.C) bool;
+const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
+
+const allocateMemoryType: type = fn (size: MemoryIndex) callconv(.C) ?*anyopaque;
+const deallocateMemoryType: type = fn (memory: ?*anyopaque) callconv(.C) void;
 
 const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
 const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;
@@ -166,12 +175,15 @@ pub const Platform = extern struct {
     addQueueEntry: *const addQueueEntryType = undefined,
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
 
-    getAllFilesOfTypeBegin: *const getAllFilesOfTypeBegin = undefined,
-    getAllFilesOfTypeEnd: *const getAllFilesOfTypeEnd = undefined,
-    openNextFile: *const openNextFile = undefined,
-    readDataFromFile: *const readDataFromFile = undefined,
-    noFileErrors: *const noFileErrors = defaultNoFileErrors,
-    fileError: *const fileError = undefined,
+    getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
+    getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
+    openNextFile: *const openNextFileType = undefined,
+    readDataFromFile: *const readDataFromFileType = undefined,
+    noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
+    fileError: *const fileErrorType = undefined,
+
+    allocateMemory: *const allocateMemoryType = undefined,
+    deallocateMemory: *const deallocateMemoryType = undefined,
 
     debugFreeFileMemory: *const debugFreeFileMemoryType = undefined,
     debugWriteEntireFile: *const debugWriteEntireFileType = undefined,

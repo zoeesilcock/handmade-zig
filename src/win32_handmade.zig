@@ -288,6 +288,21 @@ fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) ca
     file_handle.no_errors = false;
 }
 
+fn allocateMemory(size: shared.MemoryIndex) callconv(.C) ?*anyopaque {
+    return win32.VirtualAlloc(
+        null,
+        size,
+        win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+        win32.PAGE_READWRITE,
+    );
+}
+
+fn deallocateMemory(opt_memory: ?*anyopaque) callconv(.C) void {
+    if (opt_memory) |memory| {
+        _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
+    }
+}
+
 fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
     var result = shared.DebugReadFileResult{};
 
@@ -1481,6 +1496,9 @@ pub export fn wWinMain(
         .openNextFile = openNextFile,
         .readDataFromFile = readDataFromFile,
         .fileError = fileError,
+
+        .allocateMemory = allocateMemory,
+        .deallocateMemory = deallocateMemory,
 
         .debugReadEntireFile = debugReadEntireFile,
         .debugWriteEntireFile = debugWriteEntireFile,
