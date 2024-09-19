@@ -147,11 +147,6 @@ pub const Game = struct {
     getSoundSamples: *const @TypeOf(shared.getSoundSamplesStub) = undefined,
 };
 
-pub inline fn safeTruncateI64(value: i64) u32 {
-    std.debug.assert(value <= 0xFFFFFFFF);
-    return @as(u32, @intCast(value));
-}
-
 const Win32PlatformFileGroup = extern struct {
     platform_handle: shared.PlatformFileGroup,
     find_handle: win32.FindFileHandle,
@@ -262,7 +257,7 @@ fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, 
             },
         };
 
-        const file_size32 = safeTruncateI64(@intCast(size));
+        const file_size32 = shared.safeTruncateI64(@intCast(size));
 
         var bytes_read: u32 = undefined;
         const read_result = win32.ReadFile(
@@ -309,7 +304,7 @@ fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFi
     if (file_handle != win32.INVALID_HANDLE_VALUE) {
         var file_size: win32.LARGE_INTEGER = undefined;
         if (win32.GetFileSizeEx(file_handle, &file_size) != 0) {
-            const file_size32 = safeTruncateI64(file_size.QuadPart);
+            const file_size32 = shared.safeTruncateI64(file_size.QuadPart);
 
             if (win32.VirtualAlloc(
                 null,

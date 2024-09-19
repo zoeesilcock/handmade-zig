@@ -337,9 +337,9 @@ pub export fn updateAndRender(
             transient_state,
         );
 
-        // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
-        //     state.music = music;
-        // }
+        if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
+            state.music = music;
+        }
 
         transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
@@ -463,8 +463,8 @@ pub export fn updateAndRender(
 
     // Create draw buffer.
     var draw_buffer_ = LoadedBitmap{
-        .width = buffer.width,
-        .height = buffer.height,
+        .width = shared.safeTruncateToUInt16(buffer.width),
+        .height = shared.safeTruncateToUInt16(buffer.height),
         .pitch = @intCast(buffer.pitch),
         .memory = @ptrCast(buffer.memory),
     };
@@ -1540,11 +1540,12 @@ fn clearBitmap(bitmap: *LoadedBitmap) void {
 fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to_zero: bool) LoadedBitmap {
     const result = arena.pushStruct(LoadedBitmap);
 
-    result.width = width;
-    result.height = height;
+    result.width = shared.safeTruncateToUInt16(width);
+    result.height = shared.safeTruncateToUInt16(height);
     result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
 
-    const total_bitmap_size: u32 = @intCast(result.width * result.height * shared.BITMAP_BYTES_PER_PIXEL);
+    const total_bitmap_size: u32 =
+        @as(u32, @intCast(result.width)) * @as(u32, @intCast(result.height)) * shared.BITMAP_BYTES_PER_PIXEL;
     result.memory = @ptrCast(arena.pushSize(total_bitmap_size, 16));
 
     if (clear_to_zero) {

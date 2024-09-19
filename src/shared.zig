@@ -90,6 +90,23 @@ pub inline fn align16(value: u32) u32 {
     return (value + 15) & ~@as(u32, 15);
 }
 
+pub inline fn safeTruncateI64(value: i64) u32 {
+    std.debug.assert(value <= 0xFFFFFFFF);
+    return @as(u32, @intCast(value));
+}
+
+pub inline fn safeTruncateUInt32ToUInt16(value: u32) u16 {
+    std.debug.assert(value <= 65535);
+    std.debug.assert(value >= 0);
+    return @as(u16, @intCast(value));
+}
+
+pub inline fn safeTruncateToUInt16(value: i32) u16 {
+    std.debug.assert(value <= 65535);
+    std.debug.assert(value >= 0);
+    return @as(u16, @intCast(value));
+}
+
 // Platform.
 pub const DebugReadFileResult = extern struct {
     contents: *anyopaque = undefined,

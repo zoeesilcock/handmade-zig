@@ -43,7 +43,7 @@ pub const AssetVector = struct {
     e: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{0} ** ASSET_TYPE_ID_COUNT,
 };
 
-const AssetState = enum(u8) {
+const AssetState = enum(u32) {
     Unloaded,
     Queued,
     Loaded,
@@ -63,8 +63,8 @@ const AssetSlotType = enum {
 const AssetSlot = struct {
     state: AssetState = .Unloaded,
     data: union(AssetSlotType) {
-        bitmap: ?*LoadedBitmap,
-        sound: ?*LoadedSound,
+        bitmap: LoadedBitmap,
+        sound: LoadedSound,
     },
 };
 
@@ -331,9 +331,11 @@ pub const Assets = struct {
         opt_id: ?BitmapId,
     ) void {
         if (opt_id) |id| {
+            var slot = &self.slots[id.value];
+
             if (id.isValid() and @cmpxchgStrong(
                 AssetState,
-                &self.slots[id.value].state,
+                &slot.state,
                 .Unloaded,
                 .Queued,
                 .seq_cst,
@@ -343,32 +345,29 @@ pub const Assets = struct {
                     const asset = &self.assets[id.value];
                     const info = asset.hha.info.bitmap;
 
-                    var bitmap: *LoadedBitmap = self.arena.pushStruct(LoadedBitmap);
+                    var bitmap: *LoadedBitmap = &slot.data.bitmap;
 
                     bitmap.alignment_percentage = Vector2.new(info.alignment_percentage[0], info.alignment_percentage[1]);
                     bitmap.width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1]));
-                    bitmap.width = @intCast(info.dim[0]);
-                    bitmap.height = @intCast(info.dim[1]);
-                    bitmap.pitch = @intCast(4 * info.dim[0]);
+                    bitmap.width = shared.safeTruncateUInt32ToUInt16(info.dim[0]);
+                    bitmap.height = shared.safeTruncateUInt32ToUInt16(info.dim[1]);
+                    bitmap.pitch = shared.safeTruncateUInt32ToUInt16(4 * info.dim[0]);
 
-                    const memory_size: usize = @intCast(bitmap.pitch * bitmap.height);
+                    const memory_size: usize = @as(usize, @intCast(bitmap.pitch)) * @as(usize, @intCast(bitmap.height));
                     bitmap.memory = @ptrCast(@alignCast(self.arena.pushSize(memory_size, null)));
 
                     var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
                     work.task = task;
-                    work.slot = &self.slots[id.value];
+                    work.slot = slot;
                     work.handle = self.getFileHandleFor(asset.file_index);
                     work.offset = asset.hha.data_offset;
                     work.size = memory_size;
                     work.destination = @ptrCast(bitmap.memory);
                     work.final_state = .Loaded;
-                    work.slot.data = .{
-                        .bitmap = bitmap,
-                    };
 
                     shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
-                    @atomicStore(AssetState, &self.slots[id.value].state, .Unloaded, .release);
+                    @atomicStore(AssetState, &slot.state, .Unloaded, .release);
                 }
             }
         }
@@ -376,14 +375,11 @@ pub const Assets = struct {
 
     pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
         var result: ?*LoadedBitmap = null;
+        var slot = &self.slots[id.value];
 
-        const slot = self.slots[id.value];
-
-        if (slot.data.bitmap) |bitmap| {
-            if (@intFromEnum(slot.state) >= @intFromEnum(AssetState.Loaded)) {
-                @fence(.acquire);
-                result = bitmap;
-            }
+        if (@intFromEnum(slot.state) >= @intFromEnum(AssetState.Loaded)) {
+            @fence(.acquire);
+            result = &slot.data.bitmap;
         }
 
         return result;
@@ -441,9 +437,11 @@ pub const Assets = struct {
         opt_id: ?SoundId,
     ) void {
         if (opt_id) |id| {
+            var slot = &self.slots[id.value];
+
             if (id.isValid() and @cmpxchgStrong(
                     AssetState,
-                    &self.slots[id.value].state,
+                    &slot.state,
                     .Unloaded,
                     .Queued,
                     .seq_cst,
@@ -453,7 +451,17 @@ pub const Assets = struct {
                     const asset = &self.assets[id.value];
                     const info = asset.hha.info.sound;
 
-                    const sound = self.arena.pushStruct(LoadedSound);
+                    var sound: *LoadedSound = undefined;
+                    switch (slot.data) {
+                        AssetSlotType.sound => {
+                            sound = &slot.data.sound;
+                        },
+                        AssetSlotType.bitmap => {
+                            slot.data = .{ .sound = LoadedSound{} };
+                            sound = &slot.data.sound;
+                        },
+                    }
+
                     sound.sample_count = info.sample_count;
                     sound.channel_count = info.channel_count;
                     const channel_size: u32 = sound.sample_count * @sizeOf(i16);
@@ -469,19 +477,16 @@ pub const Assets = struct {
 
                     var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
                     work.task = task;
-                    work.slot = &self.slots[id.value];
+                    work.slot = slot;
                     work.handle = self.getFileHandleFor(asset.file_index);
                     work.offset = asset.hha.data_offset;
                     work.size = memory_size;
                     work.destination = memory;
                     work.final_state = .Loaded;
-                    work.slot.data = .{
-                        .sound = sound,
-                    };
 
                     shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
-                    @atomicStore(AssetState, &self.slots[id.value].state, .Unloaded, .release);
+                    @atomicStore(AssetState, &slot.state, .Unloaded, .release);
                 }
             }
         }
@@ -489,15 +494,13 @@ pub const Assets = struct {
 
     pub fn getSound(self: *Assets, id: SoundId) ?*LoadedSound {
         var result: ?*LoadedSound = null;
-        const slot = self.slots[id.value];
+        var slot = &self.slots[id.value];
 
         switch (slot.data) {
             AssetSlotType.sound => {
-                if (slot.data.sound) |sound| {
-                    if (@intFromEnum(slot.state) >= @intFromEnum(AssetState.Loaded)) {
-                        @fence(.acquire);
-                        result = sound;
-                    }
+                if (@intFromEnum(slot.state) >= @intFromEnum(AssetState.Loaded)) {
+                    @fence(.acquire);
+                    result = &slot.data.sound;
                 }
             },
             AssetSlotType.bitmap => {},
@@ -559,20 +562,28 @@ pub const Assets = struct {
     }
 };
 
+pub const WritableBitmap = struct {
+    pitch: i32 = 0,
+};
+
 pub const LoadedBitmap = extern struct {
+    memory: ?[*]void,
+
     alignment_percentage: Vector2 = Vector2.zero(),
     width_over_height: f32 = 0,
+    width: u16 = 0,
+    height: u16 = 0,
+    pitch: u16 = 0,
 
-    width: i32 = 0,
-    height: i32 = 0,
-    pitch: i32 = 0,
-    memory: ?[*]void,
+    pub fn getPitch(self: *LoadedSound) i16 {
+        return self.width;
+    }
 };
 
 pub const LoadedSound = struct {
-    sample_count: u32,
-    channel_count: u32,
-    samples: [2]?[*]i16,
+    samples: [2]?[*]i16 = undefined,
+    sample_count: u32 = undefined,
+    channel_count: u32 = undefined,
 };
 
 const LoadAssetWork = struct {
