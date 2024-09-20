@@ -15,11 +15,19 @@ const std = @import("std");
 ///
 /// * Flush all thread queues before reloading DLL.
 ///
-/// * Audio.
-///     * Fix clicking bug at end of samples.
-///
 /// * Asset streaming.
 ///     * Memory management.
+///
+/// * Debug code.
+///     * Fonts.
+///     * Logging.
+///     * Diagramming.
+///     * Switches, sliders etc.
+///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
+///     * Thread visualization.
+///
+/// * Audio.
+///     * Fix clicking bug at end of samples.
 ///
 /// * Particle system.
 ///
@@ -31,14 +39,6 @@ const std = @import("std");
 ///     * Particle systems.
 ///     * Lighting.
 ///     * Final optimization.
-///
-/// * Debug code.
-///     * Fonts.
-///     * Logging.
-///     * Diagramming.
-///     * Switches, sliders etc.
-///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
-///     * Thread visualization.
 ///
 /// Architecture exploration:
 ///
@@ -333,7 +333,7 @@ pub export fn updateAndRender(
 
         transient_state.assets = Assets.allocate(
             &transient_state.arena,
-            shared.megabytes(3),
+            shared.megabytes(4),
             transient_state,
         );
 
@@ -478,7 +478,12 @@ pub export fn updateAndRender(
 
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(transient_state.assets, &transient_state.arena, @intCast(shared.megabytes(4)));
+    var render_group = RenderGroup.allocate(
+        transient_state.assets,
+        &transient_state.arena,
+        @intCast(shared.megabytes(4)),
+        false,
+    );
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
@@ -1442,7 +1447,7 @@ fn fillGroundChunk(
         var half_dim = Vector2.new(width, height).scaledTo(0.5);
 
         const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-        var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0);
+        var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0, true);
         render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
         render_group.pushClear(Color.new(1, 0, 1, 1));
 

@@ -1163,7 +1163,7 @@ fn debugSyncDisplay(
 }
 
 fn handleDebugCycleCounters(memory: *shared.Memory) void {
-    if (INTERNAL) {
+    if (OUTPUT_TIMING) {
         win32.OutputDebugStringA("DEBUG CYCLE COUNTERS:\n");
         var total_cycles: u64 = 0;
 
