@@ -98,9 +98,21 @@ const AssetFile = struct {
     asset_base: u32,
 };
 
+const AssetMemoryBlockFlags = enum(u32) {
+    Used = 0x1,
+};
+
+const AssetMemoryBlock = struct {
+    previous: ?*AssetMemoryBlock,
+    next: ?*AssetMemoryBlock,
+    flags: u64,
+    size: MemoryIndex,
+};
+
 pub const Assets = struct {
     transient_state: *TransientState,
-    arena: MemoryArena,
+
+    memory_sentinel: AssetMemoryBlock,
 
     target_memory_used: u64,
     total_memory_used: u64,
@@ -125,8 +137,16 @@ pub const Assets = struct {
         var result = arena.pushStruct(Assets);
 
         result.transient_state = transient_state;
-        result.arena = undefined;
-        arena.makeSubArena(&result.arena, memory_size, null);
+        result.memory_sentinel = AssetMemoryBlock{
+            .flags = 0,
+            .size = 0,
+            .previous = null,
+            .next = null,
+        };
+        result.memory_sentinel.previous = &result.memory_sentinel;
+        result.memory_sentinel.next = &result.memory_sentinel;
+
+        _ = result.insertBlock(&result.memory_sentinel, memory_size, arena.pushSize(memory_size, null));
 
         result.total_memory_used = 0;
         result.target_memory_used = memory_size;
@@ -275,14 +295,86 @@ pub const Assets = struct {
         return result;
     }
 
-    fn acquireAssetMemory(self: *Assets, size: MemoryIndex) ?*anyopaque {
-        const result = shared.platform.allocateMemory(size);
+    fn insertBlock(_: *Assets, previous: *AssetMemoryBlock, size: u64, memory: *anyopaque) *AssetMemoryBlock {
+        std.debug.assert(size > @sizeOf(AssetMemoryBlock));
+        var block: *AssetMemoryBlock = @ptrCast(@alignCast(memory));
+        block.flags = 0;
+        block.size = size - @sizeOf(AssetMemoryBlock);
+        block.previous = previous;
+        block.next = previous.next;
+        block.previous.?.next = block;
+        block.next.?.previous = block;
+        return block;
+    }
 
-        if (result != null) {
-            self.total_memory_used += size;
+    fn findBlockForSize(self: *Assets, size: MemoryIndex) ?*AssetMemoryBlock {
+        var result: ?*AssetMemoryBlock = null;
+        var block = self.memory_sentinel.next;
+
+        while (block != null and block != &self.memory_sentinel) : (block = block.?.next) {
+            if ((block.?.flags & @intFromEnum(AssetMemoryBlockFlags.Used)) == 0) {
+                if (block.?.size >= size) {
+                    result = block;
+                    break;
+                }
+            }
         }
 
         return result;
+    }
+
+    fn acquireAssetMemory(self: *Assets, size: MemoryIndex) ?*anyopaque {
+        var result: ?*anyopaque = null;
+
+        if (false) {
+            // Platform memory path.
+            self.evictAssetsAsNecessary();
+            result = shared.platform.allocateMemory(size);
+
+            if (result != null) {
+                self.total_memory_used += size;
+            }
+
+            return result;
+        } else {
+            while (true) {
+                if (self.findBlockForSize(size)) |block| {
+                    block.flags |= @intFromEnum(AssetMemoryBlockFlags.Used);
+
+                    std.debug.assert(size <= block.size);
+                    result = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(block)) + 1);
+
+                    const remaining_size = block.size - size;
+                    const block_split_threshold = 4096;
+
+                    if (remaining_size > block_split_threshold) {
+                        block.size -= remaining_size;
+                        _ = self.insertBlock(block, remaining_size, @as([*]u8, @ptrCast(result)) + size);
+                    }
+
+                    break;
+                } else {
+                    var header: ?*AssetMemoryHeader = self.loaded_asset_sentinel.previous;
+
+                    while (header != null and header.? != &self.loaded_asset_sentinel) : (header = header.?.previous) {
+                        if (header != &self.loaded_asset_sentinel) {
+                            const asset: *Asset = &self.assets[header.?.asset_index];
+                            if (asset.getState().toInt() >= AssetState.Loaded.toInt()) {
+                                self.evictAsset(header.?);
+                                // opt_block = self.evictAsset(header);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (result != null) {
+                self.total_memory_used += size;
+            }
+
+            return result;
+        }
     }
 
     fn releaseAssetMemory(self: *Assets, size: MemoryIndex, memory: ?*anyopaque) void {
@@ -290,7 +382,14 @@ pub const Assets = struct {
             self.total_memory_used -= size;
         }
 
-        shared.platform.deallocateMemory(memory);
+        if (false) {
+            // Platform memory path.
+            shared.platform.deallocateMemory(memory);
+        } else {
+            const block: *AssetMemoryBlock = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(@alignCast(memory))) - 1);
+            block.flags &= ~@intFromEnum(AssetMemoryBlockFlags.Used);
+            // TODO: Merge!
+        }
     }
 
     pub fn evictAssetsAsNecessary(self: *Assets) void {

@@ -1099,8 +1099,6 @@ pub export fn updateAndRender(
     transient_state.arena.endTemporaryMemory(sim_memory);
     transient_state.arena.endTemporaryMemory(render_memory);
 
-    transient_state.assets.evictAssetsAsNecessary();
-
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
 }
