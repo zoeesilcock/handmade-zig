@@ -333,7 +333,7 @@ pub export fn updateAndRender(
 
         transient_state.assets = Assets.allocate(
             &transient_state.arena,
-            shared.megabytes(4),
+            shared.megabytes(16),
             transient_state,
         );
 

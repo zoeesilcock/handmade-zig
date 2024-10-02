@@ -148,29 +148,17 @@ pub const Game = struct {
 };
 
 const Win32PlatformFileGroup = extern struct {
-    platform_handle: shared.PlatformFileGroup,
     find_handle: win32.FindFileHandle,
-    find_data: win32.WIN32_FIND_DATAA,
+    find_data: win32.WIN32_FIND_DATAW,
 };
 
 const Win32PlatformFileHandle = extern struct {
-    platform_handle: shared.PlatformFileHandle,
     win32_handle: win32.HANDLE,
 };
 
-fn getAllFilesOfTypeBegin(file_extension: [*:0]const u8) callconv(.C) *shared.PlatformFileGroup {
+fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.C) shared.PlatformFileGroup {
+    var result = shared.PlatformFileGroup{};
     var win32_file_group: *Win32PlatformFileGroup = undefined;
-
-    var file_extension_at: [*]const u8 = @ptrCast(file_extension);
-
-    var wildcard: [32]u8 = [1]u8{0} ** 32;
-    wildcard[0] = '*';
-    wildcard[1] = '.';
-    var wildcard_index: u32 = 2;
-    while (wildcard_index < wildcard.len) : (wildcard_index += 1) {
-        wildcard[wildcard_index] = file_extension[wildcard_index - 2];
-        file_extension_at += 1;
-    }
 
     if (win32.VirtualAlloc(
         null,
@@ -180,35 +168,41 @@ fn getAllFilesOfTypeBegin(file_extension: [*:0]const u8) callconv(.C) *shared.Pl
     )) |space| {
         win32_file_group = @ptrCast(@alignCast(space));
     }
+    result.platform = win32_file_group;
 
-    var find_data: win32.WIN32_FIND_DATAA = undefined;
-    var find_handle = win32.FindFirstFileA(@ptrCast(&wildcard), &find_data);
+    const wildcard: [:0]const u16 = switch(file_type) {
+        shared.PlatformFileTypes.AssetFile => win32.L("*.hha"),
+        shared.PlatformFileTypes.SaveGameFile => win32.L("*.hhs"),
+    };
+
+    var find_data: win32.WIN32_FIND_DATAW = undefined;
+    var find_handle = win32.FindFirstFileW(wildcard, &find_data);
 
     while (@as(*anyopaque, @ptrCast(&find_handle)) != win32.INVALID_HANDLE_VALUE) {
-        win32_file_group.platform_handle.file_count += 1;
+        result.file_count += 1;
 
-        if (win32.FindNextFileA(find_handle, &find_data) == 0) {
+        if (win32.FindNextFileW(find_handle, &find_data) == 0) {
             break;
         }
     }
 
     _ = win32.FindClose(find_handle);
 
-    win32_file_group.find_handle = win32.FindFirstFileA(@ptrCast(&wildcard), &win32_file_group.find_data);
+    win32_file_group.find_handle = win32.FindFirstFileW(wildcard, &win32_file_group.find_data);
 
-    return @ptrCast(&win32_file_group.platform_handle);
+    return result;
 }
 
 fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.C) void {
-    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group));
+    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
 
     _ = win32.FindClose(win32_file_group.find_handle);
     _ = win32.VirtualFree(win32_file_group, 0, win32.MEM_RELEASE);
 }
 
-fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.C) *shared.PlatformFileHandle {
-    var result: *Win32PlatformFileHandle = undefined;
-    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group));
+fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.C) shared.PlatformFileHandle {
+    var result = shared.PlatformFileHandle{};
+    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
 
     if (@as(*anyopaque, @ptrCast(&win32_file_group.find_handle)) != win32.INVALID_HANDLE_VALUE) {
         const file_name = win32_file_group.find_data.cFileName;
@@ -219,8 +213,9 @@ fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.C) *shared.Plat
             win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
             win32.PAGE_READWRITE,
         )) |space| {
-            result = @ptrCast(@alignCast(space));
-            result.win32_handle = win32.CreateFileA(
+            const win32_handle: *Win32PlatformFileHandle = @ptrCast(@alignCast(space));
+            result.platform = win32_handle;
+            win32_handle.win32_handle = win32.CreateFileW(
                 @ptrCast(&file_name),
                 win32.FILE_GENERIC_READ,
                 win32.FILE_SHARE_READ,
@@ -229,21 +224,21 @@ fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.C) *shared.Plat
                 win32.FILE_FLAGS_AND_ATTRIBUTES{},
                 null,
             );
-            result.platform_handle.no_errors = (result.win32_handle != win32.INVALID_HANDLE_VALUE);
+            result.no_errors = (win32_handle.win32_handle != win32.INVALID_HANDLE_VALUE);
 
-            if (win32.FindNextFileA(win32_file_group.find_handle, &win32_file_group.find_data) == 0) {
+            if (win32.FindNextFileW(win32_file_group.find_handle, &win32_file_group.find_data) == 0) {
                 _ = win32.FindClose(win32_file_group.find_handle);
                 win32_file_group.find_handle = -1;
             }
         }
     }
 
-    return @ptrCast(&result.platform_handle);
+    return result;
 }
 
 fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void {
     if (shared.defaultNoFileErrors(source)) {
-        const handle: *Win32PlatformFileHandle = @ptrCast(@alignCast(source));
+        const handle: *Win32PlatformFileHandle = @ptrCast(@alignCast(source.platform));
 
         var overlapped = win32.OVERLAPPED{
             .Internal = 0,
@@ -272,7 +267,7 @@ fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, 
             // File read successfully.
         } else {
             const error_number = win32.GetLastError();
-            fileError(&handle.platform_handle, "Read file failed.");
+            fileError(source, "Read file failed.");
             _ = error_number;
         }
     }

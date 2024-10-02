@@ -91,7 +91,7 @@ const AssetMemorySize = struct {
 };
 
 const AssetFile = struct {
-    handle: *PlatformFileHandle,
+    handle: PlatformFileHandle,
     header: HHAHeader,
     asset_type_array: [*]HHAAssetType,
     tag_base: u32,
@@ -102,7 +102,7 @@ const AssetMemoryBlockFlags = enum(u32) {
     Used = 0x1,
 };
 
-const AssetMemoryBlock = struct {
+const AssetMemoryBlock = extern struct {
     previous: ?*AssetMemoryBlock,
     next: ?*AssetMemoryBlock,
     flags: u64,
@@ -114,8 +114,6 @@ pub const Assets = struct {
 
     memory_sentinel: AssetMemoryBlock,
 
-    target_memory_used: u64,
-    total_memory_used: u64,
     loaded_asset_sentinel: AssetMemoryHeader,
 
     asset_count: u32,
@@ -148,9 +146,6 @@ pub const Assets = struct {
 
         _ = result.insertBlock(&result.memory_sentinel, memory_size, arena.pushSize(memory_size, null));
 
-        result.total_memory_used = 0;
-        result.target_memory_used = memory_size;
-
         result.loaded_asset_sentinel.next = &result.loaded_asset_sentinel;
         result.loaded_asset_sentinel.previous = &result.loaded_asset_sentinel;
 
@@ -161,8 +156,8 @@ pub const Assets = struct {
 
         // Load asset headers.
         {
-            const file_group = shared.platform.getAllFilesOfTypeBegin("hha");
-            defer shared.platform.getAllFilesOfTypeEnd(file_group);
+            var file_group = shared.platform.getAllFilesOfTypeBegin(.AssetFile);
+            defer shared.platform.getAllFilesOfTypeEnd(&file_group);
 
             result.file_count = file_group.file_count;
             result.files = arena.pushArray(result.file_count, AssetFile);
@@ -171,31 +166,31 @@ pub const Assets = struct {
             while (file_index < result.file_count) : (file_index += 1) {
                 const file: [*]AssetFile = result.files + file_index;
 
-                const file_handle = shared.platform.openNextFile(file_group);
+                const file_handle = shared.platform.openNextFile(&file_group);
                 file[0].tag_base = result.tag_count;
                 file[0].asset_base = result.asset_count;
                 file[0].handle = file_handle;
 
-                shared.platform.readDataFromFile(file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
+                shared.platform.readDataFromFile(&file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
 
                 const asset_type_array_size: u32 = file[0].header.asset_type_count * @sizeOf(HHAAssetType);
                 file[0].asset_type_array = @ptrCast(@alignCast(arena.pushSize(asset_type_array_size, null)));
                 shared.platform.readDataFromFile(
-                    file[0].handle,
+                    &file[0].handle,
                     file[0].header.asset_types,
                     asset_type_array_size,
                     file[0].asset_type_array,
                 );
 
                 if (file[0].header.magic_value != file_formats.HHA_MAGIC_VALUE) {
-                    shared.platform.fileError(file[0].handle, "HHA file has an invalid magic value.");
+                    shared.platform.fileError(&file[0].handle, "HHA file has an invalid magic value.");
                 }
 
                 if (file[0].header.version > file_formats.HHA_VERSION) {
-                    shared.platform.fileError(file[0].handle, "HHA file is of a later version.");
+                    shared.platform.fileError(&file[0].handle, "HHA file is of a later version.");
                 }
 
-                if (shared.platform.noFileErrors(file[0].handle)) {
+                if (shared.platform.noFileErrors(&file[0].handle)) {
                     // The first asset and tag slot in every HHA is a null,
                     // so we don't count it as something we will need space for.
                     result.tag_count += (file[0].header.tag_count - 1);
@@ -216,11 +211,11 @@ pub const Assets = struct {
             var file_index: u32 = 0;
             while (file_index < result.file_count) : (file_index += 1) {
                 const file: [*]AssetFile = result.files + file_index;
-                if (shared.platform.noFileErrors(file[0].handle)) {
+                if (shared.platform.noFileErrors(&file[0].handle)) {
                     // Skip the first tag, since it is null.
                     const tag_array_size = @sizeOf(HHATag) * (file[0].header.tag_count - 1);
                     shared.platform.readDataFromFile(
-                        file[0].handle,
+                        &file[0].handle,
                         file[0].header.tags + @sizeOf(HHATag),
                         tag_array_size,
                         result.tags + file[0].tag_base,
@@ -244,7 +239,7 @@ pub const Assets = struct {
             while (file_index < result.file_count) : (file_index += 1) {
                 const file: [*]AssetFile = result.files + file_index;
 
-                if (shared.platform.noFileErrors(file[0].handle)) {
+                if (shared.platform.noFileErrors(&file[0].handle)) {
                     var source_index: u32 = 0;
                     while (source_index < file[0].header.asset_type_count) : (source_index += 1) {
                         const source_type: [*]HHAAssetType = file[0].asset_type_array + source_index;
@@ -257,7 +252,7 @@ pub const Assets = struct {
                             const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(asset_count_for_type, HHAAsset);
 
                             shared.platform.readDataFromFile(
-                                file[0].handle,
+                                &file[0].handle,
                                 file[0].header.assets + source_type[0].first_asset_index * @sizeOf(HHAAsset),
                                 asset_count_for_type * @sizeOf(HHAAsset),
                                 hha_asset_array,
@@ -323,25 +318,38 @@ pub const Assets = struct {
         return result;
     }
 
+    fn mergeIfPossible(self: *Assets, first: *AssetMemoryBlock, second: *AssetMemoryBlock) bool {
+        var result = false;
+
+        if (first != &self.memory_sentinel and second != &self.memory_sentinel) {
+            if ((first.flags & @intFromEnum(AssetMemoryBlockFlags.Used)) == 0 and
+                (second.flags & @intFromEnum(AssetMemoryBlockFlags.Used)) == 0) {
+                const expected_second = @as([*]u8, @ptrCast(first)) + @sizeOf(AssetMemoryBlock) + first.size;
+                if (@as([*]u8, @ptrCast(second)) == expected_second) {
+                    second.next.?.previous = second.previous;
+                    second.previous.?.next = second.next;
+
+                    first.size += @sizeOf(AssetMemoryBlock) + second.size;
+
+                    result = true;
+                }
+            }
+        }
+
+        return result;
+    }
+
     fn acquireAssetMemory(self: *Assets, size: MemoryIndex) ?*anyopaque {
         var result: ?*anyopaque = null;
+        var opt_block = self.findBlockForSize(size);
 
-        if (false) {
-            // Platform memory path.
-            self.evictAssetsAsNecessary();
-            result = shared.platform.allocateMemory(size);
-
-            if (result != null) {
-                self.total_memory_used += size;
-            }
-
-            return result;
-        } else {
-            while (true) {
-                if (self.findBlockForSize(size)) |block| {
+        // TODO: This loop can get stuck, feels like there is a break condition missing.
+        while (true) {
+            if (opt_block) |block| {
+                // Use the block found.
+                if (size <= block.size) {
                     block.flags |= @intFromEnum(AssetMemoryBlockFlags.Used);
 
-                    std.debug.assert(size <= block.size);
                     result = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(block)) + 1);
 
                     const remaining_size = block.size - size;
@@ -353,73 +361,37 @@ pub const Assets = struct {
                     }
 
                     break;
-                } else {
-                    var header: ?*AssetMemoryHeader = self.loaded_asset_sentinel.previous;
-
-                    while (header != null and header.? != &self.loaded_asset_sentinel) : (header = header.?.previous) {
-                        if (header != &self.loaded_asset_sentinel) {
-                            const asset: *Asset = &self.assets[header.?.asset_index];
-                            if (asset.getState().toInt() >= AssetState.Loaded.toInt()) {
-                                self.evictAsset(header.?);
-                                // opt_block = self.evictAsset(header);
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (result != null) {
-                self.total_memory_used += size;
-            }
-
-            return result;
-        }
-    }
-
-    fn releaseAssetMemory(self: *Assets, size: MemoryIndex, memory: ?*anyopaque) void {
-        if (memory != null) {
-            self.total_memory_used -= size;
-        }
-
-        if (false) {
-            // Platform memory path.
-            shared.platform.deallocateMemory(memory);
-        } else {
-            const block: *AssetMemoryBlock = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(@alignCast(memory))) - 1);
-            block.flags &= ~@intFromEnum(AssetMemoryBlockFlags.Used);
-            // TODO: Merge!
-        }
-    }
-
-    pub fn evictAssetsAsNecessary(self: *Assets) void {
-        while (self.total_memory_used > self.target_memory_used) {
-            const opt_header: ?*AssetMemoryHeader = self.loaded_asset_sentinel.previous;
-
-            if (opt_header) |header| {
-                if (header != &self.loaded_asset_sentinel) {
-                    const asset: *Asset = &self.assets[header.asset_index];
-                    if (asset.getState().toInt() >= AssetState.Loaded.toInt()) {
-                        self.evictAsset(header);
-                    }
                 }
             } else {
-                unreachable;
+                // No block found, evict something to make space.
+                var header: ?*AssetMemoryHeader = self.loaded_asset_sentinel.previous;
+                while (header != null and header.? != &self.loaded_asset_sentinel) : (header = header.?.previous) {
+                    var asset: *Asset = &self.assets[header.?.asset_index];
+                    if (asset.getState().toInt() >= AssetState.Loaded.toInt()) {
+                        std.debug.assert(asset.getState() == AssetState.Loaded);
+                        std.debug.assert(!asset.isLocked());
+
+                        self.removeAssetHeaderFromList(header.?);
+
+                        opt_block = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(@alignCast(asset.header))) - 1);
+                        opt_block.?.flags &= ~@intFromEnum(AssetMemoryBlockFlags.Used);
+
+                        if (self.mergeIfPossible(opt_block.?.previous.?, opt_block.?)) {
+                            opt_block = opt_block.?.previous;
+                        }
+
+                        _ = self.mergeIfPossible(opt_block.?, opt_block.?.next.?);
+
+                        asset.state = AssetState.Unloaded.toInt();
+                        asset.header = null;
+
+                        break;
+                    }
+                }
             }
         }
-    }
 
-    fn evictAsset(self: *Assets, header: *AssetMemoryHeader) void {
-        const asset_index = header.asset_index;
-        const asset: *Asset = &self.assets[asset_index];
-
-        std.debug.assert(asset.getState() == AssetState.Loaded);
-        std.debug.assert(!asset.isLocked());
-
-        self.removeAssetHeaderFromList(header);
-        self.releaseAssetMemory(header.total_size, asset.header);
-        asset.state = AssetState.Unloaded.toInt();
-        asset.header = null;
+        return result;
     }
 
     fn insertAssetHeaderAtFront(self: *Assets, header: *AssetMemoryHeader) void {
@@ -459,7 +431,7 @@ pub const Assets = struct {
 
     fn getFileHandleFor(self: *Assets, file_index: u32) *shared.PlatformFileHandle {
         std.debug.assert(file_index < self.file_count);
-        return self.files[file_index].handle;
+        return &self.files[file_index].handle;
     }
 
     pub fn getFirstAsset(self: *Assets, type_id: AssetTypeId) ?u32 {
@@ -563,7 +535,7 @@ pub const Assets = struct {
                     size.data = size.section * height;
                     size.total = size.data + @sizeOf(AssetMemoryHeader);
 
-                    asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(size.total)));
+                    asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(shared.align16(size.total))));
 
                     var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
 
@@ -684,7 +656,7 @@ pub const Assets = struct {
                     size.data = info.channel_count * size.section;
                     size.total = size.data + @sizeOf(AssetMemoryHeader);
 
-                    asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(size.total)));
+                    asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(shared.align16(size.total))));
                     const sound = &asset.header.?.data.sound;
 
                     sound.sample_count = info.sample_count;

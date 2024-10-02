@@ -139,6 +139,7 @@ pub const PlatformWorkQueue = extern struct {
 
 pub const PlatformFileHandle = extern struct {
     no_errors: bool = false,
+    platform: *anyopaque = undefined,
 
     pub fn isValid(self: *PlatformFileHandle) bool {
         _ = self;
@@ -147,15 +148,21 @@ pub const PlatformFileHandle = extern struct {
 };
 
 pub const PlatformFileGroup = extern struct {
-    file_count: u32,
+    file_count: u32 = 0,
+    platform: *anyopaque = undefined,
+};
+
+pub const PlatformFileTypes = enum(u32) {
+    AssetFile,
+    SaveGameFile,
 };
 
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
-const getAllFilesOfTypeBeginType: type = fn (file_extension: [*:0]const u8) callconv(.C) *PlatformFileGroup;
+const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.C) PlatformFileGroup;
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.C) void;
-const openNextFileType: type = fn (file_group: *PlatformFileGroup) callconv(.C) *PlatformFileHandle;
+const openNextFileType: type = fn (file_group: *PlatformFileGroup) callconv(.C) PlatformFileHandle;
 const readDataFromFileType: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void;
 const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.C) bool;
 const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
