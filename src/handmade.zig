@@ -945,7 +945,7 @@ pub export fn updateAndRender(
                         // Render particle.
                         render_group.pushBitmapId(
                             particle.bitmap_id,
-                            0.2,
+                            1,
                             particle.position,
                             color,
                         );

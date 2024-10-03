@@ -4,9 +4,18 @@ const file_formats = @import("file_formats");
 const math = shared.math;
 const intrinsics = shared.intrinsics;
 
+const USE_FONTS_FROM_WINDOWS = true;
+
 const c = @cImport({
     @cInclude("stb_truetype.h");
 });
+
+const win32 = struct {
+    usingnamespace @import("win32").graphics.gdi;
+    usingnamespace @import("win32").foundation;
+};
+
+pub const UNICODE = true;
 
 // Types.
 const AssetTypeId = file_formats.AssetTypeId;
@@ -82,21 +91,22 @@ const LoadedBitmap = struct {
 fn loadBMP(
     file_name: []const u8,
     allocator: std.mem.Allocator,
-) LoadedBitmap {
-    var result: LoadedBitmap = undefined;
+) ?LoadedBitmap {
+    var result: ?LoadedBitmap = null;
     const read_result = readEntireFile(file_name, allocator);
 
     if (read_result.content_size > 0) {
-        result.free = read_result.contents;
-
         const header = @as(*BitmapHeader, @ptrCast(@alignCast(@constCast(read_result.contents))));
 
         std.debug.assert(header.height >= 0);
         std.debug.assert(header.compression == 3);
 
-        result.memory = @as([*]void, @ptrCast(@constCast(read_result.contents))) + header.bitmap_offset;
-        result.width = header.width;
-        result.height = header.height;
+        result = LoadedBitmap{
+            .free = read_result.contents,
+            .memory = @as([*]void, @ptrCast(@constCast(read_result.contents))) + header.bitmap_offset,
+            .width = header.width,
+            .height = header.height,
+        };
 
         const alpha_mask = ~(header.red_mask | header.green_mask | header.blue_mask);
         const alpha_scan = intrinsics.findLeastSignificantSetBit(alpha_mask);
@@ -114,7 +124,7 @@ fn loadBMP(
         const blue_shift_down = @as(u5, @intCast(blue_scan.index));
         const alpha_shift_down = @as(u5, @intCast(alpha_scan.index));
 
-        var source_dest: [*]align(@alignOf(u8)) u32 = @ptrCast(result.memory);
+        var source_dest: [*]align(@alignOf(u8)) u32 = @ptrCast(result.?.memory);
         var x: u32 = 0;
         while (x < header.width) : (x += 1) {
             var y: u32 = 0;
@@ -139,80 +149,205 @@ fn loadBMP(
         }
     }
 
-    result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
+    result.?.pitch = result.?.width * shared.BITMAP_BYTES_PER_PIXEL;
 
     if (false) {
-        result.pitch = -result.width * shared.BITMAP_BYTES_PER_PIXEL;
-        const offset: usize = @intCast(-result.pitch * (result.height - 1));
-        result.memory = @ptrCast(@as([*]u8, @ptrCast(result.memory)) + offset);
+        result.?.pitch = -result.?.width * shared.BITMAP_BYTES_PER_PIXEL;
+        const offset: usize = @intCast(-result.?.pitch * (result.?.height - 1));
+        result.?.memory = @ptrCast(@as([*]u8, @ptrCast(result.?.memory)) + offset);
     }
 
     return result;
 }
 
+var device_context: ?win32.CreatedHDC = null;
+
 fn loadGlyphBMP(
     file_name: []const u8,
+    font_name: []const u8,
     codepoint: u32,
     allocator: std.mem.Allocator,
-) LoadedBitmap {
-    var result: LoadedBitmap = undefined;
-    const ttf_file = readEntireFile(file_name, allocator);
-    defer allocator.free(ttf_file.contents);
+) ?LoadedBitmap {
+    var result: ?LoadedBitmap = null;
 
-    if (ttf_file.content_size != 0) {
-        const ttf_data: [*c]const u8 = @ptrCast(ttf_file.contents);
+    if (USE_FONTS_FROM_WINDOWS) {
+        if (device_context == null) {
+            _ = win32.AddFontResourceExA(@ptrCast(file_name), .PRIVATE, null);
+            const font = win32.CreateFontA(
+                128,
+                0,
+                0,
+                0,
+                win32.FW_NORMAL,
+                0,
+                0,
+                0,
+                win32.DEFAULT_CHARSET,
+                .DEFAULT_PRECIS,
+                win32.CLIP_DEFAULT_PRECIS,
+                .ANTIALIASED_QUALITY,
+                win32.FF_DONTCARE,
+                @ptrCast(font_name),
+            );
 
-        var font: c.stbtt_fontinfo = undefined;
-        _ = c.stbtt_InitFont(&font, ttf_data, c.stbtt_GetFontOffsetForIndex(ttf_data, 0));
+            device_context = win32.CreateCompatibleDC(null);
+            const bitmap = win32.CreateCompatibleBitmap(device_context, 1024, 1024);
+            _ = win32.SelectObject(device_context, bitmap);
+            _ = win32.SelectObject(device_context, font);
+            _ = win32.SetBkColor(device_context, 0x000000);
 
-        var width: c_int = undefined;
-        var height: c_int = undefined;
-        var x_offset: c_int = undefined;
-        var y_offset: c_int = undefined;
-        const mono_bitmap = c.stbtt_GetCodepointBitmap(
-            &font,
-            0,
-            c.stbtt_ScaleForPixelHeight(&font, 128),
-            @intCast(codepoint),
-            &width,
-            &height,
-            &x_offset,
-            &y_offset,
-        );
-        defer c.stbtt_FreeBitmap(mono_bitmap, null);
+            var text_metrics: win32.TEXTMETRICW = undefined;
+            _ = win32.GetTextMetricsW(device_context, &text_metrics);
+        }
 
-        result = LoadedBitmap{
-            .free = undefined,
-            .memory = undefined,
-            .width = width,
-            .height = height,
-            .pitch = width * shared.BITMAP_BYTES_PER_PIXEL,
-        };
-        result.free = allocator.alloc(u8, @intCast(@as(i32, @intCast(height)) * result.pitch)) catch unreachable;
-        result.memory = @ptrCast(@constCast(result.free));
+        const cheese_point: []const u16 = &[_]u16{@intCast(codepoint)};
 
-        var source: [*]u8 = mono_bitmap;
-        var dest_row: [*]u8 = @as([*]u8, @ptrCast(result.memory.?)) + @as(usize, @intCast((height - 1) * result.pitch));
+        var size: win32.SIZE = undefined;
+        _ = win32.GetTextExtentPoint32W(device_context, @ptrCast(cheese_point), 1, &size);
 
-        var y: u32 = 0;
-        while (y < height) : (y += 1) {
-            var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
+        var width: i32 = size.cx;
+        var height: i32 = size.cy;
 
-            var x: u32 = 0;
-            while (x < width) : (x += 1) {
-                const alpha = source;
-                source += 1;
+        // _ = win32.PatBlt(device_context, 0, 0, width, height, win32.BLACKNESS);
+        // _ = win32.SetBkMode(device_context, .TRANSPARENT);
+        _ = win32.SetTextColor(device_context, 0xffffff);
+        _ = win32.TextOutW(device_context, 0, 0, @ptrCast(cheese_point), 1);
 
-                dest[0] = @truncate(
-                    ((@as(u32, @intCast(alpha[0])) << 24) |
-                        (@as(u32, @intCast(alpha[0])) << 16) |
-                        (@as(u32, @intCast(alpha[0])) << 8) |
-                        (@as(u32, @intCast(alpha[0])) << 0)),
-                );
-                dest += 1;
+        var min_x: i32 = 10000;
+        var min_y: i32 = 10000;
+        var max_x: i32 = -10000;
+        var max_y: i32 = -10000;
+
+        { // Calculate extents of glyph.
+            var y: i32 = 0;
+            while (y < height) : (y += 1) {
+                var x: i32 = 0;
+                while (x < width) : (x += 1) {
+                    const pixel = win32.GetPixel(device_context, x, y);
+
+                    if (pixel != 0) {
+                        if (min_x > x) {
+                            min_x = x;
+                        }
+                        if (min_y > y) {
+                            min_y = y;
+                        }
+                        if (max_x < x) {
+                            max_x = x;
+                        }
+                        if (max_y < y) {
+                            max_y = y;
+                        }
+                    }
+                }
             }
+        }
 
-            dest_row -= @as(usize, @intCast(result.pitch));
+        if (min_x <= max_x) {
+            min_x -= 1;
+            min_y -= 1;
+            max_x += 1;
+            max_y += 1;
+
+            width = (max_x - min_x) + 1;
+            height = (max_y - min_y) + 1;
+
+            result = LoadedBitmap{
+                .free = undefined,
+                .memory = undefined,
+                .width = width,
+                .height = height,
+                .pitch = width * shared.BITMAP_BYTES_PER_PIXEL,
+            };
+            result.?.free = allocator.alloc(u8, @intCast(@as(i32, @intCast(height)) * result.?.pitch)) catch unreachable;
+            result.?.memory = @ptrCast(@constCast(result.?.free));
+
+            var dest_row: [*]u8 = @as([*]u8, @ptrCast(result.?.memory.?)) + @as(usize, @intCast((height - 1) * result.?.pitch));
+
+            var y: i32 = min_y;
+            while (y <= max_y) : (y += 1) {
+                var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
+
+                var x: i32 = min_x;
+                while (x <= max_x) : (x += 1) {
+                    const pixel = win32.GetPixel(device_context, @intCast(x), @intCast(y));
+                    const gray: u8 = @intCast(pixel & 0xff);
+                    const alpha: u8 = 0xff;
+
+                    dest[0] = @truncate(
+                        ((@as(u32, @intCast(alpha)) << 24) |
+                         (@as(u32, @intCast(gray)) << 16) |
+                         (@as(u32, @intCast(gray)) << 8) |
+                         (@as(u32, @intCast(gray)) << 0)),
+                    );
+                    dest += 1;
+                }
+
+                dest_row -= @as(usize, @intCast(result.?.pitch));
+            }
+        } else {
+            unreachable;
+        }
+    } else {
+        const ttf_file = readEntireFile(file_name, allocator);
+        defer allocator.free(ttf_file.contents);
+
+        if (ttf_file.content_size != 0) {
+            const ttf_data: [*c]const u8 = @ptrCast(ttf_file.contents);
+
+            var font: c.stbtt_fontinfo = undefined;
+            _ = c.stbtt_InitFont(&font, ttf_data, c.stbtt_GetFontOffsetForIndex(ttf_data, 0));
+
+            var width: c_int = undefined;
+            var height: c_int = undefined;
+            var x_offset: c_int = undefined;
+            var y_offset: c_int = undefined;
+            const mono_bitmap = c.stbtt_GetCodepointBitmap(
+                &font,
+                0,
+                c.stbtt_ScaleForPixelHeight(&font, 128),
+                @intCast(codepoint),
+                &width,
+                &height,
+                &x_offset,
+                &y_offset,
+            );
+            defer c.stbtt_FreeBitmap(mono_bitmap, null);
+
+            result = LoadedBitmap{
+                .free = undefined,
+                .memory = undefined,
+                .width = width,
+                .height = height,
+                .pitch = width * shared.BITMAP_BYTES_PER_PIXEL,
+            };
+            result.?.free = allocator.alloc(u8, @intCast(@as(i32, @intCast(height)) * result.?.pitch)) catch unreachable;
+            result.?.memory = @ptrCast(@constCast(result.?.free));
+
+            var source: [*]u8 = mono_bitmap;
+            var dest_row: [*]u8 = @as([*]u8, @ptrCast(result.?.memory.?)) + @as(usize, @intCast((height - 1) * result.?.pitch));
+
+            var y: u32 = 0;
+            while (y < height) : (y += 1) {
+                var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
+
+                var x: u32 = 0;
+                while (x < width) : (x += 1) {
+                    const alpha: u8 = 0xff;
+                    const gray = source;
+                    source += 1;
+
+                    dest[0] = @truncate(
+                        ((@as(u32, @intCast(alpha)) << 24) |
+                            (@as(u32, @intCast(gray[0])) << 16) |
+                            (@as(u32, @intCast(gray[0])) << 8) |
+                            (@as(u32, @intCast(gray[0])) << 0)),
+                    );
+                    dest += 1;
+                }
+
+                dest_row -= @as(usize, @intCast(result.?.pitch));
+            }
         }
     }
 
@@ -412,10 +547,15 @@ const AssetType = enum(u32) {
     Font,
 };
 
-const AssetSource = struct { asset_type: AssetType, file_name: []const u8 = undefined, data: union {
-    first_sample_index: u32,
-    codepoint: u32,
-} };
+const AssetSource = struct {
+    asset_type: AssetType,
+    file_name: []const u8 = undefined,
+    data: union {
+        first_sample_index: u32,
+        codepoint: u32,
+    },
+    font_name: []const u8 = undefined,
+};
 
 const BitmapAsset = struct {
     file_name: [*:0]const u8 = undefined,
@@ -506,6 +646,7 @@ pub const Assets = struct {
     fn addCharacterAsset(
         self: *Assets,
         font_file: []const u8,
+        font_name: []const u8,
         codepoint: u32,
         alignment_percentage_x: ?f32,
         alignment_percentage_y: ?f32,
@@ -536,6 +677,7 @@ pub const Assets = struct {
 
             source.asset_type = .Font;
             source.file_name = font_file;
+            source.font_name = font_name;
             source.data = .{ .codepoint = codepoint };
 
             self.asset_index = result.?.value;
@@ -663,7 +805,8 @@ fn writeHero(allocator: std.mem.Allocator) void {
     result.beginAssetType(.Font);
     var character: u32 = 'A';
     while (character <= 'Z') : (character += 1) {
-        _ = result.addCharacterAsset("C:/Windows/Fonts/arial.ttf", character, null, null);
+        // _ = result.addCharacterAsset("C:/Windows/Fonts/arial.ttf", "Arial", character, null, null);
+        _ = result.addCharacterAsset("C:/Windows/Fonts/cour.ttf", "Courier New", character, null, null);
         result.addTag(.UnicodeCodepoint, @floatFromInt(character));
     }
     result.endAssetType();
@@ -808,21 +951,24 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
 
             switch (source.asset_type) {
                 .Bitmap, .Font => {
-                    const bmp = if (source.asset_type == .Font)
-                        loadGlyphBMP(source.file_name, source.data.codepoint, allocator)
+                    const opt_bmp = if (source.asset_type == .Font)
+                        loadGlyphBMP(source.file_name, source.font_name, source.data.codepoint, allocator)
                     else
                         loadBMP(source.file_name, allocator);
-                    defer allocator.free(bmp.free);
 
-                    dest.info.bitmap.dim[0] = @intCast(bmp.width);
-                    dest.info.bitmap.dim[1] = @intCast(bmp.height);
+                    if (opt_bmp) |bmp| {
+                        defer allocator.free(bmp.free);
 
-                    std.debug.assert((bmp.width * 4) == bmp.pitch);
-                    const size: usize = @as(usize, @intCast(bmp.width)) * @as(usize, @intCast(bmp.height * 4));
-                    const bytes: []const u8 = @as([*]const u8, @ptrCast(bmp.memory.?))[0..size];
-                    bytes_written += try out.write(bytes);
-                    // std.debug.print("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
-                    // std.debug.print("Bytes written after bmp: {d}\n", .{ bytes_written });
+                        dest.info.bitmap.dim[0] = @intCast(bmp.width);
+                        dest.info.bitmap.dim[1] = @intCast(bmp.height);
+
+                        std.debug.assert((bmp.width * 4) == bmp.pitch);
+                        const size: usize = @as(usize, @intCast(bmp.width)) * @as(usize, @intCast(bmp.height * 4));
+                        const bytes: []const u8 = @as([*]const u8, @ptrCast(bmp.memory.?))[0..size];
+                        bytes_written += try out.write(bytes);
+                        // std.debug.print("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
+                        // std.debug.print("Bytes written after bmp: {d}\n", .{ bytes_written });
+                    }
                 },
                 .Sound => {
                     const wav = loadWAV(source.file_name, source.data.first_sample_index, dest.info.sound.sample_count, allocator);

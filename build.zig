@@ -108,6 +108,9 @@ pub fn build(b: *std.Build) void {
     asset_builder_exe.addIncludePath(stb_dep.path(""));
     asset_builder_exe.addCSourceFiles(.{ .files = &[_][]const u8{"src/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
 
+    const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
+    asset_builder_exe.root_module.addImport("win32", zigwin32);
+
     b.installArtifact(asset_builder_exe);
 
     // Allow running asset builder from build command.
