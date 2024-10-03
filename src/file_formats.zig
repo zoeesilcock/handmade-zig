@@ -1,6 +1,50 @@
 pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 0;
 
+pub const AssetTagId = enum(u32) {
+    Smoothness,
+    Flatness,
+    FacingDirection, // Angles in radians off of due right.
+    UnicodeCodepoint,
+
+    pub fn toInt(self: AssetTagId) u32 {
+        return @intFromEnum(self);
+    }
+};
+pub const AssetTypeId = enum(u32) {
+    None,
+
+    // Bitmaps.
+    Shadow,
+    Tree,
+    Sword,
+    Rock,
+
+    Grass,
+    Tuft,
+    Stone,
+
+    Head,
+    Cape,
+    Torso,
+
+    Font,
+
+    // Sounds.
+    Bloop,
+    Crack,
+    Drop,
+    Glide,
+    Music,
+    Puhp,
+
+    pub fn toInt(self: AssetTypeId) u32 {
+        return @intFromEnum(self);
+    }
+};
+
+pub const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeId).Enum.fields.len;
+
 pub const HHAHeader = extern struct {
     magic_value: u32 = HHA_MAGIC_VALUE,
     version: u32 = HHA_VERSION,

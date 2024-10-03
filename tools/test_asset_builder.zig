@@ -4,9 +4,13 @@ const file_formats = @import("file_formats");
 const math = shared.math;
 const intrinsics = shared.intrinsics;
 
+const c = @cImport({
+    @cInclude("stb_truetype.h");
+});
+
 // Types.
-const AssetTypeId = shared.AssetTypeId;
-const AssetTagId = shared.AssetTagId;
+const AssetTypeId = file_formats.AssetTypeId;
+const AssetTagId = file_formats.AssetTagId;
 const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
 const HHAAssetType = file_formats.HHAAssetType;
@@ -18,7 +22,7 @@ const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const Color = math.Color;
 
-const ASSET_TYPE_ID_COUNT = shared.ASSET_TYPE_ID_COUNT;
+const ASSET_TYPE_ID_COUNT = file_formats.ASSET_TYPE_ID_COUNT;
 
 // File formats.
 const EntireFile = struct {
@@ -146,6 +150,75 @@ fn loadBMP(
     return result;
 }
 
+fn loadGlyphBMP(
+    file_name: []const u8,
+    codepoint: u32,
+    allocator: std.mem.Allocator,
+) LoadedBitmap {
+    var result: LoadedBitmap = undefined;
+    const ttf_file = readEntireFile(file_name, allocator);
+    defer allocator.free(ttf_file.contents);
+
+    if (ttf_file.content_size != 0) {
+        const ttf_data: [*c]const u8 = @ptrCast(ttf_file.contents);
+
+        var font: c.stbtt_fontinfo = undefined;
+        _ = c.stbtt_InitFont(&font, ttf_data, c.stbtt_GetFontOffsetForIndex(ttf_data, 0));
+
+        var width: c_int = undefined;
+        var height: c_int = undefined;
+        var x_offset: c_int = undefined;
+        var y_offset: c_int = undefined;
+        const mono_bitmap = c.stbtt_GetCodepointBitmap(
+            &font,
+            0,
+            c.stbtt_ScaleForPixelHeight(&font, 128),
+            @intCast(codepoint),
+            &width,
+            &height,
+            &x_offset,
+            &y_offset,
+        );
+        defer c.stbtt_FreeBitmap(mono_bitmap, null);
+
+        result = LoadedBitmap{
+            .free = undefined,
+            .memory = undefined,
+            .width = width,
+            .height = height,
+            .pitch = width * shared.BITMAP_BYTES_PER_PIXEL,
+        };
+        result.free = allocator.alloc(u8, @intCast(@as(i32, @intCast(height)) * result.pitch)) catch unreachable;
+        result.memory = @ptrCast(@constCast(result.free));
+
+        var source: [*]u8 = mono_bitmap;
+        var dest_row: [*]u8 = @as([*]u8, @ptrCast(result.memory.?)) + @as(usize, @intCast((height - 1) * result.pitch));
+
+        var y: u32 = 0;
+        while (y < height) : (y += 1) {
+            var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
+
+            var x: u32 = 0;
+            while (x < width) : (x += 1) {
+                const alpha = source;
+                source += 1;
+
+                dest[0] = @truncate(
+                    ((@as(u32, @intCast(alpha[0])) << 24) |
+                        (@as(u32, @intCast(alpha[0])) << 16) |
+                        (@as(u32, @intCast(alpha[0])) << 8) |
+                        (@as(u32, @intCast(alpha[0])) << 0)),
+                );
+                dest += 1;
+            }
+
+            dest_row -= @as(usize, @intCast(result.pitch));
+        }
+    }
+
+    return result;
+}
+
 const WaveHeader = extern struct {
     riff_id: u32,
     size: u32,
@@ -177,8 +250,8 @@ const LoadedSound = struct {
     free: []const u8,
 };
 
-fn riffCode(a: u32, b: u32, c: u32, d: u32) u32 {
-    return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, c << 16) | @as(u32, d << 24);
+fn riffCode(a: u32, b: u32, in_c: u32, d: u32) u32 {
+    return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, in_c << 16) | @as(u32, d << 24);
 }
 
 const WaveChunkId = enum(u32) {
@@ -336,13 +409,13 @@ pub fn loadWAV(
 const AssetType = enum(u32) {
     Sound,
     Bitmap,
+    Font,
 };
 
-const AssetSource = struct {
-    asset_type: AssetType,
-    file_name: []const u8 = undefined,
+const AssetSource = struct { asset_type: AssetType, file_name: []const u8 = undefined, data: union {
     first_sample_index: u32,
-};
+    codepoint: u32,
+} };
 
 const BitmapAsset = struct {
     file_name: [*:0]const u8 = undefined,
@@ -430,6 +503,47 @@ pub const Assets = struct {
         return result;
     }
 
+    fn addCharacterAsset(
+        self: *Assets,
+        font_file: []const u8,
+        codepoint: u32,
+        alignment_percentage_x: ?f32,
+        alignment_percentage_y: ?f32,
+    ) ?BitmapId {
+        std.debug.assert(self.debug_asset_type != null);
+
+        var result: ?BitmapId = null;
+
+        if (self.debug_asset_type) |asset_type| {
+            std.debug.assert(asset_type.one_past_last_asset_index < self.assets.len);
+
+            result = BitmapId{ .value = asset_type.one_past_last_asset_index };
+            const source: *AssetSource = &self.asset_sources[result.?.value];
+            const hha: *HHAAsset = &self.assets[result.?.value];
+            self.debug_asset_type.?.one_past_last_asset_index += 1;
+
+            hha.first_tag_index = self.tag_count;
+            hha.one_past_last_tag_index = self.tag_count;
+            hha.info = .{
+                .bitmap = HHABitmap{
+                    .dim = .{ 0, 0 },
+                    .alignment_percentage = .{
+                        alignment_percentage_x orelse 0.5,
+                        alignment_percentage_y orelse 0.5,
+                    },
+                },
+            };
+
+            source.asset_type = .Font;
+            source.file_name = font_file;
+            source.data = .{ .codepoint = codepoint };
+
+            self.asset_index = result.?.value;
+        }
+
+        return result;
+    }
+
     fn addSoundAsset(self: *Assets, file_name: []const u8) ?SoundId {
         return self.addSoundSectionAsset(file_name, 0, 0);
     }
@@ -442,7 +556,7 @@ pub const Assets = struct {
         if (self.debug_asset_type) |asset_type| {
             std.debug.assert(asset_type.one_past_last_asset_index < self.assets.len);
 
-            result = SoundId { .value = asset_type.one_past_last_asset_index };
+            result = SoundId{ .value = asset_type.one_past_last_asset_index };
             const source: *AssetSource = &self.asset_sources[result.?.value];
             const hha: *HHAAsset = &self.assets[result.?.value];
 
@@ -461,7 +575,7 @@ pub const Assets = struct {
 
             source.asset_type = .Sound;
             source.file_name = file_name;
-            source.first_sample_index = first_sample_index;
+            source.data.first_sample_index = first_sample_index;
 
             self.asset_index = result.?.value;
         }
@@ -544,6 +658,14 @@ fn writeHero(allocator: std.mem.Allocator) void {
     result.addTag(.FacingDirection, angle_left);
     _ = result.addBitmapAsset("test/test_hero_front_torso.bmp", hero_align_x, hero_align_y);
     result.addTag(.FacingDirection, angle_front);
+    result.endAssetType();
+
+    result.beginAssetType(.Font);
+    var character: u32 = 'A';
+    while (character <= 'Z') : (character += 1) {
+        _ = result.addCharacterAsset("C:/Windows/Fonts/arial.ttf", character, null, null);
+        result.addTag(.UnicodeCodepoint, @floatFromInt(character));
+    }
     result.endAssetType();
 
     writeHHA("test1.hha", &result, allocator) catch unreachable;
@@ -685,8 +807,11 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
             dest.data_offset = try out.getPos();
 
             switch (source.asset_type) {
-                .Bitmap => {
-                    const bmp = loadBMP(source.file_name, allocator);
+                .Bitmap, .Font => {
+                    const bmp = if (source.asset_type == .Font)
+                        loadGlyphBMP(source.file_name, source.data.codepoint, allocator)
+                    else
+                        loadBMP(source.file_name, allocator);
                     defer allocator.free(bmp.free);
 
                     dest.info.bitmap.dim[0] = @intCast(bmp.width);
@@ -700,7 +825,7 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
                     // std.debug.print("Bytes written after bmp: {d}\n", .{ bytes_written });
                 },
                 .Sound => {
-                    const wav = loadWAV(source.file_name, source.first_sample_index, dest.info.sound.sample_count, allocator);
+                    const wav = loadWAV(source.file_name, source.data.first_sample_index, dest.info.sound.sample_count, allocator);
                     defer allocator.free(wav.free);
 
                     dest.info.sound.sample_count = wav.sample_count;
@@ -714,7 +839,7 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
                         // std.debug.print("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
                         // std.debug.print("Bytes written after wav: {d}\n", .{ bytes_written });
                     }
-                }
+                },
             }
         }
         try out.seekTo(header.assets);

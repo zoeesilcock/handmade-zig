@@ -4,7 +4,6 @@ const random = @import("random.zig");
 const render = @import("render.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
-const asset_type_id = @import("asset_type_id.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
@@ -26,9 +25,9 @@ const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const PlatformFileHandle = shared.PlatformFileHandle;
 
-pub const AssetTypeId = asset_type_id.AssetTypeId;
-pub const AssetTagId = asset_type_id.AssetTagId;
-pub const ASSET_TYPE_ID_COUNT = asset_type_id.COUNT;
+pub const AssetTypeId = file_formats.AssetTypeId;
+pub const AssetTagId = file_formats.AssetTagId;
+pub const ASSET_TYPE_ID_COUNT = file_formats.ASSET_TYPE_ID_COUNT;
 
 const Asset = struct {
     state: u32 = 0,

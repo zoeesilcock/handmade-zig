@@ -12,10 +12,10 @@ pub const math = @import("math.zig");
 const world = @import("world.zig");
 const sim = @import("sim.zig");
 const render = @import("render.zig");
+const file_formats = @import("file_formats");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const random = @import("random.zig");
-const file_formats = @import("file_formats");
 const std = @import("std");
 
 // Types.
@@ -28,11 +28,6 @@ const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const PlayingSound = audio.PlayingSound;
-
-// Exposed types.
-pub const AssetTypeId = asset.AssetTypeId;
-pub const AssetTagId = asset.AssetTagId;
-pub const ASSET_TYPE_ID_COUNT = asset.ASSET_TYPE_ID_COUNT;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;

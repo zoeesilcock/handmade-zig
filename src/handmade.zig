@@ -4,7 +4,7 @@ const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const render = @import("render.zig");
 const asset = @import("asset.zig");
-const asset_type_id = @import("asset_type_id.zig");
+const file_formats = @import("file_formats");
 const audio = @import("audio.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
@@ -102,7 +102,7 @@ const AddLowEntityResult = shared.AddLowEntityResult;
 const RenderGroup = render.RenderGroup;
 const Assets = asset.Assets;
 const AssetTypeId = asset.AssetTypeId;
-const AssetTagId = asset_type_id.AssetTagId;
+const AssetTagId = file_formats.AssetTagId;
 const LoadedBitmap = asset.LoadedBitmap;
 const Particle = shared.Particle;
 const ParticleCel = shared.ParticleCel;
@@ -803,7 +803,20 @@ pub export fn updateAndRender(
                             1,
                         );
                         particle.color_velocity = Color.new(0, 0, 0, -0.5);
-                        particle.bitmap_id = transient_state.assets.getRandomBitmap(.Head, &state.effects_entropy).?;
+
+                        const nothings = "NOTHINGS";
+                        var particle_match_vector = asset.AssetVector{};
+                        var particle_weight_vector = asset.AssetVector{};
+                        particle_match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] =
+                            @floatFromInt(nothings[state.effects_entropy.randomChoice(nothings.len)]);
+                        particle_weight_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = 1;
+                        particle.bitmap_id = transient_state.assets.getBestMatchBitmap(
+                            .Font,
+                            &particle_match_vector,
+                            &particle_weight_vector,
+                        ).?;
+
+                        // particle.bitmap_id = transient_state.assets.getRandomBitmap(.Head, &state.effects_entropy).?;
                     }
 
                     const grid_scale: f32 = 0.25;
@@ -831,10 +844,18 @@ pub export fn updateAndRender(
                             var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
                             var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
 
-                            if (x < 0) { x = 0; }
-                            if (x > (shared.PARTICLE_CEL_DIM - 1)) { x = (shared.PARTICLE_CEL_DIM - 1); }
-                            if (y < 0) { y = 0; }
-                            if (y > (shared.PARTICLE_CEL_DIM - 1)) { y = (shared.PARTICLE_CEL_DIM - 1); }
+                            if (x < 0) {
+                                x = 0;
+                            }
+                            if (x > (shared.PARTICLE_CEL_DIM - 1)) {
+                                x = (shared.PARTICLE_CEL_DIM - 1);
+                            }
+                            if (y < 0) {
+                                y = 0;
+                            }
+                            if (y > (shared.PARTICLE_CEL_DIM - 1)) {
+                                y = (shared.PARTICLE_CEL_DIM - 1);
+                            }
 
                             const cel = &state.particle_cels[y][x];
                             const density: f32 = particle.color.a();
@@ -868,10 +889,18 @@ pub export fn updateAndRender(
                         var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
                         var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
 
-                        if (x < 1) { x = 1; }
-                        if (x > (shared.PARTICLE_CEL_DIM - 2)) { x = (shared.PARTICLE_CEL_DIM - 2); }
-                        if (y < 1) { y = 1; }
-                        if (y > (shared.PARTICLE_CEL_DIM - 2)) { y = (shared.PARTICLE_CEL_DIM - 2); }
+                        if (x < 1) {
+                            x = 1;
+                        }
+                        if (x > (shared.PARTICLE_CEL_DIM - 2)) {
+                            x = (shared.PARTICLE_CEL_DIM - 2);
+                        }
+                        if (y < 1) {
+                            y = 1;
+                        }
+                        if (y > (shared.PARTICLE_CEL_DIM - 2)) {
+                            y = (shared.PARTICLE_CEL_DIM - 2);
+                        }
 
                         const cel_center = &state.particle_cels[y][x];
                         const cel_left = &state.particle_cels[y][x - 1];
@@ -916,7 +945,7 @@ pub export fn updateAndRender(
                         // Render particle.
                         render_group.pushBitmapId(
                             particle.bitmap_id,
-                            1,
+                            0.2,
                             particle.position,
                             color,
                         );
@@ -1544,6 +1573,9 @@ fn clearBitmap(bitmap: *LoadedBitmap) void {
 
 fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to_zero: bool) LoadedBitmap {
     const result = arena.pushStruct(LoadedBitmap);
+
+    result.alignment_percentage = Vector2.splat(0.5);
+    result.width_over_height = math.safeRatio1(@floatFromInt(width), @floatFromInt(height));
 
     result.width = shared.safeTruncateToUInt16(width);
     result.height = shared.safeTruncateToUInt16(height);

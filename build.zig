@@ -102,6 +102,12 @@ pub fn build(b: *std.Build) void {
     asset_builder_exe.root_module.addOptions("build_options", build_options);
     asset_builder_exe.root_module.addImport("shared", shared_module);
     asset_builder_exe.root_module.addImport("file_formats", file_formats_module);
+
+    const stb_dep = b.dependency("stb", .{});
+    asset_builder_exe.linkLibC();
+    asset_builder_exe.addIncludePath(stb_dep.path(""));
+    asset_builder_exe.addCSourceFiles(.{ .files = &[_][]const u8{"src/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
+
     b.installArtifact(asset_builder_exe);
 
     // Allow running asset builder from build command.
