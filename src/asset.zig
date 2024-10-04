@@ -35,14 +35,6 @@ const Asset = struct {
 
     hha: HHAAsset,
     file_index: u32,
-
-    pub fn getState(self: *Asset) AssetState {
-        return @enumFromInt(self.state & @intFromEnum(AssetState.StateMask));
-    }
-
-    pub fn isLocked(self: *Asset) bool {
-        return (self.state & @intFromEnum(AssetState.Locked)) != 0;
-    }
 };
 
 const AssetMemoryHeader = extern struct {
@@ -50,6 +42,7 @@ const AssetMemoryHeader = extern struct {
     previous: ?*AssetMemoryHeader,
     asset_index: u32,
     total_size: u32,
+    generation_id: u32,
     data: extern union {
         bitmap: LoadedBitmap,
         sound: LoadedSound,
@@ -69,9 +62,7 @@ const AssetState = enum(u32) {
     Unloaded,
     Queued,
     Loaded,
-    StateMask = 0xFFF,
-
-    Locked = 0x10000,
+    Operating,
 
     pub fn toInt(self: AssetState) u32 {
         return @intFromEnum(self);
@@ -115,16 +106,18 @@ pub const Assets = struct {
 
     loaded_asset_sentinel: AssetMemoryHeader,
 
-    asset_count: u32,
-    assets: [*]Asset,
-    asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
-
-    tag_count: u32,
-    tags: [*]HHATag,
     tag_range: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{1000000} ** ASSET_TYPE_ID_COUNT,
 
     file_count: u32,
     files: [*]AssetFile,
+
+    tag_count: u32,
+    tags: [*]HHATag,
+
+    asset_count: u32,
+    assets: [*]Asset,
+
+    asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
 
     pub fn allocate(
         arena: *MemoryArena,
@@ -366,9 +359,8 @@ pub const Assets = struct {
                 var header: ?*AssetMemoryHeader = self.loaded_asset_sentinel.previous;
                 while (header != null and header.? != &self.loaded_asset_sentinel) : (header = header.?.previous) {
                     var asset: *Asset = &self.assets[header.?.asset_index];
-                    if (asset.getState().toInt() >= AssetState.Loaded.toInt()) {
-                        std.debug.assert(asset.getState() == AssetState.Loaded);
-                        std.debug.assert(!asset.isLocked());
+                    if (asset.state >= AssetState.Loaded.toInt()) {
+                        std.debug.assert(asset.state == AssetState.Loaded.toInt());
 
                         self.removeAssetHeaderFromList(header.?);
 
@@ -420,11 +412,9 @@ pub const Assets = struct {
     }
 
     fn moveAssetHeaderToFront(self: *Assets, asset: *Asset) void {
-        if (!asset.isLocked()) {
-            if (asset.header) |header| {
-                self.removeAssetHeaderFromList(header);
-                self.insertAssetHeaderAtFront(header);
-            }
+        if (asset.header) |header| {
+            self.removeAssetHeaderFromList(header);
+            self.insertAssetHeaderAtFront(header);
         }
     }
 
@@ -503,15 +493,13 @@ pub const Assets = struct {
     pub fn prefetchBitmap(
         self: *Assets,
         opt_id: ?BitmapId,
-        locked: bool,
     ) void {
-        self.loadBitmap(opt_id, locked);
+        self.loadBitmap(opt_id);
     }
 
     pub fn loadBitmap(
         self: *Assets,
         opt_id: ?BitmapId,
-        locked: bool,
     ) void {
         if (opt_id) |id| {
             var asset = &self.assets[id.value];
@@ -554,12 +542,7 @@ pub const Assets = struct {
                     work.destination = @ptrCast(bitmap.memory);
                     work.final_state = AssetState.Loaded.toInt();
 
-                    if (locked) {
-                        work.final_state |= AssetState.Locked.toInt();
-                        asset.state |= AssetState.Locked.toInt();
-                    } else {
-                        self.addAssetHeaderToList(id.value, size);
-                    }
+                    self.addAssetHeaderToList(id.value, size);
 
                     shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
@@ -569,17 +552,50 @@ pub const Assets = struct {
         }
     }
 
-    pub fn getBitmap(self: *Assets, id: BitmapId, should_be_locked: bool) ?*LoadedBitmap {
-        var result: ?*LoadedBitmap = null;
-        var asset = &self.assets[id.value];
+    fn getAsset(self: *Assets, id: u32) ?*AssetMemoryHeader {
+        var result: ?*AssetMemoryHeader = null;
+        var asset = &self.assets[id];
 
-        if (asset.getState().toInt() >= AssetState.Loaded.toInt()) {
-            std.debug.assert(!should_be_locked or asset.isLocked());
-            @fence(.acquire);
-            if (asset.header) |header| {
-                result = &header.data.bitmap;
-                self.moveAssetHeaderToFront(asset);
+        while (true) {
+            const state = asset.state;
+
+            if (state == AssetState.Loaded.toInt()) {
+                if (@cmpxchgStrong(
+                        u32,
+                        &asset.state,
+                        state,
+                        AssetState.Operating.toInt(),
+                        .seq_cst,
+                        .seq_cst
+                ) == null) {
+                    if (asset.header) |header| {
+                        result = header;
+                        self.moveAssetHeaderToFront(asset);
+
+                        // if (header.generation_id < generation_id) {
+                        //     header.generation_id = generation_id;
+                        // }
+
+                        @fence(.acquire);
+
+                        asset.state = state;
+                    }
+
+                    break;
+                }
+            } else if (state != AssetState.Operating.toInt()) {
+                break;
             }
+        }
+
+        return result;
+    }
+
+    pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
+        var result: ?*LoadedBitmap = null;
+
+        if (self.getAsset(id.value)) |header| {
+            result = &header.data.bitmap;
         }
 
         return result;
@@ -691,14 +707,9 @@ pub const Assets = struct {
 
     pub fn getSound(self: *Assets, id: SoundId) ?*LoadedSound {
         var result: ?*LoadedSound = null;
-        var asset = &self.assets[id.value];
 
-        if (asset.getState().toInt() >= AssetState.Loaded.toInt()) {
-            @fence(.acquire);
-            if (asset.header) |header| {
-                result = &header.data.sound;
-                self.moveAssetHeaderToFront(asset);
-            }
+        if (self.getAsset(id.value)) |header| {
+            result = &header.data.sound;
         }
 
         return result;

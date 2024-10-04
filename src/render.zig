@@ -183,13 +183,10 @@ pub const RenderGroup = extern struct {
 
     missing_resource_count: u32,
 
-    assets_should_be_locked: bool,
-
     pub fn allocate(
         assets: *asset.Assets,
         arena: *shared.MemoryArena,
         max_push_buffer_size: u32,
-        assets_should_be_locked: bool,
     ) *RenderGroup {
         var result = arena.pushStruct(RenderGroup);
 
@@ -205,7 +202,6 @@ pub const RenderGroup = extern struct {
         result.assets = assets;
         result.global_alpha = 1;
         result.missing_resource_count = 0;
-        result.assets_should_be_locked = assets_should_be_locked;
 
         // Default transform.
         result.transform.offset_position = Vector3.zero();
@@ -352,10 +348,10 @@ pub const RenderGroup = extern struct {
         color: Color,
     ) void {
         if (opt_id) |id| {
-            if (self.assets.getBitmap(id, self.assets_should_be_locked)) |bitmap| {
+            if (self.assets.getBitmap(id)) |bitmap| {
                 self.pushBitmap(bitmap, height, offset, color);
             } else {
-                self.assets.loadBitmap(id, self.assets_should_be_locked);
+                self.assets.loadBitmap(id);
                 self.missing_resource_count += 1;
             }
         }

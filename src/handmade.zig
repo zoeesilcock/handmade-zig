@@ -482,7 +482,6 @@ pub export fn updateAndRender(
         transient_state.assets,
         &transient_state.arena,
         @intCast(shared.megabytes(4)),
-        false,
     );
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
@@ -1474,7 +1473,7 @@ fn fillGroundChunk(
         var half_dim = Vector2.new(width, height).scaledTo(0.5);
 
         const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-        var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0, true);
+        var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0);
         render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
         render_group.pushClear(Color.new(1, 0, 1, 1));
 
