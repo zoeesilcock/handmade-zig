@@ -173,6 +173,8 @@ pub const RenderGroup = extern struct {
     assets: *asset.Assets,
     global_alpha: f32,
 
+    generation_id: u32,
+
     monitor_half_dim_in_meters: Vector2,
 
     transform: RenderTransform,
@@ -182,11 +184,13 @@ pub const RenderGroup = extern struct {
     push_buffer_base: [*]u8,
 
     missing_resource_count: u32,
+    renders_in_background: bool,
 
     pub fn allocate(
         assets: *asset.Assets,
         arena: *shared.MemoryArena,
         max_push_buffer_size: u32,
+        renders_in_background: bool,
     ) *RenderGroup {
         var result = arena.pushStruct(RenderGroup);
 
@@ -201,11 +205,15 @@ pub const RenderGroup = extern struct {
 
         result.assets = assets;
         result.global_alpha = 1;
-        result.missing_resource_count = 0;
+
+        result.generation_id = assets.beginGeneration();
 
         // Default transform.
         result.transform.offset_position = Vector3.zero();
         result.transform.scale = 1;
+
+        result.missing_resource_count = 0;
+        result.renders_in_background = renders_in_background;
 
         return result;
     }
@@ -348,10 +356,19 @@ pub const RenderGroup = extern struct {
         color: Color,
     ) void {
         if (opt_id) |id| {
-            if (self.assets.getBitmap(id)) |bitmap| {
+            var opt_bitmap = self.assets.getBitmap(id, self.generation_id);
+
+            if (self.renders_in_background and opt_bitmap == null) {
+                self.assets.loadBitmap(id, true);
+                opt_bitmap = self.assets.getBitmap(id, self.generation_id);
+            }
+
+            if (opt_bitmap) |bitmap| {
                 self.pushBitmap(bitmap, height, offset, color);
             } else {
-                self.assets.loadBitmap(id);
+                std.debug.assert(!self.renders_in_background);
+
+                self.assets.loadBitmap(id, false);
                 self.missing_resource_count += 1;
             }
         }
@@ -646,6 +663,10 @@ pub const RenderGroup = extern struct {
                 },
             }
         }
+    }
+
+    pub fn finish(self: *RenderGroup) void {
+        self.assets.endGeneration(self.generation_id);
     }
 };
 

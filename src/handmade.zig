@@ -482,6 +482,7 @@ pub export fn updateAndRender(
         transient_state.assets,
         &transient_state.arena,
         @intCast(shared.megabytes(4)),
+        false,
     );
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
@@ -1122,6 +1123,7 @@ pub export fn updateAndRender(
     }
 
     render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+    render_group.finish();
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
@@ -1450,6 +1452,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
     const work: *FillGroundChunkWork = @ptrCast(@alignCast(data));
 
     work.render_group.singleRenderTo(work.buffer);
+    work.render_group.finish();
 
     endTaskWithMemory(work.task);
 }
@@ -1473,7 +1476,7 @@ fn fillGroundChunk(
         var half_dim = Vector2.new(width, height).scaledTo(0.5);
 
         const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-        var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0);
+        var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0, true);
         render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
         render_group.pushClear(Color.new(1, 0, 1, 1));
 
@@ -1554,12 +1557,10 @@ fn fillGroundChunk(
             }
         }
 
-        if (render_group.allResourcesPresent()) {
-            ground_buffer.position = chunk_position.*;
-            shared.platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
-        } else {
-            endTaskWithMemory(work.task);
-        }
+        std.debug.assert(render_group.allResourcesPresent());
+
+        ground_buffer.position = chunk_position.*;
+        shared.platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
     }
 }
 
