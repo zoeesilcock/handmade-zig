@@ -85,7 +85,7 @@ const LoadedBitmap = struct {
     height: i32 = 0,
     pitch: i32 = 0,
     memory: ?[*]void,
-    free: []const u8,
+    free: []u8,
 };
 
 fn loadBMP(
@@ -102,7 +102,7 @@ fn loadBMP(
         std.debug.assert(header.compression == 3);
 
         result = LoadedBitmap{
-            .free = read_result.contents,
+            .free = @constCast(read_result.contents),
             .memory = @as([*]void, @ptrCast(@constCast(read_result.contents))) + header.bitmap_offset,
             .width = header.width,
             .height = header.height,
@@ -161,6 +161,7 @@ fn loadBMP(
 }
 
 var device_context: ?win32.CreatedHDC = null;
+var opt_bits: ?*anyopaque = null;
 
 fn loadGlyphBMP(
     file_name: []const u8,
@@ -169,6 +170,8 @@ fn loadGlyphBMP(
     allocator: std.mem.Allocator,
 ) ?LoadedBitmap {
     var result: ?LoadedBitmap = null;
+    const max_width: u32 = 1024;
+    const max_height: u32 = 1024;
 
     if (USE_FONTS_FROM_WINDOWS) {
         if (device_context == null) {
@@ -190,8 +193,34 @@ fn loadGlyphBMP(
                 @ptrCast(font_name),
             );
 
-            device_context = win32.CreateCompatibleDC(null);
-            const bitmap = win32.CreateCompatibleBitmap(device_context, 1024, 1024);
+            device_context = win32.CreateCompatibleDC(win32.GetDC(null));
+
+            const info = win32.BITMAPINFO{
+                .bmiHeader = .{
+                    .biSize = @sizeOf(win32.BITMAPINFOHEADER),
+                    .biWidth = max_width,
+                    .biHeight = max_height,
+                    .biPlanes = 1,
+                    .biBitCount = 32,
+                    .biCompression = win32.BI_RGB,
+                    .biSizeImage = 0,
+                    .biXPelsPerMeter = 0,
+                    .biYPelsPerMeter = 0,
+                    .biClrUsed = 0,
+                    .biClrImportant = 0,
+                },
+                .bmiColors = .{
+                    win32.RGBQUAD{
+                        .rgbBlue = 0,
+                        .rgbGreen = 0,
+                        .rgbRed = 0,
+                        .rgbReserved = 0,
+                    },
+                }
+            };
+            const bitmap = win32.CreateDIBSection(device_context, &info, win32.DIB_RGB_COLORS, &opt_bits, null, 0);
+
+            // const bitmap = win32.CreateCompatibleBitmap(device_context, 1024, 1024);
             _ = win32.SelectObject(device_context, bitmap);
             _ = win32.SelectObject(device_context, font);
             _ = win32.SetBkColor(device_context, 0x000000);
@@ -218,75 +247,89 @@ fn loadGlyphBMP(
         var max_x: i32 = -10000;
         var max_y: i32 = -10000;
 
-        { // Calculate extents of glyph.
-            var y: i32 = 0;
-            while (y < height) : (y += 1) {
-                var x: i32 = 0;
-                while (x < width) : (x += 1) {
-                    const pixel = win32.GetPixel(device_context, x, y);
+        if (opt_bits) |bits| {
+            { // Calculate extents of glyph.
+                var row: [*]u32 = @as([*]u32, @ptrCast(@alignCast(bits))) + (max_height - 1) * max_width;
+                var y: i32 = 0;
+                while (y < height) : (y += 1) {
+                    var pixel = row;
+                    var x: i32 = 0;
+                    while (x < width) : (x += 1) {
+                        // const ref_pixel = win32.GetPixel(device_context, x, y);
+                        // std.debug.assert(pixel[0] == ref_pixel);
 
-                    if (pixel != 0) {
-                        if (min_x > x) {
-                            min_x = x;
+                        if (pixel[0] != 0) {
+                            if (min_x > x) {
+                                min_x = x;
+                            }
+                            if (min_y > y) {
+                                min_y = y;
+                            }
+                            if (max_x < x) {
+                                max_x = x;
+                            }
+                            if (max_y < y) {
+                                max_y = y;
+                            }
                         }
-                        if (min_y > y) {
-                            min_y = y;
-                        }
-                        if (max_x < x) {
-                            max_x = x;
-                        }
-                        if (max_y < y) {
-                            max_y = y;
-                        }
+
+                        pixel += 1;
                     }
+
+                    row -= max_width;
                 }
             }
-        }
 
-        if (min_x <= max_x) {
-            min_x -= 1;
-            min_y -= 1;
-            max_x += 1;
-            max_y += 1;
+            if (min_x <= max_x) {
+                width = (max_x - min_x) + 1;
+                height = (max_y - min_y) + 1;
 
-            width = (max_x - min_x) + 1;
-            height = (max_y - min_y) + 1;
+                result = LoadedBitmap{
+                    .free = undefined,
+                    .memory = undefined,
+                    .width = width + 2,
+                    .height = height + 2,
+                };
+                result.?.pitch = result.?.width * shared.BITMAP_BYTES_PER_PIXEL;
+                result.?.free = allocator.alloc(u8, @intCast(@as(i32, @intCast(result.?.height)) * result.?.pitch)) catch unreachable;
+                @memset(result.?.free, 0);
+                result.?.memory = @ptrCast(@constCast(result.?.free));
 
-            result = LoadedBitmap{
-                .free = undefined,
-                .memory = undefined,
-                .width = width,
-                .height = height,
-                .pitch = width * shared.BITMAP_BYTES_PER_PIXEL,
-            };
-            result.?.free = allocator.alloc(u8, @intCast(@as(i32, @intCast(height)) * result.?.pitch)) catch unreachable;
-            result.?.memory = @ptrCast(@constCast(result.?.free));
+                var dest_row: [*]u8 = @as([*]u8, @ptrCast(result.?.memory.?)) + @as(usize, @intCast((result.?.height - 1 - 1) * result.?.pitch));
+                var source_row: [*]u32 = @as([*]u32, @ptrCast(@alignCast(bits))) + (max_height - 1 - @as(u32, @intCast(min_y))) * max_width;
 
-            var dest_row: [*]u8 = @as([*]u8, @ptrCast(result.?.memory.?)) + @as(usize, @intCast((height - 1) * result.?.pitch));
+                var y: i32 = min_y;
+                while (y <= max_y) : (y += 1) {
+                    var source: [*]u32 = source_row + @as(u32, @intCast(min_x));
+                    var dest: [*]u32 = @as([*]u32, @ptrCast(@alignCast(dest_row))) + 1;
 
-            var y: i32 = min_y;
-            while (y <= max_y) : (y += 1) {
-                var dest: [*]u32 = @ptrCast(@alignCast(dest_row));
+                    var x: i32 = min_x;
+                    while (x <= max_x) : (x += 1) {
+                        // const pixel = win32.GetPixel(device_context, @intCast(x), @intCast(y));
+                        // std.debug.assert(pixel == source[0]);
 
-                var x: i32 = min_x;
-                while (x <= max_x) : (x += 1) {
-                    const pixel = win32.GetPixel(device_context, @intCast(x), @intCast(y));
-                    const gray: u8 = @intCast(pixel & 0xff);
-                    const alpha: u8 = 0xff;
+                        const gray: u8 = @intCast(source[0] & 0xff);
+                        const alpha: u8 = gray;
 
-                    dest[0] = @truncate(
-                        ((@as(u32, @intCast(alpha)) << 24) |
-                         (@as(u32, @intCast(gray)) << 16) |
-                         (@as(u32, @intCast(gray)) << 8) |
-                         (@as(u32, @intCast(gray)) << 0)),
-                    );
-                    dest += 1;
+                        dest[0] = @truncate(
+                            ((@as(u32, @intCast(alpha)) << 24) |
+                             (@as(u32, @intCast(gray)) << 16) |
+                             (@as(u32, @intCast(gray)) << 8) |
+                             (@as(u32, @intCast(gray)) << 0)),
+                        );
+                        dest += 1;
+                        source += 1;
+                    }
+
+                    dest_row -= @as(usize, @intCast(result.?.pitch));
+                    source_row -= max_width;
                 }
-
-                dest_row -= @as(usize, @intCast(result.?.pitch));
+            } else {
+                unreachable;
             }
         } else {
-            unreachable;
+            std.debug.print("Failed to generate glyph: {d}\n", .{ codepoint });
+            return null;
         }
     } else {
         const ttf_file = readEntireFile(file_name, allocator);
