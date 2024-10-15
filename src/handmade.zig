@@ -1441,9 +1441,12 @@ pub fn endTaskWithMemory(task: *shared.TaskWithMemory) void {
 }
 
 const FillGroundChunkWork = struct {
-    render_group: *render.RenderGroup,
+    transient_state: *TransientState,
+    state: *State,
+    ground_buffer: *shared.GroundBuffer,
+    chunk_position: world.WorldPosition,
+
     task: *shared.TaskWithMemory,
-    buffer: *LoadedBitmap,
 };
 
 pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
@@ -1451,8 +1454,97 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
 
     const work: *FillGroundChunkWork = @ptrCast(@alignCast(data));
 
-    work.render_group.singleRenderTo(work.buffer);
-    work.render_group.finish();
+    const buffer = &work.ground_buffer.bitmap;
+    buffer.alignment_percentage = Vector2.new(0.5, 0.5);
+    buffer.width_over_height = 1.0;
+
+    const width: f32 = work.state.world.chunk_dimension_in_meters.x();
+    const height: f32 = work.state.world.chunk_dimension_in_meters.y();
+    std.debug.assert(width == height);
+    var half_dim = Vector2.new(width, height).scaledTo(0.5);
+
+    const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
+    var render_group = RenderGroup.allocate(work.transient_state.assets, &work.task.arena, 0, true);
+    render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
+    render_group.pushClear(Color.new(1, 0, 1, 1));
+
+    var chunk_offset_y: i32 = -1;
+    while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
+        var chunk_offset_x: i32 = -1;
+        while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
+            const chunk_x = work.chunk_position.chunk_x + chunk_offset_x;
+            const chunk_y = work.chunk_position.chunk_y + chunk_offset_y;
+            const chunk_z = work.chunk_position.chunk_z;
+            const center = Vector2.new(
+                @as(f32, @floatFromInt(chunk_offset_x)) * width,
+                @as(f32, @floatFromInt(chunk_offset_y)) * height,
+            );
+
+            const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
+            const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
+            var series = random.Series.seed(seed);
+
+            const color = Color.white();
+            // var color = Color.new(1, 0, 0, 1);
+            // if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
+            //     color = Color.new(0, 0, 1, 1);
+            // }
+
+            var grass_index: u32 = 0;
+            while (grass_index < 100) : (grass_index += 1) {
+                const opt_stamp = work.transient_state.assets.getRandomBitmap(
+                    if (series.randomChoice(2) == 1) .Grass else .Stone,
+                    &series,
+                );
+
+                if (opt_stamp) |stamp| {
+                    const offset = half_dim.hadamardProduct(
+                        Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                    );
+                    const position = center.plus(offset);
+
+                    render_group.pushBitmapId(stamp, 2, position.toVector3(0), color);
+                }
+            }
+        }
+    }
+
+    chunk_offset_y = -1;
+    while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
+        var chunk_offset_x: i32 = -1;
+        while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
+            const chunk_x = work.chunk_position.chunk_x + chunk_offset_x;
+            const chunk_y = work.chunk_position.chunk_y + chunk_offset_y;
+            const chunk_z = work.chunk_position.chunk_z;
+            const center = Vector2.new(
+                @as(f32, @floatFromInt(chunk_offset_x)) * width,
+                @as(f32, @floatFromInt(chunk_offset_y)) * height,
+            );
+
+            const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
+            const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
+            var series = random.Series.seed(seed);
+
+            var grass_index: u32 = 0;
+            while (grass_index < 50) : (grass_index += 1) {
+                const opt_stamp = work.transient_state.assets.getRandomBitmap(.Tuft, &series);
+
+                if (opt_stamp) |stamp| {
+                    const offset = half_dim.hadamardProduct(
+                        Vector2.new(series.randomBilateral(), series.randomBilateral()),
+                    );
+                    const position = center.plus(offset);
+
+                    render_group.pushBitmapId(stamp, 0.1, position.toVector3(0), Color.white());
+                }
+            }
+        }
+    }
+
+    std.debug.assert(render_group.allResourcesPresent());
+
+    render_group.singleRenderTo(buffer);
+    render_group.finish();
 
     endTaskWithMemory(work.task);
 }
@@ -1465,100 +1557,11 @@ fn fillGroundChunk(
 ) void {
     if (beginTaskWithMemory(transient_state)) |task| {
         var work: *FillGroundChunkWork = task.arena.pushStruct(FillGroundChunkWork);
-
-        const buffer = &ground_buffer.bitmap;
-        buffer.alignment_percentage = Vector2.new(0.5, 0.5);
-        buffer.width_over_height = 1.0;
-
-        const width: f32 = state.world.chunk_dimension_in_meters.x();
-        const height: f32 = state.world.chunk_dimension_in_meters.y();
-        std.debug.assert(width == height);
-        var half_dim = Vector2.new(width, height).scaledTo(0.5);
-
-        const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-        var render_group = RenderGroup.allocate(transient_state.assets, &task.arena, 0, true);
-        render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
-        render_group.pushClear(Color.new(1, 0, 1, 1));
-
-        work.buffer = buffer;
-        work.render_group = render_group;
+        work.state = state;
+        work.transient_state = transient_state;
+        work.ground_buffer = ground_buffer;
+        work.chunk_position = chunk_position.*;
         work.task = task;
-
-        var chunk_offset_y: i32 = -1;
-        while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
-            var chunk_offset_x: i32 = -1;
-            while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
-                const chunk_x = chunk_position.chunk_x + chunk_offset_x;
-                const chunk_y = chunk_position.chunk_y + chunk_offset_y;
-                const chunk_z = chunk_position.chunk_z;
-                const center = Vector2.new(
-                    @as(f32, @floatFromInt(chunk_offset_x)) * width,
-                    @as(f32, @floatFromInt(chunk_offset_y)) * height,
-                );
-
-                const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
-                const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
-                var series = random.Series.seed(seed);
-
-                const color = Color.white();
-                // var color = Color.new(1, 0, 0, 1);
-                // if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
-                //     color = Color.new(0, 0, 1, 1);
-                // }
-
-                var grass_index: u32 = 0;
-                while (grass_index < 100) : (grass_index += 1) {
-                    const opt_stamp = transient_state.assets.getRandomBitmap(
-                        if (series.randomChoice(2) == 1) .Grass else .Stone,
-                        &series,
-                    );
-
-                    if (opt_stamp) |stamp| {
-                        const offset = half_dim.hadamardProduct(
-                            Vector2.new(series.randomBilateral(), series.randomBilateral()),
-                        );
-                        const position = center.plus(offset);
-
-                        render_group.pushBitmapId(stamp, 2, position.toVector3(0), color);
-                    }
-                }
-            }
-        }
-
-        chunk_offset_y = -1;
-        while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
-            var chunk_offset_x: i32 = -1;
-            while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
-                const chunk_x = chunk_position.chunk_x + chunk_offset_x;
-                const chunk_y = chunk_position.chunk_y + chunk_offset_y;
-                const chunk_z = chunk_position.chunk_z;
-                const center = Vector2.new(
-                    @as(f32, @floatFromInt(chunk_offset_x)) * width,
-                    @as(f32, @floatFromInt(chunk_offset_y)) * height,
-                );
-
-                const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
-                const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
-                var series = random.Series.seed(seed);
-
-                var grass_index: u32 = 0;
-                while (grass_index < 50) : (grass_index += 1) {
-                    const opt_stamp = transient_state.assets.getRandomBitmap(.Tuft, &series);
-
-                    if (opt_stamp) |stamp| {
-                        const offset = half_dim.hadamardProduct(
-                            Vector2.new(series.randomBilateral(), series.randomBilateral()),
-                        );
-                        const position = center.plus(offset);
-
-                        render_group.pushBitmapId(stamp, 0.1, position.toVector3(0), Color.white());
-                    }
-                }
-            }
-        }
-
-        std.debug.assert(render_group.allResourcesPresent());
-
         ground_buffer.position = chunk_position.*;
         shared.platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
     }

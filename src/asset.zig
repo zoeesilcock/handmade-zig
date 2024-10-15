@@ -564,63 +564,68 @@ pub const Assets = struct {
     ) void {
         if (opt_id) |id| {
             var asset = &self.assets[id.value];
+            if (id.isValid()) {
+                if (@cmpxchgStrong(
+                        u32,
+                        &asset.state,
+                        AssetState.Unloaded.toInt(),
+                        AssetState.Queued.toInt(),
+                        .seq_cst,
+                        .seq_cst,
+                ) == null) {
+                    var opt_task: ?*shared.TaskWithMemory = null;
 
-            if (id.isValid() and @cmpxchgStrong(
-                u32,
-                &asset.state,
-                AssetState.Unloaded.toInt(),
-                AssetState.Queued.toInt(),
-                .seq_cst,
-                .seq_cst,
-            ) == null) {
-                var opt_task: ?*shared.TaskWithMemory = null;
-
-                if (!immediate) {
-                    opt_task = handmade.beginTaskWithMemory(self.transient_state);
-                }
-
-                if (immediate or opt_task != null) {
-                    const info = asset.hha.info.bitmap;
-
-                    var size = AssetMemorySize{};
-                    const width = shared.safeTruncateUInt32ToUInt16(info.dim[0]);
-                    const height = shared.safeTruncateUInt32ToUInt16(info.dim[1]);
-                    size.section = 4 * width;
-                    size.data = size.section * height;
-                    size.total = size.data + @sizeOf(AssetMemoryHeader);
-
-                    asset.header = self.acquireAssetMemory(shared.align16(size.total), id.value);
-
-                    var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
-
-                    bitmap.alignment_percentage = Vector2.new(info.alignment_percentage[0], info.alignment_percentage[1]);
-                    bitmap.width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1]));
-                    bitmap.width = width;
-                    bitmap.height = height;
-                    bitmap.pitch = shared.safeTruncateUInt32ToUInt16(size.section);
-                    bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
-
-                    var work = LoadAssetWork{
-                        .task = undefined,
-                        .asset = asset,
-                        .handle = self.getFileHandleFor(asset.file_index),
-                        .offset = asset.hha.data_offset,
-                        .size = size.data,
-                        .destination = @ptrCast(bitmap.memory),
-                        .final_state = AssetState.Loaded.toInt(),
-                    };
-
-                    if (opt_task) |task| {
-                        work.task = task;
-
-                        const task_work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
-                        task_work.* = work;
-                        shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, task_work);
-                    } else {
-                        doLoadAssetWorkDirectly(&work);
+                    if (!immediate) {
+                        opt_task = handmade.beginTaskWithMemory(self.transient_state);
                     }
-                } else {
-                    @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
+
+                    if (immediate or opt_task != null) {
+                        const info = asset.hha.info.bitmap;
+
+                        var size = AssetMemorySize{};
+                        const width = shared.safeTruncateUInt32ToUInt16(info.dim[0]);
+                        const height = shared.safeTruncateUInt32ToUInt16(info.dim[1]);
+                        size.section = 4 * width;
+                        size.data = size.section * height;
+                        size.total = size.data + @sizeOf(AssetMemoryHeader);
+
+                        asset.header = self.acquireAssetMemory(shared.align16(size.total), id.value);
+
+                        var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
+
+                        bitmap.alignment_percentage = Vector2.new(info.alignment_percentage[0], info.alignment_percentage[1]);
+                        bitmap.width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1]));
+                        bitmap.width = width;
+                        bitmap.height = height;
+                        bitmap.pitch = shared.safeTruncateUInt32ToUInt16(size.section);
+                        bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
+
+                        var work = LoadAssetWork{
+                            .task = undefined,
+                            .asset = asset,
+                            .handle = self.getFileHandleFor(asset.file_index),
+                            .offset = asset.hha.data_offset,
+                            .size = size.data,
+                            .destination = @ptrCast(bitmap.memory),
+                            .final_state = AssetState.Loaded.toInt(),
+                        };
+
+                        if (opt_task) |task| {
+                            work.task = task;
+
+                            const task_work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+                            task_work.* = work;
+                            shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, task_work);
+                        } else {
+                            doLoadAssetWorkDirectly(&work);
+                        }
+                    } else {
+                        @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
+                    }
+                } else if (immediate) {
+                    // The asset is already queued on another thread, wait until that asset loading is completed.
+                    const state: *volatile u32 = &asset.state;
+                    while (state.* == AssetState.Queued.toInt()) { }
                 }
             }
         }
