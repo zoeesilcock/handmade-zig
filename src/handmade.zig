@@ -11,12 +11,11 @@ const math = @import("math.zig");
 const random = @import("random.zig");
 const std = @import("std");
 
+const OUTPUT_TIMING = @import("build_options").timing;
+
 /// TODO: An overview of upcoming tasks.
 ///
 /// * Flush all thread queues before reloading DLL.
-///
-/// * Asset streaming.
-///     * Memory management.
 ///
 /// * Debug code.
 ///     * Fonts.
@@ -337,6 +336,8 @@ pub export fn updateAndRender(
             transient_state,
         );
 
+        debug_render_group = RenderGroup.allocate(transient_state.assets, &transient_state.arena, shared.megabytes(16), false);
+
         if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
             state.music = music;
         }
@@ -391,6 +392,11 @@ pub export fn updateAndRender(
         }
 
         transient_state.is_initialized = true;
+    }
+
+    if (debug_render_group) |group| {
+        group.beginRender();
+        debugTextReset(buffer.width, buffer.height);
     }
 
     if (false) {
@@ -484,6 +490,7 @@ pub export fn updateAndRender(
         @intCast(shared.megabytes(4)),
         false,
     );
+    render_group.beginRender();
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
@@ -1123,7 +1130,7 @@ pub export fn updateAndRender(
     }
 
     render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
-    render_group.finish();
+    render_group.endRender();
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
@@ -1131,6 +1138,114 @@ pub export fn updateAndRender(
 
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
+
+    overlayDebugCycleCounters(memory);
+    if (debug_render_group) |group| {
+        group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+        group.endRender();
+    }
+}
+
+var debug_render_group: ?*RenderGroup = null;
+var left_edge: f32 = 0;
+var at_y: f32 = 0;
+var font_scale: f32 = 0;
+
+pub fn debugTextReset(width: i32, height: i32) void {
+    if (debug_render_group) |group| {
+        group.orthographicMode(width, height, 1);
+    }
+
+    font_scale = 20;
+    at_y = 0.5 * @as(f32, @floatFromInt(height)) - (0.5 * font_scale);
+    left_edge = -0.5 * @as(f32, @floatFromInt(width)) + (0.5 * font_scale);
+}
+
+pub fn debugTextLine(text: [:0]const u8) void {
+    if (debug_render_group) |render_group| {
+        var match_vector = asset.AssetVector{};
+        var weight_vector = asset.AssetVector{};
+        weight_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = 1;
+
+        var color = Color.white();
+        var char_scale = font_scale;
+        var at_x: f32 = left_edge;
+
+        var at: [*]const u8 = @ptrCast(text);
+        while (at[0] != 0) {
+            if (at[0] == '\\' and
+                at[1] == '#' and
+                at[2] != 0 and
+                at[3] != 0 and
+                at[4] != 0)
+            {
+                const c_scale: f32 = 1.0 / 9.0;
+                color = Color.new(
+                    math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
+                    math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
+                    math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
+                    1,
+                );
+
+                at += 5;
+            } else if (at[0] == '\\' and
+                at[1] == '^' and
+                at[2] != 0)
+            {
+                const c_scale: f32 = 1.0 / 9.0;
+                char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
+                at += 3;
+            } else {
+                if (at[0] != ' ') {
+                    match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = @floatFromInt(at[0]);
+                    const bitmap_id = render_group.assets.getBestMatchBitmap(.Font, &match_vector, &weight_vector);
+                    render_group.pushBitmapId(bitmap_id, char_scale, Vector3.new(at_x, at_y, 0), color);
+                }
+                at_x += char_scale;
+                at += 1;
+            }
+        }
+
+        at_y -= 1.2 * font_scale;
+    }
+}
+
+fn overlayDebugCycleCounters(memory: *shared.Memory) void {
+    if (OUTPUT_TIMING) {
+        const name_table: [6][:0]const u8 = .{
+            "GameUpdateAndRender",
+            "RenderGrouptToOutput",
+            "DrawRectangle",
+            "DrawRectangleSlowly",
+            "DrawRectangleQuickly",
+            "ProcessPixel",
+        };
+
+        debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTERS:");
+        var total_cycles: u64 = 0;
+
+        for (&memory.counters, 0..) |*counter, counter_index| {
+            if (counter_index == 0) {
+                total_cycles = counter.cycle_count;
+            }
+
+            if (counter.hit_count > 0) {
+                // var buffer: [128]u8 = undefined;
+                // const slice = std.fmt.bufPrintZ(&buffer, "{d} {s} {s:>25}: {d:>10} cycles, {d:>10} hits, {d:>10} cycles/hit, {d:>6.2}%\n", .{
+                //     counter_index,
+                //     name_table[counter_index],
+                //     shared.DEBUG_CYCLE_COUNTER_NAMES[counter_index],
+                //     counter.cycle_count,
+                //     counter.hit_count,
+                //     counter.cycle_count / counter.hit_count,
+                //     (@as(f32, @floatFromInt(counter.cycle_count)) / @as(f32, @floatFromInt(total_cycles))) * 100.0,
+                // }) catch "";
+                // debugTextLine(slice);
+
+                debugTextLine(name_table[counter_index]);
+            }
+        }
+    }
 }
 
 pub fn chunkPositionFromTilePosition(
@@ -1465,6 +1580,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
 
     const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
     var render_group = RenderGroup.allocate(work.transient_state.assets, &work.task.arena, 0, true);
+    render_group.beginRender();
     render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
     render_group.pushClear(Color.new(1, 0, 1, 1));
 
@@ -1544,7 +1660,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
     std.debug.assert(render_group.allResourcesPresent());
 
     render_group.singleRenderTo(buffer);
-    render_group.finish();
+    render_group.endRender();
 
     endTaskWithMemory(work.task);
 }

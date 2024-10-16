@@ -186,6 +186,8 @@ pub const RenderGroup = extern struct {
     missing_resource_count: u32,
     renders_in_background: bool,
 
+    inside_renderer: bool,
+
     pub fn allocate(
         assets: *asset.Assets,
         arena: *shared.MemoryArena,
@@ -206,7 +208,7 @@ pub const RenderGroup = extern struct {
         result.assets = assets;
         result.global_alpha = 1;
 
-        result.generation_id = assets.beginGeneration();
+        result.generation_id = 0;
 
         // Default transform.
         result.transform.offset_position = Vector3.zero();
@@ -214,6 +216,8 @@ pub const RenderGroup = extern struct {
 
         result.missing_resource_count = 0;
         result.renders_in_background = renders_in_background;
+
+        result.inside_renderer = false;
 
         return result;
     }
@@ -279,6 +283,8 @@ pub const RenderGroup = extern struct {
         entry_type: RenderEntryType,
         comptime alignment: u32,
     ) ?*void {
+        std.debug.assert(self.inside_renderer);
+
         var result: ?*void = null;
         const size = in_size + @sizeOf(RenderEntryHeader);
 
@@ -465,6 +471,8 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         output_target: *LoadedBitmap,
     ) void {
+        std.debug.assert(self.inside_renderer);
+
         std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
 
         const clip_rect = Rectangle2i.new(0, 0, output_target.width, output_target.height);
@@ -482,6 +490,8 @@ pub const RenderGroup = extern struct {
         render_queue: *shared.PlatformWorkQueue,
         output_target: *LoadedBitmap,
     ) void {
+        std.debug.assert(self.inside_renderer);
+
         // TODO
         // * Make sure that tiles are all cache-aligned.
         // * Can we get hyperthreads synced so they do interleaved lines?
@@ -665,8 +675,20 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn finish(self: *RenderGroup) void {
+    pub fn beginRender(self: *RenderGroup) void {
+        std.debug.assert(!self.inside_renderer);
+        self.inside_renderer = true;
+
+        self.generation_id = self.assets.beginGeneration();
+    }
+
+    pub fn endRender(self: *RenderGroup) void {
+        std.debug.assert(self.inside_renderer);
+        self.inside_renderer = false;
+
         self.assets.endGeneration(self.generation_id);
+        self.generation_id = 0;
+        self.push_buffer_size = 0;
     }
 };
 

@@ -846,8 +846,8 @@ fn writeHero(allocator: std.mem.Allocator) void {
     result.endAssetType();
 
     result.beginAssetType(.Font);
-    var character: u32 = 'A';
-    while (character <= 'Z') : (character += 1) {
+    var character: u32 = '!';
+    while (character <= '~') : (character += 1) {
         // _ = result.addCharacterAsset("C:/Windows/Fonts/arial.ttf", "Arial", character, null, null);
         _ = result.addCharacterAsset("C:/Windows/Fonts/cour.ttf", "Courier New", character, null, null);
         result.addTag(.UnicodeCodepoint, @floatFromInt(character));
