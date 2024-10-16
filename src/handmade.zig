@@ -338,9 +338,9 @@ pub export fn updateAndRender(
 
         debug_render_group = RenderGroup.allocate(transient_state.assets, &transient_state.arena, shared.megabytes(16), false);
 
-        if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
-            state.music = music;
-        }
+        // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
+        //     state.music = music;
+        // }
 
         transient_state.ground_buffer_count = 256;
         transient_state.ground_buffers = transient_state.arena.pushArray(
@@ -782,62 +782,108 @@ pub export fn updateAndRender(
 
                     drawHitPoints(entity, render_group);
 
-                    // Particle system test.
-                    var particle_spawn_index: u32 = 0;
-                    while (particle_spawn_index < 3) : (particle_spawn_index += 1) {
-                        const particle: *Particle = &state.particles[state.next_particle];
+                    if (false) {
+                        // Particle system test.
+                        var particle_spawn_index: u32 = 0;
+                        while (particle_spawn_index < 3) : (particle_spawn_index += 1) {
+                            const particle: *Particle = &state.particles[state.next_particle];
 
-                        state.next_particle += 1;
-                        if (state.next_particle >= state.particles.len) {
-                            state.next_particle = 0;
+                            state.next_particle += 1;
+                            if (state.next_particle >= state.particles.len) {
+                                state.next_particle = 0;
+                            }
+
+                            particle.position = Vector3.new(
+                                state.effects_entropy.randomFloatBetween(-0.05, 0.05),
+                                0,
+                                0,
+                            );
+                            particle.velocity = Vector3.new(
+                                state.effects_entropy.randomFloatBetween(-0.01, 0.01),
+                                7 * state.effects_entropy.randomFloatBetween(0.7, 1),
+                                0,
+                            );
+                            particle.acceleration = Vector3.new(0, -9.8, 0);
+                            particle.color = Color.new(
+                                state.effects_entropy.randomFloatBetween(0.75, 1),
+                                state.effects_entropy.randomFloatBetween(0.75, 1),
+                                state.effects_entropy.randomFloatBetween(0.75, 1),
+                                1,
+                            );
+                            particle.color_velocity = Color.new(0, 0, 0, -0.5);
+
+                            const nothings = "NOTHINGS";
+                            var particle_match_vector = asset.AssetVector{};
+                            var particle_weight_vector = asset.AssetVector{};
+                            particle_match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] =
+                                @floatFromInt(nothings[state.effects_entropy.randomChoice(nothings.len)]);
+                            particle_weight_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = 1;
+                            particle.bitmap_id = transient_state.assets.getBestMatchBitmap(
+                                .Font,
+                                &particle_match_vector,
+                                &particle_weight_vector,
+                            ).?;
+
+                            // particle.bitmap_id = transient_state.assets.getRandomBitmap(.Head, &state.effects_entropy).?;
                         }
 
-                        particle.position = Vector3.new(
-                            state.effects_entropy.randomFloatBetween(-0.05, 0.05),
-                            0,
-                            0,
-                        );
-                        particle.velocity = Vector3.new(
-                            state.effects_entropy.randomFloatBetween(-0.01, 0.01),
-                            7 * state.effects_entropy.randomFloatBetween(0.7, 1),
-                            0,
-                        );
-                        particle.acceleration = Vector3.new(0, -9.8, 0);
-                        particle.color = Color.new(
-                            state.effects_entropy.randomFloatBetween(0.75, 1),
-                            state.effects_entropy.randomFloatBetween(0.75, 1),
-                            state.effects_entropy.randomFloatBetween(0.75, 1),
-                            1,
-                        );
-                        particle.color_velocity = Color.new(0, 0, 0, -0.5);
+                        const grid_scale: f32 = 0.25;
+                        const inv_grid_scale: f32 = 1 / grid_scale;
+                        const grid_origin = Vector3.new(-0.5 * grid_scale * shared.PARTICLE_CEL_DIM, 0, 0);
 
-                        const nothings = "NOTHINGS";
-                        var particle_match_vector = asset.AssetVector{};
-                        var particle_weight_vector = asset.AssetVector{};
-                        particle_match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] =
-                            @floatFromInt(nothings[state.effects_entropy.randomChoice(nothings.len)]);
-                        particle_weight_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = 1;
-                        particle.bitmap_id = transient_state.assets.getBestMatchBitmap(
-                            .Font,
-                            &particle_match_vector,
-                            &particle_weight_vector,
-                        ).?;
-
-                        // particle.bitmap_id = transient_state.assets.getRandomBitmap(.Head, &state.effects_entropy).?;
-                    }
-
-                    const grid_scale: f32 = 0.25;
-                    const inv_grid_scale: f32 = 1 / grid_scale;
-                    const grid_origin = Vector3.new(-0.5 * grid_scale * shared.PARTICLE_CEL_DIM, 0, 0);
-
-                    {
-                        // Zero the paricle cels.
                         {
+                            // Zero the paricle cels.
+                            {
+                                var y: u32 = 0;
+                                while (y < shared.PARTICLE_CEL_DIM) : (y += 1) {
+                                    var x: u32 = 0;
+                                    while (x < shared.PARTICLE_CEL_DIM) : (x += 1) {
+                                        state.particle_cels[y][x] = ParticleCel{};
+                                    }
+                                }
+                            }
+
+                            var particle_index: u32 = 0;
+                            while (particle_index < state.particles.len) : (particle_index += 1) {
+                                const particle: *Particle = &state.particles[particle_index];
+                                const position = particle.position.minus(grid_origin).scaledTo(inv_grid_scale);
+                                const ix: i32 = intrinsics.floorReal32ToInt32(position.x());
+                                const iy: i32 = intrinsics.floorReal32ToInt32(position.y());
+                                var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
+                                var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
+
+                                if (x < 0) {
+                                    x = 0;
+                                }
+                                if (x > (shared.PARTICLE_CEL_DIM - 1)) {
+                                    x = (shared.PARTICLE_CEL_DIM - 1);
+                                }
+                                if (y < 0) {
+                                    y = 0;
+                                }
+                                if (y > (shared.PARTICLE_CEL_DIM - 1)) {
+                                    y = (shared.PARTICLE_CEL_DIM - 1);
+                                }
+
+                                const cel = &state.particle_cels[y][x];
+                                const density: f32 = particle.color.a();
+                                cel.density += density;
+                                cel.velocity_times_density = cel.velocity_times_density.plus(particle.velocity.scaledTo(density));
+                            }
+                        }
+
+                        if (false) {
                             var y: u32 = 0;
                             while (y < shared.PARTICLE_CEL_DIM) : (y += 1) {
                                 var x: u32 = 0;
                                 while (x < shared.PARTICLE_CEL_DIM) : (x += 1) {
-                                    state.particle_cels[y][x] = ParticleCel{};
+                                    const cel = &state.particle_cels[y][x];
+                                    const alpha: f32 = math.clampf01(0.1 * cel.density);
+                                    render_group.pushRectangle(
+                                        Vector2.one().scaledTo(grid_scale),
+                                        Vector3.new(@floatFromInt(x), @floatFromInt(y), 0).scaledTo(grid_scale).plus(grid_origin),
+                                        Color.new(alpha, alpha, alpha, 0),
+                                    );
                                 }
                             }
                         }
@@ -851,111 +897,67 @@ pub export fn updateAndRender(
                             var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
                             var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
 
-                            if (x < 0) {
-                                x = 0;
+                            if (x < 1) {
+                                x = 1;
                             }
-                            if (x > (shared.PARTICLE_CEL_DIM - 1)) {
-                                x = (shared.PARTICLE_CEL_DIM - 1);
+                            if (x > (shared.PARTICLE_CEL_DIM - 2)) {
+                                x = (shared.PARTICLE_CEL_DIM - 2);
                             }
-                            if (y < 0) {
-                                y = 0;
+                            if (y < 1) {
+                                y = 1;
                             }
-                            if (y > (shared.PARTICLE_CEL_DIM - 1)) {
-                                y = (shared.PARTICLE_CEL_DIM - 1);
+                            if (y > (shared.PARTICLE_CEL_DIM - 2)) {
+                                y = (shared.PARTICLE_CEL_DIM - 2);
                             }
 
-                            const cel = &state.particle_cels[y][x];
-                            const density: f32 = particle.color.a();
-                            cel.density += density;
-                            cel.velocity_times_density = cel.velocity_times_density.plus(particle.velocity.scaledTo(density));
-                        }
-                    }
+                            const cel_center = &state.particle_cels[y][x];
+                            const cel_left = &state.particle_cels[y][x - 1];
+                            const cel_right = &state.particle_cels[y][x + 1];
+                            const cel_down = &state.particle_cels[y - 1][x];
+                            const cel_up = &state.particle_cels[y + 1][x];
 
-                    if (false) {
-                        var y: u32 = 0;
-                        while (y < shared.PARTICLE_CEL_DIM) : (y += 1) {
-                            var x: u32 = 0;
-                            while (x < shared.PARTICLE_CEL_DIM) : (x += 1) {
-                                const cel = &state.particle_cels[y][x];
-                                const alpha: f32 = math.clampf01(0.1 * cel.density);
-                                render_group.pushRectangle(
-                                    Vector2.one().scaledTo(grid_scale),
-                                    Vector3.new(@floatFromInt(x), @floatFromInt(y), 0).scaledTo(grid_scale).plus(grid_origin),
-                                    Color.new(alpha, alpha, alpha, 0),
-                                );
+                            var dispersion = Vector3.zero();
+                            const dispersion_coefficient: f32 = 1;
+                            dispersion = dispersion.plus(Vector3.new(-1, 0, 0)
+                                .scaledTo(dispersion_coefficient * (cel_center.density - cel_left.density)));
+                            dispersion = dispersion.plus(Vector3.new(1, 0, 0)
+                                .scaledTo(dispersion_coefficient * (cel_center.density - cel_right.density)));
+                            dispersion = dispersion.plus(Vector3.new(0, -1, 0)
+                                .scaledTo(dispersion_coefficient * (cel_center.density - cel_down.density)));
+                            dispersion = dispersion.plus(Vector3.new(0, 1, 0)
+                                .scaledTo(dispersion_coefficient * (cel_center.density - cel_up.density)));
+
+                            // Simulate particle.
+                            const particle_acceleration = particle.acceleration.plus(dispersion);
+                            particle.position = particle.position.plus(
+                                particle_acceleration.scaledTo(0.5 * math.square(input.frame_delta_time) * input.frame_delta_time),
+                            ).plus(
+                                particle.velocity.scaledTo(input.frame_delta_time),
+                            );
+                            particle.velocity = particle.velocity.plus(particle_acceleration.scaledTo(input.frame_delta_time));
+                            particle.color = particle.color.plus(particle.color_velocity.scaledTo(input.frame_delta_time));
+
+                            if (particle.position.y() < 0) {
+                                const coefficient_of_restitution = 0.3;
+                                const coefficient_of_friction = 0.7;
+                                _ = particle.position.setY(-particle.position.y());
+                                _ = particle.velocity.setY(-coefficient_of_restitution * particle.velocity.y());
+                                _ = particle.velocity.setX(coefficient_of_friction * particle.velocity.x());
                             }
+
+                            var color = particle.color.clamp01();
+                            if (particle.color.a() > 0.9) {
+                                _ = color.setA(0.9 * math.clamp01MapToRange(1, 0.9, color.a()));
+                            }
+
+                            // Render particle.
+                            render_group.pushBitmapId(
+                                particle.bitmap_id,
+                                1,
+                                particle.position,
+                                color,
+                            );
                         }
-                    }
-
-                    var particle_index: u32 = 0;
-                    while (particle_index < state.particles.len) : (particle_index += 1) {
-                        const particle: *Particle = &state.particles[particle_index];
-                        const position = particle.position.minus(grid_origin).scaledTo(inv_grid_scale);
-                        const ix: i32 = intrinsics.floorReal32ToInt32(position.x());
-                        const iy: i32 = intrinsics.floorReal32ToInt32(position.y());
-                        var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
-                        var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
-
-                        if (x < 1) {
-                            x = 1;
-                        }
-                        if (x > (shared.PARTICLE_CEL_DIM - 2)) {
-                            x = (shared.PARTICLE_CEL_DIM - 2);
-                        }
-                        if (y < 1) {
-                            y = 1;
-                        }
-                        if (y > (shared.PARTICLE_CEL_DIM - 2)) {
-                            y = (shared.PARTICLE_CEL_DIM - 2);
-                        }
-
-                        const cel_center = &state.particle_cels[y][x];
-                        const cel_left = &state.particle_cels[y][x - 1];
-                        const cel_right = &state.particle_cels[y][x + 1];
-                        const cel_down = &state.particle_cels[y - 1][x];
-                        const cel_up = &state.particle_cels[y + 1][x];
-
-                        var dispersion = Vector3.zero();
-                        const dispersion_coefficient: f32 = 1;
-                        dispersion = dispersion.plus(Vector3.new(-1, 0, 0)
-                            .scaledTo(dispersion_coefficient * (cel_center.density - cel_left.density)));
-                        dispersion = dispersion.plus(Vector3.new(1, 0, 0)
-                            .scaledTo(dispersion_coefficient * (cel_center.density - cel_right.density)));
-                        dispersion = dispersion.plus(Vector3.new(0, -1, 0)
-                            .scaledTo(dispersion_coefficient * (cel_center.density - cel_down.density)));
-                        dispersion = dispersion.plus(Vector3.new(0, 1, 0)
-                            .scaledTo(dispersion_coefficient * (cel_center.density - cel_up.density)));
-
-                        // Simulate particle.
-                        const particle_acceleration = particle.acceleration.plus(dispersion);
-                        particle.position = particle.position.plus(
-                            particle_acceleration.scaledTo(0.5 * math.square(input.frame_delta_time) * input.frame_delta_time),
-                        ).plus(
-                            particle.velocity.scaledTo(input.frame_delta_time),
-                        );
-                        particle.velocity = particle.velocity.plus(particle_acceleration.scaledTo(input.frame_delta_time));
-                        particle.color = particle.color.plus(particle.color_velocity.scaledTo(input.frame_delta_time));
-
-                        if (particle.position.y() < 0) {
-                            const coefficient_of_restitution = 0.3;
-                            const coefficient_of_friction = 0.7;
-                            _ = particle.position.setY(-particle.position.y());
-                            _ = particle.velocity.setY(-coefficient_of_restitution * particle.velocity.y());
-                            _ = particle.velocity.setX(coefficient_of_friction * particle.velocity.x());
-                        }
-
-                        var color = particle.color.clamp01();
-                        if (particle.color.a() > 0.9) {
-                            _ = color.setA(0.9 * math.clamp01MapToRange(1, 0.9, color.a()));
-                        }
-
-                        // Render particle.
-                        render_group.pushBitmapId(
-                            particle.bitmap_id,
-                            1,
-                            particle.position,
-                            color,
-                        );
                     }
                 },
                 .Sword => {
@@ -1156,7 +1158,7 @@ pub fn debugTextReset(width: i32, height: i32) void {
         group.orthographicMode(width, height, 1);
     }
 
-    font_scale = 20;
+    font_scale = 1;
     at_y = 0.5 * @as(f32, @floatFromInt(height)) - (0.5 * font_scale);
     left_edge = -0.5 * @as(f32, @floatFromInt(width)) + (0.5 * font_scale);
 }
@@ -1196,17 +1198,22 @@ pub fn debugTextLine(text: [:0]const u8) void {
                 char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
                 at += 3;
             } else {
+                var char_dim: f32 = 10;
                 if (at[0] != ' ') {
                     match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = @floatFromInt(at[0]);
-                    const bitmap_id = render_group.assets.getBestMatchBitmap(.Font, &match_vector, &weight_vector);
-                    render_group.pushBitmapId(bitmap_id, char_scale, Vector3.new(at_x, at_y, 0), color);
+                    if (render_group.assets.getBestMatchBitmap(.Font, &match_vector, &weight_vector)) |bitmap_id| {
+                        const info = render_group.assets.getBitmapInfo(bitmap_id);
+                        const char_height = @as(f32, @floatFromInt(info.dim[1])) * char_scale;
+                        char_dim = char_scale * @as(f32, @floatFromInt(info.dim[0] + 2));
+                        render_group.pushBitmapId(bitmap_id, char_height, Vector3.new(at_x, at_y, 0), color);
+                    }
                 }
-                at_x += char_scale;
+                at_x += char_scale * char_dim;
                 at += 1;
             }
         }
 
-        at_y -= 1.2 * font_scale;
+        at_y -= 1.2 * 80 * font_scale;
     }
 }
 

@@ -162,12 +162,14 @@ fn loadBMP(
 
 var device_context: ?win32.CreatedHDC = null;
 var opt_bits: ?*anyopaque = null;
+var text_metrics: win32.TEXTMETRICW = undefined;
 
 fn loadGlyphBMP(
     file_name: []const u8,
     font_name: []const u8,
     codepoint: u32,
     allocator: std.mem.Allocator,
+    asset: *HHAAsset,
 ) ?LoadedBitmap {
     var result: ?LoadedBitmap = null;
     const max_width: u32 = 1024;
@@ -225,7 +227,6 @@ fn loadGlyphBMP(
             _ = win32.SelectObject(device_context, font);
             _ = win32.SetBkColor(device_context, 0x000000);
 
-            var text_metrics: win32.TEXTMETRICW = undefined;
             _ = win32.GetTextMetricsW(device_context, &text_metrics);
         }
 
@@ -234,8 +235,14 @@ fn loadGlyphBMP(
         var size: win32.SIZE = undefined;
         _ = win32.GetTextExtentPoint32W(device_context, @ptrCast(cheese_point), 1, &size);
 
-        var width: i32 = size.cx;
-        var height: i32 = size.cy;
+        var bound_width: i32 = size.cx;
+        if (bound_width > max_width) {
+            bound_width = max_width;
+        }
+        var bound_height: i32 = size.cy;
+        if (bound_height > max_height) {
+            bound_height = max_height;
+        }
 
         // _ = win32.PatBlt(device_context, 0, 0, width, height, win32.BLACKNESS);
         // _ = win32.SetBkMode(device_context, .TRANSPARENT);
@@ -251,10 +258,10 @@ fn loadGlyphBMP(
             { // Calculate extents of glyph.
                 var row: [*]u32 = @as([*]u32, @ptrCast(@alignCast(bits))) + (max_height - 1) * max_width;
                 var y: i32 = 0;
-                while (y < height) : (y += 1) {
+                while (y < bound_height) : (y += 1) {
                     var pixel = row;
                     var x: i32 = 0;
-                    while (x < width) : (x += 1) {
+                    while (x < bound_width) : (x += 1) {
                         // const ref_pixel = win32.GetPixel(device_context, x, y);
                         // std.debug.assert(pixel[0] == ref_pixel);
 
@@ -281,8 +288,8 @@ fn loadGlyphBMP(
             }
 
             if (min_x <= max_x) {
-                width = (max_x - min_x) + 1;
-                height = (max_y - min_y) + 1;
+                const width = (max_x - min_x) + 1;
+                const height = (max_y - min_y) + 1;
 
                 result = LoadedBitmap{
                     .free = undefined,
@@ -308,15 +315,14 @@ fn loadGlyphBMP(
                         // const pixel = win32.GetPixel(device_context, @intCast(x), @intCast(y));
                         // std.debug.assert(pixel == source[0]);
 
-                        const gray: u8 = @intCast(source[0] & 0xff);
-                        const alpha: u8 = gray;
+                        const gray: f32 = @as(f32, @floatFromInt(source[0] & 0xff));
+                        var texel = Color.new(255, 255, 255, gray);
+                        texel = math.sRGB255ToLinear1(texel);
+                        _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
+                        texel = math.linear1ToSRGB255(texel);
 
-                        dest[0] = @truncate(
-                            ((@as(u32, @intCast(alpha)) << 24) |
-                             (@as(u32, @intCast(gray)) << 16) |
-                             (@as(u32, @intCast(gray)) << 8) |
-                             (@as(u32, @intCast(gray)) << 0)),
-                        );
+                        dest[0] = texel.packColor1();
+
                         dest += 1;
                         source += 1;
                     }
@@ -327,6 +333,9 @@ fn loadGlyphBMP(
             } else {
                 unreachable;
             }
+
+            asset.info.bitmap.alignment_percentage[0] = 1.0 / @as(f32, @floatFromInt(result.?.width));
+            asset.info.bitmap.alignment_percentage[1] = (1.0 + @as(f32, @floatFromInt(max_y - (bound_width - text_metrics.tmDescent)))) / @as(f32, @floatFromInt(result.?.height));
         } else {
             std.debug.print("Failed to generate glyph: {d}\n", .{ codepoint });
             return null;
@@ -995,7 +1004,7 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
             switch (source.asset_type) {
                 .Bitmap, .Font => {
                     const opt_bmp = if (source.asset_type == .Font)
-                        loadGlyphBMP(source.file_name, source.font_name, source.data.codepoint, allocator)
+                        loadGlyphBMP(source.file_name, source.font_name, source.data.codepoint, allocator, dest)
                     else
                         loadBMP(source.file_name, allocator);
 

@@ -667,6 +667,11 @@ pub const Assets = struct {
         return result;
     }
 
+    pub fn getBitmapInfo(self: *Assets, id: BitmapId) *HHABitmap {
+        std.debug.assert(id.value <= self.asset_count);
+        return &self.assets[id.value].hha.info.bitmap;
+    }
+
     pub fn getFirstBitmap(self: *Assets, type_id: AssetTypeId) ?BitmapId {
         var result: ?BitmapId = null;
 
