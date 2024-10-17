@@ -335,7 +335,8 @@ fn loadGlyphBMP(
             }
 
             asset.info.bitmap.alignment_percentage[0] = 1.0 / @as(f32, @floatFromInt(result.?.width));
-            asset.info.bitmap.alignment_percentage[1] = (1.0 + @as(f32, @floatFromInt(max_y - (bound_width - text_metrics.tmDescent)))) / @as(f32, @floatFromInt(result.?.height));
+            asset.info.bitmap.alignment_percentage[1] = (1.0 + @as(f32, @floatFromInt(max_y - (bound_height - text_metrics.tmDescent)))) / @as(f32, @floatFromInt(result.?.height));
+
         } else {
             std.debug.print("Failed to generate glyph: {d}\n", .{ codepoint });
             return null;
@@ -857,8 +858,8 @@ fn writeHero(allocator: std.mem.Allocator) void {
     result.beginAssetType(.Font);
     var character: u32 = '!';
     while (character <= '~') : (character += 1) {
-        // _ = result.addCharacterAsset("C:/Windows/Fonts/arial.ttf", "Arial", character, null, null);
-        _ = result.addCharacterAsset("C:/Windows/Fonts/cour.ttf", "Courier New", character, null, null);
+        _ = result.addCharacterAsset("C:/Windows/Fonts/arial.ttf", "Arial", character, null, null);
+        // _ = result.addCharacterAsset("C:/Windows/Fonts/cour.ttf", "Courier New", character, null, null);
         result.addTag(.UnicodeCodepoint, @floatFromInt(character));
     }
     result.endAssetType();

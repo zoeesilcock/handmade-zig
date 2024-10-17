@@ -21,8 +21,10 @@ const HHAAssetType = file_formats.HHAAssetType;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
+const HHAFont = file_formats.HHAFont;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
+const FontId = file_formats.FontId;
 const PlatformFileHandle = shared.PlatformFileHandle;
 
 pub const AssetTypeId = file_formats.AssetTypeId;
@@ -46,6 +48,7 @@ const AssetMemoryHeader = extern struct {
     data: extern union {
         bitmap: LoadedBitmap,
         sound: LoadedSound,
+        font: LoadedFont,
     },
 };
 
@@ -835,6 +838,109 @@ pub const Assets = struct {
 
         return result;
     }
+
+    pub fn loadFont(
+        self: *Assets,
+        opt_id: ?FontId,
+        immediate: bool,
+    ) void {
+        if (opt_id) |id| {
+            var asset = &self.assets[id.value];
+            if (id.isValid()) {
+                if (@cmpxchgStrong(
+                        u32,
+                        &asset.state,
+                        AssetState.Unloaded.toInt(),
+                        AssetState.Queued.toInt(),
+                        .seq_cst,
+                        .seq_cst,
+                ) == null) {
+                    var opt_task: ?*shared.TaskWithMemory = null;
+
+                    if (!immediate) {
+                        opt_task = handmade.beginTaskWithMemory(self.transient_state);
+                    }
+
+                    if (immediate or opt_task != null) {
+                        const info: HHAFont = asset.hha.info.font;
+
+                        const horizontal_advance_size: u32 = @sizeOf(f32) * info.code_point_count * info.code_point_count;
+                        const code_points_size: u32 = info.code_point_count * @sizeOf(BitmapId);
+                        const size_data: u32 = code_points_size + horizontal_advance_size;
+                        const size_total: u32 = size_data + @sizeOf(AssetMemoryHeader);
+
+                        asset.header = self.acquireAssetMemory(shared.align16(size_total), id.value);
+
+                        var font: *LoadedFont = @ptrCast(@alignCast(&asset.header.?.data.font));
+                        font.code_points = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
+                        font.horizontal_advance =
+                            @ptrCast(@as([*]u8, @ptrCast(font.code_points)) + code_points_size);
+
+                        var work = LoadAssetWork{
+                            .task = undefined,
+                            .asset = asset,
+                            .handle = self.getFileHandleFor(asset.file_index),
+                            .offset = asset.hha.data_offset,
+                            .size = size_data,
+                            .destination = @ptrCast(font.code_points),
+                            .final_state = AssetState.Loaded.toInt(),
+                        };
+
+                        if (opt_task) |task| {
+                            work.task = task;
+
+                            const task_work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+                            task_work.* = work;
+                            shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, task_work);
+                        } else {
+                            doLoadAssetWorkDirectly(&work);
+                        }
+                    } else {
+                        @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
+                    }
+                } else if (immediate) {
+                    // The asset is already queued on another thread, wait until that asset loading is completed.
+                    const state: *volatile u32 = &asset.state;
+                    while (state.* == AssetState.Queued.toInt()) { }
+                }
+            }
+        }
+    }
+
+    pub fn getFont(self: *Assets, id: FontId, generation_id: u32) ?*LoadedFont {
+        var result: ?*LoadedFont = null;
+
+        if (self.getAsset(id.value, generation_id)) |header| {
+            result = &header.data.font;
+        }
+
+        // var fake_font = LoadedFont{};
+        // result = &fake_font;
+
+        return result;
+    }
+
+    pub fn getFontInfo(self: *Assets, id: FontId) *HHAFont {
+        std.debug.assert(id.value <= self.asset_count);
+        return &self.assets[id.value].hha.info.font;
+    }
+
+    pub fn getBestMatchFont(
+        self: *Assets,
+        type_id: AssetTypeId,
+        match_vector: *AssetVector,
+        weight_vector: *AssetVector,
+    ) ?FontId {
+        var result: ?FontId = null;
+
+        if (self.getBestMatchAsset(type_id, match_vector, weight_vector)) |slot_id| {
+            result = FontId{ .value = slot_id };
+        }
+
+        // result = FontId{ .value = 1 };
+
+        return result;
+    }
 };
 
 pub const WritableBitmap = struct {
@@ -859,6 +965,33 @@ pub const LoadedSound = extern struct {
     samples: [2]?[*]i16 = undefined,
     sample_count: u32 = undefined,
     channel_count: u32 = undefined,
+};
+
+pub const LoadedFont = extern struct {
+    code_points: [*]BitmapId,
+    horizontal_advance: [*]f32,
+
+    pub fn getHorizontalAdvanceForPair(self: *LoadedFont, info: *HHAFont, desired_prev_code_point: u32, desired_code_point: u32) f32 {
+        const prev_code_point = info.getClampedCodePoint(desired_prev_code_point);
+        const code_point = info.getClampedCodePoint(desired_code_point);
+
+        const result = self.horizontal_advance[prev_code_point * info.code_point_count + code_point];
+
+        return result;
+    }
+
+    pub fn getBitmapForGlyph(self: *LoadedFont, info: *HHAFont, assets: *Assets, desired_code_point: u32) ?file_formats.BitmapId {
+        _ = assets;
+
+        const code_point = info.getClampedCodePoint(desired_code_point);
+        return self.code_points[code_point];
+    }
+
+    pub fn getLineAdvance(self: *LoadedFont, info: *HHAFont) f32 {
+        _ = self;
+
+        return info.line_advance;
+    }
 };
 
 const LoadAssetWork = struct {

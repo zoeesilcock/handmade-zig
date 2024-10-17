@@ -29,6 +29,7 @@ pub const AssetTypeId = enum(u32) {
     Torso,
 
     Font,
+    FontGlyph,
 
     // Sounds.
     Bloop,
@@ -81,12 +82,17 @@ pub const HHAAsset = extern struct {
     info: extern union {
         bitmap: HHABitmap,
         sound: HHASound,
+        font: HHAFont,
     }
 };
 
 pub const HHABitmap = extern struct {
     dim: [2]u32,
     alignment_percentage: [2]f32,
+
+    // Data looks like this:
+    //
+    // pixels: [dim[1]][dim[0]]u32,
 };
 
 pub const HHASoundChain = enum(u32) {
@@ -99,6 +105,31 @@ pub const HHASound = extern struct {
     sample_count: u32,
     channel_count: u32,
     chain: HHASoundChain,
+
+    // Data looks like this:
+    //
+    // channels: [channel_count][sample_count]i16,
+};
+
+pub const HHAFont = extern struct {
+    code_point_count: u32,
+    line_advance: f32,
+
+    // Data looks like this:
+    //
+    // code_points: [code_point_count]BitmapId,
+    // horizontal_advance: [code_point_count]f32,
+    //
+    // This could also be implemented using comptime.
+
+    pub fn getClampedCodePoint(self: *HHAFont, code_point: u32) u32 {
+        var result: u32 = 0;
+        if (code_point < self.code_point_count) {
+            result = code_point;
+        }
+
+        return result;
+    }
 };
 
 pub const BitmapId = extern struct {
@@ -113,6 +144,14 @@ pub const SoundId = extern struct {
     value: u32,
 
     pub fn isValid(self: *const SoundId) bool {
+        return self.value != 0;
+    }
+};
+
+pub const FontId = extern struct {
+    value: u32,
+
+    pub fn isValid(self: *const FontId) bool {
         return self.value != 0;
     }
 };
