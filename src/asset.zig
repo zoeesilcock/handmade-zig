@@ -88,6 +88,7 @@ const AssetFile = struct {
     asset_type_array: [*]HHAAssetType,
     tag_base: u32,
     asset_base: u32,
+    font_bitmap_id_offset: u32,
 };
 
 const AssetMemoryBlockFlags = enum(u32) {
@@ -171,6 +172,7 @@ pub const Assets = struct {
                 const file: [*]AssetFile = assets.files + file_index;
 
                 const file_handle = shared.platform.openNextFile(&file_group);
+                file[0].font_bitmap_id_offset = 0;
                 file[0].tag_base = assets.tag_count;
                 file[0].asset_base = assets.asset_count;
                 file[0].handle = file_handle;
@@ -248,6 +250,10 @@ pub const Assets = struct {
                     while (source_index < file[0].header.asset_type_count) : (source_index += 1) {
                         const source_type: [*]HHAAssetType = file[0].asset_type_array + source_index;
                         if (source_type[0].type_id == dest_type_id) {
+                            if (source_type[0].type_id == AssetTypeId.FontGlyph.toInt()) {
+                                file[0].font_bitmap_id_offset = asset_count - source_type[0].first_asset_index;
+                            }
+
                             const asset_count_for_type =
                                 source_type[0].one_past_last_asset_index - source_type[0].first_asset_index;
 
@@ -481,9 +487,13 @@ pub const Assets = struct {
         header.previous = null;
     }
 
-    fn getFileHandleFor(self: *Assets, file_index: u32) *shared.PlatformFileHandle {
+    fn getFile(self: *Assets, file_index: u32) *AssetFile {
         std.debug.assert(file_index < self.file_count);
-        return &self.files[file_index].handle;
+        return &self.files[file_index];
+    }
+
+    fn getFileHandleFor(self: *Assets, file_index: u32) *shared.PlatformFileHandle {
+        return &self.getFile(file_index).handle;
     }
 
     pub fn getFirstAsset(self: *Assets, type_id: AssetTypeId) ?u32 {
@@ -872,6 +882,7 @@ pub const Assets = struct {
                         asset.header = self.acquireAssetMemory(shared.align16(size_total), id.value);
 
                         var font: *LoadedFont = @ptrCast(@alignCast(&asset.header.?.data.font));
+                        font.bitmap_id_offset = self.getFile(asset.file_index).font_bitmap_id_offset;
                         font.code_points = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
                         font.horizontal_advance =
                             @ptrCast(@as([*]u8, @ptrCast(font.code_points)) + code_points_size);
@@ -970,6 +981,7 @@ pub const LoadedSound = extern struct {
 pub const LoadedFont = extern struct {
     code_points: [*]BitmapId,
     horizontal_advance: [*]f32,
+    bitmap_id_offset: u32,
 
     pub fn getHorizontalAdvanceForPair(self: *LoadedFont, info: *HHAFont, desired_prev_code_point: u32, desired_code_point: u32) f32 {
         const prev_code_point = info.getClampedCodePoint(desired_prev_code_point);
@@ -984,7 +996,10 @@ pub const LoadedFont = extern struct {
         _ = assets;
 
         const code_point = info.getClampedCodePoint(desired_code_point);
-        return self.code_points[code_point];
+        var result = self.code_points[code_point];
+        result.value += self.bitmap_id_offset;
+
+        return result;
     }
 
     pub fn getLineAdvance(self: *LoadedFont, info: *HHAFont) f32 {
