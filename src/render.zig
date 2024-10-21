@@ -35,6 +35,7 @@ const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
 const LoadedBitmap = asset.LoadedBitmap;
+const LoadedFont = asset.LoadedFont;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
@@ -378,6 +379,26 @@ pub const RenderGroup = extern struct {
                 self.missing_resource_count += 1;
             }
         }
+    }
+
+    pub fn pushFont(
+        self: *RenderGroup,
+        opt_id: ?file_formats.FontId,
+    ) ?*LoadedFont {
+        var opt_font: ?*LoadedFont = null;
+
+        if (opt_id) |id| {
+            opt_font = self.assets.getFont(id, self.generation_id);
+
+            if (opt_font == null) {
+                std.debug.assert(!self.renders_in_background);
+
+                self.assets.loadFont(id, false);
+                self.missing_resource_count += 1;
+            }
+        }
+
+        return opt_font;
     }
 
     pub fn pushRectangle(

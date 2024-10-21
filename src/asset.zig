@@ -885,7 +885,7 @@ pub const Assets = struct {
                         font.bitmap_id_offset = self.getFile(asset.file_index).font_bitmap_id_offset;
                         font.code_points = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
                         font.horizontal_advance =
-                            @ptrCast(@as([*]u8, @ptrCast(font.code_points)) + code_points_size);
+                            @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.code_points)) + code_points_size));
 
                         var work = LoadAssetWork{
                             .task = undefined,
@@ -916,6 +916,13 @@ pub const Assets = struct {
                 }
             }
         }
+    }
+
+    pub fn prefetchFont(
+        self: *Assets,
+        opt_id: ?FontId,
+    ) void {
+        self.loadFont(opt_id);
     }
 
     pub fn getFont(self: *Assets, id: FontId, generation_id: u32) ?*LoadedFont {

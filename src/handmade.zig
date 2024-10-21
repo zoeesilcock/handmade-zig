@@ -1171,7 +1171,7 @@ pub fn debugTextLine(text: [:0]const u8) void {
         // weight_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = 1;
 
         if (render_group.assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |font_id| {
-            if (render_group.assets.getFont(font_id, render_group.generation_id)) |font| {
+            if (render_group.pushFont(font_id)) |font| {
                 const font_info = render_group.assets.getFontInfo(font_id);
                 var prev_code_point: u32 = 0;
                 var char_scale = font_scale;
@@ -1264,6 +1264,8 @@ fn overlayDebugCycleCounters(memory: *shared.Memory) void {
                 debugTextLine(name_table[counter_index]);
             }
         }
+
+        debugTextLine("AVA WA Ta");
     }
 }
 
