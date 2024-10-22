@@ -1149,6 +1149,12 @@ pub export fn updateAndRender(
     }
 }
 
+// Kanji owl codepoints
+// 0x5c0f
+// 0x8033
+// 0x6728
+// 0x514e
+
 var debug_render_group: ?*RenderGroup = null;
 var left_edge: f32 = 0;
 var at_y: f32 = 0;

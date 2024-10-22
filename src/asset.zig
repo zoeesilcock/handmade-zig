@@ -874,8 +874,8 @@ pub const Assets = struct {
                     if (immediate or opt_task != null) {
                         const info: HHAFont = asset.hha.info.font;
 
-                        const horizontal_advance_size: u32 = @sizeOf(f32) * info.code_point_count * info.code_point_count;
-                        const code_points_size: u32 = info.code_point_count * @sizeOf(BitmapId);
+                        const horizontal_advance_size: u32 = @sizeOf(f32) * info.glyph_count * info.glyph_count;
+                        const code_points_size: u32 = info.glyph_count * @sizeOf(BitmapId);
                         const size_data: u32 = code_points_size + horizontal_advance_size;
                         const size_total: u32 = size_data + @sizeOf(AssetMemoryHeader);
 
@@ -994,7 +994,7 @@ pub const LoadedFont = extern struct {
         const prev_code_point = info.getClampedCodePoint(desired_prev_code_point);
         const code_point = info.getClampedCodePoint(desired_code_point);
 
-        const result = self.horizontal_advance[prev_code_point * info.code_point_count + code_point];
+        const result = self.horizontal_advance[prev_code_point * info.glyph_count + code_point];
 
         return result;
     }

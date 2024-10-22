@@ -111,22 +111,27 @@ pub const HHASound = extern struct {
     // channels: [channel_count][sample_count]i16,
 };
 
+pub const HHAFontGlyph = extern struct {
+    unicode_code_point: u32,
+    bitmap: BitmapId,
+};
+
 pub const HHAFont = extern struct {
-    code_point_count: u32,
+    glyph_count: u32,
     ascender_height: f32,
     descender_height: f32,
     external_leading: f32,
 
     // Data looks like this:
     //
-    // code_points: [code_point_count]BitmapId,
-    // horizontal_advance: [code_point_count]f32,
+    // code_points: [glyph_count]HHAFontGlyph,
+    // horizontal_advance: [glyph_count][glyph_count]f32,
     //
     // This could also be implemented using comptime.
 
     pub fn getClampedCodePoint(self: *HHAFont, code_point: u32) u32 {
         var result: u32 = 0;
-        if (code_point < self.code_point_count) {
+        if (code_point < self.glyph_count) {
             result = code_point;
         }
 
