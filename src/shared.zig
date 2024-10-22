@@ -224,7 +224,7 @@ pub inline fn endTimedBlockCounted(counter_id: DebugCycleCounters, hit_count: u3
 
 pub const DebugCycleCounters = enum(u8) {
     GameUpdateAndRender = 0,
-    RenderGrouptToOutput,
+    RenderGroupToOutput,
     DrawRectangle,
     DrawRectangleSlowly,
     DrawRectangleQuickly,

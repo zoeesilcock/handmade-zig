@@ -1008,12 +1008,6 @@ pub const LoadedFont = extern struct {
 
         return result;
     }
-
-    pub fn getLineAdvance(self: *LoadedFont, info: *HHAFont) f32 {
-        _ = self;
-
-        return info.line_advance;
-    }
 };
 
 const LoadAssetWork = struct {

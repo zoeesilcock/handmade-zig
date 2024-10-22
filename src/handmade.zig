@@ -397,7 +397,7 @@ pub export fn updateAndRender(
 
     if (debug_render_group) |group| {
         group.beginRender();
-        debugTextReset(buffer.width, buffer.height);
+        debugTextReset(transient_state.assets, buffer.width, buffer.height);
     }
 
     if (false) {
@@ -1153,78 +1153,84 @@ var debug_render_group: ?*RenderGroup = null;
 var left_edge: f32 = 0;
 var at_y: f32 = 0;
 var font_scale: f32 = 0;
+var font_id: file_formats.FontId = undefined;
 
-pub fn debugTextReset(width: i32, height: i32) void {
+pub fn debugTextReset(assets: *Assets, width: i32, height: i32) void {
+    var match_vector = asset.AssetVector{};
+    var weight_vector = asset.AssetVector{};
+
+    font_scale = 1;
+    at_y = 0;
+    left_edge = -0.5 * @as(f32, @floatFromInt(width));
+
     if (debug_render_group) |group| {
         group.orthographicMode(width, height, 1);
     }
 
-    font_scale = 1;
-    at_y = 0.5 * @as(f32, @floatFromInt(height)) - (0.5 * font_scale);
-    left_edge = -0.5 * @as(f32, @floatFromInt(width)) + (0.5 * font_scale);
+    if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
+        font_id = id;
+
+        const font_info = assets.getFontInfo(font_id);
+        at_y = 0.5 * @as(f32, @floatFromInt(height)) - font_scale * font_info.getStartingBaselineY();
+    }
 }
 
 pub fn debugTextLine(text: [:0]const u8) void {
     if (debug_render_group) |render_group| {
         var match_vector = asset.AssetVector{};
-        var weight_vector = asset.AssetVector{};
-        // weight_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = 1;
 
-        if (render_group.assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |font_id| {
-            if (render_group.pushFont(font_id)) |font| {
-                const font_info = render_group.assets.getFontInfo(font_id);
-                var prev_code_point: u32 = 0;
-                var char_scale = font_scale;
-                var color = Color.white();
-                var at_x: f32 = left_edge;
+        if (render_group.pushFont(font_id)) |font| {
+            const font_info = render_group.assets.getFontInfo(font_id);
+            var prev_code_point: u32 = 0;
+            var char_scale = font_scale;
+            var color = Color.white();
+            var at_x: f32 = left_edge;
 
-                var at: [*]const u8 = @ptrCast(text);
-                while (at[0] != 0) {
-                    if (at[0] == '\\' and
-                        at[1] == '#' and
-                        at[2] != 0 and
-                        at[3] != 0 and
-                        at[4] != 0)
-                    {
-                        const c_scale: f32 = 1.0 / 9.0;
-                        color = Color.new(
-                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
-                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
-                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
-                            1,
-                        );
+            var at: [*]const u8 = @ptrCast(text);
+            while (at[0] != 0) {
+                if (at[0] == '\\' and
+                    at[1] == '#' and
+                    at[2] != 0 and
+                    at[3] != 0 and
+                    at[4] != 0)
+                {
+                    const c_scale: f32 = 1.0 / 9.0;
+                    color = Color.new(
+                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
+                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
+                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
+                        1,
+                    );
 
-                        at += 5;
-                    } else if (at[0] == '\\' and
-                        at[1] == '^' and
-                        at[2] != 0)
-                    {
-                        const c_scale: f32 = 1.0 / 9.0;
-                        char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
-                        at += 3;
-                    } else {
-                        const code_point = at[0];
-                        const advance_x: f32 = font.getHorizontalAdvanceForPair(font_info, prev_code_point, code_point);
-                        at_x += advance_x;
+                    at += 5;
+                } else if (at[0] == '\\' and
+                    at[1] == '^' and
+                    at[2] != 0)
+                {
+                    const c_scale: f32 = 1.0 / 9.0;
+                    char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
+                    at += 3;
+                } else {
+                    const code_point = at[0];
+                    const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(font_info, prev_code_point, code_point);
+                    at_x += advance_x;
 
-                        if (code_point != ' ') {
-                            match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
-                            if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
-                                const info = render_group.assets.getBitmapInfo(bitmap_id);
-
-                                const char_height = char_scale * @as(f32, @floatFromInt(info.dim[1]));
-                                render_group.pushBitmapId(bitmap_id, char_height, Vector3.new(at_x, at_y, 0), color);
-                            }
+                    if (code_point != ' ') {
+                        match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
+                        if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
+                            const info = render_group.assets.getBitmapInfo(bitmap_id);
+                            const char_height = char_scale * @as(f32, @floatFromInt(info.dim[1]));
+                            render_group.pushBitmapId(bitmap_id, char_height, Vector3.new(at_x, at_y, 0), color);
                         }
-
-                        prev_code_point = code_point;
-
-                        at += 1;
                     }
-                }
 
-                at_y -= font.getLineAdvance(font_info) * font_scale;
+                    prev_code_point = code_point;
+
+                    at += 1;
+                }
             }
+
+            at_y -= font_info.getLineAdvance() * font_scale;
         }
     }
 }
@@ -1233,14 +1239,14 @@ fn overlayDebugCycleCounters(memory: *shared.Memory) void {
     if (OUTPUT_TIMING) {
         const name_table: [6][:0]const u8 = .{
             "GameUpdateAndRender",
-            "RenderGrouptToOutput",
+            "RenderGroupToOutput",
             "DrawRectangle",
             "DrawRectangleSlowly",
             "DrawRectangleQuickly",
             "ProcessPixel",
         };
 
-        debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTERS:");
+        debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTS:");
         var total_cycles: u64 = 0;
 
         for (&memory.counters, 0..) |*counter, counter_index| {

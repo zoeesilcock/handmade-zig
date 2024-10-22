@@ -571,8 +571,8 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {
-        shared.beginTimedBlock(.RenderGrouptToOutput);
-        defer shared.endTimedBlock(.RenderGrouptToOutput);
+        shared.beginTimedBlock(.RenderGroupToOutput);
+        defer shared.endTimedBlock(.RenderGroupToOutput);
 
         const null_pixels_to_meters: f32 = 1.0;
 

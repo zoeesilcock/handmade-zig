@@ -170,7 +170,6 @@ const LoadedFont = struct {
     win32_handle: win32.HFONT = undefined,
     text_metrics: win32.TEXTMETRICW = undefined,
     code_point_count: u32 = undefined,
-    line_advance: f32 = undefined,
     bitmap_ids: []BitmapId,
     horizontal_advance: []f32,
 };
@@ -233,25 +232,10 @@ fn loadFont(
     _ = win32.SelectObject(global_font_device_context, result.win32_handle);
     _ = win32.GetTextMetricsW(global_font_device_context, &result.text_metrics);
 
-    result.line_advance = @floatFromInt(result.text_metrics.tmHeight + result.text_metrics.tmExternalLeading);
     result.code_point_count = code_point_count;
     result.bitmap_ids = (allocator.alloc(BitmapId, code_point_count) catch unreachable);
     result.horizontal_advance = (allocator.alloc(f32, code_point_count * code_point_count) catch unreachable);
-
-    // Get base character widths.
-    const abcs = allocator.alloc(win32.ABC, result.code_point_count) catch unreachable;
-    defer allocator.free(abcs);
-    _ = win32.GetCharABCWidthsW(global_font_device_context, 0, result.code_point_count - 1, @ptrCast(abcs.ptr));
-
-    var code_point_index: u32 = 0;
-    while (code_point_index < result.code_point_count) : (code_point_index += 1) {
-        const this_abc = abcs[code_point_index];
-        const w: f32 = @floatFromInt(this_abc.abcA + @as(i32, @intCast(this_abc.abcB)) + this_abc.abcC);
-        var other_code_point_index: u32 = 0;
-        while (other_code_point_index < result.code_point_count) : (other_code_point_index += 1) {
-            result.horizontal_advance[code_point_index * result.code_point_count + other_code_point_index] = w;
-        }
-    }
+    @memset(result.horizontal_advance, 0);
 
     // Get the kerning pair adjustments.
     const kerning_pair_count = win32.GetKerningPairsW(global_font_device_context, 0, null);
@@ -287,9 +271,6 @@ fn loadGlyphBMP(
 
     if (USE_FONTS_FROM_WINDOWS) {
         _ = win32.SelectObject(global_font_device_context, font.win32_handle);
-
-        // var this_abc: win32.ABC = undefined;
-        // _ = win32.GetCharABCWidthsW(global_font_device_context, code_point, code_point, &this_abc);
 
         if (opt_global_bits) |bits| {
             // Clear bits to black.
@@ -403,8 +384,26 @@ fn loadGlyphBMP(
                 unreachable;
             }
 
+            // var this_abc: win32.ABC = undefined;
+            // _ = win32.GetCharABCWidthsW(global_font_device_context, code_point, code_point, &this_abc);
+            // const char_advance: f32 = @floatFromInt(this_abc.abcA + @as(i32, @intCast(this_abc.abcB)) + this_abc.abcC);
+
+            var this_width: i32 = undefined;
+            _ = win32.GetCharWidth32W(global_font_device_context, code_point, code_point, &this_width);
+            const char_advance: f32 = @floatFromInt(this_width);
+
+            const kerning_change = @as(f32, @floatFromInt(min_x - pre_step_x));
+            var other_code_point_index: u32 = 0;
+            while (other_code_point_index < font.code_point_count) : (other_code_point_index += 1) {
+                font.horizontal_advance[code_point * font.code_point_count + other_code_point_index] += char_advance - kerning_change;
+
+                if (other_code_point_index != 0) {
+                    font.horizontal_advance[other_code_point_index * font.code_point_count + code_point] += kerning_change;
+                }
+            }
+
             asset.info.bitmap.alignment_percentage[0] =
-                (1.0 - @as(f32, @floatFromInt(min_x - pre_step_x))) / @as(f32, @floatFromInt(result.?.width));
+                (1.0) / @as(f32, @floatFromInt(result.?.width));
             asset.info.bitmap.alignment_percentage[1] =
                 (1.0 + @as(f32, @floatFromInt(max_y - (bound_height - font.text_metrics.tmDescent)))) / @as(f32, @floatFromInt(result.?.height));
         } else {
@@ -816,7 +815,9 @@ pub const Assets = struct {
             asset.hha.info = .{
                 .font = HHAFont{
                     .code_point_count = font.code_point_count,
-                    .line_advance = font.line_advance,
+                    .ascender_height = @floatFromInt(font.text_metrics.tmAscent),
+                    .descender_height = @floatFromInt(font.text_metrics.tmDescent),
+                    .external_leading = @floatFromInt(font.text_metrics.tmExternalLeading),
                 },
             };
             asset.source.asset_type = .Font;
@@ -928,10 +929,6 @@ fn writeFonts(allocator: std.mem.Allocator) void {
     var result = Assets.init();
     const debug_font = loadFont(allocator, "C:/Windows/Fonts/arial.ttf", "Arial", ('~' + 1));
 
-    result.beginAssetType(.Font);
-    _ = result.addFontAsset(debug_font);
-    result.endAssetType();
-
     result.beginAssetType(.FontGlyph);
     var character: u32 = '!';
     while (character <= '~') : (character += 1) {
@@ -939,6 +936,11 @@ fn writeFonts(allocator: std.mem.Allocator) void {
             debug_font.bitmap_ids[character] = bitmap_id;
         }
     }
+    result.endAssetType();
+
+    // This needs to happen after the glyphs for the font have been added.
+    result.beginAssetType(.Font);
+    _ = result.addFontAsset(debug_font);
     result.endAssetType();
 
     writeHHA("testfonts.hha", &result, allocator) catch unreachable;

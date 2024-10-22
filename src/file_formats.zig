@@ -113,7 +113,9 @@ pub const HHASound = extern struct {
 
 pub const HHAFont = extern struct {
     code_point_count: u32,
-    line_advance: f32,
+    ascender_height: f32,
+    descender_height: f32,
+    external_leading: f32,
 
     // Data looks like this:
     //
@@ -129,6 +131,14 @@ pub const HHAFont = extern struct {
         }
 
         return result;
+    }
+
+    pub fn getLineAdvance(self: *HHAFont) f32 {
+        return self.ascender_height + self.descender_height + self.external_leading;
+    }
+
+    pub fn getStartingBaselineY(self: *HHAFont) f32 {
+        return self.ascender_height;
     }
 };
 
