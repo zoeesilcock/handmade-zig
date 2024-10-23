@@ -9,6 +9,7 @@ const audio = @import("audio.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
+const debug = @import("debug.zig");
 const std = @import("std");
 
 const OUTPUT_TIMING = @import("build_options").timing;
@@ -116,10 +117,10 @@ pub export fn updateAndRender(
     shared.platform = platform;
 
     if (shared.INTERNAL) {
-        shared.debug_global_memory = memory;
+        debug.debug_global_memory = memory;
     }
-    shared.beginTimedBlock(.GameUpdateAndRender);
-    defer shared.endTimedBlock(.GameUpdateAndRender);
+    var timed_block = debug.TimedBlock.init(.GameUpdateAndRender);
+    defer timed_block.endTimedBlock();
 
     const ground_buffer_width: u32 = 256;
     const ground_buffer_height: u32 = 256;

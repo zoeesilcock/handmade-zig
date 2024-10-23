@@ -38,6 +38,7 @@ const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
 const shared = @import("shared.zig");
+const debug = @import("debug.zig");
 
 // Build options.
 const OUTPUT_TIMING = @import("build_options").timing;
@@ -1171,7 +1172,7 @@ fn handleDebugCycleCounters(memory: *shared.Memory) void {
                 var buffer: [128]u8 = undefined;
                 const slice = std.fmt.bufPrintZ(&buffer, "{d} {s:>25}: {d:>10} cycles, {d:>10} hits, {d:>10} cycles/hit, {d:>6.2}%\n", .{
                     counter_index,
-                    shared.DEBUG_CYCLE_COUNTER_NAMES[counter_index],
+                    debug.DEBUG_CYCLE_COUNTER_NAMES[counter_index],
                     counter.cycle_count,
                     counter.hit_count,
                     counter.cycle_count / counter.hit_count,
@@ -1592,7 +1593,7 @@ pub export fn wWinMain(
                 .transient_storage = null,
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
-                .counters = if (INTERNAL) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
+                .counters = if (INTERNAL) [1]debug.DebugCycleCounter{debug.DebugCycleCounter{}} ** debug.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 
             state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;

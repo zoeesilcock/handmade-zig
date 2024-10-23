@@ -20,6 +20,7 @@ const shared = @import("shared.zig");
 const math = @import("math.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
+const debug = @import("debug.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
@@ -571,8 +572,8 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {
-        shared.beginTimedBlock(.RenderGroupToOutput);
-        defer shared.endTimedBlock(.RenderGroupToOutput);
+        var timed_block = debug.TimedBlock.init(.RenderGroupToOutput);
+        defer timed_block.endTimedBlock();
 
         const null_pixels_to_meters: f32 = 1.0;
 
@@ -721,8 +722,8 @@ pub fn drawRectangle(
     clip_rect: Rectangle2i,
     even: bool,
 ) void {
-    shared.beginTimedBlock(.DrawRectangle);
-    shared.endTimedBlock(.DrawRectangle);
+    var timed_block = debug.TimedBlock.init(.DrawRectangle);
+    defer timed_block.endTimedBlock();
 
     var fill_rect = Rectangle2i.new(
         intrinsics.floorReal32ToInt32(min.x()),
@@ -794,8 +795,8 @@ pub fn drawRectangleQuickly(
 ) void {
     _ = pixels_to_meters;
 
-    shared.beginTimedBlock(.DrawRectangleQuickly);
-    defer shared.endTimedBlock(.DrawRectangleQuickly);
+    var timed_block = debug.TimedBlock.init(.DrawRectangleQuickly);
+    defer timed_block.endTimedBlock();
 
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -910,7 +911,7 @@ pub fn drawRectangleQuickly(
         var row: [*]u8 = @ptrCast(draw_buffer.memory);
         row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * draw_buffer.pitch)));
 
-        shared.beginTimedBlock(.ProcessPixel);
+        var process_timed_block = debug.TimedBlock.init(.ProcessPixel);
 
         var y: i32 = min_y;
         while (y < max_y) : (y += 2) {
@@ -1096,7 +1097,7 @@ pub fn drawRectangleQuickly(
             row += row_advance;
         }
 
-        shared.endTimedBlockCounted(.ProcessPixel, @intCast(@divFloor(fill_rect.getClampedArea(), 2)));
+        process_timed_block.endTimedBlockCounted(@intCast(@divFloor(fill_rect.getClampedArea(), 2)));
     }
 }
 

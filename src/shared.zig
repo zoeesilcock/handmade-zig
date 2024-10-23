@@ -16,6 +16,7 @@ const file_formats = @import("file_formats");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const random = @import("random.zig");
+const debug = @import("debug.zig");
 const std = @import("std");
 
 // Types.
@@ -28,6 +29,8 @@ const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const PlayingSound = audio.PlayingSound;
+const DebugCycleCounter = debug.DebugCycleCounter;
+const DebugCycleCounters = debug.DebugCycleCounters;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -194,60 +197,6 @@ pub const Platform = extern struct {
 
 pub var platform: Platform = undefined;
 
-pub var debug_global_memory: ?*Memory = null;
-pub inline fn beginTimedBlock(counter_id: DebugCycleCounters) void {
-    if (INTERNAL) {
-        if (debug_global_memory) |memory| {
-            memory.getCycleCounter(counter_id).last_cycle_start = rdtsc();
-        }
-    }
-}
-pub inline fn endTimedBlock(counter_id: DebugCycleCounters) void {
-    if (INTERNAL) {
-        if (debug_global_memory) |memory| {
-            const counter = memory.getCycleCounter(counter_id);
-            counter.cycle_count +%= rdtsc() -% counter.last_cycle_start;
-            counter.hit_count +%= 1;
-        }
-    }
-}
-
-pub inline fn endTimedBlockCounted(counter_id: DebugCycleCounters, hit_count: u32) void {
-    if (INTERNAL) {
-        if (debug_global_memory) |memory| {
-            const counter = memory.getCycleCounter(counter_id);
-            counter.cycle_count +%= rdtsc() -% counter.last_cycle_start;
-            counter.hit_count +%= hit_count;
-        }
-    }
-}
-
-pub const DebugCycleCounters = enum(u8) {
-    GameUpdateAndRender = 0,
-    RenderGroupToOutput,
-    DrawRectangle,
-    DrawRectangleSlowly,
-    DrawRectangleQuickly,
-    ProcessPixel,
-};
-
-pub const DEBUG_CYCLE_COUNTERS_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;
-pub const DEBUG_CYCLE_COUNTER_NAMES: [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 = buildDebugCycleCounterNames();
-
-fn buildDebugCycleCounterNames() [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 {
-    var names: [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 = undefined;
-    for (0..DEBUG_CYCLE_COUNTERS_COUNT) |counter_index| {
-        names[counter_index] = @typeInfo(DebugCycleCounters).Enum.fields[counter_index].name;
-    }
-    return names;
-}
-
-pub const DebugCycleCounter = extern struct {
-    cycle_count: u64 = 0,
-    last_cycle_start: u64 = 0,
-    hit_count: u32 = 0,
-};
-
 // Data from platform.
 pub fn updateAndRenderStub(_: Platform, _: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) void {
     return;
@@ -343,7 +292,7 @@ fn GameMemory() type {
         high_priority_queue: *PlatformWorkQueue,
         low_priority_queue: *PlatformWorkQueue,
 
-        counters: if (INTERNAL) [DEBUG_CYCLE_COUNTERS_COUNT]DebugCycleCounter else void,
+        counters: if (INTERNAL) [debug.DEBUG_CYCLE_COUNTERS_COUNT]DebugCycleCounter else void,
 
         const Self = @This();
 
