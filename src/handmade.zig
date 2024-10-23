@@ -1149,12 +1149,6 @@ pub export fn updateAndRender(
     }
 }
 
-// Kanji owl codepoints
-// 0x5c0f
-// 0x8033
-// 0x6728
-// 0x514e
-
 var debug_render_group: ?*RenderGroup = null;
 var left_edge: f32 = 0;
 var at_y: f32 = 0;
@@ -1179,6 +1173,22 @@ pub fn debugTextReset(assets: *Assets, width: i32, height: i32) void {
         const font_info = assets.getFontInfo(font_id);
         at_y = 0.5 * @as(f32, @floatFromInt(height)) - font_scale * font_info.getStartingBaselineY();
     }
+}
+
+fn isHex(char: u8) bool {
+    return (char >= '0' and char <= '9') or (char >= 'A' and char <= 'F');
+}
+
+fn getHex(char: u8) u32 {
+    var result: u32 = 0;
+
+    if (char >= '0' and char <= '9') {
+        result = char - '0';
+    } else if (char >= 'A' and char <= 'F') {
+        result = 0xA + (char - 'A');
+    }
+
+    return result;
 }
 
 pub fn debugTextLine(text: [:0]const u8) void {
@@ -1217,7 +1227,22 @@ pub fn debugTextLine(text: [:0]const u8) void {
                     char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
                     at += 3;
                 } else {
-                    const code_point = at[0];
+                    var code_point: u32 = at[0];
+
+                    if (at[0] == '\\' and
+                        (isHex(at[1])) and
+                        (isHex(at[2])) and
+                        (isHex(at[3])) and
+                        (isHex(at[4])))
+                    {
+                        code_point = ((getHex(at[1]) << 12) |
+                            (getHex(at[2]) << 8) |
+                            (getHex(at[3]) << 4) |
+                            (getHex(at[4]) << 0));
+
+                        at += 4;
+                    }
+
                     const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(font_info, prev_code_point, code_point);
                     at_x += advance_x;
 
@@ -1251,6 +1276,13 @@ fn overlayDebugCycleCounters(memory: *shared.Memory) void {
             "DrawRectangleQuickly",
             "ProcessPixel",
         };
+
+        // Kanji owl codepoints
+        // 0x5c0f
+        // 0x8033
+        // 0x6728
+        // 0x514e
+        debugTextLine("\\5C0F\\8033\\6728\\514E");
 
         debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTS:");
         var total_cycles: u64 = 0;

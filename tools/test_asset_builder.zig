@@ -8,7 +8,7 @@ pub const UNICODE = true;
 const USE_FONTS_FROM_WINDOWS = true;
 const ASSET_TYPE_ID_COUNT = file_formats.ASSET_TYPE_ID_COUNT;
 
-const ONE_PAST_MAX_FONT_CODE_POINT: u32 = 0x10FFFF + 1;
+const ONE_PAST_MAX_FONT_CODE_POINT: u33 = 0x10FFFF + 1;
 const MAX_FONT_WIDTH: u32 = 1024;
 const MAX_FONT_HEIGHT: u32 = 1024;
 
@@ -182,6 +182,7 @@ const LoadedFont = struct {
     max_glyph_count: u32 = 0,
 
     glyph_index_from_code_point: []u32,
+    one_past_highest_code_point: u32 = 0,
 };
 
 fn initializeFontDC() void {
@@ -248,14 +249,20 @@ fn loadFont(
     // 5k characters should be more than enough for anybody.
     font.max_glyph_count = 5000;
     font.glyph_count = 0;
+    font.one_past_highest_code_point = 0;
 
-    const glyph_index_from_code_point_size: u32 = ONE_PAST_MAX_FONT_CODE_POINT * @sizeOf(LoadedFont);
+    const glyph_index_from_code_point_size: u32 = ONE_PAST_MAX_FONT_CODE_POINT * @sizeOf(u32);
     font.glyph_index_from_code_point = allocator.alloc(u32, glyph_index_from_code_point_size) catch unreachable;
     @memset(font.glyph_index_from_code_point, 0);
 
     font.glyphs = (allocator.alloc(HHAFontGlyph, font.max_glyph_count) catch unreachable);
     font.horizontal_advance = (allocator.alloc(f32, font.max_glyph_count * font.max_glyph_count) catch unreachable);
     @memset(font.horizontal_advance, 0);
+
+    // Reserve space for the null glyph.
+    font.glyph_count = 1;
+    font.glyphs[0].unicode_code_point = 0;
+    font.glyphs[0].bitmap = undefined;
 
     return font;
 }
@@ -275,7 +282,10 @@ fn finalizeFontKerning(allocator: std.mem.Allocator, font: *LoadedFont) void {
         if (pair.wFirst < ONE_PAST_MAX_FONT_CODE_POINT and pair.wSecond < ONE_PAST_MAX_FONT_CODE_POINT) {
             const first = font.glyph_index_from_code_point[pair.wFirst];
             const second = font.glyph_index_from_code_point[pair.wSecond];
-            font.horizontal_advance[first * font.max_glyph_count + second] += @floatFromInt(pair.iKernAmount);
+
+            if (first != 0 and second != 0) {
+                font.horizontal_advance[first * font.max_glyph_count + second] += @floatFromInt(pair.iKernAmount);
+            }
         }
     }
 }
@@ -845,6 +855,7 @@ pub const Assets = struct {
             result = FontId{ .value = asset.id };
             asset.hha.info = .{
                 .font = HHAFont{
+                    .one_past_highest_code_point = font.one_past_highest_code_point,
                     .glyph_count = font.glyph_count,
                     .ascender_height = @floatFromInt(font.text_metrics.tmAscent),
                     .descender_height = @floatFromInt(font.text_metrics.tmDescent),
@@ -892,6 +903,10 @@ pub const Assets = struct {
             glyph.unicode_code_point = code_point;
             glyph.bitmap = result.?;
             font.glyph_index_from_code_point[code_point] = glyph_index;
+
+            if (font.one_past_highest_code_point <= code_point) {
+                font.one_past_highest_code_point = code_point + 1;
+            }
         }
 
         return result;
@@ -967,6 +982,7 @@ pub fn main() anyerror!void {
 fn writeFonts(allocator: std.mem.Allocator) void {
     var result = Assets.init();
     const debug_font = loadFont(allocator, "C:/Windows/Fonts/arial.ttf", "Arial");
+    defer freeFont(allocator, debug_font);
 
     result.beginAssetType(.FontGlyph);
     var character: u32 = ' ';
@@ -974,7 +990,7 @@ fn writeFonts(allocator: std.mem.Allocator) void {
         _ = result.addCharacterAsset(debug_font, character);
     }
 
-    // Kanju owl.
+    // Kanji owl.
     _ = result.addCharacterAsset(debug_font, 0x5c0f);
     _ = result.addCharacterAsset(debug_font, 0x8033);
     _ = result.addCharacterAsset(debug_font, 0x6728);
@@ -1178,7 +1194,6 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
                     finalizeFontKerning(allocator, font);
 
                     const glyphs_size: u32 = font.glyph_count * @sizeOf(HHAFontGlyph);
-
                     var bytes: []const u8 = @as([*]const u8, @ptrCast(font.glyphs))[0..glyphs_size];
                     bytes_written += try out.write(bytes);
 

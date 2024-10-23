@@ -22,6 +22,7 @@ const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
 const HHAFont = file_formats.HHAFont;
+const HHAFontGlyph = file_formats.HHAFontGlyph;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
@@ -620,6 +621,7 @@ pub const Assets = struct {
                             .offset = asset.hha.data_offset,
                             .size = size.data,
                             .destination = @ptrCast(bitmap.memory),
+                            .finalize_operation = .None,
                             .final_state = AssetState.Loaded.toInt(),
                         };
 
@@ -777,6 +779,7 @@ pub const Assets = struct {
                     work.offset = asset.hha.data_offset;
                     work.size = size.data;
                     work.destination = memory;
+                    work.finalize_operation = .None;
                     work.final_state = AssetState.Loaded.toInt();
 
                     shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
@@ -875,17 +878,22 @@ pub const Assets = struct {
                         const info: HHAFont = asset.hha.info.font;
 
                         const horizontal_advance_size: u32 = @sizeOf(f32) * info.glyph_count * info.glyph_count;
-                        const code_points_size: u32 = info.glyph_count * @sizeOf(BitmapId);
-                        const size_data: u32 = code_points_size + horizontal_advance_size;
-                        const size_total: u32 = size_data + @sizeOf(AssetMemoryHeader);
+                        const glyphs_size: u32 = info.glyph_count * @sizeOf(HHAFontGlyph);
+                        const unicode_map_size: u32 = @sizeOf(u16) * info.one_past_highest_code_point;
+                        const size_data: u32 = glyphs_size + horizontal_advance_size;
+                        const size_total: u32 = size_data + @sizeOf(AssetMemoryHeader) + unicode_map_size;
 
                         asset.header = self.acquireAssetMemory(shared.align16(size_total), id.value);
 
                         var font: *LoadedFont = @ptrCast(@alignCast(&asset.header.?.data.font));
                         font.bitmap_id_offset = self.getFile(asset.file_index).font_bitmap_id_offset;
-                        font.code_points = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
+                        font.glyphs = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
                         font.horizontal_advance =
-                            @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.code_points)) + code_points_size));
+                            @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.glyphs)) + glyphs_size));
+                        font.unicode_map =
+                            @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.horizontal_advance)) + horizontal_advance_size));
+
+                        shared.zeroSize(unicode_map_size, @ptrCast(font.unicode_map));
 
                         var work = LoadAssetWork{
                             .task = undefined,
@@ -893,7 +901,8 @@ pub const Assets = struct {
                             .handle = self.getFileHandleFor(asset.file_index),
                             .offset = asset.hha.data_offset,
                             .size = size_data,
-                            .destination = @ptrCast(font.code_points),
+                            .destination = @ptrCast(font.glyphs),
+                            .finalize_operation = .Font,
                             .final_state = AssetState.Loaded.toInt(),
                         };
 
@@ -986,15 +995,27 @@ pub const LoadedSound = extern struct {
 };
 
 pub const LoadedFont = extern struct {
-    code_points: [*]BitmapId,
+    glyphs: [*]HHAFontGlyph,
     horizontal_advance: [*]f32,
     bitmap_id_offset: u32,
+    unicode_map: [*]u16,
+
+    pub fn getGlyphFromCodePoint(self: *LoadedFont, info: *HHAFont, code_point: u32) u32 {
+        var result: u32 = 0;
+
+        if (code_point < info.one_past_highest_code_point) {
+            result = self.unicode_map[code_point];
+            std.debug.assert(result < info.glyph_count);
+        }
+
+        return result;
+    }
 
     pub fn getHorizontalAdvanceForPair(self: *LoadedFont, info: *HHAFont, desired_prev_code_point: u32, desired_code_point: u32) f32 {
-        const prev_code_point = info.getClampedCodePoint(desired_prev_code_point);
-        const code_point = info.getClampedCodePoint(desired_code_point);
+        const prev_glyph = self.getGlyphFromCodePoint(info, desired_prev_code_point);
+        const glyph = self.getGlyphFromCodePoint(info, desired_code_point);
 
-        const result = self.horizontal_advance[prev_code_point * info.glyph_count + code_point];
+        const result = self.horizontal_advance[prev_glyph * info.glyph_count + glyph];
 
         return result;
     }
@@ -1002,12 +1023,17 @@ pub const LoadedFont = extern struct {
     pub fn getBitmapForGlyph(self: *LoadedFont, info: *HHAFont, assets: *Assets, desired_code_point: u32) ?file_formats.BitmapId {
         _ = assets;
 
-        const code_point = info.getClampedCodePoint(desired_code_point);
-        var result = self.code_points[code_point];
+        const glyph = self.getGlyphFromCodePoint(info, desired_code_point);
+        var result = self.glyphs[glyph].bitmap;
         result.value += self.bitmap_id_offset;
 
         return result;
     }
+};
+
+const FinalizeLoadAssetOperation = enum(u8) {
+    None,
+    Font,
 };
 
 const LoadAssetWork = struct {
@@ -1019,6 +1045,7 @@ const LoadAssetWork = struct {
     size: u64,
     destination: *anyopaque,
 
+    finalize_operation: FinalizeLoadAssetOperation,
     final_state: u32,
 };
 
@@ -1026,6 +1053,29 @@ fn doLoadAssetWorkDirectly(
     work: *LoadAssetWork,
 ) callconv(.C) void {
     shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);
+
+    if (shared.platform.noFileErrors(work.handle)) {
+        switch (work.finalize_operation) {
+            .None => {
+                // Nothing to do.
+            },
+            .Font => {
+                const font: *LoadedFont = &work.asset.header.?.data.font;
+                const info: *HHAFont = &work.asset.hha.info.font;
+
+                var glyph_index: u32 = 1;
+                while (glyph_index < info.glyph_count) : (glyph_index += 1) {
+                    const glyph: *HHAFontGlyph = &font.glyphs[glyph_index];
+
+                    std.debug.assert(glyph.unicode_code_point < info.one_past_highest_code_point);
+                    std.debug.assert(@as(u16, @intCast(glyph_index)) == glyph_index);
+                    font.unicode_map[glyph.unicode_code_point] = @intCast(glyph_index);
+                }
+            },
+        }
+    }
+
+    @fence(.seq_cst);
 
     if (!shared.platform.noFileErrors(work.handle)) {
         shared.zeroSize(work.size, @ptrCast(work.destination));

@@ -480,6 +480,10 @@ pub fn zeroStruct(comptime T: type, ptr: *T) void {
     zeroSize(@sizeOf(T), @ptrCast(ptr));
 }
 
+pub fn zeroArray(count: u32, ptr: *anyopaque) void {
+    zeroSize(@sizeOf(ptr) * count, ptr);
+}
+
 pub fn copy(size: MemoryIndex, source_init: *void, dest_init: *void) void {
     var source: [*]u8 = @ptrCast(source_init);
     var dest: [*]u8 = @ptrCast(dest_init);

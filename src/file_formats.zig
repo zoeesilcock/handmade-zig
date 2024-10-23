@@ -117,6 +117,7 @@ pub const HHAFontGlyph = extern struct {
 };
 
 pub const HHAFont = extern struct {
+    one_past_highest_code_point: u32,
     glyph_count: u32,
     ascender_height: f32,
     descender_height: f32,
@@ -128,15 +129,6 @@ pub const HHAFont = extern struct {
     // horizontal_advance: [glyph_count][glyph_count]f32,
     //
     // This could also be implemented using comptime.
-
-    pub fn getClampedCodePoint(self: *HHAFont, code_point: u32) u32 {
-        var result: u32 = 0;
-        if (code_point < self.glyph_count) {
-            result = code_point;
-        }
-
-        return result;
-    }
 
     pub fn getLineAdvance(self: *HHAFont) f32 {
         return self.ascender_height + self.descender_height + self.external_leading;
