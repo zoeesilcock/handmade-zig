@@ -29,8 +29,6 @@ const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const PlayingSound = audio.PlayingSound;
-const DebugCycleCounter = debug.DebugCycleCounter;
-const DebugCycleCounters = debug.DebugCycleCounters;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -292,18 +290,7 @@ fn GameMemory() type {
         high_priority_queue: *PlatformWorkQueue,
         low_priority_queue: *PlatformWorkQueue,
 
-        counters: if (INTERNAL) [debug.DEBUG_CYCLE_COUNTERS_COUNT]DebugCycleCounter else void,
-
         const Self = @This();
-
-        pub usingnamespace switch (INTERNAL) {
-            inline true => struct {
-                pub fn getCycleCounter(self: *Self, counter_id: DebugCycleCounters) *DebugCycleCounter {
-                    return &self.counters[@intFromEnum(counter_id)];
-                }
-            },
-            inline else => struct {},
-        };
     };
 }
 

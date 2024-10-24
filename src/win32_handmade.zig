@@ -1158,36 +1158,6 @@ fn debugSyncDisplay(
     }
 }
 
-fn handleDebugCycleCounters(memory: *shared.Memory) void {
-    if (OUTPUT_TIMING) {
-        win32.OutputDebugStringA("DEBUG CYCLE COUNTERS:\n");
-        var total_cycles: u64 = 0;
-
-        for (&memory.counters, 0..) |*counter, counter_index| {
-            if (counter_index == 0) {
-                total_cycles = counter.cycle_count;
-            }
-
-            if (counter.hit_count > 0) {
-                var buffer: [128]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "{d} {s:>25}: {d:>10} cycles, {d:>10} hits, {d:>10} cycles/hit, {d:>6.2}%\n", .{
-                    counter_index,
-                    debug.DEBUG_CYCLE_COUNTER_NAMES[counter_index],
-                    counter.cycle_count,
-                    counter.hit_count,
-                    counter.cycle_count / counter.hit_count,
-                    (@as(f32, @floatFromInt(counter.cycle_count)) / @as(f32, @floatFromInt(total_cycles))) * 100.0,
-                }) catch "";
-                win32.OutputDebugStringA(@ptrCast(slice.ptr));
-            }
-
-            counter.cycle_count = 0;
-            counter.last_cycle_start = 0;
-            counter.hit_count = 0;
-        }
-    }
-}
-
 fn catStrings(
     source_a: []const u8,
     source_b: []const u8,
@@ -1593,7 +1563,7 @@ pub export fn wWinMain(
                 .transient_storage = null,
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
-                .counters = if (INTERNAL) [1]debug.DebugCycleCounter{debug.DebugCycleCounter{}} ** debug.DEBUG_CYCLE_COUNTERS_COUNT,
+                // .counters = if (INTERNAL) [1]debug.DebugCycleCounter{debug.DebugCycleCounter{}} ** debug.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 
             state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
@@ -1729,7 +1699,6 @@ pub export fn wWinMain(
 
                     // Send all input to game.
                     game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
-                    handleDebugCycleCounters(&game_memory);
 
                     // Output sound.
                     if (opt_secondary_buffer) |secondary_buffer| {

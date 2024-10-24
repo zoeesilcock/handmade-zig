@@ -116,11 +116,7 @@ pub export fn updateAndRender(
 ) void {
     shared.platform = platform;
 
-    if (shared.INTERNAL) {
-        debug.debug_global_memory = memory;
-    }
-    var timed_block = debug.TimedBlock.init(.GameUpdateAndRender);
-    defer timed_block.endTimedBlock();
+    const timed_block = debug.TimedBlock.begin(@src(), .GameUpdateAndRender);
 
     const ground_buffer_width: u32 = 256;
     const ground_buffer_height: u32 = 256;
@@ -1143,7 +1139,9 @@ pub export fn updateAndRender(
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
 
-    overlayDebugCycleCounters(memory);
+    timed_block.end();
+
+    overlayDebugCycleCounters();
     if (debug_render_group) |group| {
         group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
         group.endRender();
@@ -1267,17 +1265,8 @@ pub fn debugTextLine(text: [:0]const u8) void {
     }
 }
 
-fn overlayDebugCycleCounters(memory: *shared.Memory) void {
+fn overlayDebugCycleCounters() void {
     if (OUTPUT_TIMING) {
-        const name_table: [6][:0]const u8 = .{
-            "GameUpdateAndRender",
-            "RenderGroupToOutput",
-            "DrawRectangle",
-            "DrawRectangleSlowly",
-            "DrawRectangleQuickly",
-            "ProcessPixel",
-        };
-
         // Kanji owl codepoints
         // 0x5c0f
         // 0x8033
@@ -1288,29 +1277,26 @@ fn overlayDebugCycleCounters(memory: *shared.Memory) void {
         debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTS:");
         var total_cycles: u64 = 0;
 
-        for (&memory.counters, 0..) |*counter, counter_index| {
+        for (&debug.debug_records, 0..) |*record, counter_index| {
             if (counter_index == 0) {
-                total_cycles = counter.cycle_count;
+                total_cycles = record.cycle_count;
             }
 
-            if (counter.hit_count > 0) {
-                // var buffer: [128]u8 = undefined;
-                // const slice = std.fmt.bufPrintZ(&buffer, "{d} {s} {s:>25}: {d:>10} cycles, {d:>10} hits, {d:>10} cycles/hit, {d:>6.2}%\n", .{
-                //     counter_index,
-                //     name_table[counter_index],
-                //     shared.DEBUG_CYCLE_COUNTER_NAMES[counter_index],
-                //     counter.cycle_count,
-                //     counter.hit_count,
-                //     counter.cycle_count / counter.hit_count,
-                //     (@as(f32, @floatFromInt(counter.cycle_count)) / @as(f32, @floatFromInt(total_cycles))) * 100.0,
-                // }) catch "";
-                // debugTextLine(slice);
+            if (record.hit_count > 0) {
+                var buffer: [128]u8 = undefined;
+                const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}cy, {d}h, {d}cy/h, {d:.2}%\n", .{
+                    record.function_name,
+                    record.cycle_count,
+                    record.hit_count,
+                    record.cycle_count / record.hit_count,
+                    (@as(f32, @floatFromInt(record.cycle_count)) / @as(f32, @floatFromInt(total_cycles))) * 100.0,
+                }) catch "";
+                debugTextLine(slice);
 
-                debugTextLine(name_table[counter_index]);
+                record.cycle_count = 0;
+                record.hit_count = 0;
             }
         }
-
-        debugTextLine("AVA WA Ta");
     }
 }
 

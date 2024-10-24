@@ -1,10 +1,7 @@
 const shared = @import("shared.zig");
+const std = @import("std");
 
-pub var debug_global_memory: ?*shared.Memory = null;
-
-const INTERNAL = shared.INTERNAL;
 pub const DEBUG_CYCLE_COUNTERS_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;
-pub const DEBUG_CYCLE_COUNTER_NAMES: [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 = buildDebugCycleCounterNames();
 
 pub const DebugCycleCounters = enum(u8) {
     GameUpdateAndRender = 0,
@@ -15,54 +12,42 @@ pub const DebugCycleCounters = enum(u8) {
     ProcessPixel,
 };
 
-fn buildDebugCycleCounterNames() [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 {
-    var names: [DEBUG_CYCLE_COUNTERS_COUNT][:0]const u8 = undefined;
-    for (0..DEBUG_CYCLE_COUNTERS_COUNT) |counter_index| {
-        names[counter_index] = @typeInfo(DebugCycleCounters).Enum.fields[counter_index].name;
-    }
-    return names;
-}
+pub var debug_records = [1]DebugRecord{DebugRecord{}} ** DEBUG_CYCLE_COUNTERS_COUNT;
 
-pub const DebugCycleCounter = extern struct {
-    cycle_count: u64 = 0,
-    last_cycle_start: u64 = 0,
-    hit_count: u32 = 0,
+const DebugRecord = struct {
+    cycle_count: u64 = undefined,
+
+    file_name: [:0]const u8 = undefined,
+    function_name: [:0]const u8 = undefined,
+
+    line_number: u32 = undefined,
+    hit_count: u32 = undefined,
 };
 
 pub const TimedBlock = struct {
-    id: DebugCycleCounters,
+    record: *DebugRecord,
 
-    pub fn init(id: DebugCycleCounters) TimedBlock {
-        var result = TimedBlock{ .id = id };
-        result.beginTimedBlock();
+    pub fn begin(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+        const result = TimedBlock{
+            .record = &debug_records[@intFromEnum(counter)],
+        };
+
+        result.record.file_name = source.file;
+        result.record.function_name = source.fn_name;
+        result.record.line_number = source.line;
+        result.record.cycle_count -%= shared.rdtsc();
+        result.record.hit_count += 1;
+
         return result;
     }
 
-    pub fn beginTimedBlock(self: *TimedBlock) void {
-        if (INTERNAL) {
-            if (debug_global_memory) |memory| {
-                memory.getCycleCounter(self.id).last_cycle_start = shared.rdtsc();
-            }
-        }
-    }
-    pub fn endTimedBlock(self: *TimedBlock) void {
-        if (INTERNAL) {
-            if (debug_global_memory) |memory| {
-                const counter = memory.getCycleCounter(self.id);
-                counter.cycle_count +%= shared.rdtsc() -% counter.last_cycle_start;
-                counter.hit_count +%= 1;
-            }
-        }
+    pub fn end(self: TimedBlock) void {
+        self.record.cycle_count +%= shared.rdtsc();
     }
 
-    pub fn endTimedBlockCounted(self: *TimedBlock, hit_count: u32) void {
-        if (INTERNAL) {
-            if (debug_global_memory) |memory| {
-                const counter = memory.getCycleCounter(self.id);
-                counter.cycle_count +%= shared.rdtsc() -% counter.last_cycle_start;
-                counter.hit_count +%= hit_count;
-            }
-        }
+    pub fn endWithCount(self: TimedBlock, hit_count: u32) void {
+        self.end();
+        self.record.hit_count +%= hit_count;
     }
 };
 

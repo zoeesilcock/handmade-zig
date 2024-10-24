@@ -572,8 +572,8 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {
-        var timed_block = debug.TimedBlock.init(.RenderGroupToOutput);
-        defer timed_block.endTimedBlock();
+        var timed_block = debug.TimedBlock.begin(@src(), .RenderGroupToOutput);
+        defer timed_block.end();
 
         const null_pixels_to_meters: f32 = 1.0;
 
@@ -722,8 +722,8 @@ pub fn drawRectangle(
     clip_rect: Rectangle2i,
     even: bool,
 ) void {
-    var timed_block = debug.TimedBlock.init(.DrawRectangle);
-    defer timed_block.endTimedBlock();
+    var timed_block = debug.TimedBlock.begin(@src(), .DrawRectangle);
+    defer timed_block.end();
 
     var fill_rect = Rectangle2i.new(
         intrinsics.floorReal32ToInt32(min.x()),
@@ -795,8 +795,8 @@ pub fn drawRectangleQuickly(
 ) void {
     _ = pixels_to_meters;
 
-    var timed_block = debug.TimedBlock.init(.DrawRectangleQuickly);
-    defer timed_block.endTimedBlock();
+    var timed_block = debug.TimedBlock.begin(@src(), .DrawRectangleQuickly);
+    defer timed_block.end();
 
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -911,7 +911,8 @@ pub fn drawRectangleQuickly(
         var row: [*]u8 = @ptrCast(draw_buffer.memory);
         row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * draw_buffer.pitch)));
 
-        var process_timed_block = debug.TimedBlock.init(.ProcessPixel);
+        var process_timed_block = debug.TimedBlock.begin(@src(), .ProcessPixel);
+        process_timed_block.endWithCount(@intCast(@divFloor(fill_rect.getClampedArea(), 2)));
 
         var y: i32 = min_y;
         while (y < max_y) : (y += 2) {
@@ -1096,8 +1097,6 @@ pub fn drawRectangleQuickly(
 
             row += row_advance;
         }
-
-        process_timed_block.endTimedBlockCounted(@intCast(@divFloor(fill_rect.getClampedArea(), 2)));
     }
 }
 
@@ -1114,8 +1113,8 @@ pub fn drawRectangleSlowly(
     bottom: *EnvironmentMap,
     pixels_to_meters: f32,
 ) void {
-    shared.beginTimedBlock(.DrawRectangleSlowly);
-    defer shared.endTimedBlock(.DrawRectangleSlowly);
+    const timed_block = debug.TimedBlock.begin(@src(), .DrawRectangleSlowly);
+    defer timed_block.end();
 
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -1184,7 +1183,8 @@ pub fn drawRectangleSlowly(
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
     row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
 
-    shared.beginTimedBlock(.ProcessPixel);
+    const timed_block_pixel = debug.TimedBlock.begin(@src(), .ProcessPixel);
+
     var y: i32 = y_min;
     while (y < y_max) : (y += 1) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
@@ -1323,7 +1323,7 @@ pub fn drawRectangleSlowly(
         row += @as(usize, @intCast(draw_buffer.pitch));
     }
 
-    shared.endTimedBlockCounted(.ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
+    defer timed_block_pixel.endWithCount(@intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
 }
 
 pub fn drawRectangleOutline(
