@@ -6,8 +6,14 @@ Learning Zig by following along with the [Handmade Hero](https://handmadehero.or
 ## Assets
 Graphical assets are not included as they are not created by me. They need to be added to the `data/` directory manually. We currently expect the `test`, `test2`, and `test3` directories of assets found in this location of the pre-order data: `handmade_hero_legacy_art.zip/early_data`.
 
+### Packing the assets
+The asset files need to be packed using the asset packer before running the game.
+```
+zig build build-assets
+```
+
 ## Debugging
-The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [C/C++ extension](https://github.com/Microsoft/vscode-cpptools) in VS Code. Using Visual Studio with C/C++ tooling appears to give the most reliable results.
+The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [C/C++ extension](https://github.com/Microsoft/vscode-cpptools) in VS Code. Using Visual Studio with C/C++ tooling appears to give the most reliable results. Another alternative that works almost as well as Visual Studio is [Rad Debugger](https://github.com/EpicGamesExt/raddebugger).
 
 When running outside of an IDE, `OutputDebugString` messages can be viewed using [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview).
 
