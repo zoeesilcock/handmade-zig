@@ -4,6 +4,7 @@ const random = @import("random.zig");
 const render = @import("render.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
+const debug = @import("debug.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
@@ -406,6 +407,9 @@ pub const Assets = struct {
     }
 
     fn acquireAssetMemory(self: *Assets, size: u32, asset_index: u32) ?*AssetMemoryHeader {
+        var timed_block = debug.TimedBlock.begin(@src(), .AcquireAssetMemory);
+        defer timed_block.end();
+
         var result: ?*AssetMemoryHeader = null;
         var opt_block = self.findBlockForSize(size);
 
@@ -498,6 +502,9 @@ pub const Assets = struct {
     }
 
     pub fn getFirstAsset(self: *Assets, type_id: AssetTypeId) ?u32 {
+        var timed_block = debug.TimedBlock.begin(@src(), .GetFirstAsset);
+        defer timed_block.end();
+
         var result: ?u32 = null;
         const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
 
@@ -509,6 +516,9 @@ pub const Assets = struct {
     }
 
     pub fn getRandomAsset(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?u32 {
+        var timed_block = debug.TimedBlock.begin(@src(), .GetRandomAsset);
+        defer timed_block.end();
+
         var result: ?u32 = null;
         const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
 
@@ -527,6 +537,9 @@ pub const Assets = struct {
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
     ) ?u32 {
+        var timed_block = debug.TimedBlock.begin(@src(), .GetBestMatchAsset);
+        defer timed_block.end();
+
         var result: ?u32 = null;
         var best_diff: f32 = std.math.floatMax(f32);
         const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
@@ -576,6 +589,9 @@ pub const Assets = struct {
         opt_id: ?BitmapId,
         immediate: bool,
     ) void {
+        var timed_block = debug.TimedBlock.begin(@src(), .LoadBitmap);
+        defer timed_block.end();
+
         if (opt_id) |id| {
             var asset = &self.assets[id.value];
             if (id.isValid()) {
@@ -738,6 +754,9 @@ pub const Assets = struct {
         self: *Assets,
         opt_id: ?SoundId,
     ) void {
+        var timed_block = debug.TimedBlock.begin(@src(), .LoadSound);
+        defer timed_block.end();
+
         if (opt_id) |id| {
             var asset = &self.assets[id.value];
 
@@ -857,6 +876,9 @@ pub const Assets = struct {
         opt_id: ?FontId,
         immediate: bool,
     ) void {
+        var timed_block = debug.TimedBlock.begin(@src(), .LoadFont);
+        defer timed_block.end();
+
         if (opt_id) |id| {
             var asset = &self.assets[id.value];
             if (id.isValid()) {
@@ -1052,6 +1074,9 @@ const LoadAssetWork = struct {
 fn doLoadAssetWorkDirectly(
     work: *LoadAssetWork,
 ) callconv(.C) void {
+    var timed_block = debug.TimedBlock.begin(@src(), .LoadAssetWorkDirectly);
+    defer timed_block.end();
+
     shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);
 
     if (shared.platform.noFileErrors(work.handle)) {

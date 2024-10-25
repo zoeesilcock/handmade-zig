@@ -5,49 +5,82 @@ pub const DEBUG_CYCLE_COUNTERS_COUNT = @typeInfo(DebugCycleCounters).Enum.fields
 
 pub const DebugCycleCounters = enum(u8) {
     GameUpdateAndRender = 0,
-    RenderGroupToOutput,
+    DebugTextReset,
+    BeginRender,
+    PushRenderElement,
     DrawRectangle,
+    DrawBitmap,
     DrawRectangleSlowly,
     DrawRectangleQuickly,
     ProcessPixel,
+    RenderToOutput,
+    TiledRenderToOutput,
+    SingleRenderToOutput,
+    EndRender,
+    GetRenderEntityBasisPosition,
+    ChangeSaturation,
+    MoveEntity,
+    EntitiesOverlap,
+    SpeculativeCollide,
+    EndSimulation,
+    BeginSimulation,
+    AddEntityRaw,
+    ChangeEntityLocation,
+    ChangeEntityLocationRaw,
+    GetWorldChunk,
+    PlaySound,
+    OutputPlayingSounds,
+    FillGroundChunk,
+    LoadAssetWorkDirectly,
+    AcquireAssetMemory,
+    LoadBitmap,
+    LoadSound,
+    LoadFont,
+    GetBestMatchAsset,
+    GetRandomAsset,
+    GetFirstAsset,
 };
 
 pub var debug_records = [1]DebugRecord{DebugRecord{}} ** DEBUG_CYCLE_COUNTERS_COUNT;
 
-const DebugRecord = struct {
-    cycle_count: u64 = undefined,
-
-    file_name: [:0]const u8 = undefined,
-    function_name: [:0]const u8 = undefined,
+pub const DebugRecord = extern struct {
+    file_name: [*:0]const u8 = undefined,
+    function_name: [*:0]const u8 = undefined,
 
     line_number: u32 = undefined,
-    hit_count: u32 = undefined,
+    reserved: u32 = 0,
+
+    hit_count_cycle_count: u64 = 0,
 };
 
 pub const TimedBlock = struct {
     record: *DebugRecord,
+    start_cycles: u64 = 0,
+    hit_count: u32 = 0,
 
     pub fn begin(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
-        const result = TimedBlock{
+        var result = TimedBlock{
             .record = &debug_records[@intFromEnum(counter)],
+            .hit_count = 1,
         };
 
         result.record.file_name = source.file;
         result.record.function_name = source.fn_name;
         result.record.line_number = source.line;
-        result.record.cycle_count -%= shared.rdtsc();
-        result.record.hit_count += 1;
+        result.start_cycles = @intCast(shared.rdtsc());
 
         return result;
     }
 
-    pub fn end(self: TimedBlock) void {
-        self.record.cycle_count +%= shared.rdtsc();
+    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: DebugCycleCounters, hit_count: u32) TimedBlock {
+        var result = TimedBlock.begin(source, counter);
+        result.hit_count = hit_count;
+        return result;
     }
 
-    pub fn endWithCount(self: TimedBlock, hit_count: u32) void {
-        self.end();
-        self.record.hit_count +%= hit_count;
+    pub fn end(self: TimedBlock) void {
+        const delta: u64 = (shared.rdtsc() - self.start_cycles) | (@as(u64, @intCast(self.hit_count)) << 32);
+        _ = @atomicRmw(u64, &self.record.hit_count_cycle_count, .Add, delta, .monotonic);
     }
 };
 

@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const world = @import("world.zig");
+const debug = @import("debug.zig");
 const std = @import("std");
 
 const addCollisionRule = @import("handmade.zig").addCollisionRule;
@@ -236,6 +237,9 @@ pub fn addEntityRaw(
     storage_index: u32,
     opt_source: ?*shared.LowEntity,
 ) ?*SimEntity {
+    var timed_block = debug.TimedBlock.begin(@src(), .AddEntityRaw);
+    defer timed_block.end();
+
     std.debug.assert(storage_index != 0);
 
     var entity: ?*SimEntity = null;
@@ -315,6 +319,9 @@ pub fn beginSimulation(
     bounds: Rectangle3,
     delta_time: f32,
 ) *SimRegion {
+    var timed_block = debug.TimedBlock.begin(@src(), .BeginSimulation);
+    defer timed_block.end();
+
     var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion);
     shared.zeroStruct([4096]SimEntityHash, &sim_region.sim_entity_hash);
 
@@ -407,6 +414,9 @@ fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_tim
 }
 
 fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vector3) bool {
+    var timed_block = debug.TimedBlock.begin(@src(), .SpeculativeCollide);
+    defer timed_block.end();
+
     var result = true;
 
     if (region.type == .Stairwell) {
@@ -420,6 +430,9 @@ fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vect
 }
 
 fn entitiesOverlap(entity: *SimEntity, test_entity: *SimEntity, epsilon: Vector3) bool {
+    var timed_block = debug.TimedBlock.begin(@src(), .EntitiesOverlap);
+    defer timed_block.end();
+
     var overlapped = false;
 
     var entity_volume_index: u32 = 0;
@@ -524,6 +537,9 @@ pub fn moveEntity(
     in_acceleration: Vector3,
     move_spec: *const MoveSpec,
 ) void {
+    var timed_block = debug.TimedBlock.begin(@src(), .MoveEntity);
+    defer timed_block.end();
+
     std.debug.assert(!entity.isSet(SimEntityFlags.Nonspatial.toInt()));
 
     var acceleration = in_acceleration;
@@ -789,6 +805,9 @@ pub fn moveEntity(
 }
 
 pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
+    var timed_block = debug.TimedBlock.begin(@src(), .EndSimulation);
+    defer timed_block.end();
+
     var sim_entity_index: u32 = 0;
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
         const entity = &sim_region.entities[sim_entity_index];

@@ -1,11 +1,17 @@
 pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 0;
 
+pub const AssetFontType = enum(u32) {
+    Default = 0,
+    Debug = 10,
+};
+
 pub const AssetTagId = enum(u32) {
     Smoothness,
     Flatness,
     FacingDirection, // Angles in radians off of due right.
     UnicodeCodepoint,
+    FontType,
 
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);

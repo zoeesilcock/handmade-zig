@@ -61,8 +61,8 @@ pub fn doNextWorkQueueEntry(queue: *shared.PlatformWorkQueue) bool {
             &queue.next_entry_to_read,
             original_next_entry_to_read,
             new_next_entry_to_read,
-            .release,
-            .acquire,
+            .seq_cst,
+            .seq_cst,
         ) == null) {
             const entry = &queue.entries[original_next_entry_to_read];
             entry.callback(queue, entry.data);

@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
+const debug = @import("debug.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
@@ -40,6 +41,9 @@ pub const AudioState = struct {
     }
 
     pub fn playSound(self: *AudioState, opt_sound_id: ?SoundId) ?*PlayingSound {
+        var timed_block = debug.TimedBlock.begin(@src(), .PlaySound);
+        defer timed_block.end();
+
         var result: ?*PlayingSound = null;
 
         if (opt_sound_id) |sound_id| {
@@ -105,6 +109,9 @@ pub const AudioState = struct {
         assets: *Assets,
         temp_arena: *MemoryArena,
     ) void {
+        var timed_block = debug.TimedBlock.begin(@src(), .OutputPlayingSounds);
+        defer timed_block.end();
+
         const mixer_memory = temp_arena.beginTemporaryMemory();
         defer temp_arena.endTemporaryMemory(mixer_memory);
 

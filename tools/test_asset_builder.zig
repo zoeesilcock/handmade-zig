@@ -26,6 +26,7 @@ const win32 = struct {
 
 // Types.
 const AssetTypeId = file_formats.AssetTypeId;
+const AssetFontType = file_formats.AssetFontType;
 const AssetTagId = file_formats.AssetTagId;
 const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
@@ -219,12 +220,13 @@ fn loadFont(
     allocator: std.mem.Allocator,
     file_name: []const u8,
     font_name: []const u8,
+    pixel_height: i32,
 ) *LoadedFont {
     var font: *LoadedFont = allocator.create(LoadedFont) catch unreachable;
 
     _ = win32.AddFontResourceExA(@ptrCast(file_name), .PRIVATE, null);
     font.win32_handle = win32.CreateFontA(
-        128,
+        pixel_height,
         0,
         0,
         0,
@@ -979,31 +981,76 @@ pub fn main() anyerror!void {
     }
 }
 
-fn writeFonts(allocator: std.mem.Allocator) void {
-    var result = Assets.init();
-    const debug_font = loadFont(allocator, "C:/Windows/Fonts/arial.ttf", "Arial");
-    defer freeFont(allocator, debug_font);
+inline fn addFont(
+    allocator: std.mem.Allocator,
+    assets: *Assets,
+    font_file: []const u8,
+    font_name: []const u8,
+    font_type: AssetFontType,
+) *LoadedFont {
+    const font = loadFont(allocator, font_file, font_name);
 
-    result.beginAssetType(.FontGlyph);
+    assets.beginAssetType(.FontGlyph);
     var character: u32 = ' ';
     while (character <= '~') : (character += 1) {
-        _ = result.addCharacterAsset(debug_font, character);
+        _ = assets.addCharacterAsset(font, character);
     }
 
     // Kanji owl.
-    _ = result.addCharacterAsset(debug_font, 0x5c0f);
-    _ = result.addCharacterAsset(debug_font, 0x8033);
-    _ = result.addCharacterAsset(debug_font, 0x6728);
-    _ = result.addCharacterAsset(debug_font, 0x514e);
+    _ = assets.addCharacterAsset(font, 0x5c0f);
+    _ = assets.addCharacterAsset(font, 0x8033);
+    _ = assets.addCharacterAsset(font, 0x6728);
+    _ = assets.addCharacterAsset(font, 0x514e);
 
-    result.endAssetType();
+    assets.endAssetType();
 
     // This needs to happen after the glyphs for the font have been added.
-    result.beginAssetType(.Font);
-    _ = result.addFontAsset(debug_font);
-    result.endAssetType();
+    assets.beginAssetType(.Font);
+    _ = assets.addFontAsset(font);
+    assets.addTag(.FontType, @floatFromInt(@intFromEnum(font_type)));
+    assets.endAssetType();
 
-    writeHHA("testfonts.hha", &result, allocator) catch unreachable;
+    return font;
+}
+
+fn writeFonts(allocator: std.mem.Allocator) void {
+    var assets = Assets.init();
+
+    const fonts: [2]*LoadedFont = .{
+        loadFont(allocator, "C:/Windows/Fonts/arial.ttf", "Arial", 128),
+        loadFont(allocator, "C:/Windows/Fonts/LiberationMono-Regular.ttf", "Liberation Mono", 20),
+    };
+    defer freeFont(allocator, fonts[0]);
+    defer freeFont(allocator, fonts[1]);
+    const font_types: [2]AssetFontType = .{
+        .Default,
+        .Debug,
+    };
+
+    assets.beginAssetType(.FontGlyph);
+    for (fonts) |font| {
+        var character: u32 = ' ';
+        while (character <= '~') : (character += 1) {
+            _ = assets.addCharacterAsset(font, character);
+        }
+
+        // Kanji owl.
+        _ = assets.addCharacterAsset(font, 0x5c0f);
+        _ = assets.addCharacterAsset(font, 0x8033);
+        _ = assets.addCharacterAsset(font, 0x6728);
+        _ = assets.addCharacterAsset(font, 0x514e);
+    }
+    assets.endAssetType();
+
+    // This needs to happen after the glyphs for the font have been added.
+    assets.beginAssetType(.Font);
+    for (fonts, 0..) |font, index| {
+        _ = assets.addFontAsset(font);
+        assets.addTag(.FontType, @floatFromInt(@intFromEnum(font_types[index])));
+    }
+    assets.endAssetType();
+
+    writeHHA("testfonts.hha", &assets, allocator) catch unreachable;
 }
 
 fn writeHero(allocator: std.mem.Allocator) void {

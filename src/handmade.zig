@@ -103,6 +103,7 @@ const RenderGroup = render.RenderGroup;
 const Assets = asset.Assets;
 const AssetTypeId = asset.AssetTypeId;
 const AssetTagId = file_formats.AssetTagId;
+const AssetFontType = file_formats.AssetFontType;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
 const Particle = shared.Particle;
@@ -1155,6 +1156,9 @@ var font_scale: f32 = 0;
 var font_id: file_formats.FontId = undefined;
 
 pub fn debugTextReset(assets: *Assets, width: i32, height: i32) void {
+    var timed_block = debug.TimedBlock.begin(@src(), .DebugTextReset);
+    defer timed_block.end();
+
     var match_vector = asset.AssetVector{};
     var weight_vector = asset.AssetVector{};
 
@@ -1166,6 +1170,8 @@ pub fn debugTextReset(assets: *Assets, width: i32, height: i32) void {
         group.orthographicMode(width, height, 1);
     }
 
+    match_vector.e[AssetTagId.FontType.toInt()] = @intFromEnum(AssetFontType.Debug);
+    weight_vector.e[AssetTagId.FontType.toInt()] = 1;
     if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
         font_id = id;
 
@@ -1265,6 +1271,26 @@ pub fn debugTextLine(text: [:0]const u8) void {
     }
 }
 
+fn outputDebugRecords(debug_records: *[debug.DEBUG_CYCLE_COUNTERS_COUNT]debug.DebugRecord) void {
+    for (debug_records) |*record| {
+        const hit_count_cycle_count = @atomicRmw(u64, @constCast(&record.hit_count_cycle_count), .Xchg, 0, .monotonic);
+        const hit_count: u32 = @intCast(hit_count_cycle_count >> 32);
+        const cycle_count: u32 = @intCast(hit_count_cycle_count & 0xFFFFFFFF);
+
+        if (hit_count > 0) {
+            var buffer: [128]u8 = undefined;
+            const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
+                record.function_name,
+                record.line_number,
+                cycle_count,
+                hit_count,
+                cycle_count / hit_count,
+            }) catch "";
+            debugTextLine(slice);
+        }
+    }
+}
+
 fn overlayDebugCycleCounters() void {
     if (OUTPUT_TIMING) {
         // Kanji owl codepoints
@@ -1272,31 +1298,10 @@ fn overlayDebugCycleCounters() void {
         // 0x8033
         // 0x6728
         // 0x514e
-        debugTextLine("\\5C0F\\8033\\6728\\514E");
+        // debugTextLine("\\5C0F\\8033\\6728\\514E");
 
         debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTS:");
-        var total_cycles: u64 = 0;
-
-        for (&debug.debug_records, 0..) |*record, counter_index| {
-            if (counter_index == 0) {
-                total_cycles = record.cycle_count;
-            }
-
-            if (record.hit_count > 0) {
-                var buffer: [128]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}cy, {d}h, {d}cy/h, {d:.2}%\n", .{
-                    record.function_name,
-                    record.cycle_count,
-                    record.hit_count,
-                    record.cycle_count / record.hit_count,
-                    (@as(f32, @floatFromInt(record.cycle_count)) / @as(f32, @floatFromInt(total_cycles))) * 100.0,
-                }) catch "";
-                debugTextLine(slice);
-
-                record.cycle_count = 0;
-                record.hit_count = 0;
-            }
-        }
+        outputDebugRecords(&debug.debug_records);
     }
 }
 
@@ -1617,6 +1622,9 @@ const FillGroundChunkWork = struct {
 };
 
 pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+    var timed_block = debug.TimedBlock.begin(@src(), .FillGroundChunk);
+    defer timed_block.end();
+
     _ = queue;
 
     const work: *FillGroundChunkWork = @ptrCast(@alignCast(data));
