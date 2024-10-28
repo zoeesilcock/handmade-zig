@@ -12,14 +12,11 @@ const random = @import("random.zig");
 const debug = @import("debug.zig");
 const std = @import("std");
 
-const OUTPUT_TIMING = @import("build_options").timing;
-
 /// TODO: An overview of upcoming tasks.
 ///
 /// * Flush all thread queues before reloading DLL.
 ///
 /// * Debug code.
-///     * Fonts.
 ///     * Logging.
 ///     * Diagramming.
 ///     * Switches, sliders etc.
@@ -88,6 +85,9 @@ const OUTPUT_TIMING = @import("build_options").timing;
 ///     * Entity system.
 ///     * World generation.
 ///
+
+// Build options.
+const INTERNAL = shared.INTERNAL;
 
 // Types.
 const Vector2 = math.Vector2;
@@ -1142,10 +1142,89 @@ pub export fn updateAndRender(
 
     timed_block.end();
 
-    overlayDebugCycleCounters();
+    overlayDebugCycleCounters(memory);
     if (debug_render_group) |group| {
         group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
         group.endRender();
+    }
+}
+
+pub export fn debugFrameEnd(memory: *shared.Memory, info: *shared.DebugFrameEndInfo) void {
+    _ = info;
+
+    if (memory.debug_storage) |debug_storage| {
+        var debug_state: *debug.DebugState = @ptrCast(@alignCast(debug_storage));
+        debug_state.counter_count = 0;
+        updateDebugRecords(debug_state, &debug.debug_records);
+
+        debug_state.snapshot_index += 1;
+        if (debug_state.snapshot_index >= debug.SNAPSHOT_COUNT) {
+            debug_state.snapshot_index = 0;
+        }
+    }
+}
+
+fn updateDebugRecords(debug_state: *debug.DebugState, debug_records: *[debug.DEBUG_CYCLE_COUNTERS_COUNT]debug.DebugRecord) void {
+    for (debug_records) |*source| {
+        var dest: *debug.DebugCounterState = &debug_state.counter_states[debug_state.counter_count];
+        debug_state.counter_count += 1;
+
+        const hit_count_cycle_count = @atomicRmw(u64, @constCast(&source.hit_count_cycle_count), .Xchg, 0, .monotonic);
+
+        dest.file_name = source.file_name;
+        dest.function_name = source.function_name;
+        dest.line_number = source.line_number;
+        dest.snapshots[debug_state.snapshot_index].hit_count = @intCast(hit_count_cycle_count >> 32);
+        dest.snapshots[debug_state.snapshot_index].cycle_count = @intCast(hit_count_cycle_count & 0xFFFFFFFF);
+    }
+}
+
+fn overlayDebugCycleCounters(memory: *shared.Memory) void {
+    if (memory.debug_storage) |debug_storage| {
+        const debug_state: *debug.DebugState = @ptrCast(@alignCast(debug_storage));
+
+        var counter_index: u32 = 0;
+        while (counter_index < debug_state.counter_count) : (counter_index += 1) {
+            const counter = debug_state.counter_states[counter_index];
+
+            var hit_count = debug.DebugStatistic.begin();
+            var cycle_count = debug.DebugStatistic.begin();
+            var cycle_over_hit = debug.DebugStatistic.begin();
+            for (counter.snapshots) |snapshot| {
+                hit_count.accumulate(@floatFromInt(snapshot.hit_count));
+                cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
+
+                var coh: f64 = 0;
+                if (snapshot.hit_count > 0) {
+                    coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
+                }
+                cycle_over_hit.accumulate(coh);
+            }
+            hit_count.end();
+            cycle_count.end();
+            cycle_over_hit.end();
+
+            if (hit_count.max > 0) {
+                var buffer: [128]u8 = undefined;
+                const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
+                    counter.function_name,
+                    counter.line_number,
+                    @as(u32, @intFromFloat(cycle_count.average)),
+                    @as(u32, @intFromFloat(hit_count.average)),
+                    @as(u32, @intFromFloat(cycle_over_hit.average)),
+                }) catch "";
+                debugTextLine(slice);
+            }
+        }
+
+        // Kanji owl codepoints
+        // 0x5c0f
+        // 0x8033
+        // 0x6728
+        // 0x514e
+        // debugTextLine("\\5C0F\\8033\\6728\\514E");
+        //
+        // debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTS:");
     }
 }
 
@@ -1268,40 +1347,6 @@ pub fn debugTextLine(text: [:0]const u8) void {
 
             at_y -= font_info.getLineAdvance() * font_scale;
         }
-    }
-}
-
-fn outputDebugRecords(debug_records: *[debug.DEBUG_CYCLE_COUNTERS_COUNT]debug.DebugRecord) void {
-    for (debug_records) |*record| {
-        const hit_count_cycle_count = @atomicRmw(u64, @constCast(&record.hit_count_cycle_count), .Xchg, 0, .monotonic);
-        const hit_count: u32 = @intCast(hit_count_cycle_count >> 32);
-        const cycle_count: u32 = @intCast(hit_count_cycle_count & 0xFFFFFFFF);
-
-        if (hit_count > 0) {
-            var buffer: [128]u8 = undefined;
-            const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
-                record.function_name,
-                record.line_number,
-                cycle_count,
-                hit_count,
-                cycle_count / hit_count,
-            }) catch "";
-            debugTextLine(slice);
-        }
-    }
-}
-
-fn overlayDebugCycleCounters() void {
-    if (OUTPUT_TIMING) {
-        // Kanji owl codepoints
-        // 0x5c0f
-        // 0x8033
-        // 0x6728
-        // 0x514e
-        // debugTextLine("\\5C0F\\8033\\6728\\514E");
-
-        debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTS:");
-        outputDebugRecords(&debug.debug_records);
     }
 }
 

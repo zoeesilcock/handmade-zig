@@ -84,3 +84,63 @@ pub const TimedBlock = struct {
     }
 };
 
+pub const SNAPSHOT_COUNT = 120;
+const COUNTER_COUNT = 512;
+
+pub const DebugCounterSnapshot = struct {
+    hit_count: u32 = 0,
+    cycle_count: u32 = 0,
+};
+
+pub const DebugCounterState = struct {
+    file_name: [*:0]const u8 = undefined,
+    function_name: [*:0]const u8 = undefined,
+    line_number: u32 = undefined,
+
+    snapshots: [SNAPSHOT_COUNT]DebugCounterSnapshot = [1]DebugCounterSnapshot{DebugCounterSnapshot{}} ** SNAPSHOT_COUNT,
+};
+
+pub const DebugState = struct {
+    snapshot_index: u32,
+    counter_count: u32,
+    counter_states: [COUNTER_COUNT]DebugCounterState = [1]DebugCounterState{DebugCounterState{}} ** COUNTER_COUNT,
+};
+
+pub const DebugStatistic = struct {
+    min: f64,
+    max: f64,
+    average: f64,
+    count: u32,
+
+    pub fn begin() DebugStatistic {
+        return DebugStatistic{
+            .min = std.math.floatMax(f64),
+            .max = -std.math.floatMax(f64),
+            .average = 0,
+            .count = 0,
+        };
+    }
+
+    pub fn accumulate(self: *DebugStatistic, value: f64) void {
+        self.count += 1;
+
+        if (self.min > value) {
+            self.min = value;
+        }
+
+        if (self.max < value) {
+            self.max = value;
+        }
+
+        self.average += value;
+    }
+
+    pub fn end(self: *DebugStatistic) void {
+        if (self.count != 0) {
+            self.average /= @as(f32, @floatFromInt(self.count));
+        } else {
+            self.min = 0;
+            self.max = 0;
+        }
+    }
+};

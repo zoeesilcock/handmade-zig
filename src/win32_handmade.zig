@@ -41,7 +41,6 @@ const shared = @import("shared.zig");
 const debug = @import("debug.zig");
 
 // Build options.
-const OUTPUT_TIMING = @import("build_options").timing;
 const INTERNAL = shared.INTERNAL;
 
 const std = @import("std");
@@ -146,6 +145,7 @@ pub const Game = struct {
     last_write_time: win32.FILETIME = undefined,
     updateAndRender: *const @TypeOf(shared.updateAndRenderStub) = undefined,
     getSoundSamples: *const @TypeOf(shared.getSoundSamplesStub) = undefined,
+    debugFrameEnd: ?*const @TypeOf(shared.debugFrameEndStub) = undefined,
 };
 
 const Win32PlatformFileGroup = extern struct {
@@ -405,6 +405,7 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
     result.dll = win32.LoadLibraryA(temp_dll_name);
     result.updateAndRender = shared.updateAndRenderStub;
     result.getSoundSamples = shared.getSoundSamplesStub;
+    result.debugFrameEnd = null;
 
     if (result.dll) |library| {
         if (win32.GetProcAddress(library, "updateAndRender")) |procedure| {
@@ -413,6 +414,10 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
 
         if (win32.GetProcAddress(library, "getSoundSamples")) |procedure| {
             result.getSoundSamples = @as(@TypeOf(result.getSoundSamples), @ptrCast(procedure));
+        }
+
+        if (win32.GetProcAddress(library, "debugFrameEnd")) |procedure| {
+            result.debugFrameEnd = @as(@TypeOf(result.debugFrameEnd), @ptrCast(procedure));
         }
     }
 
@@ -427,6 +432,7 @@ fn unloadGameCode(game: *Game) void {
 
     game.updateAndRender = shared.updateAndRenderStub;
     game.getSoundSamples = shared.getSoundSamplesStub;
+    game.debugFrameEnd = null;
 }
 
 fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(std.os.windows.WINAPI) isize {
@@ -1546,7 +1552,7 @@ pub export fn wWinMain(
                 win32.PAGE_READWRITE,
             )));
 
-            var debug_time_marker_index: u32 = 0;
+            const debug_time_marker_index: u32 = 0;
             var debug_time_markers: [DEBUG_TIME_MARKER_COUNT]DebugTimeMarker = [1]DebugTimeMarker{DebugTimeMarker{}} ** DEBUG_TIME_MARKER_COUNT;
 
             initDirectSound(window_handle, sound_output.samples_per_second, sound_output.secondary_buffer_size);
@@ -1556,17 +1562,18 @@ pub export fn wWinMain(
             }
 
             var game_memory: shared.Memory = shared.Memory{
-                .is_initialized = false,
                 .permanent_storage_size = shared.megabytes(256),
                 .permanent_storage = null,
-                .transient_storage_size = shared.megabytes(256),
+                .transient_storage_size = shared.gigabytes(1),
                 .transient_storage = null,
+                .debug_storage_size = shared.megabytes(64),
+                .debug_storage = null,
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
                 // .counters = if (INTERNAL) [1]debug.DebugCycleCounter{debug.DebugCycleCounter{}} ** debug.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 
-            state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
+            state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size + game_memory.debug_storage_size;
             const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
             state.game_memory_block = win32.VirtualAlloc(
                 base_address,
@@ -1578,6 +1585,7 @@ pub export fn wWinMain(
             if (state.game_memory_block) |memory_block| {
                 game_memory.permanent_storage = @ptrCast(memory_block);
                 game_memory.transient_storage = @as([*]void, @ptrCast(memory_block)) + game_memory.permanent_storage_size;
+                game_memory.debug_storage = game_memory.transient_storage.? + game_memory.transient_storage_size;
             }
 
             for (0..state.replay_buffers.len) |index| {
@@ -1652,6 +1660,8 @@ pub export fn wWinMain(
                 running = true;
 
                 while (running) {
+                    var frame_end_info = shared.DebugFrameEndInfo{};
+
                     // Reload the game code if it has changed.
                     const last_dll_write_time = getLastWriteTime(&source_dll_path);
                     new_input.executable_reloaded = false;
@@ -1663,6 +1673,8 @@ pub export fn wWinMain(
                         game = loadGameCode(&source_dll_path, &temp_dll_path);
                         new_input.executable_reloaded = true;
                     }
+
+                    frame_end_info.executable_ready = getSecondsElapsed(last_counter, getWallClock());
 
                     var message: win32.MSG = undefined;
 
@@ -1691,6 +1703,8 @@ pub export fn wWinMain(
                     processMouseInput(new_input, window_handle);
                     processXInput(old_input, new_input);
 
+                    frame_end_info.input_processed = getSecondsElapsed(last_counter, getWallClock());
+
                     if (state.input_recording_index > 0) {
                         recordInput(&state, new_input);
                     } else if (state.input_playing_index > 0) {
@@ -1699,6 +1713,8 @@ pub export fn wWinMain(
 
                     // Send all input to game.
                     game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
+
+                    frame_end_info.game_updated = getSecondsElapsed(last_counter, getWallClock());
 
                     // Output sound.
                     if (opt_secondary_buffer) |secondary_buffer| {
@@ -1782,28 +1798,26 @@ pub export fn wWinMain(
                                 marker.output_location = sound_output_info.byte_to_lock;
                                 marker.output_byte_count = sound_output_info.bytes_to_write;
 
-                                if (OUTPUT_TIMING) {
-                                    var unwrapped_write_cursor = write_cursor;
-                                    if (unwrapped_write_cursor < play_cursor) {
-                                        unwrapped_write_cursor += sound_output.secondary_buffer_size;
-                                    }
-                                    const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
-                                    const audio_latency_seconds: f32 =
-                                        (@as(f32, @floatFromInt(audio_latency_bytes)) /
-                                        @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
-                                        @as(f32, @floatFromInt(sound_output.samples_per_second));
-                                    var buffer: [128]u8 = undefined;
-                                    const slice = std.fmt.bufPrintZ(&buffer, "Audio: BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d:>3.4}\n", .{
-                                        sound_output_info.byte_to_lock,
-                                        target_cursor,
-                                        sound_output_info.bytes_to_write,
-                                        play_cursor,
-                                        write_cursor,
-                                        audio_latency_bytes,
-                                        audio_latency_seconds,
-                                    }) catch "";
-                                    win32.OutputDebugStringA(@ptrCast(slice.ptr));
+                                var unwrapped_write_cursor = write_cursor;
+                                if (unwrapped_write_cursor < play_cursor) {
+                                    unwrapped_write_cursor += sound_output.secondary_buffer_size;
                                 }
+                                const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
+                                const audio_latency_seconds: f32 =
+                                    (@as(f32, @floatFromInt(audio_latency_bytes)) /
+                                     @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
+                                    @as(f32, @floatFromInt(sound_output.samples_per_second));
+                                var buffer: [128]u8 = undefined;
+                                const slice = std.fmt.bufPrintZ(&buffer, "Audio: BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d:>3.4}\n", .{
+                                    sound_output_info.byte_to_lock,
+                                    target_cursor,
+                                    sound_output_info.bytes_to_write,
+                                    play_cursor,
+                                    write_cursor,
+                                    audio_latency_bytes,
+                                    audio_latency_seconds,
+                                }) catch "";
+                                win32.OutputDebugStringA(@ptrCast(slice.ptr));
                             }
 
                             fillSoundBuffer(&sound_output, secondary_buffer, &sound_output_info);
@@ -1812,8 +1826,9 @@ pub export fn wWinMain(
                         }
                     }
 
+                    frame_end_info.audio_updated = getSecondsElapsed(last_counter, getWallClock());
+
                     // Capture timing.
-                    const end_cycle_count = shared.rdtsc();
                     const work_counter = getWallClock();
                     const work_seconds_elapsed = getSecondsElapsed(last_counter, work_counter);
 
@@ -1834,9 +1849,7 @@ pub export fn wWinMain(
                         // Target frame rate missed.
                     }
 
-                    const end_counter = getWallClock();
-                    const time_per_frame = getSecondsElapsed(last_counter, end_counter);
-                    last_counter = end_counter;
+                    frame_end_info.frame_rate_wait_complete = getSecondsElapsed(last_counter, getWallClock());
 
                     if (INTERNAL) {
                         if (false) {
@@ -1863,56 +1876,24 @@ pub export fn wWinMain(
 
                     flip_wall_clock = getWallClock();
 
-                    // Output debug markers for the sound cursor positions.
-                    if (INTERNAL) {
-                        if (opt_secondary_buffer) |secondary_buffer| {
-                            var play_cursor: std.os.windows.DWORD = undefined;
-                            var write_cursor: std.os.windows.DWORD = undefined;
-                            if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
-                                secondary_buffer,
-                                &play_cursor,
-                                &write_cursor,
-                            ))) {
-                                std.debug.assert(debug_time_marker_index < debug_time_markers.len);
-
-                                debug_time_markers[debug_time_marker_index].flip_play_cursor = play_cursor;
-                                debug_time_markers[debug_time_marker_index].flip_write_cursor = write_cursor;
-                            }
-                        }
-                    }
-
-                    if (OUTPUT_TIMING) {
-                        // Calculate timing information.
-                        const work_ms_elapsed: f32 = (1000.0 * work_seconds_elapsed);
-                        const ms_elapsed: f32 = (1000.0 * time_per_frame);
-                        const fps: f32 = 1.0 / seconds_elapsed_for_frame;
-                        const cycles_elapsed: u64 = @intCast(end_cycle_count - last_cycle_count);
-                        const mega_cycles_per_frame: f32 =
-                            @as(f32, @floatFromInt(cycles_elapsed)) /
-                            @as(f32, @floatFromInt(1000 * 1000));
-
-                        // Output timing information.
-                        var buffer: [128]u8 = undefined;
-                        const slice = std.fmt.bufPrintZ(&buffer, "Visual: FPS: {d:3.2}, Work: {d:3.2}ms - (Actual: {d:3.2}ms/f, {d:3.2}:mc/f)\n", .{
-                            fps,
-                            work_ms_elapsed,
-                            ms_elapsed,
-                            mega_cycles_per_frame,
-                        }) catch "";
-                        win32.OutputDebugStringA(@ptrCast(slice.ptr));
-                    }
-
                     // Flip the controller inputs for next frame.
                     const temp: *shared.GameInput = new_input;
                     new_input = old_input;
                     old_input = temp;
 
-                    last_cycle_count = end_cycle_count;
+                    const end_counter = getWallClock();
+                    last_counter = end_counter;
 
                     if (INTERNAL) {
-                        debug_time_marker_index += 1;
-                        if (debug_time_marker_index == debug_time_markers.len) {
-                            debug_time_marker_index = 0;
+                        // Calculate timing information.
+                        frame_end_info.end_of_frame = getSecondsElapsed(last_counter, end_counter);
+
+                        const end_cycle_count = shared.rdtsc();
+                        // const cycles_elapsed: u64 = @intCast(end_cycle_count - last_cycle_count);
+                        last_cycle_count = end_cycle_count;
+
+                        if (game.debugFrameEnd) |frameEndFn| {
+                            frameEndFn(&game_memory, &frame_end_info);
                         }
                     }
                 }

@@ -202,6 +202,17 @@ pub fn updateAndRenderStub(_: Platform, _: *Memory, _: GameInput, _: *OffscreenB
 pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
     return;
 }
+pub const DebugFrameEndInfo = struct {
+    executable_ready: f32 = 0,
+    input_processed: f32 = 0,
+    game_updated: f32 = 0,
+    audio_updated: f32 = 0,
+    frame_rate_wait_complete: f32 = 0,
+    end_of_frame: f32 = 0,
+};
+pub fn debugFrameEndStub(_: *Memory, _: *DebugFrameEndInfo) callconv(.C) void {
+    return;
+}
 
 pub const OffscreenBuffer = extern struct {
     memory: ?*anyopaque = undefined,
@@ -281,11 +292,14 @@ pub const MemoryIndex = usize;
 pub const Memory = GameMemory();
 fn GameMemory() type {
     return extern struct {
-        is_initialized: bool,
         permanent_storage_size: u64,
         permanent_storage: ?[*]void,
+
         transient_storage_size: u64,
         transient_storage: ?[*]void,
+
+        debug_storage_size: u64,
+        debug_storage: ?[*]void,
 
         high_priority_queue: *PlatformWorkQueue,
         low_priority_queue: *PlatformWorkQueue,

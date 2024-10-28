@@ -149,19 +149,21 @@ pub fn main() anyerror!void {
 
     // Allocate game memory.
     var game_memory: shared.Memory = shared.Memory{
-        .is_initialized = false,
         .permanent_storage_size = shared.megabytes(256),
         .permanent_storage = null,
-        .transient_storage_size = shared.megabytes(256),
+        .transient_storage_size = shared.gigabytes(1),
         .transient_storage = null,
+        .debug_storage_size = shared.megabytes(64),
+        .debug_storage = null,
         .high_priority_queue = &high_priority_queue,
         .low_priority_queue = &low_priority_queue,
         .counters = if (INTERNAL) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
     };
-    const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
+    const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size + game_memory.debug_storage_size;
     // const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
     game_memory.permanent_storage = @as([*]void, @ptrCast(rl.memAlloc(@intCast(total_size))));
     game_memory.transient_storage = game_memory.permanent_storage.? + game_memory.permanent_storage_size;
+    game_memory.debug_storage = game_memory.transient_storage.? + game_memory.transient_storage_size;
 
     // Create the back buffer.
     const bitmap_memory_size: usize = @intCast((back_buffer.width * back_buffer.height) * shared.BITMAP_BYTES_PER_PIXEL);

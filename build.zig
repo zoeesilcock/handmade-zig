@@ -13,7 +13,6 @@ pub fn build(b: *std.Build) void {
 
     // Build options.
     const build_options = b.addOptions();
-    build_options.addOption(bool, "timing", b.option(bool, "timing", "print timing info to debug output") orelse false);
     build_options.addOption(bool, "internal", b.option(bool, "internal", "use this for internal builds") orelse true);
     build_options.addOption(Backend, "backend", backend);
 
