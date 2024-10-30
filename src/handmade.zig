@@ -118,6 +118,7 @@ pub export fn updateAndRender(
     shared.platform = platform;
 
     const timed_block = debug.TimedBlock.begin(@src(), .GameUpdateAndRender);
+    defer timed_block.end();
 
     const ground_buffer_width: u32 = 256;
     const ground_buffer_height: u32 = 256;
@@ -335,7 +336,7 @@ pub export fn updateAndRender(
             transient_state,
         );
 
-        debug_render_group = RenderGroup.allocate(transient_state.assets, &transient_state.arena, shared.megabytes(16), false);
+        debug.render_group = RenderGroup.allocate(transient_state.assets, &transient_state.arena, shared.megabytes(16), false);
 
         // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
         //     state.music = music;
@@ -393,9 +394,9 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
-    if (debug_render_group) |group| {
+    if (debug.render_group) |group| {
         group.beginRender();
-        debugTextReset(transient_state.assets, buffer.width, buffer.height);
+        debug.textReset(transient_state.assets, buffer.width, buffer.height);
     }
 
     if (false) {
@@ -1140,214 +1141,18 @@ pub export fn updateAndRender(
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
 
-    timed_block.end();
+    if (debug.render_group) |group| {
+        var overlay_timed_block = debug.TimedBlock.begin(@src(), .DebugOverlay);
+        defer overlay_timed_block.end();
 
-    overlayDebugCycleCounters(memory);
-    if (debug_render_group) |group| {
+        debug.overlay(memory);
         group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
         group.endRender();
     }
 }
 
 pub export fn debugFrameEnd(memory: *shared.Memory, info: *shared.DebugFrameEndInfo) void {
-    _ = info;
-
-    if (memory.debug_storage) |debug_storage| {
-        var debug_state: *debug.DebugState = @ptrCast(@alignCast(debug_storage));
-        debug_state.counter_count = 0;
-        updateDebugRecords(debug_state, &debug.debug_records);
-
-        debug_state.snapshot_index += 1;
-        if (debug_state.snapshot_index >= debug.SNAPSHOT_COUNT) {
-            debug_state.snapshot_index = 0;
-        }
-    }
-}
-
-fn updateDebugRecords(debug_state: *debug.DebugState, debug_records: *[debug.DEBUG_CYCLE_COUNTERS_COUNT]debug.DebugRecord) void {
-    for (debug_records) |*source| {
-        var dest: *debug.DebugCounterState = &debug_state.counter_states[debug_state.counter_count];
-        debug_state.counter_count += 1;
-
-        const hit_count_cycle_count = @atomicRmw(u64, @constCast(&source.hit_count_cycle_count), .Xchg, 0, .monotonic);
-
-        dest.file_name = source.file_name;
-        dest.function_name = source.function_name;
-        dest.line_number = source.line_number;
-        dest.snapshots[debug_state.snapshot_index].hit_count = @intCast(hit_count_cycle_count >> 32);
-        dest.snapshots[debug_state.snapshot_index].cycle_count = @intCast(hit_count_cycle_count & 0xFFFFFFFF);
-    }
-}
-
-fn overlayDebugCycleCounters(memory: *shared.Memory) void {
-    if (memory.debug_storage) |debug_storage| {
-        const debug_state: *debug.DebugState = @ptrCast(@alignCast(debug_storage));
-
-        var counter_index: u32 = 0;
-        while (counter_index < debug_state.counter_count) : (counter_index += 1) {
-            const counter = debug_state.counter_states[counter_index];
-
-            var hit_count = debug.DebugStatistic.begin();
-            var cycle_count = debug.DebugStatistic.begin();
-            var cycle_over_hit = debug.DebugStatistic.begin();
-            for (counter.snapshots) |snapshot| {
-                hit_count.accumulate(@floatFromInt(snapshot.hit_count));
-                cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
-
-                var coh: f64 = 0;
-                if (snapshot.hit_count > 0) {
-                    coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
-                }
-                cycle_over_hit.accumulate(coh);
-            }
-            hit_count.end();
-            cycle_count.end();
-            cycle_over_hit.end();
-
-            if (hit_count.max > 0) {
-                var buffer: [128]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
-                    counter.function_name,
-                    counter.line_number,
-                    @as(u32, @intFromFloat(cycle_count.average)),
-                    @as(u32, @intFromFloat(hit_count.average)),
-                    @as(u32, @intFromFloat(cycle_over_hit.average)),
-                }) catch "";
-                debugTextLine(slice);
-            }
-        }
-
-        // Kanji owl codepoints
-        // 0x5c0f
-        // 0x8033
-        // 0x6728
-        // 0x514e
-        // debugTextLine("\\5C0F\\8033\\6728\\514E");
-        //
-        // debugTextLine("\\#900DEBUG \\#090CYCLE \\#990\\^5COUNTS:");
-    }
-}
-
-var debug_render_group: ?*RenderGroup = null;
-var left_edge: f32 = 0;
-var at_y: f32 = 0;
-var font_scale: f32 = 0;
-var font_id: file_formats.FontId = undefined;
-
-pub fn debugTextReset(assets: *Assets, width: i32, height: i32) void {
-    var timed_block = debug.TimedBlock.begin(@src(), .DebugTextReset);
-    defer timed_block.end();
-
-    var match_vector = asset.AssetVector{};
-    var weight_vector = asset.AssetVector{};
-
-    font_scale = 1;
-    at_y = 0;
-    left_edge = -0.5 * @as(f32, @floatFromInt(width));
-
-    if (debug_render_group) |group| {
-        group.orthographicMode(width, height, 1);
-    }
-
-    match_vector.e[AssetTagId.FontType.toInt()] = @intFromEnum(AssetFontType.Debug);
-    weight_vector.e[AssetTagId.FontType.toInt()] = 1;
-    if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
-        font_id = id;
-
-        const font_info = assets.getFontInfo(font_id);
-        at_y = 0.5 * @as(f32, @floatFromInt(height)) - font_scale * font_info.getStartingBaselineY();
-    }
-}
-
-fn isHex(char: u8) bool {
-    return (char >= '0' and char <= '9') or (char >= 'A' and char <= 'F');
-}
-
-fn getHex(char: u8) u32 {
-    var result: u32 = 0;
-
-    if (char >= '0' and char <= '9') {
-        result = char - '0';
-    } else if (char >= 'A' and char <= 'F') {
-        result = 0xA + (char - 'A');
-    }
-
-    return result;
-}
-
-pub fn debugTextLine(text: [:0]const u8) void {
-    if (debug_render_group) |render_group| {
-        var match_vector = asset.AssetVector{};
-
-        if (render_group.pushFont(font_id)) |font| {
-            const font_info = render_group.assets.getFontInfo(font_id);
-            var prev_code_point: u32 = 0;
-            var char_scale = font_scale;
-            var color = Color.white();
-            var at_x: f32 = left_edge;
-
-            var at: [*]const u8 = @ptrCast(text);
-            while (at[0] != 0) {
-                if (at[0] == '\\' and
-                    at[1] == '#' and
-                    at[2] != 0 and
-                    at[3] != 0 and
-                    at[4] != 0)
-                {
-                    const c_scale: f32 = 1.0 / 9.0;
-                    color = Color.new(
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
-                        1,
-                    );
-
-                    at += 5;
-                } else if (at[0] == '\\' and
-                    at[1] == '^' and
-                    at[2] != 0)
-                {
-                    const c_scale: f32 = 1.0 / 9.0;
-                    char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
-                    at += 3;
-                } else {
-                    var code_point: u32 = at[0];
-
-                    if (at[0] == '\\' and
-                        (isHex(at[1])) and
-                        (isHex(at[2])) and
-                        (isHex(at[3])) and
-                        (isHex(at[4])))
-                    {
-                        code_point = ((getHex(at[1]) << 12) |
-                            (getHex(at[2]) << 8) |
-                            (getHex(at[3]) << 4) |
-                            (getHex(at[4]) << 0));
-
-                        at += 4;
-                    }
-
-                    const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(font_info, prev_code_point, code_point);
-                    at_x += advance_x;
-
-                    if (code_point != ' ') {
-                        match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
-                        if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
-                            const info = render_group.assets.getBitmapInfo(bitmap_id);
-                            const char_height = char_scale * @as(f32, @floatFromInt(info.dim[1]));
-                            render_group.pushBitmapId(bitmap_id, char_height, Vector3.new(at_x, at_y, 0), color);
-                        }
-                    }
-
-                    prev_code_point = code_point;
-
-                    at += 1;
-                }
-            }
-
-            at_y -= font_info.getLineAdvance() * font_scale;
-        }
-    }
+    debug.frameEnd(memory, info);
 }
 
 pub fn chunkPositionFromTilePosition(

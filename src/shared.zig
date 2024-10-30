@@ -202,13 +202,23 @@ pub fn updateAndRenderStub(_: Platform, _: *Memory, _: GameInput, _: *OffscreenB
 pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
     return;
 }
+pub const DebugFrameTimestamp = struct {
+    name: [*:0]const u8 = undefined,
+    seconds: f32 = 0,
+};
 pub const DebugFrameEndInfo = struct {
-    executable_ready: f32 = 0,
-    input_processed: f32 = 0,
-    game_updated: f32 = 0,
-    audio_updated: f32 = 0,
-    frame_rate_wait_complete: f32 = 0,
-    end_of_frame: f32 = 0,
+    timestamp_count: u32 = 0,
+    timestamps: [64]DebugFrameTimestamp = [1]DebugFrameTimestamp{DebugFrameTimestamp{}} ** 64,
+
+    pub fn recordTimestamp(self: *DebugFrameEndInfo, name: [*:0]const u8, seconds: f32) void {
+        std.debug.assert(self.timestamp_count < self.timestamps.len);
+
+        var timestamp = &self.timestamps[self.timestamp_count];
+        self.timestamp_count += 1;
+
+        timestamp.name = name;
+        timestamp.seconds = seconds;
+    }
 };
 pub fn debugFrameEndStub(_: *Memory, _: *DebugFrameEndInfo) callconv(.C) void {
     return;

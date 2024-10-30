@@ -1674,7 +1674,7 @@ pub export fn wWinMain(
                         new_input.executable_reloaded = true;
                     }
 
-                    frame_end_info.executable_ready = getSecondsElapsed(last_counter, getWallClock());
+                    frame_end_info.recordTimestamp("ExecutableReady", getSecondsElapsed(last_counter, getWallClock()));
 
                     var message: win32.MSG = undefined;
 
@@ -1703,7 +1703,7 @@ pub export fn wWinMain(
                     processMouseInput(new_input, window_handle);
                     processXInput(old_input, new_input);
 
-                    frame_end_info.input_processed = getSecondsElapsed(last_counter, getWallClock());
+                    frame_end_info.recordTimestamp("InputProcessed", getSecondsElapsed(last_counter, getWallClock()));
 
                     if (state.input_recording_index > 0) {
                         recordInput(&state, new_input);
@@ -1714,7 +1714,7 @@ pub export fn wWinMain(
                     // Send all input to game.
                     game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
 
-                    frame_end_info.game_updated = getSecondsElapsed(last_counter, getWallClock());
+                    frame_end_info.recordTimestamp("GameUpdated", getSecondsElapsed(last_counter, getWallClock()));
 
                     // Output sound.
                     if (opt_secondary_buffer) |secondary_buffer| {
@@ -1826,7 +1826,7 @@ pub export fn wWinMain(
                         }
                     }
 
-                    frame_end_info.audio_updated = getSecondsElapsed(last_counter, getWallClock());
+                    frame_end_info.recordTimestamp("AudioUpdated", getSecondsElapsed(last_counter, getWallClock()));
 
                     // Capture timing.
                     const work_counter = getWallClock();
@@ -1849,7 +1849,7 @@ pub export fn wWinMain(
                         // Target frame rate missed.
                     }
 
-                    frame_end_info.frame_rate_wait_complete = getSecondsElapsed(last_counter, getWallClock());
+                    frame_end_info.recordTimestamp("FrameRateWaitComplete", getSecondsElapsed(last_counter, getWallClock()));
 
                     if (INTERNAL) {
                         if (false) {
@@ -1886,7 +1886,7 @@ pub export fn wWinMain(
 
                     if (INTERNAL) {
                         // Calculate timing information.
-                        frame_end_info.end_of_frame = getSecondsElapsed(last_counter, end_counter);
+                        frame_end_info.recordTimestamp("EndOfFrame", getSecondsElapsed(last_counter, end_counter));
 
                         const end_cycle_count = shared.rdtsc();
                         // const cycles_elapsed: u64 = @intCast(end_cycle_count - last_cycle_count);
