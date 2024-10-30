@@ -11,7 +11,7 @@ const Vector2 = math.Vector2;
 const Color = math.Color;
 const Color3 = math.Color3;
 
-pub const DebugCycleCounters = enum(u8) {
+pub const DebugCycleCounters = enum(u16) {
     GameUpdateAndRender = 0,
     DebugOverlay,
     DebugTextReset,
@@ -53,6 +53,14 @@ pub const DebugCycleCounters = enum(u8) {
 pub const DEBUG_CYCLE_COUNTERS_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;
 pub var debug_records = [1]DebugRecord{DebugRecord{}} ** DEBUG_CYCLE_COUNTERS_COUNT;
 
+const DEBUG_EVENT_COUNT = 16 * 65536;
+pub var debug_event_array = [2][DEBUG_EVENT_COUNT]DebugEvent{
+    [1]DebugEvent{DebugEvent{}} ** DEBUG_EVENT_COUNT,
+    [1]DebugEvent{DebugEvent{}} ** DEBUG_EVENT_COUNT,
+};
+
+pub var debug_array_index_event_index: u64 = 0;
+
 pub const DebugRecord = extern struct {
     file_name: [*:0]const u8 = undefined,
     function_name: [*:0]const u8 = undefined,
@@ -63,10 +71,40 @@ pub const DebugRecord = extern struct {
     hit_count_cycle_count: u64 = 0,
 };
 
+const DebugEventType = enum(u8) {
+    BeginBlock,
+    EndBlock,
+};
+
+const DebugEvent = extern struct {
+    clock: u64 = 0,
+    thread_index: u16 = 0,
+    core_index: u16 = 0,
+    debug_record_index: u16 = 0,
+    debug_record_array_index: u8 = 0,
+    event_type: DebugEventType = undefined,
+};
+
+fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType) void {
+    const array_index_event_index = @atomicRmw(u64, &debug_array_index_event_index, .Add, 1, .seq_cst);
+    const array_index = array_index_event_index >> 32;
+    const event_index = array_index_event_index & 0xffffffff;
+    std.debug.assert(event_index < DEBUG_EVENT_COUNT);
+
+    var event: *DebugEvent = &debug_event_array[array_index][event_index];
+    event.clock = shared.rdtsc();
+    event.thread_index = 0;
+    event.core_index = 0;
+    event.debug_record_index = debug_record_index;
+    event.debug_record_array_index = 0;
+    event.event_type = event_type;
+}
+
 pub const TimedBlock = struct {
     record: *DebugRecord,
     start_cycles: u64 = 0,
     hit_count: u32 = 0,
+    counter: DebugCycleCounters = undefined,
 
     pub fn begin(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
         var result = TimedBlock{
@@ -78,6 +116,9 @@ pub const TimedBlock = struct {
         result.record.function_name = source.fn_name;
         result.record.line_number = source.line;
         result.start_cycles = @intCast(shared.rdtsc());
+        result.counter = counter;
+
+        recordDebugEvent(@intFromEnum(counter), .BeginBlock);
 
         return result;
     }
@@ -91,6 +132,8 @@ pub const TimedBlock = struct {
     pub fn end(self: TimedBlock) void {
         const delta: u64 = (shared.rdtsc() - self.start_cycles) | (@as(u64, @intCast(self.hit_count)) << 32);
         _ = @atomicRmw(u64, &self.record.hit_count_cycle_count, .Add, delta, .monotonic);
+
+        recordDebugEvent(@intFromEnum(self.counter), .EndBlock);
     }
 };
 
@@ -99,7 +142,7 @@ const COUNTER_COUNT = 512;
 
 pub const DebugCounterSnapshot = struct {
     hit_count: u32 = 0,
-    cycle_count: u32 = 0,
+    cycle_count: u64 = 0,
 };
 
 pub const DebugCounterState = struct {
@@ -129,6 +172,40 @@ pub const DebugState = struct {
             dest.line_number = source.line_number;
             dest.snapshots[self.snapshot_index].hit_count = @intCast(hit_count_cycle_count >> 32);
             dest.snapshots[self.snapshot_index].cycle_count = @intCast(hit_count_cycle_count & 0xFFFFFFFF);
+        }
+    }
+
+    pub fn collateDebugRecords(self: *DebugState, event_count: u32, events: *[DEBUG_EVENT_COUNT]DebugEvent) void {
+        self.counter_count = DEBUG_CYCLE_COUNTERS_COUNT;
+
+        var counter_index: u32 = 0;
+        while (counter_index < self.counter_count) : (counter_index += 1) {
+            var dest: *DebugCounterState = &self.counter_states[counter_index];
+            dest.snapshots[self.snapshot_index].hit_count = 0;
+            dest.snapshots[self.snapshot_index].cycle_count = 0;
+        }
+
+        var event_index: u32 = 0;
+        while (event_index < event_count) : (event_index += 1) {
+            const event: *const DebugEvent = &events[event_index];
+
+            // These two lookups are simpler because we have all our code in the same compilation.
+            // If we split our compilation into optimized and non-optimized like Casey does we need to
+            // implement the same type of lookup here.
+            const dest: *DebugCounterState = &self.counter_states[event.debug_record_index];
+            const source: *DebugRecord = &debug_records[event.debug_record_index];
+
+            dest.file_name = source.file_name;
+            dest.function_name = source.function_name;
+            dest.line_number = source.line_number;
+
+            if (event.event_type == .BeginBlock) {
+                dest.snapshots[self.snapshot_index].hit_count += 1;
+                dest.snapshots[self.snapshot_index].cycle_count -%= event.clock;
+            } else {
+                std.debug.assert(event.event_type == .EndBlock);
+                dest.snapshots[self.snapshot_index].cycle_count +%= event.clock;
+            }
         }
     }
 };
@@ -177,12 +254,26 @@ var left_edge: f32 = 0;
 var at_y: f32 = 0;
 var font_scale: f32 = 0;
 var font_id: file_formats.FontId = undefined;
+var current_event_array_index: u64 = 0;
 
 pub fn frameEnd(memory: *shared.Memory, info: *shared.DebugFrameEndInfo) void {
+    current_event_array_index = if (current_event_array_index == 0) 1 else 0;
+    const next_event_array_index: u64 = current_event_array_index << 32;
+    const array_index_event_index: u64 =
+        @atomicRmw(u64, &debug_array_index_event_index, .Xchg, next_event_array_index, .seq_cst);
+
+    const event_array_index: u32 = @intCast(array_index_event_index >> 32);
+    const event_count: u32 = @intCast(array_index_event_index & 0xffffffff);
+
     if (memory.debug_storage) |debug_storage| {
         var debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
         debug_state.counter_count = 0;
-        debug_state.updateDebugRecords();
+
+        if (false) {
+            debug_state.updateDebugRecords();
+        } else {
+            debug_state.collateDebugRecords(event_count, &debug_event_array[event_array_index]);
+        }
 
         debug_state.frame_end_infos[debug_state.snapshot_index] = info.*;
 
@@ -348,9 +439,9 @@ pub fn overlay(memory: *shared.Memory) void {
                         const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
                             function_name,
                             counter.line_number,
-                            @as(u32, @intFromFloat(cycle_count.average)),
-                            @as(u32, @intFromFloat(hit_count.average)),
-                            @as(u32, @intFromFloat(cycle_over_hit.average)),
+                            @as(u64, @intFromFloat(cycle_count.average)),
+                            @as(u64, @intFromFloat(hit_count.average)),
+                            @as(u64, @intFromFloat(cycle_over_hit.average)),
                         }) catch "";
                         textLine(slice);
                     }
