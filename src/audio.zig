@@ -41,7 +41,7 @@ pub const AudioState = struct {
     }
 
     pub fn playSound(self: *AudioState, opt_sound_id: ?SoundId) ?*PlayingSound {
-        var timed_block = debug.TimedBlock.begin(@src(), .PlaySound);
+        var timed_block = shared.TimedBlock.begin(@src(), .PlaySound);
         defer timed_block.end();
 
         var result: ?*PlayingSound = null;
@@ -109,7 +109,7 @@ pub const AudioState = struct {
         assets: *Assets,
         temp_arena: *MemoryArena,
     ) void {
-        var timed_block = debug.TimedBlock.begin(@src(), .OutputPlayingSounds);
+        var timed_block = shared.TimedBlock.begin(@src(), .OutputPlayingSounds);
         defer timed_block.end();
 
         const mixer_memory = temp_arena.beginTemporaryMemory();
@@ -343,8 +343,8 @@ pub const AudioState = struct {
             while (sample_index < chunk_count) : (sample_index += 1) {
                 const l: Vec4i = @intFromFloat(source0[sample_index]);
                 const r: Vec4i = @intFromFloat(source1[sample_index]);
-                const lr0: Vec4i = @shuffle(i32, l, r, Vec4i{0, -1, 1, -2});
-                const lr1: Vec4i = @shuffle(i32, l, r, Vec4i{2, -3, 3, -4});
+                const lr0: Vec4i = @shuffle(i32, l, r, Vec4i{ 0, -1, 1, -2 });
+                const lr1: Vec4i = @shuffle(i32, l, r, Vec4i{ 2, -3, 3, -4 });
                 const s01: @Vector(8, i16) = @truncate(std.simd.join(lr0, lr1));
 
                 sample_out[sample_index] = s01;

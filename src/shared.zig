@@ -58,7 +58,7 @@ pub inline fn incrementPointer(pointer: anytype, offset: i32) @TypeOf(pointer) {
         pointer - @abs(offset);
 }
 
-pub inline fn rdtsc() u64 {
+pub fn rdtsc() u64 {
     var hi: u32 = 0;
     var low: u32 = 0;
 
@@ -68,6 +68,16 @@ pub inline fn rdtsc() u64 {
           [hi] "={edx}" (hi),
     );
     return (@as(u64, hi) << 32) | @as(u64, low);
+}
+
+pub fn getThreadId() u32 {
+    const thread_local_storage_ptr = asm (
+        \\movq %%gs:0x30, %[ret]
+        : [ret] "=ret" (-> *anyopaque),
+    );
+    const thread_id: *u32 = @ptrFromInt(@intFromPtr(thread_local_storage_ptr) + 0x48);
+
+    return thread_id.*;
 }
 
 pub inline fn alignPow2(value: u32, alignment: u32) u32 {
@@ -223,6 +233,92 @@ pub const DebugFrameEndInfo = struct {
 pub fn debugFrameEndStub(_: *Memory, _: *DebugFrameEndInfo) callconv(.C) void {
     return;
 }
+
+const MAX_DEBUG_TRANSLATION_UNITS = 1;
+pub const TRANSLATION_UNIT_INDEX = 0;
+pub const MAX_DEBUG_EVENT_COUNT = 16 * 65536;
+pub const MAX_DEBUG_RECORD_COUNT = @typeInfo(debug.DebugCycleCounters).Enum.fields.len;
+
+const DebugTable = struct {
+    current_event_array_index: u64 = 0,
+    event_array_index_event_index: u64 = 0,
+    records: [MAX_DEBUG_TRANSLATION_UNITS][MAX_DEBUG_RECORD_COUNT]DebugRecord = [2][MAX_DEBUG_RECORD_COUNT]DebugRecord{
+        [1]DebugRecord{DebugRecord{}} ** MAX_DEBUG_RECORD_COUNT,
+    },
+    events: [2][MAX_DEBUG_EVENT_COUNT]DebugEvent = [2][MAX_DEBUG_EVENT_COUNT]DebugEvent{
+        [1]DebugEvent{DebugEvent{}} ** MAX_DEBUG_EVENT_COUNT,
+        [1]DebugEvent{DebugEvent{}} ** MAX_DEBUG_EVENT_COUNT,
+    },
+};
+
+pub var debug_table: DebugTable = undefined;
+
+pub const DebugRecord = extern struct {
+    file_name: [*:0]const u8 = undefined,
+    function_name: [*:0]const u8 = undefined,
+
+    line_number: u32 = undefined,
+    reserved: u32 = 0,
+
+    hit_count_cycle_count: u64 = 0,
+};
+
+pub const DebugEventType = enum(u8) {
+    BeginBlock,
+    EndBlock,
+};
+
+pub const DebugEvent = extern struct {
+    clock: u64 = 0,
+    thread_index: u16 = 0,
+    core_index: u16 = 0,
+    debug_record_index: u16 = 0,
+    translation_unit: u8 = 0,
+    event_type: DebugEventType = undefined,
+};
+
+fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType) void {
+    const event_array_index_event_index = @atomicRmw(u64, &debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
+    const array_index = event_array_index_event_index >> 32;
+    const event_index = event_array_index_event_index & 0xffffffff;
+    std.debug.assert(event_index < MAX_DEBUG_EVENT_COUNT);
+
+    var event: *DebugEvent = &debug_table.events[array_index][event_index];
+    event.clock = rdtsc();
+    event.thread_index = @truncate(getThreadId());
+    event.core_index = 0;
+    event.debug_record_index = debug_record_index;
+    event.translation_unit = 0;
+    event.event_type = event_type;
+}
+
+pub const TimedBlock = struct {
+    counter: debug.DebugCycleCounters = undefined,
+
+    pub fn begin(source: std.builtin.SourceLocation, counter: debug.DebugCycleCounters) TimedBlock {
+        const result = TimedBlock{ .counter = counter };
+
+        var record = &debug_table.records[TRANSLATION_UNIT_INDEX][@intFromEnum(counter)];
+        record.file_name = source.file;
+        record.function_name = source.fn_name;
+        record.line_number = source.line;
+
+        recordDebugEvent(@intFromEnum(counter), .BeginBlock);
+
+        return result;
+    }
+
+    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: debug.DebugCycleCounters, hit_count: u32) TimedBlock {
+        const result = TimedBlock.begin(source, counter);
+        // result.hit_count = hit_count;
+        _ = hit_count;
+        return result;
+    }
+
+    pub fn end(self: TimedBlock) void {
+        recordDebugEvent(@intFromEnum(self.counter), .EndBlock);
+    }
+};
 
 pub const OffscreenBuffer = extern struct {
     memory: ?*anyopaque = undefined,

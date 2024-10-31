@@ -38,7 +38,6 @@ const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
 const shared = @import("shared.zig");
-const debug = @import("debug.zig");
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
@@ -1570,7 +1569,6 @@ pub export fn wWinMain(
                 .debug_storage = null,
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
-                // .counters = if (INTERNAL) [1]debug.DebugCycleCounter{debug.DebugCycleCounter{}} ** debug.DEBUG_CYCLE_COUNTERS_COUNT,
             };
 
             state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size + game_memory.debug_storage_size;

@@ -157,7 +157,6 @@ pub fn main() anyerror!void {
         .debug_storage = null,
         .high_priority_queue = &high_priority_queue,
         .low_priority_queue = &low_priority_queue,
-        .counters = if (INTERNAL) [1]shared.DebugCycleCounter{shared.DebugCycleCounter{}} ** shared.DEBUG_CYCLE_COUNTERS_COUNT,
     };
     const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size + game_memory.debug_storage_size;
     // const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
