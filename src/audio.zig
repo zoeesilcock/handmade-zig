@@ -41,7 +41,7 @@ pub const AudioState = struct {
     }
 
     pub fn playSound(self: *AudioState, opt_sound_id: ?SoundId) ?*PlayingSound {
-        var timed_block = shared.TimedBlock.begin(@src(), .PlaySound);
+        var timed_block = shared.TimedBlock.beginFunction(@src(), .PlaySound);
         defer timed_block.end();
 
         var result: ?*PlayingSound = null;
@@ -109,7 +109,7 @@ pub const AudioState = struct {
         assets: *Assets,
         temp_arena: *MemoryArena,
     ) void {
-        var timed_block = shared.TimedBlock.begin(@src(), .OutputPlayingSounds);
+        var timed_block = shared.TimedBlock.beginFunction(@src(), .OutputPlayingSounds);
         defer timed_block.end();
 
         const mixer_memory = temp_arena.beginTemporaryMemory();

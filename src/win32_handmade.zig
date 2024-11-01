@@ -39,6 +39,8 @@ const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
 const shared = @import("shared.zig");
 
+var local_stub_debug_table: shared.DebugTable = shared.DebugTable{};
+
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
@@ -1409,6 +1411,8 @@ pub export fn wWinMain(
     _ = cmd_line;
     _ = cmd_show;
 
+    shared.global_debug_table = &local_stub_debug_table;
+
     var state = Win32State{};
     getExeFileName(&state);
 
@@ -1658,7 +1662,14 @@ pub export fn wWinMain(
                 running = true;
 
                 while (running) {
-                    var frame_end_info = shared.DebugFrameEndInfo{};
+                    var full_block = shared.TimedBlock.frameMarker(@src(), .TotalPlatformLoop);
+                    defer full_block.end();
+
+                    var timed_block = shared.TimedBlock.beginBlock(@src(), .ExecutableRefresh);
+
+                    //
+                    //
+                    //
 
                     // Reload the game code if it has changed.
                     const last_dll_write_time = getLastWriteTime(&source_dll_path);
@@ -1667,12 +1678,20 @@ pub export fn wWinMain(
                         completeAllQueuedWork(&high_priority_queue);
                         completeAllQueuedWork(&low_priority_queue);
 
+                        shared.global_debug_table = &local_stub_debug_table;
+
                         unloadGameCode(&game);
                         game = loadGameCode(&source_dll_path, &temp_dll_path);
                         new_input.executable_reloaded = true;
                     }
 
-                    frame_end_info.recordTimestamp("ExecutableReady", getSecondsElapsed(last_counter, getWallClock()));
+                    timed_block.end();
+
+                    //
+                    //
+                    //
+
+                    timed_block = shared.TimedBlock.beginBlock(@src(), .InputProcessing);
 
                     var message: win32.MSG = undefined;
 
@@ -1701,7 +1720,13 @@ pub export fn wWinMain(
                     processMouseInput(new_input, window_handle);
                     processXInput(old_input, new_input);
 
-                    frame_end_info.recordTimestamp("InputProcessed", getSecondsElapsed(last_counter, getWallClock()));
+                    timed_block.end();
+
+                    //
+                    //
+                    //
+
+                    timed_block = shared.TimedBlock.beginBlock(@src(), .GameUpdate);
 
                     if (state.input_recording_index > 0) {
                         recordInput(&state, new_input);
@@ -1712,7 +1737,13 @@ pub export fn wWinMain(
                     // Send all input to game.
                     game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
 
-                    frame_end_info.recordTimestamp("GameUpdated", getSecondsElapsed(last_counter, getWallClock()));
+                    timed_block.end();
+
+                    //
+                    //
+                    //
+
+                    timed_block = shared.TimedBlock.beginBlock(@src(), .AudioUpdate);
 
                     // Output sound.
                     if (opt_secondary_buffer) |secondary_buffer| {
@@ -1824,7 +1855,13 @@ pub export fn wWinMain(
                         }
                     }
 
-                    frame_end_info.recordTimestamp("AudioUpdated", getSecondsElapsed(last_counter, getWallClock()));
+                    timed_block.end();
+
+                    //
+                    //
+                    //
+
+                    timed_block = shared.TimedBlock.beginBlock(@src(), .FrameRateWait);
 
                     // Capture timing.
                     const work_counter = getWallClock();
@@ -1847,7 +1884,13 @@ pub export fn wWinMain(
                         // Target frame rate missed.
                     }
 
-                    frame_end_info.recordTimestamp("FrameRateWaitComplete", getSecondsElapsed(last_counter, getWallClock()));
+                    timed_block.end();
+
+                    //
+                    //
+                    //
+
+                    timed_block = shared.TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     if (INTERNAL) {
                         if (false) {
@@ -1882,18 +1925,23 @@ pub export fn wWinMain(
                     const end_counter = getWallClock();
                     last_counter = end_counter;
 
+                    //
+                    //
+                    //
+
+                    timed_block.end();
+
                     if (INTERNAL) {
                         // Calculate timing information.
-                        frame_end_info.recordTimestamp("EndOfFrame", getSecondsElapsed(last_counter, end_counter));
-
                         const end_cycle_count = shared.rdtsc();
                         // const cycles_elapsed: u64 = @intCast(end_cycle_count - last_cycle_count);
                         last_cycle_count = end_cycle_count;
 
                         if (game.debugFrameEnd) |frameEndFn| {
-                            frameEndFn(&game_memory, &frame_end_info);
+                            shared.global_debug_table = frameEndFn(&game_memory);
                         }
                     }
+                    local_stub_debug_table.event_array_index_event_index = 0;
                 }
             } else {
                 win32.OutputDebugStringA("Failed to allocate memory.\n");

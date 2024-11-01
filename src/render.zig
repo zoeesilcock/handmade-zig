@@ -138,7 +138,7 @@ pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) cal
 }
 
 fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: Vector3) RenderEntityBasisResult {
-    var timed_block = shared.TimedBlock.begin(@src(), .GetRenderEntityBasisPosition);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .GetRenderEntityBasisPosition);
     defer timed_block.end();
 
     var result = RenderEntityBasisResult{};
@@ -278,7 +278,7 @@ pub const RenderGroup = extern struct {
     }
 
     fn pushRenderElement(self: *RenderGroup, comptime T: type) ?*T {
-        var timed_block = shared.TimedBlock.begin(@src(), .PushRenderElement);
+        var timed_block = shared.TimedBlock.beginFunction(@src(), .PushRenderElement);
         defer timed_block.end();
 
         const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[7..]);
@@ -499,7 +499,7 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         output_target: *LoadedBitmap,
     ) void {
-        var timed_block = shared.TimedBlock.begin(@src(), .SingleRenderToOutput);
+        var timed_block = shared.TimedBlock.beginFunction(@src(), .SingleRenderToOutput);
         defer timed_block.end();
 
         std.debug.assert(self.inside_renderer);
@@ -521,7 +521,7 @@ pub const RenderGroup = extern struct {
         render_queue: *shared.PlatformWorkQueue,
         output_target: *LoadedBitmap,
     ) void {
-        var timed_block = shared.TimedBlock.begin(@src(), .TiledRenderToOutput);
+        var timed_block = shared.TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
         defer timed_block.end();
 
         std.debug.assert(self.inside_renderer);
@@ -584,7 +584,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {
-        var timed_block = shared.TimedBlock.begin(@src(), .RenderToOutput);
+        var timed_block = shared.TimedBlock.beginFunction(@src(), .RenderToOutput);
         defer timed_block.end();
 
         const null_pixels_to_meters: f32 = 1.0;
@@ -710,7 +710,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn beginRender(self: *RenderGroup) void {
-        var timed_block = shared.TimedBlock.begin(@src(), .BeginRender);
+        var timed_block = shared.TimedBlock.beginFunction(@src(), .BeginRender);
         defer timed_block.end();
 
         std.debug.assert(!self.inside_renderer);
@@ -720,7 +720,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn endRender(self: *RenderGroup) void {
-        var timed_block = shared.TimedBlock.begin(@src(), .EndRender);
+        var timed_block = shared.TimedBlock.beginFunction(@src(), .EndRender);
         defer timed_block.end();
 
         std.debug.assert(self.inside_renderer);
@@ -740,7 +740,7 @@ pub fn drawRectangle(
     clip_rect: Rectangle2i,
     even: bool,
 ) void {
-    var timed_block = shared.TimedBlock.begin(@src(), .DrawRectangle);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .DrawRectangle);
     defer timed_block.end();
 
     var fill_rect = Rectangle2i.new(
@@ -777,7 +777,7 @@ pub fn drawRectangle(
 }
 
 fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
-    var timed_block = shared.TimedBlock.begin(@src(), .ChangeSaturation);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .ChangeSaturation);
     defer timed_block.end();
 
     var dest_row: [*]u8 = @ptrCast(draw_buffer.memory);
@@ -815,7 +815,7 @@ pub fn drawRectangleQuickly(
 ) void {
     _ = pixels_to_meters;
 
-    var timed_block = shared.TimedBlock.begin(@src(), .DrawRectangleQuickly);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .DrawRectangleQuickly);
     defer timed_block.end();
 
     var color = color_in;
@@ -1133,7 +1133,7 @@ pub fn drawRectangleSlowly(
     bottom: *EnvironmentMap,
     pixels_to_meters: f32,
 ) void {
-    const timed_block = shared.TimedBlock.begin(@src(), .DrawRectangleSlowly);
+    const timed_block = shared.TimedBlock.beginFunction(@src(), .DrawRectangleSlowly);
     defer timed_block.end();
 
     var color = color_in;
@@ -1392,7 +1392,7 @@ pub fn drawBitmap(
     real_y: f32,
     in_alpha: f32,
 ) void {
-    var timed_block = shared.TimedBlock.begin(@src(), .DrawBitmap);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .DrawBitmap);
     defer timed_block.end();
 
     // TODO: Should we really clamp here?

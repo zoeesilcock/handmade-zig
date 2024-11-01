@@ -117,7 +117,7 @@ pub export fn updateAndRender(
 ) void {
     shared.platform = platform;
 
-    const timed_block = shared.TimedBlock.begin(@src(), .GameUpdateAndRender);
+    const timed_block = shared.TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
     defer timed_block.end();
 
     const ground_buffer_width: u32 = 256;
@@ -1142,7 +1142,7 @@ pub export fn updateAndRender(
     transient_state.arena.checkArena();
 
     if (debug.render_group) |group| {
-        var overlay_timed_block = shared.TimedBlock.begin(@src(), .DebugOverlay);
+        var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugOverlay);
         defer overlay_timed_block.end();
 
         debug.overlay(memory);
@@ -1151,8 +1151,8 @@ pub export fn updateAndRender(
     }
 }
 
-pub export fn debugFrameEnd(memory: *shared.Memory, info: *shared.DebugFrameEndInfo) void {
-    debug.frameEnd(memory, info);
+pub export fn debugFrameEnd(memory: *shared.Memory) *shared.DebugTable {
+    return debug.frameEnd(memory);
 }
 
 pub fn chunkPositionFromTilePosition(
@@ -1472,7 +1472,7 @@ const FillGroundChunkWork = struct {
 };
 
 pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
-    var timed_block = shared.TimedBlock.begin(@src(), .FillGroundChunk);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .FillGroundChunk);
     defer timed_block.end();
 
     _ = queue;

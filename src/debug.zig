@@ -15,44 +15,7 @@ const Vector2 = math.Vector2;
 const Color = math.Color;
 const Color3 = math.Color3;
 
-pub const DebugCycleCounters = enum(u16) {
-    GameUpdateAndRender = 0,
-    DebugOverlay,
-    DebugTextReset,
-    BeginRender,
-    PushRenderElement,
-    DrawRectangle,
-    DrawBitmap,
-    DrawRectangleSlowly,
-    DrawRectangleQuickly,
-    ProcessPixel,
-    RenderToOutput,
-    TiledRenderToOutput,
-    SingleRenderToOutput,
-    EndRender,
-    GetRenderEntityBasisPosition,
-    ChangeSaturation,
-    MoveEntity,
-    EntitiesOverlap,
-    SpeculativeCollide,
-    BeginSimulation,
-    EndSimulation,
-    AddEntityRaw,
-    ChangeEntityLocation,
-    ChangeEntityLocationRaw,
-    GetWorldChunk,
-    PlaySound,
-    OutputPlayingSounds,
-    FillGroundChunk,
-    LoadAssetWorkDirectly,
-    AcquireAssetMemory,
-    LoadBitmap,
-    LoadSound,
-    LoadFont,
-    GetBestMatchAsset,
-    GetRandomAsset,
-    GetFirstAsset,
-};
+pub var global_debug_table: shared.DebugTable = shared.DebugTable{};
 
 pub const SNAPSHOT_COUNT = 120;
 const COUNTER_COUNT = 512;
@@ -64,7 +27,7 @@ pub const DebugCounterSnapshot = struct {
 
 pub const DebugCounterState = struct {
     file_name: ?[*:0]const u8 = null,
-    function_name: ?[*:0]const u8 = null,
+    block_name: ?[*:0]const u8 = null,
     line_number: u32 = undefined,
 
     snapshots: [SNAPSHOT_COUNT]DebugCounterSnapshot = [1]DebugCounterSnapshot{DebugCounterSnapshot{}} ** SNAPSHOT_COUNT,
@@ -74,8 +37,6 @@ pub const DebugState = struct {
     snapshot_index: u32 = 0,
     counter_count: u32 = 0,
     counter_states: [COUNTER_COUNT]DebugCounterState = [1]DebugCounterState{DebugCounterState{}} ** COUNTER_COUNT,
-    frame_end_infos: [SNAPSHOT_COUNT]shared.DebugFrameEndInfo =
-        [1]shared.DebugFrameEndInfo{shared.DebugFrameEndInfo{}} ** SNAPSHOT_COUNT,
 
     pub fn collateDebugRecords(self: *DebugState, event_count: u32, events: *[shared.MAX_DEBUG_EVENT_COUNT]DebugEvent) void {
         self.counter_count = shared.MAX_DEBUG_RECORD_COUNT;
@@ -95,17 +56,16 @@ pub const DebugState = struct {
             // If we split our compilation into optimized and non-optimized like Casey does we need to
             // implement the same type of lookup here.
             const dest: *DebugCounterState = &self.counter_states[event.debug_record_index];
-            const source: *DebugRecord = &shared.debug_table.records[shared.TRANSLATION_UNIT_INDEX][event.debug_record_index];
+            const source: *DebugRecord = &global_debug_table.records[shared.TRANSLATION_UNIT_INDEX][event.debug_record_index];
 
             dest.file_name = source.file_name;
-            dest.function_name = source.function_name;
+            dest.block_name = source.block_name;
             dest.line_number = source.line_number;
 
             if (event.event_type == .BeginBlock) {
                 dest.snapshots[self.snapshot_index].hit_count += 1;
                 dest.snapshots[self.snapshot_index].cycle_count -%= event.clock;
-            } else {
-                std.debug.assert(event.event_type == .EndBlock);
+            } else if (event.event_type == .EndBlock) {
                 dest.snapshots[self.snapshot_index].cycle_count +%= event.clock;
             }
         }
@@ -157,11 +117,15 @@ var at_y: f32 = 0;
 var font_scale: f32 = 0;
 var font_id: file_formats.FontId = undefined;
 
-pub fn frameEnd(memory: *shared.Memory, info: *shared.DebugFrameEndInfo) void {
-    shared.debug_table.current_event_array_index = if (shared.debug_table.current_event_array_index == 0) 1 else 0;
-    const next_event_array_index: u64 = shared.debug_table.current_event_array_index << 32;
+pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
+    global_debug_table.current_event_array_index += 1;
+    if (global_debug_table.current_event_array_index >= global_debug_table.events.len) {
+        global_debug_table.current_event_array_index = 0;
+    }
+
+    const next_event_array_index: u64 = global_debug_table.current_event_array_index << 32;
     const event_array_index_event_index: u64 =
-        @atomicRmw(u64, &shared.debug_table.event_array_index_event_index, .Xchg, next_event_array_index, .seq_cst);
+        @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Xchg, next_event_array_index, .seq_cst);
 
     const event_array_index: u32 = @intCast(event_array_index_event_index >> 32);
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
@@ -170,19 +134,19 @@ pub fn frameEnd(memory: *shared.Memory, info: *shared.DebugFrameEndInfo) void {
         var debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
         debug_state.counter_count = 0;
 
-        debug_state.collateDebugRecords(event_count, &shared.debug_table.events[event_array_index]);
-
-        debug_state.frame_end_infos[debug_state.snapshot_index] = info.*;
+        debug_state.collateDebugRecords(event_count, &global_debug_table.events[event_array_index]);
 
         debug_state.snapshot_index += 1;
         if (debug_state.snapshot_index >= SNAPSHOT_COUNT) {
             debug_state.snapshot_index = 0;
         }
     }
+
+    return &global_debug_table;
 }
 
 pub fn textReset(assets: *asset.Assets, width: i32, height: i32) void {
-    var timed_block = TimedBlock.begin(@src(), .DebugTextReset);
+    var timed_block = TimedBlock.beginFunction(@src(), .DebugTextReset);
     defer timed_block.end();
 
     var match_vector = asset.AssetVector{};
@@ -310,7 +274,7 @@ pub fn overlay(memory: *shared.Memory) void {
                     cycle_count.end();
                     cycle_over_hit.end();
 
-                    if (counter.function_name) |function_name| {
+                    if (counter.block_name) |block_name| {
                         if (cycle_count.max > 0) {
                             const bar_width: f32 = 4;
                             const chart_left: f32 = 0;
@@ -334,7 +298,7 @@ pub fn overlay(memory: *shared.Memory) void {
 
                         var buffer: [128]u8 = undefined;
                         const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
-                            function_name,
+                            block_name,
                             counter.line_number,
                             @as(u64, @intFromFloat(cycle_count.average)),
                             @as(u64, @intFromFloat(hit_count.average)),
@@ -367,6 +331,7 @@ pub fn overlay(memory: *shared.Memory) void {
                     Color3.new(0, 0.5, 1),
                 };
 
+                if (false) {
                 var snapshot_index: u32 = 0;
                 while (snapshot_index < SNAPSHOT_COUNT) : (snapshot_index += 1) {
                     const info: *shared.DebugFrameEndInfo = &debug_state.frame_end_infos[snapshot_index];
@@ -394,6 +359,7 @@ pub fn overlay(memory: *shared.Memory) void {
 
                         stack_y += this_height;
                     }
+                }
                 }
 
                 // 30 FPS line.

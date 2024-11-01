@@ -237,7 +237,7 @@ pub fn addEntityRaw(
     storage_index: u32,
     opt_source: ?*shared.LowEntity,
 ) ?*SimEntity {
-    var timed_block = shared.TimedBlock.begin(@src(), .AddEntityRaw);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .AddEntityRaw);
     defer timed_block.end();
 
     std.debug.assert(storage_index != 0);
@@ -319,7 +319,7 @@ pub fn beginSimulation(
     bounds: Rectangle3,
     delta_time: f32,
 ) *SimRegion {
-    var timed_block = shared.TimedBlock.begin(@src(), .BeginSimulation);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .BeginSimulation);
     defer timed_block.end();
 
     var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion);
@@ -414,7 +414,7 @@ fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_tim
 }
 
 fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vector3) bool {
-    var timed_block = shared.TimedBlock.begin(@src(), .SpeculativeCollide);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .SpeculativeCollide);
     defer timed_block.end();
 
     var result = true;
@@ -430,7 +430,7 @@ fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vect
 }
 
 fn entitiesOverlap(entity: *SimEntity, test_entity: *SimEntity, epsilon: Vector3) bool {
-    var timed_block = shared.TimedBlock.begin(@src(), .EntitiesOverlap);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .EntitiesOverlap);
     defer timed_block.end();
 
     var overlapped = false;
@@ -537,7 +537,7 @@ pub fn moveEntity(
     in_acceleration: Vector3,
     move_spec: *const MoveSpec,
 ) void {
-    var timed_block = shared.TimedBlock.begin(@src(), .MoveEntity);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .MoveEntity);
     defer timed_block.end();
 
     std.debug.assert(!entity.isSet(SimEntityFlags.Nonspatial.toInt()));
@@ -805,7 +805,7 @@ pub fn moveEntity(
 }
 
 pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
-    var timed_block = shared.TimedBlock.begin(@src(), .EndSimulation);
+    var timed_block = shared.TimedBlock.beginFunction(@src(), .EndSimulation);
     defer timed_block.end();
 
     var sim_entity_index: u32 = 0;

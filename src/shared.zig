@@ -209,53 +209,89 @@ pub var platform: Platform = undefined;
 pub fn updateAndRenderStub(_: Platform, _: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) void {
     return;
 }
+
 pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
     return;
 }
-pub const DebugFrameTimestamp = struct {
-    name: [*:0]const u8 = undefined,
-    seconds: f32 = 0,
-};
-pub const DebugFrameEndInfo = struct {
-    timestamp_count: u32 = 0,
-    timestamps: [64]DebugFrameTimestamp = [1]DebugFrameTimestamp{DebugFrameTimestamp{}} ** 64,
 
-    pub fn recordTimestamp(self: *DebugFrameEndInfo, name: [*:0]const u8, seconds: f32) void {
-        std.debug.assert(self.timestamp_count < self.timestamps.len);
-
-        var timestamp = &self.timestamps[self.timestamp_count];
-        self.timestamp_count += 1;
-
-        timestamp.name = name;
-        timestamp.seconds = seconds;
-    }
-};
-pub fn debugFrameEndStub(_: *Memory, _: *DebugFrameEndInfo) callconv(.C) void {
-    return;
+pub fn debugFrameEndStub(_: *Memory) callconv(.C) *DebugTable {
+    return undefined;
 }
 
 const MAX_DEBUG_TRANSLATION_UNITS = 1;
 pub const TRANSLATION_UNIT_INDEX = 0;
 pub const MAX_DEBUG_EVENT_COUNT = 16 * 65536;
-pub const MAX_DEBUG_RECORD_COUNT = @typeInfo(debug.DebugCycleCounters).Enum.fields.len;
+pub const MAX_DEBUG_RECORD_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;
 
-const DebugTable = struct {
-    current_event_array_index: u64 = 0,
-    event_array_index_event_index: u64 = 0,
-    records: [MAX_DEBUG_TRANSLATION_UNITS][MAX_DEBUG_RECORD_COUNT]DebugRecord = [2][MAX_DEBUG_RECORD_COUNT]DebugRecord{
-        [1]DebugRecord{DebugRecord{}} ** MAX_DEBUG_RECORD_COUNT,
-    },
-    events: [2][MAX_DEBUG_EVENT_COUNT]DebugEvent = [2][MAX_DEBUG_EVENT_COUNT]DebugEvent{
-        [1]DebugEvent{DebugEvent{}} ** MAX_DEBUG_EVENT_COUNT,
-        [1]DebugEvent{DebugEvent{}} ** MAX_DEBUG_EVENT_COUNT,
-    },
+pub const DebugCycleCounters = enum(u16) {
+    TotalPlatformLoop,
+    ExecutableRefresh,
+    InputProcessing,
+    GameUpdate,
+    AudioUpdate,
+    FrameRateWait,
+    FrameDisplay,
+
+    GameUpdateAndRender,
+    FillGroundChunk,
+    DebugOverlay,
+    DebugTextReset,
+    BeginRender,
+    PushRenderElement,
+    DrawRectangle,
+    DrawBitmap,
+    DrawRectangleSlowly,
+    DrawRectangleQuickly,
+    ProcessPixel,
+    RenderToOutput,
+    TiledRenderToOutput,
+    SingleRenderToOutput,
+    EndRender,
+
+    GetRenderEntityBasisPosition,
+    ChangeSaturation,
+    MoveEntity,
+    EntitiesOverlap,
+    SpeculativeCollide,
+    BeginSimulation,
+    EndSimulation,
+    AddEntityRaw,
+
+    ChangeEntityLocation,
+    ChangeEntityLocationRaw,
+    GetWorldChunk,
+
+    PlaySound,
+    OutputPlayingSounds,
+
+    LoadAssetWorkDirectly,
+    AcquireAssetMemory,
+    LoadBitmap,
+    LoadSound,
+    LoadFont,
+    GetBestMatchAsset,
+    GetRandomAsset,
+    GetFirstAsset,
 };
 
-pub var debug_table: DebugTable = undefined;
+const DEBUG_EVENT_FRAME_COUNT = 50;
+
+pub const DebugTable = struct {
+    current_event_array_index: u64 = 0,
+    event_array_index_event_index: u64 = 0,
+    records: [MAX_DEBUG_TRANSLATION_UNITS][MAX_DEBUG_RECORD_COUNT]DebugRecord = [MAX_DEBUG_TRANSLATION_UNITS][MAX_DEBUG_RECORD_COUNT]DebugRecord{
+        [1]DebugRecord{DebugRecord{}} ** MAX_DEBUG_RECORD_COUNT,
+    },
+    events: [DEBUG_EVENT_FRAME_COUNT][MAX_DEBUG_EVENT_COUNT]DebugEvent = [1][MAX_DEBUG_EVENT_COUNT]DebugEvent{
+        [1]DebugEvent{DebugEvent{}} ** MAX_DEBUG_EVENT_COUNT,
+    } ** DEBUG_EVENT_FRAME_COUNT,
+};
+
+pub var global_debug_table: *DebugTable = &debug.global_debug_table;
 
 pub const DebugRecord = extern struct {
     file_name: [*:0]const u8 = undefined,
-    function_name: [*:0]const u8 = undefined,
+    block_name: [*:0]const u8 = undefined,
 
     line_number: u32 = undefined,
     reserved: u32 = 0,
@@ -264,6 +300,7 @@ pub const DebugRecord = extern struct {
 };
 
 pub const DebugEventType = enum(u8) {
+    FrameMarker,
     BeginBlock,
     EndBlock,
 };
@@ -278,12 +315,12 @@ pub const DebugEvent = extern struct {
 };
 
 fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType) void {
-    const event_array_index_event_index = @atomicRmw(u64, &debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
+    const event_array_index_event_index = @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
     const array_index = event_array_index_event_index >> 32;
     const event_index = event_array_index_event_index & 0xffffffff;
     std.debug.assert(event_index < MAX_DEBUG_EVENT_COUNT);
 
-    var event: *DebugEvent = &debug_table.events[array_index][event_index];
+    var event: *DebugEvent = &global_debug_table.events[array_index][event_index];
     event.clock = rdtsc();
     event.thread_index = @truncate(getThreadId());
     event.core_index = 0;
@@ -293,14 +330,22 @@ fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType) void {
 }
 
 pub const TimedBlock = struct {
-    counter: debug.DebugCycleCounters = undefined,
+    counter: DebugCycleCounters = undefined,
 
-    pub fn begin(source: std.builtin.SourceLocation, counter: debug.DebugCycleCounters) TimedBlock {
+    pub fn beginBlock(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+        return begin_(source, counter, true);
+    }
+
+    pub fn beginFunction(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+        return begin_(source, counter, false);
+    }
+
+    fn begin_(source: std.builtin.SourceLocation, counter: DebugCycleCounters, is_block: bool) TimedBlock {
         const result = TimedBlock{ .counter = counter };
 
-        var record = &debug_table.records[TRANSLATION_UNIT_INDEX][@intFromEnum(counter)];
+        var record = &global_debug_table.records[TRANSLATION_UNIT_INDEX][@intFromEnum(counter)];
         record.file_name = source.file;
-        record.function_name = source.fn_name;
+        record.block_name = if (is_block) @tagName(counter) else source.fn_name;
         record.line_number = source.line;
 
         recordDebugEvent(@intFromEnum(counter), .BeginBlock);
@@ -308,8 +353,21 @@ pub const TimedBlock = struct {
         return result;
     }
 
-    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: debug.DebugCycleCounters, hit_count: u32) TimedBlock {
-        const result = TimedBlock.begin(source, counter);
+    pub fn frameMarker(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+        const result = TimedBlock{ .counter = counter };
+
+        var record = &global_debug_table.records[TRANSLATION_UNIT_INDEX][@intFromEnum(counter)];
+        record.file_name = source.file;
+        record.block_name = "FrameMarker";
+        record.line_number = source.line;
+
+        recordDebugEvent(@intFromEnum(counter), .FrameMarker);
+
+        return result;
+    }
+
+    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: DebugCycleCounters, hit_count: u32) TimedBlock {
+        const result = TimedBlock.beginBlock(source, counter);
         // result.hit_count = hit_count;
         _ = hit_count;
         return result;
