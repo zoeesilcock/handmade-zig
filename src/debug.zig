@@ -17,7 +17,6 @@ const Color3 = math.Color3;
 
 pub var global_debug_table: shared.DebugTable = shared.DebugTable{};
 
-pub const SNAPSHOT_COUNT = 120;
 const COUNTER_COUNT = 512;
 
 pub const DebugCounterSnapshot = struct {
@@ -29,46 +28,131 @@ pub const DebugCounterState = struct {
     file_name: ?[*:0]const u8 = null,
     block_name: ?[*:0]const u8 = null,
     line_number: u32 = undefined,
+};
 
-    snapshots: [SNAPSHOT_COUNT]DebugCounterSnapshot = [1]DebugCounterSnapshot{DebugCounterSnapshot{}} ** SNAPSHOT_COUNT,
+const DebugFrame = struct {
+    begin_clock: u64,
+    end_clock: u64,
+    region_count: u32,
+    regions: [*]DebugFrameRegion,
+};
+
+const DebugFrameRegion = struct {
+    lane_index: u32,
+    min_t: f32,
+    max_t: f32,
 };
 
 pub const DebugState = struct {
-    snapshot_index: u32 = 0,
-    counter_count: u32 = 0,
-    counter_states: [COUNTER_COUNT]DebugCounterState = [1]DebugCounterState{DebugCounterState{}} ** COUNTER_COUNT,
+    initialized: bool,
 
-    pub fn collateDebugRecords(self: *DebugState, event_count: u32, events: *[shared.MAX_DEBUG_EVENT_COUNT]DebugEvent) void {
-        self.counter_count = shared.MAX_DEBUG_RECORD_COUNT;
+    collate_arena: shared.MemoryArena,
+    collate_temp: shared.TemporaryMemory,
 
-        var counter_index: u32 = 0;
-        while (counter_index < self.counter_count) : (counter_index += 1) {
-            var dest: *DebugCounterState = &self.counter_states[counter_index];
-            dest.snapshots[self.snapshot_index].hit_count = 0;
-            dest.snapshots[self.snapshot_index].cycle_count = 0;
-        }
+    frame_bar_lane_count: u32,
+    frame_bar_scale: f32,
+    frame_count: u32,
 
-        var event_index: u32 = 0;
-        while (event_index < event_count) : (event_index += 1) {
-            const event: *const DebugEvent = &events[event_index];
+    frames: [*]DebugFrame,
 
-            // These two lookups are simpler because we have all our code in the same compilation.
-            // If we split our compilation into optimized and non-optimized like Casey does we need to
-            // implement the same type of lookup here.
-            const dest: *DebugCounterState = &self.counter_states[event.debug_record_index];
-            const source: *DebugRecord = &global_debug_table.records[shared.TRANSLATION_UNIT_INDEX][event.debug_record_index];
+    pub fn collateDebugRecords(
+        self: *DebugState,
+        invalid_event_array_index: u32,
+    ) void {
+        self.frame_bar_lane_count = 0;
+        self.frame_bar_scale = 0;
+        self.frame_count = 0;
 
-            dest.file_name = source.file_name;
-            dest.block_name = source.block_name;
-            dest.line_number = source.line_number;
+        var opt_current_frame: ?*DebugFrame = null;
 
-            if (event.event_type == .BeginBlock) {
-                dest.snapshots[self.snapshot_index].hit_count += 1;
-                dest.snapshots[self.snapshot_index].cycle_count -%= event.clock;
-            } else if (event.event_type == .EndBlock) {
-                dest.snapshots[self.snapshot_index].cycle_count +%= event.clock;
+        var event_array_index: u32 = invalid_event_array_index + 1;
+        while (true) : (event_array_index += 1) {
+            if (event_array_index == shared.DEBUG_EVENT_FRAME_COUNT) {
+                event_array_index = 0;
+            }
+
+            if (event_array_index == invalid_event_array_index) {
+                break;
+            }
+
+            var event_index: u32 = 0;
+            while (event_index < shared.DEBUG_EVENT_FRAME_COUNT) : (event_index += 1) {
+                const event: *DebugEvent = &global_debug_table.events[event_array_index][event_index];
+                const source: *DebugRecord = &global_debug_table.records[shared.TRANSLATION_UNIT_INDEX][event.debug_record_index];
+
+                _ = source;
+
+                if (event.event_type == .FrameMarker) {
+                    if (opt_current_frame) |current_frame| {
+                        current_frame.end_clock = event.clock;
+                    }
+
+                    opt_current_frame = &self.frames[self.frame_count];
+                    self.frame_count += 1;
+
+                    if (opt_current_frame) |current_frame| {
+                        current_frame.begin_clock = event.clock;
+                        current_frame.end_clock = 0;
+                        current_frame.region_count = 0;
+                    }
+                } else {
+                    if (opt_current_frame) |current_frame| {
+                        const relative_clock: u64 = event.clock - current_frame.begin_clock;
+                        const lane_index: u32 = self.getLaneFromThreadIndex(event.thread_index);
+
+                        _ = lane_index;
+                        _ = relative_clock;
+
+                        switch (event.event_type) {
+                            .BeginBlock => {
+                            },
+                            .EndBlock => {
+                            },
+                            else => unreachable,
+                        }
+                    }
+                }
             }
         }
+
+        // if (false) {
+        //     self.counter_count = shared.MAX_DEBUG_RECORD_COUNT;
+        //
+        //     var counter_index: u32 = 0;
+        //     while (counter_index < self.counter_count) : (counter_index += 1) {
+        //         var dest: *DebugCounterState = &self.counter_states[counter_index];
+        //         dest.snapshots[self.snapshot_index].hit_count = 0;
+        //         dest.snapshots[self.snapshot_index].cycle_count = 0;
+        //     }
+        //
+        //     var event_index: u32 = 0;
+        //     while (event_index < event_count) : (event_index += 1) {
+        //         const event: *const DebugEvent = &events[event_index];
+        //
+        //         // These two lookups are simpler because we have all our code in the same compilation.
+        //         // If we split our compilation into optimized and non-optimized like Casey does we need to
+        //         // implement the same type of lookup here.
+        //         const dest: *DebugCounterState = &self.counter_states[event.debug_record_index];
+        //         const source: *DebugRecord = &global_debug_table.records[shared.TRANSLATION_UNIT_INDEX][event.debug_record_index];
+        //
+        //         dest.file_name = source.file_name;
+        //         dest.block_name = source.block_name;
+        //         dest.line_number = source.line_number;
+        //
+        //         if (event.event_type == .BeginBlock) {
+        //             dest.snapshots[self.snapshot_index].hit_count += 1;
+        //             dest.snapshots[self.snapshot_index].cycle_count -%= event.clock;
+        //         } else if (event.event_type == .EndBlock) {
+        //             dest.snapshots[self.snapshot_index].cycle_count +%= event.clock;
+        //         }
+        //     }
+        // }
+    }
+
+    fn getLaneFromThreadIndex(self: *DebugState, thread_index: u32) u32 {
+        _ = self;
+        _ = thread_index;
+        return 0;
     }
 };
 
@@ -123,23 +207,32 @@ pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
         global_debug_table.current_event_array_index = 0;
     }
 
-    const next_event_array_index: u64 = global_debug_table.current_event_array_index << 32;
+    const next_event_array_index: u64 = @as(u64, @intCast(global_debug_table.current_event_array_index)) << 32;
     const event_array_index_event_index: u64 =
         @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Xchg, next_event_array_index, .seq_cst);
 
     const event_array_index: u32 = @intCast(event_array_index_event_index >> 32);
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
+    global_debug_table.event_count[event_array_index] = event_count;
 
     if (memory.debug_storage) |debug_storage| {
         var debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
-        debug_state.counter_count = 0;
 
-        debug_state.collateDebugRecords(event_count, &global_debug_table.events[event_array_index]);
+        if (!debug_state.initialized) {
+            debug_state.collate_arena.initialize(
+                memory.debug_storage_size - @sizeOf(DebugState),
+                memory.debug_storage.? + @sizeOf(DebugState),
+            );
 
-        debug_state.snapshot_index += 1;
-        if (debug_state.snapshot_index >= SNAPSHOT_COUNT) {
-            debug_state.snapshot_index = 0;
+            debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
+
+            debug_state.initialized = true;
         }
+
+        debug_state.collate_arena.endTemporaryMemory(debug_state.collate_temp);
+        debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
+
+        debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
     }
 
     return &global_debug_table;
@@ -253,68 +346,72 @@ pub fn overlay(memory: *shared.Memory) void {
             if (group.pushFont(font_id)) |_| {
                 const font_info = group.assets.getFontInfo(font_id);
 
-                var counter_index: u32 = 0;
-                while (counter_index < debug_state.counter_count) : (counter_index += 1) {
-                    const counter = debug_state.counter_states[counter_index];
+                if (false) {
+                    var counter_index: u32 = 0;
+                    while (counter_index < debug_state.counter_count) : (counter_index += 1) {
+                        const counter = debug_state.counter_states[counter_index];
 
-                    var hit_count = DebugStatistic.begin();
-                    var cycle_count = DebugStatistic.begin();
-                    var cycle_over_hit = DebugStatistic.begin();
-                    for (counter.snapshots) |snapshot| {
-                        hit_count.accumulate(@floatFromInt(snapshot.hit_count));
-                        cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
+                        var hit_count = DebugStatistic.begin();
+                        var cycle_count = DebugStatistic.begin();
+                        var cycle_over_hit = DebugStatistic.begin();
+                        for (counter.snapshots) |snapshot| {
+                            hit_count.accumulate(@floatFromInt(snapshot.hit_count));
+                            cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
 
-                        var coh: f64 = 0;
-                        if (snapshot.hit_count > 0) {
-                            coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
-                        }
-                        cycle_over_hit.accumulate(coh);
-                    }
-                    hit_count.end();
-                    cycle_count.end();
-                    cycle_over_hit.end();
-
-                    if (counter.block_name) |block_name| {
-                        if (cycle_count.max > 0) {
-                            const bar_width: f32 = 4;
-                            const chart_left: f32 = 0;
-                            const chart_min_y: f32 = at_y;
-                            const char_height: f32 = font_info.ascender_height * font_scale;
-                            const scale: f32 = 1 / @as(f32, @floatCast(cycle_count.max));
-                            for (counter.snapshots, 0..) |snapshot, snapshot_index| {
-                                const this_proportion: f32 = scale * @as(f32, @floatFromInt(snapshot.cycle_count));
-                                const this_height: f32 = char_height * this_proportion;
-                                group.pushRectangle(
-                                    Vector2.new(bar_width, this_height),
-                                    Vector3.new(
-                                        chart_left + bar_width * @as(f32, (@floatFromInt(snapshot_index))) - 0.5 * bar_width,
-                                        chart_min_y + 0.5 * this_height,
-                                        0,
-                                    ),
-                                    Color.new(this_proportion, 1, 0, 1),
-                                );
+                            var coh: f64 = 0;
+                            if (snapshot.hit_count > 0) {
+                                coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
                             }
+                            cycle_over_hit.accumulate(coh);
                         }
+                        hit_count.end();
+                        cycle_count.end();
+                        cycle_over_hit.end();
 
-                        var buffer: [128]u8 = undefined;
-                        const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
-                            block_name,
-                            counter.line_number,
-                            @as(u64, @intFromFloat(cycle_count.average)),
-                            @as(u64, @intFromFloat(hit_count.average)),
-                            @as(u64, @intFromFloat(cycle_over_hit.average)),
-                        }) catch "";
-                        textLine(slice);
+                        if (counter.block_name) |block_name| {
+                            if (cycle_count.max > 0) {
+                                const bar_width: f32 = 4;
+                                const chart_left: f32 = 0;
+                                const chart_min_y: f32 = at_y;
+                                const char_height: f32 = font_info.ascender_height * font_scale;
+                                const scale: f32 = 1 / @as(f32, @floatCast(cycle_count.max));
+                                for (counter.snapshots, 0..) |snapshot, snapshot_index| {
+                                    const this_proportion: f32 = scale * @as(f32, @floatFromInt(snapshot.cycle_count));
+                                    const this_height: f32 = char_height * this_proportion;
+                                    group.pushRectangle(
+                                        Vector2.new(bar_width, this_height),
+                                        Vector3.new(
+                                            chart_left + bar_width * @as(f32, (@floatFromInt(snapshot_index))) - 0.5 * bar_width,
+                                            chart_min_y + 0.5 * this_height,
+                                            0,
+                                        ),
+                                        Color.new(this_proportion, 1, 0, 1),
+                                    );
+                                }
+                            }
+
+                            var buffer: [128]u8 = undefined;
+                            const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
+                                block_name,
+                                counter.line_number,
+                                @as(u64, @intFromFloat(cycle_count.average)),
+                                @as(u64, @intFromFloat(hit_count.average)),
+                                @as(u64, @intFromFloat(cycle_over_hit.average)),
+                            }) catch "";
+                            textLine(slice);
+                        }
                     }
                 }
 
-                const bar_width: f32 = 8;
-                const bar_spacing: f32 = 10;
+                const lane_width: f32 = 4;
+                const lane_count: u32 = debug_state.frame_bar_lane_count;
+                const bar_width: f32 = lane_width * @as(f32, @floatFromInt(lane_count));
+                const bar_spacing: f32 = bar_width + 4;
                 const chart_left: f32 = left_edge + 10;
                 const chart_height: f32 = 300;
-                const chart_width: f32 = bar_spacing * @as(f32, @floatFromInt(SNAPSHOT_COUNT));
+                const chart_width: f32 = bar_spacing * @as(f32, @floatFromInt(debug_state.frame_count));
                 const chart_min_y: f32 = at_y - (chart_height + 80);
-                const scale: f32 = 1.0 / 0.03333;
+                const scale: f32 = debug_state.frame_bar_scale;
 
                 const colors: [12]Color3 = .{
                     Color3.new(1, 0, 0),
@@ -331,35 +428,30 @@ pub fn overlay(memory: *shared.Memory) void {
                     Color3.new(0, 0.5, 1),
                 };
 
-                if (false) {
-                var snapshot_index: u32 = 0;
-                while (snapshot_index < SNAPSHOT_COUNT) : (snapshot_index += 1) {
-                    const info: *shared.DebugFrameEndInfo = &debug_state.frame_end_infos[snapshot_index];
+                var frame_index: u32 = 0;
+                while (frame_index < debug_state.frame_count) : (frame_index += 1) {
+                    const frame: *DebugFrame = &debug_state.frames[frame_index];
 
-                    var stack_y: f32 = chart_min_y;
-                    var prev_timestamp_seconds: f32 = 0;
-                    var timestamp_index: u32 = 0;
-                    while (timestamp_index < info.timestamp_count) : (timestamp_index += 1) {
-                        const timestamp: *const shared.DebugFrameTimestamp = &info.timestamps[timestamp_index];
-                        const this_seconds_elapsed: f32 = timestamp.seconds - prev_timestamp_seconds;
-                        prev_timestamp_seconds = timestamp.seconds;
+                    const stack_x: f32 = chart_left + bar_spacing * @as(f32, (@floatFromInt(frame_index)));
+                    const stack_y: f32 = chart_min_y;
 
-                        const color = colors[timestamp_index % colors.len];
-                        const this_proportion: f32 = scale * this_seconds_elapsed;
-                        const this_height: f32 = chart_height * this_proportion;
+                    var region_index: u32 = 0;
+                    while (region_index < frame.region_count) : (region_index += 1) {
+                        const region: *const DebugFrameRegion = &frame.regions[region_index];
+
+                        const color = colors[region_index % colors.len];
+                        const this_min_y: f32 = stack_y + scale * region.min_t;
+                        const this_max_y: f32 = stack_y + scale * region.max_t;
                         group.pushRectangle(
-                            Vector2.new(bar_width, this_height),
+                            Vector2.new(lane_width, this_max_y - this_min_y),
                             Vector3.new(
-                                chart_left + bar_spacing * @as(f32, (@floatFromInt(snapshot_index))) + 0.5 * bar_width,
-                                stack_y + 0.5 * this_height,
+                                stack_x + 0.5 * lane_width + lane_width * @as(f32, @floatFromInt(region.lane_index)),
+                                0.5 * (this_min_y + this_max_y),
                                 0,
                             ),
                             color.toColor(1),
                         );
-
-                        stack_y += this_height;
                     }
-                }
                 }
 
                 // 30 FPS line.

@@ -274,11 +274,12 @@ pub const DebugCycleCounters = enum(u16) {
     GetFirstAsset,
 };
 
-const DEBUG_EVENT_FRAME_COUNT = 50;
+pub const DEBUG_EVENT_FRAME_COUNT = 50;
 
 pub const DebugTable = struct {
-    current_event_array_index: u64 = 0,
+    current_event_array_index: u32 = 0,
     event_array_index_event_index: u64 = 0,
+    event_count: [DEBUG_EVENT_FRAME_COUNT]u32 = [1]u32{0} ** DEBUG_EVENT_FRAME_COUNT,
     records: [MAX_DEBUG_TRANSLATION_UNITS][MAX_DEBUG_RECORD_COUNT]DebugRecord = [MAX_DEBUG_TRANSLATION_UNITS][MAX_DEBUG_RECORD_COUNT]DebugRecord{
         [1]DebugRecord{DebugRecord{}} ** MAX_DEBUG_RECORD_COUNT,
     },
@@ -295,8 +296,6 @@ pub const DebugRecord = extern struct {
 
     line_number: u32 = undefined,
     reserved: u32 = 0,
-
-    hit_count_cycle_count: u64 = 0,
 };
 
 pub const DebugEventType = enum(u8) {
