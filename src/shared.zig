@@ -119,6 +119,32 @@ pub inline fn safeTruncateToInt16(value: i32) i16 {
     return @as(u16, @intCast(value));
 }
 
+pub inline fn stringsAreEqual(a: []const u8, b: []const u8) bool {
+    var result: bool = true;
+
+    if (a.len != b.len) {
+        result = false;
+    } else {
+        for (a, 0..) |a_char, i| {
+            if (a_char != b[i]) {
+                result = false;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
+test "stringsAreEqual" {
+    try std.testing.expectEqual(true, stringsAreEqual("abc", "abc"));
+    try std.testing.expectEqual(true, stringsAreEqual("", ""));
+
+    try std.testing.expectEqual(false, stringsAreEqual("cba", "abc"));
+    try std.testing.expectEqual(false, stringsAreEqual("abc", "abcd"));
+    try std.testing.expectEqual(false, stringsAreEqual("abcd", "abc"));
+}
+
 // Platform.
 pub const DebugReadFileResult = extern struct {
     contents: *anyopaque = undefined,
@@ -249,6 +275,7 @@ pub const DebugCycleCounters = enum(u16) {
     RenderToOutput,
     TiledRenderToOutput,
     SingleRenderToOutput,
+    DoTiledRenderWork,
     EndRender,
 
     GetRenderEntityBasisPosition,

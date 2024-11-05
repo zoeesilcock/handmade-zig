@@ -130,6 +130,9 @@ const TileRenderWork = struct {
 };
 
 pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+    const timed_block = shared.TimedBlock.beginFunction(@src(), .DoTiledRenderWork);
+    defer timed_block.end();
+
     _ = queue;
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
 

@@ -507,7 +507,9 @@ pub fn overlay(memory: *shared.Memory) void {
                     }
                 }
 
-                const lane_width: f32 = 4;
+                at_y -= 300;
+
+                const lane_width: f32 = 8;
                 const lane_count: u32 = debug_state.frame_bar_lane_count;
                 const bar_width: f32 = lane_width * @as(f32, @floatFromInt(lane_count));
                 const bar_spacing: f32 = bar_width + 4;
@@ -532,9 +534,14 @@ pub fn overlay(memory: *shared.Memory) void {
                     Color3.new(0, 0.5, 1),
                 };
 
+                var max_frame: u32 = debug_state.frame_count;
+                if (max_frame > 10) {
+                    max_frame = 10;
+                }
+
                 var frame_index: u32 = 0;
-                while (frame_index < debug_state.frame_count) : (frame_index += 1) {
-                    const frame: *DebugFrame = &debug_state.frames[frame_index];
+                while (frame_index < max_frame) : (frame_index += 1) {
+                    const frame: *DebugFrame = &debug_state.frames[debug_state.frame_count - (frame_index + 1)];
 
                     const stack_x: f32 = chart_left + bar_spacing * @as(f32, (@floatFromInt(frame_index)));
                     const stack_y: f32 = chart_min_y;
