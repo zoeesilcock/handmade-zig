@@ -43,6 +43,20 @@ const DebugFrameRegion = struct {
     max_t: f32,
 };
 
+const OpenDebugBlock = struct {
+    staring_frame_index: u32,
+    opening_event: *DebugEvent,
+    parent: ?*OpenDebugBlock,
+    next_free: ?*OpenDebugBlock,
+};
+
+const DebugThread = struct {
+    id: u32,
+    lane_index: u32,
+    first_open_block: ?*OpenDebugBlock,
+    next: ?*DebugThread,
+};
+
 pub const DebugState = struct {
     initialized: bool,
 
@@ -54,20 +68,23 @@ pub const DebugState = struct {
     frame_count: u32,
 
     frames: [*]DebugFrame,
+    first_thread: ?*DebugThread,
+    first_free_block: ?*OpenDebugBlock,
 
     pub fn collateDebugRecords(
         self: *DebugState,
         invalid_event_array_index: u32,
     ) void {
+        self.frames = self.collate_arena.pushArray(shared.MAX_DEBUG_EVENT_ARRAY_COUNT * 4, DebugFrame);
         self.frame_bar_lane_count = 0;
-        self.frame_bar_scale = 0;
+        self.frame_bar_scale = 1.0 / (60.0 * 1000000.0);
         self.frame_count = 0;
 
         var opt_current_frame: ?*DebugFrame = null;
 
         var event_array_index: u32 = invalid_event_array_index + 1;
         while (true) : (event_array_index += 1) {
-            if (event_array_index == shared.DEBUG_EVENT_FRAME_COUNT) {
+            if (event_array_index == shared.MAX_DEBUG_EVENT_ARRAY_COUNT) {
                 event_array_index = 0;
             }
 
@@ -76,7 +93,7 @@ pub const DebugState = struct {
             }
 
             var event_index: u32 = 0;
-            while (event_index < shared.DEBUG_EVENT_FRAME_COUNT) : (event_index += 1) {
+            while (event_index < global_debug_table.event_count[event_array_index]) : (event_index += 1) {
                 const event: *DebugEvent = &global_debug_table.events[event_array_index][event_index];
                 const source: *DebugRecord = &global_debug_table.records[shared.TRANSLATION_UNIT_INDEX][event.debug_record_index];
 
@@ -85,6 +102,17 @@ pub const DebugState = struct {
                 if (event.event_type == .FrameMarker) {
                     if (opt_current_frame) |current_frame| {
                         current_frame.end_clock = event.clock;
+
+                        if (false) {
+                            const clock_range: f32 = @floatFromInt(current_frame.end_clock - current_frame.begin_clock);
+                            if (clock_range > 0) {
+                                const frame_bar_scale = 1.0 / clock_range;
+
+                                if (self.frame_bar_scale > frame_bar_scale) {
+                                    self.frame_bar_scale = frame_bar_scale;
+                                }
+                            }
+                        }
                     }
 
                     opt_current_frame = &self.frames[self.frame_count];
@@ -94,19 +122,60 @@ pub const DebugState = struct {
                         current_frame.begin_clock = event.clock;
                         current_frame.end_clock = 0;
                         current_frame.region_count = 0;
+                        current_frame.regions = self.collate_arena.pushArray(shared.MAX_DEBUG_REGIONS_PER_FRAME, DebugFrameRegion);
                     }
                 } else {
                     if (opt_current_frame) |current_frame| {
+                        const frame_index: u32 = self.frame_count - 1;
+                        const thread: *DebugThread = self.getDebugThread(event.thread_id);
                         const relative_clock: u64 = event.clock - current_frame.begin_clock;
-                        const lane_index: u32 = self.getLaneFromThreadIndex(event.thread_index);
 
-                        _ = lane_index;
                         _ = relative_clock;
 
                         switch (event.event_type) {
                             .BeginBlock => {
+                                var debug_block: ?*OpenDebugBlock = self.first_free_block;
+
+                                if (debug_block) |block| {
+                                    self.first_free_block = block.next_free;
+                                } else {
+                                    debug_block = self.collate_arena.pushStruct(OpenDebugBlock);
+                                }
+
+                                if (debug_block) |block| {
+                                    block.staring_frame_index = frame_index;
+                                    block.opening_event = event;
+                                    block.parent = thread.first_open_block;
+                                    thread.first_open_block = block;
+                                    block.next_free = null;
+                                }
                             },
                             .EndBlock => {
+                                if (thread.first_open_block) |matching_block| {
+                                    const opening_event: *DebugEvent = matching_block.opening_event;
+
+                                    if (opening_event.thread_id == event.thread_id and
+                                        opening_event.debug_record_index == event.debug_record_index and
+                                        opening_event.translation_unit == event.translation_unit)
+                                    {
+                                        if (matching_block.staring_frame_index == frame_index) {
+                                            if (thread.first_open_block != null and thread.first_open_block.?.parent == null) {
+                                                var region: *DebugFrameRegion = self.addRegion(current_frame);
+                                                region.lane_index = thread.lane_index;
+                                                region.min_t = @floatFromInt(opening_event.clock - current_frame.begin_clock);
+                                                region.max_t = @floatFromInt(event.clock - current_frame.begin_clock);
+                                            }
+                                        } else {
+                                            // Started on some previous frame.
+                                        }
+
+                                        matching_block.next_free = self.first_free_block;
+                                        self.first_free_block = thread.first_open_block;
+                                        thread.first_open_block = matching_block.parent;
+                                    } else {
+                                        // No begin block.
+                                    }
+                                }
                             },
                             else => unreachable,
                         }
@@ -149,10 +218,42 @@ pub const DebugState = struct {
         // }
     }
 
-    fn getLaneFromThreadIndex(self: *DebugState, thread_index: u32) u32 {
+    fn getDebugThread(self: *DebugState, thread_id: u32) *DebugThread {
+        var result: ?*DebugThread = null;
+        var opt_thread: ?*DebugThread = self.first_thread;
+
+        while (opt_thread) |thread| : (opt_thread = thread.next) {
+            if (thread.id == thread_id) {
+                result = thread;
+                break;
+            }
+        }
+
+        if (result == null) {
+            result = self.collate_arena.pushStruct(DebugThread);
+
+            result.?.id = thread_id;
+            result.?.first_open_block = null;
+
+            result.?.lane_index = self.frame_bar_lane_count;
+            self.frame_bar_lane_count += 1;
+
+            result.?.next = self.first_thread;
+            self.first_thread = result.?;
+        }
+
+        return result.?;
+    }
+
+    fn addRegion(self: *DebugState, current_frame: *DebugFrame) *DebugFrameRegion {
         _ = self;
-        _ = thread_index;
-        return 0;
+
+        std.debug.assert(current_frame.region_count < shared.MAX_DEBUG_REGIONS_PER_FRAME);
+
+        const result: *DebugFrameRegion = &current_frame.regions[current_frame.region_count];
+        current_frame.region_count += 1;
+
+        return result;
     }
 };
 
@@ -231,6 +332,9 @@ pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
 
         debug_state.collate_arena.endTemporaryMemory(debug_state.collate_temp);
         debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
+
+        debug_state.first_thread = null;
+        debug_state.first_free_block = null;
 
         debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
     }
@@ -411,7 +515,7 @@ pub fn overlay(memory: *shared.Memory) void {
                 const chart_height: f32 = 300;
                 const chart_width: f32 = bar_spacing * @as(f32, @floatFromInt(debug_state.frame_count));
                 const chart_min_y: f32 = at_y - (chart_height + 80);
-                const scale: f32 = debug_state.frame_bar_scale;
+                const scale: f32 = chart_height * debug_state.frame_bar_scale;
 
                 const colors: [12]Color3 = .{
                     Color3.new(1, 0, 0),

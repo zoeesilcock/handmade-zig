@@ -219,6 +219,9 @@ pub fn debugFrameEndStub(_: *Memory) callconv(.C) *DebugTable {
 }
 
 const MAX_DEBUG_TRANSLATION_UNITS = 1;
+pub const MAX_DEBUG_THREAD_COUNT = 256;
+pub const MAX_DEBUG_REGIONS_PER_FRAME = 256 * 10;
+pub const MAX_DEBUG_EVENT_ARRAY_COUNT = 50;
 pub const TRANSLATION_UNIT_INDEX = 0;
 pub const MAX_DEBUG_EVENT_COUNT = 16 * 65536;
 pub const MAX_DEBUG_RECORD_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;
@@ -274,18 +277,16 @@ pub const DebugCycleCounters = enum(u16) {
     GetFirstAsset,
 };
 
-pub const DEBUG_EVENT_FRAME_COUNT = 50;
-
 pub const DebugTable = struct {
     current_event_array_index: u32 = 0,
     event_array_index_event_index: u64 = 0,
-    event_count: [DEBUG_EVENT_FRAME_COUNT]u32 = [1]u32{0} ** DEBUG_EVENT_FRAME_COUNT,
+    event_count: [MAX_DEBUG_EVENT_ARRAY_COUNT]u32 = [1]u32{0} ** MAX_DEBUG_EVENT_ARRAY_COUNT,
     records: [MAX_DEBUG_TRANSLATION_UNITS][MAX_DEBUG_RECORD_COUNT]DebugRecord = [MAX_DEBUG_TRANSLATION_UNITS][MAX_DEBUG_RECORD_COUNT]DebugRecord{
         [1]DebugRecord{DebugRecord{}} ** MAX_DEBUG_RECORD_COUNT,
     },
-    events: [DEBUG_EVENT_FRAME_COUNT][MAX_DEBUG_EVENT_COUNT]DebugEvent = [1][MAX_DEBUG_EVENT_COUNT]DebugEvent{
+    events: [MAX_DEBUG_EVENT_ARRAY_COUNT][MAX_DEBUG_EVENT_COUNT]DebugEvent = [1][MAX_DEBUG_EVENT_COUNT]DebugEvent{
         [1]DebugEvent{DebugEvent{}} ** MAX_DEBUG_EVENT_COUNT,
-    } ** DEBUG_EVENT_FRAME_COUNT,
+    } ** MAX_DEBUG_EVENT_ARRAY_COUNT,
 };
 
 pub var global_debug_table: *DebugTable = &debug.global_debug_table;
@@ -306,7 +307,7 @@ pub const DebugEventType = enum(u8) {
 
 pub const DebugEvent = extern struct {
     clock: u64 = 0,
-    thread_index: u16 = 0,
+    thread_id: u16 = 0,
     core_index: u16 = 0,
     debug_record_index: u16 = 0,
     translation_unit: u8 = 0,
@@ -321,7 +322,7 @@ fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType) void {
 
     var event: *DebugEvent = &global_debug_table.events[array_index][event_index];
     event.clock = rdtsc();
-    event.thread_index = @truncate(getThreadId());
+    event.thread_id = @truncate(getThreadId());
     event.core_index = 0;
     event.debug_record_index = debug_record_index;
     event.translation_unit = 0;
