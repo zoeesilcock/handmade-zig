@@ -1651,10 +1651,8 @@ pub export fn wWinMain(
                 var old_input = &game_input[1];
 
                 // Initialize timing.
-                var last_cycle_count: u64 = 0;
                 var last_counter: win32.LARGE_INTEGER = getWallClock();
                 var flip_wall_clock: win32.LARGE_INTEGER = getWallClock();
-                last_cycle_count = shared.rdtsc();
 
                 // Load the game code.
                 var game = loadGameCode(&source_dll_path, &temp_dll_path);
@@ -1662,9 +1660,6 @@ pub export fn wWinMain(
                 running = true;
 
                 while (running) {
-                    var full_block = shared.TimedBlock.frameMarker(@src(), .TotalPlatformLoop);
-                    defer full_block.end();
-
                     var timed_block = shared.TimedBlock.beginBlock(@src(), .ExecutableRefresh);
 
                     //
@@ -1922,9 +1917,6 @@ pub export fn wWinMain(
                     new_input = old_input;
                     old_input = temp;
 
-                    const end_counter = getWallClock();
-                    last_counter = end_counter;
-
                     //
                     //
                     //
@@ -1932,16 +1924,24 @@ pub export fn wWinMain(
                     timed_block.end();
 
                     if (INTERNAL) {
-                        // Calculate timing information.
-                        const end_cycle_count = shared.rdtsc();
-                        // const cycles_elapsed: u64 = @intCast(end_cycle_count - last_cycle_count);
-                        last_cycle_count = end_cycle_count;
+                        timed_block = shared.TimedBlock.beginBlock(@src(), .DebugCollation);
+                        defer timed_block.end();
 
                         if (game.debugFrameEnd) |frameEndFn| {
                             shared.global_debug_table = frameEndFn(&game_memory);
                         }
+
+                        local_stub_debug_table.event_array_index_event_index = 0;
                     }
-                    local_stub_debug_table.event_array_index_event_index = 0;
+
+                    const end_counter = getWallClock();
+                    var frame_marker = shared.TimedBlock.frameMarker(
+                        @src(),
+                        .TotalPlatformLoop,
+                        getSecondsElapsed(last_counter, end_counter),
+                    );
+                    defer frame_marker.end();
+                    last_counter = end_counter;
                 }
             } else {
                 win32.OutputDebugStringA("Failed to allocate memory.\n");

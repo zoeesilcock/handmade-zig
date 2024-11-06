@@ -6,14 +6,24 @@ const Backend = enum {
     Raylib,
 };
 
+const FORCE_RELEASE_MODE = false;
+const INTERNAL_DEFAULT = false;
+const PROFILE_DEFAULT = false;
+const BACKEND_DEFAULT = .Win32;
+
 pub fn build(b: *std.Build) void {
-    const backend = b.option(Backend, "backend", "win32 or raylib") orelse .Win32;
+    if (FORCE_RELEASE_MODE) {
+        b.release_mode = .fast;
+    }
+
+    const backend = b.option(Backend, "backend", "win32 or raylib") orelse BACKEND_DEFAULT;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     // Build options.
     const build_options = b.addOptions();
-    build_options.addOption(bool, "internal", b.option(bool, "internal", "use this for internal builds") orelse true);
+    build_options.addOption(bool, "internal", b.option(bool, "internal", "use this for internal builds") orelse INTERNAL_DEFAULT);
+    build_options.addOption(bool, "profile", b.option(bool, "profile", "enables profiling") orelse PROFILE_DEFAULT);
     build_options.addOption(Backend, "backend", backend);
 
     // Modules.

@@ -33,6 +33,7 @@ pub const DebugCounterState = struct {
 const DebugFrame = struct {
     begin_clock: u64,
     end_clock: u64,
+    wall_seconds_elapsed: f32,
     region_count: u32,
     regions: [*]DebugFrameRegion,
 };
@@ -102,6 +103,7 @@ pub const DebugState = struct {
                 if (event.event_type == .FrameMarker) {
                     if (opt_current_frame) |current_frame| {
                         current_frame.end_clock = event.clock;
+                        current_frame.wall_seconds_elapsed = event.data.seconds_elapsed;
 
                         if (false) {
                             const clock_range: f32 = @floatFromInt(current_frame.end_clock - current_frame.begin_clock);
@@ -123,11 +125,12 @@ pub const DebugState = struct {
                         current_frame.end_clock = 0;
                         current_frame.region_count = 0;
                         current_frame.regions = self.collate_arena.pushArray(shared.MAX_DEBUG_REGIONS_PER_FRAME, DebugFrameRegion);
+                        current_frame.wall_seconds_elapsed = 0;
                     }
                 } else {
                     if (opt_current_frame) |current_frame| {
                         const frame_index: u32 = self.frame_count - 1;
-                        const thread: *DebugThread = self.getDebugThread(event.thread_id);
+                        const thread: *DebugThread = self.getDebugThread(event.data.tc.thread_id);
                         const relative_clock: u64 = event.clock - current_frame.begin_clock;
 
                         _ = relative_clock;
@@ -154,16 +157,22 @@ pub const DebugState = struct {
                                 if (thread.first_open_block) |matching_block| {
                                     const opening_event: *DebugEvent = matching_block.opening_event;
 
-                                    if (opening_event.thread_id == event.thread_id and
+                                    if (opening_event.data.tc.thread_id == event.data.tc.thread_id and
                                         opening_event.debug_record_index == event.debug_record_index and
                                         opening_event.translation_unit == event.translation_unit)
                                     {
                                         if (matching_block.staring_frame_index == frame_index) {
                                             if (thread.first_open_block != null and thread.first_open_block.?.parent == null) {
-                                                var region: *DebugFrameRegion = self.addRegion(current_frame);
-                                                region.lane_index = thread.lane_index;
-                                                region.min_t = @floatFromInt(opening_event.clock - current_frame.begin_clock);
-                                                region.max_t = @floatFromInt(event.clock - current_frame.begin_clock);
+                                                const min_t: f32 = @floatFromInt(opening_event.clock - current_frame.begin_clock);
+                                                const max_t: f32 = @floatFromInt(event.clock - current_frame.begin_clock);
+                                                const threshold_t: f32 = 0.01;
+
+                                                if ((max_t - min_t) > threshold_t) {
+                                                    var region: *DebugFrameRegion = self.addRegion(current_frame);
+                                                    region.lane_index = thread.lane_index;
+                                                    region.min_t = min_t;
+                                                    region.max_t = max_t;
+                                                }
                                             }
                                         } else {
                                             // Started on some previous frame.
@@ -505,6 +514,14 @@ pub fn overlay(memory: *shared.Memory) void {
                             textLine(slice);
                         }
                     }
+                }
+
+                if (debug_state.frame_count > 0) {
+                    var buffer: [128]u8 = undefined;
+                    const slice = std.fmt.bufPrintZ(&buffer, "Last frame time: {d:0.2}ms", .{
+                        debug_state.frames[debug_state.frame_count - 1].wall_seconds_elapsed * 1000,
+                    }) catch "";
+                    textLine(slice);
                 }
 
                 at_y -= 300;
