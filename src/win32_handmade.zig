@@ -1856,30 +1856,32 @@ pub export fn wWinMain(
                     //
                     //
 
-                    timed_block = shared.TimedBlock.beginBlock(@src(), .FrameRateWait);
+                    if (false) {
+                        timed_block = shared.TimedBlock.beginBlock(@src(), .FrameRateWait);
 
-                    // Capture timing.
-                    const work_counter = getWallClock();
-                    const work_seconds_elapsed = getSecondsElapsed(last_counter, work_counter);
+                        // Capture timing.
+                        const work_counter = getWallClock();
+                        const work_seconds_elapsed = getSecondsElapsed(last_counter, work_counter);
 
-                    // Wait until we reach frame rate target.
-                    var seconds_elapsed_for_frame = work_seconds_elapsed;
-                    if (seconds_elapsed_for_frame < target_seconds_per_frame) {
-                        if (sleep_is_grannular) {
-                            const sleep_ms: u32 = @intFromFloat(1000.0 * (target_seconds_per_frame - seconds_elapsed_for_frame));
-                            if (sleep_ms > 0) {
-                                win32.Sleep(sleep_ms);
+                        // Wait until we reach frame rate target.
+                        var seconds_elapsed_for_frame = work_seconds_elapsed;
+                        if (seconds_elapsed_for_frame < target_seconds_per_frame) {
+                            if (sleep_is_grannular) {
+                                const sleep_ms: u32 = @intFromFloat(1000.0 * (target_seconds_per_frame - seconds_elapsed_for_frame));
+                                if (sleep_ms > 0) {
+                                    win32.Sleep(sleep_ms);
+                                }
                             }
+
+                            while (seconds_elapsed_for_frame < target_seconds_per_frame) {
+                                seconds_elapsed_for_frame = getSecondsElapsed(last_counter, getWallClock());
+                            }
+                        } else {
+                            // Target frame rate missed.
                         }
 
-                        while (seconds_elapsed_for_frame < target_seconds_per_frame) {
-                            seconds_elapsed_for_frame = getSecondsElapsed(last_counter, getWallClock());
-                        }
-                    } else {
-                        // Target frame rate missed.
+                        timed_block.end();
                     }
-
-                    timed_block.end();
 
                     //
                     //
