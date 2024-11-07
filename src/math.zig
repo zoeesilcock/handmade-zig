@@ -570,7 +570,7 @@ fn Rectangle(comptime dimension_count: comptime_int, comptime ScalarType: type) 
         }
 
         pub inline fn getCenter(self: *const Self) VectorType {
-            return self.min.plus(self.max).scale(0.5);
+            return self.min.plus(self.max).scaledTo(0.5);
         }
 
         pub inline fn getDimension(self: *const Self) VectorType {

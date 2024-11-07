@@ -429,6 +429,10 @@ pub const RenderGroup = extern struct {
         }
     }
 
+    pub fn pushRectangle2(self: *RenderGroup, rectangle: Rectangle2, z: f32, color: Color) void {
+        self.pushRectangle(rectangle.getDimension(), rectangle.toRectangle3(z, z).getCenter(), color);
+    }
+
     pub fn pushRectangleOutline(
         self: *RenderGroup,
         dimension: Vector2,

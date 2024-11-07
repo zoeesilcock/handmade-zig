@@ -39,6 +39,8 @@ const DebugFrame = struct {
 };
 
 const DebugFrameRegion = struct {
+    record: *DebugRecord,
+    cycle_count: u64,
     lane_index: u32,
     min_t: f32,
     max_t: f32,
@@ -60,6 +62,7 @@ const DebugThread = struct {
 
 pub const DebugState = struct {
     initialized: bool,
+    paused: bool,
 
     collate_arena: shared.MemoryArena,
     collate_temp: shared.TemporaryMemory,
@@ -98,12 +101,11 @@ pub const DebugState = struct {
                 const event: *DebugEvent = &global_debug_table.events[event_array_index][event_index];
                 const source: *DebugRecord = &global_debug_table.records[shared.TRANSLATION_UNIT_INDEX][event.debug_record_index];
 
-                _ = source;
-
                 if (event.event_type == .FrameMarker) {
                     if (opt_current_frame) |current_frame| {
                         current_frame.end_clock = event.clock;
                         current_frame.wall_seconds_elapsed = event.data.seconds_elapsed;
+                        self.frame_count += 1;
 
                         if (false) {
                             const clock_range: f32 = @floatFromInt(current_frame.end_clock - current_frame.begin_clock);
@@ -118,7 +120,6 @@ pub const DebugState = struct {
                     }
 
                     opt_current_frame = &self.frames[self.frame_count];
-                    self.frame_count += 1;
 
                     if (opt_current_frame) |current_frame| {
                         current_frame.begin_clock = event.clock;
@@ -129,7 +130,7 @@ pub const DebugState = struct {
                     }
                 } else {
                     if (opt_current_frame) |current_frame| {
-                        const frame_index: u32 = self.frame_count - 1;
+                        const frame_index: u32 = self.frame_count -% 1;
                         const thread: *DebugThread = self.getDebugThread(event.data.tc.thread_id);
                         const relative_clock: u64 = event.clock - current_frame.begin_clock;
 
@@ -169,6 +170,8 @@ pub const DebugState = struct {
 
                                                 if ((max_t - min_t) > threshold_t) {
                                                     var region: *DebugFrameRegion = self.addRegion(current_frame);
+                                                    region.record = source;
+                                                    region.cycle_count = event.clock - opening_event.clock;
                                                     region.lane_index = thread.lane_index;
                                                     region.min_t = min_t;
                                                     region.max_t = max_t;
@@ -310,6 +313,8 @@ var left_edge: f32 = 0;
 var at_y: f32 = 0;
 var font_scale: f32 = 0;
 var font_id: file_formats.FontId = undefined;
+var global_width: f32 = 0;
+var global_height: f32 = 0;
 
 pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
     global_debug_table.current_event_array_index += 1;
@@ -339,13 +344,15 @@ pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
             debug_state.initialized = true;
         }
 
-        debug_state.collate_arena.endTemporaryMemory(debug_state.collate_temp);
-        debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
+        if (!debug_state.paused) {
+            debug_state.collate_arena.endTemporaryMemory(debug_state.collate_temp);
+            debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
 
-        debug_state.first_thread = null;
-        debug_state.first_free_block = null;
+            debug_state.first_thread = null;
+            debug_state.first_free_block = null;
 
-        debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
+            debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
+        }
     }
 
     return &global_debug_table;
@@ -354,6 +361,9 @@ pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
 pub fn textReset(assets: *asset.Assets, width: i32, height: i32) void {
     var timed_block = TimedBlock.beginFunction(@src(), .DebugTextReset);
     defer timed_block.end();
+
+    global_width = @floatFromInt(width);
+    global_height = @floatFromInt(height);
 
     var match_vector = asset.AssetVector{};
     var weight_vector = asset.AssetVector{};
@@ -451,10 +461,15 @@ pub fn textLine(text: [:0]const u8) void {
     }
 }
 
-pub fn overlay(memory: *shared.Memory) void {
+pub fn overlay(memory: *shared.Memory, input: *const shared.GameInput) void {
     if (memory.debug_storage) |debug_storage| {
         if (render_group) |group| {
             const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
+            const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
+
+            if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].wasPressed()) {
+                debug_state.paused = !debug_state.paused;
+            }
 
             if (group.pushFont(font_id)) |_| {
                 const font_info = group.assets.getFontInfo(font_id);
@@ -524,8 +539,6 @@ pub fn overlay(memory: *shared.Memory) void {
                     textLine(slice);
                 }
 
-                at_y -= 300;
-
                 const lane_width: f32 = 8;
                 const lane_count: u32 = debug_state.frame_bar_lane_count;
                 const bar_width: f32 = lane_width * @as(f32, @floatFromInt(lane_count));
@@ -533,7 +546,7 @@ pub fn overlay(memory: *shared.Memory) void {
                 const chart_left: f32 = left_edge + 10;
                 const chart_height: f32 = 300;
                 const chart_width: f32 = bar_spacing * @as(f32, @floatFromInt(debug_state.frame_count));
-                const chart_min_y: f32 = at_y - (chart_height + 80);
+                const chart_min_y: f32 = -0.5 * global_height + 10;
                 const scale: f32 = chart_height * debug_state.frame_bar_scale;
 
                 const colors: [12]Color3 = .{
@@ -570,15 +583,27 @@ pub fn overlay(memory: *shared.Memory) void {
                         const color = colors[region_index % colors.len];
                         const this_min_y: f32 = stack_y + scale * region.min_t;
                         const this_max_y: f32 = stack_y + scale * region.max_t;
-                        group.pushRectangle(
-                            Vector2.new(lane_width, this_max_y - this_min_y),
-                            Vector3.new(
-                                stack_x + 0.5 * lane_width + lane_width * @as(f32, @floatFromInt(region.lane_index)),
-                                0.5 * (this_min_y + this_max_y),
-                                0,
-                            ),
-                            color.toColor(1),
+                        const lane: f32 = @as(f32, @floatFromInt(region.lane_index));
+
+                        const region_rect = math.Rectangle2.new(
+                            stack_x + lane_width * lane, this_min_y,
+                            stack_x + lane_width * (lane + 1), this_max_y,
                         );
+
+                        group.pushRectangle2(region_rect, 0, color.toColor(1));
+
+                        if (mouse_position.isInRectangle(region_rect)) {
+                            const record: *DebugRecord = region.record;
+
+                            var buffer: [128]u8 = undefined;
+                            const slice = std.fmt.bufPrintZ(&buffer, "{s:32}: {d:10}cy [{s}({d})]", .{
+                                record.block_name,
+                                region.cycle_count,
+                                record.file_name,
+                                record.line_number,
+                            }) catch "";
+                            textLine(slice);
+                        }
                     }
                 }
 

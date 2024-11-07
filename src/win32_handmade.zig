@@ -458,34 +458,34 @@ fn loadXInput() void {
     }
 }
 
-fn processMouseInput(new_input: *shared.GameInput, window: win32.HWND) void {
+fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput, window: win32.HWND) void {
     var mouse_point: win32.POINT = undefined;
     if (win32.GetCursorPos(&mouse_point) == win32.TRUE) {
         _ = win32.ScreenToClient(window, &mouse_point);
-        new_input.mouse_x = mouse_point.x;
-        new_input.mouse_y = mouse_point.y;
+
+        const window_dimension = getWindowDimension(window);
+        new_input.mouse_x = (-0.5 * @as(f32, @floatFromInt(window_dimension.width)) + 0.5) + @as(f32, @floatFromInt(mouse_point.x));
+        new_input.mouse_y = (0.5 * @as(f32, @floatFromInt(window_dimension.height)) - 0.5) - @as(f32, @floatFromInt(mouse_point.y));
     }
 
-    processKeyboardInputMessage(
-        &new_input.mouse_buttons[0],
-        win32.GetKeyState(@intFromEnum(win32.VK_LBUTTON)) & (1 << 7) != 0,
-    );
-    processKeyboardInputMessage(
-        &new_input.mouse_buttons[1],
-        win32.GetKeyState(@intFromEnum(win32.VK_MBUTTON)) & (1 << 7) != 0,
-    );
-    processKeyboardInputMessage(
-        &new_input.mouse_buttons[2],
-        win32.GetKeyState(@intFromEnum(win32.VK_RBUTTON)) & (1 << 7) != 0,
-    );
-    processKeyboardInputMessage(
-        &new_input.mouse_buttons[3],
-        win32.GetKeyState(@intFromEnum(win32.VK_XBUTTON1)) & (1 << 7) != 0,
-    );
-    processKeyboardInputMessage(
-        &new_input.mouse_buttons[4],
-        win32.GetKeyState(@intFromEnum(win32.VK_XBUTTON2)) & (1 << 7) != 0,
-    );
+    const win_button_ids = [_]win32.VIRTUAL_KEY{
+        win32.VK_LBUTTON,
+        win32.VK_MBUTTON,
+        win32.VK_RBUTTON,
+        win32.VK_XBUTTON1,
+        win32.VK_XBUTTON2,
+    };
+
+    var button_index: u32 = 0;
+    while (button_index < old_input.mouse_buttons.len) : (button_index += 1) {
+        new_input.mouse_buttons[button_index] = old_input.mouse_buttons[button_index];
+        new_input.mouse_buttons[button_index].half_transitions = 0;
+
+        processKeyboardInputMessage(
+            &new_input.mouse_buttons[button_index],
+            win32.GetKeyState(@intFromEnum(win_button_ids[button_index])) & (1 << 7) != 0,
+        );
+    }
 }
 
 fn processXInput(old_input: *shared.GameInput, new_input: *shared.GameInput) void {
@@ -1712,7 +1712,7 @@ pub export fn wWinMain(
 
                     // Prepare input to game.
                     var game_buffer = getGameBuffer();
-                    processMouseInput(new_input, window_handle);
+                    processMouseInput(old_input, new_input, window_handle);
                     processXInput(old_input, new_input);
 
                     timed_block.end();

@@ -248,7 +248,7 @@ pub fn debugFrameEndStub(_: *Memory) callconv(.C) *DebugTable {
 const MAX_DEBUG_TRANSLATION_UNITS = 1;
 pub const MAX_DEBUG_THREAD_COUNT = 256;
 pub const MAX_DEBUG_REGIONS_PER_FRAME = 4096;
-pub const MAX_DEBUG_EVENT_ARRAY_COUNT = 50;
+pub const MAX_DEBUG_EVENT_ARRAY_COUNT = 8;
 pub const TRANSLATION_UNIT_INDEX = 0;
 pub const MAX_DEBUG_EVENT_COUNT = 16 * 65536;
 pub const MAX_DEBUG_RECORD_COUNT = @typeInfo(DebugCycleCounters).Enum.fields.len;
@@ -466,10 +466,23 @@ pub const SoundOutputBuffer = extern struct {
     sample_count: u32,
 };
 
+pub const MOUSE_BUTTON_COUNT = @typeInfo(GameInputMouseButton).Enum.fields.len;
+pub const GameInputMouseButton = enum(u8) {
+    Left,
+    Middle,
+    Right,
+    Extended0,
+    Extended1,
+
+    pub fn toInt(self: GameInputMouseButton) u32 {
+        return @intFromEnum(self);
+    }
+};
+
 pub const GameInput = extern struct {
-    mouse_buttons: [5]ControllerButtonState = [1]ControllerButtonState{ControllerButtonState{}} ** 5,
-    mouse_x: i32 = 0,
-    mouse_y: i32 = 0,
+    mouse_buttons: [MOUSE_BUTTON_COUNT]ControllerButtonState = [1]ControllerButtonState{ControllerButtonState{}} ** MOUSE_BUTTON_COUNT,
+    mouse_x: f32 = 0,
+    mouse_y: f32 = 0,
 
     executable_reloaded: bool = false,
     frame_delta_time: f32 = 0,
@@ -522,6 +535,10 @@ pub const ControllerInput = extern struct {
 pub const ControllerButtonState = extern struct {
     ended_down: bool = false,
     half_transitions: u8 = 0,
+
+    pub fn wasPressed(self: ControllerButtonState) bool {
+        return self.half_transitions > 1 or (self.half_transitions == 1 and self.ended_down);
+    }
 };
 
 // Memory.
