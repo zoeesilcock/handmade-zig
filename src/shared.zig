@@ -265,8 +265,8 @@ pub const DebugCycleCounters = enum(u16) {
 
     GameUpdateAndRender,
     FillGroundChunk,
-    DebugOverlay,
-    DebugTextReset,
+    DebugStart,
+    DebugEnd,
     BeginRender,
     PushRenderElement,
     DrawRectangle,

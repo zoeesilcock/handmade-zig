@@ -14,8 +14,10 @@ const Vector3 = math.Vector3;
 const Vector2 = math.Vector2;
 const Color = math.Color;
 const Color3 = math.Color3;
+const Rectangle2 = math.Rectangle2;
 
 pub var global_debug_table: shared.DebugTable = shared.DebugTable{};
+pub var debug_global_memory: ?*shared.Memory = null;
 
 const COUNTER_COUNT = 512;
 
@@ -62,71 +64,57 @@ const DebugThread = struct {
     next: ?*DebugThread,
 };
 
-pub var render_group: ?*render.RenderGroup = null;
-var left_edge: f32 = 0;
-var at_y: f32 = 0;
-var font_scale: f32 = 0;
-var font_id: file_formats.FontId = undefined;
-var global_width: f32 = 0;
-var global_height: f32 = 0;
+pub const DebugStatistic = struct {
+    min: f64,
+    max: f64,
+    average: f64,
+    count: u32,
 
-pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
-    global_debug_table.current_event_array_index += 1;
-    if (global_debug_table.current_event_array_index >= global_debug_table.events.len) {
-        global_debug_table.current_event_array_index = 0;
+    pub fn begin() DebugStatistic {
+        return DebugStatistic{
+            .min = std.math.floatMax(f64),
+            .max = -std.math.floatMax(f64),
+            .average = 0,
+            .count = 0,
+        };
     }
 
-    const next_event_array_index: u64 = @as(u64, @intCast(global_debug_table.current_event_array_index)) << 32;
-    const event_array_index_event_index: u64 =
-        @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Xchg, next_event_array_index, .seq_cst);
+    pub fn accumulate(self: *DebugStatistic, value: f64) void {
+        self.count += 1;
 
-    const event_array_index: u32 = @intCast(event_array_index_event_index >> 32);
-    const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
-    global_debug_table.event_count[event_array_index] = event_count;
-
-    if (memory.debug_storage) |debug_storage| {
-        var debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
-
-        if (!debug_state.initialized) {
-            debug_state.collate_arena.initialize(
-                memory.debug_storage_size - @sizeOf(DebugState),
-                memory.debug_storage.? + @sizeOf(DebugState),
-            );
-
-            debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
-
-            debug_state.paused = false;
-            debug_state.scope_to_record = null;
-            debug_state.initialized = true;
-
-            debug_state.restartCollation(global_debug_table.current_event_array_index);
+        if (self.min > value) {
+            self.min = value;
         }
 
-        if (!debug_state.paused) {
-            if (debug_state.frame_count >= shared.MAX_DEBUG_EVENT_ARRAY_COUNT * 4) {
-                debug_state.restartCollation(global_debug_table.current_event_array_index);
-            }
+        if (self.max < value) {
+            self.max = value;
+        }
 
-            debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
+        self.average += value;
+    }
+
+    pub fn end(self: *DebugStatistic) void {
+        if (self.count != 0) {
+            self.average /= @as(f32, @floatFromInt(self.count));
+        } else {
+            self.min = 0;
+            self.max = 0;
         }
     }
-
-    return &global_debug_table;
-}
-
-fn getRecordFrom(opt_block: ?*OpenDebugBlock) ?*DebugRecord {
-    var result: ?*DebugRecord = null;
-
-    if (opt_block) |block| {
-        result = block.source;
-    }
-
-    return result;
-}
+};
 
 pub const DebugState = struct {
     initialized: bool,
-    paused: bool,
+
+    high_priority_queue: *shared.PlatformWorkQueue,
+    debug_arena: shared.MemoryArena,
+    render_group: ?*render.RenderGroup = null,
+    left_edge: f32 = 0,
+    at_y: f32 = 0,
+    font_scale: f32 = 0,
+    font_id: file_formats.FontId = undefined,
+    global_width: f32 = 0,
+    global_height: f32 = 0,
 
     scope_to_record: ?*DebugRecord,
 
@@ -138,10 +126,34 @@ pub const DebugState = struct {
     frame_bar_lane_count: u32,
     frame_bar_scale: f32,
     frame_count: u32,
+    paused: bool,
+
+    profile_rect: Rectangle2,
 
     frames: [*]DebugFrame,
     first_thread: ?*DebugThread,
     first_free_block: ?*OpenDebugBlock,
+
+    pub fn get() ?*DebugState {
+        var result: ?*DebugState = null;
+
+        if (debug_global_memory) |memory| {
+            result = @ptrCast(@alignCast(memory.debug_storage));
+        }
+
+        return result;
+    }
+
+    pub fn getFrom(memory: *shared.Memory) ?*DebugState {
+        var result: ?*DebugState = null;
+
+        if (memory.debug_storage) |debug_storage| {
+            result = @ptrCast(@alignCast(debug_storage));
+            std.debug.assert(result.?.initialized);
+        }
+
+        return result;
+    }
 
     fn restartCollation(self: *DebugState, invalid_event_array_index: u32) void {
         self.collate_arena.endTemporaryMemory(self.collate_temp);
@@ -316,160 +328,69 @@ pub const DebugState = struct {
     }
 };
 
-pub const DebugStatistic = struct {
-    min: f64,
-    max: f64,
-    average: f64,
-    count: u32,
-
-    pub fn begin() DebugStatistic {
-        return DebugStatistic{
-            .min = std.math.floatMax(f64),
-            .max = -std.math.floatMax(f64),
-            .average = 0,
-            .count = 0,
-        };
-    }
-
-    pub fn accumulate(self: *DebugStatistic, value: f64) void {
-        self.count += 1;
-
-        if (self.min > value) {
-            self.min = value;
-        }
-
-        if (self.max < value) {
-            self.max = value;
-        }
-
-        self.average += value;
-    }
-
-    pub fn end(self: *DebugStatistic) void {
-        if (self.count != 0) {
-            self.average /= @as(f32, @floatFromInt(self.count));
-        } else {
-            self.min = 0;
-            self.max = 0;
-        }
-    }
-};
-
-pub fn textReset(assets: *asset.Assets, width: i32, height: i32) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .DebugTextReset);
+pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
+    var timed_block = TimedBlock.beginFunction(@src(), .DebugStart);
     defer timed_block.end();
 
-    global_width = @floatFromInt(width);
-    global_height = @floatFromInt(height);
+    if (debug_global_memory) |memory| {
+        const opt_debug_state: ?*DebugState = @ptrCast(@alignCast(memory.debug_storage));
 
-    var match_vector = asset.AssetVector{};
-    var weight_vector = asset.AssetVector{};
+        if (opt_debug_state) |debug_state| {
+            if (!debug_state.initialized) {
+                debug_state.high_priority_queue = memory.high_priority_queue;
 
-    font_scale = 1;
-    at_y = 0;
-    left_edge = -0.5 * @as(f32, @floatFromInt(width));
+                debug_state.debug_arena.initialize(
+                    memory.debug_storage_size - @sizeOf(DebugState),
+                    memory.debug_storage.? + @sizeOf(DebugState),
+                );
 
-    if (render_group) |group| {
-        group.orthographicMode(width, height, 1);
-    }
+                debug_state.render_group =
+                    render.RenderGroup.allocate(assets, &debug_state.debug_arena, shared.megabytes(16), false);
 
-    match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
-    weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
-    if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
-        font_id = id;
+                debug_state.paused = false;
+                debug_state.scope_to_record = null;
+                debug_state.initialized = true;
 
-        const font_info = assets.getFontInfo(font_id);
-        at_y = 0.5 * @as(f32, @floatFromInt(height)) - font_scale * font_info.getStartingBaselineY();
-    }
-}
+                debug_state.debug_arena.makeSubArena(&debug_state.collate_arena, shared.megabytes(32), 4);
+                debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
 
-pub fn textOutAt(text: [:0]const u8, position: Vector2) void {
-    if (render_group) |group| {
-        var match_vector = asset.AssetVector{};
+                debug_state.restartCollation(0);
+            }
 
-        if (group.pushFont(font_id)) |font| {
-            const font_info = group.assets.getFontInfo(font_id);
-            var prev_code_point: u32 = 0;
-            var char_scale = font_scale;
-            var color = Color.white();
-            var x: f32 = position.x();
+            debug_state.render_group.?.beginRender();
 
-            var at: [*]const u8 = @ptrCast(text);
-            while (at[0] != 0) {
-                if (at[0] == '\\' and
-                    at[1] == '#' and
-                    at[2] != 0 and
-                    at[3] != 0 and
-                    at[4] != 0)
-                {
-                    const c_scale: f32 = 1.0 / 9.0;
-                    color = Color.new(
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
-                        1,
-                    );
+            debug_state.global_width = @floatFromInt(width);
+            debug_state.global_height = @floatFromInt(height);
 
-                    at += 5;
-                } else if (at[0] == '\\' and
-                    at[1] == '^' and
-                    at[2] != 0)
-                {
-                    const c_scale: f32 = 1.0 / 9.0;
-                    char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
-                    at += 3;
-                } else {
-                    var code_point: u32 = at[0];
+            var match_vector = asset.AssetVector{};
+            var weight_vector = asset.AssetVector{};
 
-                    if (at[0] == '\\' and
-                        (isHex(at[1])) and
-                        (isHex(at[2])) and
-                        (isHex(at[3])) and
-                        (isHex(at[4])))
-                    {
-                        code_point = ((getHex(at[1]) << 12) |
-                            (getHex(at[2]) << 8) |
-                            (getHex(at[3]) << 4) |
-                            (getHex(at[4]) << 0));
+            debug_state.font_scale = 1;
+            debug_state.at_y = 0;
+            debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
 
-                        at += 4;
-                    }
+            if (debug_state.render_group) |group| {
+                group.orthographicMode(width, height, 1);
+            }
 
-                    const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(font_info, prev_code_point, code_point);
-                    x += advance_x;
+            match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
+            weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
+            if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
+                debug_state.font_id = id;
 
-                    if (code_point != ' ') {
-                        match_vector.e[@intFromEnum(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
-                        if (font.getBitmapForGlyph(font_info, group.assets, code_point)) |bitmap_id| {
-                            const info = group.assets.getBitmapInfo(bitmap_id);
-                            const char_height = char_scale * @as(f32, @floatFromInt(info.dim[1]));
-                            group.pushBitmapId(bitmap_id, char_height, Vector3.new(x, position.y(), 0), color);
-                        }
-                    }
-
-                    prev_code_point = code_point;
-
-                    at += 1;
-                }
+                const font_info = assets.getFontInfo(debug_state.font_id);
+                debug_state.at_y = 0.5 * @as(f32, @floatFromInt(height)) - debug_state.font_scale * font_info.getStartingBaselineY();
             }
         }
     }
 }
 
-pub fn textLine(text: [:0]const u8) void {
-    if (render_group) |group| {
-        if (group.pushFont(font_id)) |_| {
-            const font_info = group.assets.getFontInfo(font_id);
-            textOutAt(text, Vector2.new(left_edge, at_y));
-            at_y -= font_info.getLineAdvance() * font_scale;
-        }
-    }
-}
+pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
+    var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugEnd);
+    defer overlay_timed_block.end();
 
-pub fn overlay(memory: *shared.Memory, input: *const shared.GameInput) void {
-    if (memory.debug_storage) |debug_storage| {
-        if (render_group) |group| {
-            const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
+    if (DebugState.get()) |debug_state| {
+        if (debug_state.render_group) |group| {
             const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
             var hot_record: ?*DebugRecord = null;
 
@@ -477,8 +398,8 @@ pub fn overlay(memory: *shared.Memory, input: *const shared.GameInput) void {
                 debug_state.paused = !debug_state.paused;
             }
 
-            if (group.pushFont(font_id)) |_| {
-                const font_info = group.assets.getFontInfo(font_id);
+            if (group.pushFont(debug_state.font_id)) |_| {
+                const font_info = group.assets.getFontInfo(debug_state.font_id);
 
                 if (false) {
                     var counter_index: u32 = 0;
@@ -506,8 +427,8 @@ pub fn overlay(memory: *shared.Memory, input: *const shared.GameInput) void {
                             if (cycle_count.max > 0) {
                                 const bar_width: f32 = 4;
                                 const chart_left: f32 = 0;
-                                const chart_min_y: f32 = at_y;
-                                const char_height: f32 = font_info.ascender_height * font_scale;
+                                const chart_min_y: f32 = debug_state.at_y;
+                                const char_height: f32 = font_info.ascender_height * debug_state.font_scale;
                                 const scale: f32 = 1 / @as(f32, @floatCast(cycle_count.max));
                                 for (counter.snapshots, 0..) |snapshot, snapshot_index| {
                                     const this_proportion: f32 = scale * @as(f32, @floatFromInt(snapshot.cycle_count));
@@ -545,14 +466,36 @@ pub fn overlay(memory: *shared.Memory, input: *const shared.GameInput) void {
                     textLine(slice);
                 }
 
-                const lane_height: f32 = 20;
+                group.orthographicMode(
+                    @intFromFloat(debug_state.global_width),
+                    @intFromFloat(debug_state.global_height),
+                    1,
+                );
+
+                debug_state.profile_rect = Rectangle2.new(50, 50, 200, 200);
+                group.pushRectangle2(debug_state.profile_rect, 0, Color.new(0, 0, 0, 0.25));
+
+
+                const bar_spacing: f32 = 4;
+                var lane_height: f32 = 0;
                 const lane_count: u32 = debug_state.frame_bar_lane_count;
+
+                var max_frame: u32 = debug_state.frame_count;
+                if (max_frame > 10) {
+                    max_frame = 10;
+                }
+
+                if (lane_count > 0 and max_frame > 0) {
+                    const pixels_per_frame: f32 = debug_state.profile_rect.getDimension().y() / @as(f32, @floatFromInt(max_frame));
+                    lane_height = (pixels_per_frame - bar_spacing) / @as(f32, @floatFromInt(lane_count));
+                }
+
                 const bar_height: f32 = lane_height * @as(f32, @floatFromInt(lane_count));
-                const bar_spacing: f32 = bar_height + 4;
-                const chart_left: f32 = left_edge + 10;
-                // const chart_height: f32 = bar_spacing * @as(f32, @floatFromInt(debug_state.frame_count));
-                const chart_width: f32 = 1000;
-                const chart_top: f32 = 0.5 * global_height - 10;
+                const bars_plus_spacing: f32 = bar_height + bar_spacing;
+                const chart_left: f32 = debug_state.profile_rect.min.x();
+                // const chart_height: f32 = bars_plus_spacing * @as(f32, @floatFromInt(max_frame));
+                const chart_width: f32 = debug_state.profile_rect.getDimension().x();
+                const chart_top: f32 = debug_state.profile_rect.max.y();
                 const scale: f32 = chart_width * debug_state.frame_bar_scale;
 
                 const colors: [12]Color3 = .{
@@ -570,17 +513,12 @@ pub fn overlay(memory: *shared.Memory, input: *const shared.GameInput) void {
                     Color3.new(0, 0.5, 1),
                 };
 
-                var max_frame: u32 = debug_state.frame_count;
-                if (max_frame > 10) {
-                    max_frame = 10;
-                }
-
                 var frame_index: u32 = 0;
                 while (frame_index < max_frame) : (frame_index += 1) {
                     const frame: *DebugFrame = &debug_state.frames[debug_state.frame_count - (frame_index + 1)];
 
                     const stack_x: f32 = chart_left;
-                    const stack_y: f32 = chart_top - bar_spacing * @as(f32, (@floatFromInt(frame_index)));
+                    const stack_y: f32 = chart_top - bars_plus_spacing * @as(f32, (@floatFromInt(frame_index)));
 
                     var region_index: u32 = 0;
                     while (region_index < frame.region_count) : (region_index += 1) {
@@ -639,6 +577,96 @@ pub fn overlay(memory: *shared.Memory, input: *const shared.GameInput) void {
 
                 debug_state.refreshCollation();
             }
+
+            group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer);
+            group.endRender();
+        }
+    }
+}
+
+pub fn textOutAt(text: [:0]const u8, position: Vector2) void {
+    if (DebugState.get()) |debug_state| {
+        if (debug_state.render_group) |group| {
+            var match_vector = asset.AssetVector{};
+
+            if (group.pushFont(debug_state.font_id)) |font| {
+                const font_info = group.assets.getFontInfo(debug_state.font_id);
+                var prev_code_point: u32 = 0;
+                var char_scale = debug_state.font_scale;
+                var color = Color.white();
+                var x: f32 = position.x();
+
+                var at: [*]const u8 = @ptrCast(text);
+                while (at[0] != 0) {
+                    if (at[0] == '\\' and
+                        at[1] == '#' and
+                        at[2] != 0 and
+                        at[3] != 0 and
+                        at[4] != 0)
+                    {
+                        const c_scale: f32 = 1.0 / 9.0;
+                        color = Color.new(
+                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
+                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
+                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
+                            1,
+                        );
+
+                        at += 5;
+                    } else if (at[0] == '\\' and
+                        at[1] == '^' and
+                        at[2] != 0)
+                    {
+                        const c_scale: f32 = 1.0 / 9.0;
+                        char_scale = debug_state.font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
+                        at += 3;
+                    } else {
+                        var code_point: u32 = at[0];
+
+                        if (at[0] == '\\' and
+                            (isHex(at[1])) and
+                            (isHex(at[2])) and
+                            (isHex(at[3])) and
+                            (isHex(at[4])))
+                        {
+                            code_point = ((getHex(at[1]) << 12) |
+                                (getHex(at[2]) << 8) |
+                                (getHex(at[3]) << 4) |
+                                (getHex(at[4]) << 0));
+
+                            at += 4;
+                        }
+
+                        const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(font_info, prev_code_point, code_point);
+                        x += advance_x;
+
+                        if (code_point != ' ') {
+                            match_vector.e[@intFromEnum(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
+                            if (font.getBitmapForGlyph(font_info, group.assets, code_point)) |bitmap_id| {
+                                const info = group.assets.getBitmapInfo(bitmap_id);
+                                const char_height = char_scale * @as(f32, @floatFromInt(info.dim[1]));
+                                group.pushBitmapId(bitmap_id, char_height, Vector3.new(x, position.y(), 0), color);
+                            }
+                        }
+
+                        prev_code_point = code_point;
+
+                        at += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn textLine(text: [:0]const u8) void {
+    if (DebugState.get()) |debug_state| {
+        if (debug_state.render_group) |group| {
+            if (group.pushFont(debug_state.font_id)) |_| {
+                const font_info = group.assets.getFontInfo(debug_state.font_id);
+                textOutAt(text, Vector2.new(debug_state.left_edge, debug_state.at_y));
+                debug_state.at_y -= font_info.getLineAdvance() * debug_state.font_scale;
+            }
         }
     }
 }
@@ -657,4 +685,41 @@ fn getHex(char: u8) u32 {
     }
 
     return result;
+}
+
+fn getRecordFrom(opt_block: ?*OpenDebugBlock) ?*DebugRecord {
+    var result: ?*DebugRecord = null;
+
+    if (opt_block) |block| {
+        result = block.source;
+    }
+
+    return result;
+}
+
+pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
+    global_debug_table.current_event_array_index += 1;
+    if (global_debug_table.current_event_array_index >= global_debug_table.events.len) {
+        global_debug_table.current_event_array_index = 0;
+    }
+
+    const next_event_array_index: u64 = @as(u64, @intCast(global_debug_table.current_event_array_index)) << 32;
+    const event_array_index_event_index: u64 =
+        @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Xchg, next_event_array_index, .seq_cst);
+
+    const event_array_index: u32 = @intCast(event_array_index_event_index >> 32);
+    const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
+    global_debug_table.event_count[event_array_index] = event_count;
+
+    if (DebugState.getFrom(memory)) |debug_state| {
+        if (!debug_state.paused) {
+            if (debug_state.frame_count >= shared.MAX_DEBUG_EVENT_ARRAY_COUNT * 4) {
+                debug_state.restartCollation(global_debug_table.current_event_array_index);
+            }
+
+            debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
+        }
+    }
+
+    return &global_debug_table;
 }

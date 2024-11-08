@@ -117,6 +117,10 @@ pub export fn updateAndRender(
 ) void {
     shared.platform = platform;
 
+    if (INTERNAL) {
+        debug.debug_global_memory = memory;
+    }
+
     const timed_block = shared.TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
     defer timed_block.end();
 
@@ -336,8 +340,6 @@ pub export fn updateAndRender(
             transient_state,
         );
 
-        debug.render_group = RenderGroup.allocate(transient_state.assets, &transient_state.arena, shared.megabytes(16), false);
-
         // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
         //     state.music = music;
         // }
@@ -394,10 +396,7 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
-    if (debug.render_group) |group| {
-        group.beginRender();
-        debug.textReset(transient_state.assets, buffer.width, buffer.height);
-    }
+    debug.start(transient_state.assets, buffer.width, buffer.height);
 
     if (false) {
         if (input.executable_reloaded) {
@@ -1141,14 +1140,7 @@ pub export fn updateAndRender(
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
 
-    if (debug.render_group) |group| {
-        var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugOverlay);
-        defer overlay_timed_block.end();
-
-        debug.overlay(memory, &input);
-        group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
-        group.endRender();
-    }
+    debug.end(&input, draw_buffer);
 }
 
 pub export fn debugFrameEnd(memory: *shared.Memory) *shared.DebugTable {
