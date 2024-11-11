@@ -74,6 +74,9 @@ fn Vector(
 
                             return result;
                         }
+                        pub inline fn arm2(angle: f32) Self {
+                            return Self.new(intrinsics.cos(angle), intrinsics.sin(angle));
+                        }
                     },
                     else => {
                         unreachable;
@@ -461,6 +464,22 @@ fn Rectangle(comptime dimension_count: comptime_int, comptime ScalarType: type) 
 
         const Self = @This();
 
+        pub usingnamespace switch (ScalarType) {
+            inline u32, i32 => struct {
+                pub inline fn invertedInfinity() Self {
+                    const scalar_max = std.math.maxInt(ScalarType);
+                    return Self.new(scalar_max, scalar_max, -scalar_max, -scalar_max);
+                }
+            },
+            inline f32 => struct {
+                pub inline fn invertedInfinity() Self {
+                    const scalar_max = std.math.floatMax(ScalarType);
+                    return Self.new(scalar_max, scalar_max, -scalar_max, -scalar_max);
+                }
+            },
+            else => {}
+        };
+
         pub usingnamespace switch (Self.dimensions) {
             inline 2 => struct {
                 pub inline fn new(min_x: ScalarType, min_y: ScalarType, max_x: ScalarType, max_y: ScalarType) Self {
@@ -556,11 +575,6 @@ fn Rectangle(comptime dimension_count: comptime_int, comptime ScalarType: type) 
             return fromCenterHalfDimension(center, dimension.scaledTo(0.5));
         }
 
-        pub inline fn invertedInfinity() Self {
-            const scalar_max = std.math.maxInt(ScalarType);
-            return Self.new(scalar_max, scalar_max, -scalar_max, -scalar_max);
-        }
-
         pub inline fn getMinCorner(self: *const Self) VectorType {
             return self.min;
         }
@@ -597,10 +611,10 @@ fn Rectangle(comptime dimension_count: comptime_int, comptime ScalarType: type) 
             };
         }
 
-        pub inline fn offsetBy(self: *Self, offset: VectorType) Self {
+        pub inline fn offsetBy(self: *const Self, offset: VectorType) Self {
             return Self{
-                .min = self.min.add(offset),
-                .max = self.max.add(offset),
+                .min = self.min.plus(offset),
+                .max = self.max.plus(offset),
             };
         }
 

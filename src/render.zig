@@ -42,6 +42,13 @@ const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
 const Vec4i = math.Vec4i;
 
+pub const UsedBitmapDim = struct {
+    basis: RenderEntityBasisResult = undefined,
+    size: Vector2 = undefined,
+    alignment: Vector2 = undefined,
+    position: Vector3 = undefined,
+};
+
 pub const EnvironmentMap = extern struct {
     lod: [4]LoadedBitmap,
     z_position: f32,
@@ -343,6 +350,22 @@ pub const RenderGroup = extern struct {
         }
     }
 
+    pub fn getBitmapDim(
+        self: *RenderGroup,
+        bitmap: *const LoadedBitmap,
+        height: f32,
+        offset: Vector3,
+    ) UsedBitmapDim {
+        var dim = UsedBitmapDim{};
+
+        dim.size = Vector2.new(height * bitmap.width_over_height, height);
+        dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size);
+        dim.position = offset.minus(dim.alignment.toVector3(0));
+        dim.basis = getRenderEntityBasisPosition(&self.transform, dim.position);
+
+        return dim;
+    }
+
     pub fn pushBitmap(
         self: *RenderGroup,
         bitmap: *const LoadedBitmap,
@@ -350,16 +373,13 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
     ) void {
-        const size = Vector2.new(height * bitmap.width_over_height, height);
-        const alignment = bitmap.alignment_percentage.hadamardProduct(size);
-        const position = offset.minus(alignment.toVector3(0));
+        const dim = self.getBitmapDim(bitmap, height, offset);
 
-        const basis = getRenderEntityBasisPosition(&self.transform, position);
-        if (basis.valid) {
+        if (dim.basis.valid) {
             if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
                 entry.bitmap = bitmap;
-                entry.position = basis.position;
-                entry.size = size.scaledTo(basis.scale);
+                entry.position = dim.basis.position;
+                entry.size = dim.size.scaledTo(dim.basis.scale);
                 entry.color = color.scaledTo(self.global_alpha);
             }
         }
