@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const asset = @import("asset.zig");
 const render = @import("render.zig");
 const math = @import("math.zig");
+const config = @import("config.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
@@ -116,6 +117,9 @@ pub const DebugState = struct {
     render_group: ?*render.RenderGroup = null,
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
+
+    is_compiling: bool = false,
+    compiler: shared.DebugExecutingProcess,
 
     menu_position: Vector2,
     menu_active: bool,
@@ -404,6 +408,21 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
     }
 }
 
+fn writeHandmadeConfig(debug_state: *DebugState, use_debug_camera: bool) void {
+    if (!debug_state.is_compiling) {
+        var temp: [4096]u8 = undefined;
+        const slice = std.fmt.bufPrintZ(
+            &temp,
+            "pub var DEBUGUI_USE_DEBUG_CAMERA = {s};", .{ if (use_debug_camera) "true" else "false" },
+        ) catch "";
+
+        _ = shared.platform.debugWriteEntireFile("../src/config.zig", @intCast(slice.len), @constCast(slice.ptr));
+
+        debug_state.is_compiling = true;
+        debug_state.compiler = shared.platform.debugExecuteSystemCommand("../", "C:/Windows/System32/cmd.exe", "/C zig build");
+    }
+}
+
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     _ = render_group;
 
@@ -459,10 +478,23 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
                 drawDebugMainMenu(debug_state, group, mouse_position);
             } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
                 drawDebugMainMenu(debug_state, group, mouse_position);
+                var use_debug_camera = config.DEBUGUI_USE_DEBUG_CAMERA;
                 switch(debug_state.hot_menu_index) {
                     0 => debug_state.profile_on = !debug_state.profile_on,
                     1 => debug_state.paused = !debug_state.paused,
+                    2 => use_debug_camera = !use_debug_camera,
                     else => {}
+                }
+
+                writeHandmadeConfig(debug_state, use_debug_camera);
+            }
+
+            if (debug_state.is_compiling) {
+                const state = shared.platform.debugGetProcessState(debug_state.compiler);
+                if (state.is_running) {
+                    textLine("COMPILING");
+                } else {
+                    debug_state.is_compiling = false;
                 }
             }
 
@@ -814,6 +846,10 @@ pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
     global_debug_table.event_count[event_array_index] = event_count;
 
     if (DebugState.getFrom(memory)) |debug_state| {
+        if (memory.executable_reloaded) {
+            debug_state.restartCollation(global_debug_table.current_event_array_index);
+        }
+
         if (!debug_state.paused) {
             if (debug_state.frame_count >= shared.MAX_DEBUG_EVENT_ARRAY_COUNT * 4) {
                 debug_state.restartCollation(global_debug_table.current_event_array_index);

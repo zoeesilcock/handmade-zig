@@ -21,6 +21,7 @@ const math = @import("math.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
 const debug = @import("debug.zig");
+const config = @import("config.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
@@ -162,7 +163,7 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
     } else {
         const offset_z: f32 = 0;
         var distance_above_target = transform.distance_above_target;
-        if (false) {
+        if (config.DEBUGUI_USE_DEBUG_CAMERA) {
             // TODO: How do we want to control the debug camera?
             distance_above_target += 50;
         }

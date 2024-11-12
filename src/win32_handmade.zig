@@ -172,7 +172,7 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.C) shar
     }
     result.platform = win32_file_group;
 
-    const wildcard: [:0]const u16 = switch(file_type) {
+    const wildcard: [:0]const u16 = switch (file_type) {
         shared.PlatformFileTypes.AssetFile => win32.L("*.hha"),
         shared.PlatformFileTypes.SaveGameFile => win32.L("*.hhs"),
     };
@@ -372,6 +372,85 @@ fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *any
         }
 
         _ = win32.CloseHandle(file_handle);
+    }
+
+    return result;
+}
+
+fn debugExecuteSystemCommand(
+    path: [*:0]const u8,
+    command: [*:0]const u8,
+    command_line: [*:0]const u8,
+) callconv(.C) shared.DebugExecutingProcess {
+    var result: shared.DebugExecutingProcess = .{};
+    const h_process: *win32.HANDLE = @ptrCast(@alignCast(&result.os_handle));
+
+    var startup_info: win32.STARTUPINFOA = .{
+        .cb = @sizeOf(win32.STARTUPINFOA),
+        .lpReserved = null,
+        .lpDesktop = null,
+        .lpTitle = null,
+        .dwX = 0,
+        .dwY = 0,
+        .dwXSize = 0,
+        .dwYSize = 0,
+        .dwXCountChars = 0,
+        .dwYCountChars = 0,
+        .dwFillAttribute = 0,
+        .dwFlags = win32.STARTUPINFOW_FLAGS{ .USESHOWWINDOW = 1 },
+        .wShowWindow = 0,
+        .cbReserved2 = 0,
+        .lpReserved2 = null,
+        .hStdInput = null,
+        .hStdOutput = null,
+        .hStdError = null,
+    };
+
+    var process_info: win32.PROCESS_INFORMATION = .{
+        .hProcess = null,
+        .hThread = null,
+        .dwProcessId = 0,
+        .dwThreadId = 0,
+    };
+
+    if (win32.CreateProcessA(
+        command,
+        @constCast(command_line),
+        null,
+        null,
+        win32.FALSE,
+        win32.PROCESS_CREATION_FLAGS{},
+        null,
+        path,
+        &startup_info,
+        &process_info,
+    ) != 0) {
+        if (process_info.hProcess) |process_handle| {
+            std.debug.assert(@sizeOf(u64) >= @sizeOf(win32.HANDLE));
+            h_process.* = process_handle;
+        }
+    } else {
+        h_process.* = win32.INVALID_HANDLE_VALUE;
+        std.debug.print("Error executing system command: {d}\n", .{@intFromEnum(win32.GetLastError())});
+    }
+
+    return result;
+}
+
+fn debugGetProcessState(process: shared.DebugExecutingProcess) callconv(.C) shared.DebugExecutingProcessState {
+    var result: shared.DebugExecutingProcessState = .{};
+    const h_process: *const win32.HANDLE = @ptrCast(&process.os_handle);
+
+    if (h_process.* != win32.INVALID_HANDLE_VALUE) {
+        result.started_successfully = true;
+
+        if (win32.WaitForSingleObject(h_process.*, 0) == @intFromEnum(win32.WAIT_OBJECT_0)) {
+            var exit_code: u32 = undefined;
+            _ = win32.GetExitCodeProcess(h_process.*, &exit_code);
+            _ = win32.CloseHandle(h_process.*);
+        } else {
+            result.is_running = true;
+        }
     }
 
     return result;
@@ -1298,7 +1377,8 @@ fn endInputPlayback(state: *Win32State) void {
 
 fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: i32) void {
     const initial_count = 0;
-    const opt_semaphore_handle = win32.CreateSemaphoreEx(null,
+    const opt_semaphore_handle = win32.CreateSemaphoreEx(
+        null,
         initial_count,
         thread_count,
         null,
@@ -1326,7 +1406,11 @@ fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: i32) void {
     }
 }
 
-pub fn addQueueEntry(queue: *shared.PlatformWorkQueue, callback: shared.PlatformWorkQueueCallback, data: *anyopaque,) callconv(.C) void {
+pub fn addQueueEntry(
+    queue: *shared.PlatformWorkQueue,
+    callback: shared.PlatformWorkQueueCallback,
+    data: *anyopaque,
+) callconv(.C) void {
     const original_next_entry_to_write = @atomicLoad(u32, &queue.next_entry_to_write, .acquire);
     const original_next_entry_to_read = @atomicLoad(u32, &queue.next_entry_to_read, .acquire);
     const new_next_entry_to_write: u32 = @mod(original_next_entry_to_write + 1, @as(u32, @intCast(queue.entries.len)));
@@ -1475,9 +1559,11 @@ pub export fn wWinMain(
         .allocateMemory = allocateMemory,
         .deallocateMemory = deallocateMemory,
 
+        .debugFreeFileMemory = debugFreeFileMemory,
         .debugReadEntireFile = debugReadEntireFile,
         .debugWriteEntireFile = debugWriteEntireFile,
-        .debugFreeFileMemory = debugFreeFileMemory,
+        .debugExecuteSystemCommand = debugExecuteSystemCommand,
+        .debugGetProcessState = debugGetProcessState,
     };
 
     const window_class: win32.WNDCLASSW = .{
@@ -1668,7 +1754,7 @@ pub export fn wWinMain(
 
                     // Reload the game code if it has changed.
                     const last_dll_write_time = getLastWriteTime(&source_dll_path);
-                    new_input.executable_reloaded = false;
+                    game_memory.executable_reloaded = false;
                     if (win32.CompareFileTime(&last_dll_write_time, &game.last_write_time) != 0) {
                         completeAllQueuedWork(&high_priority_queue);
                         completeAllQueuedWork(&low_priority_queue);
@@ -1677,7 +1763,7 @@ pub export fn wWinMain(
 
                         unloadGameCode(&game);
                         game = loadGameCode(&source_dll_path, &temp_dll_path);
-                        new_input.executable_reloaded = true;
+                        game_memory.executable_reloaded = true;
                     }
 
                     timed_block.end();
@@ -1829,7 +1915,7 @@ pub export fn wWinMain(
                                 const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
                                 const audio_latency_seconds: f32 =
                                     (@as(f32, @floatFromInt(audio_latency_bytes)) /
-                                     @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
+                                    @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
                                     @as(f32, @floatFromInt(sound_output.samples_per_second));
                                 var buffer: [128]u8 = undefined;
                                 const slice = std.fmt.bufPrintZ(&buffer, "Audio: BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d:>3.4}\n", .{

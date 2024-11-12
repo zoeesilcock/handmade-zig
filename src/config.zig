@@ -1,0 +1,1 @@
+pub var DEBUGUI_USE_DEBUG_CAMERA = false;

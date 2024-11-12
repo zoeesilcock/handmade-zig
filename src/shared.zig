@@ -190,6 +190,16 @@ pub const PlatformFileTypes = enum(u32) {
     SaveGameFile,
 };
 
+pub const DebugExecutingProcess = extern struct {
+    os_handle: u64 = 0,
+};
+
+pub const DebugExecutingProcessState = extern struct {
+    started_successfully: bool = false,
+    is_running: bool = false,
+    return_code: u32 = 0,
+};
+
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
@@ -206,6 +216,8 @@ const deallocateMemoryType: type = fn (memory: ?*anyopaque) callconv(.C) void;
 const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
 const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;
 const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult;
+const debugExecuteSystemCommandType: type = fn (path: [*:0]const u8, command: [*:0]const u8, command_line: [*:0]const u8) callconv(.C) DebugExecutingProcess;
+const debugGetProcessStateType: type = fn (process: DebugExecutingProcess) callconv(.C) DebugExecutingProcessState;
 
 pub fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
     return file_handle.no_errors;
@@ -228,6 +240,8 @@ pub const Platform = extern struct {
     debugFreeFileMemory: *const debugFreeFileMemoryType = undefined,
     debugWriteEntireFile: *const debugWriteEntireFileType = undefined,
     debugReadEntireFile: *const debugReadEntireFileType = undefined,
+    debugExecuteSystemCommand: *const debugExecuteSystemCommandType = undefined,
+    debugGetProcessState: *const debugGetProcessStateType = undefined,
 };
 
 pub var platform: Platform = undefined;
@@ -484,7 +498,6 @@ pub const GameInput = extern struct {
     mouse_x: f32 = 0,
     mouse_y: f32 = 0,
 
-    executable_reloaded: bool = false,
     frame_delta_time: f32 = 0,
 
     controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{ControllerInput{}} ** MAX_CONTROLLER_COUNT,
@@ -558,6 +571,8 @@ fn GameMemory() type {
 
         high_priority_queue: *PlatformWorkQueue,
         low_priority_queue: *PlatformWorkQueue,
+
+        executable_reloaded: bool = false,
 
         const Self = @This();
     };

@@ -399,7 +399,7 @@ pub export fn updateAndRender(
     debug.start(transient_state.assets, buffer.width, buffer.height);
 
     if (false) {
-        if (input.executable_reloaded) {
+        if (memory.executable_reloaded) {
             for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
                 const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
                 ground_buffer.position = WorldPosition.nullPosition();
