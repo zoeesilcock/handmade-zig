@@ -440,7 +440,11 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
 
     if (!debug_state.is_compiling) {
         debug_state.is_compiling = true;
-        debug_state.compiler = shared.platform.debugExecuteSystemCommand("../", "C:/Windows/System32/cmd.exe", "/C zig build");
+        debug_state.compiler = shared.platform.debugExecuteSystemCommand(
+            "../",
+            "C:/Windows/System32/cmd.exe",
+            "/C zig build -Dpackage=Library",
+        );
     }
 }
 

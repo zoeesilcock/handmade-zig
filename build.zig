@@ -1,40 +1,68 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+// Defaults.
+const FORCE_RELEASE_MODE = false;
+const PACKAGE_DEFAULT = .Game;
+const INTERNAL_DEFAULT = false;
+const PROFILE_DEFAULT = false;
+const BACKEND_DEFAULT = .Win32;
+
 const Backend = enum {
     Win32,
     Raylib,
 };
 
-const FORCE_RELEASE_MODE = false;
-const INTERNAL_DEFAULT = false;
-const PROFILE_DEFAULT = false;
-const BACKEND_DEFAULT = .Win32;
+const Package = enum {
+    All,
+    Game,
+    Executable,
+    Library,
+    AssetBuilder,
+};
 
 pub fn build(b: *std.Build) void {
     if (FORCE_RELEASE_MODE) {
         b.release_mode = .fast;
     }
 
-    const backend = b.option(Backend, "backend", "win32 or raylib") orelse BACKEND_DEFAULT;
+    // Retrieve build options.
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const backend = b.option(Backend, "backend", "platform backend") orelse BACKEND_DEFAULT;
+    const package = b.option(Package, "package", "which part to build") orelse PACKAGE_DEFAULT;
+    const internal = b.option(bool, "internal", "use this for internal builds") orelse INTERNAL_DEFAULT;
+    const profile = b.option(bool, "profile", "enables profiling") orelse PROFILE_DEFAULT;
 
-    // Build options.
+    // Add build options.
     const build_options = b.addOptions();
-    build_options.addOption(bool, "internal", b.option(bool, "internal", "use this for internal builds") orelse INTERNAL_DEFAULT);
-    build_options.addOption(bool, "profile", b.option(bool, "profile", "enables profiling") orelse PROFILE_DEFAULT);
+    build_options.addOption(bool, "internal", internal);
+    build_options.addOption(bool, "profile", profile);
+    build_options.addOption(Package, "package", package);
     build_options.addOption(Backend, "backend", backend);
 
-    // Modules.
-    const shared_module = b.addModule("shared", .{
-        .root_source_file = b.path("src/shared.zig"),
-    });
-    const file_formats_module = b.addModule("file_formats", .{
-        .root_source_file = b.path("src/file_formats.zig"),
-    });
+    // Add the packages.
+    if (package == .All or package == .Game or package == .Executable) {
+        addExecutable(b, build_options, target, optimize, package, backend);
+    }
 
-    // Main executable ------------------------------------------------------------------------------------------------
+    if (package == .All or package == .Game or package == .Library) {
+        addLibrary(b, build_options, target, optimize, package);
+    }
+
+    if (package == .All or package == .AssetBuilder) {
+        addAssetBuilder(b, build_options, target, optimize);
+    }
+}
+
+fn addExecutable(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    package: Package,
+    backend: Backend,
+) void {
     const exe = b.addExecutable(.{
         .name = "handmade-zig",
         .root_source_file = if (backend == .Win32) b.path("src/win32_handmade.zig") else b.path("src/raylib_handmade.zig"),
@@ -47,9 +75,7 @@ pub fn build(b: *std.Build) void {
         // Add the win32 API wrapper.
         const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
         exe.root_module.addImport("win32", zigwin32);
-    }
-
-    if (backend == .Raylib) {
+    } else if (backend == .Raylib) {
         // Add the raylib API wrapper and library.
         const raylib_dep = b.dependency("raylib-zig", .{
             .target = target,
@@ -64,9 +90,11 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addImport("raygui", raygui);
     }
 
-    // Emit generated assembly of the main executable.
-    const assembly_file = b.addInstallFile(exe.getEmittedAsm(), "bin/handmade.asm");
-    b.getInstallStep().dependOn(&assembly_file.step);
+    if (package == .All) {
+        // Emit generated assembly of the main executable.
+        const assembly_file = b.addInstallFile(exe.getEmittedAsm(), "bin/handmade.asm");
+        b.getInstallStep().dependOn(&assembly_file.step);
+    }
 
     b.installArtifact(exe);
 
@@ -75,8 +103,19 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the application");
     run_exe.setCwd(b.path("data/"));
     run_step.dependOn(&run_exe.step);
+}
 
-    // Game library ---------------------------------------------------------------------------------------------------
+fn addLibrary(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    package: Package,
+) void {
+    const file_formats_module = b.addModule("file_formats", .{
+        .root_source_file = b.path("src/file_formats.zig"),
+    });
+
     const lib_handmade = b.addSharedLibrary(.{
         .name = "handmade",
         .root_source_file = b.path("src/handmade.zig"),
@@ -87,9 +126,11 @@ pub fn build(b: *std.Build) void {
     lib_handmade.root_module.addOptions("build_options", build_options);
     lib_handmade.root_module.addImport("file_formats", file_formats_module);
 
-    // Emit generated assembly of the library.
-    const lib_assembly_file = b.addInstallFile(lib_handmade.getEmittedAsm(), "bin/handmade-dll.asm");
-    b.getInstallStep().dependOn(&lib_assembly_file.step);
+    if (package == .All) {
+        // Emit generated assembly of the library.
+        const lib_assembly_file = b.addInstallFile(lib_handmade.getEmittedAsm(), "bin/handmade-dll.asm");
+        b.getInstallStep().dependOn(&lib_assembly_file.step);
+    }
 
     b.installArtifact(lib_handmade);
 
@@ -100,8 +141,21 @@ pub fn build(b: *std.Build) void {
         const install_dll = b.addInstallFileWithDir(lib_handmade.getEmittedBin(), .prefix, dll_copy_path);
         b.getInstallStep().dependOn(&install_dll.step);
     }
+}
 
-    // Test asset builder ---------------------------------------------------------------------------------------------
+fn addAssetBuilder(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const shared_module = b.addModule("shared", .{
+        .root_source_file = b.path("src/shared.zig"),
+    });
+    const file_formats_module = b.addModule("file_formats", .{
+        .root_source_file = b.path("src/file_formats.zig"),
+    });
+
     const asset_builder_exe = b.addExecutable(.{
         .name = "test-asset-builder",
         .root_source_file = b.path("tools/test_asset_builder.zig"),
