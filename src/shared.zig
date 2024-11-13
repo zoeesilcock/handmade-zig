@@ -497,6 +497,7 @@ pub const GameInput = extern struct {
     mouse_buttons: [MOUSE_BUTTON_COUNT]ControllerButtonState = [1]ControllerButtonState{ControllerButtonState{}} ** MOUSE_BUTTON_COUNT,
     mouse_x: f32 = 0,
     mouse_y: f32 = 0,
+    mouse_z: f32 = 0,
 
     frame_delta_time: f32 = 0,
 

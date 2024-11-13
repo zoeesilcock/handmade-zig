@@ -10,6 +10,7 @@ const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
 const debug = @import("debug.zig");
+const config = @import("config.zig");
 const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
@@ -29,6 +30,7 @@ const std = @import("std");
 /// * Particle system.
 ///
 /// * Rendering.
+///     * Get rid of "even" notion?
 ///     * Straighten out all coordinate systems!
 ///         * Screen.
 ///         * World.
@@ -93,6 +95,7 @@ const INTERNAL = shared.INTERNAL;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle3 = math.Rectangle3;
+const Rectangle2i = math.Rectangle2i;
 const Color = math.Color;
 const Color3 = math.Color3;
 const State = shared.State;
@@ -398,7 +401,7 @@ pub export fn updateAndRender(
 
     debug.start(transient_state.assets, buffer.width, buffer.height);
 
-    if (false) {
+    if (config.DEBUGUI_RECOMPUTE_GROUND_CUNKS_ON_EXE_CHANGE) {
         if (memory.executable_reloaded) {
             for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
                 const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -475,7 +478,7 @@ pub export fn updateAndRender(
     };
     const draw_buffer = &draw_buffer_;
 
-    if (false) {
+    if (config.DEBUGUI_TEST_WEIRD_DRAW_BUFFER_SIZE) {
         // Enable this to test weird buffer sizes in the renderer.
         draw_buffer.width = 1279;
         draw_buffer.height = 719;
@@ -527,7 +530,7 @@ pub export fn updateAndRender(
                     const ground_side_in_meters = state.world.chunk_dimension_in_meters.x();
                     render_group.pushBitmap(bitmap, ground_side_in_meters, delta, Color.white());
 
-                    if (false) {
+                    if (config.DEBUGUI_GROUND_CHUNK_OUTLINES) {
                         render_group.pushRectangleOutline(
                             Vector2.splat(ground_side_in_meters),
                             delta,
@@ -720,13 +723,15 @@ pub export fn updateAndRender(
                         }
                     }
 
-                    // if (closest_hero) |hero| {
-                    //     if (closest_hero_squared > math.square(3.0)) {
-                    //         const speed: f32 = 1.0;
-                    //         const one_over_length = speed / @sqrt(closest_hero_squared);
-                    //         acceleration = hero.position.minus(entity.position).scaledTo(one_over_length);
-                    //     }
-                    // }
+                    if (config.DEBUGUI_FAMILIAR_FOLLOWS_HERO) {
+                        if (closest_hero) |hero| {
+                            if (closest_hero_squared > math.square(3.0)) {
+                                const speed: f32 = 1.0;
+                                const one_over_length = speed / @sqrt(closest_hero_squared);
+                                acceleration = hero.position.minus(entity.position).scaledTo(one_over_length);
+                            }
+                        }
+                    }
 
                     move_spec = sim.MoveSpec{
                         .speed = 25,
@@ -781,7 +786,7 @@ pub export fn updateAndRender(
 
                     drawHitPoints(entity, render_group);
 
-                    if (false) {
+                    if (config.DEBUGUI_PARTICLE_TEST) {
                         // Particle system test.
                         var particle_spawn_index: u32 = 0;
                         while (particle_spawn_index < 3) : (particle_spawn_index += 1) {
@@ -823,7 +828,7 @@ pub export fn updateAndRender(
                                 &particle_weight_vector,
                             ).?;
 
-                            // particle.bitmap_id = transient_state.assets.getRandomBitmap(.Head, &state.effects_entropy).?;
+                            particle.bitmap_id = transient_state.assets.getRandomBitmap(.Head, &state.effects_entropy).?;
                         }
 
                         const grid_scale: f32 = 0.25;
@@ -871,7 +876,7 @@ pub export fn updateAndRender(
                             }
                         }
 
-                        if (false) {
+                        if (config.DEBUGUI_PARTICLE_GRID) {
                             var y: u32 = 0;
                             while (y < shared.PARTICLE_CEL_DIM) : (y += 1) {
                                 var x: u32 = 0;
@@ -997,15 +1002,17 @@ pub export fn updateAndRender(
                     render_group.pushBitmapId(hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
                 },
                 .Space => {
-                    const space_color = Color.new(0, 0.5, 1, 1);
-                    var volume_index: u32 = 0;
-                    while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                        const volume = entity.collision.volumes[volume_index];
-                        render_group.pushRectangleOutline(
-                            volume.dimension.xy(),
-                            volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                            space_color,
-                        );
+                    if (config.DEBUGUI_SPACES) {
+                        const space_color = Color.new(0, 0.5, 1, 1);
+                        var volume_index: u32 = 0;
+                        while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+                            const volume = entity.collision.volumes[volume_index];
+                            render_group.pushRectangleOutline(
+                                volume.dimension.xy(),
+                                volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                                space_color,
+                            );
+                        }
                     }
                 },
                 else => {
@@ -1029,6 +1036,7 @@ pub export fn updateAndRender(
         const checker_dimension = Vector2.new(checker_width, checker_height);
         for (&transient_state.env_maps, 0..) |*map, map_index| {
             const lod: *LoadedBitmap = &map.lod[0];
+            const clip_rect: Rectangle2i = Rectangle2i.new(0, 0, lod.width, lod.height);
 
             var row_checker_on = false;
             var y: u32 = 0;
@@ -1039,7 +1047,8 @@ pub export fn updateAndRender(
                     const min_position = Vector2.newU(x, y);
                     const max_position = min_position.plus(checker_dimension);
                     const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
-                    render.drawRectangle(lod, min_position, max_position, color);
+                    render.drawRectangle(lod, min_position, max_position, color, clip_rect, true);
+                    render.drawRectangle(lod, min_position, max_position, color, clip_rect, false);
                     checker_on = !checker_on;
                 }
 
@@ -1502,11 +1511,13 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
             const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
             var series = random.Series.seed(seed);
 
-            const color = Color.white();
-            // var color = Color.new(1, 0, 0, 1);
-            // if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
-            //     color = Color.new(0, 0, 1, 1);
-            // }
+            var color = Color.white();
+            if (config.DEBUGUI_GROUND_CHUNK_CHECKERBOARDS) {
+                color = Color.new(1, 0, 0, 1);
+                if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
+                    color = Color.new(0, 0, 1, 1);
+                }
+            }
 
             var grass_index: u32 = 0;
             while (grass_index < 100) : (grass_index += 1) {

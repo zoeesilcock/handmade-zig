@@ -545,6 +545,7 @@ fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput,
         const window_dimension = getWindowDimension(window);
         new_input.mouse_x = (-0.5 * @as(f32, @floatFromInt(window_dimension.width)) + 0.5) + @as(f32, @floatFromInt(mouse_point.x));
         new_input.mouse_y = (0.5 * @as(f32, @floatFromInt(window_dimension.height)) - 0.5) - @as(f32, @floatFromInt(mouse_point.y));
+        new_input.mouse_z = 0; // TODO: Add mouse wheel support.
     }
 
     const win_button_ids = [_]win32.VIRTUAL_KEY{
@@ -1812,7 +1813,14 @@ pub export fn wWinMain(
                     if (state.input_recording_index > 0) {
                         recordInput(&state, new_input);
                     } else if (state.input_playing_index > 0) {
+                        const temp: shared.GameInput = new_input.*;
+
                         playbackInput(&state, new_input);
+
+                        new_input.mouse_buttons = temp.mouse_buttons;
+                        new_input.mouse_x = temp.mouse_x;
+                        new_input.mouse_y = temp.mouse_y;
+                        new_input.mouse_z = temp.mouse_z;
                     }
 
                     // Send all input to game.

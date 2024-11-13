@@ -19,6 +19,7 @@ const Rectangle2 = math.Rectangle2;
 
 pub var global_debug_table: shared.DebugTable = shared.DebugTable{};
 pub var debug_global_memory: ?*shared.Memory = null;
+var debug_variable_list = @import("debug_variables.zig").debug_variable_list;
 
 const COUNTER_COUNT = 512;
 
@@ -408,16 +409,36 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
     }
 }
 
-fn writeHandmadeConfig(debug_state: *DebugState, use_debug_camera: bool) void {
-    if (!debug_state.is_compiling) {
-        var temp: [4096]u8 = undefined;
+const DebugVariableType = enum {
+    Boolean,
+};
+
+pub const DebugVariable = struct {
+    name: [:0]const u8,
+    value_type: DebugVariableType = .Boolean,
+    value: bool = true,
+
+    pub fn new(comptime name: [:0]const u8) DebugVariable {
+        return DebugVariable{ .name = name, .value = @field(config, name) };
+    }
+};
+
+fn writeHandmadeConfig(debug_state: *DebugState) void {
+    var buf: [4096:0]u8 = undefined;
+    var len: u32 = 0;
+
+    for (debug_variable_list) |variable| {
         const slice = std.fmt.bufPrintZ(
-            &temp,
-            "pub var DEBUGUI_USE_DEBUG_CAMERA = {s};", .{ if (use_debug_camera) "true" else "false" },
+            buf[len..],
+            "pub const {s} = {s};\n", .{ variable.name, if (variable.value) "true" else "false" },
         ) catch "";
 
-        _ = shared.platform.debugWriteEntireFile("../src/config.zig", @intCast(slice.len), @constCast(slice.ptr));
+        len += @intCast(slice.len);
+    }
 
+    _ = shared.platform.debugWriteEntireFile("../src/config.zig", len, &buf);
+
+    if (!debug_state.is_compiling) {
         debug_state.is_compiling = true;
         debug_state.compiler = shared.platform.debugExecuteSystemCommand("../", "C:/Windows/System32/cmd.exe", "/C zig build");
     }
@@ -426,22 +447,15 @@ fn writeHandmadeConfig(debug_state: *DebugState, use_debug_camera: bool) void {
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     _ = render_group;
 
-    const menu_items: [6][:0]const u8 = .{
-        "Toggle Profile Graph",
-        "Toggle Debug Collation",
-        "Toggle Framerate Counter",
-        "Mark Loop Point",
-        "Draw Entity Bounds",
-        "Toggle World Chunk Bounds",
-    };
-
-    var new_hot_menu_index: u32 = menu_items.len;
+    var new_hot_menu_index: u32 = debug_variable_list.len;
     var best_distance_sq: f32 = std.math.floatMax(f32);
 
-    const menu_radius: f32 = 200;
-    const angle_step: f32 = shared.TAU32 / @as(f32, @floatFromInt(menu_items.len));
-    for (menu_items, 0..) |text, index| {
-        var item_color = Color.white();
+    const menu_radius: f32 = 400;
+    const angle_step: f32 = shared.TAU32 / @as(f32, @floatFromInt(debug_variable_list.len));
+    for (debug_variable_list, 0..) |variable, index| {
+        const text = variable.name;
+
+        var item_color = if (variable.value) Color.white() else Color.new(0.5, 0.5, 0.5, 1);
         if (index == debug_state.hot_menu_index) {
             item_color = Color.new(1, 1, 0, 1);
         }
@@ -459,7 +473,11 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
         textOutAt(text, text_position.minus(text_bounds.getDimension().scaledTo(0.5)), item_color);
     }
 
-    debug_state.hot_menu_index = new_hot_menu_index;
+    if (mouse_position.minus(debug_state.menu_position).lengthSquared() > math.square(menu_radius)) {
+        debug_state.hot_menu_index = new_hot_menu_index;
+    } else {
+        debug_state.hot_menu_index = debug_variable_list.len;
+    }
 }
 
 pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
@@ -478,15 +496,12 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
                 drawDebugMainMenu(debug_state, group, mouse_position);
             } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
                 drawDebugMainMenu(debug_state, group, mouse_position);
-                var use_debug_camera = config.DEBUGUI_USE_DEBUG_CAMERA;
-                switch(debug_state.hot_menu_index) {
-                    0 => debug_state.profile_on = !debug_state.profile_on,
-                    1 => debug_state.paused = !debug_state.paused,
-                    2 => use_debug_camera = !use_debug_camera,
-                    else => {}
-                }
 
-                writeHandmadeConfig(debug_state, use_debug_camera);
+                if (debug_state.hot_menu_index < debug_variable_list.len) {
+                    debug_variable_list[debug_state.hot_menu_index].value =
+                        !debug_variable_list[debug_state.hot_menu_index].value;
+                }
+                writeHandmadeConfig(debug_state);
             }
 
             if (debug_state.is_compiling) {

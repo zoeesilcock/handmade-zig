@@ -3,6 +3,7 @@ const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const world = @import("world.zig");
 const debug = @import("debug.zig");
+const config = @import("config.zig");
 const std = @import("std");
 
 const addCollisionRule = @import("handmade.zig").addCollisionRule;
@@ -836,17 +837,16 @@ pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
             var new_camera_position = state.camera_position;
             new_camera_position.chunk_z = stored.position.chunk_z;
 
-            if (false) {
-                // Move camera when player leaves the current screen.
-                if (entity.position.x() > 9.0 * state.world.tile_side_in_meters) {
-                    new_camera_position.chunk_x += 17;
-                } else if (entity.position.x() < -9.0 * state.world.tile_side_in_meters) {
-                    new_camera_position.chunk_x -= 17;
+            if (config.DEBUGUI_USE_ROOM_BASED_CAMERA) {
+                if (entity.position.x() > 9.0) {
+                    new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(18, 0, 0));
+                } else if (entity.position.x() < -9.0) {
+                    new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(-18, 0, 0));
                 }
-                if (entity.position.y() > 5.0 * state.world.tile_side_in_meters) {
-                    new_camera_position.chunk_y += 9;
-                } else if (entity.position.y() < -5.0 * state.world.tile_side_in_meters) {
-                    new_camera_position.chunk_y -= 9;
+                if (entity.position.y() > 5.0) {
+                    new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(0, 10, 0));
+                } else if (entity.position.y() < -5.0) {
+                    new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(0, -10, 0));
                 }
             } else {
                 new_camera_position = stored.position;

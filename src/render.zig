@@ -1646,7 +1646,7 @@ inline fn sampleEnvironmentMap(
     std.debug.assert(rounded_x >= 0 and rounded_x < lod.width);
     std.debug.assert(rounded_y >= 0 and rounded_y < lod.height);
 
-    if (false) {
+    if (config.DEBUGUI_SHOW_LIGHTING_SAMPLES) {
         // Debug where we are sampling from on the environment map.
         const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
         const texture_base = shared.incrementPointer(lod.memory.?, test_offset);
