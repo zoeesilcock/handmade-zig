@@ -4,6 +4,7 @@ const render = @import("render.zig");
 const math = @import("math.zig");
 const config = @import("config.zig");
 const file_formats = @import("file_formats");
+const debug_variables = @import("debug_variables.zig");
 const std = @import("std");
 
 // Types.
@@ -19,7 +20,6 @@ const Rectangle2 = math.Rectangle2;
 
 pub var global_debug_table: shared.DebugTable = shared.DebugTable{};
 pub var debug_global_memory: ?*shared.Memory = null;
-var debug_variable_list = @import("debug_variables.zig").debug_variable_list;
 
 const COUNTER_COUNT = 512;
 
@@ -115,6 +115,9 @@ pub const DebugState = struct {
 
     high_priority_queue: *shared.PlatformWorkQueue,
     debug_arena: shared.MemoryArena,
+
+    root_group: ?*DebugVariable,
+
     render_group: ?*render.RenderGroup = null,
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
@@ -362,6 +365,8 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
                     memory.debug_storage.? + @sizeOf(DebugState),
                 );
 
+                debug_variables.createDebugVariables(debug_state);
+
                 debug_state.render_group =
                     render.RenderGroup.allocate(assets, &debug_state.debug_arena, shared.megabytes(16), false);
 
@@ -409,79 +414,127 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
     }
 }
 
-const DebugVariableType = enum {
+pub const DebugVariableType = enum(u32) {
     Boolean,
+    Group,
+};
+
+pub const DebugVariableGroup = struct {
+    expanded: bool,
+    first_child: ?*DebugVariable,
+    last_child: ?*DebugVariable,
 };
 
 pub const DebugVariable = struct {
+    variable_type: DebugVariableType = .Boolean,
     name: [:0]const u8,
-    value_type: DebugVariableType = .Boolean,
-    value: bool = true,
+    next: ?*DebugVariable = null,
+    parent: ?*DebugVariable = null,
 
-    pub fn new(comptime name: [:0]const u8) DebugVariable {
-        return DebugVariable{ .name = name, .value = @field(config, name) };
-    }
+    data: union {
+        bool_value: bool,
+        group: DebugVariableGroup,
+    },
 };
 
 fn writeHandmadeConfig(debug_state: *DebugState) void {
     var buf: [4096:0]u8 = undefined;
     var len: u32 = 0;
+    var depth: u32 = 0;
 
-    for (debug_variable_list) |variable| {
-        const slice = std.fmt.bufPrintZ(
-            buf[len..],
-            "pub const {s} = {s};\n", .{ variable.name, if (variable.value) "true" else "false" },
-        ) catch "";
+    if (debug_state.root_group) |root_group| {
+        var opt_variable: ?*DebugVariable = root_group.data.group.first_child;
 
-        len += @intCast(slice.len);
-    }
+        while (opt_variable) |variable| {
+            for (0..depth) |_| {
+                for (0..4) |_| {
+                    buf[len] = ' ';
+                    len += 1;
+                }
+            }
 
-    _ = shared.platform.debugWriteEntireFile("../src/config.zig", len, &buf);
+            switch(variable.variable_type) {
+                .Boolean => {
+                    const slice = std.fmt.bufPrintZ(
+                        buf[len..],
+                        "pub const DEBUGUI_{s} = {s};\n", .{ variable.name, if (variable.data.bool_value) "true" else "false" },
+                    ) catch "";
+                    len += @intCast(slice.len);
+                },
+                .Group => {
+                    const slice = std.fmt.bufPrintZ(
+                        buf[len..],
+                        "// {s}\n", .{ variable.name },
+                    ) catch "";
+                    len += @intCast(slice.len);
+                },
+            }
 
-    if (!debug_state.is_compiling) {
-        debug_state.is_compiling = true;
-        debug_state.compiler = shared.platform.debugExecuteSystemCommand(
-            "../",
-            "C:/Windows/System32/cmd.exe",
-            "/C zig build -Dpackage=Library",
-        );
+            if (variable.variable_type == .Group) {
+                opt_variable = variable.data.group.first_child;
+                depth +%= 1;
+            } else {
+                while (opt_variable) |variable2| {
+                    if (variable2.next != null) {
+                        opt_variable = variable2.next;
+                        break;
+                    } else {
+                        opt_variable = variable2.parent;
+                        depth -%= 1;
+                    }
+                }
+            }
+        }
+
+        _ = shared.platform.debugWriteEntireFile("../src/config.zig", len, &buf);
+
+        if (!debug_state.is_compiling) {
+            debug_state.is_compiling = true;
+            debug_state.compiler = shared.platform.debugExecuteSystemCommand(
+                "../",
+                "C:/Windows/System32/cmd.exe",
+                "/C zig build -Dpackage=Library",
+            );
+        }
     }
 }
 
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     _ = render_group;
+    _ = debug_state;
+    _ = mouse_position;
 
-    var new_hot_menu_index: u32 = debug_variable_list.len;
-    var best_distance_sq: f32 = std.math.floatMax(f32);
-
-    const menu_radius: f32 = 400;
-    const angle_step: f32 = shared.TAU32 / @as(f32, @floatFromInt(debug_variable_list.len));
-    for (debug_variable_list, 0..) |variable, index| {
-        const text = variable.name;
-
-        var item_color = if (variable.value) Color.white() else Color.new(0.5, 0.5, 0.5, 1);
-        if (index == debug_state.hot_menu_index) {
-            item_color = Color.new(1, 1, 0, 1);
-        }
-
-        const angle: f32 = @as(f32, @floatFromInt(index)) * angle_step;
-        const text_position: Vector2 = debug_state.menu_position.plus(Vector2.arm2(angle).scaledTo(menu_radius));
-
-        const this_distance_sq: f32 = text_position.minus(mouse_position).lengthSquared();
-        if (best_distance_sq > this_distance_sq) {
-            new_hot_menu_index = @intCast(index);
-            best_distance_sq = this_distance_sq;
-        }
-
-        const text_bounds: Rectangle2 = getTextSize(debug_state, text);
-        textOutAt(text, text_position.minus(text_bounds.getDimension().scaledTo(0.5)), item_color);
-    }
-
-    if (mouse_position.minus(debug_state.menu_position).lengthSquared() > math.square(menu_radius)) {
-        debug_state.hot_menu_index = new_hot_menu_index;
-    } else {
-        debug_state.hot_menu_index = debug_variable_list.len;
-    }
+    // var new_hot_menu_index: u32 = debug_variable_list.len;
+    // var best_distance_sq: f32 = std.math.floatMax(f32);
+    //
+    // const menu_radius: f32 = 400;
+    // const angle_step: f32 = shared.TAU32 / @as(f32, @floatFromInt(debug_variable_list.len));
+    // for (debug_variable_list, 0..) |variable, index| {
+    //     const text = variable.name;
+    //
+    //     var item_color = if (variable.value) Color.white() else Color.new(0.5, 0.5, 0.5, 1);
+    //     if (index == debug_state.hot_menu_index) {
+    //         item_color = Color.new(1, 1, 0, 1);
+    //     }
+    //
+    //     const angle: f32 = @as(f32, @floatFromInt(index)) * angle_step;
+    //     const text_position: Vector2 = debug_state.menu_position.plus(Vector2.arm2(angle).scaledTo(menu_radius));
+    //
+    //     const this_distance_sq: f32 = text_position.minus(mouse_position).lengthSquared();
+    //     if (best_distance_sq > this_distance_sq) {
+    //         new_hot_menu_index = @intCast(index);
+    //         best_distance_sq = this_distance_sq;
+    //     }
+    //
+    //     const text_bounds: Rectangle2 = getTextSize(debug_state, text);
+    //     textOutAt(text, text_position.minus(text_bounds.getDimension().scaledTo(0.5)), item_color);
+    // }
+    //
+    // if (mouse_position.minus(debug_state.menu_position).lengthSquared() > math.square(menu_radius)) {
+    //     debug_state.hot_menu_index = new_hot_menu_index;
+    // } else {
+    //     debug_state.hot_menu_index = debug_variable_list.len;
+    // }
 }
 
 pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
@@ -493,20 +546,20 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
             const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
             var hot_record: ?*DebugRecord = null;
 
-            if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down) {
-                if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
-                    debug_state.menu_position = mouse_position;
-                }
-                drawDebugMainMenu(debug_state, group, mouse_position);
-            } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
-                drawDebugMainMenu(debug_state, group, mouse_position);
-
-                if (debug_state.hot_menu_index < debug_variable_list.len) {
-                    debug_variable_list[debug_state.hot_menu_index].value =
-                        !debug_variable_list[debug_state.hot_menu_index].value;
-                }
-                writeHandmadeConfig(debug_state);
-            }
+            // if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down) {
+            //     if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
+            //         debug_state.menu_position = mouse_position;
+            //     }
+            //     drawDebugMainMenu(debug_state, group, mouse_position);
+            // } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
+            //     drawDebugMainMenu(debug_state, group, mouse_position);
+            //
+            //     if (debug_state.hot_menu_index < debug_variable_list.len) {
+            //         debug_variable_list[debug_state.hot_menu_index].value =
+            //             !debug_variable_list[debug_state.hot_menu_index].value;
+            //     }
+            //     writeHandmadeConfig(debug_state);
+            // }
 
             if (debug_state.is_compiling) {
                 const state = shared.platform.debugGetProcessState(debug_state.compiler);
