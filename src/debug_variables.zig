@@ -1,12 +1,16 @@
 const shared = @import("shared.zig");
 const config = @import("config.zig");
 const debug = @import("debug.zig");
+const math = @import("math.zig");
 const std = @import("std");
 
 const DebugState = debug.DebugState;
 const DebugVariable = debug.DebugVariable;
 const DebugVariableType = debug.DebugVariableType;
 const DebugVariableGroup = debug.DebugVariableGroup;
+const Vector2 = math.Vector2;
+const Vector3 = math.Vector3;
+const Vector4 = math.Vector4;
 
 const DebugVariableDefinitionContext = struct {
     state: *DebugState,
@@ -22,7 +26,7 @@ fn addDebugVariable(
 ) *DebugVariable {
     const variable = context.arena.pushStruct(debug.DebugVariable);
     variable.variable_type = variable_type;
-    variable.name = name;
+    variable.name = @ptrCast(context.arena.pushCopy(name.len + 1, @ptrCast(@constCast(name))));
     variable.next = null;
     variable.parent = context.group;
 
@@ -52,22 +56,68 @@ fn beginVariableGroup(context: *DebugVariableDefinitionContext, name: [:0]const 
     return group_variable;
 }
 
-fn addDebugVariableBool(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: bool) *DebugVariable {
-    var variable: *DebugVariable = addDebugVariable(context, .Bool, name);
-    variable.data.bool_value = value;
-
-    return variable;
-}
-
 fn endVariableGroup(context: *DebugVariableDefinitionContext) void {
     std.debug.assert(context.group != null);
 
     context.group = context.group.?.parent;
 }
 
-pub fn debugVariableListing(comptime name: [:0]const u8, context: *DebugVariableDefinitionContext) *DebugVariable {
+fn addDebugVariableBool(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: bool) *DebugVariable {
     var variable: *DebugVariable = addDebugVariable(context, .Boolean, name);
-    variable.data.bool_value = @field(config, "DEBUGUI_" ++ name);
+    variable.data.bool_value = value;
+
+    return variable;
+}
+
+fn addDebugVariableFloat(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: f32) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Float, name);
+    variable.data = .{ .float_value = value };
+
+    return variable;
+}
+
+fn addDebugVariableVector2(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector2) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Vector2, name);
+    variable.data = .{ .vector2_value = value };
+
+    return variable;
+}
+
+fn addDebugVariableVector3(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector3) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Vector3, name);
+    variable.data = .{ .vector3_value = value };
+
+    return variable;
+}
+
+fn addDebugVariableVector4(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector4) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Vector4, name);
+    variable.data = .{ .vector4_value = value };
+
+    return variable;
+}
+
+pub fn debugVariableListing(comptime name: [:0]const u8, context: *DebugVariableDefinitionContext) *DebugVariable {
+    var variable: *DebugVariable = undefined;
+
+    switch (@TypeOf(@field(config, "DEBUGUI_" ++ name))) {
+        bool => {
+            variable = addDebugVariableBool(context, name, @field(config, "DEBUGUI_" ++ name));
+        },
+        f32 => {
+            variable = addDebugVariableFloat(context, name, @field(config, "DEBUGUI_" ++ name));
+        },
+        Vector2 => {
+            variable = addDebugVariableVector2(context, name, @field(config, "DEBUGUI_" ++ name));
+        },
+        Vector3 => {
+            variable = addDebugVariableVector3(context, name, @field(config, "DEBUGUI_" ++ name));
+        },
+        Vector4 => {
+            variable = addDebugVariableVector4(context, name, @field(config, "DEBUGUI_" ++ name));
+        },
+        else => unreachable,
+    }
 
     return variable;
 }
@@ -100,6 +150,7 @@ pub fn createDebugVariables(state: *DebugState) void {
         _ = beginVariableGroup(&context, "Camera");
         {
             _ = debugVariableListing("USE_DEBUG_CAMERA", &context);
+            _ = debugVariableListing("DEBUG_CAMERA_DISTANCE", &context);
             _ = debugVariableListing("USE_ROOM_BASED_CAMERA", &context);
         }
         endVariableGroup(&context);
@@ -108,7 +159,8 @@ pub fn createDebugVariables(state: *DebugState) void {
     }
 
     _ = debugVariableListing("FAMILIAR_FOLLOWS_HERO", &context);
-    _ = debugVariableListing("SPACE_OUTLINES", &context);
+    _ = debugVariableListing("USE_SPACE_OUTLINES", &context);
+    _ = debugVariableListing("FAUX_V4", &context);
 
     state.root_group = context.group;
 }

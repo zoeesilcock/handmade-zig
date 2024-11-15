@@ -664,6 +664,10 @@ pub const MemoryArena = struct {
         return @ptrCast(dest);
     }
 
+    pub fn pushCopy(self: *MemoryArena, size: MemoryIndex, source: *void) *void {
+        return copy(size, source, @ptrCast(self.pushSize(size, null)));
+    }
+
     pub fn beginTemporaryMemory(self: *MemoryArena) TemporaryMemory {
         const result = TemporaryMemory{
             .used = self.used,
@@ -705,7 +709,7 @@ pub fn zeroArray(count: u32, ptr: *anyopaque) void {
     zeroSize(@sizeOf(ptr) * count, ptr);
 }
 
-pub fn copy(size: MemoryIndex, source_init: *void, dest_init: *void) void {
+pub fn copy(size: MemoryIndex, source_init: *void, dest_init: *void) *void {
     var source: [*]u8 = @ptrCast(source_init);
     var dest: [*]u8 = @ptrCast(dest_init);
 
@@ -716,6 +720,8 @@ pub fn copy(size: MemoryIndex, source_init: *void, dest_init: *void) void {
         source += 1;
         dest += 1;
     }
+
+    return dest_init;
 }
 
 // Game state.

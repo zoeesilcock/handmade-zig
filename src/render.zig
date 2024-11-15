@@ -164,8 +164,7 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
         const offset_z: f32 = 0;
         var distance_above_target = transform.distance_above_target;
         if (config.DEBUGUI_USE_DEBUG_CAMERA) {
-            // TODO: How do we want to control the debug camera?
-            distance_above_target += 50;
+            distance_above_target += config.DEBUGUI_DEBUG_CAMERA_DISTANCE;
         }
 
         const distance_to_position_z = distance_above_target - position.z();

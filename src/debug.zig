@@ -12,8 +12,9 @@ const DebugRecord = shared.DebugRecord;
 const DebugEventType = shared.DebugEventType;
 const DebugEvent = shared.DebugEvent;
 const TimedBlock = shared.TimedBlock;
-const Vector3 = math.Vector3;
 const Vector2 = math.Vector2;
+const Vector3 = math.Vector3;
+const Vector4 = math.Vector4;
 const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
@@ -116,8 +117,6 @@ pub const DebugState = struct {
     high_priority_queue: *shared.PlatformWorkQueue,
     debug_arena: shared.MemoryArena,
 
-    root_group: ?*DebugVariable,
-
     render_group: ?*render.RenderGroup = null,
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
@@ -125,9 +124,10 @@ pub const DebugState = struct {
     is_compiling: bool = false,
     compiler: shared.DebugExecutingProcess,
 
+    root_group: ?*DebugVariable,
+    hot_variable: ?*DebugVariable,
     menu_position: Vector2,
     menu_active: bool,
-    hot_menu_index: u32,
 
     left_edge: f32 = 0,
     at_y: f32 = 0,
@@ -393,6 +393,11 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
 
             var match_vector = asset.AssetVector{};
             var weight_vector = asset.AssetVector{};
+            match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
+            weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
+            if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
+                debug_state.font_id = id;
+            }
 
             debug_state.font_scale = 1;
             debug_state.at_y = 0;
@@ -402,20 +407,50 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
                 group.orthographicMode(width, height, 1);
             }
 
-            match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
-            weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
-            if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
-                debug_state.font_id = id;
-
-                const font_info = assets.getFontInfo(debug_state.font_id);
-                debug_state.at_y = 0.5 * @as(f32, @floatFromInt(height)) - debug_state.font_scale * font_info.getStartingBaselineY();
+            if (debug_state.debug_font_info) |font_info| {
+                debug_state.at_y =
+                    0.5 * @as(f32, @floatFromInt(height)) - debug_state.font_scale * font_info.getStartingBaselineY();
             }
         }
     }
 }
 
+const DebugVariableToTextFlag = enum(u32) {
+    Declaration = 0x1,
+    Name = 0x2,
+    Type = 0x4,
+    SemiColonEnd = 0x8,
+    NullTerminator = 0x10,
+    LineFeedEnd = 0x20,
+    Colon = 0x40,
+
+    pub fn toInt(self: DebugVariableToTextFlag) u32 {
+        return @intFromEnum(self);
+    }
+
+    pub fn declarationFlags() u32 {
+        return DebugVariableToTextFlag.Declaration.toInt() |
+            DebugVariableToTextFlag.Name.toInt() |
+            DebugVariableToTextFlag.Type.toInt() |
+            DebugVariableToTextFlag.SemiColonEnd.toInt() |
+            DebugVariableToTextFlag.LineFeedEnd.toInt();
+    }
+
+    pub fn displayFlags() u32 {
+        return DebugVariableToTextFlag.Name.toInt() |
+            DebugVariableToTextFlag.NullTerminator.toInt() |
+            DebugVariableToTextFlag.Colon.toInt();
+    }
+};
+
 pub const DebugVariableType = enum(u32) {
     Boolean,
+    Int,
+    UInt,
+    Float,
+    Vector2,
+    Vector3,
+    Vector4,
     Group,
 };
 
@@ -427,20 +462,172 @@ pub const DebugVariableGroup = struct {
 
 pub const DebugVariable = struct {
     variable_type: DebugVariableType = .Boolean,
-    name: [:0]const u8,
+    name: [*:0]const u8,
     next: ?*DebugVariable = null,
     parent: ?*DebugVariable = null,
 
     data: union {
         bool_value: bool,
+        int_value: i32,
+        uint_value: u32,
+        float_value: f32,
+        vector2_value: Vector2,
+        vector3_value: Vector3,
+        vector4_value: Vector4,
+
         group: DebugVariableGroup,
     },
+
+    pub fn typeString(self: *DebugVariable) []const u8 {
+        return switch (self.variable_type) {
+            .Boolean => "bool",
+            .Int => "i32",
+            .UInt => "u32",
+            .Float => "f32",
+            .Vector2 => "Vector2",
+            .Vector3 => "Vector3",
+            .Vector4 => "Vector4",
+            else => "",
+        };
+    }
+
+    pub fn prefixString(self: *DebugVariable) []const u8 {
+        return switch (self.variable_type) {
+            .Group => "// ",
+            else => "pub const DEBUGUI_",
+        };
+    }
 };
 
+
+fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVariable, flags: u32) u32 {
+    var len: u32 = start_index;
+
+    if (flags & DebugVariableToTextFlag.Declaration.toInt() != 0) {
+        const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{ variable.prefixString() }) catch "";
+        len += @intCast(slice.len);
+    }
+
+    if (flags & DebugVariableToTextFlag.Name.toInt() != 0) {
+        const slice = std.fmt.bufPrintZ(
+            buffer[len..],
+            "{s}", .{ variable.name },
+        ) catch "";
+        len += @intCast(slice.len);
+    }
+
+    if (flags & DebugVariableToTextFlag.Colon.toInt() != 0) {
+        const slice = std.fmt.bufPrintZ(buffer[len..], ": ", .{ }) catch "";
+        len += @intCast(slice.len);
+    }
+
+    if (variable.variable_type != .Group and flags & DebugVariableToTextFlag.Type.toInt() != 0) {
+        const slice = std.fmt.bufPrintZ(
+            buffer[len..],
+            ": {s} = ", .{ variable.typeString() },
+        ) catch "";
+        len += @intCast(slice.len);
+    }
+
+    if (flags & DebugVariableToTextFlag.Declaration.toInt() != 0) {
+        switch(variable.variable_type) {
+            .Vector2, .Vector3, .Vector4 => {
+                const slice = std.fmt.bufPrintZ(buffer[len..], "{s}.new", .{ variable.typeString() }) catch "";
+                len += @intCast(slice.len);
+            },
+            else => {},
+        }
+    }
+
+    switch(variable.variable_type) {
+        .Boolean => {
+            const slice = std.fmt.bufPrintZ(
+                buffer[len..],
+                "{s}", .{ if (variable.data.bool_value) "true" else "false" },
+            ) catch "";
+            len += @intCast(slice.len);
+        },
+        .Int => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{ variable.data.int_value }) catch "";
+            len += @intCast(slice.len);
+        },
+        .UInt => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{ variable.data.uint_value }) catch "";
+            len += @intCast(slice.len);
+        },
+        .Float => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{ variable.data.float_value }) catch "";
+            len += @intCast(slice.len);
+        },
+        .Vector2 => {
+            const slice = std.fmt.bufPrintZ(
+                buffer[len..],
+                "({d}, {d})",
+                .{ variable.data.vector2_value.x(), variable.data.vector2_value.y() },
+            ) catch "";
+            len += @intCast(slice.len);
+        },
+        .Vector3 => {
+            const slice = std.fmt.bufPrintZ(
+                buffer[len..],
+                "({d}, {d}, {d})",
+                .{ variable.data.vector3_value.x(), variable.data.vector3_value.y(), variable.data.vector3_value.z() },
+            ) catch "";
+            len += @intCast(slice.len);
+        },
+        .Vector4 => {
+            const slice = std.fmt.bufPrintZ(
+                buffer[len..],
+                "({d}, {d}, {d}, {d})",
+                .{
+                    variable.data.vector4_value.x(),
+                    variable.data.vector4_value.y(),
+                    variable.data.vector4_value.z(),
+                    variable.data.vector4_value.w(),
+                },
+            ) catch "";
+            len += @intCast(slice.len);
+        },
+        .Group => {},
+    }
+
+    if (variable.variable_type != .Group and flags & DebugVariableToTextFlag.SemiColonEnd.toInt() != 0) {
+        const slice = std.fmt.bufPrintZ(buffer[len..], ";", .{}) catch "";
+        len += @intCast(slice.len);
+    }
+
+    if (flags & DebugVariableToTextFlag.LineFeedEnd.toInt() != 0) {
+        const slice = std.fmt.bufPrintZ(buffer[len..], "\n", .{}) catch "";
+        len += @intCast(slice.len);
+    }
+
+    if (flags & DebugVariableToTextFlag.NullTerminator.toInt() != 0) {
+        buffer[len] = 0;
+        len += 1;
+    }
+
+    return len;
+}
+
 fn writeHandmadeConfig(debug_state: *DebugState) void {
-    var buf: [4096:0]u8 = undefined;
-    var len: u32 = 0;
+    var buffer: [4096:0]u8 = undefined;
+    var length: u32 = 0;
     var depth: u32 = 0;
+
+    {
+        const imports =
+            \\const math = @import("math.zig");
+            \\
+            \\const Vector2 = math.Vector2;
+            \\const Vector3 = math.Vector3;
+            \\const Vector4 = math.Vector4;
+            \\
+            \\
+        ;
+
+        const slice = std.fmt.bufPrintZ(buffer[length..], "{s}", .{ imports }) catch "";
+        length += @intCast(slice.len);
+    }
 
     if (debug_state.root_group) |root_group| {
         var opt_variable: ?*DebugVariable = root_group.data.group.first_child;
@@ -448,27 +635,12 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
         while (opt_variable) |variable| {
             for (0..depth) |_| {
                 for (0..4) |_| {
-                    buf[len] = ' ';
-                    len += 1;
+                    buffer[length] = ' ';
+                    length += 1;
                 }
             }
 
-            switch(variable.variable_type) {
-                .Boolean => {
-                    const slice = std.fmt.bufPrintZ(
-                        buf[len..],
-                        "pub const DEBUGUI_{s} = {s};\n", .{ variable.name, if (variable.data.bool_value) "true" else "false" },
-                    ) catch "";
-                    len += @intCast(slice.len);
-                },
-                .Group => {
-                    const slice = std.fmt.bufPrintZ(
-                        buf[len..],
-                        "// {s}\n", .{ variable.name },
-                    ) catch "";
-                    len += @intCast(slice.len);
-                },
-            }
+            length = debugVariableToText(&buffer, length, variable, DebugVariableToTextFlag.declarationFlags());
 
             if (variable.variable_type == .Group) {
                 opt_variable = variable.data.group.first_child;
@@ -486,7 +658,7 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
             }
         }
 
-        _ = shared.platform.debugWriteEntireFile("../src/config.zig", len, &buf);
+        _ = shared.platform.debugWriteEntireFile("../src/config.zig", length, &buffer);
 
         if (!debug_state.is_compiling) {
             debug_state.is_compiling = true;
@@ -500,9 +672,60 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
 }
 
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
+    var depth: u32 = 0;
+    const at_x = debug_state.left_edge;
+    var at_y = debug_state.at_y;
+    const line_advance: f32 =
+        if (debug_state.debug_font_info) |font_info| font_info.getLineAdvance() * debug_state.font_scale else 0;
+
+    debug_state.hot_variable = null;
+
+    if (debug_state.root_group) |root_group| {
+        var opt_variable: ?*DebugVariable = root_group.data.group.first_child;
+
+        while (opt_variable) |variable| {
+            var item_color: Color = Color.white();
+            var text: [4096:0]u8 = undefined;
+            var len: u32 = 0;
+
+            len = debugVariableToText(&text, len, variable, DebugVariableToTextFlag.displayFlags());
+
+            const indent: f32 = @as(f32, @floatFromInt(depth)) * 2 * line_advance;
+            const text_position: Vector2 = Vector2.new(at_x + indent, at_y);
+
+            const text_bounds: Rectangle2 = getTextSize(debug_state, &text);
+            if (mouse_position.isInRectangle(text_bounds.offsetBy(text_position))) {
+                item_color = Color.new(1, 1, 0, 1);
+                debug_state.hot_variable = variable;
+            }
+
+            textOutAt(&text, text_position, item_color);
+            at_y -= line_advance;
+
+            if (variable.variable_type == .Group and variable.data.group.expanded) {
+                opt_variable = variable.data.group.first_child;
+                depth +%= 1;
+            } else {
+                while (opt_variable) |inner_variable| {
+                    if (inner_variable.next != null) {
+                        opt_variable = inner_variable.next;
+                        break;
+                    } else {
+                        opt_variable = inner_variable.parent;
+                        depth -%= 1;
+                    }
+                }
+            }
+        }
+    }
+
+    debug_state.at_y = at_y;
+
+
+
     _ = render_group;
-    _ = debug_state;
-    _ = mouse_position;
+    // _ = debug_state;
+    // _ = mouse_position;
 
     // var new_hot_menu_index: u32 = debug_variable_list.len;
     // var best_distance_sq: f32 = std.math.floatMax(f32);
@@ -546,6 +769,8 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
             const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
             var hot_record: ?*DebugRecord = null;
 
+            drawDebugMainMenu(debug_state, group, mouse_position);
+
             // if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down) {
             //     if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
             //         debug_state.menu_position = mouse_position;
@@ -560,6 +785,22 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
             //     }
             //     writeHandmadeConfig(debug_state);
             // }
+
+            if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
+                if (debug_state.hot_variable) |variable| {
+                    switch (variable.variable_type) {
+                        .Boolean => {
+                            variable.data.bool_value = !variable.data.bool_value;
+                        },
+                        .Group => {
+                            variable.data.group.expanded = !variable.data.group.expanded;
+                        },
+                        else => {},
+                    }
+                }
+
+                writeHandmadeConfig(debug_state);
+            }
 
             if (debug_state.is_compiling) {
                 const state = shared.platform.debugGetProcessState(debug_state.compiler);
@@ -867,12 +1108,9 @@ pub fn textOp(
 
 pub fn textLine(text: [:0]const u8) void {
     if (DebugState.get()) |debug_state| {
-        if (debug_state.render_group) |group| {
-            if (group.pushFont(debug_state.font_id)) |_| {
-                const font_info = group.assets.getFontInfo(debug_state.font_id);
-                textOutAt(text, Vector2.new(debug_state.left_edge, debug_state.at_y), Color.white());
-                debug_state.at_y -= font_info.getLineAdvance() * debug_state.font_scale;
-            }
+        if (debug_state.debug_font_info) |font_info| {
+            textOutAt(text, Vector2.new(debug_state.left_edge, debug_state.at_y), Color.white());
+            debug_state.at_y -= font_info.getLineAdvance() * debug_state.font_scale;
         }
     }
 }

@@ -1002,7 +1002,7 @@ pub export fn updateAndRender(
                     render_group.pushBitmapId(hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
                 },
                 .Space => {
-                    if (config.DEBUGUI_SPACE_OUTLINES) {
+                    if (config.DEBUGUI_USE_SPACE_OUTLINES) {
                         const space_color = Color.new(0, 0.5, 1, 1);
                         var volume_index: u32 = 0;
                         while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
