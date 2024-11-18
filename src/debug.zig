@@ -111,6 +111,14 @@ pub const DebugStatistic = struct {
     }
 };
 
+const DebugInteraction = enum(u32) {
+    None,
+    NoOp,
+    ToggleValue,
+    DragValue,
+    TearValue,
+};
+
 pub const DebugState = struct {
     initialized: bool,
 
@@ -125,9 +133,15 @@ pub const DebugState = struct {
     compiler: shared.DebugExecutingProcess,
 
     root_group: ?*DebugVariable,
-    hot_variable: ?*DebugVariable,
     menu_position: Vector2,
     menu_active: bool,
+
+    hierarchy: DebugVariableHierarchy,
+    interaction: DebugInteraction,
+    last_mouse_position: Vector2,
+    hot: ?*DebugVariable,
+    next_hot: ?*DebugVariable,
+    interacting_with: ?*DebugVariable,
 
     left_edge: f32 = 0,
     at_y: f32 = 0,
@@ -411,6 +425,9 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
                 debug_state.at_y =
                     0.5 * @as(f32, @floatFromInt(height)) - debug_state.font_scale * font_info.getStartingBaselineY();
             }
+
+            debug_state.hierarchy.group = debug_state.root_group;
+            debug_state.hierarchy.ui_position = Vector2.new(debug_state.left_edge, debug_state.at_y);
         }
     }
 }
@@ -458,6 +475,11 @@ pub const DebugVariableGroup = struct {
     expanded: bool,
     first_child: ?*DebugVariable,
     last_child: ?*DebugVariable,
+};
+
+pub const DebugVariableHierarchy = struct {
+    ui_position: Vector2,
+    group: ?*DebugVariable,
 };
 
 pub const DebugVariable = struct {
@@ -673,15 +695,13 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
 
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     var depth: u32 = 0;
-    const at_x = debug_state.left_edge;
-    var at_y = debug_state.at_y;
+    const at_x = debug_state.hierarchy.ui_position.x();
+    var at_y = debug_state.hierarchy.ui_position.y();
     const line_advance: f32 =
         if (debug_state.debug_font_info) |font_info| font_info.getLineAdvance() * debug_state.font_scale else 0;
 
-    debug_state.hot_variable = null;
-
-    if (debug_state.root_group) |root_group| {
-        var opt_variable: ?*DebugVariable = root_group.data.group.first_child;
+    if (debug_state.hierarchy.group) |hierarchy_group| {
+        var opt_variable: ?*DebugVariable = hierarchy_group.data.group.first_child;
 
         while (opt_variable) |variable| {
             var item_color: Color = Color.white();
@@ -695,8 +715,11 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 
             const text_bounds: Rectangle2 = getTextSize(debug_state, &text);
             if (mouse_position.isInRectangle(text_bounds.offsetBy(text_position))) {
+                debug_state.next_hot = variable;
+            }
+
+            if (debug_state.hot == variable) {
                 item_color = Color.new(1, 1, 0, 1);
-                debug_state.hot_variable = variable;
             }
 
             textOutAt(&text, text_position, item_color);
@@ -720,8 +743,6 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
     }
 
     debug_state.at_y = at_y;
-
-
 
     _ = render_group;
     // _ = debug_state;
@@ -760,34 +781,42 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
     // }
 }
 
-pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
-    var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugEnd);
-    defer overlay_timed_block.end();
+fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
+    _ = input;
+    _ = mouse_position;
 
-    if (DebugState.get()) |debug_state| {
-        if (debug_state.render_group) |group| {
-            const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
-            var hot_record: ?*DebugRecord = null;
+    if (debug_state.hot) |variable| {
+        switch (variable.variable_type) {
+            .Boolean => {
+                debug_state.interaction = .ToggleValue;
+            },
+            .Float => {
+                debug_state.interaction = .DragValue;
+            },
+            .Group => {
+                debug_state.interaction = .ToggleValue;
+            },
+            else => {},
+        }
 
-            drawDebugMainMenu(debug_state, group, mouse_position);
+        if (debug_state.interaction != .None) {
+            debug_state.interacting_with = debug_state.hot;
+        }
+    } else {
+        debug_state.interaction = .NoOp;
+    }
+}
 
-            // if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down) {
-            //     if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
-            //         debug_state.menu_position = mouse_position;
-            //     }
-            //     drawDebugMainMenu(debug_state, group, mouse_position);
-            // } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
-            //     drawDebugMainMenu(debug_state, group, mouse_position);
-            //
-            //     if (debug_state.hot_menu_index < debug_variable_list.len) {
-            //         debug_variable_list[debug_state.hot_menu_index].value =
-            //             !debug_variable_list[debug_state.hot_menu_index].value;
-            //     }
-            //     writeHandmadeConfig(debug_state);
-            // }
+fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
+    _ = input;
+    _ = mouse_position;
 
-            if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
-                if (debug_state.hot_variable) |variable| {
+    if (debug_state.interaction != .NoOp) {
+        std.debug.assert(debug_state.interacting_with != null);
+
+        if (debug_state.interacting_with) |variable| {
+            switch (debug_state.interaction) {
+                .ToggleValue => {
                     switch (variable.variable_type) {
                         .Boolean => {
                             variable.data.bool_value = !variable.data.bool_value;
@@ -797,10 +826,90 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
                         },
                         else => {},
                     }
-                }
-
-                writeHandmadeConfig(debug_state);
+                },
+                else => {},
             }
+
+            writeHandmadeConfig(debug_state);
+        }
+    }
+
+    debug_state.interaction = .None;
+    debug_state.interacting_with = null;
+}
+
+fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
+    const mouse_delta = mouse_position.minus(debug_state.last_mouse_position);
+    // if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down) {
+    //     if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
+    //         debug_state.menu_position = mouse_position;
+    //     }
+    //     drawDebugMainMenu(debug_state, group, mouse_position);
+    // } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
+    //     drawDebugMainMenu(debug_state, group, mouse_position);
+    //
+    //     if (debug_state.hot_menu_index < debug_variable_list.len) {
+    //         debug_variable_list[debug_state.hot_menu_index].value =
+    //             !debug_variable_list[debug_state.hot_menu_index].value;
+    //     }
+    //     writeHandmadeConfig(debug_state);
+    // }
+
+    if (debug_state.interaction != .None) {
+        if (debug_state.interacting_with) |variable| {
+            // Mouse move interaction.
+            switch (debug_state.interaction) {
+                .DragValue => {
+                    switch (variable.variable_type) {
+                        .Float => {
+                            variable.data.float_value += 0.1 * mouse_delta.y();
+                        },
+                        else => {},
+                    }
+                },
+                else => {},
+            }
+        }
+
+        // Click interaction.
+        var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
+        while (transition_index > 1) : (transition_index -= 1) {
+            endInteract(debug_state, input, mouse_position);
+            beginInteract(debug_state, input, mouse_position);
+        }
+
+        if (!input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down) {
+            endInteract(debug_state, input, mouse_position);
+        }
+    } else {
+        debug_state.hot = debug_state.next_hot;
+
+        var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
+        while (transition_index > 1) : (transition_index -= 1) {
+            beginInteract(debug_state, input, mouse_position);
+            endInteract(debug_state, input, mouse_position);
+        }
+
+        if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down) {
+            beginInteract(debug_state, input, mouse_position);
+        }
+    }
+
+    debug_state.last_mouse_position = mouse_position;
+}
+
+pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
+    var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugEnd);
+    defer overlay_timed_block.end();
+
+    if (DebugState.get()) |debug_state| {
+        if (debug_state.render_group) |group| {
+            const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
+            var hot_record: ?*DebugRecord = null;
+            debug_state.next_hot = null;
+
+            drawDebugMainMenu(debug_state, group, mouse_position);
+            interact(debug_state, input, mouse_position);
 
             if (debug_state.is_compiling) {
                 const state = shared.platform.debugGetProcessState(debug_state.compiler);

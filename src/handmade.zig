@@ -27,8 +27,6 @@ const std = @import("std");
 /// * Audio.
 ///     * Fix clicking bug at end of samples.
 ///
-/// * Particle system.
-///
 /// * Rendering.
 ///     * Get rid of "even" notion?
 ///     * Straighten out all coordinate systems!
@@ -55,37 +53,36 @@ const std = @import("std");
 ///     instead of handling overlap outside and so on.
 ///     * Transient collusion rules. Clear based on flag.
 ///         * Allow non-transient rules to override transient ones.
-///     * Entry/exit?
+///         * Entry/exit?
 ///     * Robustness/shape definition?
 ///     * Implement reprojection to handle interpenetration.
+///     * Things pushing other things.
+/// * Animation.
+///     * Skeletal animation.
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
-///
-/// * Metagame/save game?
-///     * How do you enter a save slot? Multiple profiles and potential "menu world".
-///     * Persistent unlocks, etc.
-///     * De we allo save games? Probably yes, just for "pausing".
-///     * Continuous save for crash recovery?
-///
-/// * Rudimentary world generation to understand which elements will be needed.
-///     * Placement of background things.
-///     * Connectivity?
-///     * None-overlapping?
-///     * Map display.
+///     * Simple zoomed-out view for testing?
 /// * AI.
 ///     * Rudimentary monster behaviour example.
 ///     * Pathfinding.
 ///     * AI storage.
-///
-/// * Animation, should lead into rendering.
-///     * Skeletal animation.
 ///
 /// Production:
 ///
 /// * Game.
 ///     * Entity system.
 ///     * World generation.
+///     * Rudimentary world generation to understand which elements will be needed.
+///         * Placement of background things.
+///         * Connectivity?
+///         * None-overlapping?
+///         * Map display.
+/// * Metagame/save game?
+///     * How do you enter a save slot? Multiple profiles and potential "menu world".
+///     * Persistent unlocks, etc.
+///     * De we allo save games? Probably yes, just for "pausing".
+///     * Continuous save for crash recovery?
 ///
 
 // Build options.
