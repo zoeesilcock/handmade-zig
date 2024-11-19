@@ -117,6 +117,7 @@ const DebugInteraction = enum(u32) {
     ToggleValue,
     DragValue,
     TearValue,
+    ResizeProfile,
 };
 
 pub const DebugState = struct {
@@ -139,11 +140,14 @@ pub const DebugState = struct {
     hierarchy: DebugVariableHierarchy,
     interaction: DebugInteraction,
     last_mouse_position: Vector2,
+    hot_interaction: DebugInteraction,
+    next_hot_interaction: DebugInteraction,
     hot: ?*DebugVariable,
     next_hot: ?*DebugVariable,
     interacting_with: ?*DebugVariable,
 
     left_edge: f32 = 0,
+    right_edge: f32 = 0,
     at_y: f32 = 0,
     font_scale: f32 = 0,
     font_id: file_formats.FontId = undefined,
@@ -161,9 +165,6 @@ pub const DebugState = struct {
     frame_bar_scale: f32,
     frame_count: u32,
     paused: bool,
-
-    profile_on: bool,
-    profile_rect: Rectangle2,
 
     frames: [*]DebugFrame,
     first_thread: ?*DebugThread,
@@ -379,7 +380,32 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
                     memory.debug_storage.? + @sizeOf(DebugState),
                 );
 
-                debug_variables.createDebugVariables(debug_state);
+                var context: debug_variables.DebugVariableDefinitionContext = .{
+                    .state = debug_state,
+                    .arena = &debug_state.debug_arena,
+                    .group = null,
+                };
+                context.group = debug_variables.beginVariableGroup(&context, "Root");
+
+                _ = debug_variables.beginVariableGroup(&context, "Debugging");
+                debug_variables.createDebugVariables(&context);
+
+                _ = debug_variables.beginVariableGroup(&context, "Profile");
+                {
+                    _ = debug_variables.beginVariableGroup(&context, "By Thread");
+                    var thread_list = debug_variables.addDebugVariable(&context, .CounterThreadList, "");
+                    thread_list.data = .{ .profile = .{ .dimension = Vector2.new(1024, 100) } };
+                    debug_variables.endVariableGroup(&context);
+
+                    _ = debug_variables.beginVariableGroup(&context, "By Function");
+                    var function_list = debug_variables.addDebugVariable(&context, .CounterThreadList, "");
+                    function_list.data = .{ .profile = .{ .dimension = Vector2.new(1024, 200) } };
+                    debug_variables.endVariableGroup(&context);
+                }
+                debug_variables.endVariableGroup(&context);
+                debug_variables.endVariableGroup(&context);
+
+                debug_state.root_group = context.group;
 
                 debug_state.render_group =
                     render.RenderGroup.allocate(assets, &debug_state.debug_arena, shared.megabytes(16), false);
@@ -414,16 +440,12 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
             }
 
             debug_state.font_scale = 1;
-            debug_state.at_y = 0;
+            debug_state.at_y = 0.5 * @as(f32, @floatFromInt(height));
             debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
+            debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
 
             if (debug_state.render_group) |group| {
                 group.orthographicMode(width, height, 1);
-            }
-
-            if (debug_state.debug_font_info) |font_info| {
-                debug_state.at_y =
-                    0.5 * @as(f32, @floatFromInt(height)) - debug_state.font_scale * font_info.getStartingBaselineY();
             }
 
             debug_state.hierarchy.group = debug_state.root_group;
@@ -468,6 +490,8 @@ pub const DebugVariableType = enum(u32) {
     Vector2,
     Vector3,
     Vector4,
+    CounterThreadList,
+    // CounterFunctionList,
     Group,
 };
 
@@ -480,6 +504,10 @@ pub const DebugVariableGroup = struct {
 pub const DebugVariableHierarchy = struct {
     ui_position: Vector2,
     group: ?*DebugVariable,
+};
+
+const DebugProfileSettings = struct {
+    dimension: Vector2,
 };
 
 pub const DebugVariable = struct {
@@ -496,9 +524,14 @@ pub const DebugVariable = struct {
         vector2_value: Vector2,
         vector3_value: Vector3,
         vector4_value: Vector4,
+        profile: DebugProfileSettings,
 
         group: DebugVariableGroup,
     },
+
+    pub fn shouldBeWritten(self: *DebugVariable) bool {
+        return self.variable_type != .CounterThreadList;
+    }
 
     pub fn typeString(self: *DebugVariable) []const u8 {
         return switch (self.variable_type) {
@@ -610,6 +643,7 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
             ) catch "";
             len += @intCast(slice.len);
         },
+        .CounterThreadList => {},
         .Group => {},
     }
 
@@ -655,14 +689,16 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
         var opt_variable: ?*DebugVariable = root_group.data.group.first_child;
 
         while (opt_variable) |variable| {
-            for (0..depth) |_| {
-                for (0..4) |_| {
-                    buffer[length] = ' ';
-                    length += 1;
+            if (variable.shouldBeWritten()) {
+                for (0..depth) |_| {
+                    for (0..4) |_| {
+                        buffer[length] = ' ';
+                        length += 1;
+                    }
                 }
-            }
 
-            length = debugVariableToText(&buffer, length, variable, DebugVariableToTextFlag.declarationFlags());
+                length = debugVariableToText(&buffer, length, variable, DebugVariableToTextFlag.declarationFlags());
+            }
 
             if (variable.variable_type == .Group) {
                 opt_variable = variable.data.group.first_child;
@@ -693,49 +729,183 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
     }
 }
 
+fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_position: Vector2) void {
+    if (debug_state.render_group) |group| {
+        group.pushRectangle2(profile_rect, 0, Color.new(0, 0, 0, 0.25));
+
+        const bar_spacing: f32 = 4;
+        var lane_height: f32 = 0;
+        const lane_count: u32 = debug_state.frame_bar_lane_count;
+
+        var max_frame: u32 = debug_state.frame_count;
+        if (max_frame > 10) {
+            max_frame = 10;
+        }
+
+        if (lane_count > 0 and max_frame > 0) {
+            const pixels_per_frame: f32 = profile_rect.getDimension().y() / @as(f32, @floatFromInt(max_frame));
+            lane_height = (pixels_per_frame - bar_spacing) / @as(f32, @floatFromInt(lane_count));
+        }
+
+        const bar_height: f32 = lane_height * @as(f32, @floatFromInt(lane_count));
+        const bars_plus_spacing: f32 = bar_height + bar_spacing;
+        const chart_left: f32 = profile_rect.min.x();
+        // const chart_height: f32 = bars_plus_spacing * @as(f32, @floatFromInt(max_frame));
+        const chart_width: f32 = profile_rect.getDimension().x();
+        const chart_top: f32 = profile_rect.max.y();
+        const scale: f32 = chart_width * debug_state.frame_bar_scale;
+
+        const colors: [12]Color3 = .{
+            Color3.new(1, 0, 0),
+            Color3.new(0, 1, 0),
+            Color3.new(0, 0, 1),
+            Color3.new(1, 1, 0),
+            Color3.new(0, 1, 1),
+            Color3.new(1, 0, 1),
+            Color3.new(1, 0.5, 0),
+            Color3.new(1, 0, 0.5),
+            Color3.new(0.5, 1, 0),
+            Color3.new(0, 1, 0.5),
+            Color3.new(0.5, 0, 1),
+            Color3.new(0, 0.5, 1),
+        };
+
+        var frame_index: u32 = 0;
+        while (frame_index < max_frame) : (frame_index += 1) {
+            const frame: *DebugFrame = &debug_state.frames[debug_state.frame_count - (frame_index + 1)];
+
+            const stack_x: f32 = chart_left;
+            const stack_y: f32 = chart_top - bars_plus_spacing * @as(f32, (@floatFromInt(frame_index)));
+
+            var region_index: u32 = 0;
+            while (region_index < frame.region_count) : (region_index += 1) {
+                const region: *const DebugFrameRegion = &frame.regions[region_index];
+
+                const color = colors[region.color_index % colors.len];
+                const this_min_x: f32 = stack_x + scale * region.min_t;
+                const this_max_x: f32 = stack_x + scale * region.max_t;
+                const lane: f32 = @as(f32, @floatFromInt(region.lane_index));
+
+                const region_rect = math.Rectangle2.new(
+                    this_min_x, stack_y - lane_height * (lane + 1),
+                    this_max_x, stack_y - lane_height * lane,
+                );
+
+                group.pushRectangle2(region_rect, 0, color.toColor(1));
+
+                if (mouse_position.isInRectangle(region_rect)) {
+                    const record: *DebugRecord = region.record;
+
+                    var buffer: [128]u8 = undefined;
+                    const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
+                        record.block_name,
+                        region.cycle_count,
+                        record.file_name,
+                        record.line_number,
+                    }) catch "";
+                    textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
+
+                    // hot_record = record;
+                }
+            }
+        }
+
+        // // 30 FPS line.
+        // group.pushRectangle(
+        //     Vector2.new(chart_width, 1),
+        //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + chart_height, 0),
+        //     Color.white(),
+        // );
+        //
+        // // 60 FPS line.
+        // group.pushRectangle(
+        //     Vector2.new(chart_width, 1),
+        //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + (chart_height * 0.5), 0),
+        //     Color.new(0.5, 1, 0, 1),
+        // );
+    }
+}
+
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     var depth: u32 = 0;
+    const spacing_y: f32 = 4;
     const at_x = debug_state.hierarchy.ui_position.x();
     var at_y = debug_state.hierarchy.ui_position.y();
-    const line_advance: f32 =
-        if (debug_state.debug_font_info) |font_info| font_info.getLineAdvance() * debug_state.font_scale else 0;
 
     if (debug_state.hierarchy.group) |hierarchy_group| {
-        var opt_variable: ?*DebugVariable = hierarchy_group.data.group.first_child;
+        if (debug_state.debug_font_info) |font_info| {
+            const line_advance: f32 = font_info.getLineAdvance() * debug_state.font_scale;
+            var opt_variable: ?*DebugVariable = hierarchy_group.data.group.first_child;
 
-        while (opt_variable) |variable| {
-            var item_color: Color = Color.white();
-            var text: [4096:0]u8 = undefined;
-            var len: u32 = 0;
+            while (opt_variable) |variable| {
+                const is_hot: bool = debug_state.hot == variable;
+                const item_color: Color =
+                    if (is_hot and debug_state.hot_interaction == .None) Color.new(1, 1, 0, 1) else Color.white();
+                var bounds: Rectangle2 = Rectangle2.zero();
 
-            len = debugVariableToText(&text, len, variable, DebugVariableToTextFlag.displayFlags());
+                switch(variable.variable_type) {
+                    .CounterThreadList => {
+                        const indent: f32 = @as(f32, @floatFromInt(depth)) * 2 * line_advance;
+                        const min_corner: Vector2 = Vector2.new(at_x + indent, at_y - variable.data.profile.dimension.y());
+                        const max_corner: Vector2 = Vector2.new(min_corner.x() + variable.data.profile.dimension.x(), at_y);
+                        bounds = Rectangle2.fromMinMax(min_corner, max_corner);
+                        drawProfileIn(debug_state, bounds, mouse_position);
 
-            const indent: f32 = @as(f32, @floatFromInt(depth)) * 2 * line_advance;
-            const text_position: Vector2 = Vector2.new(at_x + indent, at_y);
+                        const size_position: Vector2 = Vector2.new(max_corner.x(), min_corner.y());
+                        const size_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(size_position, Vector2.new(4, 4));
+                        const size_box_color: Color =
+                            if (is_hot and debug_state.hot_interaction == .ResizeProfile) Color.new(1, 1, 0, 1) else Color.white();
+                        render_group.pushRectangle2(size_box, 0, size_box_color);
 
-            const text_bounds: Rectangle2 = getTextSize(debug_state, &text);
-            if (mouse_position.isInRectangle(text_bounds.offsetBy(text_position))) {
-                debug_state.next_hot = variable;
-            }
+                        if (mouse_position.isInRectangle(size_box)) {
+                            debug_state.next_hot_interaction = .ResizeProfile;
+                            debug_state.next_hot = variable;
+                        } else if (mouse_position.isInRectangle(bounds)) {
+                            debug_state.next_hot_interaction = .None;
+                            debug_state.next_hot = variable;
+                        }
+                    },
+                    else => {
+                        var text: [4096:0]u8 = undefined;
+                        var len: u32 = 0;
 
-            if (debug_state.hot == variable) {
-                item_color = Color.new(1, 1, 0, 1);
-            }
+                        len = debugVariableToText(&text, len, variable, DebugVariableToTextFlag.displayFlags());
 
-            textOutAt(&text, text_position, item_color);
-            at_y -= line_advance;
+                        const left_p_x: f32 = at_x + @as(f32, @floatFromInt(depth)) * 2 * line_advance;
+                        const top_p_y: f32 = at_y;
 
-            if (variable.variable_type == .Group and variable.data.group.expanded) {
-                opt_variable = variable.data.group.first_child;
-                depth +%= 1;
-            } else {
-                while (opt_variable) |inner_variable| {
-                    if (inner_variable.next != null) {
-                        opt_variable = inner_variable.next;
-                        break;
-                    } else {
-                        opt_variable = inner_variable.parent;
-                        depth -%= 1;
+                        bounds = getTextSize(debug_state, &text);
+                        bounds = bounds.offsetBy(Vector2.new(left_p_x, top_p_y - bounds.getDimension().y()));
+
+                        const text_position: Vector2 = Vector2.new(
+                            left_p_x,
+                            top_p_y - debug_state.font_scale * font_info.getStartingBaselineY(),
+                        );
+                        textOutAt(&text, text_position, item_color);
+
+                        at_y -= line_advance;
+
+                        if (mouse_position.isInRectangle(bounds)) {
+                            debug_state.next_hot_interaction = .None;
+                            debug_state.next_hot = variable;
+                        }
+                    }
+                }
+
+                at_y = bounds.min.y() - spacing_y;
+
+                if (variable.variable_type == .Group and variable.data.group.expanded) {
+                    opt_variable = variable.data.group.first_child;
+                    depth +%= 1;
+                } else {
+                    while (opt_variable) |inner_variable| {
+                        if (inner_variable.next != null) {
+                            opt_variable = inner_variable.next;
+                            break;
+                        } else {
+                            opt_variable = inner_variable.parent;
+                            depth -%= 1;
+                        }
                     }
                 }
             }
@@ -743,10 +913,6 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
     }
 
     debug_state.at_y = at_y;
-
-    _ = render_group;
-    // _ = debug_state;
-    // _ = mouse_position;
 
     // var new_hot_menu_index: u32 = debug_variable_list.len;
     // var best_distance_sq: f32 = std.math.floatMax(f32);
@@ -786,17 +952,21 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
     _ = mouse_position;
 
     if (debug_state.hot) |variable| {
-        switch (variable.variable_type) {
-            .Boolean => {
-                debug_state.interaction = .ToggleValue;
-            },
-            .Float => {
-                debug_state.interaction = .DragValue;
-            },
-            .Group => {
-                debug_state.interaction = .ToggleValue;
-            },
-            else => {},
+        if (debug_state.hot_interaction != .None) {
+            debug_state.interaction = debug_state.hot_interaction;
+        } else {
+            switch (variable.variable_type) {
+                .Boolean => {
+                    debug_state.interaction = .ToggleValue;
+                },
+                .Float => {
+                    debug_state.interaction = .DragValue;
+                },
+                .Group => {
+                    debug_state.interaction = .ToggleValue;
+                },
+                else => {},
+            }
         }
 
         if (debug_state.interaction != .None) {
@@ -805,6 +975,73 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
     } else {
         debug_state.interaction = .NoOp;
     }
+}
+
+fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
+    const mouse_delta = mouse_position.minus(debug_state.last_mouse_position);
+    // if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down) {
+    //     if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
+    //         debug_state.menu_position = mouse_position;
+    //     }
+    //     drawDebugMainMenu(debug_state, group, mouse_position);
+    // } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
+    //     drawDebugMainMenu(debug_state, group, mouse_position);
+    //
+    //     if (debug_state.hot_menu_index < debug_variable_list.len) {
+    //         debug_variable_list[debug_state.hot_menu_index].value =
+    //             !debug_variable_list[debug_state.hot_menu_index].value;
+    //     }
+    //     writeHandmadeConfig(debug_state);
+    // }
+
+    if (debug_state.interaction != .None) {
+        if (debug_state.interacting_with) |variable| {
+            // Mouse move interaction.
+            switch (debug_state.interaction) {
+                .DragValue => {
+                    switch (variable.variable_type) {
+                        .Float => {
+                            variable.data.float_value += 0.1 * mouse_delta.y();
+                        },
+                        else => {},
+                    }
+                },
+                .ResizeProfile => {
+                    const flipped_delta: Vector2 = Vector2.new(mouse_delta.x(), -mouse_delta.y());
+                    variable.data.profile.dimension = variable.data.profile.dimension.plus(flipped_delta);
+                    _ = variable.data.profile.dimension.setX(@max(variable.data.profile.dimension.x(), 10));
+                    _ = variable.data.profile.dimension.setY(@max(variable.data.profile.dimension.y(), 10));
+                },
+                else => {},
+            }
+        }
+
+        // Click interaction.
+        var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
+        while (transition_index > 1) : (transition_index -= 1) {
+            endInteract(debug_state, input, mouse_position);
+            beginInteract(debug_state, input, mouse_position);
+        }
+
+        if (!input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down) {
+            endInteract(debug_state, input, mouse_position);
+        }
+    } else {
+        debug_state.hot = debug_state.next_hot;
+        debug_state.hot_interaction = debug_state.next_hot_interaction;
+
+        var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
+        while (transition_index > 1) : (transition_index -= 1) {
+            beginInteract(debug_state, input, mouse_position);
+            endInteract(debug_state, input, mouse_position);
+        }
+
+        if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down) {
+            beginInteract(debug_state, input, mouse_position);
+        }
+    }
+
+    debug_state.last_mouse_position = mouse_position;
 }
 
 fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
@@ -838,66 +1075,6 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     debug_state.interacting_with = null;
 }
 
-fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
-    const mouse_delta = mouse_position.minus(debug_state.last_mouse_position);
-    // if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down) {
-    //     if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
-    //         debug_state.menu_position = mouse_position;
-    //     }
-    //     drawDebugMainMenu(debug_state, group, mouse_position);
-    // } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
-    //     drawDebugMainMenu(debug_state, group, mouse_position);
-    //
-    //     if (debug_state.hot_menu_index < debug_variable_list.len) {
-    //         debug_variable_list[debug_state.hot_menu_index].value =
-    //             !debug_variable_list[debug_state.hot_menu_index].value;
-    //     }
-    //     writeHandmadeConfig(debug_state);
-    // }
-
-    if (debug_state.interaction != .None) {
-        if (debug_state.interacting_with) |variable| {
-            // Mouse move interaction.
-            switch (debug_state.interaction) {
-                .DragValue => {
-                    switch (variable.variable_type) {
-                        .Float => {
-                            variable.data.float_value += 0.1 * mouse_delta.y();
-                        },
-                        else => {},
-                    }
-                },
-                else => {},
-            }
-        }
-
-        // Click interaction.
-        var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
-        while (transition_index > 1) : (transition_index -= 1) {
-            endInteract(debug_state, input, mouse_position);
-            beginInteract(debug_state, input, mouse_position);
-        }
-
-        if (!input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down) {
-            endInteract(debug_state, input, mouse_position);
-        }
-    } else {
-        debug_state.hot = debug_state.next_hot;
-
-        var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
-        while (transition_index > 1) : (transition_index -= 1) {
-            beginInteract(debug_state, input, mouse_position);
-            endInteract(debug_state, input, mouse_position);
-        }
-
-        if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down) {
-            beginInteract(debug_state, input, mouse_position);
-        }
-    }
-
-    debug_state.last_mouse_position = mouse_position;
-}
-
 pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
     var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugEnd);
     defer overlay_timed_block.end();
@@ -905,8 +1082,9 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
     if (DebugState.get()) |debug_state| {
         if (debug_state.render_group) |group| {
             const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
-            var hot_record: ?*DebugRecord = null;
+            // var hot_record: ?*DebugRecord = null;
             debug_state.next_hot = null;
+            debug_state.next_hot_interaction = .None;
 
             drawDebugMainMenu(debug_state, group, mouse_position);
             interact(debug_state, input, mouse_position);
@@ -985,118 +1163,15 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
                 textLine(slice);
             }
 
-            if (debug_state.profile_on) {
-                group.orthographicMode(
-                    @intFromFloat(debug_state.global_width),
-                    @intFromFloat(debug_state.global_height),
-                    1,
-                );
-
-                debug_state.profile_rect = Rectangle2.new(50, 50, 200, 200);
-                group.pushRectangle2(debug_state.profile_rect, 0, Color.new(0, 0, 0, 0.25));
-
-
-                const bar_spacing: f32 = 4;
-                var lane_height: f32 = 0;
-                const lane_count: u32 = debug_state.frame_bar_lane_count;
-
-                var max_frame: u32 = debug_state.frame_count;
-                if (max_frame > 10) {
-                    max_frame = 10;
-                }
-
-                if (lane_count > 0 and max_frame > 0) {
-                    const pixels_per_frame: f32 = debug_state.profile_rect.getDimension().y() / @as(f32, @floatFromInt(max_frame));
-                    lane_height = (pixels_per_frame - bar_spacing) / @as(f32, @floatFromInt(lane_count));
-                }
-
-                const bar_height: f32 = lane_height * @as(f32, @floatFromInt(lane_count));
-                const bars_plus_spacing: f32 = bar_height + bar_spacing;
-                const chart_left: f32 = debug_state.profile_rect.min.x();
-                // const chart_height: f32 = bars_plus_spacing * @as(f32, @floatFromInt(max_frame));
-                const chart_width: f32 = debug_state.profile_rect.getDimension().x();
-                const chart_top: f32 = debug_state.profile_rect.max.y();
-                const scale: f32 = chart_width * debug_state.frame_bar_scale;
-
-                const colors: [12]Color3 = .{
-                    Color3.new(1, 0, 0),
-                    Color3.new(0, 1, 0),
-                    Color3.new(0, 0, 1),
-                    Color3.new(1, 1, 0),
-                    Color3.new(0, 1, 1),
-                    Color3.new(1, 0, 1),
-                    Color3.new(1, 0.5, 0),
-                    Color3.new(1, 0, 0.5),
-                    Color3.new(0.5, 1, 0),
-                    Color3.new(0, 1, 0.5),
-                    Color3.new(0.5, 0, 1),
-                    Color3.new(0, 0.5, 1),
-                };
-
-                var frame_index: u32 = 0;
-                while (frame_index < max_frame) : (frame_index += 1) {
-                    const frame: *DebugFrame = &debug_state.frames[debug_state.frame_count - (frame_index + 1)];
-
-                    const stack_x: f32 = chart_left;
-                    const stack_y: f32 = chart_top - bars_plus_spacing * @as(f32, (@floatFromInt(frame_index)));
-
-                    var region_index: u32 = 0;
-                    while (region_index < frame.region_count) : (region_index += 1) {
-                        const region: *const DebugFrameRegion = &frame.regions[region_index];
-
-                        const color = colors[region.color_index % colors.len];
-                        const this_min_x: f32 = stack_x + scale * region.min_t;
-                        const this_max_x: f32 = stack_x + scale * region.max_t;
-                        const lane: f32 = @as(f32, @floatFromInt(region.lane_index));
-
-                        const region_rect = math.Rectangle2.new(
-                            this_min_x, stack_y - lane_height * (lane + 1),
-                            this_max_x, stack_y - lane_height * lane,
-                        );
-
-                        group.pushRectangle2(region_rect, 0, color.toColor(1));
-
-                        if (mouse_position.isInRectangle(region_rect)) {
-                            const record: *DebugRecord = region.record;
-
-                            var buffer: [128]u8 = undefined;
-                            const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
-                                record.block_name,
-                                region.cycle_count,
-                                record.file_name,
-                                record.line_number,
-                            }) catch "";
-                            textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
-
-                            hot_record = record;
-                        }
-                    }
-                }
-
-                // // 30 FPS line.
-                // group.pushRectangle(
-                //     Vector2.new(chart_width, 1),
-                //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + chart_height, 0),
-                //     Color.white(),
-                // );
-                //
-                // // 60 FPS line.
-                // group.pushRectangle(
-                //     Vector2.new(chart_width, 1),
-                //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + (chart_height * 0.5), 0),
-                //     Color.new(0.5, 1, 0, 1),
-                // );
-            }
-
-            if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
-                if (hot_record) |record| {
-                    debug_state.scope_to_record = record;
-                } else {
-                    debug_state.scope_to_record = null;
-                }
-
-                debug_state.refreshCollation();
-            }
+            // if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
+            //     if (hot_record) |record| {
+            //         debug_state.scope_to_record = record;
+            //     } else {
+            //         debug_state.scope_to_record = null;
+            //     }
+            //
+            //     debug_state.refreshCollation();
+            // }
 
             group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer);
             group.endRender();
@@ -1218,7 +1293,11 @@ pub fn textOp(
 pub fn textLine(text: [:0]const u8) void {
     if (DebugState.get()) |debug_state| {
         if (debug_state.debug_font_info) |font_info| {
-            textOutAt(text, Vector2.new(debug_state.left_edge, debug_state.at_y), Color.white());
+            const position = Vector2.new(
+                debug_state.left_edge,
+                debug_state.at_y - debug_state.font_scale * font_info.getStartingBaselineY(),
+            );
+            textOutAt(text, position, Color.white());
             debug_state.at_y -= font_info.getLineAdvance() * debug_state.font_scale;
         }
     }
