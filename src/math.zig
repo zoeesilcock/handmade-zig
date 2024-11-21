@@ -318,6 +318,9 @@ fn Vector(
                         pub inline fn white() Self {
                             return Self.one();
                         }
+                        pub inline fn black() Self {
+                            return Self.zero();
+                        }
                     },
                 };
             },

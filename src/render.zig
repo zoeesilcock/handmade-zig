@@ -355,11 +355,12 @@ pub const RenderGroup = extern struct {
         bitmap: *const LoadedBitmap,
         height: f32,
         offset: Vector3,
+        align_coefficient: f32,
     ) UsedBitmapDim {
         var dim = UsedBitmapDim{};
 
         dim.size = Vector2.new(height * bitmap.width_over_height, height);
-        dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size);
+        dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size).scaledTo(align_coefficient);
         dim.position = offset.minus(dim.alignment.toVector3(0));
         dim.basis = getRenderEntityBasisPosition(&self.transform, dim.position);
 
@@ -372,8 +373,9 @@ pub const RenderGroup = extern struct {
         height: f32,
         offset: Vector3,
         color: Color,
+        align_coefficient: f32,
     ) void {
-        const dim = self.getBitmapDim(bitmap, height, offset);
+        const dim = self.getBitmapDim(bitmap, height, offset, align_coefficient);
 
         if (dim.basis.valid) {
             if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
@@ -391,7 +393,9 @@ pub const RenderGroup = extern struct {
         height: f32,
         offset: Vector3,
         color: Color,
+        opt_align_coefficient: ?f32,
     ) void {
+        const align_coefficient: f32 = opt_align_coefficient orelse 1;
         if (opt_id) |id| {
             var opt_bitmap = self.assets.getBitmap(id, self.generation_id);
 
@@ -401,7 +405,7 @@ pub const RenderGroup = extern struct {
             }
 
             if (opt_bitmap) |bitmap| {
-                self.pushBitmap(bitmap, height, offset, color);
+                self.pushBitmap(bitmap, height, offset, color, align_coefficient);
             } else {
                 std.debug.assert(!self.renders_in_background);
 

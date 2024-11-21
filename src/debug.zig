@@ -111,14 +111,35 @@ pub const DebugStatistic = struct {
     }
 };
 
-const DebugInteraction = enum(u32) {
+const DebugInteractionType = enum(u32) {
     None,
     NoOp,
+    AutoModifyVariable,
     ToggleValue,
     DragValue,
     TearValue,
-    ResizeProfile,
-    MoveHierarchy,
+    Resize,
+    Move
+};
+
+const DebugInteractionTargetType = enum(u32) {
+    variable,
+    hierarchy,
+    position,
+};
+
+const DebugInteraction = struct {
+    interaction_type: DebugInteractionType,
+
+    target: union(DebugInteractionTargetType) {
+        variable: *DebugVariable,
+        hierarchy: ?*DebugVariableHierarchy,
+        position: *Vector2,
+    },
+
+    pub fn equals(self: *const DebugInteraction, other: *const DebugInteraction) bool {
+        return self.interaction_type == other.interaction_type and std.meta.eql(self.target, other.target);
+    }
 };
 
 pub const DebugState = struct {
@@ -134,21 +155,16 @@ pub const DebugState = struct {
     is_compiling: bool = false,
     compiler: shared.DebugExecutingProcess,
 
-    root_group: ?*DebugVariableReference,
     menu_position: Vector2,
     menu_active: bool,
 
+    root_group: ?*DebugVariableReference,
     hierarchy_sentinel: DebugVariableHierarchy,
-    dragging_hierarchy: ?*DebugVariableHierarchy,
 
-    interaction: DebugInteraction,
     last_mouse_position: Vector2,
+    interaction: DebugInteraction,
     hot_interaction: DebugInteraction,
     next_hot_interaction: DebugInteraction,
-    next_hot_hierarchy: ?*DebugVariableHierarchy,
-    hot: ?*DebugVariable,
-    next_hot: ?*DebugVariable,
-    interacting_with: ?*DebugVariable,
 
     left_edge: f32 = 0,
     right_edge: f32 = 0,
@@ -379,6 +395,10 @@ pub const DebugState = struct {
 
         return hierarchy;
     }
+
+    fn interactionIsHot(self: *const DebugState, interaction: *const DebugInteraction) bool {
+        return interaction.equals(&self.hot_interaction);
+    }
 };
 
 pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
@@ -409,6 +429,7 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
                 context.group = debug_variables.beginVariableGroup(&context, "Root");
 
                 _ = debug_variables.beginVariableGroup(&context, "Debugging");
+
                 debug_variables.createDebugVariables(&context);
 
                 _ = debug_variables.beginVariableGroup(&context, "Profile");
@@ -424,6 +445,15 @@ pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
                     debug_variables.endVariableGroup(&context);
                 }
                 debug_variables.endVariableGroup(&context);
+
+                var match_vector = asset.AssetVector{};
+                match_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 0;
+                var weight_vector = asset.AssetVector{};
+                weight_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 1;
+                if (assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector)) |id| {
+                    _ = debug_variables.addDebugVariableBitmap(&context, "Test Bitmap", id);
+                }
+
                 debug_variables.endVariableGroup(&context);
 
                 debug_state.root_group = context.group;
@@ -505,19 +535,6 @@ const DebugVariableToTextFlag = enum(u32) {
     }
 };
 
-pub const DebugVariableType = enum(u32) {
-    Boolean,
-    Int,
-    UInt,
-    Float,
-    Vector2,
-    Vector3,
-    Vector4,
-    CounterThreadList,
-    // CounterFunctionList,
-    Group,
-};
-
 pub const DebugVariableGroup = struct {
     expanded: bool,
     first_child: ?*DebugVariableReference,
@@ -541,6 +558,26 @@ pub const DebugVariableReference = struct {
     parent: ?*DebugVariableReference = null,
 };
 
+const DebugBitmapDisplay = struct {
+    id: file_formats.BitmapId,
+    dimension: Vector2,
+    alpha: bool,
+};
+
+pub const DebugVariableType = enum(u32) {
+    Boolean,
+    Int,
+    UInt,
+    Float,
+    Vector2,
+    Vector3,
+    Vector4,
+    Group,
+    CounterThreadList,
+    // CounterFunctionList,
+    BitmapDisplay,
+};
+
 pub const DebugVariable = struct {
     variable_type: DebugVariableType = .Boolean,
     name: [*:0]const u8,
@@ -553,13 +590,13 @@ pub const DebugVariable = struct {
         vector2_value: Vector2,
         vector3_value: Vector3,
         vector4_value: Vector4,
-        profile: DebugProfileSettings,
-
         group: DebugVariableGroup,
+        profile: DebugProfileSettings,
+        bitmap_display: DebugBitmapDisplay,
     },
 
     pub fn shouldBeWritten(self: *DebugVariable) bool {
-        return self.variable_type != .CounterThreadList;
+        return self.variable_type != .CounterThreadList and self.variable_type != .BitmapDisplay;
     }
 
     pub fn typeString(self: *DebugVariable) []const u8 {
@@ -674,8 +711,9 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
             ) catch "";
             len += @intCast(slice.len);
         },
-        .CounterThreadList => {},
         .Group => {},
+        .CounterThreadList => {},
+        .BitmapDisplay => {},
     }
 
     if (variable.variable_type != .Group and flags & DebugVariableToTextFlag.SemiColonEnd.toInt() != 0) {
@@ -881,9 +919,12 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 
                 while (opt_ref) |ref| {
                     const variable: *DebugVariable = ref.variable;
-                    const is_hot: bool = debug_state.hot == variable;
-                    const item_color: Color =
-                        if (is_hot and debug_state.hot_interaction == .None) Color.new(1, 1, 0, 1) else Color.white();
+                    const item_interaction: DebugInteraction = DebugInteraction{
+                        .interaction_type = .AutoModifyVariable,
+                        .target = .{ .variable = variable },
+                    };
+                    const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+                    const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
                     var bounds: Rectangle2 = Rectangle2.zero();
 
                     switch (variable.variable_type) {
@@ -894,18 +935,64 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                             bounds = Rectangle2.fromMinMax(min_corner, max_corner);
                             drawProfileIn(debug_state, bounds, mouse_position);
 
+                            const size_interaction: DebugInteraction = DebugInteraction{
+                                .interaction_type = .Resize,
+                                .target = .{ .position = &variable.data.profile.dimension },
+                            };
                             const size_box_position: Vector2 = Vector2.new(max_corner.x(), min_corner.y());
                             const size_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(size_box_position, Vector2.new(4, 4));
                             const size_box_color: Color =
-                                if (is_hot and debug_state.hot_interaction == .ResizeProfile) Color.new(1, 1, 0, 1) else Color.white();
+                                if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
                             render_group.pushRectangle2(size_box, 0, size_box_color);
 
                             if (mouse_position.isInRectangle(size_box)) {
-                                debug_state.next_hot_interaction = .ResizeProfile;
-                                debug_state.next_hot = variable;
+                                debug_state.next_hot_interaction = size_interaction;
                             } else if (mouse_position.isInRectangle(bounds)) {
-                                debug_state.next_hot_interaction = .None;
-                                debug_state.next_hot = variable;
+                                debug_state.next_hot_interaction = item_interaction;
+                            }
+
+                            _ = bounds.min.setY(bounds.min.y() - spacing_y);
+                        },
+                        .BitmapDisplay => {
+                            const bitmap_scale = variable.data.bitmap_display.dimension.y();
+                            const indent: f32 = @as(f32, @floatFromInt(depth)) * 2 * line_advance;
+                            const min_corner: Vector2 = Vector2.new(at_x + indent, at_y - bitmap_scale);
+
+                            if (render_group.assets.getBitmap(variable.data.bitmap_display.id, render_group.generation_id)) |bitmap| {
+                                var dim = render_group.getBitmapDim(bitmap, bitmap_scale, min_corner.toVector3(0), 0);
+                                _ = variable.data.bitmap_display.dimension.setX(dim.size.x());
+                            }
+
+                            const max_corner: Vector2 = Vector2.new(min_corner.x() + variable.data.bitmap_display.dimension.x(), at_y);
+                            bounds = Rectangle2.fromMinMax(min_corner, max_corner);
+
+                            render_group.pushRectangle2(bounds, 0, Color.black());
+                            render_group.pushBitmapId(
+                                variable.data.bitmap_display.id,
+                                bitmap_scale,
+                                min_corner.toVector3(0),
+                                Color.white(),
+                                0,
+                            );
+
+                            const size_interaction: DebugInteraction = DebugInteraction{
+                                .interaction_type = .Resize,
+                                .target = .{ .position = &variable.data.bitmap_display.dimension },
+                            };
+                            const size_box_position: Vector2 = Vector2.new(max_corner.x(), min_corner.y());
+                            const size_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(size_box_position, Vector2.new(4, 4));
+                            const size_box_color: Color =
+                                if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
+                            render_group.pushRectangle2(size_box, 0, size_box_color);
+
+                            if (mouse_position.isInRectangle(size_box)) {
+                                debug_state.next_hot_interaction = size_interaction;
+                            } else if (mouse_position.isInRectangle(bounds)) {
+                                const tear_interaction: DebugInteraction = .{
+                                    .interaction_type = .TearValue,
+                                    .target = .{ .variable = variable },
+                                };
+                                debug_state.next_hot_interaction = tear_interaction;
                             }
 
                             _ = bounds.min.setY(bounds.min.y() - spacing_y);
@@ -933,8 +1020,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                             at_y -= line_advance;
 
                             if (mouse_position.isInRectangle(bounds)) {
-                                debug_state.next_hot_interaction = .None;
-                                debug_state.next_hot = variable;
+                                debug_state.next_hot_interaction = item_interaction;
                             }
                         },
                     }
@@ -962,15 +1048,20 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
         debug_state.at_y = at_y;
 
         if (true) {
+            const move_interaction: DebugInteraction = DebugInteraction{
+                .interaction_type = .Move,
+                .target = .{ .position = &hierarchy.ui_position },
+            };
+            const move_box_color: Color =
+                if (debug_state.interactionIsHot(&move_interaction)) Color.new(1, 1, 0, 1) else Color.white();
             const move_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(
                 hierarchy.ui_position.minus(Vector2.new(4, 4)),
                 Vector2.new(4, 4),
             );
-            render_group.pushRectangle2(move_box, 0, Color.white());
+            render_group.pushRectangle2(move_box, 0, move_box_color);
 
             if (mouse_position.isInRectangle(move_box)) {
-                debug_state.next_hot_interaction = .MoveHierarchy;
-                debug_state.next_hot_hierarchy = hierarchy;
+                debug_state.next_hot_interaction = move_interaction;
             }
         }
     }
@@ -1010,35 +1101,42 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 
 fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2, alt_ui: bool) void {
     _ = input;
-    _ = mouse_position;
 
-    if (debug_state.hot_interaction != .None) {
-        debug_state.interaction = debug_state.hot_interaction;
-        debug_state.interacting_with = debug_state.hot;
-    } else {
-        if (debug_state.hot) |variable| {
+    if (debug_state.hot_interaction.interaction_type != .None) {
+        if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
+            switch (debug_state.hot_interaction.target.variable.variable_type) {
+                .Boolean => {
+                    debug_state.hot_interaction.interaction_type = .ToggleValue;
+                },
+                .Float => {
+                    debug_state.hot_interaction.interaction_type = .DragValue;
+                },
+                .Group => {
+                    debug_state.hot_interaction.interaction_type = .ToggleValue;
+                },
+                else => {},
+            }
+
             if (alt_ui) {
-                debug_state.interaction = .TearValue;
-            } else {
-                switch (variable.variable_type) {
-                    .Boolean => {
-                        debug_state.interaction = .ToggleValue;
-                    },
-                    .Float => {
-                        debug_state.interaction = .DragValue;
-                    },
-                    .Group => {
-                        debug_state.interaction = .ToggleValue;
-                    },
-                    else => {},
-                }
+                debug_state.hot_interaction.interaction_type = .TearValue;
             }
-            if (debug_state.interaction != .None) {
-                debug_state.interacting_with = debug_state.hot;
-            }
-        } else {
-            debug_state.interaction = .NoOp;
         }
+
+        switch (debug_state.hot_interaction.interaction_type) {
+            .TearValue => {
+                const root_group: *DebugVariableReference = debug_variables.addRootGroup(debug_state, "NewUserGroup");
+                _ = debug_variables.addVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
+                const hierarchy = debug_state.addHierarchy(root_group, Vector2.zero());
+                hierarchy.ui_position = mouse_position;
+                debug_state.hot_interaction.interaction_type = .Move;
+                debug_state.hot_interaction.target = .{ .position = &hierarchy.ui_position };
+            },
+            else => {},
+        }
+
+        debug_state.interaction = debug_state.hot_interaction;
+    } else {
+        debug_state.interaction.interaction_type = .NoOp;
     }
 }
 
@@ -1059,40 +1157,29 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
     //     writeHandmadeConfig(debug_state);
     // }
 
-    if (debug_state.interaction != .None) {
-        // Mouse move interaction.
-        switch (debug_state.interaction) {
-            .DragValue => {
-                if (debug_state.interacting_with) |variable| {
-                    switch (variable.variable_type) {
-                        .Float => {
-                            variable.data.float_value += 0.1 * mouse_delta.y();
-                        },
-                        else => {},
-                    }
-                }
-            },
-            .ResizeProfile => {
-                if (debug_state.interacting_with) |variable| {
-                    const flipped_delta: Vector2 = Vector2.new(mouse_delta.x(), -mouse_delta.y());
-                    variable.data.profile.dimension = variable.data.profile.dimension.plus(flipped_delta);
-                    _ = variable.data.profile.dimension.setX(@max(variable.data.profile.dimension.x(), 10));
-                    _ = variable.data.profile.dimension.setY(@max(variable.data.profile.dimension.y(), 10));
-                }
-            },
-            .MoveHierarchy => {
-                debug_state.dragging_hierarchy.?.ui_position = debug_state.dragging_hierarchy.?.ui_position.plus(mouse_delta);
-            },
-            .TearValue => {
-                if (debug_state.interacting_with) |variable| {
-                    if (debug_state.dragging_hierarchy == null) {
-                        const root_group: *DebugVariableReference = debug_variables.addRootGroup(debug_state, "NewUserGroup");
-                        _ = debug_variables.addVariableToGroup(debug_state, root_group, variable);
-                        debug_state.dragging_hierarchy = debug_state.addHierarchy(root_group, Vector2.zero());
-                    }
+    if (debug_state.interaction.interaction_type != .None) {
 
-                    debug_state.dragging_hierarchy.?.ui_position = mouse_position;
+        // Mouse move interaction.
+        switch (debug_state.interaction.interaction_type) {
+            .DragValue => {
+                const variable = debug_state.interaction.target.variable;
+                switch (variable.variable_type) {
+                    .Float => {
+                        variable.data.float_value += 0.1 * mouse_delta.y();
+                    },
+                    else => {},
                 }
+            },
+            .Resize => {
+                var position = debug_state.interaction.target.position;
+                const flipped_delta: Vector2 = Vector2.new(mouse_delta.x(), -mouse_delta.y());
+                position.* = position.plus(flipped_delta);
+                _ = position.setX(@max(position.x(), 10));
+                _ = position.setY(@max(position.y(), 10));
+            },
+            .Move => {
+                var position = debug_state.interaction.target.position;
+                position.* = position.plus(mouse_delta);
             },
             else => {},
         }
@@ -1109,9 +1196,7 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
             endInteract(debug_state, input, mouse_position);
         }
     } else {
-        debug_state.hot = debug_state.next_hot;
         debug_state.hot_interaction = debug_state.next_hot_interaction;
-        debug_state.dragging_hierarchy = debug_state.next_hot_hierarchy;
 
         const alt_ui: bool = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
         var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
@@ -1132,30 +1217,28 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     _ = input;
     _ = mouse_position;
 
-    if (debug_state.interaction != .NoOp) {
-        if (debug_state.interacting_with) |variable| {
-            switch (debug_state.interaction) {
-                .ToggleValue => {
-                    switch (variable.variable_type) {
-                        .Boolean => {
-                            variable.data.bool_value = !variable.data.bool_value;
-                        },
-                        .Group => {
-                            variable.data.group.expanded = !variable.data.group.expanded;
-                        },
-                        else => {},
-                    }
+    switch (debug_state.interaction.interaction_type) {
+        .ToggleValue => {
+            std.debug.assert(debug_state.interaction.target == .variable);
+
+            const variable = debug_state.interaction.target.variable;
+            switch (variable.variable_type) {
+                .Boolean => {
+                    variable.data.bool_value = !variable.data.bool_value;
+                },
+                .Group => {
+                    variable.data.group.expanded = !variable.data.group.expanded;
                 },
                 else => {},
             }
-
-            writeHandmadeConfig(debug_state);
-        }
+        },
+        else => {},
     }
 
-    debug_state.interaction = .None;
-    debug_state.interacting_with = null;
-    debug_state.dragging_hierarchy = null;
+    writeHandmadeConfig(debug_state);
+
+    debug_state.interaction.interaction_type = .None;
+    debug_state.interaction.target = .{ .hierarchy = null };
 }
 
 pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
@@ -1165,10 +1248,7 @@ pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) voi
     if (DebugState.get()) |debug_state| {
         if (debug_state.render_group) |group| {
             const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
-            // var hot_record: ?*DebugRecord = null;
-            debug_state.next_hot = null;
-            debug_state.next_hot_interaction = .None;
-            debug_state.next_hot_hierarchy = null;
+            shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
 
             drawDebugMainMenu(debug_state, group, mouse_position);
             interact(debug_state, input, mouse_position);
@@ -1344,12 +1424,12 @@ pub fn textOp(
                                 const bitamp_offset: Vector3 = Vector3.new(x, position.y(), 0);
 
                                 if (op == .DrawText) {
-                                    render_group.pushBitmapId(bitmap_id, bitmap_scale, bitamp_offset, color);
+                                    render_group.pushBitmapId(bitmap_id, bitmap_scale, bitamp_offset, color, null);
                                 } else {
                                     std.debug.assert(op == .SizeText);
 
                                     if (render_group.assets.getBitmap(bitmap_id, render_group.generation_id)) |bitmap| {
-                                        const dim = render_group.getBitmapDim(bitmap, bitmap_scale, bitamp_offset);
+                                        const dim = render_group.getBitmapDim(bitmap, bitmap_scale, bitamp_offset, 1);
                                         var glyph_dim: Rectangle2 = Rectangle2.fromMinDimension(dim.position.xy(), dim.size);
                                         result = result.getUnionWith(&glyph_dim);
                                         rect_found = true;

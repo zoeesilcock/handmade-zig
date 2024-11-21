@@ -525,7 +525,7 @@ pub export fn updateAndRender(
 
                 if (delta.z() >= -1 and delta.z() < 1) {
                     const ground_side_in_meters = state.world.chunk_dimension_in_meters.x();
-                    render_group.pushBitmap(bitmap, ground_side_in_meters, delta, Color.white());
+                    render_group.pushBitmap(bitmap, ground_side_in_meters, delta, Color.white(), 1);
 
                     if (config.DEBUGUI_GROUND_CHUNK_OUTLINES) {
                         render_group.pushRectangleOutline(
@@ -776,10 +776,10 @@ pub export fn updateAndRender(
                 .Hero => {
                     const hero_scale = 2.5;
 
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), hero_scale * 1.0, Vector3.zero(), shadow_color);
-                    render_group.pushBitmapId(hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white());
-                    render_group.pushBitmapId(hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white());
-                    render_group.pushBitmapId(hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), hero_scale * 1.0, Vector3.zero(), shadow_color, null);
+                    render_group.pushBitmapId(hero_bitmaps.torso, hero_scale * 1.2, Vector3.zero(), Color.white(), null);
+                    render_group.pushBitmapId(hero_bitmaps.cape, hero_scale * 1.2, Vector3.zero(), Color.white(), null);
+                    render_group.pushBitmapId(hero_bitmaps.head, hero_scale * 1.2, Vector3.zero(), Color.white(), null);
 
                     drawHitPoints(entity, render_group);
 
@@ -957,16 +957,17 @@ pub export fn updateAndRender(
                                 1,
                                 particle.position,
                                 color,
+                                null,
                             );
                         }
                     }
                 },
                 .Sword => {
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 0.25, Vector3.zero(), shadow_color);
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Sword), 0.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 0.25, Vector3.zero(), shadow_color, null);
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Sword), 0.5, Vector3.zero(), Color.white(), null);
                 },
                 .Wall => {
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Tree), 2.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Tree), 2.5, Vector3.zero(), Color.white(), null);
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
@@ -979,8 +980,8 @@ pub export fn updateAndRender(
                     );
                 },
                 .Monster => {
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 4.5, Vector3.zero(), shadow_color);
-                    render_group.pushBitmapId(hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 4.5, Vector3.zero(), shadow_color, null);
+                    render_group.pushBitmapId(hero_bitmaps.torso, 4.5, Vector3.zero(), Color.white(), null);
 
                     drawHitPoints(entity, render_group);
                 },
@@ -995,8 +996,8 @@ pub export fn updateAndRender(
                     const head_z = 0.25 * head_bob_sine;
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
-                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 2.5, Vector3.zero(), head_shadow_color);
-                    render_group.pushBitmapId(hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white());
+                    render_group.pushBitmapId(transient_state.assets.getFirstBitmap(.Shadow), 2.5, Vector3.zero(), head_shadow_color, null);
+                    render_group.pushBitmapId(hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white(), null);
                 },
                 .Space => {
                     if (config.DEBUGUI_USE_SPACE_OUTLINES) {
@@ -1529,7 +1530,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
                     );
                     const position = center.plus(offset);
 
-                    render_group.pushBitmapId(stamp, 2, position.toVector3(0), color);
+                    render_group.pushBitmapId(stamp, 2, position.toVector3(0), color, null);
                 }
             }
         }
@@ -1561,7 +1562,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
                     );
                     const position = center.plus(offset);
 
-                    render_group.pushBitmapId(stamp, 0.1, position.toVector3(0), Color.white());
+                    render_group.pushBitmapId(stamp, 0.1, position.toVector3(0), Color.white(), null);
                 }
             }
         }

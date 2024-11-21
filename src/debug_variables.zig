@@ -2,6 +2,8 @@ const shared = @import("shared.zig");
 const config = @import("config.zig");
 const debug = @import("debug.zig");
 const math = @import("math.zig");
+const asset = @import("asset.zig");
+const file_formats = @import("file_formats");
 const std = @import("std");
 
 const DebugState = debug.DebugState;
@@ -127,6 +129,19 @@ fn addDebugVariableVector3(context: *DebugVariableDefinitionContext, name: [:0]c
 fn addDebugVariableVector4(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector4) *DebugVariableReference {
     var ref: *DebugVariableReference = addDebugVariable(context, .Vector4, name);
     ref.variable.data = .{ .vector4_value = value };
+
+    return ref;
+}
+
+pub fn addDebugVariableBitmap(context: *DebugVariableDefinitionContext, name: [:0]const u8, id: file_formats.BitmapId) *DebugVariableReference {
+    var ref: *DebugVariableReference = addDebugVariable(context, .BitmapDisplay, name);
+    ref.variable.data = .{
+        .bitmap_display = .{
+            .id = id,
+            .dimension = Vector2.new(25, 25),
+            .alpha = true,
+        },
+    };
 
     return ref;
 }
