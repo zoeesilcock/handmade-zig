@@ -899,22 +899,140 @@ fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_posit
     }
 }
 
+const Layout = struct {
+    debug_state: *DebugState,
+    mouse_position: Vector2,
+    at: Vector2,
+    depth: u32,
+    line_advance: f32,
+    spacing_y: f32,
+
+    pub fn beginElementRectangle(self: *Layout, dimension: *Vector2) LayoutElement {
+        const element: LayoutElement = .{
+            .layout = self,
+            .dimension = dimension,
+        };
+        return element;
+    }
+};
+
+const LayoutElement = struct {
+    layout: *Layout,
+    dimension: *Vector2,
+    size: ?*Vector2 = null,
+    default_interaction: ?DebugInteraction = null,
+
+    bounds: Rectangle2 = undefined,
+
+    pub fn makeSizable(self: *LayoutElement) void {
+        self.size = self.dimension;
+    }
+
+    pub fn defaultInteraction(self: *LayoutElement, interaction: DebugInteraction) void {
+        self.default_interaction = interaction;
+    }
+
+    pub fn end(self: *LayoutElement) void {
+        const debug_state: *DebugState = self.layout.debug_state;
+
+        if (debug_state.render_group) |render_group| {
+            const size_handle_pixels: f32 = 4;
+            var frame: Vector2 = Vector2.new(0, 0);
+
+            if (self.size != null) {
+                frame = Vector2.splat(size_handle_pixels);
+            }
+
+            const total_dimension: Vector2 = self.dimension.plus(frame.scaledTo(2));
+
+            const total_min_corner: Vector2 = Vector2.new(
+                self.layout.at.x() + @as(f32, @floatFromInt(self.layout.depth)) * 2 * self.layout.line_advance,
+                self.layout.at.y() - total_dimension.y(),
+            );
+            const total_max_corner: Vector2 = total_min_corner.plus(total_dimension);
+
+            const interior_min_corner: Vector2 = total_min_corner.plus(frame);
+            const interior_max_corner: Vector2 = interior_min_corner.plus(self.dimension.*);
+
+            const total_bounds: Rectangle2 = Rectangle2.fromMinMax(total_min_corner, total_max_corner);
+            self.bounds = Rectangle2.fromMinMax(interior_min_corner, interior_max_corner);
+
+            if (self.default_interaction) |interaction| {
+                if (interaction.interaction_type != .None and self.layout.mouse_position.isInRectangle(self.bounds)) {
+                    debug_state.next_hot_interaction = interaction;
+                }
+            }
+
+            if (self.size) |size| {
+                render_group.pushRectangle2(
+                    Rectangle2.fromMinMax(
+                        Vector2.new(total_min_corner.x(), interior_min_corner.y()),
+                        Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
+                    ), 0, Color.black(),
+                );
+                render_group.pushRectangle2(
+                    Rectangle2.fromMinMax(
+                        Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
+                        Vector2.new(total_max_corner.x(), total_max_corner.y()),
+                    ), 0, Color.black(),
+                );
+                render_group.pushRectangle2(
+                    Rectangle2.fromMinMax(
+                        Vector2.new(interior_min_corner.x(), total_min_corner.y()),
+                        Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
+                    ), 0, Color.black(),
+                );
+                render_group.pushRectangle2(
+                    Rectangle2.fromMinMax(
+                        Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
+                        Vector2.new(interior_max_corner.x(), total_max_corner.y()),
+                    ), 0, Color.black(),
+                );
+
+                const size_interaction: DebugInteraction = DebugInteraction{
+                    .interaction_type = .Resize,
+                    .target = .{ .position = size },
+                };
+
+                const size_box: Rectangle2 = Rectangle2.fromMinMax(
+                    Vector2.new(interior_max_corner.x(), total_min_corner.y()),
+                    Vector2.new(total_max_corner.x(), interior_min_corner.y()),
+                );
+                const size_box_color: Color =
+                    if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
+                render_group.pushRectangle2(size_box, 0, size_box_color);
+
+                if (self.layout.mouse_position.isInRectangle(size_box)) {
+                    debug_state.next_hot_interaction = size_interaction;
+                }
+            }
+
+            const spacing_y: f32 = if (false) 0 else self.layout.spacing_y;
+            _ = self.layout.at.setY(total_bounds.min.y() - spacing_y);
+        }
+    }
+};
+
+
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     var opt_hierarchy: ?*DebugVariableHierarchy = debug_state.hierarchy_sentinel.next;
 
-    while (opt_hierarchy) |hierarchy| : (opt_hierarchy = hierarchy.next) {
-        if (hierarchy == &debug_state.hierarchy_sentinel) {
-            break;
-        }
+    if (debug_state.debug_font_info) |font_info| {
+        while (opt_hierarchy) |hierarchy| : (opt_hierarchy = hierarchy.next) {
+            if (hierarchy == &debug_state.hierarchy_sentinel) {
+                break;
+            }
 
-        var depth: u32 = 0;
-        const spacing_y: f32 = 4;
-        const at_x = hierarchy.ui_position.x();
-        var at_y = hierarchy.ui_position.y();
+            var layout: Layout = .{
+                .debug_state = debug_state,
+                .mouse_position = mouse_position,
+                .at = hierarchy.ui_position,
+                .depth = 0,
+                .line_advance = font_info.getLineAdvance() * debug_state.font_scale,
+                .spacing_y = 4,
+            };
 
-        if (hierarchy.group) |hierarchy_group| {
-            if (debug_state.debug_font_info) |font_info| {
-                const line_advance: f32 = font_info.getLineAdvance() * debug_state.font_scale;
+            if (hierarchy.group) |hierarchy_group| {
                 var opt_ref: ?*DebugVariableReference = hierarchy_group.variable.data.group.first_child;
 
                 while (opt_ref) |ref| {
@@ -925,111 +1043,65 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                     };
                     const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
                     const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
-                    var bounds: Rectangle2 = Rectangle2.zero();
 
                     switch (variable.variable_type) {
                         .CounterThreadList => {
-                            const indent: f32 = @as(f32, @floatFromInt(depth)) * 2 * line_advance;
-                            const min_corner: Vector2 = Vector2.new(at_x + indent, at_y - variable.data.profile.dimension.y());
-                            const max_corner: Vector2 = Vector2.new(min_corner.x() + variable.data.profile.dimension.x(), at_y);
-                            bounds = Rectangle2.fromMinMax(min_corner, max_corner);
-                            drawProfileIn(debug_state, bounds, mouse_position);
+                            var element: LayoutElement = layout.beginElementRectangle(&variable.data.profile.dimension);
+                            element.makeSizable();
+                            element.defaultInteraction(item_interaction);
+                            element.end();
 
-                            const size_interaction: DebugInteraction = DebugInteraction{
-                                .interaction_type = .Resize,
-                                .target = .{ .position = &variable.data.profile.dimension },
-                            };
-                            const size_box_position: Vector2 = Vector2.new(max_corner.x(), min_corner.y());
-                            const size_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(size_box_position, Vector2.new(4, 4));
-                            const size_box_color: Color =
-                                if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
-                            render_group.pushRectangle2(size_box, 0, size_box_color);
-
-                            if (mouse_position.isInRectangle(size_box)) {
-                                debug_state.next_hot_interaction = size_interaction;
-                            } else if (mouse_position.isInRectangle(bounds)) {
-                                debug_state.next_hot_interaction = item_interaction;
-                            }
-
-                            _ = bounds.min.setY(bounds.min.y() - spacing_y);
+                            drawProfileIn(debug_state, element.bounds, mouse_position);
                         },
                         .BitmapDisplay => {
                             const bitmap_scale = variable.data.bitmap_display.dimension.y();
-                            const indent: f32 = @as(f32, @floatFromInt(depth)) * 2 * line_advance;
-                            const min_corner: Vector2 = Vector2.new(at_x + indent, at_y - bitmap_scale);
-
                             if (render_group.assets.getBitmap(variable.data.bitmap_display.id, render_group.generation_id)) |bitmap| {
-                                var dim = render_group.getBitmapDim(bitmap, bitmap_scale, min_corner.toVector3(0), 0);
+                                var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
                                 _ = variable.data.bitmap_display.dimension.setX(dim.size.x());
                             }
 
-                            const max_corner: Vector2 = Vector2.new(min_corner.x() + variable.data.bitmap_display.dimension.x(), at_y);
-                            bounds = Rectangle2.fromMinMax(min_corner, max_corner);
+                            const tear_interaction: DebugInteraction = .{
+                                .interaction_type = .TearValue,
+                                .target = .{ .variable = variable },
+                            };
 
-                            render_group.pushRectangle2(bounds, 0, Color.black());
+                            var element: LayoutElement = layout.beginElementRectangle(&variable.data.bitmap_display.dimension);
+                            element.makeSizable();
+                            element.defaultInteraction(tear_interaction);
+                            element.end();
+
+                            render_group.pushRectangle2(element.bounds, 0, Color.black());
                             render_group.pushBitmapId(
                                 variable.data.bitmap_display.id,
                                 bitmap_scale,
-                                min_corner.toVector3(0),
+                                element.bounds.min.toVector3(0),
                                 Color.white(),
                                 0,
                             );
-
-                            const size_interaction: DebugInteraction = DebugInteraction{
-                                .interaction_type = .Resize,
-                                .target = .{ .position = &variable.data.bitmap_display.dimension },
-                            };
-                            const size_box_position: Vector2 = Vector2.new(max_corner.x(), min_corner.y());
-                            const size_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(size_box_position, Vector2.new(4, 4));
-                            const size_box_color: Color =
-                                if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
-                            render_group.pushRectangle2(size_box, 0, size_box_color);
-
-                            if (mouse_position.isInRectangle(size_box)) {
-                                debug_state.next_hot_interaction = size_interaction;
-                            } else if (mouse_position.isInRectangle(bounds)) {
-                                const tear_interaction: DebugInteraction = .{
-                                    .interaction_type = .TearValue,
-                                    .target = .{ .variable = variable },
-                                };
-                                debug_state.next_hot_interaction = tear_interaction;
-                            }
-
-                            _ = bounds.min.setY(bounds.min.y() - spacing_y);
                         },
                         else => {
                             var text: [4096:0]u8 = undefined;
                             var len: u32 = 0;
-
                             len = debugVariableToText(&text, len, variable, DebugVariableToTextFlag.displayFlags());
 
-                            const left_p_x: f32 = at_x + @as(f32, @floatFromInt(depth)) * 2 * line_advance;
-                            const top_p_y: f32 = at_y;
-
                             const text_bounds = getTextSize(debug_state, &text);
-                            bounds = Rectangle2.fromMinMax(
-                                Vector2.new(left_p_x + text_bounds.min.x(), top_p_y - line_advance),
-                                Vector2.new(left_p_x + text_bounds.max.x(), top_p_y),
-                            );
+                            var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+                            var element: LayoutElement = layout.beginElementRectangle(&dim);
+                            element.defaultInteraction(item_interaction);
+                            element.end();
+
                             const text_position: Vector2 = Vector2.new(
-                                left_p_x,
-                                top_p_y - debug_state.font_scale * font_info.getStartingBaselineY(),
+                                element.bounds.min.x(),
+                                element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
                             );
                             textOutAt(&text, text_position, item_color);
-
-                            at_y -= line_advance;
-
-                            if (mouse_position.isInRectangle(bounds)) {
-                                debug_state.next_hot_interaction = item_interaction;
-                            }
                         },
                     }
 
-                    at_y = bounds.min.y();
-
                     if (variable.variable_type == .Group and variable.data.group.expanded) {
                         opt_ref = variable.data.group.first_child;
-                        depth +%= 1;
+                        layout.depth +%= 1;
                     } else {
                         while (opt_ref) |inner_variable| {
                             if (inner_variable.next != null) {
@@ -1037,31 +1109,31 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                                 break;
                             } else {
                                 opt_ref = inner_variable.parent;
-                                depth -%= 1;
+                                layout.depth -%= 1;
                             }
                         }
                     }
                 }
             }
-        }
 
-        debug_state.at_y = at_y;
+            debug_state.at_y = layout.at.y();
 
-        if (true) {
-            const move_interaction: DebugInteraction = DebugInteraction{
-                .interaction_type = .Move,
-                .target = .{ .position = &hierarchy.ui_position },
-            };
-            const move_box_color: Color =
-                if (debug_state.interactionIsHot(&move_interaction)) Color.new(1, 1, 0, 1) else Color.white();
-            const move_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(
-                hierarchy.ui_position.minus(Vector2.new(4, 4)),
-                Vector2.new(4, 4),
-            );
-            render_group.pushRectangle2(move_box, 0, move_box_color);
+            if (true) {
+                const move_interaction: DebugInteraction = DebugInteraction{
+                    .interaction_type = .Move,
+                    .target = .{ .position = &hierarchy.ui_position },
+                };
+                const move_box_color: Color =
+                    if (debug_state.interactionIsHot(&move_interaction)) Color.new(1, 1, 0, 1) else Color.white();
+                const move_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(
+                    hierarchy.ui_position.minus(Vector2.new(4, 4)),
+                    Vector2.new(4, 4),
+                );
+                render_group.pushRectangle2(move_box, 0, move_box_color);
 
-            if (mouse_position.isInRectangle(move_box)) {
-                debug_state.next_hot_interaction = move_interaction;
+                if (mouse_position.isInRectangle(move_box)) {
+                    debug_state.next_hot_interaction = move_interaction;
+                }
             }
         }
     }

@@ -319,7 +319,7 @@ fn Vector(
                             return Self.one();
                         }
                         pub inline fn black() Self {
-                            return Self.zero();
+                            return Self.new(0, 0, 0, 1);
                         }
                     },
                 };
