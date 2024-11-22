@@ -9,7 +9,6 @@ const audio = @import("audio.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
-const debug = @import("debug.zig");
 const config = @import("config.zig");
 const std = @import("std");
 
@@ -118,7 +117,7 @@ pub export fn updateAndRender(
     shared.platform = platform;
 
     if (INTERNAL) {
-        debug.debug_global_memory = memory;
+        shared.debug_global_memory = memory;
     }
 
     const timed_block = shared.TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
@@ -395,8 +394,6 @@ pub export fn updateAndRender(
 
         transient_state.is_initialized = true;
     }
-
-    debug.start(transient_state.assets, buffer.width, buffer.height);
 
     if (config.DEBUGUI_RECOMPUTE_GROUND_CUNKS_ON_EXE_CHANGE) {
         if (memory.executable_reloaded) {
@@ -1146,12 +1143,10 @@ pub export fn updateAndRender(
 
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
-
-    debug.end(&input, draw_buffer);
 }
 
-pub export fn debugFrameEnd(memory: *shared.Memory) *shared.DebugTable {
-    return debug.frameEnd(memory);
+pub export fn debugFrameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) *shared.DebugTable {
+    return shared.debugFrameEnd(memory, input, buffer);
 }
 
 pub fn chunkPositionFromTilePosition(

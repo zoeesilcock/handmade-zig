@@ -2,7 +2,6 @@ const shared = @import("shared.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
-const debug = @import("debug.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 

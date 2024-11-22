@@ -2,7 +2,6 @@ const shared = @import("shared.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const sim = @import("sim.zig");
-const debug = @import("debug.zig");
 const std = @import("std");
 
 const Vector3 = math.Vector3;

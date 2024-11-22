@@ -4,8 +4,7 @@ const builtin = @import("builtin");
 // Defaults.
 const FORCE_RELEASE_MODE = false;
 const PACKAGE_DEFAULT = .Game;
-const INTERNAL_DEFAULT = false;
-const PROFILE_DEFAULT = false;
+const INTERNAL_DEFAULT = true;
 const BACKEND_DEFAULT = .Win32;
 
 const Backend = enum {
@@ -32,14 +31,12 @@ pub fn build(b: *std.Build) void {
     const backend = b.option(Backend, "backend", "platform backend") orelse BACKEND_DEFAULT;
     const package = b.option(Package, "package", "which part to build") orelse PACKAGE_DEFAULT;
     const internal = b.option(bool, "internal", "use this for internal builds") orelse INTERNAL_DEFAULT;
-    const profile = b.option(bool, "profile", "enables profiling") orelse PROFILE_DEFAULT;
 
     // Add build options.
     const build_options = b.addOptions();
-    build_options.addOption(bool, "internal", internal);
-    build_options.addOption(bool, "profile", profile);
     build_options.addOption(Package, "package", package);
     build_options.addOption(Backend, "backend", backend);
+    build_options.addOption(bool, "internal", internal);
 
     // Add the packages.
     if (package == .All or package == .Game or package == .Executable) {

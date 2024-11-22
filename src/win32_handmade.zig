@@ -39,8 +39,6 @@ const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
 const shared = @import("shared.zig");
 
-var local_stub_debug_table: shared.DebugTable = shared.DebugTable{};
-
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
@@ -74,6 +72,7 @@ var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
 var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
+var local_stub_debug_table: shared.DebugTable = if (INTERNAL) shared.DebugTable{} else undefined;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -300,165 +299,185 @@ fn deallocateMemory(opt_memory: ?*anyopaque) callconv(.C) void {
     }
 }
 
-fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
-    var result = shared.DebugReadFileResult{};
+const DebugFunctions = if (INTERNAL) struct {
+    pub fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
+        var result = shared.DebugReadFileResult{};
 
-    const file_handle: win32.HANDLE = win32.CreateFileA(
-        file_name,
-        win32.FILE_GENERIC_READ,
-        win32.FILE_SHARE_READ,
-        null,
-        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
-        win32.FILE_FLAGS_AND_ATTRIBUTES{},
-        null,
-    );
+        const file_handle: win32.HANDLE = win32.CreateFileA(
+            file_name,
+            win32.FILE_GENERIC_READ,
+            win32.FILE_SHARE_READ,
+            null,
+            win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+            win32.FILE_FLAGS_AND_ATTRIBUTES{},
+            null,
+        );
 
-    if (file_handle != win32.INVALID_HANDLE_VALUE) {
-        var file_size: win32.LARGE_INTEGER = undefined;
-        if (win32.GetFileSizeEx(file_handle, &file_size) != 0) {
-            const file_size32 = shared.safeTruncateI64(file_size.QuadPart);
+        if (file_handle != win32.INVALID_HANDLE_VALUE) {
+            var file_size: win32.LARGE_INTEGER = undefined;
+            if (win32.GetFileSizeEx(file_handle, &file_size) != 0) {
+                const file_size32 = shared.safeTruncateI64(file_size.QuadPart);
 
-            if (win32.VirtualAlloc(
-                null,
-                file_size32,
-                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-                win32.PAGE_READWRITE,
-            )) |file_contents| {
-                var bytes_read: u32 = undefined;
-                const read_result = win32.ReadFile(
-                    file_handle,
-                    file_contents,
-                    file_size32,
-                    &bytes_read,
+                if (win32.VirtualAlloc(
                     null,
-                );
+                    file_size32,
+                    win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+                    win32.PAGE_READWRITE,
+                )) |file_contents| {
+                    var bytes_read: u32 = undefined;
+                    const read_result = win32.ReadFile(
+                        file_handle,
+                        file_contents,
+                        file_size32,
+                        &bytes_read,
+                        null,
+                    );
 
-                if (read_result != 0 and bytes_read == file_size32) {
-                    // File read successfully.
-                    result.contents = file_contents;
-                    result.content_size = file_size32;
-                } else {
-                    debugFreeFileMemory(result.contents);
-                    result.contents = undefined;
+                    if (read_result != 0 and bytes_read == file_size32) {
+                        // File read successfully.
+                        result.contents = file_contents;
+                        result.content_size = file_size32;
+                    } else {
+                        debugFreeFileMemory(result.contents);
+                        result.contents = undefined;
+                    }
                 }
+            }
+
+            _ = win32.CloseHandle(file_handle);
+        }
+
+        return result;
+    }
+
+    pub fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
+        var result: bool = false;
+
+        const file_handle: win32.HANDLE = win32.CreateFileA(
+            file_name,
+            win32.FILE_GENERIC_WRITE,
+            win32.FILE_SHARE_NONE,
+            null,
+            win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
+            win32.FILE_FLAGS_AND_ATTRIBUTES{},
+            null,
+        );
+
+        if (file_handle != win32.INVALID_HANDLE_VALUE) {
+            var bytes_written: u32 = undefined;
+
+            if (win32.WriteFile(file_handle, memory, memory_size, &bytes_written, null) != 0) {
+                // File written successfully.
+                result = bytes_written == memory_size;
+            }
+
+            _ = win32.CloseHandle(file_handle);
+        }
+
+        return result;
+    }
+
+    pub fn debugExecuteSystemCommand(
+        path: [*:0]const u8,
+        command: [*:0]const u8,
+        command_line: [*:0]const u8,
+    ) callconv(.C) shared.DebugExecutingProcess {
+        var result: shared.DebugExecutingProcess = .{};
+        const h_process: *win32.HANDLE = @ptrCast(@alignCast(&result.os_handle));
+
+        var startup_info: win32.STARTUPINFOA = .{
+            .cb = @sizeOf(win32.STARTUPINFOA),
+            .lpReserved = null,
+            .lpDesktop = null,
+            .lpTitle = null,
+            .dwX = 0,
+            .dwY = 0,
+            .dwXSize = 0,
+            .dwYSize = 0,
+            .dwXCountChars = 0,
+            .dwYCountChars = 0,
+            .dwFillAttribute = 0,
+            .dwFlags = win32.STARTUPINFOW_FLAGS{ .USESHOWWINDOW = 1 },
+            .wShowWindow = 0,
+            .cbReserved2 = 0,
+            .lpReserved2 = null,
+            .hStdInput = null,
+            .hStdOutput = null,
+            .hStdError = null,
+        };
+
+        var process_info: win32.PROCESS_INFORMATION = .{
+            .hProcess = null,
+            .hThread = null,
+            .dwProcessId = 0,
+            .dwThreadId = 0,
+        };
+
+        if (win32.CreateProcessA(
+            command,
+            @constCast(command_line),
+            null,
+            null,
+            win32.FALSE,
+            win32.PROCESS_CREATION_FLAGS{},
+            null,
+            path,
+            &startup_info,
+            &process_info,
+        ) != 0) {
+            if (process_info.hProcess) |process_handle| {
+                std.debug.assert(@sizeOf(u64) >= @sizeOf(win32.HANDLE));
+                h_process.* = process_handle;
+            }
+        } else {
+            h_process.* = win32.INVALID_HANDLE_VALUE;
+            std.debug.print("Error executing system command: {d}\n", .{@intFromEnum(win32.GetLastError())});
+        }
+
+        return result;
+    }
+
+    pub fn debugGetProcessState(process: shared.DebugExecutingProcess) callconv(.C) shared.DebugExecutingProcessState {
+        var result: shared.DebugExecutingProcessState = .{};
+        const h_process: *const win32.HANDLE = @ptrCast(&process.os_handle);
+
+        if (h_process.* != win32.INVALID_HANDLE_VALUE) {
+            result.started_successfully = true;
+
+            if (win32.WaitForSingleObject(h_process.*, 0) == @intFromEnum(win32.WAIT_OBJECT_0)) {
+                var exit_code: u32 = undefined;
+                _ = win32.GetExitCodeProcess(h_process.*, &exit_code);
+                _ = win32.CloseHandle(h_process.*);
+            } else {
+                result.is_running = true;
             }
         }
 
-        _ = win32.CloseHandle(file_handle);
+        return result;
     }
 
-    return result;
-}
-
-fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
-    var result: bool = false;
-
-    const file_handle: win32.HANDLE = win32.CreateFileA(
-        file_name,
-        win32.FILE_GENERIC_WRITE,
-        win32.FILE_SHARE_NONE,
-        null,
-        win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
-        win32.FILE_FLAGS_AND_ATTRIBUTES{},
-        null,
-    );
-
-    if (file_handle != win32.INVALID_HANDLE_VALUE) {
-        var bytes_written: u32 = undefined;
-
-        if (win32.WriteFile(file_handle, memory, memory_size, &bytes_written, null) != 0) {
-            // File written successfully.
-            result = bytes_written == memory_size;
-        }
-
-        _ = win32.CloseHandle(file_handle);
+    pub fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
+        _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
     }
-
-    return result;
-}
-
-fn debugExecuteSystemCommand(
-    path: [*:0]const u8,
-    command: [*:0]const u8,
-    command_line: [*:0]const u8,
-) callconv(.C) shared.DebugExecutingProcess {
-    var result: shared.DebugExecutingProcess = .{};
-    const h_process: *win32.HANDLE = @ptrCast(@alignCast(&result.os_handle));
-
-    var startup_info: win32.STARTUPINFOA = .{
-        .cb = @sizeOf(win32.STARTUPINFOA),
-        .lpReserved = null,
-        .lpDesktop = null,
-        .lpTitle = null,
-        .dwX = 0,
-        .dwY = 0,
-        .dwXSize = 0,
-        .dwYSize = 0,
-        .dwXCountChars = 0,
-        .dwYCountChars = 0,
-        .dwFillAttribute = 0,
-        .dwFlags = win32.STARTUPINFOW_FLAGS{ .USESHOWWINDOW = 1 },
-        .wShowWindow = 0,
-        .cbReserved2 = 0,
-        .lpReserved2 = null,
-        .hStdInput = null,
-        .hStdOutput = null,
-        .hStdError = null,
-    };
-
-    var process_info: win32.PROCESS_INFORMATION = .{
-        .hProcess = null,
-        .hThread = null,
-        .dwProcessId = 0,
-        .dwThreadId = 0,
-    };
-
-    if (win32.CreateProcessA(
-        command,
-        @constCast(command_line),
-        null,
-        null,
-        win32.FALSE,
-        win32.PROCESS_CREATION_FLAGS{},
-        null,
-        path,
-        &startup_info,
-        &process_info,
-    ) != 0) {
-        if (process_info.hProcess) |process_handle| {
-            std.debug.assert(@sizeOf(u64) >= @sizeOf(win32.HANDLE));
-            h_process.* = process_handle;
-        }
-    } else {
-        h_process.* = win32.INVALID_HANDLE_VALUE;
-        std.debug.print("Error executing system command: {d}\n", .{@intFromEnum(win32.GetLastError())});
+} else struct {
+    pub fn debugFreeFileMemory(_: *anyopaque) callconv(.C) void {}
+    pub fn debugReadEntireFile(_: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
+        return undefined;
     }
-
-    return result;
-}
-
-fn debugGetProcessState(process: shared.DebugExecutingProcess) callconv(.C) shared.DebugExecutingProcessState {
-    var result: shared.DebugExecutingProcessState = .{};
-    const h_process: *const win32.HANDLE = @ptrCast(&process.os_handle);
-
-    if (h_process.* != win32.INVALID_HANDLE_VALUE) {
-        result.started_successfully = true;
-
-        if (win32.WaitForSingleObject(h_process.*, 0) == @intFromEnum(win32.WAIT_OBJECT_0)) {
-            var exit_code: u32 = undefined;
-            _ = win32.GetExitCodeProcess(h_process.*, &exit_code);
-            _ = win32.CloseHandle(h_process.*);
-        } else {
-            result.is_running = true;
-        }
+    pub fn debugWriteEntireFile(_: [*:0]const u8, _: u32, _: *anyopaque) callconv(.C) bool {
+        return false;
     }
-
-    return result;
-}
-
-fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
-    _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
-}
+    pub fn debugExecuteSystemCommand(
+        _: [*:0]const u8,
+        _: [*:0]const u8,
+        _: [*:0]const u8,
+    ) callconv(.C) shared.DebugExecutingProcess {
+        return undefined;
+    }
+    pub fn debugGetProcessState(_: shared.DebugExecutingProcess) callconv(.C) shared.DebugExecutingProcessState {
+        return undefined;
+    }
+};
 
 inline fn getLastWriteTime(file_name: [*:0]const u8) win32.FILETIME {
     var last_write_time = win32.FILETIME{
@@ -1496,7 +1515,9 @@ pub export fn wWinMain(
     _ = cmd_line;
     _ = cmd_show;
 
-    shared.global_debug_table = &local_stub_debug_table;
+    if (INTERNAL) {
+        shared.global_debug_table = &local_stub_debug_table;
+    }
 
     var state = Win32State{};
     getExeFileName(&state);
@@ -1547,7 +1568,7 @@ pub export fn wWinMain(
 
     loadXInput();
     resizeDIBSection(&back_buffer, WIDTH, HEIGHT);
-    const platform = shared.Platform{
+    var platform = shared.Platform{
         .addQueueEntry = addQueueEntry,
         .completeAllQueuedWork = completeAllQueuedWork,
 
@@ -1559,13 +1580,15 @@ pub export fn wWinMain(
 
         .allocateMemory = allocateMemory,
         .deallocateMemory = deallocateMemory,
-
-        .debugFreeFileMemory = debugFreeFileMemory,
-        .debugReadEntireFile = debugReadEntireFile,
-        .debugWriteEntireFile = debugWriteEntireFile,
-        .debugExecuteSystemCommand = debugExecuteSystemCommand,
-        .debugGetProcessState = debugGetProcessState,
     };
+
+    if (INTERNAL) {
+        platform.debugFreeFileMemory = DebugFunctions.debugFreeFileMemory;
+        platform.debugReadEntireFile = DebugFunctions.debugReadEntireFile;
+        platform.debugWriteEntireFile = DebugFunctions.debugWriteEntireFile;
+        platform.debugExecuteSystemCommand = DebugFunctions.debugExecuteSystemCommand;
+        platform.debugGetProcessState = DebugFunctions.debugGetProcessState;
+    }
 
     const window_class: win32.WNDCLASSW = .{
         .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
@@ -1760,7 +1783,9 @@ pub export fn wWinMain(
                         completeAllQueuedWork(&high_priority_queue);
                         completeAllQueuedWork(&low_priority_queue);
 
-                        shared.global_debug_table = &local_stub_debug_table;
+                        if (INTERNAL) {
+                            shared.global_debug_table = &local_stub_debug_table;
+                        }
 
                         unloadGameCode(&game);
                         game = loadGameCode(&source_dll_path, &temp_dll_path);
@@ -1950,6 +1975,21 @@ pub export fn wWinMain(
                     //
                     //
 
+                    if (INTERNAL) {
+                        timed_block = shared.TimedBlock.beginBlock(@src(), .DebugCollation);
+                        defer timed_block.end();
+
+                        if (game.debugFrameEnd) |frameEndFn| {
+                            shared.global_debug_table = frameEndFn(&game_memory, new_input.*, &game_buffer);
+                        }
+
+                        local_stub_debug_table.event_array_index_event_index = 0;
+                    }
+
+                    //
+                    //
+                    //
+
                     if (false) {
                         timed_block = shared.TimedBlock.beginBlock(@src(), .FrameRateWait);
 
@@ -2018,17 +2058,6 @@ pub export fn wWinMain(
                     //
 
                     timed_block.end();
-
-                    if (INTERNAL) {
-                        timed_block = shared.TimedBlock.beginBlock(@src(), .DebugCollation);
-                        defer timed_block.end();
-
-                        if (game.debugFrameEnd) |frameEndFn| {
-                            shared.global_debug_table = frameEndFn(&game_memory);
-                        }
-
-                        local_stub_debug_table.event_array_index_event_index = 0;
-                    }
 
                     const end_counter = getWallClock();
                     var frame_marker = shared.TimedBlock.frameMarker(

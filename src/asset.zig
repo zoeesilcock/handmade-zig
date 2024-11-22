@@ -4,7 +4,6 @@ const random = @import("random.zig");
 const render = @import("render.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
-const debug = @import("debug.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 

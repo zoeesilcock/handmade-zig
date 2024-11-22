@@ -16,7 +16,6 @@ const file_formats = @import("file_formats");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const random = @import("random.zig");
-const debug = @import("debug.zig");
 const std = @import("std");
 
 // Types.
@@ -33,7 +32,6 @@ const PlayingSound = audio.PlayingSound;
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
-pub const PROFILE = @import("build_options").profile;
 
 // Helper functions.
 pub inline fn kilobytes(value: u32) u64 {
@@ -223,7 +221,7 @@ pub fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
     return file_handle.no_errors;
 }
 
-pub const Platform = extern struct {
+pub const Platform = if (INTERNAL) extern struct {
     addQueueEntry: *const addQueueEntryType = undefined,
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
 
@@ -242,6 +240,19 @@ pub const Platform = extern struct {
     debugReadEntireFile: *const debugReadEntireFileType = undefined,
     debugExecuteSystemCommand: *const debugExecuteSystemCommandType = undefined,
     debugGetProcessState: *const debugGetProcessStateType = undefined,
+} else extern struct {
+    addQueueEntry: *const addQueueEntryType = undefined,
+    completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
+
+    getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
+    getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
+    openNextFile: *const openNextFileType = undefined,
+    readDataFromFile: *const readDataFromFileType = undefined,
+    noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
+    fileError: *const fileErrorType = undefined,
+
+    allocateMemory: *const allocateMemoryType = undefined,
+    deallocateMemory: *const deallocateMemoryType = undefined,
 };
 
 pub var platform: Platform = undefined;
@@ -255,7 +266,7 @@ pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void 
     return;
 }
 
-pub fn debugFrameEndStub(_: *Memory) callconv(.C) *DebugTable {
+pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) *DebugTable {
     return undefined;
 }
 
@@ -332,7 +343,9 @@ pub const DebugTable = extern struct {
     } ** MAX_DEBUG_EVENT_ARRAY_COUNT,
 };
 
-pub var global_debug_table: *DebugTable = &debug.global_debug_table;
+pub var global_debug_table: *DebugTable = if (INTERNAL) &@import("debug.zig").global_debug_table else undefined;
+pub var debug_global_memory: ?*Memory = null;
+pub var debugFrameEnd: *const @TypeOf(debugFrameEndStub) = if (INTERNAL) @import("debug.zig").frameEnd else debugFrameEndStub;
 
 pub const DebugRecord = extern struct {
     file_name: [*:0]const u8 = undefined,
@@ -388,7 +401,7 @@ fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType, opt_sec
     }
 }
 
-pub const TimedBlock = if (PROFILE) struct {
+pub const TimedBlock = if (INTERNAL) struct {
     counter: DebugCycleCounters = undefined,
 
     pub fn beginBlock(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
@@ -448,9 +461,10 @@ pub const TimedBlock = if (PROFILE) struct {
         return undefined;
     }
 
-    pub fn frameMarker(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+    pub fn frameMarker(source: std.builtin.SourceLocation, counter: DebugCycleCounters, seconds_elapsed: f32) TimedBlock {
         _ = source;
         _ = counter;
+        _ = seconds_elapsed;
         return undefined;
     }
 

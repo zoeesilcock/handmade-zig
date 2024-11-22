@@ -20,7 +20,6 @@ const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 
 pub var global_debug_table: shared.DebugTable = shared.DebugTable{};
-pub var debug_global_memory: ?*shared.Memory = null;
 
 const COUNTER_COUNT = 512;
 
@@ -193,19 +192,8 @@ pub const DebugState = struct {
     pub fn get() ?*DebugState {
         var result: ?*DebugState = null;
 
-        if (debug_global_memory) |memory| {
+        if (shared.debug_global_memory) |memory| {
             result = @ptrCast(@alignCast(memory.debug_storage));
-        }
-
-        return result;
-    }
-
-    pub fn getFrom(memory: *shared.Memory) ?*DebugState {
-        var result: ?*DebugState = null;
-
-        if (memory.debug_storage) |debug_storage| {
-            result = @ptrCast(@alignCast(debug_storage));
-            std.debug.assert(result.?.initialized);
         }
 
         return result;
@@ -400,112 +388,6 @@ pub const DebugState = struct {
         return interaction.equals(&self.hot_interaction);
     }
 };
-
-pub fn start(assets: *asset.Assets, width: i32, height: i32) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .DebugStart);
-    defer timed_block.end();
-
-    if (debug_global_memory) |memory| {
-        const opt_debug_state: ?*DebugState = @ptrCast(@alignCast(memory.debug_storage));
-
-        if (opt_debug_state) |debug_state| {
-            if (!debug_state.initialized) {
-                debug_state.high_priority_queue = memory.high_priority_queue;
-
-                debug_state.hierarchy_sentinel.next = &debug_state.hierarchy_sentinel;
-                debug_state.hierarchy_sentinel.prev = &debug_state.hierarchy_sentinel;
-                debug_state.hierarchy_sentinel.group = null;
-
-                debug_state.debug_arena.initialize(
-                    memory.debug_storage_size - @sizeOf(DebugState),
-                    memory.debug_storage.? + @sizeOf(DebugState),
-                );
-
-                var context: debug_variables.DebugVariableDefinitionContext = .{
-                    .state = debug_state,
-                    .arena = &debug_state.debug_arena,
-                    .group = null,
-                };
-                context.group = debug_variables.beginVariableGroup(&context, "Root");
-
-                _ = debug_variables.beginVariableGroup(&context, "Debugging");
-
-                debug_variables.createDebugVariables(&context);
-
-                _ = debug_variables.beginVariableGroup(&context, "Profile");
-                {
-                    _ = debug_variables.beginVariableGroup(&context, "By Thread");
-                    var thread_list = debug_variables.addDebugVariable(&context, .CounterThreadList, "");
-                    thread_list.variable.data = .{ .profile = .{ .dimension = Vector2.new(1024, 100) } };
-                    debug_variables.endVariableGroup(&context);
-
-                    _ = debug_variables.beginVariableGroup(&context, "By Function");
-                    var function_list = debug_variables.addDebugVariable(&context, .CounterThreadList, "");
-                    function_list.variable.data = .{ .profile = .{ .dimension = Vector2.new(1024, 200) } };
-                    debug_variables.endVariableGroup(&context);
-                }
-                debug_variables.endVariableGroup(&context);
-
-                var match_vector = asset.AssetVector{};
-                match_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 0;
-                var weight_vector = asset.AssetVector{};
-                weight_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 1;
-                if (assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector)) |id| {
-                    _ = debug_variables.addDebugVariableBitmap(&context, "Test Bitmap", id);
-                }
-
-                debug_variables.endVariableGroup(&context);
-
-                debug_state.root_group = context.group;
-
-                debug_state.render_group =
-                    render.RenderGroup.allocate(assets, &debug_state.debug_arena, shared.megabytes(16), false);
-
-                debug_state.paused = false;
-                debug_state.scope_to_record = null;
-                debug_state.initialized = true;
-
-                debug_state.debug_arena.makeSubArena(&debug_state.collate_arena, shared.megabytes(32), 4);
-                debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
-
-                debug_state.restartCollation(0);
-
-                _ = debug_state.addHierarchy(
-                    debug_state.root_group.?,
-                    Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
-                );
-            }
-
-            if (debug_state.render_group) |group| {
-                group.beginRender();
-                if (group.pushFont(debug_state.font_id)) |font| {
-                    debug_state.debug_font = font;
-                    debug_state.debug_font_info = group.assets.getFontInfo(debug_state.font_id);
-                }
-            }
-
-            debug_state.global_width = @floatFromInt(width);
-            debug_state.global_height = @floatFromInt(height);
-
-            var match_vector = asset.AssetVector{};
-            var weight_vector = asset.AssetVector{};
-            match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
-            weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
-            if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
-                debug_state.font_id = id;
-            }
-
-            debug_state.font_scale = 1;
-            debug_state.at_y = 0.5 * @as(f32, @floatFromInt(height));
-            debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
-            debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-
-            if (debug_state.render_group) |group| {
-                group.orthographicMode(width, height, 1);
-            }
-        }
-    }
-}
 
 const DebugVariableToTextFlag = enum(u32) {
     Declaration = 0x1,
@@ -1313,108 +1195,6 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     debug_state.interaction.target = .{ .hierarchy = null };
 }
 
-pub fn end(input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
-    var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugEnd);
-    defer overlay_timed_block.end();
-
-    if (DebugState.get()) |debug_state| {
-        if (debug_state.render_group) |group| {
-            const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
-            shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
-
-            drawDebugMainMenu(debug_state, group, mouse_position);
-            interact(debug_state, input, mouse_position);
-
-            if (debug_state.is_compiling) {
-                const state = shared.platform.debugGetProcessState(debug_state.compiler);
-                if (state.is_running) {
-                    textLine("COMPILING");
-                } else {
-                    debug_state.is_compiling = false;
-                }
-            }
-
-            if (false) {
-                var counter_index: u32 = 0;
-                while (counter_index < debug_state.counter_count) : (counter_index += 1) {
-                    const counter = debug_state.counter_states[counter_index];
-
-                    var hit_count = DebugStatistic.begin();
-                    var cycle_count = DebugStatistic.begin();
-                    var cycle_over_hit = DebugStatistic.begin();
-                    for (counter.snapshots) |snapshot| {
-                        hit_count.accumulate(@floatFromInt(snapshot.hit_count));
-                        cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
-
-                        var coh: f64 = 0;
-                        if (snapshot.hit_count > 0) {
-                            coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
-                        }
-                        cycle_over_hit.accumulate(coh);
-                    }
-                    hit_count.end();
-                    cycle_count.end();
-                    cycle_over_hit.end();
-
-                    if (counter.block_name) |block_name| {
-                        if (cycle_count.max > 0) {
-                            const bar_width: f32 = 4;
-                            const chart_left: f32 = 0;
-                            const chart_min_y: f32 = debug_state.at_y;
-                            const char_height: f32 = debug_state.debug_font_info.ascender_height * debug_state.font_scale;
-                            const scale: f32 = 1 / @as(f32, @floatCast(cycle_count.max));
-                            for (counter.snapshots, 0..) |snapshot, snapshot_index| {
-                                const this_proportion: f32 = scale * @as(f32, @floatFromInt(snapshot.cycle_count));
-                                const this_height: f32 = char_height * this_proportion;
-                                group.pushRectangle(
-                                    Vector2.new(bar_width, this_height),
-                                    Vector3.new(
-                                        chart_left + bar_width * @as(f32, (@floatFromInt(snapshot_index))) - 0.5 * bar_width,
-                                        chart_min_y + 0.5 * this_height,
-                                        0,
-                                    ),
-                                    Color.new(this_proportion, 1, 0, 1),
-                                );
-                            }
-                        }
-
-                        var buffer: [128]u8 = undefined;
-                        const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
-                            block_name,
-                            counter.line_number,
-                            @as(u64, @intFromFloat(cycle_count.average)),
-                            @as(u64, @intFromFloat(hit_count.average)),
-                            @as(u64, @intFromFloat(cycle_over_hit.average)),
-                        }) catch "";
-                        textLine(slice);
-                    }
-                }
-            }
-
-            if (debug_state.frame_count > 0) {
-                var buffer: [128]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "Last frame time: {d:0.2}ms", .{
-                    debug_state.frames[debug_state.frame_count - 1].wall_seconds_elapsed * 1000,
-                }) catch "";
-                textLine(slice);
-            }
-
-            // if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
-            //     if (hot_record) |record| {
-            //         debug_state.scope_to_record = record;
-            //     } else {
-            //         debug_state.scope_to_record = null;
-            //     }
-            //
-            //     debug_state.refreshCollation();
-            // }
-
-            group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer);
-            group.endRender();
-        }
-    }
-}
-
 pub fn textOutAt(text: [:0]const u8, position: Vector2, color: Color) void {
     if (DebugState.get()) |debug_state| {
         _ = textOp(debug_state, .DrawText, text, position, color);
@@ -1565,7 +1345,220 @@ fn getRecordFrom(opt_block: ?*OpenDebugBlock) ?*DebugRecord {
     return result;
 }
 
-pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
+fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, height: i32) void {
+    var timed_block = TimedBlock.beginFunction(@src(), .DebugStart);
+    defer timed_block.end();
+
+    if (shared.debug_global_memory) |memory| {
+        if (!debug_state.initialized) {
+            debug_state.high_priority_queue = memory.high_priority_queue;
+
+            debug_state.hierarchy_sentinel.next = &debug_state.hierarchy_sentinel;
+            debug_state.hierarchy_sentinel.prev = &debug_state.hierarchy_sentinel;
+            debug_state.hierarchy_sentinel.group = null;
+
+            debug_state.debug_arena.initialize(
+                memory.debug_storage_size - @sizeOf(DebugState),
+                memory.debug_storage.? + @sizeOf(DebugState),
+            );
+
+            var context: debug_variables.DebugVariableDefinitionContext = .{
+                .state = debug_state,
+                .arena = &debug_state.debug_arena,
+                .group = null,
+            };
+            context.group = debug_variables.beginVariableGroup(&context, "Root");
+
+            _ = debug_variables.beginVariableGroup(&context, "Debugging");
+
+            debug_variables.createDebugVariables(&context);
+
+            _ = debug_variables.beginVariableGroup(&context, "Profile");
+            {
+                _ = debug_variables.beginVariableGroup(&context, "By Thread");
+                var thread_list = debug_variables.addDebugVariable(&context, .CounterThreadList, "");
+                thread_list.variable.data = .{ .profile = .{ .dimension = Vector2.new(1024, 100) } };
+                debug_variables.endVariableGroup(&context);
+
+                _ = debug_variables.beginVariableGroup(&context, "By Function");
+                var function_list = debug_variables.addDebugVariable(&context, .CounterThreadList, "");
+                function_list.variable.data = .{ .profile = .{ .dimension = Vector2.new(1024, 200) } };
+                debug_variables.endVariableGroup(&context);
+            }
+            debug_variables.endVariableGroup(&context);
+
+            var match_vector = asset.AssetVector{};
+            match_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 0;
+            var weight_vector = asset.AssetVector{};
+            weight_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 1;
+            if (assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector)) |id| {
+                _ = debug_variables.addDebugVariableBitmap(&context, "Test Bitmap", id);
+            }
+
+            debug_variables.endVariableGroup(&context);
+
+            debug_state.root_group = context.group;
+
+            debug_state.render_group =
+                render.RenderGroup.allocate(assets, &debug_state.debug_arena, shared.megabytes(16), false);
+
+            debug_state.paused = false;
+            debug_state.scope_to_record = null;
+            debug_state.initialized = true;
+
+            debug_state.debug_arena.makeSubArena(&debug_state.collate_arena, shared.megabytes(32), 4);
+            debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
+
+            debug_state.restartCollation(0);
+
+            _ = debug_state.addHierarchy(
+                debug_state.root_group.?,
+                Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
+            );
+        }
+
+        if (debug_state.render_group) |group| {
+            group.beginRender();
+            if (group.pushFont(debug_state.font_id)) |font| {
+                debug_state.debug_font = font;
+                debug_state.debug_font_info = group.assets.getFontInfo(debug_state.font_id);
+            }
+        }
+
+        debug_state.global_width = @floatFromInt(width);
+        debug_state.global_height = @floatFromInt(height);
+
+        var match_vector = asset.AssetVector{};
+        var weight_vector = asset.AssetVector{};
+        match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
+        weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
+        if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
+            debug_state.font_id = id;
+        }
+
+        debug_state.font_scale = 1;
+        debug_state.at_y = 0.5 * @as(f32, @floatFromInt(height));
+        debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
+        debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
+
+        if (debug_state.render_group) |group| {
+            group.orthographicMode(width, height, 1);
+        }
+    }
+}
+
+fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
+    var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugEnd);
+    defer overlay_timed_block.end();
+
+    if (debug_state.render_group) |group| {
+        const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
+        shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
+
+        drawDebugMainMenu(debug_state, group, mouse_position);
+        interact(debug_state, input, mouse_position);
+
+        if (debug_state.is_compiling) {
+            const state = shared.platform.debugGetProcessState(debug_state.compiler);
+            if (state.is_running) {
+                textLine("COMPILING");
+            } else {
+                debug_state.is_compiling = false;
+            }
+        }
+
+        if (false) {
+            var counter_index: u32 = 0;
+            while (counter_index < debug_state.counter_count) : (counter_index += 1) {
+                const counter = debug_state.counter_states[counter_index];
+
+                var hit_count = DebugStatistic.begin();
+                var cycle_count = DebugStatistic.begin();
+                var cycle_over_hit = DebugStatistic.begin();
+                for (counter.snapshots) |snapshot| {
+                    hit_count.accumulate(@floatFromInt(snapshot.hit_count));
+                    cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
+
+                    var coh: f64 = 0;
+                    if (snapshot.hit_count > 0) {
+                        coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
+                    }
+                    cycle_over_hit.accumulate(coh);
+                }
+                hit_count.end();
+                cycle_count.end();
+                cycle_over_hit.end();
+
+                if (counter.block_name) |block_name| {
+                    if (cycle_count.max > 0) {
+                        const bar_width: f32 = 4;
+                        const chart_left: f32 = 0;
+                        const chart_min_y: f32 = debug_state.at_y;
+                        const char_height: f32 = debug_state.debug_font_info.ascender_height * debug_state.font_scale;
+                        const scale: f32 = 1 / @as(f32, @floatCast(cycle_count.max));
+                        for (counter.snapshots, 0..) |snapshot, snapshot_index| {
+                            const this_proportion: f32 = scale * @as(f32, @floatFromInt(snapshot.cycle_count));
+                            const this_height: f32 = char_height * this_proportion;
+                            group.pushRectangle(
+                                Vector2.new(bar_width, this_height),
+                                Vector3.new(
+                                    chart_left + bar_width * @as(f32, (@floatFromInt(snapshot_index))) - 0.5 * bar_width,
+                                    chart_min_y + 0.5 * this_height,
+                                    0,
+                                ),
+                                Color.new(this_proportion, 1, 0, 1),
+                            );
+                        }
+                    }
+
+                    var buffer: [128]u8 = undefined;
+                    const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
+                        block_name,
+                        counter.line_number,
+                        @as(u64, @intFromFloat(cycle_count.average)),
+                        @as(u64, @intFromFloat(hit_count.average)),
+                        @as(u64, @intFromFloat(cycle_over_hit.average)),
+                    }) catch "";
+                    textLine(slice);
+                }
+            }
+        }
+
+        if (debug_state.frame_count > 0) {
+            var buffer: [128]u8 = undefined;
+            const slice = std.fmt.bufPrintZ(&buffer, "Last frame time: {d:0.2}ms", .{
+                debug_state.frames[debug_state.frame_count - 1].wall_seconds_elapsed * 1000,
+            }) catch "";
+            textLine(slice);
+        }
+
+        // if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
+        //     if (hot_record) |record| {
+        //         debug_state.scope_to_record = record;
+        //     } else {
+        //         debug_state.scope_to_record = null;
+        //     }
+        //
+        //     debug_state.refreshCollation();
+        // }
+
+        group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer);
+        group.endRender();
+    }
+}
+
+fn getGameAssets(memory: *shared.Memory) ?*asset.Assets {
+    var assets: ?*asset.Assets = null;
+    const transient_state: *shared.TransientState = @ptrCast(@alignCast(memory.transient_storage));
+
+    if (transient_state.is_initialized) {
+        assets = transient_state.assets;
+    }
+
+    return assets;
+}
+
+pub fn frameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) callconv(.C) *shared.DebugTable {
     global_debug_table.current_event_array_index += 1;
     if (global_debug_table.current_event_array_index >= global_debug_table.events.len) {
         global_debug_table.current_event_array_index = 0;
@@ -1579,17 +1572,32 @@ pub fn frameEnd(memory: *shared.Memory) *shared.DebugTable {
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
     global_debug_table.event_count[event_array_index] = event_count;
 
-    if (DebugState.getFrom(memory)) |debug_state| {
-        if (memory.executable_reloaded) {
-            debug_state.restartCollation(global_debug_table.current_event_array_index);
-        }
+    if (memory.debug_storage) |debug_storage| {
+        const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
 
-        if (!debug_state.paused) {
-            if (debug_state.frame_count >= shared.MAX_DEBUG_EVENT_ARRAY_COUNT * 4) {
+        if (getGameAssets(memory)) |assets| {
+            debugStart(debug_state, assets, buffer.width, buffer.height);
+
+            if (memory.executable_reloaded) {
                 debug_state.restartCollation(global_debug_table.current_event_array_index);
             }
 
-            debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
+            if (!debug_state.paused) {
+                if (debug_state.frame_count >= shared.MAX_DEBUG_EVENT_ARRAY_COUNT * 4) {
+                    debug_state.restartCollation(global_debug_table.current_event_array_index);
+                }
+
+                debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
+            }
+
+            var draw_buffer_: asset.LoadedBitmap = .{
+                .width = shared.safeTruncateToUInt16(buffer.width),
+                .height = shared.safeTruncateToUInt16(buffer.height),
+                .pitch = @intCast(buffer.pitch),
+                .memory = @ptrCast(buffer.memory),
+            };
+            const draw_buffer = &draw_buffer_;
+            debugEnd(debug_state, &input, draw_buffer);
         }
     }
 
