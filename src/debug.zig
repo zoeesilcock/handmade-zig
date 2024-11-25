@@ -123,7 +123,7 @@ const DebugInteractionType = enum(u32) {
 
 const DebugInteractionTargetType = enum(u32) {
     variable,
-    hierarchy,
+    tree,
     position,
 };
 
@@ -132,7 +132,7 @@ const DebugInteraction = struct {
 
     target: union(DebugInteractionTargetType) {
         variable: *DebugVariable,
-        hierarchy: ?*DebugVariableHierarchy,
+        tree: ?*DebugTree,
         position: *Vector2,
     },
 
@@ -157,8 +157,9 @@ pub const DebugState = struct {
     menu_position: Vector2,
     menu_active: bool,
 
-    root_group: ?*DebugVariableReference,
-    hierarchy_sentinel: DebugVariableHierarchy,
+    root_group: ?*DebugVariable,
+    view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
+    tree_sentinel: DebugTree,
 
     last_mouse_position: Vector2,
     interaction: DebugInteraction,
@@ -371,17 +372,17 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn addHierarchy(self: *DebugState, group: *DebugVariableReference, position: Vector2) *DebugVariableHierarchy {
-        var hierarchy: *DebugVariableHierarchy = self.debug_arena.pushStruct(DebugVariableHierarchy);
-        hierarchy.group = group;
-        hierarchy.ui_position = position;
+    fn addTree(self: *DebugState, group: *DebugVariableReference, position: Vector2) *DebugTree {
+        var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree);
+        tree.group = group;
+        tree.ui_position = position;
 
-        hierarchy.next = self.hierarchy_sentinel.next;
-        hierarchy.prev = &self.hierarchy_sentinel;
-        hierarchy.next.?.prev = hierarchy;
-        hierarchy.prev.?.next = hierarchy;
+        tree.next = self.hierarchy_sentinel.next;
+        tree.prev = &self.hierarchy_sentinel;
+        tree.next.?.prev = tree;
+        tree.prev.?.next = tree;
 
-        return hierarchy;
+        return tree;
     }
 
     fn interactionIsHot(self: *const DebugState, interaction: *const DebugInteraction) bool {
@@ -417,33 +418,47 @@ const DebugVariableToTextFlag = enum(u32) {
     }
 };
 
-pub const DebugVariableGroup = struct {
-    expanded: bool,
-    first_child: ?*DebugVariableReference,
-    last_child: ?*DebugVariableReference,
-};
-
-pub const DebugVariableHierarchy = struct {
+pub const DebugTree = struct {
     ui_position: Vector2,
-    group: ?*DebugVariableReference,
-    prev: ?*DebugVariableHierarchy,
-    next: ?*DebugVariableHierarchy,
+    group: ?*DebugVariable,
+
+    prev: ?*DebugTree,
+    next: ?*DebugTree,
 };
 
-const DebugProfileSettings = struct {
+const DebugViewType = enum(u32) {
+    Basic,
+    InlineBlock,
+    Collapsible,
+};
+
+pub const DebugView = struct {
+    tree: *DebugTree,
+    variable: *DebugVariable = undefined,
+    next_in_hash: *DebugView,
+
+    view_type: DebugViewType,
+    view: union {
+        inline_block: DebugViewInlineBlock,
+        collapsible: DebugViewCollapsible,
+    },
+};
+
+pub const DebugViewCollapsible = struct {
+    expanded_always: bool,
+    expanded_alt_view: bool,
+};
+
+pub const DebugViewInlineBlock = struct {
     dimension: Vector2,
 };
 
-pub const DebugVariableReference = struct {
-    variable: *DebugVariable = undefined,
-    next: ?*DebugVariableReference = null,
-    parent: ?*DebugVariableReference = null,
+const DebugProfileSettings = struct {
+    placeholder: u32,
 };
 
 const DebugBitmapDisplay = struct {
     id: file_formats.BitmapId,
-    dimension: Vector2,
-    alpha: bool,
 };
 
 pub const DebugVariableType = enum(u32) {
@@ -454,10 +469,15 @@ pub const DebugVariableType = enum(u32) {
     Vector2,
     Vector3,
     Vector4,
-    Group,
+    VarArray,
     CounterThreadList,
     // CounterFunctionList,
     BitmapDisplay,
+};
+
+const DebugVariableArray = struct {
+    count: u32,
+    variables: [*]DebugVariable,
 };
 
 pub const DebugVariable = struct {
@@ -472,9 +492,9 @@ pub const DebugVariable = struct {
         vector2_value: Vector2,
         vector3_value: Vector3,
         vector4_value: Vector4,
-        group: DebugVariableGroup,
         profile: DebugProfileSettings,
         bitmap_display: DebugBitmapDisplay,
+        var_array: DebugVariableArray,
     },
 
     pub fn shouldBeWritten(self: *DebugVariable) bool {
@@ -637,7 +657,7 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
     }
 
     if (debug_state.root_group) |root_group| {
-        var opt_ref: ?*DebugVariableReference = root_group.variable.data.group.first_child;
+        var opt_ref: ?*DebugTreeEntry = root_group.variable.data.group.first_child;
 
         while (opt_ref) |ref| {
             const variable: *DebugVariable = ref.variable;
@@ -897,25 +917,25 @@ const LayoutElement = struct {
 
 
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
-    var opt_hierarchy: ?*DebugVariableHierarchy = debug_state.hierarchy_sentinel.next;
+    var opt_tree: ?*DebugTree = debug_state.hierarchy_sentinel.next;
 
     if (debug_state.debug_font_info) |font_info| {
-        while (opt_hierarchy) |hierarchy| : (opt_hierarchy = hierarchy.next) {
-            if (hierarchy == &debug_state.hierarchy_sentinel) {
+        while (opt_tree) |tree| : (opt_tree = tree.next) {
+            if (tree == &debug_state.hierarchy_sentinel) {
                 break;
             }
 
             var layout: Layout = .{
                 .debug_state = debug_state,
                 .mouse_position = mouse_position,
-                .at = hierarchy.ui_position,
+                .at = tree.ui_position,
                 .depth = 0,
                 .line_advance = font_info.getLineAdvance() * debug_state.font_scale,
                 .spacing_y = 4,
             };
 
-            if (hierarchy.group) |hierarchy_group| {
-                var opt_ref: ?*DebugVariableReference = hierarchy_group.variable.data.group.first_child;
+            if (tree.group) |hierarchy_group| {
+                var opt_ref: ?*DebugTreeEntry = hierarchy_group.variable.data.group.first_child;
 
                 while (opt_ref) |ref| {
                     const variable: *DebugVariable = ref.variable;
@@ -1003,12 +1023,12 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
             if (true) {
                 const move_interaction: DebugInteraction = DebugInteraction{
                     .interaction_type = .Move,
-                    .target = .{ .position = &hierarchy.ui_position },
+                    .target = .{ .position = &tree.ui_position },
                 };
                 const move_box_color: Color =
                     if (debug_state.interactionIsHot(&move_interaction)) Color.new(1, 1, 0, 1) else Color.white();
                 const move_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(
-                    hierarchy.ui_position.minus(Vector2.new(4, 4)),
+                    tree.ui_position.minus(Vector2.new(4, 4)),
                     Vector2.new(4, 4),
                 );
                 render_group.pushRectangle2(move_box, 0, move_box_color);
@@ -1078,12 +1098,12 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
 
         switch (debug_state.hot_interaction.interaction_type) {
             .TearValue => {
-                const root_group: *DebugVariableReference = debug_variables.addRootGroup(debug_state, "NewUserGroup");
+                const root_group: *DebugTreeEntry = debug_variables.addRootGroup(debug_state, "NewUserGroup");
                 _ = debug_variables.addVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
-                const hierarchy = debug_state.addHierarchy(root_group, Vector2.zero());
-                hierarchy.ui_position = mouse_position;
+                const tree = debug_state.addTree(root_group, Vector2.zero());
+                tree.ui_position = mouse_position;
                 debug_state.hot_interaction.interaction_type = .Move;
-                debug_state.hot_interaction.target = .{ .position = &hierarchy.ui_position };
+                debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
             },
             else => {},
         }
@@ -1192,7 +1212,7 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     writeHandmadeConfig(debug_state);
 
     debug_state.interaction.interaction_type = .None;
-    debug_state.interaction.target = .{ .hierarchy = null };
+    debug_state.interaction.target = .{ .tree = null };
 }
 
 pub fn textOutAt(text: [:0]const u8, position: Vector2, color: Color) void {
@@ -1411,7 +1431,7 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
 
             debug_state.restartCollation(0);
 
-            _ = debug_state.addHierarchy(
+            _ = debug_state.addTree(
                 debug_state.root_group.?,
                 Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
             );

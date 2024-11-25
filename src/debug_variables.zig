@@ -8,7 +8,6 @@ const std = @import("std");
 
 const DebugState = debug.DebugState;
 const DebugVariable = debug.DebugVariable;
-const DebugVariableReference = debug.DebugVariableReference;
 const DebugVariableType = debug.DebugVariableType;
 const DebugVariableGroup = debug.DebugVariableGroup;
 const Vector2 = math.Vector2;
@@ -19,10 +18,10 @@ pub const DebugVariableDefinitionContext = struct {
     state: *DebugState,
     arena: *shared.MemoryArena,
 
-    group: ?*DebugVariableReference,
+    group: *DebugVariable,
 };
 
-pub fn addDebugUnreferencedVariable(
+pub fn addDebugVariable(
     debug_state: *DebugState,
     variable_type: DebugVariableType,
     name: [:0]const u8,
@@ -34,60 +33,27 @@ pub fn addDebugUnreferencedVariable(
     return variable;
 }
 
-pub fn addVariableToGroup(debug_state: *DebugState, group_ref: ?*DebugVariableReference, variable: *DebugVariable) *DebugVariableReference {
-    const ref: *DebugVariableReference = debug_state.debug_arena.pushStruct(DebugVariableReference);
-    ref.variable = variable;
-    ref.next = null;
-    ref.parent = group_ref;
-
-    if (ref.parent) |parent| {
-        var group = parent.variable;
-        if (group.data.group.last_child) |last_child| {
-            last_child.next = ref;
-            group.data.group.last_child = ref;
-        } else {
-            group.data.group.first_child = ref;
-            group.data.group.last_child = ref;
-        }
-    }
-
-    return ref;
-}
-
-fn addDebugVariableReference(context: *DebugVariableDefinitionContext, variable: *DebugVariable) *DebugVariableReference {
-    return addVariableToGroup(context.state, context.group, variable);
-}
-
-pub fn addDebugVariable(
+pub fn addDebugVariableToContext(
     context: *DebugVariableDefinitionContext,
     variable_type: DebugVariableType,
     name: [:0]const u8,
-) *DebugVariableReference {
-    const variable = addDebugUnreferencedVariable(context.state, variable_type, name);
-    const ref: *DebugVariableReference = addDebugVariableReference(context, variable);
-    return ref;
+) *DebugVariable {
+    std.debug.assert(context.variables < context.variables.len);
+
+    const variable = addDebugVariable(context.state, variable_type, name);
+    context.variables[context.var_count] = variable;
+    context.var_count += 1;
+
+    return variable;
 }
 
-pub fn addRootGroupInternal(debug_state: *DebugState, name: [:0]const u8) *DebugVariable {
-    const group: *DebugVariable = addDebugUnreferencedVariable(debug_state, .Group, name);
-    group.data = .{ .group = .{
-        .expanded = true,
-        .first_child = null,
-        .last_child = null,
-    } };
+pub fn beginVariableGroup(context: *DebugVariableDefinitionContext, name: [:0]const u8) *DebugVariable {
+    const group = addDebugVariableToContext(context, .VarArray, name);
+    group.data.var_array.count = 0;
 
-    return group;
-}
-
-pub fn addRootGroup(debug_state: *DebugState, name: [:0]const u8) *DebugVariableReference {
-    return addVariableToGroup(debug_state, null, addRootGroupInternal(debug_state, name));
-}
-
-pub fn beginVariableGroup(context: *DebugVariableDefinitionContext, name: [:0]const u8) *DebugVariableReference {
-    const group = addDebugVariableReference(context, addRootGroupInternal(context.state, name));
-    group.variable.data.group.expanded = false;
-
-    context.group = group;
+    // TODO: Continue here.
+    // var_count: u32,
+    // variables: [64]*DebugVariable = [1]*DebugVariable{undefined} * 64,
 
     return group;
 }
@@ -98,81 +64,79 @@ pub fn endVariableGroup(context: *DebugVariableDefinitionContext) void {
     context.group = context.group.?.parent;
 }
 
-fn addDebugVariableBool(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: bool) *DebugVariableReference {
-    var ref: *DebugVariableReference = addDebugVariable(context, .Boolean, name);
-    ref.variable.data.bool_value = value;
+fn addDebugVariableBool(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: bool) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Boolean, name);
+    variable.data.bool_value = value;
 
-    return ref;
+    return variable;
 }
 
-fn addDebugVariableFloat(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: f32) *DebugVariableReference {
-    var ref: *DebugVariableReference = addDebugVariable(context, .Float, name);
-    ref.variable.data = .{ .float_value = value };
+fn addDebugVariableFloat(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: f32) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Float, name);
+    variable.data = .{ .float_value = value };
 
-    return ref;
+    return variable;
 }
 
-fn addDebugVariableVector2(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector2) *DebugVariableReference {
-    var ref: *DebugVariableReference = addDebugVariable(context, .Vector2, name);
-    ref.variable.data = .{ .vector2_value = value };
+fn addDebugVariableVector2(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector2) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Vector2, name);
+    variable.data = .{ .vector2_value = value };
 
-    return ref;
+    return variable;
 }
 
-fn addDebugVariableVector3(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector3) *DebugVariableReference {
-    var ref: *DebugVariableReference = addDebugVariable(context, .Vector3, name);
-    ref.variable.data = .{ .vector3_value = value };
+fn addDebugVariableVector3(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector3) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Vector3, name);
+    variable.data = .{ .vector3_value = value };
 
-    return ref;
+    return variable;
 }
 
-fn addDebugVariableVector4(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector4) *DebugVariableReference {
-    var ref: *DebugVariableReference = addDebugVariable(context, .Vector4, name);
-    ref.variable.data = .{ .vector4_value = value };
+fn addDebugVariableVector4(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector4) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .Vector4, name);
+    variable.data = .{ .vector4_value = value };
 
-    return ref;
+    return variable;
 }
 
-pub fn addDebugVariableBitmap(context: *DebugVariableDefinitionContext, name: [:0]const u8, id: file_formats.BitmapId) *DebugVariableReference {
-    var ref: *DebugVariableReference = addDebugVariable(context, .BitmapDisplay, name);
-    ref.variable.data = .{
+pub fn addDebugVariableBitmap(context: *DebugVariableDefinitionContext, name: [:0]const u8, id: file_formats.BitmapId) *DebugVariable {
+    var variable: *DebugVariable = addDebugVariable(context, .BitmapDisplay, name);
+    variable.data = .{
         .bitmap_display = .{
             .id = id,
-            .dimension = Vector2.new(25, 25),
-            .alpha = true,
         },
     };
 
-    return ref;
+    return variable;
 }
 
-pub fn debugVariableListing(comptime name: [:0]const u8, context: *DebugVariableDefinitionContext) *DebugVariableReference {
-    var ref: *DebugVariableReference = undefined;
+pub fn debugVariableListing(comptime name: [:0]const u8, context: *DebugVariableDefinitionContext) *DebugVariable {
+    var variable: *DebugVariable = undefined;
 
     switch (@TypeOf(@field(config, "DEBUGUI_" ++ name))) {
         bool => {
-            ref = addDebugVariableBool(context, name, @field(config, "DEBUGUI_" ++ name));
+            variable = addDebugVariableBool(context, name, @field(config, "DEBUGUI_" ++ name));
         },
         f32 => {
-            ref = addDebugVariableFloat(context, name, @field(config, "DEBUGUI_" ++ name));
+            variable = addDebugVariableFloat(context, name, @field(config, "DEBUGUI_" ++ name));
         },
         Vector2 => {
-            ref = addDebugVariableVector2(context, name, @field(config, "DEBUGUI_" ++ name));
+            variable = addDebugVariableVector2(context, name, @field(config, "DEBUGUI_" ++ name));
         },
         Vector3 => {
-            ref = addDebugVariableVector3(context, name, @field(config, "DEBUGUI_" ++ name));
+            variable = addDebugVariableVector3(context, name, @field(config, "DEBUGUI_" ++ name));
         },
         Vector4 => {
-            ref = addDebugVariableVector4(context, name, @field(config, "DEBUGUI_" ++ name));
+            variable = addDebugVariableVector4(context, name, @field(config, "DEBUGUI_" ++ name));
         },
         else => unreachable,
     }
 
-    return ref;
+    return variable;
 }
 
 pub fn createDebugVariables(context: *DebugVariableDefinitionContext) void {
-    var use_debug_cam_ref: *DebugVariableReference = undefined;
+    var use_debug_cam_ref: *DebugVariable = undefined;
 
     _ = beginVariableGroup(context, "Ground chunks");
     _ = debugVariableListing("GROUND_CHUNK_OUTLINES", context);
