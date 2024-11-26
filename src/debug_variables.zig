@@ -18,7 +18,8 @@ pub const DebugVariableDefinitionContext = struct {
     state: *DebugState,
     arena: *shared.MemoryArena,
 
-    group: *DebugVariable,
+    group_depth: u32 = 0,
+    group_stack: [debug.MAX_VARIABLE_STACK_DEPTH]?*DebugVariable = [1]?*DebugVariable{null} ** debug.MAX_VARIABLE_STACK_DEPTH,
 };
 
 pub fn addDebugVariable(
@@ -33,74 +34,84 @@ pub fn addDebugVariable(
     return variable;
 }
 
+fn addDebugVariableToGroup(debug_state: *DebugState, group: *DebugVariable, variable: *DebugVariable) void {
+    const link = debug_state.debug_arena.pushStruct(debug.DebugVariableLink);
+    link.variable = variable;
+    link.next = group.data.var_group.next;
+    link.prev = &group.data.var_group;
+    link.next.prev = link;
+    link.prev.next = link;
+}
+
 pub fn addDebugVariableToContext(
     context: *DebugVariableDefinitionContext,
     variable_type: DebugVariableType,
     name: [:0]const u8,
 ) *DebugVariable {
-    std.debug.assert(context.variables < context.variables.len);
-
     const variable = addDebugVariable(context.state, variable_type, name);
-    context.variables[context.var_count] = variable;
-    context.var_count += 1;
+    if (context.group_stack[context.group_depth]) |parent| {
+        addDebugVariableToGroup(context.state, parent, variable);
+    }
 
     return variable;
 }
 
 pub fn beginVariableGroup(context: *DebugVariableDefinitionContext, name: [:0]const u8) *DebugVariable {
-    const group = addDebugVariableToContext(context, .VarArray, name);
-    group.data.var_array.count = 0;
+    var group = addDebugVariableToContext(context, .VarGroup, name);
+    group.data = .{ .var_group = .{ .next = undefined, .prev = undefined, .variable = undefined } };
+    group.data.var_group.next = &group.data.var_group;
+    group.data.var_group.prev = &group.data.var_group;
 
-    // TODO: Continue here.
-    // var_count: u32,
-    // variables: [64]*DebugVariable = [1]*DebugVariable{undefined} * 64,
+    std.debug.assert(context.group_depth < context.group_stack.len - 1);
+    context.group_depth += 1;
+    context.group_stack[context.group_depth] = group;
 
     return group;
 }
 
 pub fn endVariableGroup(context: *DebugVariableDefinitionContext) void {
-    std.debug.assert(context.group != null);
+    std.debug.assert(context.group_depth > 0);
 
-    context.group = context.group.?.parent;
+    context.group_depth -= 1;
 }
 
 fn addDebugVariableBool(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: bool) *DebugVariable {
-    var variable: *DebugVariable = addDebugVariable(context, .Boolean, name);
+    var variable: *DebugVariable = addDebugVariableToContext(context, .Boolean, name);
     variable.data.bool_value = value;
 
     return variable;
 }
 
 fn addDebugVariableFloat(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: f32) *DebugVariable {
-    var variable: *DebugVariable = addDebugVariable(context, .Float, name);
+    var variable: *DebugVariable = addDebugVariableToContext(context, .Float, name);
     variable.data = .{ .float_value = value };
 
     return variable;
 }
 
 fn addDebugVariableVector2(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector2) *DebugVariable {
-    var variable: *DebugVariable = addDebugVariable(context, .Vector2, name);
+    var variable: *DebugVariable = addDebugVariableToContext(context, .Vector2, name);
     variable.data = .{ .vector2_value = value };
 
     return variable;
 }
 
 fn addDebugVariableVector3(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector3) *DebugVariable {
-    var variable: *DebugVariable = addDebugVariable(context, .Vector3, name);
+    var variable: *DebugVariable = addDebugVariableToContext(context, .Vector3, name);
     variable.data = .{ .vector3_value = value };
 
     return variable;
 }
 
 fn addDebugVariableVector4(context: *DebugVariableDefinitionContext, name: [:0]const u8, value: Vector4) *DebugVariable {
-    var variable: *DebugVariable = addDebugVariable(context, .Vector4, name);
+    var variable: *DebugVariable = addDebugVariableToContext(context, .Vector4, name);
     variable.data = .{ .vector4_value = value };
 
     return variable;
 }
 
 pub fn addDebugVariableBitmap(context: *DebugVariableDefinitionContext, name: [:0]const u8, id: file_formats.BitmapId) *DebugVariable {
-    var variable: *DebugVariable = addDebugVariable(context, .BitmapDisplay, name);
+    var variable: *DebugVariable = addDebugVariableToContext(context, .BitmapDisplay, name);
     variable.data = .{
         .bitmap_display = .{
             .id = id,
@@ -136,8 +147,6 @@ pub fn debugVariableListing(comptime name: [:0]const u8, context: *DebugVariable
 }
 
 pub fn createDebugVariables(context: *DebugVariableDefinitionContext) void {
-    var use_debug_cam_ref: *DebugVariable = undefined;
-
     _ = beginVariableGroup(context, "Ground chunks");
     _ = debugVariableListing("GROUND_CHUNK_OUTLINES", context);
     _ = debugVariableListing("GROUND_CHUNK_CHECKERBOARDS", context);
@@ -157,7 +166,7 @@ pub fn createDebugVariables(context: *DebugVariableDefinitionContext) void {
         _ = beginVariableGroup(context, "Camera");
         {
             _ = debugVariableListing("USE_DEBUG_CAMERA", context);
-            use_debug_cam_ref = debugVariableListing("DEBUG_CAMERA_DISTANCE", context);
+            _ = debugVariableListing("DEBUG_CAMERA_DISTANCE", context);
             _ = debugVariableListing("USE_ROOM_BASED_CAMERA", context);
         }
         endVariableGroup(context);
@@ -168,6 +177,4 @@ pub fn createDebugVariables(context: *DebugVariableDefinitionContext) void {
     _ = debugVariableListing("FAMILIAR_FOLLOWS_HERO", context);
     _ = debugVariableListing("USE_SPACE_OUTLINES", context);
     _ = debugVariableListing("FAUX_V4", context);
-
-    // _ = addDebugVariableReference(context, use_debug_cam_ref.variable);
 }

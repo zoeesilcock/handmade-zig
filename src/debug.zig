@@ -22,6 +22,7 @@ const Rectangle2 = math.Rectangle2;
 pub var global_debug_table: shared.DebugTable = shared.DebugTable{};
 
 const COUNTER_COUNT = 512;
+pub const MAX_VARIABLE_STACK_DEPTH = 64;
 
 const DebugTextOp = enum {
     DrawText,
@@ -372,13 +373,13 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn addTree(self: *DebugState, group: *DebugVariableReference, position: Vector2) *DebugTree {
+    fn addTree(self: *DebugState, group: *DebugVariable, position: Vector2) *DebugTree {
         var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree);
         tree.group = group;
         tree.ui_position = position;
 
-        tree.next = self.hierarchy_sentinel.next;
-        tree.prev = &self.hierarchy_sentinel;
+        tree.next = self.tree_sentinel.next;
+        tree.prev = &self.tree_sentinel;
         tree.next.?.prev = tree;
         tree.prev.?.next = tree;
 
@@ -388,6 +389,17 @@ pub const DebugState = struct {
     fn interactionIsHot(self: *const DebugState, interaction: *const DebugInteraction) bool {
         return interaction.equals(&self.hot_interaction);
     }
+
+    fn getDebugViewFor(self: *DebugState, variable: *DebugVariable) *DebugView {
+        _ = self;
+        _ = variable;
+        return &dummy;
+    }
+};
+
+var dummy = DebugView{
+    .view_type = .Basic,
+    .data = undefined,
 };
 
 const DebugVariableToTextFlag = enum(u32) {
@@ -433,12 +445,12 @@ const DebugViewType = enum(u32) {
 };
 
 pub const DebugView = struct {
-    tree: *DebugTree,
+    tree: *DebugTree = undefined,
     variable: *DebugVariable = undefined,
-    next_in_hash: *DebugView,
+    next_in_hash: *DebugView = undefined,
 
     view_type: DebugViewType,
-    view: union {
+    data: union {
         inline_block: DebugViewInlineBlock,
         collapsible: DebugViewCollapsible,
     },
@@ -469,15 +481,16 @@ pub const DebugVariableType = enum(u32) {
     Vector2,
     Vector3,
     Vector4,
-    VarArray,
+    VarGroup,
     CounterThreadList,
     // CounterFunctionList,
     BitmapDisplay,
 };
 
-const DebugVariableArray = struct {
-    count: u32,
-    variables: [*]DebugVariable,
+pub const DebugVariableLink = struct {
+    next: *DebugVariableLink,
+    prev: *DebugVariableLink,
+    variable: *DebugVariable,
 };
 
 pub const DebugVariable = struct {
@@ -494,7 +507,7 @@ pub const DebugVariable = struct {
         vector4_value: Vector4,
         profile: DebugProfileSettings,
         bitmap_display: DebugBitmapDisplay,
-        var_array: DebugVariableArray,
+        var_group: DebugVariableLink,
     },
 
     pub fn shouldBeWritten(self: *DebugVariable) bool {
@@ -516,7 +529,7 @@ pub const DebugVariable = struct {
 
     pub fn prefixString(self: *DebugVariable) []const u8 {
         return switch (self.variable_type) {
-            .Group => "// ",
+            .VarGroup => "// ",
             else => "pub const DEBUGUI_",
         };
     }
@@ -544,7 +557,7 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
         len += @intCast(slice.len);
     }
 
-    if (variable.variable_type != .Group and flags & DebugVariableToTextFlag.Type.toInt() != 0) {
+    if (variable.variable_type != .VarGroup and flags & DebugVariableToTextFlag.Type.toInt() != 0) {
         const slice = std.fmt.bufPrintZ(
             buffer[len..],
             ": {s} = ",
@@ -613,12 +626,12 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
             ) catch "";
             len += @intCast(slice.len);
         },
-        .Group => {},
+        .VarGroup => {},
         .CounterThreadList => {},
         .BitmapDisplay => {},
     }
 
-    if (variable.variable_type != .Group and flags & DebugVariableToTextFlag.SemiColonEnd.toInt() != 0) {
+    if (variable.variable_type != .VarGroup and flags & DebugVariableToTextFlag.SemiColonEnd.toInt() != 0) {
         const slice = std.fmt.bufPrintZ(buffer[len..], ";", .{}) catch "";
         len += @intCast(slice.len);
     }
@@ -636,10 +649,16 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
     return len;
 }
 
+const DebugVariableIterator = struct {
+    link: *DebugVariableLink = undefined,
+    sentinel: *DebugVariableLink = undefined,
+};
+
 fn writeHandmadeConfig(debug_state: *DebugState) void {
     var buffer: [4096:0]u8 = undefined;
     var length: u32 = 0;
     var depth: u32 = 0;
+    var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
 
     {
         const imports =
@@ -657,34 +676,35 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
     }
 
     if (debug_state.root_group) |root_group| {
-        var opt_ref: ?*DebugTreeEntry = root_group.variable.data.group.first_child;
+        stack[depth].link = root_group.data.var_group.next;
+        stack[depth].sentinel = &root_group.data.var_group;
+        depth += 1;
 
-        while (opt_ref) |ref| {
-            const variable: *DebugVariable = ref.variable;
+        while (depth > 0) {
+            var iterator: DebugVariableIterator = stack[depth - 1];
 
-            if (variable.shouldBeWritten()) {
-                for (0..depth) |_| {
-                    for (0..4) |_| {
-                        buffer[length] = ' ';
-                        length += 1;
+            if (iterator.link == iterator.sentinel) {
+                depth -= 1;
+            } else {
+                const variable: *DebugVariable = iterator.link.variable;
+                iterator.link = iterator.link.next;
+
+                if (variable.shouldBeWritten()) {
+                    for (0..depth) |_| {
+                        for (0..4) |_| {
+                            buffer[length] = ' ';
+                            length += 1;
+                        }
                     }
+
+                    length = debugVariableToText(&buffer, length, variable, DebugVariableToTextFlag.declarationFlags());
                 }
 
-                length = debugVariableToText(&buffer, length, variable, DebugVariableToTextFlag.declarationFlags());
-            }
-
-            if (variable.variable_type == .Group) {
-                opt_ref = variable.data.group.first_child;
-                depth +%= 1;
-            } else {
-                while (opt_ref) |inner_ref| {
-                    if (inner_ref.next != null) {
-                        opt_ref = inner_ref.next;
-                        break;
-                    } else {
-                        opt_ref = inner_ref.parent;
-                        depth -%= 1;
-                    }
+                if (variable.variable_type == .VarGroup) {
+                    iterator = stack[depth];
+                    iterator.link = variable.data.var_group.next;
+                    iterator.sentinel = &variable.data.var_group;
+                    depth += 1;
                 }
             }
         }
@@ -917,11 +937,11 @@ const LayoutElement = struct {
 
 
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
-    var opt_tree: ?*DebugTree = debug_state.hierarchy_sentinel.next;
+    var opt_tree: ?*DebugTree = debug_state.tree_sentinel.next;
 
     if (debug_state.debug_font_info) |font_info| {
         while (opt_tree) |tree| : (opt_tree = tree.next) {
-            if (tree == &debug_state.hierarchy_sentinel) {
+            if (tree == &debug_state.tree_sentinel) {
                 break;
             }
 
@@ -934,85 +954,92 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                 .spacing_y = 4,
             };
 
-            if (tree.group) |hierarchy_group| {
-                var opt_ref: ?*DebugTreeEntry = hierarchy_group.variable.data.group.first_child;
+            // if (tree.group) |tree_group| {
+            if (debug_state.root_group) |root_group| {
+                var depth: u32 = 0;
+                var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
 
-                while (opt_ref) |ref| {
-                    const variable: *DebugVariable = ref.variable;
-                    const item_interaction: DebugInteraction = DebugInteraction{
-                        .interaction_type = .AutoModifyVariable,
-                        .target = .{ .variable = variable },
-                    };
-                    const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
-                    const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
+                stack[depth].link = root_group.data.var_group.next;
+                stack[depth].sentinel = &root_group.data.var_group;
+                depth += 1;
 
-                    switch (variable.variable_type) {
-                        .CounterThreadList => {
-                            var element: LayoutElement = layout.beginElementRectangle(&variable.data.profile.dimension);
-                            element.makeSizable();
-                            element.defaultInteraction(item_interaction);
-                            element.end();
+                while (depth > 0) {
+                    var iterator: DebugVariableIterator = stack[depth - 1];
 
-                            drawProfileIn(debug_state, element.bounds, mouse_position);
-                        },
-                        .BitmapDisplay => {
-                            const bitmap_scale = variable.data.bitmap_display.dimension.y();
-                            if (render_group.assets.getBitmap(variable.data.bitmap_display.id, render_group.generation_id)) |bitmap| {
-                                var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
-                                _ = variable.data.bitmap_display.dimension.setX(dim.size.x());
-                            }
-
-                            const tear_interaction: DebugInteraction = .{
-                                .interaction_type = .TearValue,
-                                .target = .{ .variable = variable },
-                            };
-
-                            var element: LayoutElement = layout.beginElementRectangle(&variable.data.bitmap_display.dimension);
-                            element.makeSizable();
-                            element.defaultInteraction(tear_interaction);
-                            element.end();
-
-                            render_group.pushRectangle2(element.bounds, 0, Color.black());
-                            render_group.pushBitmapId(
-                                variable.data.bitmap_display.id,
-                                bitmap_scale,
-                                element.bounds.min.toVector3(0),
-                                Color.white(),
-                                0,
-                            );
-                        },
-                        else => {
-                            var text: [4096:0]u8 = undefined;
-                            var len: u32 = 0;
-                            len = debugVariableToText(&text, len, variable, DebugVariableToTextFlag.displayFlags());
-
-                            const text_bounds = getTextSize(debug_state, &text);
-                            var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
-
-                            var element: LayoutElement = layout.beginElementRectangle(&dim);
-                            element.defaultInteraction(item_interaction);
-                            element.end();
-
-                            const text_position: Vector2 = Vector2.new(
-                                element.bounds.min.x(),
-                                element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
-                            );
-                            textOutAt(&text, text_position, item_color);
-                        },
-                    }
-
-                    if (variable.variable_type == .Group and variable.data.group.expanded) {
-                        opt_ref = variable.data.group.first_child;
-                        layout.depth +%= 1;
+                    if (iterator.link == iterator.sentinel) {
+                        depth -= 1;
                     } else {
-                        while (opt_ref) |inner_variable| {
-                            if (inner_variable.next != null) {
-                                opt_ref = inner_variable.next;
-                                break;
-                            } else {
-                                opt_ref = inner_variable.parent;
-                                layout.depth -%= 1;
-                            }
+                        const variable: *DebugVariable = iterator.link.variable;
+                        iterator.link = iterator.link.next;
+
+                        const item_interaction: DebugInteraction = DebugInteraction{
+                            .interaction_type = .AutoModifyVariable,
+                            .target = .{ .variable = variable },
+                        };
+                        const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+                        const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
+                        const view: *DebugView = debug_state.getDebugViewFor(variable);
+
+                        switch (variable.variable_type) {
+                            .CounterThreadList => {
+                                var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                                element.makeSizable();
+                                element.defaultInteraction(item_interaction);
+                                element.end();
+
+                                drawProfileIn(debug_state, element.bounds, mouse_position);
+                            },
+                            .BitmapDisplay => {
+                                const bitmap_scale = view.data.inline_block.dimension.y();
+                                if (render_group.assets.getBitmap(variable.data.bitmap_display.id, render_group.generation_id)) |bitmap| {
+                                    var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
+                                    _ = view.data.inline_block.dimension.setX(dim.size.x());
+                                }
+
+                                const tear_interaction: DebugInteraction = .{
+                                    .interaction_type = .TearValue,
+                                    .target = .{ .variable = variable },
+                                };
+
+                                var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                                element.makeSizable();
+                                element.defaultInteraction(tear_interaction);
+                                element.end();
+
+                                render_group.pushRectangle2(element.bounds, 0, Color.black());
+                                render_group.pushBitmapId(
+                                    variable.data.bitmap_display.id,
+                                    bitmap_scale,
+                                    element.bounds.min.toVector3(0),
+                                    Color.white(),
+                                    0,
+                                );
+                            },
+                            else => {
+                                var text: [4096:0]u8 = undefined;
+                                var len: u32 = 0;
+                                len = debugVariableToText(&text, len, variable, DebugVariableToTextFlag.displayFlags());
+
+                                const text_bounds = getTextSize(debug_state, &text);
+                                var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+                                var element: LayoutElement = layout.beginElementRectangle(&dim);
+                                element.defaultInteraction(item_interaction);
+                                element.end();
+
+                                const text_position: Vector2 = Vector2.new(
+                                    element.bounds.min.x(),
+                                    element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
+                                );
+                                textOutAt(&text, text_position, item_color);
+                            },
+                        }
+
+                        if (variable.variable_type == .VarGroup) {
+                            iterator = stack[depth];
+                            iterator.link = variable.data.var_group.next;
+                            iterator.sentinel = &variable.data.var_group;
+                            depth += 1;
                         }
                     }
                 }
@@ -1085,7 +1112,7 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
                 .Float => {
                     debug_state.hot_interaction.interaction_type = .DragValue;
                 },
-                .Group => {
+                .VarGroup => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
                 else => {},
@@ -1098,12 +1125,13 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
 
         switch (debug_state.hot_interaction.interaction_type) {
             .TearValue => {
-                const root_group: *DebugTreeEntry = debug_variables.addRootGroup(debug_state, "NewUserGroup");
-                _ = debug_variables.addVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
-                const tree = debug_state.addTree(root_group, Vector2.zero());
-                tree.ui_position = mouse_position;
-                debug_state.hot_interaction.interaction_type = .Move;
-                debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
+                _ = mouse_position;
+                // const root_group: *DebugTreeEntry = debug_variables.addRootGroup(debug_state, "NewUserGroup");
+                // _ = debug_variables.addVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
+                // const tree = debug_state.addTree(root_group, Vector2.zero());
+                // tree.ui_position = mouse_position;
+                // debug_state.hot_interaction.interaction_type = .Move;
+                // debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
             },
             else => {},
         }
@@ -1200,8 +1228,9 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
                 .Boolean => {
                     variable.data.bool_value = !variable.data.bool_value;
                 },
-                .Group => {
-                    variable.data.group.expanded = !variable.data.group.expanded;
+                .VarGroup => {
+                    const view: *DebugView = debug_state.getDebugViewFor(variable);
+                    view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
                 },
                 else => {},
             }
@@ -1373,9 +1402,9 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
         if (!debug_state.initialized) {
             debug_state.high_priority_queue = memory.high_priority_queue;
 
-            debug_state.hierarchy_sentinel.next = &debug_state.hierarchy_sentinel;
-            debug_state.hierarchy_sentinel.prev = &debug_state.hierarchy_sentinel;
-            debug_state.hierarchy_sentinel.group = null;
+            debug_state.tree_sentinel.next = &debug_state.tree_sentinel;
+            debug_state.tree_sentinel.prev = &debug_state.tree_sentinel;
+            debug_state.tree_sentinel.group = null;
 
             debug_state.debug_arena.initialize(
                 memory.debug_storage_size - @sizeOf(DebugState),
@@ -1385,10 +1414,8 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
             var context: debug_variables.DebugVariableDefinitionContext = .{
                 .state = debug_state,
                 .arena = &debug_state.debug_arena,
-                .group = null,
             };
-            context.group = debug_variables.beginVariableGroup(&context, "Root");
-
+            debug_state.root_group = debug_variables.beginVariableGroup(&context, "Root");
             _ = debug_variables.beginVariableGroup(&context, "Debugging");
 
             debug_variables.createDebugVariables(&context);
@@ -1396,13 +1423,11 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
             _ = debug_variables.beginVariableGroup(&context, "Profile");
             {
                 _ = debug_variables.beginVariableGroup(&context, "By Thread");
-                var thread_list = debug_variables.addDebugVariable(&context, .CounterThreadList, "");
-                thread_list.variable.data = .{ .profile = .{ .dimension = Vector2.new(1024, 100) } };
+                _ = debug_variables.addDebugVariableToContext(&context, .CounterThreadList, "");
                 debug_variables.endVariableGroup(&context);
 
                 _ = debug_variables.beginVariableGroup(&context, "By Function");
-                var function_list = debug_variables.addDebugVariable(&context, .CounterThreadList, "");
-                function_list.variable.data = .{ .profile = .{ .dimension = Vector2.new(1024, 200) } };
+                _ = debug_variables.addDebugVariableToContext(&context, .CounterThreadList, "");
                 debug_variables.endVariableGroup(&context);
             }
             debug_variables.endVariableGroup(&context);
@@ -1416,8 +1441,8 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
             }
 
             debug_variables.endVariableGroup(&context);
-
-            debug_state.root_group = context.group;
+            debug_variables.endVariableGroup(&context);
+            std.debug.assert(context.group_depth == 0);
 
             debug_state.render_group =
                 render.RenderGroup.allocate(assets, &debug_state.debug_arena, shared.megabytes(16), false);
