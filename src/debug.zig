@@ -129,6 +129,7 @@ const DebugInteractionTargetType = enum(u32) {
 };
 
 const DebugInteraction = struct {
+    id: DebugId = undefined,
     interaction_type: DebugInteractionType,
 
     target: union(DebugInteractionTargetType) {
@@ -139,6 +140,16 @@ const DebugInteraction = struct {
 
     pub fn equals(self: *const DebugInteraction, other: *const DebugInteraction) bool {
         return self.interaction_type == other.interaction_type and std.meta.eql(self.target, other.target);
+    }
+
+    pub fn fromLink(tree: *DebugTree, link: *DebugVariableLink, interaction_type: DebugInteractionType) DebugInteraction {
+        return DebugInteraction{
+            .id = DebugId.fromLink(tree, link),
+            .interaction_type = interaction_type,
+            .target = .{
+                .variable = link.variable,
+            },
+        };
     }
 };
 
@@ -390,16 +401,29 @@ pub const DebugState = struct {
         return interaction.equals(&self.hot_interaction);
     }
 
-    fn getDebugViewFor(self: *DebugState, variable: *DebugVariable) *DebugView {
-        _ = self;
-        _ = variable;
-        return &dummy;
-    }
-};
+    fn getOrCreateDebugView(self: *DebugState, id: DebugId) *DebugView {
+        const hash_index = @mod(((@intFromPtr(id.value[0]) >> 2) + (@intFromPtr(id.value[1]) >> 2)), self.view_hash.len);
+        const hash_slot = &self.view_hash[hash_index];
+        var result: ?*DebugView = null;
 
-var dummy = DebugView{
-    .view_type = .Basic,
-    .data = undefined,
+        var opt_search: ?*DebugView = hash_slot.*;
+        while (opt_search) |search| : (opt_search = search.next_in_hash) {
+            if (search.id.equals(id)) {
+                result = search;
+                break;
+            }
+        }
+
+        if (result == null) {
+            result = self.debug_arena.pushStruct(DebugView);
+            result.?.id = id;
+            result.?.view_type = .Unknown;
+            result.?.next_in_hash = hash_slot.*;
+            hash_slot.* = result.?;
+        }
+
+        return result.?;
+    }
 };
 
 const DebugVariableToTextFlag = enum(u32) {
@@ -439,18 +463,38 @@ pub const DebugTree = struct {
 };
 
 const DebugViewType = enum(u32) {
+    Unknown,
     Basic,
     InlineBlock,
     Collapsible,
 };
 
+const DebugViewDataType = enum(u32) {
+    inline_block,
+    collapsible,
+};
+
+const DebugId = struct {
+    value: [2]*void,
+
+    pub fn fromLink(tree: *DebugTree, link: *DebugVariableLink) DebugId {
+        return DebugId{
+            .value = .{ @ptrCast(tree), @ptrCast(link) }
+        };
+    }
+
+    pub fn equals(self: DebugId, other: DebugId) bool {
+        return @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]) and
+            @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]);
+    }
+};
+
 pub const DebugView = struct {
-    tree: *DebugTree = undefined,
-    variable: *DebugVariable = undefined,
+    id: DebugId,
     next_in_hash: *DebugView = undefined,
 
     view_type: DebugViewType,
-    data: union {
+    data: union(DebugViewDataType) {
         inline_block: DebugViewInlineBlock,
         collapsible: DebugViewCollapsible,
     },
@@ -681,7 +725,7 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
         depth += 1;
 
         while (depth > 0) {
-            var iterator: DebugVariableIterator = stack[depth - 1];
+            var iterator: *DebugVariableIterator = &stack[depth - 1];
 
             if (iterator.link == iterator.sentinel) {
                 depth -= 1;
@@ -701,7 +745,7 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
                 }
 
                 if (variable.variable_type == .VarGroup) {
-                    iterator = stack[depth];
+                    iterator = &stack[depth];
                     iterator.link = variable.data.var_group.next;
                     iterator.sentinel = &variable.data.var_group;
                     depth += 1;
@@ -954,31 +998,30 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                 .spacing_y = 4,
             };
 
-            // if (tree.group) |tree_group| {
-            if (debug_state.root_group) |root_group| {
+            if (tree.group) |tree_group| {
                 var depth: u32 = 0;
                 var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
 
-                stack[depth].link = root_group.data.var_group.next;
-                stack[depth].sentinel = &root_group.data.var_group;
+                stack[depth].link = tree_group.data.var_group.next;
+                stack[depth].sentinel = &tree_group.data.var_group;
                 depth += 1;
 
                 while (depth > 0) {
-                    var iterator: DebugVariableIterator = stack[depth - 1];
+                    var iterator: *DebugVariableIterator = &stack[depth - 1];
 
                     if (iterator.link == iterator.sentinel) {
                         depth -= 1;
                     } else {
+                        layout.depth = depth;
+
                         const variable: *DebugVariable = iterator.link.variable;
+                        const link: *DebugVariableLink = iterator.link;
                         iterator.link = iterator.link.next;
 
-                        const item_interaction: DebugInteraction = DebugInteraction{
-                            .interaction_type = .AutoModifyVariable,
-                            .target = .{ .variable = variable },
-                        };
+                        const item_interaction: DebugInteraction = DebugInteraction.fromLink(tree, link, .AutoModifyVariable);
                         const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
                         const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
-                        const view: *DebugView = debug_state.getDebugViewFor(variable);
+                        const view: *DebugView = debug_state.getOrCreateDebugView(DebugId.fromLink(tree, link));
 
                         switch (variable.variable_type) {
                             .CounterThreadList => {
@@ -996,11 +1039,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                                     _ = view.data.inline_block.dimension.setX(dim.size.x());
                                 }
 
-                                const tear_interaction: DebugInteraction = .{
-                                    .interaction_type = .TearValue,
-                                    .target = .{ .variable = variable },
-                                };
-
+                                const tear_interaction: DebugInteraction = DebugInteraction.fromLink(tree, link, .TearValue);
                                 var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
                                 element.makeSizable();
                                 element.defaultInteraction(tear_interaction);
@@ -1035,8 +1074,13 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                             },
                         }
 
-                        if (variable.variable_type == .VarGroup) {
-                            iterator = stack[depth];
+                        const expanded: bool = switch (view.data) {
+                            .collapsible => |data| data.expanded_always,
+                            else => false,
+                        };
+
+                        if (variable.variable_type == .VarGroup and expanded) {
+                            iterator = &stack[depth];
                             iterator.link = variable.data.var_group.next;
                             iterator.sentinel = &variable.data.var_group;
                             depth += 1;
@@ -1125,13 +1169,12 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
 
         switch (debug_state.hot_interaction.interaction_type) {
             .TearValue => {
-                _ = mouse_position;
-                // const root_group: *DebugTreeEntry = debug_variables.addRootGroup(debug_state, "NewUserGroup");
-                // _ = debug_variables.addVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
-                // const tree = debug_state.addTree(root_group, Vector2.zero());
-                // tree.ui_position = mouse_position;
-                // debug_state.hot_interaction.interaction_type = .Move;
-                // debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
+                const root_group: *DebugVariable = debug_variables.addRootGroup(debug_state, "NewUserGroup");
+                _ = debug_variables.addDebugVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
+                const tree: *DebugTree = debug_state.addTree(root_group, Vector2.zero());
+                tree.ui_position = mouse_position;
+                debug_state.hot_interaction.interaction_type = .Move;
+                debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
             },
             else => {},
         }
@@ -1223,13 +1266,18 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
         .ToggleValue => {
             std.debug.assert(debug_state.interaction.target == .variable);
 
-            const variable = debug_state.interaction.target.variable;
+            const variable: *DebugVariable = debug_state.interaction.target.variable;
             switch (variable.variable_type) {
                 .Boolean => {
                     variable.data.bool_value = !variable.data.bool_value;
                 },
                 .VarGroup => {
-                    const view: *DebugView = debug_state.getDebugViewFor(variable);
+                    const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
+
+                    if (view.data != .collapsible) {
+                        view.data = .{ .collapsible = .{ .expanded_always = false, .expanded_alt_view = false }, };
+                    }
+
                     view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
                 },
                 else => {},

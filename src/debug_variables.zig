@@ -22,7 +22,7 @@ pub const DebugVariableDefinitionContext = struct {
     group_stack: [debug.MAX_VARIABLE_STACK_DEPTH]?*DebugVariable = [1]?*DebugVariable{null} ** debug.MAX_VARIABLE_STACK_DEPTH,
 };
 
-pub fn addDebugVariable(
+fn addDebugVariable(
     debug_state: *DebugState,
     variable_type: DebugVariableType,
     name: [:0]const u8,
@@ -34,13 +34,19 @@ pub fn addDebugVariable(
     return variable;
 }
 
-fn addDebugVariableToGroup(debug_state: *DebugState, group: *DebugVariable, variable: *DebugVariable) void {
+pub fn addDebugVariableToGroup(debug_state: *DebugState, group: *DebugVariable, variable: *DebugVariable) void {
     const link = debug_state.debug_arena.pushStruct(debug.DebugVariableLink);
-    link.variable = variable;
     link.next = group.data.var_group.next;
     link.prev = &group.data.var_group;
     link.next.prev = link;
     link.prev.next = link;
+    link.variable = variable;
+}
+
+fn addDebugVariableToDefaultGroup(context: *DebugVariableDefinitionContext, variable: *DebugVariable) void {
+    if (context.group_stack[context.group_depth]) |parent| {
+        addDebugVariableToGroup(context.state, parent, variable);
+    }
 }
 
 pub fn addDebugVariableToContext(
@@ -49,18 +55,23 @@ pub fn addDebugVariableToContext(
     name: [:0]const u8,
 ) *DebugVariable {
     const variable = addDebugVariable(context.state, variable_type, name);
-    if (context.group_stack[context.group_depth]) |parent| {
-        addDebugVariableToGroup(context.state, parent, variable);
-    }
+    addDebugVariableToDefaultGroup(context, variable);
 
     return variable;
 }
 
-pub fn beginVariableGroup(context: *DebugVariableDefinitionContext, name: [:0]const u8) *DebugVariable {
-    var group = addDebugVariableToContext(context, .VarGroup, name);
+pub fn addRootGroup(debug_state: *DebugState, name: [:0]const u8) *DebugVariable {
+    var group = addDebugVariable(debug_state, .VarGroup, name);
     group.data = .{ .var_group = .{ .next = undefined, .prev = undefined, .variable = undefined } };
     group.data.var_group.next = &group.data.var_group;
     group.data.var_group.prev = &group.data.var_group;
+
+    return group;
+}
+
+pub fn beginVariableGroup(context: *DebugVariableDefinitionContext, name: [:0]const u8) *DebugVariable {
+    const group = addRootGroup(context.state, name);
+    addDebugVariableToDefaultGroup(context, group);
 
     std.debug.assert(context.group_depth < context.group_stack.len - 1);
     context.group_depth += 1;
