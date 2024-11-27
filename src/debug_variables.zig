@@ -158,6 +158,10 @@ pub fn debugVariableListing(comptime name: [:0]const u8, context: *DebugVariable
 }
 
 pub fn createDebugVariables(context: *DebugVariableDefinitionContext) void {
+    _ = beginVariableGroup(context, "Entities");
+    _ = debugVariableListing("DRAW_ENTITY_OUTLINES", context);
+    endVariableGroup(context);
+
     _ = beginVariableGroup(context, "Ground chunks");
     _ = debugVariableListing("GROUND_CHUNK_OUTLINES", context);
     _ = debugVariableListing("GROUND_CHUNK_CHECKERBOARDS", context);

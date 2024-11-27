@@ -181,9 +181,9 @@ pub export fn updateAndRender(
             tile_side_in_meters * 2.0,
             tile_depth_in_meters * 1.1,
         );
-        state.player_collsion = makeSimpleGroundedCollision(state, 0.5, 1, 1.2);
+        state.player_collsion = makeSimpleGroundedCollision(state, 1, 0.5, 1.2);
         state.sword_collsion = makeSimpleGroundedCollision(state, 1, 0.5, 0.1);
-        state.monster_collsion = makeSimpleGroundedCollision(state, 1, 1, 0.5);
+        state.monster_collsion = makeSimpleGroundedCollision(state, 1, 0.5, 0.5);
         state.familiar_collsion = makeSimpleGroundedCollision(state, 1, 0.5, 0.5);
 
         var series = random.Series.seed(3);
@@ -405,12 +405,15 @@ pub export fn updateAndRender(
     }
 
     // Handle input.
-    {
+    const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
+
+    if (false) {
         var music_volume = Vector2.zero();
         _ = music_volume.setY(math.safeRatio0(input.mouse_x, @as(f32, @floatFromInt(buffer.width))));
         _ = music_volume.setX(1.0 - music_volume.y());
         state.audio_state.changeVolume(state.music, 0.01, music_volume);
     }
+
     for (&input.controllers, 0..) |controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
         controlled_hero.movement_direction = Vector2.zero();
@@ -609,10 +612,10 @@ pub export fn updateAndRender(
         input.frame_delta_time,
     );
 
-    render_group.pushRectangleOutline(screen_bounds.getDimension(), Vector3.zero(), Color.new(1, 1, 0, 1));
+    render_group.pushRectangleOutline(screen_bounds.getDimension(), Vector3.zero(), Color.new(1, 1, 0, 1), 0.1);
     // render_group.pushRectangleOutline(camera_bounds_in_meters.getDimension().xy(), Vector3.zero(), Color.new(1, 1, 1, 1));
-    render_group.pushRectangleOutline(sim_bounds.getDimension().xy(), Vector3.zero(), Color.new(0, 1, 1, 1));
-    render_group.pushRectangleOutline(screen_sim_region.bounds.getDimension().xy(), Vector3.zero(), Color.new(1, 0, 1, 1));
+    render_group.pushRectangleOutline(sim_bounds.getDimension().xy(), Vector3.zero(), Color.new(0, 1, 1, 1), 0.1);
+    render_group.pushRectangleOutline(screen_sim_region.bounds.getDimension().xy(), Vector3.zero(), Color.new(1, 0, 1, 1), 0.1);
 
     const camera_position = world.subtractPositions(state.world, &state.camera_position, &sim_center_position);
 
@@ -1006,6 +1009,7 @@ pub export fn updateAndRender(
                                 volume.dimension.xy(),
                                 volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
                                 space_color,
+                                0.1,
                             );
                         }
                     }
@@ -1013,6 +1017,57 @@ pub export fn updateAndRender(
                 else => {
                     unreachable;
                 },
+            }
+
+            if (config.DEBUGUI_DRAW_ENTITY_OUTLINES) {
+                render_group.transform.offset_position = Vector3.zero();
+                render_group.transform.scale = 1;
+
+                const meters_mouse_position: Vector2 =
+                    mouse_position.scaledTo(1.0 / render_group.transform.meters_to_pixels);
+                const local_z: f32 = 10;
+                const world_mouse_position = render_group.unproject(meters_mouse_position, local_z);
+
+                render_group.transform.offset_position =
+                    world_mouse_position.toVector3(render_group.transform.distance_above_target - local_z);
+
+                render_group.pushRectangle(
+                    Vector2.new(1, 1),
+                    Vector3.zero(),
+                    Color.new(0, 1, 1, 1),
+                );
+
+                // if (entity_index == 166) {
+                // const meters_mouse_position: Vector2 = mouse_position.scaledTo(1.0 / render_group.transform.meters_to_pixels);
+                // var volume_index: u32 = 0;
+                // while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+                //     const volume = entity.collision.volumes[volume_index];
+                //     const local_z: f32 = volume.offset_position.z() + volume.offset_position.z();
+                //     const local_mouse_position = render_group.unproject(meters_mouse_position, local_z)
+                //         .minus(volume.offset_position.xy().plus(volume.offset_position.xy()));
+                //
+                //     render_group.pushRectangle(
+                //         Vector2.new(1, 1),
+                //         local_mouse_position.toVector3(volume.offset_position.z()),
+                //         Color.new(0, 1, 1, 1),
+                //     );
+                //
+                //     var outline_color: Color = Color.new(1, 0, 1, 1);
+                //     if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
+                //         local_mouse_position.x() < 0.5 * volume.dimension.x() and
+                //         local_mouse_position.y() > -0.5 * volume.dimension.y() and
+                //         local_mouse_position.y() < 0.5 * volume.dimension.y()) {
+                //         outline_color = Color.new(1, 1, 0, 1);
+                //     }
+                //
+                //     render_group.pushRectangleOutline(
+                //         volume.dimension.xy(),
+                //         volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                //         outline_color,
+                //         0.05,
+                //     );
+                // }
+                // }
             }
         }
     }
@@ -1134,7 +1189,11 @@ pub export fn updateAndRender(
         }
     }
 
+    render_group.orthographicMode(draw_buffer.width, draw_buffer.height, 1);
+    render_group.pushRectangleOutline(Vector2.new(5, 5), mouse_position.toVector3(0), Color.new(1, 1, 1, 1), 0.2);
+
     render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+
     render_group.endRender();
 
     sim.endSimulation(state, screen_sim_region);

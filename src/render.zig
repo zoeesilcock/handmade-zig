@@ -262,6 +262,8 @@ pub const RenderGroup = extern struct {
             0.5 * @as(f32, @floatFromInt(pixel_height)),
         );
         self.transform.orthographic = false;
+        self.transform.offset_position = Vector3.zero();
+        self.transform.scale = 1;
     }
 
     pub fn orthographicMode(
@@ -284,6 +286,8 @@ pub const RenderGroup = extern struct {
             0.5 * @as(f32, @floatFromInt(pixel_height)),
         );
         self.transform.orthographic = true;
+        self.transform.offset_position = Vector3.zero();
+        self.transform.scale = 1;
     }
 
     fn pushRenderElement(self: *RenderGroup, comptime T: type) ?*T {
@@ -324,6 +328,22 @@ pub const RenderGroup = extern struct {
     }
 
     // Renderer API.
+    // pub fn completeUnproject(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
+    //     var result: Vector2 = undefined;
+    //
+    //     if (self.transform.orthographic) {
+    //         result.position = transform.screen_center.plus(position.xy().scaledTo(transform.meters_to_pixels));
+    //         result.scale = transform.meters_to_pixels;
+    //     } else {
+    //         const a: Vector2 = final_position.minus(self.transform.screen_center).dividedBy(self.transform.meters_to_pixels);
+    //         const result: Vector2 = a.scaledTo(transform.distance_above_target - position.z() / self.transform.focal_length);
+    //     }
+    //
+    //     result = result.minus(self.transform.offset_position);
+    //
+    //     return result;
+    // }
+
     pub fn unproject(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
         return projected_xy.scaledTo(distance_from_camera / self.transform.focal_length);
     }
@@ -461,27 +481,27 @@ pub const RenderGroup = extern struct {
         dimension: Vector2,
         offset: Vector3,
         color: Color,
+        thickness: f32,
     ) void {
-        const thickness: f32 = 0.15;
         self.pushRectangle(
-            Vector2.new(dimension.x() + thickness, thickness),
-            offset.minus(Vector3.new(0, dimension.y() / 2, 0)),
+            Vector2.new(dimension.x(), thickness),
+            offset.minus(Vector3.new(0, 0.5 * dimension.y(), 0)),
             color,
         );
         self.pushRectangle(
-            Vector2.new(dimension.x() + thickness, thickness),
-            offset.plus(Vector3.new(0, dimension.y() / 2, 0)),
+            Vector2.new(dimension.x(), thickness),
+            offset.plus(Vector3.new(0, 0.5 * dimension.y(), 0)),
             color,
         );
 
         self.pushRectangle(
-            Vector2.new(thickness, dimension.y() + thickness),
-            offset.minus(Vector3.new(dimension.x() / 2, 0, 0)),
+            Vector2.new(thickness, dimension.y()),
+            offset.minus(Vector3.new(0.5 * dimension.x(), 0, 0)),
             color,
         );
         self.pushRectangle(
-            Vector2.new(thickness, dimension.y() + thickness),
-            offset.plus(Vector3.new(dimension.x() / 2, 0, 0)),
+            Vector2.new(thickness, dimension.y()),
+            offset.plus(Vector3.new(0.5 * dimension.x(), 0, 0)),
             color,
         );
     }

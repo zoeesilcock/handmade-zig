@@ -25,3 +25,5 @@ const Vector4 = math.Vector4;
             pub const DEBUGUI_RECOMPUTE_GROUND_CUNKS_ON_EXE_CHANGE: bool = false;
             pub const DEBUGUI_GROUND_CHUNK_CHECKERBOARDS: bool = false;
             pub const DEBUGUI_GROUND_CHUNK_OUTLINES: bool = false;
+        // Entities
+            pub const DEBUGUI_DRAW_ENTITY_OUTLINES: bool = true;
