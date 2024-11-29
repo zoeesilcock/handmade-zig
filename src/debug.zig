@@ -1545,7 +1545,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
     defer overlay_timed_block.end();
 
     if (debug_state.render_group) |group| {
-        const mouse_position = Vector2.new(input.mouse_x, input.mouse_y);
+        const mouse_position: Vector2 = group.unproject(Vector2.new(input.mouse_x, input.mouse_y)).xy();
         shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
 
         drawDebugMainMenu(debug_state, group, mouse_position);

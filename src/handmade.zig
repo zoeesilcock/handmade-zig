@@ -28,6 +28,7 @@ const std = @import("std");
 ///
 /// * Rendering.
 ///     * Get rid of "even" notion?
+///     * Real projections with solid concept of project/unproject.
 ///     * Straighten out all coordinate systems!
 ///         * Screen.
 ///         * World.
@@ -1020,54 +1021,72 @@ pub export fn updateAndRender(
             }
 
             if (config.DEBUGUI_DRAW_ENTITY_OUTLINES) {
-                render_group.transform.offset_position = Vector3.zero();
-                render_group.transform.scale = 1;
+                if (false) {
+                    render_group.transform.offset_position = Vector3.zero();
+                    render_group.transform.scale = 1;
 
-                const meters_mouse_position: Vector2 =
-                    mouse_position.scaledTo(1.0 / render_group.transform.meters_to_pixels);
-                const local_z: f32 = 10;
-                const world_mouse_position = render_group.unproject(meters_mouse_position, local_z);
+                    const local_z: f32 = 3;
+                    const world_mouse_position = render_group.unproject(mouse_position, local_z);
 
-                render_group.transform.offset_position =
-                    world_mouse_position.toVector3(render_group.transform.distance_above_target - local_z);
+                    render_group.transform.offset_position = world_mouse_position;
 
-                render_group.pushRectangle(
-                    Vector2.new(1, 1),
-                    Vector3.zero(),
-                    Color.new(0, 1, 1, 1),
-                );
+                    render_group.pushRectangle(
+                        Vector2.new(1, 1),
+                        Vector3.zero(),
+                        Color.new(0, 1, 1, 1),
+                    );
+                }
 
-                // if (entity_index == 166) {
-                // const meters_mouse_position: Vector2 = mouse_position.scaledTo(1.0 / render_group.transform.meters_to_pixels);
-                // var volume_index: u32 = 0;
-                // while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                //     const volume = entity.collision.volumes[volume_index];
-                //     const local_z: f32 = volume.offset_position.z() + volume.offset_position.z();
-                //     const local_mouse_position = render_group.unproject(meters_mouse_position, local_z)
-                //         .minus(volume.offset_position.xy().plus(volume.offset_position.xy()));
-                //
-                //     render_group.pushRectangle(
-                //         Vector2.new(1, 1),
-                //         local_mouse_position.toVector3(volume.offset_position.z()),
-                //         Color.new(0, 1, 1, 1),
-                //     );
-                //
-                //     var outline_color: Color = Color.new(1, 0, 1, 1);
-                //     if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
-                //         local_mouse_position.x() < 0.5 * volume.dimension.x() and
-                //         local_mouse_position.y() > -0.5 * volume.dimension.y() and
-                //         local_mouse_position.y() < 0.5 * volume.dimension.y()) {
-                //         outline_color = Color.new(1, 1, 0, 1);
-                //     }
-                //
-                //     render_group.pushRectangleOutline(
-                //         volume.dimension.xy(),
-                //         volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                //         outline_color,
-                //         0.05,
-                //     );
-                // }
-                // }
+                var volume_index: u32 = 0;
+                while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+                    const volume = entity.collision.volumes[volume_index];
+                    const local_mouse_position = render_group.unproject(mouse_position);
+
+                    if (false) {
+                        render_group.pushRectangle(
+                            Vector2.new(1, 1),
+                            local_mouse_position.xy().toVector3(0),
+                            Color.new(0, 1, 1, 1),
+                        );
+                    }
+
+                    if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
+                        local_mouse_position.x() < 0.5 * volume.dimension.x() and
+                        local_mouse_position.y() > -0.5 * volume.dimension.y() and
+                        local_mouse_position.y() < 0.5 * volume.dimension.y()) {
+                        const outline_color: Color = Color.new(1, 1, 0, 1);
+
+                        render_group.pushRectangleOutline(
+                            volume.dimension.xy(),
+                            volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                            outline_color,
+                            0.05,
+                        );
+
+                       shared.debugBeginHotElement(entity);
+                       shared.debugValue(entity.storage_index);
+                       shared.debugValue(entity.updatable);
+                       shared.debugValue(entity.type);
+                       shared.debugValue(entity.flags);
+                       shared.debugValue(entity.position);
+                       shared.debugValue(entity.velocity);
+                       shared.debugValue(entity.distance_limit);
+                       shared.debugValue(entity.facing_direction);
+                       shared.debugValue(entity.head_bob_time);
+                       shared.debugValue(entity.abs_tile_z_delta);
+                       shared.debugValue(entity.hit_point_max);
+                       shared.debugBeginArray(entity.hit_points);
+                       var hit_point_index: u32 = 0;
+                       while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
+                           shared.debugValue(entity.hit_points[hit_point_index]);
+                       }
+                       shared.debugEndArray();
+                       shared.debugValue(entity.sword);
+                       shared.debugValue(entity.walkable_dimension);
+                       shared.debugValue(entity.walkable_height);
+                       shared.debugEndHotElement();
+                    }
+                }
             }
         }
     }

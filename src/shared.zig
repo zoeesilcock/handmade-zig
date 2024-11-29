@@ -480,6 +480,24 @@ pub const TimedBlock = if (INTERNAL) struct {
     }
 };
 
+pub fn debugBeginHotElement(element: anytype) void {
+    _ = element;
+}
+
+pub fn debugValue(value: anytype) void {
+    _ = value;
+}
+
+pub fn debugBeginArray(array: anytype) void {
+    _ = array;
+}
+
+pub fn debugEndArray() void {
+}
+
+pub fn debugEndHotElement() void {
+}
+
 pub const OffscreenBuffer = extern struct {
     memory: ?*anyopaque = undefined,
     width: i32 = 0,

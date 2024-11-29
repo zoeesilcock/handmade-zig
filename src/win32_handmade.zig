@@ -562,8 +562,8 @@ fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput,
         _ = win32.ScreenToClient(window, &mouse_point);
 
         const window_dimension = getWindowDimension(window);
-        new_input.mouse_x = (-0.5 * @as(f32, @floatFromInt(window_dimension.width)) + 0.5) + @as(f32, @floatFromInt(mouse_point.x));
-        new_input.mouse_y = (0.5 * @as(f32, @floatFromInt(window_dimension.height)) - 0.5) - @as(f32, @floatFromInt(mouse_point.y));
+        new_input.mouse_x = @as(f32, @floatFromInt(mouse_point.x));
+        new_input.mouse_y = @as(f32, @floatFromInt((window_dimension.height - 1) - mouse_point.y));
         new_input.mouse_z = 0; // TODO: Add mouse wheel support.
     }
 

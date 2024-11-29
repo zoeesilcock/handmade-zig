@@ -328,28 +328,29 @@ pub const RenderGroup = extern struct {
     }
 
     // Renderer API.
-    // pub fn completeUnproject(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
-    //     var result: Vector2 = undefined;
-    //
-    //     if (self.transform.orthographic) {
-    //         result.position = transform.screen_center.plus(position.xy().scaledTo(transform.meters_to_pixels));
-    //         result.scale = transform.meters_to_pixels;
-    //     } else {
-    //         const a: Vector2 = final_position.minus(self.transform.screen_center).dividedBy(self.transform.meters_to_pixels);
-    //         const result: Vector2 = a.scaledTo(transform.distance_above_target - position.z() / self.transform.focal_length);
-    //     }
-    //
-    //     result = result.minus(self.transform.offset_position);
-    //
-    //     return result;
-    // }
+    pub fn unproject(self: *RenderGroup, pixels_xy: Vector2) Vector3 {
+        var unprojected_xy: Vector2 = undefined;
 
-    pub fn unproject(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
+        if (self.transform.orthographic) {
+            unprojected_xy = pixels_xy.minus(self.transform.screen_center).scaledTo(1.0 / self.transform.meters_to_pixels);
+        } else {
+            const a: Vector2 = pixels_xy.minus(self.transform.screen_center).scaledTo(1.0 / self.transform.meters_to_pixels);
+            unprojected_xy =
+                a.scaledTo((self.transform.distance_above_target - self.transform.offset_position.z()) / self.transform.focal_length);
+        }
+
+        var result: Vector3 = unprojected_xy.toVector3(self.transform.offset_position.z());
+        result = result.minus(self.transform.offset_position);
+
+        return result;
+    }
+
+    pub fn unprojectOld(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
         return projected_xy.scaledTo(distance_from_camera / self.transform.focal_length);
     }
 
     pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle2 {
-        const raw_xy = self.unproject(self.monitor_half_dim_in_meters, distance_from_camera);
+        const raw_xy = self.unprojectOld(self.monitor_half_dim_in_meters, distance_from_camera);
         return Rectangle2.fromCenterHalfDimension(Vector2.zero(), raw_xy);
     }
 
