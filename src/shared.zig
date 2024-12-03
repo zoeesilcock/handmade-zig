@@ -144,6 +144,10 @@ test "stringsAreEqual" {
     try std.testing.expectEqual(false, stringsAreEqual("abcd", "abc"));
 }
 
+pub fn introspect(input: []const u8) void {
+    _ = input;
+}
+
 // Platform.
 pub const DebugReadFileResult = extern struct {
     contents: *anyopaque = undefined,

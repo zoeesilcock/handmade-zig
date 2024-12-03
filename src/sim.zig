@@ -71,6 +71,7 @@ pub const SimEntityCollisionVolumeGroup = extern struct {
     }
 };
 
+// shared.introspect("regular butter");
 pub const SimEntity = extern struct {
     storage_index: u32 = 0,
     updatable: bool = false,

@@ -18,6 +18,7 @@ const Package = enum {
     Executable,
     Library,
     AssetBuilder,
+    Preprocessor,
 };
 
 pub fn build(b: *std.Build) void {
@@ -49,6 +50,10 @@ pub fn build(b: *std.Build) void {
 
     if (package == .All or package == .AssetBuilder) {
         addAssetBuilder(b, build_options, target, optimize);
+    }
+
+    if (package == .All or package == .Preprocessor) {
+        addSimplePreprocessor(b, build_options, target, optimize);
     }
 }
 
@@ -178,4 +183,27 @@ fn addAssetBuilder(
     const asset_builder_run_step = b.step("build-assets", "Run the test asset builder");
     run_asset_builder.setCwd(b.path("data/"));
     asset_builder_run_step.dependOn(&run_asset_builder.step);
+}
+
+fn addSimplePreprocessor(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const simple_preprocessor_exe = b.addExecutable(.{
+        .name = "simple-preprocessor",
+        .root_source_file = b.path("tools/simple_preprocessor.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    simple_preprocessor_exe.root_module.addOptions("build_options", build_options);
+
+    b.installArtifact(simple_preprocessor_exe);
+
+    // Allow running the preprocessor from build command.
+    const run_simple_preprocessor = b.addRunArtifact(simple_preprocessor_exe);
+    const simple_preprocessor_run_step = b.step("simple-preprocessor", "Run the preprocessor");
+    run_simple_preprocessor.setCwd(b.path("."));
+    simple_preprocessor_run_step.dependOn(&run_simple_preprocessor.step);
 }
