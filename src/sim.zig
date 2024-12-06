@@ -15,6 +15,7 @@ const Rectangle3 = math.Rectangle3;
 const State = shared.State;
 const World = world.World;
 
+// introspect("sim");
 pub const SimRegion = extern struct {
     world: *World,
     max_entity_radius: f32,
@@ -55,11 +56,13 @@ pub const SimEntityFlags = enum(u32) {
     }
 };
 
+// introspect("sim");
 pub const SimEntityCollisionVolume = extern struct {
     offset_position: Vector3,
     dimension: Vector3,
 };
 
+// introspect("sim");
 pub const SimEntityCollisionVolumeGroup = extern struct {
     total_volume: SimEntityCollisionVolume,
 
@@ -71,7 +74,7 @@ pub const SimEntityCollisionVolumeGroup = extern struct {
     }
 };
 
-// shared.introspect("regular butter");
+// introspect("sim");
 pub const SimEntity = extern struct {
     storage_index: u32 = 0,
     updatable: bool = false,
@@ -94,7 +97,7 @@ pub const SimEntity = extern struct {
     hit_point_max: u32,
     hit_points: [16]HitPoint,
 
-    sword: EntityReference = null,
+    sword: EntityReference = undefined,
 
     walkable_dimension: Vector2,
     walkable_height: f32 = 0,

@@ -3,8 +3,11 @@ const asset = @import("asset.zig");
 const render = @import("render.zig");
 const math = @import("math.zig");
 const config = @import("config.zig");
+const sim = @import("sim.zig");
 const file_formats = @import("file_formats");
 const debug_variables = @import("debug_variables.zig");
+const meta = @import("meta.zig");
+const generated = @import("generated.zig");
 const std = @import("std");
 
 // Types.
@@ -18,6 +21,7 @@ const Vector4 = math.Vector4;
 const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
+const Rectangle3 = math.Rectangle3;
 
 pub var global_debug_table: shared.DebugTable = shared.DebugTable{};
 
@@ -1540,6 +1544,68 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
     }
 }
 
+pub fn debugDumpStruct(struct_ptr: *anyopaque, member_defs: [*]const meta.MemberDefinition, member_def_count: u32, indent_level: u32) void {
+    var member_index: u32 = 0;
+    while (member_index < member_def_count) : (member_index += 1) {
+        const member: *const meta.MemberDefinition = @ptrCast(member_defs + member_index);
+        var opt_member_ptr: ?*anyopaque = @ptrFromInt(@intFromPtr(struct_ptr) + member.field_offset);
+
+        if (opt_member_ptr) |member_ptr| {
+            if (member.flags == .IsPointer) {
+                opt_member_ptr = @as(**anyopaque, @ptrCast(@alignCast(member_ptr))).*;
+                // Pointers give an incorrect alignment panic, skip for now.
+                continue;
+            }
+        }
+
+        if (opt_member_ptr) |member_ptr| {
+            var buffer: [256]u8 = undefined;
+            var slice: ?[:0]const u8 = null;
+            switch(member.field_type) {
+                .u32 => {
+                    const value: *u32 = @ptrCast(@alignCast(member_ptr));
+                    slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}", .{ member.field_name, value.* }) catch "";
+                },
+                .i32 => {
+                    const value: *i32 = @ptrCast(@alignCast(member_ptr));
+                    slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}", .{ member.field_name, value.* }) catch "";
+                },
+                .f32 => {
+                    const value: *f32 = @ptrCast(@alignCast(member_ptr));
+                    slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:0.4}", .{ member.field_name, value.* }) catch "";
+                },
+                .bool => {
+                    const value: *bool = @ptrCast(@alignCast(member_ptr));
+                    slice = std.fmt.bufPrintZ(&buffer, "{s}: {s}", .{ member.field_name, if (value.*) "true" else "false" }) catch "";
+                },
+                .Vector2 => {
+                    const value: *Vector2 = @ptrCast(@alignCast(member_ptr));
+                    slice = std.fmt.bufPrintZ(&buffer, "{s}: {{{d:0.4}, {d:0.4}}}", .{ member.field_name, value.x(), value.y() }) catch "";
+                },
+                .Vector3 => {
+                    const value: *Vector3 = @ptrCast(@alignCast(member_ptr));
+                    slice = std.fmt.bufPrintZ(&buffer, "{s}: {{{d:0.4}, {d:0.4}, {d:0.4}}}", .{ member.field_name, value.x(), value.y(), value.z() }) catch "";
+                },
+                else => {
+                    generated.dumpKnownStruct(member_ptr, member, indent_level + 1);
+                },
+            }
+
+            if (slice) |s| {
+                var indent_buffer: [128]u8 = undefined;
+                var indent_index: u32 = 0;
+                while (indent_index < indent_level * 4) : (indent_index += 1) {
+                    indent_buffer[indent_index] = ' ';
+                }
+                const indent: []const u8 = indent_buffer[0..indent_level * 4];
+
+                var out_buffer: [256]u8 = undefined;
+                textLine(std.fmt.bufPrintZ(&out_buffer, "{s}{s}", .{ indent, s }) catch "");
+            }
+        }
+    }
+}
+
 fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
     var overlay_timed_block = shared.TimedBlock.beginBlock(@src(), .DebugEnd);
     defer overlay_timed_block.end();
@@ -1550,6 +1616,44 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
 
         drawDebugMainMenu(debug_state, group, mouse_position);
         interact(debug_state, input, mouse_position);
+
+        var volume: sim.SimEntityCollisionVolume = .{
+            .offset_position = Vector3.new(10, 11, 12),
+            .dimension = Vector3.new(13, 14, 15)
+        };
+        var testCollisionVolumeGroup: sim.SimEntityCollisionVolumeGroup = .{
+            .total_volume = .{
+                .offset_position = Vector3.new(9, 8, 7),
+                .dimension = Vector3.new(4, 5, 6),
+            },
+            .volume_count = 1,
+            .volumes = @ptrCast(&volume),
+        };
+        var testEntity: sim.SimEntity = .{
+            .distance_limit = 10,
+            .head_bob_time = 0.1,
+            .facing_direction = 360,
+            .abs_tile_z_delta = 4,
+            .collision = &testCollisionVolumeGroup,
+            .hit_point_max = 10,
+            .hit_points = undefined,
+            .walkable_dimension = undefined,
+            .walkable_height = undefined,
+        };
+        debugDumpStruct(&testEntity, @ptrCast(&generated.SimEntityMembers), generated.SimEntityMembers.len, 0);
+
+        var testRegion: sim.SimRegion = .{
+            .world = undefined,
+            .origin = undefined,
+            .bounds = Rectangle3.new(1, 2, 3, 4, 5, 6),
+            .updatable_bounds = Rectangle3.new(10, 20, 30, 40, 50, 60),
+            .entities = undefined,
+            .max_entity_radius = 25,
+            .max_entity_velocity = 9.98,
+            .max_entity_count = 3,
+            .entity_count = 2,
+        };
+        debugDumpStruct(&testRegion, @ptrCast(&generated.SimRegionMembers), generated.SimRegionMembers.len, 0);
 
         if (debug_state.is_compiling) {
             const state = shared.platform.debugGetProcessState(debug_state.compiler);

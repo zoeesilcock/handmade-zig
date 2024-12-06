@@ -206,4 +206,7 @@ fn addSimplePreprocessor(
     const simple_preprocessor_run_step = b.step("simple-preprocessor", "Run the preprocessor");
     run_simple_preprocessor.setCwd(b.path("."));
     simple_preprocessor_run_step.dependOn(&run_simple_preprocessor.step);
+
+    // const output = run_simple_preprocessor.captureStdOut();
+    // simple_preprocessor_run_step.dependOn(&b.addInstallFileWithDir(output, .prefix, "../src/generated.zig").step);
 }

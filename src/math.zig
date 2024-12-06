@@ -480,7 +480,7 @@ fn Rectangle(comptime dimension_count: comptime_int, comptime ScalarType: type) 
                     return Self.new(scalar_max, scalar_max, -scalar_max, -scalar_max);
                 }
             },
-            else => {}
+            else => {},
         };
 
         pub usingnamespace switch (Self.dimensions) {
@@ -534,6 +534,19 @@ fn Rectangle(comptime dimension_count: comptime_int, comptime ScalarType: type) 
                 }
             },
             inline 3 => struct {
+                pub inline fn new(
+                    min_x: ScalarType,
+                    min_y: ScalarType,
+                    min_z: ScalarType,
+                    max_x: ScalarType,
+                    max_y: ScalarType,
+                    max_z: ScalarType,
+                ) Self {
+                    return Self{
+                        .min = VectorType.new(min_x, min_y, min_z),
+                        .max = VectorType.new(max_x, max_y, max_z),
+                    };
+                }
                 pub inline fn toRectangle2(self: Self) Rectangle2 {
                     return Rectangle2{
                         .min = self.min.xy(),
@@ -720,4 +733,3 @@ pub inline fn linear1ToSRGB255(color: Color) Color {
         255.0 * color.a(),
     );
 }
-
