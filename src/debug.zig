@@ -72,7 +72,8 @@ const OpenDebugBlock = struct {
 const DebugThread = struct {
     id: u32,
     lane_index: u32,
-    first_open_block: ?*OpenDebugBlock,
+    first_open_code_block: ?*OpenDebugBlock,
+    first_open_data_block: ?*OpenDebugBlock,
     next: ?*DebugThread,
 };
 
@@ -237,6 +238,21 @@ pub const DebugState = struct {
         self.collateDebugRecords(global_debug_table.current_event_array_index);
     }
 
+    fn allocateOpenDebugBlock(self: *DebugState) *OpenDebugBlock {
+        var result: ?*OpenDebugBlock = self.first_free_block;
+        if (result) |block| {
+            self.first_free_block = block.next_free;
+        } else {
+            result = self.collate_arena.pushStruct(OpenDebugBlock);
+        }
+        return result.?;
+    }
+
+    fn deallocateOpenDebugBlock(self: *DebugState, block: *OpenDebugBlock) void {
+        block.next_free = self.first_free_block;
+        self.first_free_block = block;
+    }
+
     pub fn collateDebugRecords(self: *DebugState, invalid_event_array_index: u32) void {
         while (true) : (self.collation_array_index += 1) {
             if (self.collation_array_index == shared.MAX_DEBUG_EVENT_ARRAY_COUNT) {
@@ -289,25 +305,16 @@ pub const DebugState = struct {
 
                         switch (event.event_type) {
                             .BeginBlock => {
-                                var debug_block: ?*OpenDebugBlock = self.first_free_block;
-
-                                if (debug_block) |block| {
-                                    self.first_free_block = block.next_free;
-                                } else {
-                                    debug_block = self.collate_arena.pushStruct(OpenDebugBlock);
-                                }
-
-                                if (debug_block) |block| {
-                                    block.staring_frame_index = frame_index;
-                                    block.opening_event = event;
-                                    block.parent = thread.first_open_block;
-                                    block.source = source;
-                                    thread.first_open_block = block;
-                                    block.next_free = null;
-                                }
+                                var debug_block = self.allocateOpenDebugBlock();
+                                debug_block.staring_frame_index = frame_index;
+                                debug_block.opening_event = event;
+                                debug_block.parent = thread.first_open_code_block;
+                                debug_block.source = source;
+                                thread.first_open_code_block = debug_block;
+                                debug_block.next_free = null;
                             },
                             .EndBlock => {
-                                if (thread.first_open_block) |matching_block| {
+                                if (thread.first_open_code_block) |matching_block| {
                                     const opening_event: *DebugEvent = matching_block.opening_event;
 
                                     if (opening_event.data.tc.thread_id == event.data.tc.thread_id and
@@ -334,14 +341,23 @@ pub const DebugState = struct {
                                             // Started on some previous frame.
                                         }
 
-                                        matching_block.next_free = self.first_free_block;
-                                        self.first_free_block = thread.first_open_block;
-                                        thread.first_open_block = matching_block.parent;
+                                        self.deallocateOpenDebugBlock(thread.first_open_code_block.?);
+                                        thread.first_open_code_block = matching_block.parent;
                                     } else {
                                         // No begin block.
                                     }
                                 }
                             },
+                            .OpenDataBlock => {},
+                            .CloseDataBlock => {},
+                            .F32 => {},
+                            .U32 => {},
+                            .I32 => {},
+                            .Vector2 => {},
+                            .Vector3 => {},
+                            .Vector4 => {},
+                            .Rectangle2 => {},
+                            .Rectangle3 => {},
                             else => unreachable,
                         }
                     }
@@ -365,7 +381,8 @@ pub const DebugState = struct {
             result = self.collate_arena.pushStruct(DebugThread);
 
             result.?.id = thread_id;
-            result.?.first_open_block = null;
+            result.?.first_open_code_block = null;
+            result.?.first_open_data_block = null;
 
             result.?.lane_index = self.frame_bar_lane_count;
             self.frame_bar_lane_count += 1;
@@ -1616,44 +1633,6 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
 
         drawDebugMainMenu(debug_state, group, mouse_position);
         interact(debug_state, input, mouse_position);
-
-        var volume: sim.SimEntityCollisionVolume = .{
-            .offset_position = Vector3.new(10, 11, 12),
-            .dimension = Vector3.new(13, 14, 15)
-        };
-        var testCollisionVolumeGroup: sim.SimEntityCollisionVolumeGroup = .{
-            .total_volume = .{
-                .offset_position = Vector3.new(9, 8, 7),
-                .dimension = Vector3.new(4, 5, 6),
-            },
-            .volume_count = 1,
-            .volumes = @ptrCast(&volume),
-        };
-        var testEntity: sim.SimEntity = .{
-            .distance_limit = 10,
-            .head_bob_time = 0.1,
-            .facing_direction = 360,
-            .abs_tile_z_delta = 4,
-            .collision = &testCollisionVolumeGroup,
-            .hit_point_max = 10,
-            .hit_points = undefined,
-            .walkable_dimension = undefined,
-            .walkable_height = undefined,
-        };
-        debugDumpStruct(&testEntity, @ptrCast(&generated.SimEntityMembers), generated.SimEntityMembers.len, 0);
-
-        var testRegion: sim.SimRegion = .{
-            .world = undefined,
-            .origin = undefined,
-            .bounds = Rectangle3.new(1, 2, 3, 4, 5, 6),
-            .updatable_bounds = Rectangle3.new(10, 20, 30, 40, 50, 60),
-            .entities = undefined,
-            .max_entity_radius = 25,
-            .max_entity_velocity = 9.98,
-            .max_entity_count = 3,
-            .entity_count = 2,
-        };
-        debugDumpStruct(&testRegion, @ptrCast(&generated.SimRegionMembers), generated.SimRegionMembers.len, 0);
 
         if (debug_state.is_compiling) {
             const state = shared.platform.debugGetProcessState(debug_state.compiler);

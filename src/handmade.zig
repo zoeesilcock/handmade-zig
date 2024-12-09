@@ -1063,7 +1063,7 @@ pub export fn updateAndRender(
                             0.05,
                         );
 
-                       shared.debugBeginHotElement(entity);
+                       shared.debugBeginDataBlock(@src(), .HotEntity, "Hot Entity", &state.low_entities[entity.storage_index], null);
                        shared.debugValue(entity.storage_index);
                        shared.debugValue(entity.updatable);
                        shared.debugValue(entity.type);
@@ -1075,16 +1075,16 @@ pub export fn updateAndRender(
                        shared.debugValue(entity.head_bob_time);
                        shared.debugValue(entity.abs_tile_z_delta);
                        shared.debugValue(entity.hit_point_max);
-                       shared.debugBeginArray(entity.hit_points);
-                       var hit_point_index: u32 = 0;
-                       while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-                           shared.debugValue(entity.hit_points[hit_point_index]);
-                       }
-                       shared.debugEndArray();
+                       // shared.debugBeginArray(entity.hit_points);
+                       // var hit_point_index: u32 = 0;
+                       // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
+                       //     shared.debugValue(entity.hit_points[hit_point_index]);
+                       // }
+                       // shared.debugEndArray();
                        shared.debugValue(entity.sword);
                        shared.debugValue(entity.walkable_dimension);
                        shared.debugValue(entity.walkable_height);
-                       shared.debugEndHotElement();
+                       shared.debugEndDataBlock(@src(), .HotEntity);
                     }
                 }
             }

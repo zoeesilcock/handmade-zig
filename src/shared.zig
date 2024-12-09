@@ -21,6 +21,9 @@ const std = @import("std");
 // Types.
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
+const Vector4 = math.Vector4;
+const Rectangle2 = math.Rectangle2;
+const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedSound = asset.LoadedSound;
@@ -333,6 +336,8 @@ pub const DebugCycleCounters = enum(u16) {
     GetBestMatchAsset,
     GetRandomAsset,
     GetFirstAsset,
+
+    HotEntity,
 };
 
 pub const DebugTable = extern struct {
@@ -363,6 +368,17 @@ pub const DebugEventType = enum(u8) {
     FrameMarker,
     BeginBlock,
     EndBlock,
+
+    OpenDataBlock,
+    CloseDataBlock,
+    F32,
+    U32,
+    I32,
+    Vector2,
+    Vector3,
+    Vector4,
+    Rectangle2,
+    Rectangle3,
 };
 
 pub const ThreadIdCoreIndex = extern struct {
@@ -372,16 +388,81 @@ pub const ThreadIdCoreIndex = extern struct {
 
 pub const DebugEvent = extern struct {
     clock: u64 = 0,
-    data: extern union {
-        tc: ThreadIdCoreIndex,
-        seconds_elapsed: f32,
-    } = undefined,
     debug_record_index: u16 = 0,
     translation_unit: u8 = 0,
     event_type: DebugEventType = undefined,
+    data: extern union {
+        tc: ThreadIdCoreIndex,
+        seconds_elapsed: f32,
+
+        vec_ptr: [3]?*anyopaque,
+        vec_u32: [6]u32,
+        vec_i32: [6]i32,
+        vec_f32: [6]f32,
+    } = undefined,
+
+    pub fn setValue(self: *DebugEvent, value: anytype) void {
+        switch (@TypeOf(value)) {
+            u32 => {
+                self.event_type = .U32;
+                self.data = .{ .vec_u32 = [1]u32{0} ** 6 };
+                self.data.vec_u32[0] = value;
+            },
+            i32 => {
+                self.event_type = .I32;
+                self.data = .{ .vec_i32 = [1]i32{0} ** 6 };
+                self.data.vec_i32[0] = value;
+            },
+            f32 => {
+                self.event_type = .F32;
+                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
+                self.data.vec_f32[0] = value;
+            },
+            Vector2 => {
+                self.event_type = .Vector2;
+                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
+                self.data.vec_f32[0] = value.x();
+                self.data.vec_f32[1] = value.y();
+            },
+            Vector3 => {
+                self.event_type = .Vector3;
+                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
+                self.data.vec_f32[0] = value.x();
+                self.data.vec_f32[1] = value.y();
+                self.data.vec_f32[2] = value.z();
+            },
+            Vector4 => {
+                self.event_type = .Vector4;
+                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
+                self.data.vec_f32[0] = value.x();
+                self.data.vec_f32[1] = value.y();
+                self.data.vec_f32[2] = value.z();
+                self.data.vec_f32[3] = value.w();
+            },
+            Rectangle2 => {
+                self.event_type = .Rectangle2;
+                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
+                self.data.vec_f32[0] = value.min.x();
+                self.data.vec_f32[1] = value.min.y();
+                self.data.vec_f32[2] = value.max.x();
+                self.data.vec_f32[3] = value.max.y();
+            },
+            Rectangle3 => {
+                self.event_type = .Rectangle3;
+                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
+                self.data.vec_f32[0] = value.min.x();
+                self.data.vec_f32[1] = value.min.y();
+                self.data.vec_f32[2] = value.min.z();
+                self.data.vec_f32[3] = value.max.x();
+                self.data.vec_f32[4] = value.max.y();
+                self.data.vec_f32[5] = value.max.z();
+            },
+            else => {},
+        }
+    }
 };
 
-fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType, opt_seconds_elapsed: ?f32) void {
+fn recordDebugEventCommon(debug_record_index: u16, event_type: DebugEventType) *DebugEvent {
     const event_array_index_event_index = @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
     const array_index = event_array_index_event_index >> 32;
     const event_index = event_array_index_event_index & 0xffffffff;
@@ -393,6 +474,11 @@ fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType, opt_sec
     event.translation_unit = 0;
     event.event_type = event_type;
 
+    return event;
+}
+
+fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType, opt_seconds_elapsed: ?f32) void {
+    var event = recordDebugEventCommon(debug_record_index, event_type);
     if (opt_seconds_elapsed) |seconds_elapsed| {
         event.data = .{ .seconds_elapsed = seconds_elapsed };
     } else {
@@ -484,12 +570,27 @@ pub const TimedBlock = if (INTERNAL) struct {
     }
 };
 
-pub fn debugBeginHotElement(element: anytype) void {
-    _ = element;
+var additional_debug_record_index: u16 = @typeInfo(DebugEventType).Enum.fields.len + 1;
+
+pub fn debugBeginDataBlock(
+    source: std.builtin.SourceLocation,
+    counter: DebugCycleCounters,
+    name: [*:0]const u8,
+    ptr0: ?*anyopaque,
+    ptr1: ?*anyopaque,
+) void {
+    var record = &global_debug_table.records[TRANSLATION_UNIT_INDEX][@intFromEnum(counter)];
+    record.file_name = source.file;
+    record.block_name = name;
+    record.line_number = source.line;
+
+    var event = recordDebugEventCommon(@intFromEnum(counter), .OpenDataBlock);
+    event.data = .{ .vec_ptr = .{ ptr0, ptr1, null } };
 }
 
 pub fn debugValue(value: anytype) void {
-    _ = value;
+    var event = recordDebugEventCommon(additional_debug_record_index, .FrameMarker);
+    event.setValue(value);
 }
 
 pub fn debugBeginArray(array: anytype) void {
@@ -499,7 +600,12 @@ pub fn debugBeginArray(array: anytype) void {
 pub fn debugEndArray() void {
 }
 
-pub fn debugEndHotElement() void {
+pub fn debugEndDataBlock(source: std.builtin.SourceLocation, counter: DebugCycleCounters) void {
+    var record = &global_debug_table.records[TRANSLATION_UNIT_INDEX][@intFromEnum(counter)];
+    record.file_name = source.file;
+    record.line_number = source.line;
+
+    _ = recordDebugEventCommon(@intFromEnum(counter), .CloseDataBlock);
 }
 
 pub const OffscreenBuffer = extern struct {
