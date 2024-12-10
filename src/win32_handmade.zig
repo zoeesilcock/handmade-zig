@@ -561,9 +561,10 @@ fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput,
     if (win32.GetCursorPos(&mouse_point) == win32.TRUE) {
         _ = win32.ScreenToClient(window, &mouse_point);
 
+        const dim = calculateGameOffset(window);
         const window_dimension = getWindowDimension(window);
-        new_input.mouse_x = @as(f32, @floatFromInt(mouse_point.x));
-        new_input.mouse_y = @as(f32, @floatFromInt((window_dimension.height - 1) - mouse_point.y));
+        new_input.mouse_x = @as(f32, @floatFromInt(mouse_point.x)) - @as(f32, @floatFromInt(dim.offset_x));
+        new_input.mouse_y = @as(f32, @floatFromInt((window_dimension.height - 1) - mouse_point.y)) - @as(f32, @floatFromInt(dim.offset_y));
         new_input.mouse_z = 0; // TODO: Add mouse wheel support.
     }
 
@@ -1047,26 +1048,46 @@ fn getGameBuffer() shared.OffscreenBuffer {
     };
 }
 
-fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, window_width: i32, window_height: i32) void {
+const GameBufferDimensions = struct {
+    blit_height: i32,
+    blit_width: i32,
+    offset_x: i32,
+    offset_y: i32,
+};
+
+fn calculateGameOffset(window: win32.HWND) GameBufferDimensions {
+    const win_dim = getWindowDimension(window);
+    const window_width = win_dim.width;
+    const window_height = win_dim.height;
+
     // Double size if we have space for it.
-    const should_double_size = window_width >= buffer.width * 2 and window_height >= buffer.height * 2;
-    const blit_width = if (should_double_size) buffer.width * 2 else buffer.width;
-    const blit_height = if (should_double_size) buffer.height * 2 else buffer.height;
-    const offset_x = @divFloor((window_width - blit_width), 2);
-    const offset_y = @divFloor((window_height - blit_height), 2);
+    const should_double_size = window_width >= back_buffer.width * 2 and window_height >= back_buffer.height * 2;
+    const blit_width = if (should_double_size) back_buffer.width * 2 else back_buffer.width;
+    const blit_height = if (should_double_size) back_buffer.height * 2 else back_buffer.height;
+
+    return GameBufferDimensions{
+        .blit_width = blit_width,
+        .blit_height = blit_height,
+        .offset_x = @divFloor((window_width - blit_width), 2),
+        .offset_y = @divFloor((window_height - blit_height), 2),
+    };
+}
+
+fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, window: win32.HWND, window_width: i32, window_height: i32,) void {
+    const dim = calculateGameOffset(window);
 
     // Clear areas outside of our drawing area.
-    _ = win32.PatBlt(device_context, 0, 0, window_width, offset_y, win32.BLACKNESS);
-    _ = win32.PatBlt(device_context, 0, offset_y + blit_height, window_width, window_height, win32.BLACKNESS);
-    _ = win32.PatBlt(device_context, 0, 0, offset_x, window_height, win32.BLACKNESS);
-    _ = win32.PatBlt(device_context, offset_x + blit_width, 0, window_width, window_height, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, 0, 0, dim.offset_x, window_height, win32.BLACKNESS);
+    _ = win32.PatBlt(device_context, dim.offset_x + dim.blit_width, 0, window_width, window_height, win32.BLACKNESS);
 
     _ = win32.StretchDIBits(
         device_context,
-        offset_x,
-        offset_y,
-        blit_width,
-        blit_height,
+        dim.offset_x,
+        dim.offset_y,
+        dim.blit_width,
+        dim.blit_height,
         0,
         0,
         buffer.width,
@@ -1110,7 +1131,7 @@ fn windowProcedure(
             const opt_device_context: ?win32.HDC = win32.BeginPaint(window, &paint);
             if (opt_device_context) |device_context| {
                 const window_dimension = getWindowDimension(window);
-                displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
+                displayBufferInWindow(&back_buffer, device_context, window, window_dimension.width, window_dimension.height);
             }
             _ = win32.EndPaint(window, &paint);
         },
@@ -2044,7 +2065,7 @@ pub export fn wWinMain(
 
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
-                    displayBufferInWindow(&back_buffer, device_context, window_dimension.width, window_dimension.height);
+                    displayBufferInWindow(&back_buffer, device_context, window_handle, window_dimension.width, window_dimension.height);
 
                     flip_wall_clock = getWallClock();
 
