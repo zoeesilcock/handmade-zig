@@ -48,6 +48,7 @@ const DebugFrame = struct {
     begin_clock: u64,
     end_clock: u64,
     wall_seconds_elapsed: f32,
+    root_group: ?*DebugVariable,
     region_count: u32,
     regions: [*]DebugFrameRegion,
 };
@@ -65,6 +66,7 @@ const OpenDebugBlock = struct {
     staring_frame_index: u32,
     source: *DebugRecord,
     opening_event: *DebugEvent,
+    group: ?*DebugVariable,
     parent: ?*OpenDebugBlock,
     next_free: ?*OpenDebugBlock,
 };
@@ -116,16 +118,7 @@ pub const DebugStatistic = struct {
     }
 };
 
-const DebugInteractionType = enum(u32) {
-    None,
-    NoOp,
-    AutoModifyVariable,
-    ToggleValue,
-    DragValue,
-    TearValue,
-    Resize,
-    Move
-};
+const DebugInteractionType = enum(u32) { None, NoOp, AutoModifyVariable, ToggleValue, DragValue, TearValue, Resize, Move };
 
 const DebugInteractionTargetType = enum(u32) {
     variable,
@@ -238,19 +231,82 @@ pub const DebugState = struct {
         self.collateDebugRecords(global_debug_table.current_event_array_index);
     }
 
-    fn allocateOpenDebugBlock(self: *DebugState) *OpenDebugBlock {
+    fn allocateOpenDebugBlock(
+        self: *DebugState,
+        frame_index: u32,
+        event: *DebugEvent,
+        source: *DebugRecord,
+        first_open_block: *?*OpenDebugBlock,
+    ) *OpenDebugBlock {
         var result: ?*OpenDebugBlock = self.first_free_block;
         if (result) |block| {
             self.first_free_block = block.next_free;
         } else {
             result = self.collate_arena.pushStruct(OpenDebugBlock);
         }
+
+        result.?.staring_frame_index = frame_index;
+        result.?.opening_event = event;
+        result.?.source = source;
+        result.?.next_free = null;
+        result.?.parent = first_open_block.*;
+        first_open_block.* = result;
+
         return result.?;
     }
 
-    fn deallocateOpenDebugBlock(self: *DebugState, block: *OpenDebugBlock) void {
-        block.next_free = self.first_free_block;
-        self.first_free_block = block;
+    fn deallocateOpenDebugBlock(self: *DebugState, first_open_block: *?*OpenDebugBlock) void {
+        if (first_open_block.*) |*free_block| {
+            free_block.*.next_free = self.first_free_block;
+            self.first_free_block = free_block.*;
+            first_open_block.* = free_block.*.parent;
+        }
+    }
+
+    fn collateCreateVariable(
+        self: *DebugState,
+        variable_type: DebugVariableType,
+        name: [:0]const u8,
+    ) *DebugVariable {
+        const variable = self.collate_arena.pushStruct(DebugVariable);
+        variable.variable_type = variable_type;
+        variable.name = @ptrCast(self.collate_arena.pushCopy(name.len + 1, @ptrCast(@constCast(name))));
+
+        return variable;
+    }
+
+    pub fn collateAddVariableToGroup(self: *DebugState, group: *DebugVariable, variable: *DebugVariable) void {
+        const link = self.collate_arena.pushStruct(DebugVariableLink);
+        link.next = group.data.var_group.next;
+        link.prev = &group.data.var_group;
+        link.next.prev = link;
+        link.prev.next = link;
+        link.variable = variable;
+    }
+
+    fn collateCreateVariableGroup(self: *DebugState, name: [:0]const u8) *DebugVariable {
+        var group = self.collateCreateVariable(.VarGroup, name);
+        group.data = .{ .var_group = .{ .next = undefined, .prev = undefined, .variable = undefined } };
+        group.data.var_group.next = &group.data.var_group;
+        group.data.var_group.prev = &group.data.var_group;
+
+        return group;
+    }
+
+    fn collateCreateGroupedVariable(
+        self: *DebugState,
+        opt_block: ?*OpenDebugBlock,
+        variable_type: DebugVariableType,
+        name: [:0]const u8,
+    ) *DebugVariable {
+        std.debug.assert(opt_block != null);
+        std.debug.assert(opt_block.?.group != null);
+
+        const result: *DebugVariable = self.collateCreateVariable(variable_type, name);
+
+        self.collateAddVariableToGroup(opt_block.?.group.?, result);
+
+        return result;
     }
 
     pub fn collateDebugRecords(self: *DebugState, invalid_event_array_index: u32) void {
@@ -289,6 +345,7 @@ pub const DebugState = struct {
                     self.collation_frame = &self.frames[self.frame_count];
 
                     if (self.collation_frame) |current_frame| {
+                        current_frame.root_group = self.collateCreateVariableGroup("Frame");
                         current_frame.begin_clock = event.clock;
                         current_frame.end_clock = 0;
                         current_frame.region_count = 0;
@@ -298,29 +355,20 @@ pub const DebugState = struct {
                 } else {
                     if (self.collation_frame) |current_frame| {
                         const frame_index: u32 = self.frame_count -% 1;
-                        const thread: *DebugThread = self.getDebugThread(event.data.tc.thread_id);
-                        const relative_clock: u64 = event.clock - current_frame.begin_clock;
-
-                        _ = relative_clock;
+                        const thread: *DebugThread = self.getDebugThread(event.tc.thread_id);
+                        // const relative_clock: u64 = event.clock - current_frame.begin_clock;
+                        // _ = relative_clock;
 
                         switch (event.event_type) {
                             .BeginBlock => {
-                                var debug_block = self.allocateOpenDebugBlock();
-                                debug_block.staring_frame_index = frame_index;
-                                debug_block.opening_event = event;
-                                debug_block.parent = thread.first_open_code_block;
-                                debug_block.source = source;
-                                thread.first_open_code_block = debug_block;
-                                debug_block.next_free = null;
+                                const debug_block = self.allocateOpenDebugBlock(frame_index, event, source, &thread.first_open_code_block);
+                                _ = debug_block;
                             },
                             .EndBlock => {
                                 if (thread.first_open_code_block) |matching_block| {
                                     const opening_event: *DebugEvent = matching_block.opening_event;
 
-                                    if (opening_event.data.tc.thread_id == event.data.tc.thread_id and
-                                        opening_event.debug_record_index == event.debug_record_index and
-                                        opening_event.translation_unit == event.translation_unit)
-                                    {
+                                    if (opening_event.matches(event)) {
                                         if (matching_block.staring_frame_index == frame_index) {
                                             if (getRecordFrom(matching_block.parent) == self.scope_to_record) {
                                                 const min_t: f32 = @floatFromInt(opening_event.clock - current_frame.begin_clock);
@@ -341,23 +389,140 @@ pub const DebugState = struct {
                                             // Started on some previous frame.
                                         }
 
-                                        self.deallocateOpenDebugBlock(thread.first_open_code_block.?);
-                                        thread.first_open_code_block = matching_block.parent;
+                                        self.deallocateOpenDebugBlock(&thread.first_open_code_block);
                                     } else {
                                         // No begin block.
                                     }
                                 }
                             },
-                            .OpenDataBlock => {},
-                            .CloseDataBlock => {},
-                            .F32 => {},
-                            .U32 => {},
-                            .I32 => {},
-                            .Vector2 => {},
-                            .Vector3 => {},
-                            .Vector4 => {},
-                            .Rectangle2 => {},
-                            .Rectangle3 => {},
+                            .OpenDataBlock => {
+                                const debug_block = self.allocateOpenDebugBlock(
+                                    frame_index,
+                                    event,
+                                    source,
+                                    &thread.first_open_data_block,
+                                );
+                                debug_block.group = self.collateCreateVariableGroup(std.mem.sliceTo(source.block_name, 0));
+
+                                if (debug_block.parent) |parent| {
+                                    if (parent.group) |group| {
+                                        self.collateAddVariableToGroup(group, debug_block.group.?);
+                                    }
+                                } else if (self.collation_frame) |collation_frame| {
+                                    if (collation_frame.root_group) |group| {
+                                        self.collateAddVariableToGroup(group, debug_block.group.?);
+                                    }
+                                }
+                            },
+                            .CloseDataBlock => {
+                                if (thread.first_open_data_block) |matching_block| {
+                                    const opening_event: *DebugEvent = matching_block.opening_event;
+
+                                    if (opening_event.matches(event)) {
+                                        self.deallocateOpenDebugBlock(&thread.first_open_data_block);
+                                    } else {
+                                        // No begin block.
+                                    }
+                                }
+                            },
+                            .F32 => {
+                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                    thread.first_open_data_block,
+                                    .Float,
+                                    std.mem.sliceTo(source.block_name, 0),
+                                );
+                                variable.data = .{ .float_value = event.data.vec_f32[0] };
+                            },
+                            .U32 => {
+                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                    thread.first_open_data_block,
+                                    .UInt,
+                                    std.mem.sliceTo(source.block_name, 0),
+                                );
+                                variable.data = .{ .uint_value = event.data.vec_u32[0] };
+                            },
+                            .I32 => {
+                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                    thread.first_open_data_block,
+                                    .Int,
+                                    std.mem.sliceTo(source.block_name, 0),
+                                );
+                                variable.data = .{ .int_value = event.data.vec_i32[0] };
+                            },
+                            .Vector2 => {
+                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                    thread.first_open_data_block,
+                                    .Vector2,
+                                    std.mem.sliceTo(source.block_name, 0),
+                                );
+                                variable.data = .{
+                                    .vector2_value = Vector2.new(
+                                        event.data.vec_f32[0],
+                                        event.data.vec_f32[1],
+                                    ),
+                                };
+                            },
+                            .Vector3 => {
+                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                    thread.first_open_data_block,
+                                    .Vector3,
+                                    std.mem.sliceTo(source.block_name, 0),
+                                );
+                                variable.data = .{
+                                    .vector3_value = Vector3.new(
+                                        event.data.vec_f32[0],
+                                        event.data.vec_f32[1],
+                                        event.data.vec_f32[2],
+                                    ),
+                                };
+                            },
+                            .Vector4 => {
+                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                    thread.first_open_data_block,
+                                    .Vector4,
+                                    std.mem.sliceTo(source.block_name, 0),
+                                );
+                                variable.data = .{
+                                    .vector4_value = Vector4.new(
+                                        event.data.vec_f32[0],
+                                        event.data.vec_f32[1],
+                                        event.data.vec_f32[2],
+                                        event.data.vec_f32[3],
+                                    ),
+                                };
+                            },
+                            .Rectangle2 => {
+                                // var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                //     thread.first_open_data_block,
+                                //     .Rectangle2,
+                                //     std.mem.sliceTo(source.block_name, 0),
+                                // );
+                                // variable.data = .{ .rectangle2_value =
+                                //     Rectangle2.new(
+                                //         event.data.vec_f32[0],
+                                //         event.data.vec_f32[1],
+                                //         event.data.vec_f32[2],
+                                //         event.data.vec_f32[3]
+                                //     ),
+                                // };
+                            },
+                            .Rectangle3 => {
+                                // var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                //     thread.first_open_data_block,
+                                //     .Rectangle3,
+                                //     std.mem.sliceTo(source.block_name, 0),
+                                // );
+                                // variable.data = .{ .rectangle3_value =
+                                //     Rectangle3.new(
+                                //         event.data.vec_f32[0],
+                                //         event.data.vec_f32[1],
+                                //         event.data.vec_f32[2],
+                                //         event.data.vec_f32[3],
+                                //         event.data.vec_f32[4],
+                                //         event.data.vec_f32[5]
+                                //     ),
+                                // };
+                            },
                             else => unreachable,
                         }
                     }
@@ -499,9 +664,7 @@ const DebugId = struct {
     value: [2]*void,
 
     pub fn fromLink(tree: *DebugTree, link: *DebugVariableLink) DebugId {
-        return DebugId{
-            .value = .{ @ptrCast(tree), @ptrCast(link) }
-        };
+        return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };
     }
 
     pub fn equals(self: DebugId, other: DebugId) bool {
@@ -562,7 +725,7 @@ pub const DebugVariable = struct {
     variable_type: DebugVariableType = .Boolean,
     name: [*:0]const u8,
 
-    data: union {
+    data: union(enum) {
         bool_value: bool,
         int_value: i32,
         uint_value: u32,
@@ -955,25 +1118,33 @@ const LayoutElement = struct {
                     Rectangle2.fromMinMax(
                         Vector2.new(total_min_corner.x(), interior_min_corner.y()),
                         Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
-                    ), 0, Color.black(),
+                    ),
+                    0,
+                    Color.black(),
                 );
                 render_group.pushRectangle2(
                     Rectangle2.fromMinMax(
                         Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
                         Vector2.new(total_max_corner.x(), total_max_corner.y()),
-                    ), 0, Color.black(),
+                    ),
+                    0,
+                    Color.black(),
                 );
                 render_group.pushRectangle2(
                     Rectangle2.fromMinMax(
                         Vector2.new(interior_min_corner.x(), total_min_corner.y()),
                         Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
-                    ), 0, Color.black(),
+                    ),
+                    0,
+                    Color.black(),
                 );
                 render_group.pushRectangle2(
                     Rectangle2.fromMinMax(
                         Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
                         Vector2.new(interior_max_corner.x(), total_max_corner.y()),
-                    ), 0, Color.black(),
+                    ),
+                    0,
+                    Color.black(),
                 );
 
                 const size_interaction: DebugInteraction = DebugInteraction{
@@ -1000,7 +1171,6 @@ const LayoutElement = struct {
     }
 };
 
-
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     var opt_tree: ?*DebugTree = debug_state.tree_sentinel.next;
 
@@ -1019,7 +1189,16 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                 .spacing_y = 4,
             };
 
-            if (tree.group) |tree_group| {
+            var opt_group = tree.group;
+            if (debug_state.frame_count > 0) {
+                if (debug_state.frames[0].root_group) |hacky_group| {
+                    if (hacky_group.data == .var_group) {
+                        opt_group = hacky_group;
+                    }
+                }
+            }
+
+            if (opt_group) |tree_group| {
                 var depth: u32 = 0;
                 var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
 
@@ -1095,10 +1274,11 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                             },
                         }
 
-                        const expanded: bool = switch (view.data) {
-                            .collapsible => |data| data.expanded_always,
-                            else => false,
-                        };
+                        // const expanded: bool = switch (view.data) {
+                        //     .collapsible => |data| data.expanded_always,
+                        //     else => false,
+                        // };
+                        const expanded = true;
 
                         if (variable.variable_type == .VarGroup and expanded) {
                             iterator = &stack[depth];
@@ -1296,7 +1476,9 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
                     const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
 
                     if (view.data != .collapsible) {
-                        view.data = .{ .collapsible = .{ .expanded_always = false, .expanded_alt_view = false }, };
+                        view.data = .{
+                            .collapsible = .{ .expanded_always = false, .expanded_alt_view = false },
+                        };
                     }
 
                     view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
@@ -1578,7 +1760,7 @@ pub fn debugDumpStruct(struct_ptr: *anyopaque, member_defs: [*]const meta.Member
         if (opt_member_ptr) |member_ptr| {
             var buffer: [256]u8 = undefined;
             var slice: ?[:0]const u8 = null;
-            switch(member.field_type) {
+            switch (member.field_type) {
                 .u32 => {
                     const value: *u32 = @ptrCast(@alignCast(member_ptr));
                     slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}", .{ member.field_name, value.* }) catch "";
@@ -1614,7 +1796,7 @@ pub fn debugDumpStruct(struct_ptr: *anyopaque, member_defs: [*]const meta.Member
                 while (indent_index < indent_level * 4) : (indent_index += 1) {
                     indent_buffer[indent_index] = ' ';
                 }
-                const indent: []const u8 = indent_buffer[0..indent_level * 4];
+                const indent: []const u8 = indent_buffer[0 .. indent_level * 4];
 
                 var out_buffer: [256]u8 = undefined;
                 textLine(std.fmt.bufPrintZ(&out_buffer, "{s}{s}", .{ indent, s }) catch "");
@@ -1759,7 +1941,7 @@ pub fn frameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared
             }
 
             if (!debug_state.paused) {
-                if (debug_state.frame_count >= shared.MAX_DEBUG_EVENT_ARRAY_COUNT * 4) {
+                if (debug_state.frame_count >= (shared.MAX_DEBUG_EVENT_ARRAY_COUNT * 4 - 1)) {
                     debug_state.restartCollation(global_debug_table.current_event_array_index);
                 }
 

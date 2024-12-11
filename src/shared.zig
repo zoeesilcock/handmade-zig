@@ -388,13 +388,12 @@ pub const ThreadIdCoreIndex = extern struct {
 
 pub const DebugEvent = extern struct {
     clock: u64 = 0,
+    tc: ThreadIdCoreIndex = undefined,
     debug_record_index: u16 = 0,
     translation_unit: u8 = 0,
     event_type: DebugEventType = undefined,
     data: extern union {
-        tc: ThreadIdCoreIndex,
         seconds_elapsed: f32,
-
         vec_ptr: [3]?*anyopaque,
         vec_u32: [6]u32,
         vec_i32: [6]i32,
@@ -460,9 +459,15 @@ pub const DebugEvent = extern struct {
             else => {},
         }
     }
+
+    pub fn matches(a: *DebugEvent, b: *DebugEvent) bool {
+        return (a.tc.thread_id == b.tc.thread_id and
+            // a.debug_record_index == b.debug_record_index and
+            a.translation_unit == b.translation_unit);
+    }
 };
 
-fn recordDebugEventCommon(debug_record_index: u16, event_type: DebugEventType) *DebugEvent {
+fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType) *DebugEvent {
     const event_array_index_event_index = @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
     const array_index = event_array_index_event_index >> 32;
     const event_index = event_array_index_event_index & 0xffffffff;
@@ -473,22 +478,12 @@ fn recordDebugEventCommon(debug_record_index: u16, event_type: DebugEventType) *
     event.debug_record_index = debug_record_index;
     event.translation_unit = 0;
     event.event_type = event_type;
+    event.tc = .{
+        .thread_id = @truncate(getThreadId()),
+        .core_index = 0,
+    };
 
     return event;
-}
-
-fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType, opt_seconds_elapsed: ?f32) void {
-    var event = recordDebugEventCommon(debug_record_index, event_type);
-    if (opt_seconds_elapsed) |seconds_elapsed| {
-        event.data = .{ .seconds_elapsed = seconds_elapsed };
-    } else {
-        event.data = .{
-            .tc = .{
-                .thread_id = @truncate(getThreadId()),
-                .core_index = 0,
-            }
-        };
-    }
 }
 
 pub const TimedBlock = if (INTERNAL) struct {
@@ -510,7 +505,7 @@ pub const TimedBlock = if (INTERNAL) struct {
         record.block_name = if (is_block) @tagName(counter) else source.fn_name;
         record.line_number = source.line;
 
-        recordDebugEvent(@intFromEnum(counter), .BeginBlock, null);
+        _ = recordDebugEvent(@intFromEnum(counter), .BeginBlock);
 
         return result;
     }
@@ -523,7 +518,8 @@ pub const TimedBlock = if (INTERNAL) struct {
         record.block_name = "FrameMarker";
         record.line_number = source.line;
 
-        recordDebugEvent(@intFromEnum(counter), .FrameMarker, seconds_elapsed);
+        var event = recordDebugEvent(@intFromEnum(counter), .FrameMarker);
+        event.data = .{ .seconds_elapsed = seconds_elapsed };
 
         return result;
     }
@@ -536,7 +532,7 @@ pub const TimedBlock = if (INTERNAL) struct {
     }
 
     pub fn end(self: TimedBlock) void {
-        recordDebugEvent(@intFromEnum(self.counter), .EndBlock, null);
+        _ = recordDebugEvent(@intFromEnum(self.counter), .EndBlock);
     }
 } else struct {
     pub fn beginBlock(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
@@ -584,12 +580,12 @@ pub fn debugBeginDataBlock(
     record.block_name = name;
     record.line_number = source.line;
 
-    var event = recordDebugEventCommon(@intFromEnum(counter), .OpenDataBlock);
+    var event = recordDebugEvent(@intFromEnum(counter), .OpenDataBlock);
     event.data = .{ .vec_ptr = .{ ptr0, ptr1, null } };
 }
 
 pub fn debugValue(value: anytype) void {
-    var event = recordDebugEventCommon(additional_debug_record_index, .FrameMarker);
+    var event = recordDebugEvent(additional_debug_record_index, .FrameMarker);
     event.setValue(value);
 }
 
@@ -605,7 +601,7 @@ pub fn debugEndDataBlock(source: std.builtin.SourceLocation, counter: DebugCycle
     record.file_name = source.file;
     record.line_number = source.line;
 
-    _ = recordDebugEventCommon(@intFromEnum(counter), .CloseDataBlock);
+    _ = recordDebugEvent(@intFromEnum(counter), .CloseDataBlock);
 }
 
 pub const OffscreenBuffer = extern struct {
