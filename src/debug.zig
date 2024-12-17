@@ -12,7 +12,7 @@ const std = @import("std");
 
 // Types.
 const DebugRecord = shared.DebugRecord;
-const DebugEventType = shared.DebugEventType;
+const DebugType = shared.DebugType;
 const DebugEvent = shared.DebugEvent;
 const TimedBlock = shared.TimedBlock;
 const Vector2 = math.Vector2;
@@ -48,7 +48,7 @@ const DebugFrame = struct {
     begin_clock: u64,
     end_clock: u64,
     wall_seconds_elapsed: f32,
-    root_group: ?*DebugVariable,
+    root_group: ?*DebugVariableGroup,
     region_count: u32,
     regions: [*]DebugFrameRegion,
 };
@@ -66,7 +66,7 @@ const OpenDebugBlock = struct {
     staring_frame_index: u32,
     source: *DebugRecord,
     opening_event: *DebugEvent,
-    group: ?*DebugVariable,
+    group: ?*DebugVariableGroup,
     parent: ?*OpenDebugBlock,
     next_free: ?*OpenDebugBlock,
 };
@@ -167,7 +167,7 @@ pub const DebugState = struct {
     menu_position: Vector2,
     menu_active: bool,
 
-    root_group: ?*DebugVariable,
+    root_group: ?*DebugVariableGroup,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
     tree_sentinel: DebugTree,
 
@@ -249,6 +249,7 @@ pub const DebugState = struct {
         result.?.opening_event = event;
         result.?.source = source;
         result.?.next_free = null;
+
         result.?.parent = first_open_block.*;
         first_open_block.* = result;
 
@@ -265,7 +266,7 @@ pub const DebugState = struct {
 
     fn collateCreateVariable(
         self: *DebugState,
-        variable_type: DebugVariableType,
+        variable_type: DebugType,
         name: [:0]const u8,
     ) *DebugVariable {
         const variable = self.collate_arena.pushStruct(DebugVariable);
@@ -275,20 +276,22 @@ pub const DebugState = struct {
         return variable;
     }
 
-    pub fn collateAddVariableToGroup(self: *DebugState, group: *DebugVariable, variable: *DebugVariable) void {
-        const link = self.collate_arena.pushStruct(DebugVariableLink);
-        link.next = group.data.var_group.next;
-        link.prev = &group.data.var_group;
+    pub fn collateAddVariableToGroup(self: *DebugState, group: *DebugVariableGroup, variable: *DebugVariable) *DebugVariableLink {
+        const link: *DebugVariableLink = self.collate_arena.pushStruct(DebugVariableLink);
+        link.next = group.sentinel.next;
+        link.prev = group.sentinel;
         link.next.prev = link;
         link.prev.next = link;
+        link.children = null;
         link.variable = variable;
+        return link;
     }
 
-    fn collateCreateVariableGroup(self: *DebugState, name: [:0]const u8) *DebugVariable {
-        var group = self.collateCreateVariable(.VarGroup, name);
-        group.data = .{ .var_group = .{ .next = undefined, .prev = undefined, .variable = undefined } };
-        group.data.var_group.next = &group.data.var_group;
-        group.data.var_group.prev = &group.data.var_group;
+    fn collateCreateVariableGroup(self: *DebugState) *DebugVariableGroup {
+        var group: *DebugVariableGroup = self.collate_arena.pushStruct(DebugVariableGroup);
+        group.sentinel = self.collate_arena.pushStruct(DebugVariableLink);
+        group.sentinel.next = group.sentinel;
+        group.sentinel.prev = group.sentinel;
 
         return group;
     }
@@ -296,7 +299,7 @@ pub const DebugState = struct {
     fn collateCreateGroupedVariable(
         self: *DebugState,
         opt_block: ?*OpenDebugBlock,
-        variable_type: DebugVariableType,
+        variable_type: DebugType,
         name: [:0]const u8,
     ) *DebugVariable {
         std.debug.assert(opt_block != null);
@@ -304,7 +307,7 @@ pub const DebugState = struct {
 
         const result: *DebugVariable = self.collateCreateVariable(variable_type, name);
 
-        self.collateAddVariableToGroup(opt_block.?.group.?, result);
+        _ = self.collateAddVariableToGroup(opt_block.?.group.?, result);
 
         return result;
     }
@@ -327,7 +330,7 @@ pub const DebugState = struct {
                 if (event.event_type == .FrameMarker) {
                     if (self.collation_frame) |current_frame| {
                         current_frame.end_clock = event.clock;
-                        current_frame.wall_seconds_elapsed = event.data.seconds_elapsed;
+                        current_frame.wall_seconds_elapsed = event.data.float;
                         self.frame_count += 1;
 
                         if (false) {
@@ -345,186 +348,87 @@ pub const DebugState = struct {
                     self.collation_frame = &self.frames[self.frame_count];
 
                     if (self.collation_frame) |current_frame| {
-                        current_frame.root_group = self.collateCreateVariableGroup("Frame");
+                        current_frame.root_group = self.collateCreateVariableGroup();
                         current_frame.begin_clock = event.clock;
                         current_frame.end_clock = 0;
                         current_frame.region_count = 0;
                         current_frame.regions = self.collate_arena.pushArray(shared.MAX_DEBUG_REGIONS_PER_FRAME, DebugFrameRegion);
                         current_frame.wall_seconds_elapsed = 0;
                     }
-                } else {
-                    if (self.collation_frame) |current_frame| {
-                        const frame_index: u32 = self.frame_count -% 1;
-                        const thread: *DebugThread = self.getDebugThread(event.tc.thread_id);
-                        // const relative_clock: u64 = event.clock - current_frame.begin_clock;
-                        // _ = relative_clock;
+                } else if (self.collation_frame) |current_frame| {
+                    const frame_index: u32 = self.frame_count -% 1;
+                    const thread: *DebugThread = self.getDebugThread(event.tc.thread_id);
+                    // const relative_clock: u64 = event.clock - current_frame.begin_clock;
+                    // _ = relative_clock;
 
-                        switch (event.event_type) {
-                            .BeginBlock => {
-                                const debug_block = self.allocateOpenDebugBlock(frame_index, event, source, &thread.first_open_code_block);
-                                _ = debug_block;
-                            },
-                            .EndBlock => {
-                                if (thread.first_open_code_block) |matching_block| {
-                                    const opening_event: *DebugEvent = matching_block.opening_event;
+                    switch (event.event_type) {
+                        .BeginBlock => {
+                            const debug_block = self.allocateOpenDebugBlock(frame_index, event, source, &thread.first_open_code_block);
+                            _ = debug_block;
+                        },
+                        .EndBlock => {
+                            if (thread.first_open_code_block) |matching_block| {
+                                const opening_event: *DebugEvent = matching_block.opening_event;
 
-                                    if (opening_event.matches(event)) {
-                                        if (matching_block.staring_frame_index == frame_index) {
-                                            if (getRecordFrom(matching_block.parent) == self.scope_to_record) {
-                                                const min_t: f32 = @floatFromInt(opening_event.clock - current_frame.begin_clock);
-                                                const max_t: f32 = @floatFromInt(event.clock - current_frame.begin_clock);
-                                                const threshold_t: f32 = 0.01;
+                                if (opening_event.matches(event)) {
+                                    if (matching_block.staring_frame_index == frame_index) {
+                                        if (getRecordFrom(matching_block.parent) == self.scope_to_record) {
+                                            const min_t: f32 = @floatFromInt(opening_event.clock - current_frame.begin_clock);
+                                            const max_t: f32 = @floatFromInt(event.clock - current_frame.begin_clock);
+                                            const threshold_t: f32 = 0.01;
 
-                                                if ((max_t - min_t) > threshold_t) {
-                                                    var region: *DebugFrameRegion = self.addRegion(current_frame);
-                                                    region.record = source;
-                                                    region.cycle_count = event.clock - opening_event.clock;
-                                                    region.lane_index = @intCast(thread.lane_index);
-                                                    region.min_t = min_t;
-                                                    region.max_t = max_t;
-                                                    region.color_index = opening_event.debug_record_index;
-                                                }
+                                            if ((max_t - min_t) > threshold_t) {
+                                                var region: *DebugFrameRegion = self.addRegion(current_frame);
+                                                region.record = source;
+                                                region.cycle_count = event.clock - opening_event.clock;
+                                                region.lane_index = @intCast(thread.lane_index);
+                                                region.min_t = min_t;
+                                                region.max_t = max_t;
+                                                region.color_index = opening_event.debug_record_index;
                                             }
-                                        } else {
-                                            // Started on some previous frame.
                                         }
-
-                                        self.deallocateOpenDebugBlock(&thread.first_open_code_block);
                                     } else {
-                                        // No begin block.
+                                        // Started on some previous frame.
                                     }
-                                }
-                            },
-                            .OpenDataBlock => {
-                                const debug_block = self.allocateOpenDebugBlock(
-                                    frame_index,
-                                    event,
-                                    source,
-                                    &thread.first_open_data_block,
-                                );
-                                debug_block.group = self.collateCreateVariableGroup(std.mem.sliceTo(source.block_name, 0));
 
-                                if (debug_block.parent) |parent| {
-                                    if (parent.group) |group| {
-                                        self.collateAddVariableToGroup(group, debug_block.group.?);
-                                    }
-                                } else if (self.collation_frame) |collation_frame| {
-                                    if (collation_frame.root_group) |group| {
-                                        self.collateAddVariableToGroup(group, debug_block.group.?);
-                                    }
+                                    self.deallocateOpenDebugBlock(&thread.first_open_code_block);
+                                } else {
+                                    // No begin block.
                                 }
-                            },
-                            .CloseDataBlock => {
-                                if (thread.first_open_data_block) |matching_block| {
-                                    const opening_event: *DebugEvent = matching_block.opening_event;
+                            }
+                        },
+                        .OpenDataBlock => {
+                            const debug_block = self.allocateOpenDebugBlock(
+                                frame_index,
+                                event,
+                                source,
+                                &thread.first_open_data_block,
+                            );
+                            debug_block.group = self.collateCreateVariableGroup();
+                            const variable: *DebugVariable = self.collateCreateVariable(.VarGroup, std.mem.sliceTo(source.block_name, 0));
+                            const parent = if (debug_block.parent != null) debug_block.parent.?.group.? else self.collation_frame.?.root_group.?;
+                            var link: *DebugVariableLink = self.collateAddVariableToGroup(parent, variable);
+                            link.children = debug_block.group.?;
+                        },
+                        .CloseDataBlock => {
+                            if (thread.first_open_data_block) |matching_block| {
+                                const opening_event: *DebugEvent = matching_block.opening_event;
 
-                                    if (opening_event.matches(event)) {
-                                        self.deallocateOpenDebugBlock(&thread.first_open_data_block);
-                                    } else {
-                                        // No begin block.
-                                    }
+                                if (opening_event.matches(event)) {
+                                    self.deallocateOpenDebugBlock(&thread.first_open_data_block);
+                                } else {
+                                    // No begin block.
                                 }
-                            },
-                            .F32 => {
-                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
-                                    thread.first_open_data_block,
-                                    .Float,
-                                    std.mem.sliceTo(source.block_name, 0),
-                                );
-                                variable.data = .{ .float_value = event.data.vec_f32[0] };
-                            },
-                            .U32 => {
-                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
-                                    thread.first_open_data_block,
-                                    .UInt,
-                                    std.mem.sliceTo(source.block_name, 0),
-                                );
-                                variable.data = .{ .uint_value = event.data.vec_u32[0] };
-                            },
-                            .I32 => {
-                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
-                                    thread.first_open_data_block,
-                                    .Int,
-                                    std.mem.sliceTo(source.block_name, 0),
-                                );
-                                variable.data = .{ .int_value = event.data.vec_i32[0] };
-                            },
-                            .Vector2 => {
-                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
-                                    thread.first_open_data_block,
-                                    .Vector2,
-                                    std.mem.sliceTo(source.block_name, 0),
-                                );
-                                variable.data = .{
-                                    .vector2_value = Vector2.new(
-                                        event.data.vec_f32[0],
-                                        event.data.vec_f32[1],
-                                    ),
-                                };
-                            },
-                            .Vector3 => {
-                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
-                                    thread.first_open_data_block,
-                                    .Vector3,
-                                    std.mem.sliceTo(source.block_name, 0),
-                                );
-                                variable.data = .{
-                                    .vector3_value = Vector3.new(
-                                        event.data.vec_f32[0],
-                                        event.data.vec_f32[1],
-                                        event.data.vec_f32[2],
-                                    ),
-                                };
-                            },
-                            .Vector4 => {
-                                var variable: *DebugVariable = self.collateCreateGroupedVariable(
-                                    thread.first_open_data_block,
-                                    .Vector4,
-                                    std.mem.sliceTo(source.block_name, 0),
-                                );
-                                variable.data = .{
-                                    .vector4_value = Vector4.new(
-                                        event.data.vec_f32[0],
-                                        event.data.vec_f32[1],
-                                        event.data.vec_f32[2],
-                                        event.data.vec_f32[3],
-                                    ),
-                                };
-                            },
-                            .Rectangle2 => {
-                                // var variable: *DebugVariable = self.collateCreateGroupedVariable(
-                                //     thread.first_open_data_block,
-                                //     .Rectangle2,
-                                //     std.mem.sliceTo(source.block_name, 0),
-                                // );
-                                // variable.data = .{ .rectangle2_value =
-                                //     Rectangle2.new(
-                                //         event.data.vec_f32[0],
-                                //         event.data.vec_f32[1],
-                                //         event.data.vec_f32[2],
-                                //         event.data.vec_f32[3]
-                                //     ),
-                                // };
-                            },
-                            .Rectangle3 => {
-                                // var variable: *DebugVariable = self.collateCreateGroupedVariable(
-                                //     thread.first_open_data_block,
-                                //     .Rectangle3,
-                                //     std.mem.sliceTo(source.block_name, 0),
-                                // );
-                                // variable.data = .{ .rectangle3_value =
-                                //     Rectangle3.new(
-                                //         event.data.vec_f32[0],
-                                //         event.data.vec_f32[1],
-                                //         event.data.vec_f32[2],
-                                //         event.data.vec_f32[3],
-                                //         event.data.vec_f32[4],
-                                //         event.data.vec_f32[5]
-                                //     ),
-                                // };
-                            },
-                            else => unreachable,
-                        }
+                            }
+                        },
+                        else => {
+                            var variable: *DebugVariable = self.collateCreateGroupedVariable(
+                                thread.first_open_data_block,
+                                event.event_type,
+                                std.mem.sliceTo(source.block_name, 0),
+                            );
+                            variable.event = event.*;
+                        },
                     }
                 }
             }
@@ -570,7 +474,7 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn addTree(self: *DebugState, group: *DebugVariable, position: Vector2) *DebugTree {
+    fn addTree(self: *DebugState, group: *DebugVariableGroup, position: Vector2) *DebugTree {
         var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree);
         tree.group = group;
         tree.ui_position = position;
@@ -642,7 +546,7 @@ const DebugVariableToTextFlag = enum(u32) {
 
 pub const DebugTree = struct {
     ui_position: Vector2,
-    group: ?*DebugVariable,
+    group: ?*DebugVariableGroup,
 
     prev: ?*DebugTree,
     next: ?*DebugTree,
@@ -693,61 +597,28 @@ pub const DebugViewInlineBlock = struct {
     dimension: Vector2,
 };
 
-const DebugProfileSettings = struct {
-    placeholder: u32,
-};
-
-const DebugBitmapDisplay = struct {
-    id: file_formats.BitmapId,
-};
-
-pub const DebugVariableType = enum(u32) {
-    Boolean,
-    Int,
-    UInt,
-    Float,
-    Vector2,
-    Vector3,
-    Vector4,
-    VarGroup,
-    CounterThreadList,
-    // CounterFunctionList,
-    BitmapDisplay,
-};
-
 pub const DebugVariableLink = struct {
     next: *DebugVariableLink,
     prev: *DebugVariableLink,
+    children: ?*DebugVariableGroup,
     variable: *DebugVariable,
 };
 
+pub const DebugVariableGroup = struct {
+    sentinel: *DebugVariableLink,
+};
+
 pub const DebugVariable = struct {
-    variable_type: DebugVariableType = .Boolean,
+    variable_type: DebugType = .Bool,
     name: [*:0]const u8,
-
-    data: union(enum) {
-        bool_value: bool,
-        int_value: i32,
-        uint_value: u32,
-        float_value: f32,
-        vector2_value: Vector2,
-        vector3_value: Vector3,
-        vector4_value: Vector4,
-        profile: DebugProfileSettings,
-        bitmap_display: DebugBitmapDisplay,
-        var_group: DebugVariableLink,
-    },
-
-    pub fn shouldBeWritten(self: *DebugVariable) bool {
-        return self.variable_type != .CounterThreadList and self.variable_type != .BitmapDisplay;
-    }
+    event: DebugEvent,
 
     pub fn typeString(self: *DebugVariable) []const u8 {
         return switch (self.variable_type) {
-            .Boolean => "bool",
-            .Int => "i32",
-            .UInt => "u32",
-            .Float => "f32",
+            .Bool => "bool",
+            .I32 => "i32",
+            .U32 => "u32",
+            .F32 => "f32",
             .Vector2 => "Vector2",
             .Vector3 => "Vector3",
             .Vector4 => "Vector4",
@@ -795,7 +666,7 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
     }
 
     if (flags & DebugVariableToTextFlag.Declaration.toInt() != 0) {
-        switch (variable.variable_type) {
+        switch (variable.event.event_type) {
             .Vector2, .Vector3, .Vector4 => {
                 const slice = std.fmt.bufPrintZ(buffer[len..], "{s}.new", .{variable.typeString()}) catch "";
                 len += @intCast(slice.len);
@@ -805,31 +676,31 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
     }
 
     switch (variable.variable_type) {
-        .Boolean => {
+        .Bool => {
             const slice = std.fmt.bufPrintZ(
                 buffer[len..],
                 "{s}",
-                .{if (variable.data.bool_value) "true" else "false"},
+                .{if (variable.event.data.bool) "true" else "false"},
             ) catch "";
             len += @intCast(slice.len);
         },
-        .Int => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{variable.data.int_value}) catch "";
+        .I32 => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{variable.event.data.int}) catch "";
             len += @intCast(slice.len);
         },
-        .UInt => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{variable.data.uint_value}) catch "";
+        .U32 => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{variable.event.data.uint}) catch "";
             len += @intCast(slice.len);
         },
-        .Float => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{variable.data.float_value}) catch "";
+        .F32 => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{variable.event.data.float}) catch "";
             len += @intCast(slice.len);
         },
         .Vector2 => {
             const slice = std.fmt.bufPrintZ(
                 buffer[len..],
                 "({d}, {d})",
-                .{ variable.data.vector2_value.x(), variable.data.vector2_value.y() },
+                .{ variable.event.data.vector2.x(), variable.event.data.vector2.y() },
             ) catch "";
             len += @intCast(slice.len);
         },
@@ -837,8 +708,12 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
             const slice = std.fmt.bufPrintZ(
                 buffer[len..],
                 "({d}, {d}, {d})",
-                .{ variable.data.vector3_value.x(), variable.data.vector3_value.y(), variable.data.vector3_value.z() },
-            ) catch "";
+                .{
+                    variable.event.data.vector3.x(),
+                    variable.event.data.vector3.y(),
+                    variable.event.data.vector3.z(),
+                },
+                ) catch "";
             len += @intCast(slice.len);
         },
         .Vector4 => {
@@ -846,17 +721,45 @@ fn debugVariableToText(buffer: *[4096:0]u8, start_index: u32, variable: *DebugVa
                 buffer[len..],
                 "({d}, {d}, {d}, {d})",
                 .{
-                    variable.data.vector4_value.x(),
-                    variable.data.vector4_value.y(),
-                    variable.data.vector4_value.z(),
-                    variable.data.vector4_value.w(),
+                    variable.event.data.vector4.x(),
+                    variable.event.data.vector4.y(),
+                    variable.event.data.vector4.z(),
+                    variable.event.data.vector4.w(),
                 },
-            ) catch "";
+                ) catch "";
+            len += @intCast(slice.len);
+        },
+        .Rectangle2 => {
+            const slice = std.fmt.bufPrintZ(
+                buffer[len..],
+                "({d}, {d}, {d}, {d})",
+                .{
+                    variable.event.data.rectangle2.min.x(),
+                    variable.event.data.rectangle2.min.y(),
+                    variable.event.data.rectangle2.max.x(),
+                    variable.event.data.rectangle2.max.y(),
+                },
+                ) catch "";
+            len += @intCast(slice.len);
+        },
+        .Rectangle3 => {
+            const slice = std.fmt.bufPrintZ(
+                buffer[len..],
+                "({d}, {d}, {d}, {d}, {d}, {d})",
+                .{
+                    variable.event.data.rectangle3.min.x(),
+                    variable.event.data.rectangle3.min.y(),
+                    variable.event.data.rectangle3.min.z(),
+                    variable.event.data.rectangle3.max.x(),
+                    variable.event.data.rectangle3.max.y(),
+                    variable.event.data.rectangle3.max.z(),
+                },
+                ) catch "";
             len += @intCast(slice.len);
         },
         .VarGroup => {},
         .CounterThreadList => {},
-        .BitmapDisplay => {},
+        else => {},
     }
 
     if (variable.variable_type != .VarGroup and flags & DebugVariableToTextFlag.SemiColonEnd.toInt() != 0) {
@@ -883,71 +786,72 @@ const DebugVariableIterator = struct {
 };
 
 fn writeHandmadeConfig(debug_state: *DebugState) void {
-    var buffer: [4096:0]u8 = undefined;
-    var length: u32 = 0;
-    var depth: u32 = 0;
-    var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
-
-    {
-        const imports =
-            \\const math = @import("math.zig");
-            \\
-            \\const Vector2 = math.Vector2;
-            \\const Vector3 = math.Vector3;
-            \\const Vector4 = math.Vector4;
-            \\
-            \\
-        ;
-
-        const slice = std.fmt.bufPrintZ(buffer[length..], "{s}", .{imports}) catch "";
-        length += @intCast(slice.len);
-    }
-
-    if (debug_state.root_group) |root_group| {
-        stack[depth].link = root_group.data.var_group.next;
-        stack[depth].sentinel = &root_group.data.var_group;
-        depth += 1;
-
-        while (depth > 0) {
-            var iterator: *DebugVariableIterator = &stack[depth - 1];
-
-            if (iterator.link == iterator.sentinel) {
-                depth -= 1;
-            } else {
-                const variable: *DebugVariable = iterator.link.variable;
-                iterator.link = iterator.link.next;
-
-                if (variable.shouldBeWritten()) {
-                    for (0..depth) |_| {
-                        for (0..4) |_| {
-                            buffer[length] = ' ';
-                            length += 1;
-                        }
-                    }
-
-                    length = debugVariableToText(&buffer, length, variable, DebugVariableToTextFlag.declarationFlags());
-                }
-
-                if (variable.variable_type == .VarGroup) {
-                    iterator = &stack[depth];
-                    iterator.link = variable.data.var_group.next;
-                    iterator.sentinel = &variable.data.var_group;
-                    depth += 1;
-                }
-            }
-        }
-
-        _ = shared.platform.debugWriteEntireFile("../src/config.zig", length, &buffer);
-
-        if (!debug_state.is_compiling) {
-            debug_state.is_compiling = true;
-            debug_state.compiler = shared.platform.debugExecuteSystemCommand(
-                "../",
-                "C:/Windows/System32/cmd.exe",
-                "/C zig build -Dpackage=Library",
-            );
-        }
-    }
+    _ = debug_state;
+    // var buffer: [4096:0]u8 = undefined;
+    // var length: u32 = 0;
+    // var depth: u32 = 0;
+    // var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
+    //
+    // {
+    //     const imports =
+    //         \\const math = @import("math.zig");
+    //         \\
+    //         \\const Vector2 = math.Vector2;
+    //         \\const Vector3 = math.Vector3;
+    //         \\const Vector4 = math.Vector4;
+    //         \\
+    //         \\
+    //     ;
+    //
+    //     const slice = std.fmt.bufPrintZ(buffer[length..], "{s}", .{imports}) catch "";
+    //     length += @intCast(slice.len);
+    // }
+    //
+    // if (debug_state.root_group) |root_group| {
+    //     stack[depth].link = root_group.data.var_group.next;
+    //     stack[depth].sentinel = &root_group.data.var_group;
+    //     depth += 1;
+    //
+    //     while (depth > 0) {
+    //         var iterator: *DebugVariableIterator = &stack[depth - 1];
+    //
+    //         if (iterator.link == iterator.sentinel) {
+    //             depth -= 1;
+    //         } else {
+    //             const variable: *DebugVariable = iterator.link.variable;
+    //             iterator.link = iterator.link.next;
+    //
+    //             if (variable.shouldBeWritten()) {
+    //                 for (0..depth) |_| {
+    //                     for (0..4) |_| {
+    //                         buffer[length] = ' ';
+    //                         length += 1;
+    //                     }
+    //                 }
+    //
+    //                 length = debugVariableToText(&buffer, length, variable, DebugVariableToTextFlag.declarationFlags());
+    //             }
+    //
+    //             if (variable.variable_type == .VarGroup) {
+    //                 iterator = &stack[depth];
+    //                 iterator.link = variable.data.var_group.next;
+    //                 iterator.sentinel = &variable.data.var_group;
+    //                 depth += 1;
+    //             }
+    //         }
+    //     }
+    //
+    //     _ = shared.platform.debugWriteEntireFile("../src/config.zig", length, &buffer);
+    //
+    //     if (!debug_state.is_compiling) {
+    //         debug_state.is_compiling = true;
+    //         debug_state.compiler = shared.platform.debugExecuteSystemCommand(
+    //             "../",
+    //             "C:/Windows/System32/cmd.exe",
+    //             "/C zig build -Dpackage=Library",
+    //         );
+    //     }
+    // }
 }
 
 fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_position: Vector2) void {
@@ -1176,10 +1080,6 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 
     if (debug_state.debug_font_info) |font_info| {
         while (opt_tree) |tree| : (opt_tree = tree.next) {
-            if (tree == &debug_state.tree_sentinel) {
-                break;
-            }
-
             var layout: Layout = .{
                 .debug_state = debug_state,
                 .mouse_position = mouse_position,
@@ -1192,9 +1092,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
             var opt_group = tree.group;
             if (debug_state.frame_count > 0) {
                 if (debug_state.frames[0].root_group) |hacky_group| {
-                    if (hacky_group.data == .var_group) {
-                        opt_group = hacky_group;
-                    }
+                    opt_group = hacky_group;
                 }
             }
 
@@ -1202,8 +1100,8 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                 var depth: u32 = 0;
                 var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
 
-                stack[depth].link = tree_group.data.var_group.next;
-                stack[depth].sentinel = &tree_group.data.var_group;
+                stack[depth].link = tree_group.sentinel.next;
+                stack[depth].sentinel = tree_group.sentinel;
                 depth += 1;
 
                 while (depth > 0) {
@@ -1232,9 +1130,9 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 
                                 drawProfileIn(debug_state, element.bounds, mouse_position);
                             },
-                            .BitmapDisplay => {
+                            .BitmapId => {
                                 const bitmap_scale = view.data.inline_block.dimension.y();
-                                if (render_group.assets.getBitmap(variable.data.bitmap_display.id, render_group.generation_id)) |bitmap| {
+                                if (render_group.assets.getBitmap(variable.event.data.bitmap_id, render_group.generation_id)) |bitmap| {
                                     var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
                                     _ = view.data.inline_block.dimension.setX(dim.size.x());
                                 }
@@ -1247,7 +1145,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 
                                 render_group.pushRectangle2(element.bounds, 0, Color.black());
                                 render_group.pushBitmapId(
-                                    variable.data.bitmap_display.id,
+                                    variable.event.data.bitmap_id,
                                     bitmap_scale,
                                     element.bounds.min.toVector3(0),
                                     Color.white(),
@@ -1280,10 +1178,10 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                         // };
                         const expanded = true;
 
-                        if (variable.variable_type == .VarGroup and expanded) {
+                        if (link.children != null and expanded) {
                             iterator = &stack[depth];
-                            iterator.link = variable.data.var_group.next;
-                            iterator.sentinel = &variable.data.var_group;
+                            iterator.link = link.children.?.sentinel.next;
+                            iterator.sentinel = link.children.?.sentinel;
                             depth += 1;
                         }
                     }
@@ -1308,6 +1206,11 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                 if (mouse_position.isInRectangle(move_box)) {
                     debug_state.next_hot_interaction = move_interaction;
                 }
+            }
+
+            // Note that this is part of the for loop in Casey's version.
+            if (tree == &debug_state.tree_sentinel) {
+                break;
             }
         }
     }
@@ -1351,10 +1254,10 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
     if (debug_state.hot_interaction.interaction_type != .None) {
         if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
             switch (debug_state.hot_interaction.target.variable.variable_type) {
-                .Boolean => {
+                .Bool => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
-                .Float => {
+                .F32 => {
                     debug_state.hot_interaction.interaction_type = .DragValue;
                 },
                 .VarGroup => {
@@ -1370,12 +1273,13 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
 
         switch (debug_state.hot_interaction.interaction_type) {
             .TearValue => {
-                const root_group: *DebugVariable = debug_variables.addRootGroup(debug_state, "NewUserGroup");
-                _ = debug_variables.addDebugVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
-                const tree: *DebugTree = debug_state.addTree(root_group, Vector2.zero());
-                tree.ui_position = mouse_position;
-                debug_state.hot_interaction.interaction_type = .Move;
-                debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
+                _ = mouse_position;
+                // const root_group: *DebugVariable = debug_variables.addRootGroup(debug_state, "NewUserGroup");
+                // _ = debug_variables.addDebugVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
+                // const tree: *DebugTree = debug_state.addTree(root_group, Vector2.zero());
+                // tree.ui_position = mouse_position;
+                // debug_state.hot_interaction.interaction_type = .Move;
+                // debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
             },
             else => {},
         }
@@ -1410,8 +1314,8 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
             .DragValue => {
                 const variable = debug_state.interaction.target.variable;
                 switch (variable.variable_type) {
-                    .Float => {
-                        variable.data.float_value += 0.1 * mouse_delta.y();
+                    .F32 => {
+                        variable.event.data.float += 0.1 * mouse_delta.y();
                     },
                     else => {},
                 }
@@ -1469,8 +1373,8 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
 
             const variable: *DebugVariable = debug_state.interaction.target.variable;
             switch (variable.variable_type) {
-                .Boolean => {
-                    variable.data.bool_value = !variable.data.bool_value;
+                .Bool => {
+                    variable.event.data.bool = !variable.event.data.bool;
                 },
                 .VarGroup => {
                     const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
@@ -1662,38 +1566,38 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
                 memory.debug_storage.? + @sizeOf(DebugState),
             );
 
-            var context: debug_variables.DebugVariableDefinitionContext = .{
-                .state = debug_state,
-                .arena = &debug_state.debug_arena,
-            };
-            debug_state.root_group = debug_variables.beginVariableGroup(&context, "Root");
-            _ = debug_variables.beginVariableGroup(&context, "Debugging");
-
-            debug_variables.createDebugVariables(&context);
-
-            _ = debug_variables.beginVariableGroup(&context, "Profile");
-            {
-                _ = debug_variables.beginVariableGroup(&context, "By Thread");
-                _ = debug_variables.addDebugVariableToContext(&context, .CounterThreadList, "");
-                debug_variables.endVariableGroup(&context);
-
-                _ = debug_variables.beginVariableGroup(&context, "By Function");
-                _ = debug_variables.addDebugVariableToContext(&context, .CounterThreadList, "");
-                debug_variables.endVariableGroup(&context);
-            }
-            debug_variables.endVariableGroup(&context);
-
-            var match_vector = asset.AssetVector{};
-            match_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 0;
-            var weight_vector = asset.AssetVector{};
-            weight_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 1;
-            if (assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector)) |id| {
-                _ = debug_variables.addDebugVariableBitmap(&context, "Test Bitmap", id);
-            }
-
-            debug_variables.endVariableGroup(&context);
-            debug_variables.endVariableGroup(&context);
-            std.debug.assert(context.group_depth == 0);
+            // var context: debug_variables.DebugVariableDefinitionContext = .{
+            //     .state = debug_state,
+            //     .arena = &debug_state.debug_arena,
+            // };
+            // debug_state.root_group = debug_variables.beginVariableGroup(&context, "Root");
+            // _ = debug_variables.beginVariableGroup(&context, "Debugging");
+            //
+            // debug_variables.createDebugVariables(&context);
+            //
+            // _ = debug_variables.beginVariableGroup(&context, "Profile");
+            // {
+            //     _ = debug_variables.beginVariableGroup(&context, "By Thread");
+            //     _ = debug_variables.addDebugVariableToContext(&context, .CounterThreadList, "");
+            //     debug_variables.endVariableGroup(&context);
+            //
+            //     _ = debug_variables.beginVariableGroup(&context, "By Function");
+            //     _ = debug_variables.addDebugVariableToContext(&context, .CounterThreadList, "");
+            //     debug_variables.endVariableGroup(&context);
+            // }
+            // debug_variables.endVariableGroup(&context);
+            //
+            // var match_vector = asset.AssetVector{};
+            // match_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 0;
+            // var weight_vector = asset.AssetVector{};
+            // weight_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 1;
+            // if (assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector)) |id| {
+            //     _ = debug_variables.addDebugVariableBitmap(&context, "Test Bitmap", id);
+            // }
+            //
+            // debug_variables.endVariableGroup(&context);
+            // debug_variables.endVariableGroup(&context);
+            // std.debug.assert(context.group_depth == 0);
 
             debug_state.render_group =
                 render.RenderGroup.allocate(assets, &debug_state.debug_arena, shared.megabytes(16), false);
@@ -1707,10 +1611,12 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
 
             debug_state.restartCollation(0);
 
-            _ = debug_state.addTree(
-                debug_state.root_group.?,
-                Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
-            );
+            if (debug_state.root_group) |root_group| {
+                _ = debug_state.addTree(
+                    root_group,
+                    Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
+                );
+            }
         }
 
         if (debug_state.render_group) |group| {

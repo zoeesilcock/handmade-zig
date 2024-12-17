@@ -2081,6 +2081,7 @@ pub export fn wWinMain(
                     timed_block.end();
 
                     const end_counter = getWallClock();
+
                     var frame_marker = shared.TimedBlock.frameMarker(
                         @src(),
                         .TotalPlatformLoop,

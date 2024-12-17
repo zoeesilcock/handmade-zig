@@ -620,6 +620,7 @@ pub export fn updateAndRender(
 
     const camera_position = world.subtractPositions(state.world, &state.camera_position, &sim_center_position);
 
+    var hot_entity_count: u32 = 0;
     var entity_index: u32 = 0;
     while (entity_index < screen_sim_region.entity_count) : (entity_index += 1) {
         const entity = &screen_sim_region.entities[entity_index];
@@ -1055,6 +1056,8 @@ pub export fn updateAndRender(
                         local_mouse_position.y() > -0.5 * volume.dimension.y() and
                         local_mouse_position.y() < 0.5 * volume.dimension.y()) {
                         const outline_color: Color = Color.new(1, 1, 0, 1);
+                        const counter: shared.DebugCycleCounters =
+                            @enumFromInt(@intFromEnum(shared.DebugCycleCounters.HotEntity) + hot_entity_count);
 
                         render_group.pushRectangleOutline(
                             volume.dimension.xy(),
@@ -1063,28 +1066,31 @@ pub export fn updateAndRender(
                             0.05,
                         );
 
-                       shared.debugBeginDataBlock(@src(), .HotEntity, "Hot Entity", &state.low_entities[entity.storage_index], null);
-                       shared.debugValue(entity.storage_index);
-                       shared.debugValue(entity.updatable);
-                       shared.debugValue(entity.type);
-                       shared.debugValue(entity.flags);
-                       shared.debugValue(entity.position);
-                       shared.debugValue(entity.velocity);
-                       shared.debugValue(entity.distance_limit);
-                       shared.debugValue(entity.facing_direction);
-                       shared.debugValue(entity.head_bob_time);
-                       shared.debugValue(entity.abs_tile_z_delta);
-                       shared.debugValue(entity.hit_point_max);
-                       // shared.debugBeginArray(entity.hit_points);
-                       // var hit_point_index: u32 = 0;
-                       // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-                       //     shared.debugValue(entity.hit_points[hit_point_index]);
-                       // }
-                       // shared.debugEndArray();
-                       shared.debugValue(entity.sword);
-                       shared.debugValue(entity.walkable_dimension);
-                       shared.debugValue(entity.walkable_height);
-                       shared.debugEndDataBlock(@src(), .HotEntity);
+                        shared.debugBeginDataBlock(@src(), counter, "Hot Entity", &state.low_entities[entity.storage_index], null);
+                        shared.debugValue(entity.storage_index);
+                        shared.debugValue(entity.updatable);
+                        shared.debugValue(entity.type);
+                        shared.debugValue(entity.flags);
+                        shared.debugValue(entity.position);
+                        shared.debugValue(entity.velocity);
+                        shared.debugValue(entity.distance_limit);
+                        shared.debugValue(entity.facing_direction);
+                        shared.debugValue(entity.head_bob_time);
+                        shared.debugValue(entity.abs_tile_z_delta);
+                        shared.debugValue(entity.hit_point_max);
+                        shared.debugValue(hero_bitmaps.torso);
+                        // shared.debugBeginArray(entity.hit_points);
+                        // var hit_point_index: u32 = 0;
+                        // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
+                        //     shared.debugValue(entity.hit_points[hit_point_index]);
+                        // }
+                        // shared.debugEndArray();
+                        shared.debugValue(entity.sword);
+                        shared.debugValue(entity.walkable_dimension);
+                        shared.debugValue(entity.walkable_height);
+                        shared.debugEndDataBlock(@src(), counter);
+
+                        hot_entity_count += 1;
                     }
                 }
             }

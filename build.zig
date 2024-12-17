@@ -65,6 +65,10 @@ fn addExecutable(
     package: Package,
     backend: Backend,
 ) void {
+    const file_formats_module = b.addModule("file_formats", .{
+        .root_source_file = b.path("src/file_formats.zig"),
+    });
+
     const exe = b.addExecutable(.{
         .name = "handmade-zig",
         .root_source_file = if (backend == .Win32) b.path("src/win32_handmade.zig") else b.path("src/raylib_handmade.zig"),
@@ -72,6 +76,7 @@ fn addExecutable(
         .optimize = optimize,
     });
     exe.root_module.addOptions("build_options", build_options);
+    exe.root_module.addImport("file_formats", file_formats_module);
 
     if (backend == .Win32) {
         // Add the win32 API wrapper.

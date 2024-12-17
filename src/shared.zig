@@ -30,6 +30,7 @@ const LoadedSound = asset.LoadedSound;
 const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
+const FontId = file_formats.FontId;
 const PlayingSound = audio.PlayingSound;
 
 // Build options.
@@ -338,6 +339,11 @@ pub const DebugCycleCounters = enum(u16) {
     GetFirstAsset,
 
     HotEntity,
+    HotEntity1,
+    HotEntity2,
+    HotEntity3,
+    HotEntity4,
+    HotEntity5,
 };
 
 pub const DebugTable = extern struct {
@@ -364,13 +370,14 @@ pub const DebugRecord = extern struct {
     reserved: u32 = 0,
 };
 
-pub const DebugEventType = enum(u8) {
+pub const DebugType = enum(u8) {
     FrameMarker,
     BeginBlock,
     EndBlock,
 
     OpenDataBlock,
     CloseDataBlock,
+    Bool,
     F32,
     U32,
     I32,
@@ -379,6 +386,16 @@ pub const DebugEventType = enum(u8) {
     Vector4,
     Rectangle2,
     Rectangle3,
+    BitmapId,
+    SoundId,
+    FontId,
+
+    //
+
+    FirstUIType = 50,
+    CounterThreadList,
+    // CounterFunctionList,
+    VarGroup,
 };
 
 pub const ThreadIdCoreIndex = extern struct {
@@ -391,70 +408,68 @@ pub const DebugEvent = extern struct {
     tc: ThreadIdCoreIndex = undefined,
     debug_record_index: u16 = 0,
     translation_unit: u8 = 0,
-    event_type: DebugEventType = undefined,
+    event_type: DebugType = undefined,
     data: extern union {
-        seconds_elapsed: f32,
         vec_ptr: [3]?*anyopaque,
-        vec_u32: [6]u32,
-        vec_i32: [6]i32,
-        vec_f32: [6]f32,
+        bool: bool,
+        int: i32,
+        uint: u32,
+        float: f32,
+        vector2: Vector2,
+        vector3: Vector3,
+        vector4: Vector4,
+        rectangle2: Rectangle2,
+        rectangle3: Rectangle3,
+        bitmap_id: BitmapId,
+        sound_id: SoundId,
+        font_id: FontId,
     } = undefined,
 
     pub fn setValue(self: *DebugEvent, value: anytype) void {
         switch (@TypeOf(value)) {
             u32 => {
                 self.event_type = .U32;
-                self.data = .{ .vec_u32 = [1]u32{0} ** 6 };
-                self.data.vec_u32[0] = value;
+                self.data = .{ .uint = value };
             },
             i32 => {
                 self.event_type = .I32;
-                self.data = .{ .vec_i32 = [1]i32{0} ** 6 };
-                self.data.vec_i32[0] = value;
+                self.data = .{ .int = value };
             },
             f32 => {
                 self.event_type = .F32;
-                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
-                self.data.vec_f32[0] = value;
+                self.data = .{ .float = value };
             },
             Vector2 => {
                 self.event_type = .Vector2;
-                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
-                self.data.vec_f32[0] = value.x();
-                self.data.vec_f32[1] = value.y();
+                self.data = .{ .vector2 = value };
             },
             Vector3 => {
                 self.event_type = .Vector3;
-                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
-                self.data.vec_f32[0] = value.x();
-                self.data.vec_f32[1] = value.y();
-                self.data.vec_f32[2] = value.z();
+                self.data = .{ .vector3 = value };
             },
             Vector4 => {
                 self.event_type = .Vector4;
-                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
-                self.data.vec_f32[0] = value.x();
-                self.data.vec_f32[1] = value.y();
-                self.data.vec_f32[2] = value.z();
-                self.data.vec_f32[3] = value.w();
+                self.data = .{ .vector4 = value };
             },
             Rectangle2 => {
                 self.event_type = .Rectangle2;
-                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
-                self.data.vec_f32[0] = value.min.x();
-                self.data.vec_f32[1] = value.min.y();
-                self.data.vec_f32[2] = value.max.x();
-                self.data.vec_f32[3] = value.max.y();
+                self.data = .{ .rectangle2 = value };
             },
             Rectangle3 => {
                 self.event_type = .Rectangle3;
-                self.data = .{ .vec_f32 = [1]f32{0} ** 6 };
-                self.data.vec_f32[0] = value.min.x();
-                self.data.vec_f32[1] = value.min.y();
-                self.data.vec_f32[2] = value.min.z();
-                self.data.vec_f32[3] = value.max.x();
-                self.data.vec_f32[4] = value.max.y();
-                self.data.vec_f32[5] = value.max.z();
+                self.data = .{ .rectangle3 = value };
+            },
+            BitmapId => {
+                self.event_type = .BitmapId;
+                self.data = .{ .bitmap_id = value };
+            },
+            SoundId => {
+                self.event_type = .SoundId;
+                self.data = .{ .sound_id = value };
+            },
+            FontId => {
+                self.event_type = .FontId;
+                self.data = .{ .font_id = value };
             },
             else => {},
         }
@@ -467,7 +482,7 @@ pub const DebugEvent = extern struct {
     }
 };
 
-fn recordDebugEvent(debug_record_index: u16, event_type: DebugEventType) *DebugEvent {
+fn recordDebugEvent(debug_record_index: u16, event_type: DebugType) *DebugEvent {
     const event_array_index_event_index = @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
     const array_index = event_array_index_event_index >> 32;
     const event_index = event_array_index_event_index & 0xffffffff;
@@ -519,7 +534,7 @@ pub const TimedBlock = if (INTERNAL) struct {
         record.line_number = source.line;
 
         var event = recordDebugEvent(@intFromEnum(counter), .FrameMarker);
-        event.data = .{ .seconds_elapsed = seconds_elapsed };
+        event.data = .{ .float = seconds_elapsed };
 
         return result;
     }
@@ -566,7 +581,7 @@ pub const TimedBlock = if (INTERNAL) struct {
     }
 };
 
-var additional_debug_record_index: u16 = @typeInfo(DebugEventType).Enum.fields.len + 1;
+var additional_debug_record_index: u16 = @typeInfo(DebugType).Enum.fields.len + 1;
 
 pub fn debugBeginDataBlock(
     source: std.builtin.SourceLocation,
@@ -577,16 +592,22 @@ pub fn debugBeginDataBlock(
 ) void {
     var record = &global_debug_table.records[TRANSLATION_UNIT_INDEX][@intFromEnum(counter)];
     record.file_name = source.file;
-    record.block_name = name;
     record.line_number = source.line;
+    record.block_name = name;
 
     var event = recordDebugEvent(@intFromEnum(counter), .OpenDataBlock);
     event.data = .{ .vec_ptr = .{ ptr0, ptr1, null } };
 }
 
 pub fn debugValue(value: anytype) void {
-    var event = recordDebugEvent(additional_debug_record_index, .FrameMarker);
+    var event = recordDebugEvent(additional_debug_record_index, .F32);
     event.setValue(value);
+
+    const source = @src();
+    var record = &global_debug_table.records[TRANSLATION_UNIT_INDEX][additional_debug_record_index];
+    record.file_name = source.file;
+    record.line_number = source.line;
+    record.block_name = "Value";
 }
 
 pub fn debugBeginArray(array: anytype) void {
