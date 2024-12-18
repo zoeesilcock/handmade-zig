@@ -164,8 +164,9 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
     } else {
         const offset_z: f32 = 0;
         var distance_above_target = transform.distance_above_target;
-        if (config.DEBUGUI_USE_DEBUG_CAMERA) {
-            distance_above_target += config.DEBUGUI_DEBUG_CAMERA_DISTANCE;
+
+        if (debug_interface.debugIf("Renderer_Camera_UseDebug")) {
+            distance_above_target += debug_interface.debugVariable(f32, "Renderer_Camera_DebugDistance");
         }
 
         const distance_to_position_z = distance_above_target - position.z();
@@ -1671,7 +1672,7 @@ inline fn sampleEnvironmentMap(
     std.debug.assert(rounded_x >= 0 and rounded_x < lod.width);
     std.debug.assert(rounded_y >= 0 and rounded_y < lod.height);
 
-    if (config.DEBUGUI_SHOW_LIGHTING_SAMPLES) {
+    if (debug_interface.debugIf("Renderer_ShowLightingSamples")) {
         // Debug where we are sampling from on the environment map.
         const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
         const texture_base = shared.incrementPointer(lod.memory.?, test_offset);

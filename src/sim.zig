@@ -842,7 +842,7 @@ pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
             var new_camera_position = state.camera_position;
             new_camera_position.chunk_z = stored.position.chunk_z;
 
-            if (config.DEBUGUI_USE_ROOM_BASED_CAMERA) {
+            if (debug_interface.debugIf("Renderer_Camera_RoomBased")) {
                 if (entity.position.x() > 9.0) {
                     new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(18, 0, 0));
                 } else if (entity.position.x() < -9.0) {

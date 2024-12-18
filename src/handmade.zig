@@ -398,7 +398,7 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
-    if (config.DEBUGUI_RECOMPUTE_GROUND_CUNKS_ON_EXE_CHANGE) {
+    if (debug_interface.debugIf("GroundChunks_RecomputeOnEXEChange")) {
         if (memory.executable_reloaded) {
             for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
                 const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -478,7 +478,7 @@ pub export fn updateAndRender(
     };
     const draw_buffer = &draw_buffer_;
 
-    if (config.DEBUGUI_TEST_WEIRD_DRAW_BUFFER_SIZE) {
+    if (debug_interface.debugIf("Renderer_TestWeirdDrawBufferSize")) {
         // Enable this to test weird buffer sizes in the renderer.
         draw_buffer.width = 1279;
         draw_buffer.height = 719;
@@ -530,11 +530,12 @@ pub export fn updateAndRender(
                     const ground_side_in_meters = state.world.chunk_dimension_in_meters.x();
                     render_group.pushBitmap(bitmap, ground_side_in_meters, delta, Color.white(), 1);
 
-                    if (config.DEBUGUI_GROUND_CHUNK_OUTLINES) {
+                    if (debug_interface.debugIf("GroundChunks_Outlines")) {
                         render_group.pushRectangleOutline(
                             Vector2.splat(ground_side_in_meters),
                             delta,
                             Color.new(1, 1, 0, 1),
+                            0.2,
                         );
                     }
                 }
@@ -724,7 +725,7 @@ pub export fn updateAndRender(
                         }
                     }
 
-                    if (config.DEBUGUI_FAMILIAR_FOLLOWS_HERO) {
+                    if (debug_interface.debugIf("AI_Familiar_FollowsHero")) {
                         if (closest_hero) |hero| {
                             if (closest_hero_squared > math.square(3.0)) {
                                 const speed: f32 = 1.0;
@@ -787,7 +788,7 @@ pub export fn updateAndRender(
 
                     drawHitPoints(entity, render_group);
 
-                    if (config.DEBUGUI_PARTICLE_TEST) {
+                    if (debug_interface.debugIf("Particles_Test")) {
                         // Particle system test.
                         var particle_spawn_index: u32 = 0;
                         while (particle_spawn_index < 3) : (particle_spawn_index += 1) {
@@ -877,7 +878,7 @@ pub export fn updateAndRender(
                             }
                         }
 
-                        if (config.DEBUGUI_PARTICLE_GRID) {
+                        if (debug_interface.debugIf("Particles_ShowGrid")) {
                             var y: u32 = 0;
                             while (y < shared.PARTICLE_CEL_DIM) : (y += 1) {
                                 var x: u32 = 0;
@@ -1004,7 +1005,7 @@ pub export fn updateAndRender(
                     render_group.pushBitmapId(hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white(), null);
                 },
                 .Space => {
-                    if (config.DEBUGUI_USE_SPACE_OUTLINES) {
+                    if (debug_interface.debugIf("Simulation_UseSpaceOutlines")) {
                         const space_color = Color.new(0, 0.5, 1, 1);
                         var volume_index: u32 = 0;
                         while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
@@ -1579,7 +1580,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
             var series = random.Series.seed(seed);
 
             var color = Color.white();
-            if (config.DEBUGUI_GROUND_CHUNK_CHECKERBOARDS) {
+            if (debug_interface.debugIf("GroundChunks_Checkerboards")) {
                 color = Color.new(1, 0, 0, 1);
                 if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
                     color = Color.new(0, 0, 1, 1);

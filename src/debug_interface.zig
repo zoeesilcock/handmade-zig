@@ -3,6 +3,7 @@ const math = @import("math.zig");
 const asset = @import("asset.zig");
 const debug = @import("debug.zig");
 const file_formats = @import("file_formats");
+const config = @import("config.zig");
 const std = @import("std");
 
 const Vector2 = math.Vector2;
@@ -118,17 +119,22 @@ pub const DebugId = extern struct {
     }
 };
 
+// TODO: Align with Casey on compiling most these things out when INTERNAL isn't true.
+
 pub const DebugType = enum(u8) {
+    Unknown,
+
     FrameMarker,
     BeginBlock,
     EndBlock,
 
     OpenDataBlock,
     CloseDataBlock,
-    Bool,
-    F32,
-    U32,
-    I32,
+
+    bool,
+    f32,
+    u32,
+    i32,
     Vector2,
     Vector3,
     Vector4,
@@ -154,64 +160,64 @@ pub const DebugEvent = extern struct {
     data: extern union {
         debug_id: DebugId,
         bool: bool,
-        int: i32,
-        uint: u32,
-        float: f32,
-        vector2: Vector2,
-        vector3: Vector3,
-        vector4: Vector4,
-        rectangle2: Rectangle2,
-        rectangle3: Rectangle3,
-        bitmap_id: BitmapId,
-        sound_id: SoundId,
-        font_id: FontId,
+        i32: i32,
+        u32: u32,
+        f32: f32,
+        Vector2: Vector2,
+        Vector3: Vector3,
+        Vector4: Vector4,
+        Rectangle2: Rectangle2,
+        Rectangle3: Rectangle3,
+        BitmapId: BitmapId,
+        SoudnId: SoundId,
+        FontId: FontId,
     } = undefined,
 
     pub fn setValue(self: *DebugEvent, value: anytype) void {
         switch (@TypeOf(value)) {
             u32 => {
-                self.event_type = .U32;
-                self.data = .{ .uint = value };
+                self.event_type = .u32;
+                self.data = .{ .u32 = value };
             },
             i32 => {
-                self.event_type = .I32;
-                self.data = .{ .int = value };
+                self.event_type = .i32;
+                self.data = .{ .i32 = value };
             },
             f32 => {
-                self.event_type = .F32;
-                self.data = .{ .float = value };
+                self.event_type = .f32;
+                self.data = .{ .f32 = value };
             },
             Vector2 => {
                 self.event_type = .Vector2;
-                self.data = .{ .vector2 = value };
+                self.data = .{ .Vector2 = value };
             },
             Vector3 => {
                 self.event_type = .Vector3;
-                self.data = .{ .vector3 = value };
+                self.data = .{ .Vector3 = value };
             },
             Vector4 => {
                 self.event_type = .Vector4;
-                self.data = .{ .vector4 = value };
+                self.data = .{ .Vector4 = value };
             },
             Rectangle2 => {
                 self.event_type = .Rectangle2;
-                self.data = .{ .rectangle2 = value };
+                self.data = .{ .Rectangle2 = value };
             },
             Rectangle3 => {
                 self.event_type = .Rectangle3;
-                self.data = .{ .rectangle3 = value };
+                self.data = .{ .Rectangle3 = value };
             },
             BitmapId => {
                 self.event_type = .BitmapId;
-                self.data = .{ .bitmap_id = value };
+                self.data = .{ .BitmapId = value };
             },
             SoundId => {
                 self.event_type = .SoundId;
-                self.data = .{ .sound_id = value };
+                self.data = .{ .SoundId = value };
             },
             FontId => {
                 self.event_type = .FontId;
-                self.data = .{ .font_id = value };
+                self.data = .{ .FontId = value };
             },
             else => {},
         }
@@ -222,16 +228,7 @@ pub const DebugEvent = extern struct {
     }
 
     pub fn typeString(self: *DebugEvent) []const u8 {
-        return switch (self.event_type) {
-            .Bool => "bool",
-            .I32 => "i32",
-            .U32 => "u32",
-            .F32 => "f32",
-            .Vector2 => "Vector2",
-            .Vector3 => "Vector3",
-            .Vector4 => "Vector4",
-            else => "",
-        };
+        return @tagName(self.event_type);
     }
 
     pub fn prefixString(self: *DebugEvent) []const u8 {
@@ -283,7 +280,7 @@ pub const TimedBlock = if (INTERNAL) struct {
         const result = TimedBlock{ .counter = counter };
 
         var event = recordDebugEvent(source, .FrameMarker, "Frame Marker");
-        event.data = .{ .float = seconds_elapsed };
+        event.data = .{ .f32 = seconds_elapsed };
 
         return result;
     }
@@ -350,7 +347,7 @@ pub fn debugStruct(source: std.builtin.SourceLocation, parent: anytype) void {
 pub fn debugValue(source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {
     const value = @field(parent, field_name);
     const type_info = @typeInfo(@TypeOf(value));
-    var event = recordDebugEvent(source, .F32, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ field_name));
+    var event = recordDebugEvent(source, .Unknown, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ field_name));
     switch (type_info) {
         .Optional => {
             if (value) |v| {
@@ -372,4 +369,15 @@ pub fn debugEndArray() void {
 
 pub fn debugEndDataBlock(source: std.builtin.SourceLocation) void {
     _ = recordDebugEvent(source, .CloseDataBlock, "End Data Block");
+}
+
+// fn initializeDebugValue(debug_type: DebugType, event: *DebugEvent, name: []const u8) DebugEvent {
+// }
+
+pub fn debugVariable(comptime T: type, comptime path: []const u8) T {
+    return @field(config.global_constants, path);
+}
+
+pub fn debugIf(comptime path: []const u8) bool {
+    return @field(config.global_constants, path);
 }

@@ -5,7 +5,6 @@ const math = @import("math.zig");
 const config = @import("config.zig");
 const sim = @import("sim.zig");
 const file_formats = @import("file_formats");
-const debug_variables = @import("debug_variables.zig");
 const debug_interface = @import("debug_interface.zig");
 const meta = @import("meta.zig");
 const generated = @import("generated.zig");
@@ -337,7 +336,7 @@ pub const DebugState = struct {
                 if (event.event_type == .FrameMarker) {
                     if (self.collation_frame) |current_frame| {
                         current_frame.end_clock = event.clock;
-                        current_frame.wall_seconds_elapsed = event.data.float;
+                        current_frame.wall_seconds_elapsed = event.data.f32;
                         self.frame_count += 1;
 
                         if (false) {
@@ -660,27 +659,27 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
     }
 
     switch (event.event_type) {
-        .Bool => {
+        .bool => {
             const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{if (event.data.bool) "true" else "false"}) catch "";
             len += @intCast(slice.len);
         },
-        .I32 => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.int}) catch "";
+        .i32 => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.i32}) catch "";
             len += @intCast(slice.len);
         },
-        .U32 => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.uint}) catch "";
+        .u32 => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.u32}) catch "";
             len += @intCast(slice.len);
         },
-        .F32 => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.float}) catch "";
+        .f32 => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.f32}) catch "";
             len += @intCast(slice.len);
         },
         .Vector2 => {
             const slice = std.fmt.bufPrintZ(
                 buffer[len..],
                 "({d}, {d})",
-                .{ event.data.vector2.x(), event.data.vector2.y() },
+                .{ event.data.Vector2.x(), event.data.Vector2.y() },
             ) catch "";
             len += @intCast(slice.len);
         },
@@ -689,9 +688,9 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                 buffer[len..],
                 "({d}, {d}, {d})",
                 .{
-                    event.data.vector3.x(),
-                    event.data.vector3.y(),
-                    event.data.vector3.z(),
+                    event.data.Vector3.x(),
+                    event.data.Vector3.y(),
+                    event.data.Vector3.z(),
                 },
                 ) catch "";
             len += @intCast(slice.len);
@@ -701,10 +700,10 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                 buffer[len..],
                 "({d}, {d}, {d}, {d})",
                 .{
-                    event.data.vector4.x(),
-                    event.data.vector4.y(),
-                    event.data.vector4.z(),
-                    event.data.vector4.w(),
+                    event.data.Vector4.x(),
+                    event.data.Vector4.y(),
+                    event.data.Vector4.z(),
+                    event.data.Vector4.w(),
                 },
                 ) catch "";
             len += @intCast(slice.len);
@@ -714,10 +713,10 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                 buffer[len..],
                 "({d}, {d}, {d}, {d})",
                 .{
-                    event.data.rectangle2.min.x(),
-                    event.data.rectangle2.min.y(),
-                    event.data.rectangle2.max.x(),
-                    event.data.rectangle2.max.y(),
+                    event.data.Rectangle2.min.x(),
+                    event.data.Rectangle2.min.y(),
+                    event.data.Rectangle2.max.x(),
+                    event.data.Rectangle2.max.y(),
                 },
                 ) catch "";
             len += @intCast(slice.len);
@@ -727,18 +726,19 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                 buffer[len..],
                 "({d}, {d}, {d}, {d}, {d}, {d})",
                 .{
-                    event.data.rectangle3.min.x(),
-                    event.data.rectangle3.min.y(),
-                    event.data.rectangle3.min.z(),
-                    event.data.rectangle3.max.x(),
-                    event.data.rectangle3.max.y(),
-                    event.data.rectangle3.max.z(),
+                    event.data.Rectangle3.min.x(),
+                    event.data.Rectangle3.min.y(),
+                    event.data.Rectangle3.min.z(),
+                    event.data.Rectangle3.max.x(),
+                    event.data.Rectangle3.max.y(),
+                    event.data.Rectangle3.max.z(),
                 },
                 ) catch "";
             len += @intCast(slice.len);
         },
         .OpenDataBlock => {},
         .CounterThreadList => {},
+        .Unknown => {},
         else => unreachable,
     }
 
@@ -1152,7 +1152,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                             },
                             .BitmapId => {
                                 const bitmap_scale = view.data.inline_block.dimension.y();
-                                if (render_group.assets.getBitmap(event.data.bitmap_id, render_group.generation_id)) |bitmap| {
+                                if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
                                     var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
                                     _ = view.data.inline_block.dimension.setX(dim.size.x());
                                 }
@@ -1165,7 +1165,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 
                                 render_group.pushRectangle2(element.bounds, 0, Color.black());
                                 render_group.pushBitmapId(
-                                    event.data.bitmap_id,
+                                    event.data.BitmapId,
                                     bitmap_scale,
                                     element.bounds.min.toVector3(0),
                                     Color.white(),
@@ -1264,15 +1264,13 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 }
 
 fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2, alt_ui: bool) void {
-    _ = input;
-
     if (debug_state.hot_interaction.interaction_type != .None) {
         if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
             switch (debug_state.hot_interaction.target.event.event_type) {
-                .Bool => {
+                .bool => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
-                .F32 => {
+                .f32 => {
                     debug_state.hot_interaction.interaction_type = .DragValue;
                 },
                 .OpenDataBlock => {
@@ -1297,9 +1295,9 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
                 // debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
             },
             .Select => {
-                // if (!shift_key_down) {
-                //     debug_state.clearSelection();
-                // }
+                if (!input.shift_down) {
+                    debug_state.clearSelection();
+                }
 
                 debug_state.addToSelection(debug_state.hot_interaction.id);
             },
@@ -1336,8 +1334,8 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
             .DragValue => {
                 const event = debug_state.interaction.target.event;
                 switch (event.event_type) {
-                    .F32 => {
-                        event.data.float += 0.1 * mouse_delta.y();
+                    .f32 => {
+                        event.data.f32 += 0.1 * mouse_delta.y();
                     },
                     else => {},
                 }
@@ -1395,7 +1393,7 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
 
             const event: *DebugEvent = debug_state.interaction.target.event;
             switch (event.event_type) {
-                .Bool => {
+                .bool => {
                     event.data.bool = !event.data.bool;
                 },
                 .OpenDataBlock => {

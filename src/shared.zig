@@ -312,14 +312,18 @@ pub const GameInputMouseButton = enum(u8) {
 };
 
 pub const GameInput = extern struct {
+    frame_delta_time: f32 = 0,
+
+    controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{ControllerInput{}} ** MAX_CONTROLLER_COUNT,
+
+    // For debugging only.
     mouse_buttons: [MOUSE_BUTTON_COUNT]ControllerButtonState = [1]ControllerButtonState{ControllerButtonState{}} ** MOUSE_BUTTON_COUNT,
     mouse_x: f32 = 0,
     mouse_y: f32 = 0,
     mouse_z: f32 = 0,
-
-    frame_delta_time: f32 = 0,
-
-    controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{ControllerInput{}} ** MAX_CONTROLLER_COUNT,
+    shift_down: bool = false,
+    alt_down: bool = false,
+    control_down: bool = false,
 };
 
 pub const ControllerInput = extern struct {

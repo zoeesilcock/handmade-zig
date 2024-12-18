@@ -570,6 +570,9 @@ fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput,
         new_input.mouse_x = @as(f32, @floatFromInt(mouse_point.x)) - @as(f32, @floatFromInt(dim.offset_x));
         new_input.mouse_y = @as(f32, @floatFromInt((window_dimension.height - 1) - mouse_point.y)) - @as(f32, @floatFromInt(dim.offset_y));
         new_input.mouse_z = 0; // TODO: Add mouse wheel support.
+        new_input.shift_down = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
+        new_input.alt_down = win32.GetKeyState(@intFromEnum(win32.VK_MENU)) & (1 << 7) != 0;
+        new_input.control_down = win32.GetKeyState(@intFromEnum(win32.VK_CONTROL)) & (1 << 7) != 0;
     }
 
     const win_button_ids = [_]win32.VIRTUAL_KEY{
@@ -1871,6 +1874,9 @@ pub export fn wWinMain(
                         new_input.mouse_x = temp.mouse_x;
                         new_input.mouse_y = temp.mouse_y;
                         new_input.mouse_z = temp.mouse_z;
+                        new_input.shift_down = temp.shift_down;
+                        new_input.alt_down = temp.alt_down;
+                        new_input.control_down = temp.control_down;
                     }
 
                     // Send all input to game.
