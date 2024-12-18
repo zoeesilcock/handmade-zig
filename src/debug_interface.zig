@@ -340,9 +340,27 @@ pub fn debugBeginDataBlock(
     event.data = .{ .debug_id = id };
 }
 
-pub fn debugValue(source: std.builtin.SourceLocation, value: anytype) void {
-    var event = recordDebugEvent(source, .F32, "Value");
-    event.setValue(value);
+pub fn debugStruct(source: std.builtin.SourceLocation, parent: anytype) void {
+    const fields = std.meta.fields(@TypeOf(parent.*));
+    inline for (fields) |field| {
+        debugValue(source, parent, field.name);
+    }
+}
+
+pub fn debugValue(source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {
+    const value = @field(parent, field_name);
+    const type_info = @typeInfo(@TypeOf(value));
+    var event = recordDebugEvent(source, .F32, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ field_name));
+    switch (type_info) {
+        .Optional => {
+            if (value) |v| {
+                event.setValue(v);
+            }
+        },
+        else => {
+            event.setValue(value);
+        },
+    }
 }
 
 pub fn debugBeginArray(array: anytype) void {

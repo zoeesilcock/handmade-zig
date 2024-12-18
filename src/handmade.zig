@@ -1051,28 +1051,35 @@ pub export fn updateAndRender(
 
                 if (debug_interface.requested(entity_debug_id)) {
                     debug_interface.debugBeginDataBlock(@src(), "Simulation Entity", entity_debug_id);
-                    debug_interface.debugValue(@src(), entity.storage_index);
-                    debug_interface.debugValue(@src(), entity.updatable);
-                    debug_interface.debugValue(@src(), entity.type);
-                    debug_interface.debugValue(@src(), entity.flags);
-                    debug_interface.debugValue(@src(), entity.position);
-                    debug_interface.debugValue(@src(), entity.velocity);
-                    debug_interface.debugValue(@src(), entity.distance_limit);
-                    debug_interface.debugValue(@src(), entity.facing_direction);
-                    debug_interface.debugValue(@src(), entity.head_bob_time);
-                    debug_interface.debugValue(@src(), entity.abs_tile_z_delta);
-                    debug_interface.debugValue(@src(), entity.hit_point_max);
-                    debug_interface.debugValue(@src(), hero_bitmaps.torso.?);
+                    {
+                        debug_interface.debugStruct(@src(), entity);
+                        debug_interface.debugValue(@src(), hero_bitmaps, "torso");
+                    }
+                    debug_interface.debugEndDataBlock(@src());
+
+                    // debug_interface.debugBeginDataBlock(@src(), "Simulation Entity", entity_debug_id);
+                    // debug_interface.debugValue(@src(), entity, "storage_index");
+                    // debug_interface.debugValue(@src(), entity, "updatable");
+                    // debug_interface.debugValue(@src(), entity, "type");
+                    // debug_interface.debugValue(@src(), entity, "flags");
+                    // debug_interface.debugValue(@src(), entity, "position");
+                    // debug_interface.debugValue(@src(), entity, "velocity");
+                    // debug_interface.debugValue(@src(), entity, "distance_limit");
+                    // debug_interface.debugValue(@src(), entity, "facing_direction");
+                    // debug_interface.debugValue(@src(), entity, "head_bob_time");
+                    // debug_interface.debugValue(@src(), entity, "abs_tile_z_delta");
+                    // debug_interface.debugValue(@src(), entity, "hit_point_max");
+                    // debug_interface.debugValue(@src(), hero_bitmaps, "torso");
                     // debug_interface.debugBeginArray(entity.hit_points);
                     // var hit_point_index: u32 = 0;
                     // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
                     //     debug_interface.debugValue(@src(), entity.hit_points[hit_point_index]);
                     // }
                     // debug_interface.debugEndArray();
-                    debug_interface.debugValue(@src(), entity.sword);
-                    debug_interface.debugValue(@src(), entity.walkable_dimension);
-                    debug_interface.debugValue(@src(), entity.walkable_height);
-                    debug_interface.debugEndDataBlock(@src());
+                    // debug_interface.debugValue(@src(), entity, "sword");
+                    // debug_interface.debugValue(@src(), entity, "walkable_dimension");
+                    // debug_interface.debugValue(@src(), entity, "walkable_height");
+                    // debug_interface.debugEndDataBlock(@src());
 
                     hot_entity_count += 1;
                 }
