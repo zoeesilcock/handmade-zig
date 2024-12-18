@@ -3,6 +3,7 @@ const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const world = @import("world.zig");
 const config = @import("config.zig");
+const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 const addCollisionRule = @import("handmade.zig").addCollisionRule;
@@ -14,6 +15,7 @@ const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const State = shared.State;
 const World = world.World;
+const TimedBlock = debug_interface.TimedBlock;
 
 // introspect("sim");
 pub const SimRegion = extern struct {
@@ -241,7 +243,7 @@ pub fn addEntityRaw(
     storage_index: u32,
     opt_source: ?*shared.LowEntity,
 ) ?*SimEntity {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .AddEntityRaw);
+    var timed_block = TimedBlock.beginFunction(@src(), .AddEntityRaw);
     defer timed_block.end();
 
     std.debug.assert(storage_index != 0);
@@ -323,7 +325,7 @@ pub fn beginSimulation(
     bounds: Rectangle3,
     delta_time: f32,
 ) *SimRegion {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .BeginSimulation);
+    var timed_block = TimedBlock.beginFunction(@src(), .BeginSimulation);
     defer timed_block.end();
 
     var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion);
@@ -418,7 +420,7 @@ fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_tim
 }
 
 fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vector3) bool {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .SpeculativeCollide);
+    var timed_block = TimedBlock.beginFunction(@src(), .SpeculativeCollide);
     defer timed_block.end();
 
     var result = true;
@@ -434,7 +436,7 @@ fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vect
 }
 
 fn entitiesOverlap(entity: *SimEntity, test_entity: *SimEntity, epsilon: Vector3) bool {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .EntitiesOverlap);
+    var timed_block = TimedBlock.beginFunction(@src(), .EntitiesOverlap);
     defer timed_block.end();
 
     var overlapped = false;
@@ -541,7 +543,7 @@ pub fn moveEntity(
     in_acceleration: Vector3,
     move_spec: *const MoveSpec,
 ) void {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .MoveEntity);
+    var timed_block = TimedBlock.beginFunction(@src(), .MoveEntity);
     defer timed_block.end();
 
     std.debug.assert(!entity.isSet(SimEntityFlags.Nonspatial.toInt()));
@@ -809,7 +811,7 @@ pub fn moveEntity(
 }
 
 pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .EndSimulation);
+    var timed_block = TimedBlock.beginFunction(@src(), .EndSimulation);
     defer timed_block.end();
 
     var sim_entity_index: u32 = 0;

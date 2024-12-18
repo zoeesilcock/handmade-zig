@@ -10,6 +10,7 @@ const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
 const config = @import("config.zig");
+const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
@@ -108,6 +109,7 @@ const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
 const Particle = shared.Particle;
 const ParticleCel = shared.ParticleCel;
+const TimedBlock = debug_interface.TimedBlock;
 
 pub export fn updateAndRender(
     platform: shared.Platform,
@@ -121,7 +123,7 @@ pub export fn updateAndRender(
         shared.debug_global_memory = memory;
     }
 
-    const timed_block = shared.TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
+    const timed_block = TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
     defer timed_block.end();
 
     const ground_buffer_width: u32 = 256;
@@ -1056,8 +1058,6 @@ pub export fn updateAndRender(
                         local_mouse_position.y() > -0.5 * volume.dimension.y() and
                         local_mouse_position.y() < 0.5 * volume.dimension.y()) {
                         const outline_color: Color = Color.new(1, 1, 0, 1);
-                        const counter: shared.DebugCycleCounters =
-                            @enumFromInt(@intFromEnum(shared.DebugCycleCounters.HotEntity) + hot_entity_count);
 
                         render_group.pushRectangleOutline(
                             volume.dimension.xy(),
@@ -1066,29 +1066,29 @@ pub export fn updateAndRender(
                             0.05,
                         );
 
-                        shared.debugBeginDataBlock(@src(), counter, "Hot Entity", &state.low_entities[entity.storage_index], null);
-                        shared.debugValue(entity.storage_index);
-                        shared.debugValue(entity.updatable);
-                        shared.debugValue(entity.type);
-                        shared.debugValue(entity.flags);
-                        shared.debugValue(entity.position);
-                        shared.debugValue(entity.velocity);
-                        shared.debugValue(entity.distance_limit);
-                        shared.debugValue(entity.facing_direction);
-                        shared.debugValue(entity.head_bob_time);
-                        shared.debugValue(entity.abs_tile_z_delta);
-                        shared.debugValue(entity.hit_point_max);
-                        shared.debugValue(hero_bitmaps.torso);
-                        // shared.debugBeginArray(entity.hit_points);
+                        debug_interface.debugBeginDataBlock(@src(), "Hot Entity", &state.low_entities[entity.storage_index], null);
+                        debug_interface.debugValue(@src(), entity.storage_index);
+                        debug_interface.debugValue(@src(), entity.updatable);
+                        debug_interface.debugValue(@src(), entity.type);
+                        debug_interface.debugValue(@src(), entity.flags);
+                        debug_interface.debugValue(@src(), entity.position);
+                        debug_interface.debugValue(@src(), entity.velocity);
+                        debug_interface.debugValue(@src(), entity.distance_limit);
+                        debug_interface.debugValue(@src(), entity.facing_direction);
+                        debug_interface.debugValue(@src(), entity.head_bob_time);
+                        debug_interface.debugValue(@src(), entity.abs_tile_z_delta);
+                        debug_interface.debugValue(@src(), entity.hit_point_max);
+                        debug_interface.debugValue(@src(), hero_bitmaps.torso.?);
+                        // debug_interface.debugBeginArray(entity.hit_points);
                         // var hit_point_index: u32 = 0;
                         // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-                        //     shared.debugValue(entity.hit_points[hit_point_index]);
+                        //     debug_interface.debugValue(@src(), entity.hit_points[hit_point_index]);
                         // }
-                        // shared.debugEndArray();
-                        shared.debugValue(entity.sword);
-                        shared.debugValue(entity.walkable_dimension);
-                        shared.debugValue(entity.walkable_height);
-                        shared.debugEndDataBlock(@src(), counter);
+                        // debug_interface.debugEndArray();
+                        debug_interface.debugValue(@src(), entity.sword);
+                        debug_interface.debugValue(@src(), entity.walkable_dimension);
+                        debug_interface.debugValue(@src(), entity.walkable_height);
+                        debug_interface.debugEndDataBlock(@src());
 
                         hot_entity_count += 1;
                     }
@@ -1229,7 +1229,7 @@ pub export fn updateAndRender(
     transient_state.arena.checkArena();
 }
 
-pub export fn debugFrameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) *shared.DebugTable {
+pub export fn debugFrameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) *debug_interface.DebugTable {
     return shared.debugFrameEnd(memory, input, buffer);
 }
 
@@ -1550,7 +1550,7 @@ const FillGroundChunkWork = struct {
 };
 
 pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .FillGroundChunk);
+    var timed_block = TimedBlock.beginFunction(@src(), .FillGroundChunk);
     defer timed_block.end();
 
     _ = queue;

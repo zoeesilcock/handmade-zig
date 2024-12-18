@@ -5,6 +5,7 @@ const render = @import("render.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
 const file_formats = @import("file_formats");
+const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 // Types.
@@ -27,6 +28,7 @@ const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const PlatformFileHandle = shared.PlatformFileHandle;
+const TimedBlock = debug_interface.TimedBlock;
 
 pub const AssetTypeId = file_formats.AssetTypeId;
 pub const AssetTagId = file_formats.AssetTagId;
@@ -407,7 +409,7 @@ pub const Assets = struct {
     }
 
     fn acquireAssetMemory(self: *Assets, size: u32, asset_index: u32) ?*AssetMemoryHeader {
-        var timed_block = shared.TimedBlock.beginFunction(@src(), .AcquireAssetMemory);
+        var timed_block = TimedBlock.beginFunction(@src(), .AcquireAssetMemory);
         defer timed_block.end();
 
         var result: ?*AssetMemoryHeader = null;
@@ -502,7 +504,7 @@ pub const Assets = struct {
     }
 
     pub fn getFirstAsset(self: *Assets, type_id: AssetTypeId) ?u32 {
-        var timed_block = shared.TimedBlock.beginFunction(@src(), .GetFirstAsset);
+        var timed_block = TimedBlock.beginFunction(@src(), .GetFirstAsset);
         defer timed_block.end();
 
         var result: ?u32 = null;
@@ -516,7 +518,7 @@ pub const Assets = struct {
     }
 
     pub fn getRandomAsset(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?u32 {
-        var timed_block = shared.TimedBlock.beginFunction(@src(), .GetRandomAsset);
+        var timed_block = TimedBlock.beginFunction(@src(), .GetRandomAsset);
         defer timed_block.end();
 
         var result: ?u32 = null;
@@ -537,7 +539,7 @@ pub const Assets = struct {
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
     ) ?u32 {
-        var timed_block = shared.TimedBlock.beginFunction(@src(), .GetBestMatchAsset);
+        var timed_block = TimedBlock.beginFunction(@src(), .GetBestMatchAsset);
         defer timed_block.end();
 
         var result: ?u32 = null;
@@ -589,7 +591,7 @@ pub const Assets = struct {
         opt_id: ?BitmapId,
         immediate: bool,
     ) void {
-        var timed_block = shared.TimedBlock.beginFunction(@src(), .LoadBitmap);
+        var timed_block = TimedBlock.beginFunction(@src(), .LoadBitmap);
         defer timed_block.end();
 
         if (opt_id) |id| {
@@ -754,7 +756,7 @@ pub const Assets = struct {
         self: *Assets,
         opt_id: ?SoundId,
     ) void {
-        var timed_block = shared.TimedBlock.beginFunction(@src(), .LoadSound);
+        var timed_block = TimedBlock.beginFunction(@src(), .LoadSound);
         defer timed_block.end();
 
         if (opt_id) |id| {
@@ -876,7 +878,7 @@ pub const Assets = struct {
         opt_id: ?FontId,
         immediate: bool,
     ) void {
-        var timed_block = shared.TimedBlock.beginFunction(@src(), .LoadFont);
+        var timed_block = TimedBlock.beginFunction(@src(), .LoadFont);
         defer timed_block.end();
 
         if (opt_id) |id| {
@@ -1074,7 +1076,7 @@ const LoadAssetWork = struct {
 fn doLoadAssetWorkDirectly(
     work: *LoadAssetWork,
 ) callconv(.C) void {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .LoadAssetWorkDirectly);
+    var timed_block = TimedBlock.beginFunction(@src(), .LoadAssetWorkDirectly);
     defer timed_block.end();
 
     shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);

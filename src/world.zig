@@ -2,9 +2,12 @@ const shared = @import("shared.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const sim = @import("sim.zig");
+const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
+// Types.
 const Vector3 = math.Vector3;
+const TimedBlock = debug_interface.TimedBlock;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
@@ -111,7 +114,7 @@ pub fn getWorldChunk(
     chunk_z: i32,
     opt_memory_arena: ?*shared.MemoryArena,
 ) ?*WorldChunk {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .GetWorldChunk);
+    var timed_block = TimedBlock.beginFunction(@src(), .GetWorldChunk);
     defer timed_block.end();
 
     std.debug.assert(chunk_x > -TILE_CHUNK_SAFE_MARGIN);
@@ -168,7 +171,7 @@ pub fn changeEntityLocation(
     low_entity_index: u32,
     new_position: WorldPosition,
 ) void {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .ChangeEntityLocation);
+    var timed_block = TimedBlock.beginFunction(@src(), .ChangeEntityLocation);
     defer timed_block.end();
 
     var opt_old_position: ?*WorldPosition = null;
@@ -206,7 +209,7 @@ pub fn changeEntityLocationRaw(
     opt_old_position: ?*WorldPosition,
     opt_new_position: ?*WorldPosition,
 ) void {
-    var timed_block = shared.TimedBlock.beginFunction(@src(), .ChangeEntityLocationRaw);
+    var timed_block = TimedBlock.beginFunction(@src(), .ChangeEntityLocationRaw);
     defer timed_block.end();
 
     std.debug.assert(opt_old_position == null or opt_old_position.?.isValid());

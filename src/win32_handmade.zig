@@ -37,10 +37,14 @@ const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
-const shared = @import("shared.zig");
-
 // Build options.
 const INTERNAL = shared.INTERNAL;
+
+const shared = @import("shared.zig");
+const debug_interface = @import("debug_interface.zig");
+
+// Types
+const TimedBlock = debug_interface.TimedBlock;
 
 const std = @import("std");
 const win32 = struct {
@@ -72,7 +76,7 @@ var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
 var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
-var local_stub_debug_table: shared.DebugTable = if (INTERNAL) shared.DebugTable{} else undefined;
+var local_stub_debug_table: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -1791,7 +1795,7 @@ pub export fn wWinMain(
                 running = true;
 
                 while (running) {
-                    var timed_block = shared.TimedBlock.beginBlock(@src(), .ExecutableRefresh);
+                    var timed_block = TimedBlock.beginBlock(@src(), .ExecutableRefresh);
 
                     //
                     //
@@ -1819,7 +1823,7 @@ pub export fn wWinMain(
                     //
                     //
 
-                    timed_block = shared.TimedBlock.beginBlock(@src(), .InputProcessing);
+                    timed_block = TimedBlock.beginBlock(@src(), .InputProcessing);
 
                     var message: win32.MSG = undefined;
 
@@ -1854,7 +1858,7 @@ pub export fn wWinMain(
                     //
                     //
 
-                    timed_block = shared.TimedBlock.beginBlock(@src(), .GameUpdate);
+                    timed_block = TimedBlock.beginBlock(@src(), .GameUpdate);
 
                     if (state.input_recording_index > 0) {
                         recordInput(&state, new_input);
@@ -1878,7 +1882,7 @@ pub export fn wWinMain(
                     //
                     //
 
-                    timed_block = shared.TimedBlock.beginBlock(@src(), .AudioUpdate);
+                    timed_block = TimedBlock.beginBlock(@src(), .AudioUpdate);
 
                     // Output sound.
                     if (opt_secondary_buffer) |secondary_buffer| {
@@ -1997,7 +2001,7 @@ pub export fn wWinMain(
                     //
 
                     if (INTERNAL) {
-                        timed_block = shared.TimedBlock.beginBlock(@src(), .DebugCollation);
+                        timed_block = TimedBlock.beginBlock(@src(), .DebugCollation);
                         defer timed_block.end();
 
                         if (game.debugFrameEnd) |frameEndFn| {
@@ -2012,7 +2016,7 @@ pub export fn wWinMain(
                     //
 
                     if (false) {
-                        timed_block = shared.TimedBlock.beginBlock(@src(), .FrameRateWait);
+                        timed_block = TimedBlock.beginBlock(@src(), .FrameRateWait);
 
                         // Capture timing.
                         const work_counter = getWallClock();
@@ -2042,7 +2046,7 @@ pub export fn wWinMain(
                     //
                     //
 
-                    timed_block = shared.TimedBlock.beginBlock(@src(), .FrameDisplay);
+                    timed_block = TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     if (INTERNAL) {
                         if (false) {
@@ -2082,7 +2086,7 @@ pub export fn wWinMain(
 
                     const end_counter = getWallClock();
 
-                    var frame_marker = shared.TimedBlock.frameMarker(
+                    var frame_marker = TimedBlock.frameMarker(
                         @src(),
                         .TotalPlatformLoop,
                         getSecondsElapsed(last_counter, end_counter),
