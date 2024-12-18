@@ -1023,75 +1023,58 @@ pub export fn updateAndRender(
                 },
             }
 
-            if (config.DEBUGUI_DRAW_ENTITY_OUTLINES) {
-                if (false) {
-                    render_group.transform.offset_position = Vector3.zero();
-                    render_group.transform.scale = 1;
-
-                    const local_z: f32 = 3;
-                    const world_mouse_position = render_group.unproject(mouse_position, local_z);
-
-                    render_group.transform.offset_position = world_mouse_position;
-
-                    render_group.pushRectangle(
-                        Vector2.new(1, 1),
-                        Vector3.zero(),
-                        Color.new(0, 1, 1, 1),
-                    );
-                }
+            if (debug_interface.DEBUG_UI_ENABLED) {
+                const entity_debug_id = debug_interface.DebugId.fromPointer(&state.low_entities[entity.storage_index]);
 
                 var volume_index: u32 = 0;
                 while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
                     const volume = entity.collision.volumes[volume_index];
                     const local_mouse_position = render_group.unproject(mouse_position);
 
-                    if (false) {
-                        render_group.pushRectangle(
-                            Vector2.new(1, 1),
-                            local_mouse_position.xy().toVector3(0),
-                            Color.new(0, 1, 1, 1),
-                        );
-                    }
-
                     if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
                         local_mouse_position.x() < 0.5 * volume.dimension.x() and
                         local_mouse_position.y() > -0.5 * volume.dimension.y() and
                         local_mouse_position.y() < 0.5 * volume.dimension.y()) {
-                        const outline_color: Color = Color.new(1, 1, 0, 1);
+                        debug_interface.hit(entity_debug_id, local_mouse_position.z());
+                    }
 
+                    var outline_color: Color = undefined;
+                    if (debug_interface.highlighted(entity_debug_id, &outline_color)) {
                         render_group.pushRectangleOutline(
                             volume.dimension.xy(),
                             volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
                             outline_color,
                             0.05,
                         );
-
-                        debug_interface.debugBeginDataBlock(@src(), "Hot Entity", &state.low_entities[entity.storage_index], null);
-                        debug_interface.debugValue(@src(), entity.storage_index);
-                        debug_interface.debugValue(@src(), entity.updatable);
-                        debug_interface.debugValue(@src(), entity.type);
-                        debug_interface.debugValue(@src(), entity.flags);
-                        debug_interface.debugValue(@src(), entity.position);
-                        debug_interface.debugValue(@src(), entity.velocity);
-                        debug_interface.debugValue(@src(), entity.distance_limit);
-                        debug_interface.debugValue(@src(), entity.facing_direction);
-                        debug_interface.debugValue(@src(), entity.head_bob_time);
-                        debug_interface.debugValue(@src(), entity.abs_tile_z_delta);
-                        debug_interface.debugValue(@src(), entity.hit_point_max);
-                        debug_interface.debugValue(@src(), hero_bitmaps.torso.?);
-                        // debug_interface.debugBeginArray(entity.hit_points);
-                        // var hit_point_index: u32 = 0;
-                        // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-                        //     debug_interface.debugValue(@src(), entity.hit_points[hit_point_index]);
-                        // }
-                        // debug_interface.debugEndArray();
-                        debug_interface.debugValue(@src(), entity.sword);
-                        debug_interface.debugValue(@src(), entity.walkable_dimension);
-                        debug_interface.debugValue(@src(), entity.walkable_height);
-                        debug_interface.debugEndDataBlock(@src());
-
-                        hot_entity_count += 1;
                     }
+                }
+
+                if (debug_interface.requested(entity_debug_id)) {
+                    debug_interface.debugBeginDataBlock(@src(), "Simulation Entity", entity_debug_id);
+                    debug_interface.debugValue(@src(), entity.storage_index);
+                    debug_interface.debugValue(@src(), entity.updatable);
+                    debug_interface.debugValue(@src(), entity.type);
+                    debug_interface.debugValue(@src(), entity.flags);
+                    debug_interface.debugValue(@src(), entity.position);
+                    debug_interface.debugValue(@src(), entity.velocity);
+                    debug_interface.debugValue(@src(), entity.distance_limit);
+                    debug_interface.debugValue(@src(), entity.facing_direction);
+                    debug_interface.debugValue(@src(), entity.head_bob_time);
+                    debug_interface.debugValue(@src(), entity.abs_tile_z_delta);
+                    debug_interface.debugValue(@src(), entity.hit_point_max);
+                    debug_interface.debugValue(@src(), hero_bitmaps.torso.?);
+                    // debug_interface.debugBeginArray(entity.hit_points);
+                    // var hit_point_index: u32 = 0;
+                    // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
+                    //     debug_interface.debugValue(@src(), entity.hit_points[hit_point_index]);
+                    // }
+                    // debug_interface.debugEndArray();
+                    debug_interface.debugValue(@src(), entity.sword);
+                    debug_interface.debugValue(@src(), entity.walkable_dimension);
+                    debug_interface.debugValue(@src(), entity.walkable_height);
+                    debug_interface.debugEndDataBlock(@src());
+
+                    hot_entity_count += 1;
                 }
             }
         }

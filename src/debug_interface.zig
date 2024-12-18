@@ -1,6 +1,7 @@
 const shared = @import("shared.zig");
 const math = @import("math.zig");
 const asset = @import("asset.zig");
+const debug = @import("debug.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
@@ -17,6 +18,10 @@ const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 
+pub const hit = debug.hit;
+pub const highlighted = debug.highlighted;
+pub const requested = debug.requested;
+
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
@@ -25,6 +30,7 @@ pub const MAX_DEBUG_THREAD_COUNT = 256;
 pub const MAX_DEBUG_REGIONS_PER_FRAME = 4096;
 pub const MAX_DEBUG_EVENT_ARRAY_COUNT = 8;
 pub const MAX_DEBUG_EVENT_COUNT = 16 * 65536;
+pub const DEBUG_UI_ENABLED = true;
 
 pub const DebugCycleCounters = enum(u16) {
     TotalPlatformLoop,
@@ -95,6 +101,23 @@ pub const DebugTable = extern struct {
     } ** MAX_DEBUG_EVENT_ARRAY_COUNT,
 };
 
+pub const DebugId = extern struct {
+    value: [2]*void,
+
+    pub fn fromLink(tree: *debug.DebugTree, link: *debug.DebugVariableLink) DebugId {
+        return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };
+    }
+
+    pub fn fromPointer(pointer: *anyopaque) DebugId {
+        return DebugId{ .value = .{ @ptrCast(pointer), undefined } };
+    }
+
+    pub fn equals(self: DebugId, other: DebugId) bool {
+        return @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]) and
+            @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]);
+    }
+};
+
 pub const DebugType = enum(u8) {
     FrameMarker,
     BeginBlock,
@@ -129,7 +152,7 @@ pub const DebugEvent = extern struct {
     core_index: u16 = undefined,
     event_type: DebugType = undefined,
     data: extern union {
-        vec_ptr: [3]?*anyopaque,
+        debug_id: DebugId,
         bool: bool,
         int: i32,
         uint: u32,
@@ -308,16 +331,13 @@ pub const TimedBlock = if (INTERNAL) struct {
     }
 };
 
-var additional_debug_record_index: u16 = @typeInfo(DebugType).Enum.fields.len + 1;
-
 pub fn debugBeginDataBlock(
     source: std.builtin.SourceLocation,
     name: [*:0]const u8,
-    ptr0: ?*anyopaque,
-    ptr1: ?*anyopaque,
+    id: DebugId,
 ) void {
     var event = recordDebugEvent(source, .OpenDataBlock, name);
-    event.data = .{ .vec_ptr = .{ ptr0, ptr1, null } };
+    event.data = .{ .debug_id = id };
 }
 
 pub fn debugValue(source: std.builtin.SourceLocation, value: anytype) void {

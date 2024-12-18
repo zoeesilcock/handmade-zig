@@ -15,6 +15,7 @@ const std = @import("std");
 const TimedBlock = debug_interface.TimedBlock;
 const DebugType = debug_interface.DebugType;
 const DebugEvent = debug_interface.DebugEvent;
+const DebugId = debug_interface.DebugId;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -126,6 +127,7 @@ const DebugInteractionType = enum(u32) {
     TearValue,
     Resize,
     Move,
+    Select,
 };
 
 const DebugInteractionTargetType = enum(u32) {
@@ -157,6 +159,14 @@ const DebugInteraction = struct {
             },
         };
     }
+
+    pub fn fromId(id: DebugId, interaction_type: DebugInteractionType) DebugInteraction {
+        return DebugInteraction{
+            .id = id,
+            .interaction_type = interaction_type,
+            .target = undefined,
+        };
+    }
 };
 
 pub const DebugState = struct {
@@ -174,6 +184,9 @@ pub const DebugState = struct {
 
     menu_position: Vector2,
     menu_active: bool,
+
+    selected_id_count: u32,
+    selected_id: [64]DebugId = [1]DebugId{undefined} ** 64,
 
     root_group: ?*DebugVariableGroup,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
@@ -213,6 +226,10 @@ pub const DebugState = struct {
 
         if (shared.debug_global_memory) |memory| {
             result = @ptrCast(@alignCast(memory.debug_storage));
+
+            if (!result.?.initialized) {
+                result = null;
+            }
         }
 
         return result;
@@ -480,6 +497,31 @@ pub const DebugState = struct {
         return interaction.equals(&self.hot_interaction);
     }
 
+    pub fn isSelected(self: *DebugState, id: DebugId) bool {
+        var result = false;
+
+        var index: u32 = 0;
+        while (index < self.selected_id_count) : (index += 1) {
+            if (id.equals(self.selected_id[index])) {
+                result = true;
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    pub fn clearSelection(self: *DebugState) void {
+        self.selected_id_count = 0;
+    }
+
+    pub fn addToSelection(self: *DebugState, id: DebugId) void {
+        if (self.selected_id_count < self.selected_id.len and !self.isSelected(id)) {
+            self.selected_id[self.selected_id_count] = id;
+            self.selected_id_count += 1;
+        }
+    }
+
     fn getOrCreateDebugView(self: *DebugState, id: DebugId) *DebugView {
         const hash_index = @mod(((@intFromPtr(id.value[0]) >> 2) + (@intFromPtr(id.value[1]) >> 2)), self.view_hash.len);
         const hash_slot = &self.view_hash[hash_index];
@@ -551,19 +593,6 @@ const DebugViewType = enum(u32) {
 const DebugViewDataType = enum(u32) {
     inline_block,
     collapsible,
-};
-
-const DebugId = struct {
-    value: [2]*void,
-
-    pub fn fromLink(tree: *DebugTree, link: *DebugVariableLink) DebugId {
-        return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };
-    }
-
-    pub fn equals(self: DebugId, other: DebugId) bool {
-        return @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]) and
-            @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]);
-    }
 };
 
 pub const DebugView = struct {
@@ -1026,6 +1055,41 @@ const LayoutElement = struct {
     }
 };
 
+pub fn hit(id: DebugId, z_value: f32) void {
+    _ = z_value;
+    if (DebugState.get()) |debug_state| {
+        debug_state.next_hot_interaction = DebugInteraction.fromId(id, .Select);
+    }
+}
+
+pub fn highlighted(id: DebugId, outline_color: *Color) bool {
+    var result = false;
+
+    if (DebugState.get()) |debug_state| {
+        if (debug_state.isSelected(id)) {
+            result = true;
+            outline_color.* = Color.new(0, 1, 1, 1);
+        }
+
+        if (id.equals(debug_state.hot_interaction.id)) {
+            result = true;
+            outline_color.* = Color.new(1, 1, 0, 1);
+        }
+    }
+
+    return result;
+}
+
+pub fn requested(id: DebugId) bool {
+    var result = false;
+
+    if (DebugState.get()) |debug_state| {
+        result = debug_state.isSelected(id) or id.equals(debug_state.hot_interaction.id);
+    }
+
+    return result;
+}
+
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     var opt_tree: ?*DebugTree = debug_state.tree_sentinel.next;
 
@@ -1231,6 +1295,13 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
                 // tree.ui_position = mouse_position;
                 // debug_state.hot_interaction.interaction_type = .Move;
                 // debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
+            },
+            .Select => {
+                // if (!shift_key_down) {
+                //     debug_state.clearSelection();
+                // }
+
+                debug_state.addToSelection(debug_state.hot_interaction.id);
             },
             else => {},
         }
@@ -1656,7 +1727,6 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
 
     if (debug_state.render_group) |group| {
         const mouse_position: Vector2 = group.unproject(Vector2.new(input.mouse_x, input.mouse_y)).xy();
-        shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
         const hot_event: ?*DebugEvent = null;
 
         drawDebugMainMenu(debug_state, group, mouse_position);
@@ -1748,6 +1818,8 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
 
         group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer);
         group.endRender();
+
+        shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
     }
 }
 
