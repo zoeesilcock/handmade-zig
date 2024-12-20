@@ -27,10 +27,7 @@ pub const requested = if (INTERNAL) debug.requested else debug.requestedStub;
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
 
-pub const MAX_DEBUG_THREAD_COUNT = 256;
-pub const MAX_DEBUG_REGIONS_PER_FRAME = 4096;
-pub const MAX_DEBUG_EVENT_ARRAY_COUNT = 8;
-pub const MAX_DEBUG_EVENT_COUNT = 16 * 65536;
+pub const MAX_DEBUG_REGIONS_PER_FRAME = 2 * 4096;
 pub const DEBUG_UI_ENABLED = true;
 
 pub const DebugCycleCounters = enum(u16) {
@@ -96,10 +93,10 @@ pub const DebugCycleCounters = enum(u16) {
 pub const DebugTable = extern struct {
     current_event_array_index: u32 = 0,
     event_array_index_event_index: u64 = 0,
-    event_count: [MAX_DEBUG_EVENT_ARRAY_COUNT]u32 = [1]u32{0} ** MAX_DEBUG_EVENT_ARRAY_COUNT,
-    events: [MAX_DEBUG_EVENT_ARRAY_COUNT][MAX_DEBUG_EVENT_COUNT]DebugEvent = [1][MAX_DEBUG_EVENT_COUNT]DebugEvent{
-        [1]DebugEvent{DebugEvent{}} ** MAX_DEBUG_EVENT_COUNT,
-    } ** MAX_DEBUG_EVENT_ARRAY_COUNT,
+
+    events: [2][16 * 65536]DebugEvent = [1][16 * 65536]DebugEvent{
+        [1]DebugEvent{DebugEvent{}} ** (16 * 65536),
+    } ** 2,
 };
 
 pub const DebugId = extern struct {
@@ -179,7 +176,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         const event_array_index_event_index = @atomicRmw(u64, &shared.global_debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
         const array_index = event_array_index_event_index >> 32;
         const event_index = event_array_index_event_index & 0xffffffff;
-        std.debug.assert(event_index < MAX_DEBUG_EVENT_COUNT);
+        std.debug.assert(event_index < shared.global_debug_table.events[0].len);
 
         var event: *DebugEvent = &shared.global_debug_table.events[array_index][event_index];
         event.clock = shared.rdtsc();

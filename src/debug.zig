@@ -48,9 +48,15 @@ const DebugFrame = struct {
     begin_clock: u64,
     end_clock: u64,
     wall_seconds_elapsed: f32,
+
+    frame_bar_scale: f32,
+
     root_group: ?*DebugVariableGroup,
+
     region_count: u32,
     regions: [*]DebugFrameRegion,
+
+    next: ?*DebugFrame,
 };
 
 const DebugFrameRegion = struct {
@@ -197,6 +203,7 @@ pub const DebugState = struct {
     interaction: DebugInteraction,
     hot_interaction: DebugInteraction,
     next_hot_interaction: DebugInteraction,
+    paused: bool,
 
     left_edge: f32 = 0,
     right_edge: f32 = 0,
@@ -208,18 +215,16 @@ pub const DebugState = struct {
 
     scope_to_record: ?[*:0]const u8,
 
-    collate_arena: shared.MemoryArena,
-    collate_temp: shared.TemporaryMemory,
-
-    collation_array_index: u32,
-    collation_frame: ?*DebugFrame,
-    frame_bar_lane_count: u32,
-    frame_bar_scale: f32,
     frame_count: u32,
-    paused: bool,
+    oldest_frame: ?*DebugFrame,
+    most_recent_frame: ?*DebugFrame,
+    first_free_frame: ?*DebugFrame,
 
-    frames: [*]DebugFrame,
+    collation_frame: ?*DebugFrame,
+
+    frame_bar_lane_count: u32,
     first_thread: ?*DebugThread,
+    first_free_thread: ?*DebugThread,
     first_free_block: ?*OpenDebugBlock,
 
     pub fn get() ?*DebugState {
@@ -236,25 +241,36 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn restartCollation(self: *DebugState, invalid_event_array_index: u32) void {
-        self.collate_arena.endTemporaryMemory(self.collate_temp);
-        self.collate_temp = self.collate_arena.beginTemporaryMemory();
+    fn newFrame(self: *DebugState, begin_clock: u64) *DebugFrame {
+        var result: ?*DebugFrame = self.first_free_frame;
 
-        self.first_thread = null;
-        self.first_free_block = null;
+        if (result != null) {
+            self.first_free_frame = result.?.next;
+            const regions: [*]DebugFrameRegion = result.?.regions;
+            shared.zeroStruct(DebugFrame, result.?);
+            result.?.regions = regions;
 
-        self.frames = self.collate_arena.pushArray(debug_interface.MAX_DEBUG_EVENT_ARRAY_COUNT * 4, DebugFrame);
-        self.frame_bar_lane_count = 0;
-        self.frame_bar_scale = 1.0 / (60.0 * 1000000.0);
-        self.frame_count = 0;
+        } else {
+            result = self.debug_arena.pushStruct(DebugFrame);
+            shared.zeroStruct(DebugFrame, result.?);
+            result.?.regions = self.debug_arena.pushArray(debug_interface.MAX_DEBUG_REGIONS_PER_FRAME, DebugFrameRegion);
+        }
 
-        self.collation_array_index = invalid_event_array_index + 1;
-        self.collation_frame = null;
+        result.?.frame_bar_scale = 1;
+        result.?.root_group = self.createVariableGroup();
+
+        result.?.begin_clock = begin_clock;
+
+        return result.?;
     }
 
-    fn refreshCollation(self: *DebugState) void {
-        self.restartCollation(global_debug_table.current_event_array_index);
-        self.collateDebugRecords(global_debug_table.current_event_array_index);
+    fn freeFrame(self: *DebugState, opt_frame: ?*DebugFrame) void {
+        if (opt_frame) |frame| {
+            self.freeVariableGroup(frame.root_group);
+
+            frame.next = self.first_free_frame;
+            self.first_free_frame = frame;
+        }
     }
 
     fn allocateOpenDebugBlock(
@@ -267,7 +283,7 @@ pub const DebugState = struct {
         if (result) |block| {
             self.first_free_block = block.next_free;
         } else {
-            result = self.collate_arena.pushStruct(OpenDebugBlock);
+            result = self.debug_arena.pushStruct(OpenDebugBlock);
         }
 
         result.?.staring_frame_index = frame_index;
@@ -288,25 +304,23 @@ pub const DebugState = struct {
         }
     }
 
-    fn collateCreateVariable(
+    fn createVariable(
         self: *DebugState,
         event_type: DebugType,
         name: []const u8,
     ) *DebugEvent {
-        const event = self.collate_arena.pushStruct(DebugEvent);
+        const event = self.debug_arena.pushStruct(DebugEvent);
         event.event_type = event_type;
-        event.block_name = @ptrCast(self.collate_arena.pushCopy(name.len + 1, @ptrCast(@constCast(name))));
+        event.block_name = @ptrCast(self.debug_arena.pushCopy(name.len + 1, @ptrCast(@constCast(name))));
 
         return event;
     }
 
-    pub fn collateAddVariableToGroup(self: *DebugState,
+    pub fn addVariableToGroup(self: *DebugState,
         group: *DebugVariableGroup,
         event: *DebugEvent,
-        permanent: bool,
     ) *DebugVariableLink {
-        const link: *DebugVariableLink =
-            if (permanent) self.debug_arena.pushStruct(DebugVariableLink) else self.collate_arena.pushStruct(DebugVariableLink);
+        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink);
         link.next = group.sentinel.next;
         link.prev = &group.sentinel;
         link.next.prev = link;
@@ -319,13 +333,20 @@ pub const DebugState = struct {
         return link;
     }
 
-    fn collateCreateVariableGroup(self: *DebugState, permanent: bool) *DebugVariableGroup {
-        var group: *DebugVariableGroup =
-            if (permanent) self.debug_arena.pushStruct(DebugVariableGroup) else self.collate_arena.pushStruct(DebugVariableGroup);
+    fn createVariableGroup(self: *DebugState) *DebugVariableGroup {
+        var group: *DebugVariableGroup = self.debug_arena.pushStruct(DebugVariableGroup);
         group.sentinel.next = &group.sentinel;
         group.sentinel.prev = &group.sentinel;
 
         return group;
+    }
+
+    fn freeVariableGroup(self: *DebugState, group: ?*DebugVariableGroup) void {
+        _ = self;
+        _ = group;
+
+        // Not defined.
+        unreachable;
     }
 
     fn getGroupForHierarchicalName(self: *DebugState, name: [*:0]const u8) ?*DebugVariableGroup {
@@ -333,126 +354,127 @@ pub const DebugState = struct {
         return self.values_group;
     }
 
-    pub fn collateDebugRecords(self: *DebugState, invalid_event_array_index: u32) void {
-        while (true) : (self.collation_array_index += 1) {
-            if (self.collation_array_index == debug_interface.MAX_DEBUG_EVENT_ARRAY_COUNT) {
-                self.collation_array_index = 0;
+    pub fn collateDebugRecords(self: *DebugState, event_count: u32, event_array: [*]DebugEvent) void {
+        var event_index: u32 = 0;
+        while (event_index < event_count) : (event_index += 1) {
+            const event: *DebugEvent = &event_array[event_index];
+
+            if (self.collation_frame == null) {
+                self.collation_frame = self.newFrame(event.clock);
             }
 
-            if (self.collation_array_index == invalid_event_array_index) {
-                break;
-            }
+            if (event.event_type == .MarkDebugValue) {
+                if (self.getGroupForHierarchicalName(event.data.value_debug_event.block_name)) |group| {
+                    _ = self.addVariableToGroup(group, event.data.value_debug_event);
+                }
+            } else if (event.event_type == .FrameMarker) {
+                std.debug.assert(self.collation_frame != null);
 
-            var event_index: u32 = 0;
-            while (event_index < global_debug_table.event_count[self.collation_array_index]) : (event_index += 1) {
-                const event: *DebugEvent = &global_debug_table.events[self.collation_array_index][event_index];
+                if (self.collation_frame) |collation_frame| {
+                    collation_frame.end_clock = event.clock;
+                    collation_frame.wall_seconds_elapsed = event.data.f32;
 
-                if (event.event_type == .MarkDebugValue) {
-                    if (self.getGroupForHierarchicalName(event.data.value_debug_event.block_name)) |group| {
-                        _ = self.collateAddVariableToGroup(group, event.data.value_debug_event, true);
-                    }
-                } else if (event.event_type == .FrameMarker) {
-                    if (self.collation_frame) |current_frame| {
-                        current_frame.end_clock = event.clock;
-                        current_frame.wall_seconds_elapsed = event.data.f32;
-                        self.frame_count += 1;
+                    if (false) {
+                        const clock_range: f32 = @floatFromInt(collation_frame.end_clock - collation_frame.begin_clock);
+                        if (clock_range > 0) {
+                            const frame_bar_scale = 1.0 / clock_range;
 
-                        if (false) {
-                            const clock_range: f32 = @floatFromInt(current_frame.end_clock - current_frame.begin_clock);
-                            if (clock_range > 0) {
-                                const frame_bar_scale = 1.0 / clock_range;
-
-                                if (self.frame_bar_scale > frame_bar_scale) {
-                                    self.frame_bar_scale = frame_bar_scale;
-                                }
+                            if (self.frame_bar_scale > frame_bar_scale) {
+                                self.frame_bar_scale = frame_bar_scale;
                             }
                         }
                     }
 
-                    self.collation_frame = &self.frames[self.frame_count];
-
-                    if (self.collation_frame) |current_frame| {
-                        current_frame.root_group = self.collateCreateVariableGroup(false);
-                        current_frame.begin_clock = event.clock;
-                        current_frame.end_clock = 0;
-                        current_frame.region_count = 0;
-                        current_frame.regions = self.collate_arena.pushArray(debug_interface.MAX_DEBUG_REGIONS_PER_FRAME, DebugFrameRegion);
-                        current_frame.wall_seconds_elapsed = 0;
+                    if (self.paused) {
+                        self.freeFrame(self.collation_frame);
+                    } else {
+                        if (self.most_recent_frame != null) {
+                            self.most_recent_frame.?.next = collation_frame;
+                        } else {
+                            self.oldest_frame = collation_frame;
+                            self.most_recent_frame = collation_frame;
+                        }
+                        self.frame_count += 1;
                     }
-                } else if (self.collation_frame) |current_frame| {
-                    const frame_index: u32 = self.frame_count -% 1;
-                    const thread: *DebugThread = self.getDebugThread(event.thread_id);
-                    // const relative_clock: u64 = event.clock - current_frame.begin_clock;
-                    // _ = relative_clock;
+                }
 
-                    switch (event.event_type) {
-                        .BeginBlock => {
-                            const debug_block = self.allocateOpenDebugBlock(frame_index, event, &thread.first_open_code_block);
-                            _ = debug_block;
-                        },
-                        .EndBlock => {
-                            if (thread.first_open_code_block) |matching_block| {
-                                const opening_event: *DebugEvent = matching_block.opening_event;
+                self.collation_frame = self.newFrame(event.clock);
+            } else {
+                std.debug.assert(self.collation_frame != null);
 
-                                if (opening_event.matches(event)) {
-                                    if (matching_block.staring_frame_index == frame_index) {
-                                        var match_name: ?[*:0]const u8 = null;
+                const collation_frame: *DebugFrame = self.collation_frame.?;
+                const frame_index: u32 = self.frame_count -% 1;
+                const thread: *DebugThread = self.getDebugThread(event.thread_id);
+                // const relative_clock: u64 = event.clock - collation_frame.begin_clock;
+                // _ = relative_clock;
 
-                                        if (matching_block.parent) |parent| {
-                                            match_name = parent.opening_event.block_name;
-                                        }
+                switch (event.event_type) {
+                    .BeginBlock => {
+                        const debug_block = self.allocateOpenDebugBlock(frame_index, event, &thread.first_open_code_block);
+                        _ = debug_block;
+                    },
+                    .EndBlock => {
+                        if (thread.first_open_code_block) |matching_block| {
+                            const opening_event: *DebugEvent = matching_block.opening_event;
 
-                                        if (match_name == self.scope_to_record) {
-                                            const min_t: f32 = @floatFromInt(opening_event.clock - current_frame.begin_clock);
-                                            const max_t: f32 = @floatFromInt(event.clock - current_frame.begin_clock);
-                                            const threshold_t: f32 = 0.01;
+                            if (opening_event.matches(event)) {
+                                if (matching_block.staring_frame_index == frame_index) {
+                                    var match_name: ?[*:0]const u8 = null;
 
-                                            if ((max_t - min_t) > threshold_t) {
-                                                var region: *DebugFrameRegion = self.addRegion(current_frame);
-                                                region.event = opening_event;
-                                                region.cycle_count = event.clock - opening_event.clock;
-                                                region.lane_index = @intCast(thread.lane_index);
-                                                region.min_t = min_t;
-                                                region.max_t = max_t;
-                                                region.color_index = @truncate(@intFromPtr(opening_event.block_name));
-                                            }
-                                        }
-                                    } else {
-                                        // Started on some previous frame.
+                                    if (matching_block.parent) |parent| {
+                                        match_name = parent.opening_event.block_name;
                                     }
 
-                                    self.deallocateOpenDebugBlock(&thread.first_open_code_block);
-                                } else {
-                                    // No begin block.
-                                }
-                            }
-                        },
-                        .OpenDataBlock => {
-                            const debug_block = self.allocateOpenDebugBlock(
-                                frame_index,
-                                event,
-                                &thread.first_open_data_block,
-                            );
-                            debug_block.group = self.collateCreateVariableGroup(false);
-                            const parent = if (debug_block.parent != null) debug_block.parent.?.group.? else self.collation_frame.?.root_group.?;
-                            var link: *DebugVariableLink = self.collateAddVariableToGroup(parent, event, false);
-                            link.children = debug_block.group.?;
-                        },
-                        .CloseDataBlock => {
-                            if (thread.first_open_data_block) |matching_block| {
-                                const opening_event: *DebugEvent = matching_block.opening_event;
+                                    if (match_name == self.scope_to_record) {
+                                        const min_t: f32 = @floatFromInt(opening_event.clock - collation_frame.begin_clock);
+                                        const max_t: f32 = @floatFromInt(event.clock - collation_frame.begin_clock);
+                                        const threshold_t: f32 = 0.01;
 
-                                if (opening_event.matches(event)) {
-                                    self.deallocateOpenDebugBlock(&thread.first_open_data_block);
+                                        if ((max_t - min_t) > threshold_t) {
+                                            var region: *DebugFrameRegion = self.addRegion(collation_frame);
+                                            region.event = opening_event;
+                                            region.cycle_count = event.clock - opening_event.clock;
+                                            region.lane_index = @intCast(thread.lane_index);
+                                            region.min_t = min_t;
+                                            region.max_t = max_t;
+                                            region.color_index = @truncate(@intFromPtr(opening_event.block_name));
+                                        }
+                                    }
                                 } else {
-                                    // No begin block.
+                                    // Started on some previous frame.
                                 }
+
+                                self.deallocateOpenDebugBlock(&thread.first_open_code_block);
+                            } else {
+                                // No begin block.
                             }
-                        },
-                        else => {
-                            _ = self.collateAddVariableToGroup(thread.first_open_data_block.?.group.?, event, false);
-                        },
-                    }
+                        }
+                    },
+                    .OpenDataBlock => {
+                        const debug_block = self.allocateOpenDebugBlock(
+                            frame_index,
+                            event,
+                            &thread.first_open_data_block,
+                        );
+                        debug_block.group = self.createVariableGroup();
+                        const parent = if (debug_block.parent != null) debug_block.parent.?.group.? else self.collation_frame.?.root_group.?;
+                        var link: *DebugVariableLink = self.addVariableToGroup(parent, event);
+                        link.children = debug_block.group.?;
+                    },
+                    .CloseDataBlock => {
+                        if (thread.first_open_data_block) |matching_block| {
+                            const opening_event: *DebugEvent = matching_block.opening_event;
+
+                            if (opening_event.matches(event)) {
+                                self.deallocateOpenDebugBlock(&thread.first_open_data_block);
+                            } else {
+                                // No begin block.
+                            }
+                        }
+                    },
+                    else => {
+                        _ = self.addVariableToGroup(thread.first_open_data_block.?.group.?, event);
+                    },
                 }
             }
         }
@@ -470,7 +492,12 @@ pub const DebugState = struct {
         }
 
         if (result == null) {
-            result = self.collate_arena.pushStruct(DebugThread);
+            result = self.first_thread;
+            if (result != null) {
+                self.first_thread = result.?.next;
+            } else {
+                result = self.debug_arena.pushStruct(DebugThread);
+            }
 
             result.?.id = thread_id;
             result.?.first_open_code_block = null;
@@ -859,6 +886,16 @@ fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_posit
         const bar_spacing: f32 = 4;
         var lane_height: f32 = 0;
         const lane_count: u32 = debug_state.frame_bar_lane_count;
+        var frame_bar_scale: f32 = std.math.floatMax(f32);
+
+        {
+            var opt_frame: ?*DebugFrame = debug_state.oldest_frame;
+            while (opt_frame) |frame| : (opt_frame = frame.next) {
+                if (frame_bar_scale < frame.frame_bar_scale) {
+                    frame_bar_scale = frame.frame_bar_scale;
+                }
+            }
+        }
 
         var max_frame: u32 = debug_state.frame_count;
         if (max_frame > 10) {
@@ -876,7 +913,7 @@ fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_posit
         // const chart_height: f32 = bars_plus_spacing * @as(f32, @floatFromInt(max_frame));
         const chart_width: f32 = profile_rect.getDimension().x();
         const chart_top: f32 = profile_rect.max.y();
-        const scale: f32 = chart_width * debug_state.frame_bar_scale;
+        const scale: f32 = chart_width * frame_bar_scale;
 
         const colors: [12]Color3 = .{
             Color3.new(1, 0, 0),
@@ -894,9 +931,9 @@ fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_posit
         };
 
         var frame_index: u32 = 0;
-        while (frame_index < max_frame) : (frame_index += 1) {
-            const frame: *DebugFrame = &debug_state.frames[debug_state.frame_count - (frame_index + 1)];
-
+        var opt_frame: ?*DebugFrame = debug_state.oldest_frame;
+        while (opt_frame) |frame| : (opt_frame = frame.next) {
+            defer frame_index += 1;
             const stack_x: f32 = chart_left;
             const stack_y: f32 = chart_top - bars_plus_spacing * @as(f32, (@floatFromInt(frame_index)));
 
@@ -1602,6 +1639,19 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
 
     if (shared.debug_global_memory) |memory| {
         if (!debug_state.initialized) {
+            debug_state.frame_bar_lane_count = 0;
+            debug_state.first_thread = null;
+            debug_state.first_free_thread = null;
+            debug_state.first_free_block = null;
+
+            debug_state.frame_count = 0;
+
+            debug_state.oldest_frame = null;
+            debug_state.most_recent_frame = null;
+            debug_state.first_free_frame = null;
+
+            debug_state.collation_frame = null;
+
             debug_state.high_priority_queue = memory.high_priority_queue;
 
             debug_state.tree_sentinel.next = &debug_state.tree_sentinel;
@@ -1653,12 +1703,7 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
             debug_state.scope_to_record = null;
 
             debug_state.initialized = true;
-            debug_state.values_group = debug_state.collateCreateVariableGroup(true);
-
-            debug_state.debug_arena.makeSubArena(&debug_state.collate_arena, shared.megabytes(32), 4);
-            debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
-
-            debug_state.restartCollation(0);
+            debug_state.values_group = debug_state.createVariableGroup();
 
             _ = debug_state.addTree(
                 debug_state.root_group,
@@ -1835,10 +1880,10 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
             }
         }
 
-        if (debug_state.frame_count > 0) {
+        if (debug_state.most_recent_frame) |most_recent_frame| {
             var buffer: [128]u8 = undefined;
             const slice = std.fmt.bufPrintZ(&buffer, "Last frame time: {d:0.2}ms", .{
-                debug_state.frames[debug_state.frame_count - 1].wall_seconds_elapsed * 1000,
+                most_recent_frame.wall_seconds_elapsed * 1000,
             }) catch "";
             textLine(slice);
         }
@@ -1849,8 +1894,6 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
             } else {
                 debug_state.scope_to_record = null;
             }
-
-            debug_state.refreshCollation();
         }
 
         group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer);
@@ -1892,36 +1935,25 @@ pub fn initializeDebugValue(
 }
 
 pub fn frameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) callconv(.C) *debug_interface.DebugTable {
-    global_debug_table.current_event_array_index += 1;
-    if (global_debug_table.current_event_array_index >= global_debug_table.events.len) {
-        global_debug_table.current_event_array_index = 0;
-    }
+    global_debug_table.current_event_array_index = if (global_debug_table.current_event_array_index == 0) 1 else 0;
 
     const next_event_array_index: u64 = @as(u64, @intCast(global_debug_table.current_event_array_index)) << 32;
     const event_array_index_event_index: u64 =
         @atomicRmw(u64, &global_debug_table.event_array_index_event_index, .Xchg, next_event_array_index, .seq_cst);
-
     const event_array_index: u32 = @intCast(event_array_index_event_index >> 32);
+
+    std.debug.assert(event_array_index <= 1);
+
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
-    global_debug_table.event_count[event_array_index] = event_count;
+
+    std.debug.print("event_count: {d}\n", .{ event_count });
 
     if (memory.debug_storage) |debug_storage| {
         const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
 
         if (getGameAssets(memory)) |assets| {
             debugStart(debug_state, assets, buffer.width, buffer.height);
-
-            if (memory.executable_reloaded) {
-                debug_state.restartCollation(global_debug_table.current_event_array_index);
-            }
-
-            if (!debug_state.paused) {
-                // if (debug_state.frame_count >= (debug_interface.MAX_DEBUG_EVENT_ARRAY_COUNT * 4 - 1)) {
-                    debug_state.restartCollation(global_debug_table.current_event_array_index);
-                // }
-
-                debug_state.collateDebugRecords(global_debug_table.current_event_array_index);
-            }
+            debug_state.collateDebugRecords(event_count, &global_debug_table.events[event_array_index]);
 
             var draw_buffer_: asset.LoadedBitmap = .{
                 .width = shared.safeTruncateToUInt16(buffer.width),

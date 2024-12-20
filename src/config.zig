@@ -2,7 +2,7 @@ pub const global_constants = GlobalConstants{};
 
 pub const GlobalConstants = struct {
     Renderer_ShowLightingSamples: bool = false,
-    Renderer_Camera_UseDebug: bool = true,
+    Renderer_Camera_UseDebug: bool = false,
     Renderer_Camera_DebugDistance: f32 = 25,
     Renderer_Camera_RoomBased: bool = false,
     GroundChunks_Checkerboards: bool = false,
