@@ -110,6 +110,7 @@ const LoadedFont = asset.LoadedFont;
 const Particle = shared.Particle;
 const ParticleCel = shared.ParticleCel;
 const TimedBlock = debug_interface.TimedBlock;
+const DebugInterface = debug_interface.DebugInterface;
 
 pub export fn updateAndRender(
     platform: shared.Platform,
@@ -398,7 +399,7 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
-    if (debug_interface.debugIf("GroundChunks_RecomputeOnEXEChange")) {
+    if (DebugInterface.debugIf(@src(), "GroundChunks_RecomputeOnEXEChange")) {
         if (memory.executable_reloaded) {
             for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
                 const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -478,7 +479,7 @@ pub export fn updateAndRender(
     };
     const draw_buffer = &draw_buffer_;
 
-    if (debug_interface.debugIf("Renderer_TestWeirdDrawBufferSize")) {
+    if (DebugInterface.debugIf(@src(), "Renderer_TestWeirdDrawBufferSize")) {
         // Enable this to test weird buffer sizes in the renderer.
         draw_buffer.width = 1279;
         draw_buffer.height = 719;
@@ -530,7 +531,7 @@ pub export fn updateAndRender(
                     const ground_side_in_meters = state.world.chunk_dimension_in_meters.x();
                     render_group.pushBitmap(bitmap, ground_side_in_meters, delta, Color.white(), 1);
 
-                    if (debug_interface.debugIf("GroundChunks_Outlines")) {
+                    if (DebugInterface.debugIf(@src(), "GroundChunks_Outlines")) {
                         render_group.pushRectangleOutline(
                             Vector2.splat(ground_side_in_meters),
                             delta,
@@ -725,7 +726,7 @@ pub export fn updateAndRender(
                         }
                     }
 
-                    if (debug_interface.debugIf("AI_Familiar_FollowsHero")) {
+                    if (DebugInterface.debugIf(@src(), "AI_Familiar_FollowsHero")) {
                         if (closest_hero) |hero| {
                             if (closest_hero_squared > math.square(3.0)) {
                                 const speed: f32 = 1.0;
@@ -788,7 +789,7 @@ pub export fn updateAndRender(
 
                     drawHitPoints(entity, render_group);
 
-                    if (debug_interface.debugIf("Particles_Test")) {
+                    if (DebugInterface.debugIf(@src(), "Particles_Test")) {
                         // Particle system test.
                         var particle_spawn_index: u32 = 0;
                         while (particle_spawn_index < 3) : (particle_spawn_index += 1) {
@@ -878,7 +879,7 @@ pub export fn updateAndRender(
                             }
                         }
 
-                        if (debug_interface.debugIf("Particles_ShowGrid")) {
+                        if (DebugInterface.debugIf(@src(), "Particles_ShowGrid")) {
                             var y: u32 = 0;
                             while (y < shared.PARTICLE_CEL_DIM) : (y += 1) {
                                 var x: u32 = 0;
@@ -1005,7 +1006,7 @@ pub export fn updateAndRender(
                     render_group.pushBitmapId(hero_bitmaps.head, 2.5, Vector3.new(0, 0, head_z), Color.white(), null);
                 },
                 .Space => {
-                    if (debug_interface.debugIf("Simulation_UseSpaceOutlines")) {
+                    if (DebugInterface.debugIf(@src(), "Simulation_UseSpaceOutlines")) {
                         const space_color = Color.new(0, 0.5, 1, 1);
                         var volume_index: u32 = 0;
                         while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
@@ -1051,36 +1052,37 @@ pub export fn updateAndRender(
                 }
 
                 if (debug_interface.requested(entity_debug_id)) {
-                    debug_interface.debugBeginDataBlock(@src(), "Simulation Entity", entity_debug_id);
+                    DebugInterface.debugBeginDataBlock(@src(), "Simulation Entity", entity_debug_id);
                     {
-                        debug_interface.debugStruct(@src(), entity);
-                        debug_interface.debugValue(@src(), hero_bitmaps, "torso");
+                        DebugInterface.debugStruct(@src(), entity);
+                        DebugInterface.debugValue(@src(), hero_bitmaps, "torso");
+                        // DebugInterface.debugStruct(@src(), &config.global_constants);
                     }
-                    debug_interface.debugEndDataBlock(@src());
+                    DebugInterface.debugEndDataBlock(@src());
 
-                    // debug_interface.debugBeginDataBlock(@src(), "Simulation Entity", entity_debug_id);
-                    // debug_interface.debugValue(@src(), entity, "storage_index");
-                    // debug_interface.debugValue(@src(), entity, "updatable");
-                    // debug_interface.debugValue(@src(), entity, "type");
-                    // debug_interface.debugValue(@src(), entity, "flags");
-                    // debug_interface.debugValue(@src(), entity, "position");
-                    // debug_interface.debugValue(@src(), entity, "velocity");
-                    // debug_interface.debugValue(@src(), entity, "distance_limit");
-                    // debug_interface.debugValue(@src(), entity, "facing_direction");
-                    // debug_interface.debugValue(@src(), entity, "head_bob_time");
-                    // debug_interface.debugValue(@src(), entity, "abs_tile_z_delta");
-                    // debug_interface.debugValue(@src(), entity, "hit_point_max");
-                    // debug_interface.debugValue(@src(), hero_bitmaps, "torso");
-                    // debug_interface.debugBeginArray(entity.hit_points);
+                    // DebugInterface.debugBeginDataBlock(@src(), "Simulation Entity", entity_debug_id);
+                    // DebugInterface.debugValue(@src(), entity, "storage_index");
+                    // DebugInterface.debugValue(@src(), entity, "updatable");
+                    // DebugInterface.debugValue(@src(), entity, "type");
+                    // DebugInterface.debugValue(@src(), entity, "flags");
+                    // DebugInterface.debugValue(@src(), entity, "position");
+                    // DebugInterface.debugValue(@src(), entity, "velocity");
+                    // DebugInterface.debugValue(@src(), entity, "distance_limit");
+                    // DebugInterface.debugValue(@src(), entity, "facing_direction");
+                    // DebugInterface.debugValue(@src(), entity, "head_bob_time");
+                    // DebugInterface.debugValue(@src(), entity, "abs_tile_z_delta");
+                    // DebugInterface.debugValue(@src(), entity, "hit_point_max");
+                    // DebugInterface.debugValue(@src(), hero_bitmaps, "torso");
+                    // DebugInterface.debugBeginArray(entity.hit_points);
                     // var hit_point_index: u32 = 0;
                     // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-                    //     debug_interface.debugValue(@src(), entity.hit_points[hit_point_index]);
+                    //     DebugInterface.debugValue(@src(), entity.hit_points[hit_point_index]);
                     // }
-                    // debug_interface.debugEndArray();
-                    // debug_interface.debugValue(@src(), entity, "sword");
-                    // debug_interface.debugValue(@src(), entity, "walkable_dimension");
-                    // debug_interface.debugValue(@src(), entity, "walkable_height");
-                    // debug_interface.debugEndDataBlock(@src());
+                    // DebugInterface.debugEndArray();
+                    // DebugInterface.debugValue(@src(), entity, "sword");
+                    // DebugInterface.debugValue(@src(), entity, "walkable_dimension");
+                    // DebugInterface.debugValue(@src(), entity, "walkable_height");
+                    // DebugInterface.debugEndDataBlock(@src());
 
                     hot_entity_count += 1;
                 }
@@ -1580,7 +1582,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
             var series = random.Series.seed(seed);
 
             var color = Color.white();
-            if (debug_interface.debugIf("GroundChunks_Checkerboards")) {
+            if (DebugInterface.debugIf(@src(), "GroundChunks_Checkerboards")) {
                 color = Color.new(1, 0, 0, 1);
                 if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
                     color = Color.new(0, 0, 1, 1);

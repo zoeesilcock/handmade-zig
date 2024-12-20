@@ -39,6 +39,7 @@ const Rectangle2i = math.Rectangle2i;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
 const TimedBlock = debug_interface.TimedBlock;
+const DebugInterface = debug_interface.DebugInterface;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
@@ -165,8 +166,8 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
         const offset_z: f32 = 0;
         var distance_above_target = transform.distance_above_target;
 
-        if (debug_interface.debugIf("Renderer_Camera_UseDebug")) {
-            distance_above_target += debug_interface.debugVariable(f32, "Renderer_Camera_DebugDistance");
+        if (DebugInterface.debugIf(@src(), "Renderer_Camera_UseDebug")) {
+            distance_above_target += DebugInterface.debugVariable(@src(), f32, "Renderer_Camera_DebugDistance");
         }
 
         const distance_to_position_z = distance_above_target - position.z();
@@ -1672,7 +1673,7 @@ inline fn sampleEnvironmentMap(
     std.debug.assert(rounded_x >= 0 and rounded_x < lod.width);
     std.debug.assert(rounded_y >= 0 and rounded_y < lod.height);
 
-    if (debug_interface.debugIf("Renderer_ShowLightingSamples")) {
+    if (DebugInterface.debugIf(@src(), "Renderer_ShowLightingSamples")) {
         // Debug where we are sampling from on the environment map.
         const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
         const texture_base = shared.incrementPointer(lod.memory.?, test_offset);

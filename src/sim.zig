@@ -16,6 +16,7 @@ const Rectangle3 = math.Rectangle3;
 const State = shared.State;
 const World = world.World;
 const TimedBlock = debug_interface.TimedBlock;
+const DebugInterface = debug_interface.DebugInterface;
 
 // introspect("sim");
 pub const SimRegion = extern struct {
@@ -842,7 +843,7 @@ pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
             var new_camera_position = state.camera_position;
             new_camera_position.chunk_z = stored.position.chunk_z;
 
-            if (debug_interface.debugIf("Renderer_Camera_RoomBased")) {
+            if (DebugInterface.debugIf(@src(), "Renderer_Camera_RoomBased")) {
                 if (entity.position.x() > 9.0) {
                     new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(18, 0, 0));
                 } else if (entity.position.x() < -9.0) {

@@ -187,6 +187,8 @@ pub const DebugState = struct {
     selected_id_count: u32,
     selected_id: [64]DebugId = [1]DebugId{undefined} ** 64,
 
+    values_group: ?*DebugVariableGroup,
+
     root_group: ?*DebugVariableGroup,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
     tree_sentinel: DebugTree,
@@ -298,25 +300,37 @@ pub const DebugState = struct {
         return event;
     }
 
-    pub fn collateAddVariableToGroup(self: *DebugState, group: *DebugVariableGroup, event: *DebugEvent) *DebugVariableLink {
-        const link: *DebugVariableLink = self.collate_arena.pushStruct(DebugVariableLink);
+    pub fn collateAddVariableToGroup(self: *DebugState,
+        group: *DebugVariableGroup,
+        event: *DebugEvent,
+        permanent: bool,
+    ) *DebugVariableLink {
+        const link: *DebugVariableLink =
+            if (permanent) self.debug_arena.pushStruct(DebugVariableLink) else self.collate_arena.pushStruct(DebugVariableLink);
         link.next = group.sentinel.next;
-        link.prev = group.sentinel;
+        link.prev = &group.sentinel;
         link.next.prev = link;
         link.prev.next = link;
         link.children = null;
         link.event = event;
 
+        std.debug.assert(link.event.event_type != .BeginBlock);
+
         return link;
     }
 
-    fn collateCreateVariableGroup(self: *DebugState) *DebugVariableGroup {
-        var group: *DebugVariableGroup = self.collate_arena.pushStruct(DebugVariableGroup);
-        group.sentinel = self.collate_arena.pushStruct(DebugVariableLink);
-        group.sentinel.next = group.sentinel;
-        group.sentinel.prev = group.sentinel;
+    fn collateCreateVariableGroup(self: *DebugState, permanent: bool) *DebugVariableGroup {
+        var group: *DebugVariableGroup =
+            if (permanent) self.debug_arena.pushStruct(DebugVariableGroup) else self.collate_arena.pushStruct(DebugVariableGroup);
+        group.sentinel.next = &group.sentinel;
+        group.sentinel.prev = &group.sentinel;
 
         return group;
+    }
+
+    fn getGroupForHierarchicalName(self: *DebugState, name: [*:0]const u8) ?*DebugVariableGroup {
+        _ = name;
+        return self.values_group;
     }
 
     pub fn collateDebugRecords(self: *DebugState, invalid_event_array_index: u32) void {
@@ -333,7 +347,11 @@ pub const DebugState = struct {
             while (event_index < global_debug_table.event_count[self.collation_array_index]) : (event_index += 1) {
                 const event: *DebugEvent = &global_debug_table.events[self.collation_array_index][event_index];
 
-                if (event.event_type == .FrameMarker) {
+                if (event.event_type == .MarkDebugValue) {
+                    if (self.getGroupForHierarchicalName(event.data.value_debug_event.block_name)) |group| {
+                        _ = self.collateAddVariableToGroup(group, event.data.value_debug_event, true);
+                    }
+                } else if (event.event_type == .FrameMarker) {
                     if (self.collation_frame) |current_frame| {
                         current_frame.end_clock = event.clock;
                         current_frame.wall_seconds_elapsed = event.data.f32;
@@ -354,7 +372,7 @@ pub const DebugState = struct {
                     self.collation_frame = &self.frames[self.frame_count];
 
                     if (self.collation_frame) |current_frame| {
-                        current_frame.root_group = self.collateCreateVariableGroup();
+                        current_frame.root_group = self.collateCreateVariableGroup(false);
                         current_frame.begin_clock = event.clock;
                         current_frame.end_clock = 0;
                         current_frame.region_count = 0;
@@ -415,9 +433,9 @@ pub const DebugState = struct {
                                 event,
                                 &thread.first_open_data_block,
                             );
-                            debug_block.group = self.collateCreateVariableGroup();
+                            debug_block.group = self.collateCreateVariableGroup(false);
                             const parent = if (debug_block.parent != null) debug_block.parent.?.group.? else self.collation_frame.?.root_group.?;
-                            var link: *DebugVariableLink = self.collateAddVariableToGroup(parent, event);
+                            var link: *DebugVariableLink = self.collateAddVariableToGroup(parent, event, false);
                             link.children = debug_block.group.?;
                         },
                         .CloseDataBlock => {
@@ -432,7 +450,7 @@ pub const DebugState = struct {
                             }
                         },
                         else => {
-                            _ = self.collateAddVariableToGroup(thread.first_open_data_block.?.group.?, event);
+                            _ = self.collateAddVariableToGroup(thread.first_open_data_block.?.group.?, event, false);
                         },
                     }
                 }
@@ -622,7 +640,7 @@ pub const DebugVariableLink = struct {
 };
 
 pub const DebugVariableGroup = struct {
-    sentinel: *DebugVariableLink,
+    sentinel: DebugVariableLink,
 };
 
 fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, flags: u32) u32 {
@@ -1062,6 +1080,11 @@ pub fn hit(id: DebugId, z_value: f32) void {
     }
 }
 
+pub fn hitStub(id: DebugId, z_value: f32) void {
+    _ = id;
+    _ = z_value;
+}
+
 pub fn highlighted(id: DebugId, outline_color: *Color) bool {
     var result = false;
 
@@ -1080,6 +1103,12 @@ pub fn highlighted(id: DebugId, outline_color: *Color) bool {
     return result;
 }
 
+pub fn highlightedStub(id: DebugId, outline_color: *Color) bool {
+    _ = id;
+    _ = outline_color;
+    return false;
+}
+
 pub fn requested(id: DebugId) bool {
     var result = false;
 
@@ -1088,6 +1117,11 @@ pub fn requested(id: DebugId) bool {
     }
 
     return result;
+}
+
+pub fn requestedStub(id: DebugId) bool {
+    _ = id;
+    return false;
 }
 
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
@@ -1110,8 +1144,11 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 
             var opt_group = tree.group;
             if (debug_state.frame_count > 0) {
-                if (debug_state.frames[0].root_group) |hacky_group| {
-                    opt_group = hacky_group;
+                // if (debug_state.frames[0].root_group) |hacky_group| {
+                //     opt_group = hacky_group;
+                // }
+                if (debug_state.values_group) |values_group| {
+                    opt_group = values_group;
                 }
             }
 
@@ -1121,7 +1158,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                 var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
 
                 stack[depth].link = tree_group.sentinel.next;
-                stack[depth].sentinel = tree_group.sentinel;
+                stack[depth].sentinel = &tree_group.sentinel;
                 depth += 1;
 
                 while (depth > 0) {
@@ -1201,7 +1238,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                         if (link.children != null and expanded) {
                             iterator = &stack[depth];
                             iterator.link = link.children.?.sentinel.next;
-                            iterator.sentinel = link.children.?.sentinel;
+                            iterator.sentinel = &link.children.?.sentinel;
                             depth += 1;
                         }
                     }
@@ -1614,7 +1651,9 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
 
             debug_state.paused = false;
             debug_state.scope_to_record = null;
+
             debug_state.initialized = true;
+            debug_state.values_group = debug_state.collateCreateVariableGroup(true);
 
             debug_state.debug_arena.makeSubArena(&debug_state.collate_arena, shared.megabytes(32), 4);
             debug_state.collate_temp = debug_state.collate_arena.beginTemporaryMemory();
@@ -1830,6 +1869,26 @@ fn getGameAssets(memory: *shared.Memory) ?*asset.Assets {
     }
 
     return assets;
+}
+
+pub fn initializeDebugValue(
+    source: std.builtin.SourceLocation,
+    event_type: DebugType,
+    sub_event: *DebugEvent,
+    name: []const u8,
+) DebugEvent {
+    const mark_event = DebugEvent.record(source, .MarkDebugValue, "");
+    mark_event.data.value_debug_event = sub_event;
+
+    sub_event.clock = 0;
+    sub_event.file_name = @ptrCast(source.file);
+    sub_event.block_name = @ptrCast(name);
+    sub_event.line_number = source.line;
+    sub_event.thread_id = 0;
+    sub_event.core_index = 0;
+    sub_event.event_type = event_type;
+
+    return sub_event.*;
 }
 
 pub fn frameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) callconv(.C) *debug_interface.DebugTable {
