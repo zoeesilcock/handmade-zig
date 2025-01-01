@@ -251,9 +251,9 @@ pub const DebugState = struct {
             result.?.regions = regions;
 
         } else {
-            result = self.debug_arena.pushStruct(DebugFrame);
+            result = self.pushStructWithDeallocation(DebugFrame);
             shared.zeroStruct(DebugFrame, result.?);
-            result.?.regions = self.debug_arena.pushArray(debug_interface.MAX_DEBUG_REGIONS_PER_FRAME, DebugFrameRegion);
+            result.?.regions = self.pushArrayWithDeallocation(debug_interface.MAX_DEBUG_REGIONS_PER_FRAME, DebugFrameRegion);
         }
 
         result.?.frame_bar_scale = 1;
@@ -273,6 +273,35 @@ pub const DebugState = struct {
         }
     }
 
+    pub fn pushSizeWithDeallocation(self: *DebugState, size: shared.MemoryIndex, alignment: ?shared.MemoryIndex) [*]u8 {
+        var opt_frame: ?*DebugFrame = self.oldest_frame;
+
+        while (!self.debug_arena.hasRoomFor(size, alignment orelse shared.DEFAULT_MEMORY_ALIGNMENT)) {
+            if (opt_frame) |frame| {
+                const frame_to_free = frame;
+                opt_frame = frame.next;
+                if (self.oldest_frame == self.oldest_frame.?.next) {
+                    self.most_recent_frame = self.most_recent_frame.?.next;
+                }
+                self.freeFrame(frame_to_free);
+            }
+        }
+
+        return self.debug_arena.pushSize(size, alignment);
+    }
+
+    pub fn pushStructWithDeallocation(self: *DebugState, comptime T: type) *T {
+        return @as(*T, @ptrCast(@alignCast(self.pushSizeWithDeallocation(@sizeOf(T), @alignOf(T)))));
+    }
+
+    pub fn pushCopyWithDeallocation(self: *DebugState, size: shared.MemoryIndex, source: *void) *void {
+        return self.debug_arena.copy(size, source, @ptrCast(self.pushSizeWithDeallocation(size, null)));
+    }
+
+    pub fn pushArrayWithDeallocation(self: *DebugState, count: shared.MemoryIndex, comptime T: type) [*]T {
+        return @as([*]T, @ptrCast(@alignCast(pushSizeWithDeallocation(self, @sizeOf(T) * count, @alignOf(T)))));
+    }
+
     fn allocateOpenDebugBlock(
         self: *DebugState,
         frame_index: u32,
@@ -283,7 +312,7 @@ pub const DebugState = struct {
         if (result) |block| {
             self.first_free_block = block.next_free;
         } else {
-            result = self.debug_arena.pushStruct(OpenDebugBlock);
+            result = self.pushStructWithDeallocation(OpenDebugBlock);
         }
 
         result.?.staring_frame_index = frame_index;
@@ -309,9 +338,9 @@ pub const DebugState = struct {
         event_type: DebugType,
         name: []const u8,
     ) *DebugEvent {
-        const event = self.debug_arena.pushStruct(DebugEvent);
+        const event = self.pushStructWithDeallocation(DebugEvent);
         event.event_type = event_type;
-        event.block_name = @ptrCast(self.debug_arena.pushCopy(name.len + 1, @ptrCast(@constCast(name))));
+        event.block_name = @ptrCast(self.pushCopyWithDeallocation(name.len + 1, @ptrCast(@constCast(name))));
 
         return event;
     }
@@ -320,7 +349,7 @@ pub const DebugState = struct {
         group: *DebugVariableGroup,
         event: *DebugEvent,
     ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink);
+        const link: *DebugVariableLink = self.pushStructWithDeallocation(DebugVariableLink);
         link.next = group.sentinel.next;
         link.prev = &group.sentinel;
         link.next.prev = link;
@@ -334,7 +363,7 @@ pub const DebugState = struct {
     }
 
     fn createVariableGroup(self: *DebugState) *DebugVariableGroup {
-        var group: *DebugVariableGroup = self.debug_arena.pushStruct(DebugVariableGroup);
+        var group: *DebugVariableGroup = self.pushStructWithDeallocation(DebugVariableGroup);
         group.sentinel.next = &group.sentinel;
         group.sentinel.prev = &group.sentinel;
 
@@ -473,7 +502,9 @@ pub const DebugState = struct {
                         }
                     },
                     else => {
-                        _ = self.addVariableToGroup(thread.first_open_data_block.?.group.?, event);
+                        if (thread.first_open_data_block) |first_open_data_block| {
+                            _ = self.addVariableToGroup(first_open_data_block.group.?, event);
+                        }
                     },
                 }
             }
@@ -496,7 +527,7 @@ pub const DebugState = struct {
             if (result != null) {
                 self.first_thread = result.?.next;
             } else {
-                result = self.debug_arena.pushStruct(DebugThread);
+                result = self.pushStructWithDeallocation(DebugThread);
             }
 
             result.?.id = thread_id;
@@ -525,7 +556,7 @@ pub const DebugState = struct {
     }
 
     fn addTree(self: *DebugState, group: ?*DebugVariableGroup, position: Vector2) *DebugTree {
-        var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree);
+        var tree: *DebugTree = self.pushStructWithDeallocation(DebugTree);
         tree.group = group;
         tree.ui_position = position;
 
@@ -580,7 +611,7 @@ pub const DebugState = struct {
         }
 
         if (result == null) {
-            result = self.debug_arena.pushStruct(DebugView);
+            result = self.pushStructWithDeallocation(DebugView);
             result.?.id = id;
             result.?.view_type = .Unknown;
             result.?.next_in_hash = hash_slot.*;
@@ -1945,8 +1976,6 @@ pub fn frameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared
     std.debug.assert(event_array_index <= 1);
 
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
-
-    std.debug.print("event_count: {d}\n", .{ event_count });
 
     if (memory.debug_storage) |debug_storage| {
         const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));

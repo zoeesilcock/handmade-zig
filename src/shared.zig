@@ -6,6 +6,7 @@ pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
 pub const HIT_POINT_SUB_COUNT = 4;
 pub const BITMAP_BYTES_PER_PIXEL = 4;
+pub const DEFAULT_MEMORY_ALIGNMENT = 4;
 
 pub const intrinsics = @import("intrinsics.zig");
 pub const math = @import("math.zig");
@@ -431,7 +432,7 @@ pub const MemoryArena = struct {
     }
 
     pub fn getRemainingSize(self: *MemoryArena, alignent: ?MemoryIndex) MemoryIndex {
-        return self.size - (self.used + self.getAlignmentOffset(alignent orelse 4));
+        return self.size - (self.used + self.getAlignmentOffset(alignent orelse DEFAULT_MEMORY_ALIGNMENT));
     }
 
     pub fn makeSubArena(self: *MemoryArena, arena: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) void {
@@ -441,12 +442,23 @@ pub const MemoryArena = struct {
         arena.temp_count = 0;
     }
 
-    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) [*]u8 {
-        const alignment_offset = self.getAlignmentOffset(alignment orelse 4);
+    pub fn getEffectiveSizeFor(self: *MemoryArena, size: MemoryIndex, alignment: MemoryIndex) MemoryIndex {
+        const alignment_offset = self.getAlignmentOffset(alignment);
         const aligned_size = size + alignment_offset;
+        return aligned_size;
+    }
+
+    pub fn hasRoomFor(self: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) bool {
+        const effective_size = self.getEffectiveSizeFor(size, alignment orelse DEFAULT_MEMORY_ALIGNMENT);
+        return (self.used + effective_size) <= self.size;
+    }
+
+    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) [*]u8 {
+        const aligned_size = self.getEffectiveSizeFor(size, alignment orelse DEFAULT_MEMORY_ALIGNMENT);
 
         std.debug.assert((self.used + aligned_size) <= self.size);
 
+        const alignment_offset = self.getAlignmentOffset(alignment orelse DEFAULT_MEMORY_ALIGNMENT);
         const result: [*]u8 = @ptrCast(self.base + self.used + alignment_offset);
         self.used += aligned_size;
 
