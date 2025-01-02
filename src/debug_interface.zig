@@ -148,9 +148,8 @@ pub const DebugType = if (INTERNAL) enum(u8) {
 
 pub const DebugEvent = if (INTERNAL) extern struct {
     clock: u64 = 0,
-    file_name: [*:0]const u8 = undefined,
+    guid: [*:0]const u8 = undefined,
     block_name: [*:0]const u8 = undefined,
-    line_number: u32 = undefined,
 
     thread_id: u16 = undefined,
     core_index: u16 = undefined,
@@ -172,7 +171,11 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         FontId: FontId,
     } = undefined,
 
-    pub fn record(source: std.builtin.SourceLocation, event_type: DebugType, block: [*:0]const u8) *DebugEvent {
+    fn uniqueFileCounterString(comptime file_name: []const u8, comptime line_number: u32, comptime counter: []const u8) [*:0]const u8 {
+        return file_name ++ "(" ++ std.fmt.comptimePrint("{d}", .{ line_number }) ++ ")." ++ counter;
+    }
+
+    pub fn record(comptime source: std.builtin.SourceLocation, comptime event_type: DebugType, block: [*:0]const u8) *DebugEvent {
         const event_array_index_event_index = @atomicRmw(u64, &shared.global_debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
         const array_index = event_array_index_event_index >> 32;
         const event_index = event_array_index_event_index & 0xffffffff;
@@ -181,11 +184,10 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         var event: *DebugEvent = &shared.global_debug_table.events[array_index][event_index];
         event.clock = shared.rdtsc();
         event.event_type = event_type;
-        event.thread_id = @truncate(shared.getThreadId());
         event.core_index = 0;
-        event.file_name = source.file;
+        event.thread_id = @truncate(shared.getThreadId());
+        event.guid = DebugEvent.uniqueFileCounterString(source.file, source.line, @tagName(event_type));
         event.block_name = block;
-        event.line_number = source.line;
 
         return event;
     }
@@ -270,15 +272,15 @@ pub const DebugEvent = if (INTERNAL) extern struct {
 pub const TimedBlock = if (INTERNAL) struct {
     counter: DebugCycleCounters = undefined,
 
-    pub fn beginBlock(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+    pub fn beginBlock(comptime source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
         return begin_(source, counter, true);
     }
 
-    pub fn beginFunction(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+    pub fn beginFunction(comptime source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
         return begin_(source, counter, false);
     }
 
-    fn begin_(source: std.builtin.SourceLocation, counter: DebugCycleCounters, is_block: bool) TimedBlock {
+    fn begin_(comptime source: std.builtin.SourceLocation, counter: DebugCycleCounters, is_block: bool) TimedBlock {
         const result = TimedBlock{ .counter = counter };
 
         _ = DebugEvent.record(source, .BeginBlock, if (is_block) @tagName(counter) else source.fn_name);
@@ -286,7 +288,7 @@ pub const TimedBlock = if (INTERNAL) struct {
         return result;
     }
 
-    pub fn frameMarker(source: std.builtin.SourceLocation, counter: DebugCycleCounters, seconds_elapsed: f32) TimedBlock {
+    pub fn frameMarker(comptime source: std.builtin.SourceLocation, counter: DebugCycleCounters, seconds_elapsed: f32) TimedBlock {
         const result = TimedBlock{ .counter = counter };
 
         var event = DebugEvent.record(source, .FrameMarker, "Frame Marker");
@@ -295,7 +297,7 @@ pub const TimedBlock = if (INTERNAL) struct {
         return result;
     }
 
-    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: DebugCycleCounters, hit_count: u32) TimedBlock {
+    pub fn beginWithCount(comptime source: std.builtin.SourceLocation, counter: DebugCycleCounters, hit_count: u32) TimedBlock {
         const result = TimedBlock.beginBlock(source, counter);
         // result.hit_count = hit_count;
         _ = hit_count;
@@ -340,7 +342,7 @@ pub const TimedBlock = if (INTERNAL) struct {
 
 pub const DebugInterface = if (INTERNAL) struct {
     pub fn debugBeginDataBlock(
-        source: std.builtin.SourceLocation,
+        comptime source: std.builtin.SourceLocation,
         name: [*:0]const u8,
         id: DebugId,
     ) void {
@@ -348,14 +350,14 @@ pub const DebugInterface = if (INTERNAL) struct {
         event.data = .{ .debug_id = id };
     }
 
-    pub fn debugStruct(source: std.builtin.SourceLocation, parent: anytype) void {
+    pub fn debugStruct(comptime source: std.builtin.SourceLocation, parent: anytype) void {
         const fields = std.meta.fields(@TypeOf(parent.*));
         inline for (fields) |field| {
             debugValue(source, parent, field.name);
         }
     }
 
-    pub fn debugValue(source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {
+    pub fn debugValue(comptime source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {
         const value = @field(parent, field_name);
         const type_info = @typeInfo(@TypeOf(value));
         var event = DebugEvent.record(source, .Unknown, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ field_name));
@@ -378,7 +380,7 @@ pub const DebugInterface = if (INTERNAL) struct {
     pub fn debugEndArray() void {
     }
 
-    pub fn debugEndDataBlock(source: std.builtin.SourceLocation) void {
+    pub fn debugEndDataBlock(comptime source: std.builtin.SourceLocation) void {
         _ = DebugEvent.record(source, .CloseDataBlock, "End Data Block");
     }
 
@@ -407,7 +409,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         });
     }
 
-    pub fn debugVariable(source: std.builtin.SourceLocation, comptime T: type, comptime path: []const u8) T {
+    pub fn debugVariable(comptime source: std.builtin.SourceLocation, comptime T: type, comptime path: []const u8) T {
         const LocalStorage = LocalStorageType();
         const local_persist = struct {
             var storage: LocalStorage = LocalStorage{};
@@ -424,7 +426,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         return @field(event.*.?.data, @typeName(T));
     }
 
-    pub fn debugIf(source: std.builtin.SourceLocation, comptime path: []const u8) bool {
+    pub fn debugIf(comptime source: std.builtin.SourceLocation, comptime path: []const u8) bool {
         const LocalStorage = LocalStorageType();
         const local_persist = struct {
             var storage: LocalStorage = LocalStorage{};
