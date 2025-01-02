@@ -150,7 +150,6 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     clock: u64 = 0,
     guid: [*:0]const u8 = undefined,
     block_name: [*:0]const u8 = undefined,
-
     thread_id: u16 = undefined,
     core_index: u16 = undefined,
     event_type: DebugType = undefined,
@@ -171,8 +170,8 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         FontId: FontId,
     } = undefined,
 
-    fn uniqueFileCounterString(comptime file_name: []const u8, comptime line_number: u32, comptime counter: []const u8) [*:0]const u8 {
-        return file_name ++ "(" ++ std.fmt.comptimePrint("{d}", .{ line_number }) ++ ")." ++ counter;
+    fn uniqueFileCounterString(comptime file_name: []const u8, comptime line_number: u32, comptime counter: DebugType) [*:0]const u8 {
+        return file_name ++ "(" ++ std.fmt.comptimePrint("{d}", .{ line_number }) ++ ")." ++ @tagName(counter);
     }
 
     pub fn record(comptime source: std.builtin.SourceLocation, comptime event_type: DebugType, block: [*:0]const u8) *DebugEvent {
@@ -186,7 +185,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         event.event_type = event_type;
         event.core_index = 0;
         event.thread_id = @truncate(shared.getThreadId());
-        event.guid = DebugEvent.uniqueFileCounterString(source.file, source.line, @tagName(event_type));
+        event.guid = DebugEvent.uniqueFileCounterString(source.file, source.line, event_type);
         event.block_name = block;
 
         return event;
@@ -419,7 +418,13 @@ pub const DebugInterface = if (INTERNAL) struct {
         if (event.* == null) {
             const default_value = @field(config.global_constants, path);
             event.* = DebugEvent{};
-            event.* = debug.initializeDebugValue(source, .bool, &event.*.?, path);
+            event.* = debug.initializeDebugValue(
+                source,
+                .bool,
+                &event.*.?,
+                DebugEvent.uniqueFileCounterString(source.file, source.line, @field(DebugType, @typeName(T))),
+                path,
+            );
             event.*.?.setValue(default_value);
         }
 
@@ -436,7 +441,13 @@ pub const DebugInterface = if (INTERNAL) struct {
         if (event.* == null) {
             const default_value = @field(config.global_constants, path);
             event.* = DebugEvent{};
-            event.* = debug.initializeDebugValue(source, .bool, &event.*.?, path);
+            event.* = debug.initializeDebugValue(
+                source,
+                .bool,
+                &event.*.?,
+                DebugEvent.uniqueFileCounterString(source.file, source.line, .bool),
+                path,
+            );
             event.*.?.setValue(default_value);
         }
 

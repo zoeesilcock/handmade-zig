@@ -181,6 +181,7 @@ pub const DebugState = struct {
 
     high_priority_queue: *shared.PlatformWorkQueue,
     debug_arena: shared.MemoryArena,
+    per_frame_arena: shared.MemoryArena,
 
     render_group: ?*render.RenderGroup = null,
     debug_font: ?*asset.LoadedFont,
@@ -220,16 +221,17 @@ pub const DebugState = struct {
     frame_count: u32,
     oldest_frame: ?*DebugFrame,
     most_recent_frame: ?*DebugFrame,
-    first_free_frame: ?*DebugFrame,
 
     collation_frame: ?*DebugFrame,
-
-    first_free_stored_event: *DebugStoredEvent,
 
     frame_bar_lane_count: u32,
     first_thread: ?*DebugThread,
     first_free_thread: ?*DebugThread,
     first_free_block: ?*OpenDebugBlock,
+
+    // Per-frame storage management.
+    first_free_stored_event: ?*DebugStoredEvent,
+    first_free_frame: ?*DebugFrame,
 
     pub fn get() ?*DebugState {
         var result: ?*DebugState = null;
@@ -246,25 +248,27 @@ pub const DebugState = struct {
     }
 
     fn newFrame(self: *DebugState, begin_clock: u64) *DebugFrame {
-        var result: ?*DebugFrame = self.first_free_frame;
+        var result: ?*DebugFrame = null;
 
-        if (result != null) {
-            self.first_free_frame = result.?.next;
-            const regions: [*]DebugFrameRegion = result.?.regions;
-            shared.zeroStruct(DebugFrame, result.?);
-            result.?.regions = regions;
-
-        } else {
-            result = self.pushStructWithDeallocation(DebugFrame);
-            shared.zeroStruct(DebugFrame, result.?);
-            result.?.regions = self.pushArrayWithDeallocation(debug_interface.MAX_DEBUG_REGIONS_PER_FRAME, DebugFrameRegion);
+        while (result == null) {
+            result = self.first_free_frame;
+            if (result != null) {
+                self.first_free_frame = result.?.next;
+            } else {
+                if (self.per_frame_arena.hasRoomFor(@sizeOf(DebugFrame), null)) {
+                    result = self.per_frame_arena.pushStruct(DebugFrame);
+                } else {
+                    std.debug.assert(self.oldest_frame != null);
+                    self.freeOldestFrame();
+                }
+            }
         }
+
+        shared.zeroStruct(DebugFrame, result.?);
 
         result.?.frame_index = self.total_frame_count;
         self.total_frame_count += 1;
         result.?.frame_bar_scale = 1;
-        result.?.root_group = self.createVariableGroup();
-
         result.?.begin_clock = begin_clock;
 
         return result.?;
@@ -299,33 +303,49 @@ pub const DebugState = struct {
         }
     }
 
-    pub fn pushSizeWithDeallocation(self: *DebugState, size: shared.MemoryIndex, alignment: ?shared.MemoryIndex) [*]u8 {
-        var opt_frame: ?*DebugFrame = self.oldest_frame;
+    fn freeOldestFrame(self: *DebugState) void {
+        if (self.oldest_frame) |oldest_frame| {
+            self.oldest_frame = oldest_frame.next;
 
-        while (!self.debug_arena.hasRoomFor(size, alignment orelse shared.DEFAULT_MEMORY_ALIGNMENT)) {
-            if (opt_frame) |frame| {
-                const frame_to_free = frame;
-                opt_frame = frame.next;
-                if (self.oldest_frame == self.oldest_frame.?.next) {
-                    self.most_recent_frame = self.most_recent_frame.?.next;
+            if (self.most_recent_frame == oldest_frame) {
+                std.debug.assert(oldest_frame.next == null);
+                self.most_recent_frame = null;
+            }
+
+            self.freeFrame(oldest_frame);
+        }
+    }
+
+    fn storeEvent(self: *DebugState, element: *DebugElement, event: *DebugEvent) *DebugStoredEvent {
+        var result: ?*DebugStoredEvent = null;
+
+        while (result == null) {
+            result = self.first_free_stored_event;
+            if (result != null) {
+                self.first_free_stored_event = result.?.next;
+            } else {
+                if (self.per_frame_arena.hasRoomFor(@sizeOf(DebugStoredEvent), null)) {
+                    result = self.per_frame_arena.pushStruct(DebugStoredEvent);
+                } else {
+                    std.debug.assert(self.oldest_frame != null);
+                    self.freeOldestFrame();
                 }
-                self.freeFrame(frame_to_free);
             }
         }
 
-        return self.debug_arena.pushSize(size, alignment);
-    }
+        result.?.next = null;
+        result.?.frame_index = self.collation_frame.?.frame_index;
+        result.?.event = event.*;
 
-    pub fn pushStructWithDeallocation(self: *DebugState, comptime T: type) *T {
-        return @as(*T, @ptrCast(@alignCast(self.pushSizeWithDeallocation(@sizeOf(T), @alignOf(T)))));
-    }
+        if (element.most_recent_event != null) {
+            element.most_recent_event.?.next = result;
+            element.most_recent_event = result;
+        } else {
+            element.oldest_event = result;
+            element.most_recent_event = result;
+        }
 
-    pub fn pushCopyWithDeallocation(self: *DebugState, size: shared.MemoryIndex, source: *void) *void {
-        return self.debug_arena.copy(size, source, @ptrCast(self.pushSizeWithDeallocation(size, null)));
-    }
-
-    pub fn pushArrayWithDeallocation(self: *DebugState, count: shared.MemoryIndex, comptime T: type) [*]T {
-        return @as([*]T, @ptrCast(@alignCast(pushSizeWithDeallocation(self, @sizeOf(T) * count, @alignOf(T)))));
+        return result.?;
     }
 
     fn allocateOpenDebugBlock(
@@ -338,7 +358,7 @@ pub const DebugState = struct {
         if (result) |block| {
             self.first_free_block = block.next_free;
         } else {
-            result = self.pushStructWithDeallocation(OpenDebugBlock);
+            result = self.debug_arena.pushStruct(OpenDebugBlock);
         }
 
         result.?.staring_frame_index = frame_index;
@@ -352,76 +372,104 @@ pub const DebugState = struct {
     }
 
     fn deallocateOpenDebugBlock(self: *DebugState, first_open_block: *?*OpenDebugBlock) void {
-        if (first_open_block.*) |*free_block| {
-            free_block.*.next_free = self.first_free_block;
-            self.first_free_block = free_block.*;
-            first_open_block.* = free_block.*.parent;
+        const free_block: ?*OpenDebugBlock = first_open_block.*;
+        first_open_block.* = free_block.?.parent;
+        free_block.?.next_free = self.first_free_block;
+        self.first_free_block = free_block;
+    }
+
+    // fn createVariable(
+    //     self: *DebugState,
+    //     event_type: DebugType,
+    //     name: []const u8,
+    // ) *DebugEvent {
+    //     const event = self.debug_arena.pushStruct(DebugEvent);
+    //     event.event_type = event_type;
+    //     event.block_name = @ptrCast(self.pushCopy(name.len + 1, @ptrCast(@constCast(name))));
+    //
+    //     return event;
+    // }
+    //
+    // pub fn addVariableToGroup(self: *DebugState,
+    //     group: *DebugVariableGroup,
+    //     event: *DebugEvent,
+    // ) *DebugVariableLink {
+    //     const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink);
+    //     link.next = group.sentinel.next;
+    //     link.prev = &group.sentinel;
+    //     link.next.prev = link;
+    //     link.prev.next = link;
+    //     link.children = null;
+    //     _ = event;
+    //     // link.event = event;
+    //
+    //     // std.debug.assert(link.event.event_type != .BeginBlock);
+    //
+    //     return link;
+    // }
+    //
+    // fn createVariableGroup(self: *DebugState) *DebugVariableGroup {
+    //     var group: *DebugVariableGroup = self.debug_arena.pushStruct(DebugVariableGroup);
+    //     group.sentinel.next = &group.sentinel;
+    //     group.sentinel.prev = &group.sentinel;
+    //
+    //     return group;
+    // }
+    //
+    // fn freeVariableGroup(self: *DebugState, group: ?*DebugVariableGroup) void {
+    //     _ = self;
+    //     _ = group;
+    //
+    //     // Not defined.
+    //     unreachable;
+    // }
+    //
+    // fn getGroupForHierarchicalName(self: *DebugState, name: [*:0]const u8) ?*DebugVariableGroup {
+    //     _ = self;
+    //     _ = name;
+    //     // return self.values_group;
+    //     return null;
+    // }
+
+    fn getElementFromEvent(self: *DebugState, event: *DebugEvent) *DebugElement {
+        var result: ?*DebugElement = null;
+        const hash_value: u32 = @intCast(@intFromPtr(event.guid) >> 2);
+        const index: u32 = @mod(hash_value, @as(u32, @intCast(self.element_hash.len)));
+
+        var opt_chain: ?*DebugElement = self.element_hash[index];
+        while (opt_chain) |chain| : (opt_chain = chain.next_in_hash) {
+            if (@intFromPtr(chain.guid) == @intFromPtr(event.guid)) {
+                result = chain;
+                break;
+            }
         }
-    }
 
-    fn createVariable(
-        self: *DebugState,
-        event_type: DebugType,
-        name: []const u8,
-    ) *DebugEvent {
-        const event = self.pushStructWithDeallocation(DebugEvent);
-        event.event_type = event_type;
-        event.block_name = @ptrCast(self.pushCopyWithDeallocation(name.len + 1, @ptrCast(@constCast(name))));
+        if (result == null) {
+            result = self.debug_arena.pushStruct(DebugElement);
 
-        return event;
-    }
+            result.?.guid = event.guid;
+            result.?.next_in_hash = self.element_hash[index];
+            result.?.oldest_event = null;
+            result.?.most_recent_event = null;
 
-    pub fn addVariableToGroup(self: *DebugState,
-        group: *DebugVariableGroup,
-        event: *DebugEvent,
-    ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.pushStructWithDeallocation(DebugVariableLink);
-        link.next = group.sentinel.next;
-        link.prev = &group.sentinel;
-        link.next.prev = link;
-        link.prev.next = link;
-        link.children = null;
-        link.event = event;
+            self.element_hash[index] = result;
+        }
 
-        std.debug.assert(link.event.event_type != .BeginBlock);
-
-        return link;
-    }
-
-    fn createVariableGroup(self: *DebugState) *DebugVariableGroup {
-        var group: *DebugVariableGroup = self.pushStructWithDeallocation(DebugVariableGroup);
-        group.sentinel.next = &group.sentinel;
-        group.sentinel.prev = &group.sentinel;
-
-        return group;
-    }
-
-    fn freeVariableGroup(self: *DebugState, group: ?*DebugVariableGroup) void {
-        _ = self;
-        _ = group;
-
-        // Not defined.
-        unreachable;
-    }
-
-    fn getGroupForHierarchicalName(self: *DebugState, name: [*:0]const u8) ?*DebugVariableGroup {
-        _ = name;
-        return self.values_group;
+        return result.?;
     }
 
     pub fn collateDebugRecords(self: *DebugState, event_count: u32, event_array: [*]DebugEvent) void {
         var event_index: u32 = 0;
         while (event_index < event_count) : (event_index += 1) {
             const event: *DebugEvent = &event_array[event_index];
+            const element: *DebugElement = self.getElementFromEvent(event);
 
             if (self.collation_frame == null) {
                 self.collation_frame = self.newFrame(event.clock);
             }
 
             if (event.event_type == .MarkDebugValue) {
-                if (self.getGroupForHierarchicalName(event.data.value_debug_event.block_name)) |group| {
-                    _ = self.addVariableToGroup(group, event.data.value_debug_event);
-                }
+                _ = self.storeEvent(element, event);
             } else if (event.event_type == .FrameMarker) {
                 std.debug.assert(self.collation_frame != null);
 
@@ -444,6 +492,7 @@ pub const DebugState = struct {
                         self.freeFrame(self.collation_frame);
                     } else {
                         if (self.most_recent_frame != null) {
+                            self.most_recent_frame = collation_frame;
                             self.most_recent_frame.?.next = collation_frame;
                         } else {
                             self.oldest_frame = collation_frame;
@@ -457,7 +506,7 @@ pub const DebugState = struct {
             } else {
                 std.debug.assert(self.collation_frame != null);
 
-                const collation_frame: *DebugFrame = self.collation_frame.?;
+                // const collation_frame: *DebugFrame = self.collation_frame.?;
                 const frame_index: u32 = self.frame_count -% 1;
                 const thread: *DebugThread = self.getDebugThread(event.thread_id);
                 // const relative_clock: u64 = event.clock - collation_frame.begin_clock;
@@ -480,21 +529,21 @@ pub const DebugState = struct {
                                         match_name = parent.opening_event.block_name;
                                     }
 
-                                    if (match_name == self.scope_to_record) {
-                                        const min_t: f32 = @floatFromInt(opening_event.clock - collation_frame.begin_clock);
-                                        const max_t: f32 = @floatFromInt(event.clock - collation_frame.begin_clock);
-                                        const threshold_t: f32 = 0.01;
-
-                                        if ((max_t - min_t) > threshold_t) {
-                                            var region: *DebugFrameRegion = self.addRegion(collation_frame);
-                                            region.event = opening_event;
-                                            region.cycle_count = event.clock - opening_event.clock;
-                                            region.lane_index = @intCast(thread.lane_index);
-                                            region.min_t = min_t;
-                                            region.max_t = max_t;
-                                            region.color_index = @truncate(@intFromPtr(opening_event.block_name));
-                                        }
-                                    }
+                                    // if (match_name == self.scope_to_record) {
+                                    //     const min_t: f32 = @floatFromInt(opening_event.clock - collation_frame.begin_clock);
+                                    //     const max_t: f32 = @floatFromInt(event.clock - collation_frame.begin_clock);
+                                    //     const threshold_t: f32 = 0.01;
+                                    //
+                                    //     if ((max_t - min_t) > threshold_t) {
+                                    //         var region: *DebugFrameRegion = self.addRegion(collation_frame);
+                                    //         region.event = opening_event;
+                                    //         region.cycle_count = event.clock - opening_event.clock;
+                                    //         region.lane_index = @intCast(thread.lane_index);
+                                    //         region.min_t = min_t;
+                                    //         region.max_t = max_t;
+                                    //         region.color_index = @truncate(@intFromPtr(opening_event.block_name));
+                                    //     }
+                                    // }
                                 } else {
                                     // Started on some previous frame.
                                 }
@@ -511,10 +560,11 @@ pub const DebugState = struct {
                             event,
                             &thread.first_open_data_block,
                         );
-                        debug_block.group = self.createVariableGroup();
-                        const parent = if (debug_block.parent != null) debug_block.parent.?.group.? else self.collation_frame.?.root_group.?;
-                        var link: *DebugVariableLink = self.addVariableToGroup(parent, event);
-                        link.children = debug_block.group.?;
+                        _ = debug_block;
+                        // debug_block.group = self.createVariableGroup();
+                        // const parent = if (debug_block.parent != null) debug_block.parent.?.group.? else self.collation_frame.?.root_group.?;
+                        // var link: *DebugVariableLink = self.addVariableToGroup(parent, event);
+                        // link.children = debug_block.group.?;
                     },
                     .CloseDataBlock => {
                         if (thread.first_open_data_block) |matching_block| {
@@ -528,9 +578,7 @@ pub const DebugState = struct {
                         }
                     },
                     else => {
-                        if (thread.first_open_data_block) |first_open_data_block| {
-                            _ = self.addVariableToGroup(first_open_data_block.group.?, event);
-                        }
+                        _ = self.storeEvent(element, event);
                     },
                 }
             }
@@ -553,7 +601,7 @@ pub const DebugState = struct {
             if (result != null) {
                 self.first_thread = result.?.next;
             } else {
-                result = self.pushStructWithDeallocation(DebugThread);
+                result = self.debug_arena.pushStruct(DebugThread);
             }
 
             result.?.id = thread_id;
@@ -582,7 +630,7 @@ pub const DebugState = struct {
     // }
 
     fn addTree(self: *DebugState, group: ?*DebugVariableGroup, position: Vector2) *DebugTree {
-        var tree: *DebugTree = self.pushStructWithDeallocation(DebugTree);
+        var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree);
         tree.group = group;
         tree.ui_position = position;
 
@@ -637,7 +685,7 @@ pub const DebugState = struct {
         }
 
         if (result == null) {
-            result = self.pushStructWithDeallocation(DebugView);
+            result = self.debug_arena.pushStruct(DebugView);
             result.?.id = id;
             result.?.view_type = .Unknown;
             result.?.next_in_hash = hash_slot.*;
@@ -735,6 +783,7 @@ pub const DebugStoredEvent = struct {
 };
 
 pub const DebugElement = struct {
+    guid: [*:0]const u8,
     next_in_hash: ?*DebugElement,
     oldest_event: ?*DebugStoredEvent,
     most_recent_event: ?*DebugStoredEvent,
@@ -1415,7 +1464,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
 fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2, alt_ui: bool) void {
     if (debug_state.hot_interaction.interaction_type != .None) {
         if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
-            switch (debug_state.hot_interaction.target.event.event_type) {
+            switch (debug_state.hot_interaction.target.event.?.event_type) {
                 .bool => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
@@ -1481,12 +1530,13 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
         // Mouse move interaction.
         switch (debug_state.interaction.interaction_type) {
             .DragValue => {
-                const event = debug_state.interaction.target.event;
-                switch (event.event_type) {
-                    .f32 => {
-                        event.data.f32 += 0.1 * mouse_delta.y();
-                    },
-                    else => {},
+                if (debug_state.interaction.target.event) |event| {
+                    switch (event.event_type) {
+                        .f32 => {
+                            event.data.f32 += 0.1 * mouse_delta.y();
+                        },
+                        else => {},
+                    }
                 }
             },
             .Resize => {
@@ -1540,23 +1590,24 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
         .ToggleValue => {
             std.debug.assert(debug_state.interaction.target == .event);
 
-            const event: *DebugEvent = debug_state.interaction.target.event;
-            switch (event.event_type) {
-                .bool => {
-                    event.data.bool = !event.data.bool;
-                },
-                .OpenDataBlock => {
-                    const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
+            if (debug_state.interaction.target.event) |event| {
+                switch (event.event_type) {
+                    .bool => {
+                        event.data.bool = !event.data.bool;
+                    },
+                    .OpenDataBlock => {
+                        const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
 
-                    if (view.data != .collapsible) {
-                        view.data = .{
-                            .collapsible = .{ .expanded_always = false, .expanded_alt_view = false },
-                        };
-                    }
+                        if (view.data != .collapsible) {
+                            view.data = .{
+                                .collapsible = .{ .expanded_always = false, .expanded_alt_view = false },
+                            };
+                        }
 
-                    view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
-                },
-                else => {},
+                        view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
+                    },
+                    else => {},
+                }
             }
         },
         else => {},
@@ -1733,9 +1784,16 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
             debug_state.tree_sentinel.prev = &debug_state.tree_sentinel;
             debug_state.tree_sentinel.group = null;
 
+            const total_memory_size: shared.MemoryIndex = memory.debug_storage_size - @sizeOf(DebugState);
             debug_state.debug_arena.initialize(
-                memory.debug_storage_size - @sizeOf(DebugState),
+                total_memory_size,
                 memory.debug_storage.? + @sizeOf(DebugState),
+            );
+            debug_state.debug_arena.makeSubArena(
+                &debug_state.per_frame_arena,
+                total_memory_size / 2,
+                // 128 * 1024,
+                null,
             );
 
             // var context: debug_variables.DebugVariableDefinitionContext = .{
@@ -1778,12 +1836,11 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
             debug_state.scope_to_record = null;
 
             debug_state.initialized = true;
-            debug_state.values_group = debug_state.createVariableGroup();
 
-            _ = debug_state.addTree(
-                debug_state.root_group,
-                Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
-            );
+            // _ = debug_state.addTree(
+            //     debug_state.root_group,
+            //     Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
+            // );
         }
 
         if (debug_state.render_group) |group| {
@@ -1961,6 +2018,11 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
                 most_recent_frame.wall_seconds_elapsed * 1000,
             }) catch "";
             textLine(slice);
+
+            const slice2 = std.fmt.bufPrintZ(&buffer, "Per-frame arena space remaining: {d}kb", .{
+                debug_state.debug_arena.getRemainingSize(1) / 1024,
+            }) catch "";
+            textLine(slice2);
         }
 
         if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
@@ -1993,12 +2055,14 @@ pub fn initializeDebugValue(
     comptime source: std.builtin.SourceLocation,
     event_type: DebugType,
     sub_event: *DebugEvent,
+    guid: [*:0]const u8,
     name: []const u8,
 ) DebugEvent {
     const mark_event = DebugEvent.record(source, .MarkDebugValue, "");
     mark_event.data.value_debug_event = sub_event;
 
     sub_event.clock = 0;
+    sub_event.guid = guid;
     sub_event.block_name = @ptrCast(name);
     sub_event.thread_id = 0;
     sub_event.core_index = 0;
@@ -2018,11 +2082,6 @@ pub fn frameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared
     std.debug.assert(event_array_index <= 1);
 
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
-
-    std.debug.print(
-        "event_count: {d}, event_array_index: {d}, event_array_index_event_index: {d} \n",
-        .{ event_count, event_array_index, event_array_index_event_index },
-    );
 
     if (memory.debug_storage) |debug_storage| {
         const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
