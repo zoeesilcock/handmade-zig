@@ -133,6 +133,18 @@ fn addLibrary(
     lib_handmade.root_module.addOptions("build_options", build_options);
     lib_handmade.root_module.addImport("file_formats", file_formats_module);
 
+    const lib_check = b.addSharedLibrary(.{
+        .name = "handmade",
+        .root_source_file = b.path("src/handmade.zig"),
+        .target = target,
+        .optimize = optimize,
+        .version = .{ .major = 0, .minor = 1, .patch = 0 },
+    });
+    lib_check.root_module.addOptions("build_options", build_options);
+    lib_check.root_module.addImport("file_formats", file_formats_module);
+    const check = b.step("check", "Check if lib compiles");
+    check.dependOn(&lib_check.step);
+
     if (package == .All) {
         // Emit generated assembly of the library.
         const lib_assembly_file = b.addInstallFile(lib_handmade.getEmittedAsm(), "bin/handmade-dll.asm");
