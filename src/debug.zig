@@ -130,6 +130,7 @@ const DebugInteractionType = enum(u32) {
     Resize,
     Move,
     Select,
+    ToggleExpansion,
 };
 
 const DebugInteractionTargetType = enum(u32) {
@@ -149,7 +150,8 @@ const DebugInteraction = struct {
     },
 
     pub fn equals(self: *const DebugInteraction, other: *const DebugInteraction) bool {
-        return self.interaction_type == other.interaction_type and std.meta.eql(self.target, other.target);
+        return self.id.equals(other.id) and
+            self.interaction_type == other.interaction_type and std.meta.eql(self.target, other.target);
     }
 
     pub fn fromLink(
@@ -198,7 +200,7 @@ pub const DebugState = struct {
 
     element_hash: [1024]?*DebugElement = [1]?*DebugElement{null} ** 1024,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
-    root_tree: *DebugTree,
+    root_group: *DebugVariableGroup,
     tree_sentinel: DebugTree,
 
     last_mouse_position: Vector2,
@@ -374,62 +376,103 @@ pub const DebugState = struct {
     fn deallocateOpenDebugBlock(self: *DebugState, first_open_block: *?*OpenDebugBlock) void {
         const free_block: ?*OpenDebugBlock = first_open_block.*;
         first_open_block.* = free_block.?.parent;
+
         free_block.?.next_free = self.first_free_block;
         self.first_free_block = free_block;
     }
 
-    // fn createVariable(
-    //     self: *DebugState,
-    //     event_type: DebugType,
-    //     name: []const u8,
-    // ) *DebugEvent {
-    //     const event = self.debug_arena.pushStruct(DebugEvent);
-    //     event.event_type = event_type;
-    //     event.block_name = @ptrCast(self.pushCopy(name.len + 1, @ptrCast(@constCast(name))));
-    //
-    //     return event;
-    // }
-    //
-    // pub fn addVariableToGroup(self: *DebugState,
-    //     group: *DebugVariableGroup,
-    //     event: *DebugEvent,
-    // ) *DebugVariableLink {
-    //     const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink);
-    //     link.next = group.sentinel.next;
-    //     link.prev = &group.sentinel;
-    //     link.next.prev = link;
-    //     link.prev.next = link;
-    //     link.children = null;
-    //     _ = event;
-    //     // link.event = event;
-    //
-    //     // std.debug.assert(link.event.event_type != .BeginBlock);
-    //
-    //     return link;
-    // }
-    //
-    // fn createVariableGroup(self: *DebugState) *DebugVariableGroup {
-    //     var group: *DebugVariableGroup = self.debug_arena.pushStruct(DebugVariableGroup);
-    //     group.sentinel.next = &group.sentinel;
-    //     group.sentinel.prev = &group.sentinel;
-    //
-    //     return group;
-    // }
-    //
-    // fn freeVariableGroup(self: *DebugState, group: ?*DebugVariableGroup) void {
-    //     _ = self;
-    //     _ = group;
-    //
-    //     // Not defined.
-    //     unreachable;
-    // }
-    //
-    // fn getGroupForHierarchicalName(self: *DebugState, name: [*:0]const u8) ?*DebugVariableGroup {
-    //     _ = self;
-    //     _ = name;
-    //     // return self.values_group;
-    //     return null;
-    // }
+    fn getOrCreateGroupWithName(self: *DebugState, parent: *DebugVariableGroup, name_length: u32, name: [*:0]const u8) ?*DebugVariableGroup {
+        var result: ?*DebugVariableGroup = null;
+        var link: *DebugVariableLink = parent.sentinel.next;
+        while (link != &parent.sentinel) : (link = link.next) {
+            if (link.children != null and shared.stringsWithLengthAreEqual(link.children.?.name, link.children.?.name_length, name, name_length)) {
+                result = link.children;
+            }
+        }
+
+        if (result == null) {
+            result = self.createVariableGroup(name_length, name);
+            _ = self.addGroupToGroup(parent, result.?);
+        }
+
+        return result;
+    }
+
+    fn getGroupForHierarchicalName(self: *DebugState, parent: *DebugVariableGroup, name: [*:0]const u8) ?*DebugVariableGroup {
+        var result: ?*DebugVariableGroup = parent;
+        var first_underscore: ?[*]const u8 = null;
+        var opt_scan: ?[*]const u8 = @ptrCast(name);
+        while (opt_scan) |scan| : (opt_scan = scan + 1) {
+            if (scan[0] == 0) { break; }
+
+            if (scan[0] == '_') {
+                first_underscore = scan;
+                break;
+            }
+        }
+
+        if (first_underscore != null) {
+            const sub_name_length: u32 = @intCast(@intFromPtr(first_underscore.?) - @intFromPtr(name));
+            const sub_name: [*:0]const u8 = @ptrCast(first_underscore.? + 1);
+            if (self.getOrCreateGroupWithName(parent, sub_name_length, name)) |sub_group| {
+                result = self.getGroupForHierarchicalName(sub_group, sub_name);
+            }
+        }
+
+        return result;
+    }
+
+    fn freeVariableGroup(self: *DebugState, group: ?*DebugVariableGroup) void {
+        _ = self;
+        _ = group;
+
+        // Not defined.
+        unreachable;
+    }
+
+    fn createVariableGroup(self: *DebugState, name_length: u32, name: [*:0]const u8) *DebugVariableGroup {
+        var group: *DebugVariableGroup = self.debug_arena.pushStruct(DebugVariableGroup);
+        group.sentinel.next = &group.sentinel;
+        group.sentinel.prev = &group.sentinel;
+        group.name = name;
+        group.name_length = name_length;
+
+        return group;
+    }
+
+    pub fn addElementToGroup(self: *DebugState,
+        parent: *DebugVariableGroup,
+        element: *DebugElement,
+    ) *DebugVariableLink {
+        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink);
+
+        link.next = parent.sentinel.next;
+        link.prev = &parent.sentinel;
+        link.next.prev = link;
+        link.prev.next = link;
+
+        link.children = null;
+        link.element = element;
+
+        return link;
+    }
+
+    pub fn addGroupToGroup(self: *DebugState,
+        parent: *DebugVariableGroup,
+        group: *DebugVariableGroup,
+    ) *DebugVariableLink {
+        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink);
+
+        link.next = parent.sentinel.next;
+        link.prev = &parent.sentinel;
+        link.next.prev = link;
+        link.prev.next = link;
+
+        link.children = group;
+        link.element = null;
+
+        return link;
+    }
 
     fn getElementFromEvent(self: *DebugState, event: *DebugEvent) *DebugElement {
         var result: ?*DebugElement = null;
@@ -449,10 +492,14 @@ pub const DebugState = struct {
 
             result.?.guid = event.guid;
             result.?.next_in_hash = self.element_hash[index];
+            self.element_hash[index] = result;
+
             result.?.oldest_event = null;
             result.?.most_recent_event = null;
 
-            self.element_hash[index] = result;
+            if (self.getGroupForHierarchicalName(self.root_group, event.block_name)) |parent_group| {
+                _ = self.addElementToGroup(parent_group, result.?);
+            }
         }
 
         return result.?;
@@ -514,8 +561,7 @@ pub const DebugState = struct {
 
                 switch (event.event_type) {
                     .BeginBlock => {
-                        const debug_block = self.allocateOpenDebugBlock(frame_index, event, &thread.first_open_code_block);
-                        _ = debug_block;
+                        // _ = self.allocateOpenDebugBlock(frame_index, event, &thread.first_open_code_block);
                     },
                     .EndBlock => {
                         if (thread.first_open_code_block) |matching_block| {
@@ -700,7 +746,7 @@ pub const DebugState = struct {
 
         var result: ?*DebugEvent = null;
 
-        if (link.element.most_recent_event) |most_recent_event| {
+        if (link.element.?.most_recent_event) |most_recent_event| {
             result = &most_recent_event.event;
         }
 
@@ -793,10 +839,12 @@ pub const DebugVariableLink = struct {
     next: *DebugVariableLink,
     prev: *DebugVariableLink,
     children: ?*DebugVariableGroup,
-    element: *DebugElement,
+    element: ?*DebugElement,
 };
 
 pub const DebugVariableGroup = struct {
+    name_length: u32,
+    name: [*:0]const u8,
     sentinel: DebugVariableLink,
 };
 
@@ -914,7 +962,10 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
         .OpenDataBlock => {},
         .CounterThreadList => {},
         .Unknown => {},
-        else => unreachable,
+        else => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{ event.block_name }) catch "";
+            len += @intCast(slice.len);
+        },
     }
 
     if (event.event_type != .OpenDataBlock and flags & DebugVariableToTextFlag.SemiColonEnd.toInt() != 0) {
@@ -1329,78 +1380,100 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                         layout.depth = depth;
 
                         const link: *DebugVariableLink = iterator.link;
-                        const opt_event: ?*DebugEvent = debug_state.getEventFromLink(iterator.link);
                         iterator.link = iterator.link.next;
 
-                        if (opt_event) |event| {
-                            const item_interaction: DebugInteraction = DebugInteraction.fromLink(debug_state, tree, link, .AutoModifyVariable);
+                        if (link.children != null) {
+                            const debug_id: DebugId = DebugId.fromLink(tree, link);
+                            const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
+                            const item_interaction: DebugInteraction = DebugInteraction.fromId(DebugId.fromLink(tree, link), .ToggleExpansion);
+
+                            var text: [256:0]u8 = undefined;
+                            std.debug.assert(link.children.?.name_length + 1 < text.len);
+                            _ = shared.copy(link.children.?.name_length, @ptrCast(@constCast(link.children.?.name)), @ptrCast(&text));
+                            text[link.children.?.name_length] = 0;
+
+                            const text_bounds = getTextSize(debug_state, &text);
+                            var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+                            var element: LayoutElement = layout.beginElementRectangle(&dim);
+                            element.defaultInteraction(item_interaction);
+                            element.end();
+
                             const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
                             const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
-                            const view: *DebugView = debug_state.getOrCreateDebugView(DebugId.fromLink(tree, link));
 
-                            switch (event.event_type) {
-                                .CounterThreadList => {
-                                    var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
-                                    element.makeSizable();
-                                    element.defaultInteraction(item_interaction);
-                                    element.end();
+                            const text_position: Vector2 = Vector2.new(
+                                element.bounds.min.x(),
+                                element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
+                            );
+                            textOutAt(&text, text_position, item_color);
 
-                                    drawProfileIn(debug_state, element.bounds, mouse_position);
-                                },
-                                .BitmapId => {
-                                    const bitmap_scale = view.data.inline_block.dimension.y();
-                                    if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
-                                        var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
-                                        _ = view.data.inline_block.dimension.setX(dim.size.x());
-                                    }
-
-                                    const tear_interaction: DebugInteraction = DebugInteraction.fromLink(debug_state, tree, link, .TearValue);
-                                    var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
-                                    element.makeSizable();
-                                    element.defaultInteraction(tear_interaction);
-                                    element.end();
-
-                                    render_group.pushRectangle2(element.bounds, 0, Color.black());
-                                    render_group.pushBitmapId(
-                                        event.data.BitmapId,
-                                        bitmap_scale,
-                                        element.bounds.min.toVector3(0),
-                                        Color.white(),
-                                        0,
-                                    );
-                                },
-                                else => {
-                                    var text: [4096:0]u8 = undefined;
-                                    var len: u32 = 0;
-                                    len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
-
-                                    const text_bounds = getTextSize(debug_state, &text);
-                                    var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
-
-                                    var element: LayoutElement = layout.beginElementRectangle(&dim);
-                                    element.defaultInteraction(item_interaction);
-                                    element.end();
-
-                                    const text_position: Vector2 = Vector2.new(
-                                        element.bounds.min.x(),
-                                        element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
-                                    );
-                                    textOutAt(&text, text_position, item_color);
-                                },
+                            if (view.data == .collapsible and view.data.collapsible.expanded_always) {
+                                iterator = &stack[depth];
+                                iterator.link = link.children.?.sentinel.next;
+                                iterator.sentinel = &link.children.?.sentinel;
+                                depth += 1;
                             }
-                        }
+                        } else {
+                            const opt_event: ?*DebugEvent = debug_state.getEventFromLink(link);
 
-                        // const expanded: bool = switch (view.data) {
-                        //     .collapsible => |data| data.expanded_always,
-                        //     else => false,
-                        // };
-                        const expanded = true;
+                            if (opt_event) |event| {
+                                const item_interaction: DebugInteraction = DebugInteraction.fromLink(debug_state, tree, link, .AutoModifyVariable);
+                                const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+                                const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
+                                const view: *DebugView = debug_state.getOrCreateDebugView(DebugId.fromLink(tree, link));
 
-                        if (link.children != null and expanded) {
-                            iterator = &stack[depth];
-                            iterator.link = link.children.?.sentinel.next;
-                            iterator.sentinel = &link.children.?.sentinel;
-                            depth += 1;
+                                switch (event.event_type) {
+                                    .CounterThreadList => {
+                                        var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                                        element.makeSizable();
+                                        element.defaultInteraction(item_interaction);
+                                        element.end();
+
+                                        drawProfileIn(debug_state, element.bounds, mouse_position);
+                                    },
+                                    .BitmapId => {
+                                        const bitmap_scale = view.data.inline_block.dimension.y();
+                                        if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
+                                            var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
+                                            _ = view.data.inline_block.dimension.setX(dim.size.x());
+                                        }
+
+                                        const tear_interaction: DebugInteraction = DebugInteraction.fromLink(debug_state, tree, link, .TearValue);
+                                        var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                                        element.makeSizable();
+                                        element.defaultInteraction(tear_interaction);
+                                        element.end();
+
+                                        render_group.pushRectangle2(element.bounds, 0, Color.black());
+                                        render_group.pushBitmapId(
+                                            event.data.BitmapId,
+                                            bitmap_scale,
+                                            element.bounds.min.toVector3(0),
+                                            Color.white(),
+                                            0,
+                                        );
+                                    },
+                                    else => {
+                                        var text: [4096:0]u8 = undefined;
+                                        var len: u32 = 0;
+                                        len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
+
+                                        const text_bounds = getTextSize(debug_state, &text);
+                                        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+                                        var element: LayoutElement = layout.beginElementRectangle(&dim);
+                                        element.defaultInteraction(item_interaction);
+                                        element.end();
+
+                                        const text_position: Vector2 = Vector2.new(
+                                            element.bounds.min.x(),
+                                            element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
+                                        );
+                                        textOutAt(&text, text_position, item_color);
+                                    },
+                                }
+                            }
                         }
                     }
                 }
@@ -1587,6 +1660,17 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     _ = mouse_position;
 
     switch (debug_state.interaction.interaction_type) {
+        .ToggleExpansion => {
+            const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
+
+            if (view.data != .collapsible) {
+                view.data = .{
+                    .collapsible = .{ .expanded_always = false, .expanded_alt_view = false },
+                };
+            }
+
+            view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
+        },
         .ToggleValue => {
             std.debug.assert(debug_state.interaction.target == .event);
 
@@ -1594,17 +1678,6 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
                 switch (event.event_type) {
                     .bool => {
                         event.data.bool = !event.data.bool;
-                    },
-                    .OpenDataBlock => {
-                        const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
-
-                        if (view.data != .collapsible) {
-                            view.data = .{
-                                .collapsible = .{ .expanded_always = false, .expanded_alt_view = false },
-                            };
-                        }
-
-                        view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
                     },
                     else => {},
                 }
@@ -1796,6 +1869,8 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
                 null,
             );
 
+            debug_state.root_group = debug_state.createVariableGroup(4, "Root");
+
             // var context: debug_variables.DebugVariableDefinitionContext = .{
             //     .state = debug_state,
             //     .arena = &debug_state.debug_arena,
@@ -1837,10 +1912,10 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
 
             debug_state.initialized = true;
 
-            // _ = debug_state.addTree(
-            //     debug_state.root_group,
-            //     Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
-            // );
+            _ = debug_state.addTree(
+                debug_state.root_group,
+                Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
+            );
         }
 
         if (debug_state.render_group) |group| {
@@ -2059,6 +2134,8 @@ pub fn initializeDebugValue(
     name: []const u8,
 ) DebugEvent {
     const mark_event = DebugEvent.record(source, .MarkDebugValue, "");
+    mark_event.guid = guid;
+    mark_event.block_name = @ptrCast(name);
     mark_event.data.value_debug_event = sub_event;
 
     sub_event.clock = 0;

@@ -142,6 +142,21 @@ pub inline fn stringsAreEqual(a: []const u8, b: []const u8) bool {
     return result;
 }
 
+pub inline fn stringsWithLengthAreEqual(a: [*:0]const u8, a_length: MemoryIndex, b: [*:0]const u8, b_length: MemoryIndex) bool {
+    var result: bool = a_length == b_length;
+
+    if (result) {
+        for (0..a_length) |i| {
+            if (a[i] != b[i]) {
+                result = false;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
 test "stringsAreEqual" {
     try std.testing.expectEqual(true, stringsAreEqual("abc", "abc"));
     try std.testing.expectEqual(true, stringsAreEqual("", ""));

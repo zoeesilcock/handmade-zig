@@ -112,7 +112,7 @@ pub const DebugId = extern struct {
 
     pub fn equals(self: DebugId, other: DebugId) bool {
         return @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]) and
-            @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]);
+            @intFromPtr(self.value[1]) == @intFromPtr(other.value[1]);
     }
 };
 
