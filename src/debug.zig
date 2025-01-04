@@ -66,11 +66,13 @@ const DebugFrameRegion = struct {
 };
 
 const OpenDebugBlock = struct {
-    staring_frame_index: u32,
-    opening_event: *DebugEvent,
-    group: ?*DebugVariableGroup,
     parent: ?*OpenDebugBlock,
     next_free: ?*OpenDebugBlock,
+
+    staring_frame_index: u32,
+    opening_event: *DebugEvent,
+    element: ?*DebugElement,
+    group: ?*DebugVariableGroup,
 };
 
 const DebugThread = struct {
@@ -154,17 +156,18 @@ const DebugInteraction = struct {
             self.interaction_type == other.interaction_type and std.meta.eql(self.target, other.target);
     }
 
-    pub fn fromLink(
+    pub fn eventInteraction(
         debug_state: *DebugState,
-        tree: *DebugTree,
-        link: *DebugVariableLink,
+        debug_id: DebugId,
+        event: *DebugEvent,
         interaction_type: DebugInteractionType,
     ) DebugInteraction {
+        _ = debug_state;
         return DebugInteraction{
-            .id = DebugId.fromLink(tree, link),
+            .id = debug_id,
             .interaction_type = interaction_type,
             .target = .{
-                .event = debug_state.getEventFromLink(link),
+                .event = event,
             },
         };
     }
@@ -352,6 +355,7 @@ pub const DebugState = struct {
 
     fn allocateOpenDebugBlock(
         self: *DebugState,
+        element: *DebugElement,
         frame_index: u32,
         event: *DebugEvent,
         first_open_block: *?*OpenDebugBlock,
@@ -365,6 +369,7 @@ pub const DebugState = struct {
 
         result.?.staring_frame_index = frame_index;
         result.?.opening_event = event;
+        result.?.element = element;
         result.?.next_free = null;
 
         result.?.parent = first_open_block.*;
@@ -398,7 +403,11 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn getGroupForHierarchicalName(self: *DebugState, parent: *DebugVariableGroup, name: [*:0]const u8) ?*DebugVariableGroup {
+    fn getGroupForHierarchicalName(
+        self: *DebugState,
+        parent: *DebugVariableGroup,
+        name: [*:0]const u8,
+    ) ?*DebugVariableGroup {
         var result: ?*DebugVariableGroup = parent;
         var first_underscore: ?[*]const u8 = null;
         var opt_scan: ?[*]const u8 = @ptrCast(name);
@@ -561,7 +570,7 @@ pub const DebugState = struct {
 
                 switch (event.event_type) {
                     .BeginBlock => {
-                        // _ = self.allocateOpenDebugBlock(frame_index, event, &thread.first_open_code_block);
+                        // _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_code_block);
                     },
                     .EndBlock => {
                         if (thread.first_open_code_block) |matching_block| {
@@ -601,30 +610,27 @@ pub const DebugState = struct {
                         }
                     },
                     .OpenDataBlock => {
-                        const debug_block = self.allocateOpenDebugBlock(
-                            frame_index,
-                            event,
-                            &thread.first_open_data_block,
-                        );
-                        _ = debug_block;
-                        // debug_block.group = self.createVariableGroup();
-                        // const parent = if (debug_block.parent != null) debug_block.parent.?.group.? else self.collation_frame.?.root_group.?;
-                        // var link: *DebugVariableLink = self.addVariableToGroup(parent, event);
-                        // link.children = debug_block.group.?;
+                        _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_data_block);
+
                     },
                     .CloseDataBlock => {
                         if (thread.first_open_data_block) |matching_block| {
-                            const opening_event: *DebugEvent = matching_block.opening_event;
+                            _ = self.storeEvent(element, event);
 
+                            const opening_event: *DebugEvent = matching_block.opening_event;
                             if (opening_event.matches(event)) {
                                 self.deallocateOpenDebugBlock(&thread.first_open_data_block);
-                            } else {
-                                // No begin block.
                             }
                         }
                     },
                     else => {
-                        _ = self.storeEvent(element, event);
+                        var storage_element: *DebugElement = element;
+
+                        if (thread.first_open_data_block) |first_open_data_block| {
+                            storage_element = first_open_data_block.element.?;
+                        }
+
+                        _ = self.storeEvent(storage_element, event);
                     },
                 }
             }
@@ -740,18 +746,6 @@ pub const DebugState = struct {
 
         return result.?;
     }
-
-    fn getEventFromLink(self: *DebugState, link: *DebugVariableLink) ?*DebugEvent {
-        _ = self;
-
-        var result: ?*DebugEvent = null;
-
-        if (link.element.?.most_recent_event) |most_recent_event| {
-            result = &most_recent_event.event;
-        }
-
-        return result;
-    }
 };
 
 const DebugVariableToTextFlag = enum(u32) {
@@ -831,6 +825,7 @@ pub const DebugStoredEvent = struct {
 pub const DebugElement = struct {
     guid: [*:0]const u8,
     next_in_hash: ?*DebugElement,
+
     oldest_event: ?*DebugStoredEvent,
     most_recent_event: ?*DebugStoredEvent,
 };
@@ -838,6 +833,7 @@ pub const DebugElement = struct {
 pub const DebugVariableLink = struct {
     next: *DebugVariableLink,
     prev: *DebugVariableLink,
+
     children: ?*DebugVariableGroup,
     element: ?*DebugElement,
 };
@@ -959,7 +955,10 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                 ) catch "";
             len += @intCast(slice.len);
         },
-        .OpenDataBlock => {},
+        .OpenDataBlock => {
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{ event.block_name }) catch "";
+            len += @intCast(slice.len);
+        },
         .CounterThreadList => {},
         .Unknown => {},
         else => {
@@ -1345,6 +1344,105 @@ pub fn requestedStub(id: DebugId) bool {
     return false;
 }
 
+fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_id: DebugId) void {
+    const debug_state: *DebugState = layout.debug_state;
+
+    if (opt_stored_event) |stored_event| {
+        if (debug_state.debug_font_info) |font_info| {
+            if (debug_state.render_group) |render_group| {
+                const event = &stored_event.event;
+                const item_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .AutoModifyVariable);
+                const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+                const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
+                const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
+
+                switch (event.event_type) {
+                    .BitmapId => {
+                        const bitmap_scale = view.data.inline_block.dimension.y();
+                        if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
+                            var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
+                            _ = view.data.inline_block.dimension.setX(dim.size.x());
+                        }
+
+                        const tear_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .TearValue);
+                        var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                        element.makeSizable();
+                        element.defaultInteraction(tear_interaction);
+                        element.end();
+
+                        render_group.pushRectangle2(element.bounds, 0, Color.black());
+                        render_group.pushBitmapId(
+                            event.data.BitmapId,
+                            bitmap_scale,
+                            element.bounds.min.toVector3(0),
+                            Color.white(),
+                            0,
+                        );
+                    },
+                    else => {
+                        var text: [4096:0]u8 = undefined;
+                        var len: u32 = 0;
+                        len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
+
+                        const text_bounds = getTextSize(debug_state, &text);
+                        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+                        var element: LayoutElement = layout.beginElementRectangle(&dim);
+                        element.defaultInteraction(item_interaction);
+                        element.end();
+
+                        const text_position: Vector2 = Vector2.new(
+                            element.bounds.min.x(),
+                            element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
+                        );
+                        textOutAt(&text, text_position, item_color);
+                    },
+                }
+            }
+        }
+    }
+}
+
+fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, debug_id: DebugId) void {
+    const debug_state: *DebugState = layout.debug_state;
+
+    if (element.oldest_event) |oldest_event| {
+        const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
+
+        switch (oldest_event.event.event_type) {
+            .CounterThreadList => {
+                var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                layout_element.makeSizable();
+                // layout_element.defaultInteraction(item_interaction);
+                layout_element.end();
+
+                drawProfileIn(debug_state, layout_element.bounds, layout.mouse_position);
+            },
+            .OpenDataBlock => {
+                var last_open_block: *DebugStoredEvent = oldest_event;
+
+                var opt_event: ?*DebugStoredEvent = element.oldest_event;
+                while (opt_event) |event| : (opt_event = event.next) {
+                    if (event.event.event_type == .OpenDataBlock) {
+                        last_open_block = event;
+                    }
+                }
+
+                opt_event = last_open_block;
+                while (opt_event) |event| : (opt_event = event.next) {
+                    const new_id: DebugId = DebugId.fromGuid(tree, event.event.guid);
+                    drawDebugEvent(layout, event, new_id);
+                }
+            },
+            else => {
+                const opt_event: ?*DebugStoredEvent = element.most_recent_event;
+                drawDebugEvent(layout, opt_event, debug_id);
+            },
+        }
+    } else {
+    }
+}
+
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
     var opt_tree: ?*DebugTree = debug_state.tree_sentinel.next;
 
@@ -1415,65 +1513,8 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                                 depth += 1;
                             }
                         } else {
-                            const opt_event: ?*DebugEvent = debug_state.getEventFromLink(link);
-
-                            if (opt_event) |event| {
-                                const item_interaction: DebugInteraction = DebugInteraction.fromLink(debug_state, tree, link, .AutoModifyVariable);
-                                const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
-                                const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
-                                const view: *DebugView = debug_state.getOrCreateDebugView(DebugId.fromLink(tree, link));
-
-                                switch (event.event_type) {
-                                    .CounterThreadList => {
-                                        var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
-                                        element.makeSizable();
-                                        element.defaultInteraction(item_interaction);
-                                        element.end();
-
-                                        drawProfileIn(debug_state, element.bounds, mouse_position);
-                                    },
-                                    .BitmapId => {
-                                        const bitmap_scale = view.data.inline_block.dimension.y();
-                                        if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
-                                            var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
-                                            _ = view.data.inline_block.dimension.setX(dim.size.x());
-                                        }
-
-                                        const tear_interaction: DebugInteraction = DebugInteraction.fromLink(debug_state, tree, link, .TearValue);
-                                        var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
-                                        element.makeSizable();
-                                        element.defaultInteraction(tear_interaction);
-                                        element.end();
-
-                                        render_group.pushRectangle2(element.bounds, 0, Color.black());
-                                        render_group.pushBitmapId(
-                                            event.data.BitmapId,
-                                            bitmap_scale,
-                                            element.bounds.min.toVector3(0),
-                                            Color.white(),
-                                            0,
-                                        );
-                                    },
-                                    else => {
-                                        var text: [4096:0]u8 = undefined;
-                                        var len: u32 = 0;
-                                        len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
-
-                                        const text_bounds = getTextSize(debug_state, &text);
-                                        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
-
-                                        var element: LayoutElement = layout.beginElementRectangle(&dim);
-                                        element.defaultInteraction(item_interaction);
-                                        element.end();
-
-                                        const text_position: Vector2 = Vector2.new(
-                                            element.bounds.min.x(),
-                                            element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
-                                        );
-                                        textOutAt(&text, text_position, item_color);
-                                    },
-                                }
-                            }
+                            const debug_id = DebugId.fromLink(tree, link);
+                            drawDebugElement(&layout, tree, link.element.?, debug_id);
                         }
                     }
                 }

@@ -106,6 +106,10 @@ pub const DebugId = extern struct {
         return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };
     }
 
+    pub fn fromGuid(tree: *debug.DebugTree, guid: [*:0]const u8) DebugId {
+        return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(@constCast(guid)) } };
+    }
+
     pub fn fromPointer(pointer: *anyopaque) DebugId {
         return DebugId{ .value = .{ @ptrCast(pointer), undefined } };
     }
@@ -349,6 +353,14 @@ pub const DebugInterface = if (INTERNAL) struct {
         event.data = .{ .debug_id = id };
     }
 
+    fn formatFieldName(comptime name: []const u8) []const u8 {
+        var buf: [128]u8 = undefined;
+        _ = std.mem.replace(u8, name, "_", "-", &buf);
+        // return &buf[0..name.len];
+        const final = buf[0..name.len].*;
+        return &final;
+    }
+
     pub fn debugStruct(comptime source: std.builtin.SourceLocation, parent: anytype) void {
         const fields = std.meta.fields(@TypeOf(parent.*));
         inline for (fields) |field| {
@@ -356,10 +368,15 @@ pub const DebugInterface = if (INTERNAL) struct {
         }
     }
 
-    pub fn debugValue(comptime source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {
+    pub fn debugValue(
+        comptime source: std.builtin.SourceLocation,
+        parent: anytype,
+        comptime field_name: []const u8,
+    ) void {
+        const display_name = comptime DebugInterface.formatFieldName(field_name);
         const value = @field(parent, field_name);
         const type_info = @typeInfo(@TypeOf(value));
-        var event = DebugEvent.record(source, .Unknown, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ field_name));
+        var event = DebugEvent.record(source, .Unknown, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ display_name));
         switch (type_info) {
             .Optional => {
                 if (value) |v| {
