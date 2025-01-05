@@ -8,6 +8,7 @@ const file_formats = @import("file_formats");
 const audio = @import("audio.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
+const cutscene = @import("cutscene.zig");
 const random = @import("random.zig");
 const config = @import("config.zig");
 const debug_interface = @import("debug_interface.zig");
@@ -339,7 +340,7 @@ pub export fn updateAndRender(
 
         transient_state.assets = Assets.allocate(
             &transient_state.arena,
-            shared.megabytes(16),
+            shared.megabytes(256),
             transient_state,
         );
 
@@ -407,9 +408,6 @@ pub export fn updateAndRender(
             }
         }
     }
-
-    // Handle input.
-    const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
 
     if (false) {
         var music_volume = Vector2.zero();
@@ -494,10 +492,36 @@ pub export fn updateAndRender(
         false,
     );
     render_group.beginRender();
+
+    cutscene.renderCutscene(transient_state.assets, render_group, draw_buffer, state.cutscene_time);
+    state.cutscene_time += input.frame_delta_time;
+    if (state.cutscene_time > 5) {
+        state.cutscene_time = 0;
+    }
+    // updateAndRenderGame(state, transient_state, &input, render_group, draw_buffer);
+
+    render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+    render_group.endRender();
+
+    transient_state.arena.endTemporaryMemory(render_memory);
+
+    state.world_arena.checkArena();
+    transient_state.arena.checkArena();
+}
+
+fn updateAndRenderGame(
+    state: *State,
+    transient_state: *TransientState,
+    input: *const shared.GameInput,
+    render_group: *render.RenderGroup,
+    draw_buffer: *asset.LoadedBitmap,
+) void {
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
     const distance_above_ground: f32 = 9;
+    const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
+
     render_group.perspectiveMode(
         draw_buffer.width,
         draw_buffer.height,
@@ -1210,16 +1234,12 @@ pub export fn updateAndRender(
     render_group.orthographicMode(draw_buffer.width, draw_buffer.height, 1);
     render_group.pushRectangleOutline(Vector2.new(5, 5), mouse_position.toVector3(0), Color.new(1, 1, 1, 1), 0.2);
 
-    render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
-
-    render_group.endRender();
+    // render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+    //
+    // render_group.endRender();
 
     sim.endSimulation(state, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
-    transient_state.arena.endTemporaryMemory(render_memory);
-
-    state.world_arena.checkArena();
-    transient_state.arena.checkArena();
 }
 
 pub export fn debugFrameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) *debug_interface.DebugTable {

@@ -617,6 +617,8 @@ pub const State = struct {
     next_particle: u32 = 0,
     particles: [256]Particle = [1]Particle{Particle{}} ** 256,
     particle_cels: [PARTICLE_CEL_DIM][PARTICLE_CEL_DIM]ParticleCel = undefined,
+
+    cutscene_time: f32 = 0,
 };
 
 pub const PARTICLE_CEL_DIM = 32;

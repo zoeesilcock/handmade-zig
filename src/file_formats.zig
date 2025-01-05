@@ -13,6 +13,9 @@ pub const AssetTagId = enum(u32) {
     UnicodeCodepoint,
     FontType,
 
+    ShotIndex,
+    LayerIndex,
+
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
     }
@@ -44,6 +47,8 @@ pub const AssetTypeId = enum(u32) {
     Glide,
     Music,
     Puhp,
+
+    OpeningCutscene,
 
     pub fn toInt(self: AssetTypeId) u32 {
         return @intFromEnum(self);
