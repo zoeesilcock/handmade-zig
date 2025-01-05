@@ -272,8 +272,8 @@ fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, 
             // File read successfully.
         } else {
             const error_number = win32.GetLastError();
+            std.debug.print("Error loading file: {d}\n", .{ @intFromEnum(error_number) });
             fileError(source, "Read file failed.");
-            _ = error_number;
         }
     }
 }

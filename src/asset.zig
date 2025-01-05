@@ -180,7 +180,24 @@ pub const Assets = struct {
                 file[0].asset_base = assets.asset_count;
                 file[0].handle = file_handle;
 
-                shared.platform.readDataFromFile(&file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
+                var offset: u32 = 0;
+                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.magic_value);
+                offset += @sizeOf(u32);
+                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.version);
+                offset += @sizeOf(u32);
+                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.tag_count);
+                offset += @sizeOf(u32);
+                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.asset_type_count);
+                offset += @sizeOf(u32);
+                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.asset_count);
+                offset += @sizeOf(u32);
+
+                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u64), &file[0].header.tags);
+                offset += @sizeOf(u64);
+                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u64), &file[0].header.asset_types);
+                offset += @sizeOf(u64);
+                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u64), &file[0].header.assets);
+                offset += @sizeOf(u64);
 
                 const asset_type_array_size: u32 = file[0].header.asset_type_count * @sizeOf(HHAAssetType);
                 file[0].asset_type_array = @ptrCast(@alignCast(arena.pushSize(asset_type_array_size, null)));

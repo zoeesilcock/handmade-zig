@@ -7,7 +7,7 @@ Learning Zig by following along with the [Handmade Hero](https://handmadehero.or
 Graphical assets are not included as they are not created by me. They need to be added to the `data/` directory manually. We currently expect the `test`, `test2`, and `test3` directories of assets found in this location of the pre-order data: `handmade_hero_legacy_art.zip/early_data`.
 
 ### Packing the assets
-The asset files need to be packed using the asset packer before running the game.
+The asset files need to be packed using the asset packer before running the game. The current version of the asset builder doesn't produce files compatible with the game anymore since we made it compatible with asset files created by Casey.
 ```
 zig build build-assets
 ```

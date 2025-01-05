@@ -81,7 +81,7 @@ pub const HHAAssetType = extern struct {
 };
 
 pub const HHAAsset = extern struct {
-    data_offset: u64,
+    data_offset: u64 align(1),
     first_tag_index: u32,
     one_past_last_tag_index: u32,
 
