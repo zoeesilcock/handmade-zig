@@ -493,11 +493,8 @@ pub export fn updateAndRender(
     );
     render_group.beginRender();
 
-    cutscene.renderCutscene(transient_state.assets, render_group, draw_buffer, state.cutscene_time);
+    cutscene.renderCutscene(transient_state.assets, render_group, draw_buffer, &state.cutscene_time);
     state.cutscene_time += input.frame_delta_time;
-    if (state.cutscene_time > 20) {
-        state.cutscene_time = 0;
-    }
     // updateAndRenderGame(state, transient_state, &input, render_group, draw_buffer);
 
     render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
