@@ -16,6 +16,7 @@ const render = @import("render.zig");
 const file_formats = @import("file_formats");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
+const cutscene = @import("cutscene.zig");
 const random = @import("random.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
@@ -396,26 +397,22 @@ pub const ControllerButtonState = extern struct {
 // Memory.
 pub const MemoryIndex = usize;
 
-pub const Memory = GameMemory();
-fn GameMemory() type {
-    return extern struct {
-        permanent_storage_size: u64,
-        permanent_storage: ?[*]void,
+pub const Memory = struct {
+    permanent_storage_size: u64,
+    permanent_storage: ?[*]void,
 
-        transient_storage_size: u64,
-        transient_storage: ?[*]void,
+    transient_storage_size: u64,
+    transient_storage: ?[*]void,
 
-        debug_storage_size: u64,
-        debug_storage: ?[*]void,
+    debug_storage_size: u64,
+    debug_storage: ?[*]void,
 
-        high_priority_queue: *PlatformWorkQueue,
-        low_priority_queue: *PlatformWorkQueue,
+    high_priority_queue: *PlatformWorkQueue,
+    low_priority_queue: *PlatformWorkQueue,
 
-        executable_reloaded: bool = false,
-
-        const Self = @This();
-    };
-}
+    executable_reloaded: bool = false,
+    quit_requested: bool = false,
+};
 
 pub const TemporaryMemory = struct {
     used: MemoryIndex,
@@ -618,7 +615,7 @@ pub const State = struct {
     particles: [256]Particle = [1]Particle{Particle{}} ** 256,
     particle_cels: [PARTICLE_CEL_DIM][PARTICLE_CEL_DIM]ParticleCel = undefined,
 
-    cutscene_time: f32 = 0,
+    current_cutscene: ?cutscene.PlayingCutscene = null,
 };
 
 pub const PARTICLE_CEL_DIM = 32;

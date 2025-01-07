@@ -5,6 +5,8 @@ const shared = @import("shared.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
+const CUTSCENE_WARMUP_SECONDS: f32 = 2;
+
 const AssetTagId = file_formats.AssetTagId;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -35,7 +37,25 @@ const LayeredScene = struct {
     camera_end: Vector3,
 };
 
+pub const PlayingCutscene = struct {
+    scene_count: u32,
+    scenes: [*]const LayeredScene,
+    time: f32 = 0,
+
+    pub fn advance(self: *PlayingCutscene, delta_time: f32) void {
+        self.time += delta_time;
+    }
+};
+
 const intro_cutscene: []const LayeredScene = &.{
+    LayeredScene{
+        .shot_index = 0,
+        .asset_type = .None,
+        .duration = CUTSCENE_WARMUP_SECONDS,
+        .camera_start = Vector3.zero(),
+        .camera_end = Vector3.zero(),
+        .layers = &.{},
+    },
     LayeredScene{
         .shot_index = 1,
         .asset_type = .OpeningCutscene,
@@ -196,37 +216,61 @@ const intro_cutscene: []const LayeredScene = &.{
     },
 };
 
-pub fn renderCutscene(
+pub fn makeIntroCutscene() PlayingCutscene {
+    const result: PlayingCutscene = .{
+        .scene_count = intro_cutscene.len,
+        .scenes = @ptrCast(intro_cutscene),
+    };
+
+    return result;
+}
+
+fn renderCutsceneAtTime(
     assets: *asset.Assets,
-    render_group: *render.RenderGroup,
+    render_group: ?*render.RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
-    cutscene_time: *f32,
-) void {
-    var pretty_stupid = false;
+    cutscene: *PlayingCutscene,
+    cutscene_time: f32,
+) bool {
+    var cutscene_completed = false;
     var time_base: f32 = 0;
-    var shot_index: u32 = 1;
-    while (shot_index < intro_cutscene.len) : (shot_index += 1) {
-        const scene: *const LayeredScene = &intro_cutscene[shot_index - 1];
+    var shot_index: u32 = 0;
+    while (shot_index < cutscene.scene_count) : (shot_index += 1) {
+        const scene: *const LayeredScene = &cutscene.scenes[shot_index];
         const time_start: f32 = time_base;
         const time_end = time_start + scene.duration;
 
-        if (cutscene_time.* >= time_start and cutscene_time.* < time_end) {
-            const normal_time = math.clamp01MapToRange(time_start, time_end, cutscene_time.*);
+        if (cutscene_time >= time_start and cutscene_time < time_end) {
+            const normal_time = math.clamp01MapToRange(time_start, time_end, cutscene_time);
             renderLayeredScene(assets, render_group, draw_buffer, scene, normal_time);
-            pretty_stupid = true;
+            cutscene_completed = true;
         }
 
         time_base = time_end;
     }
 
-    if (!pretty_stupid) {
-        cutscene_time.* = 0;
+    return cutscene_completed;
+}
+
+pub fn renderCutscene(
+    assets: *asset.Assets,
+    render_group: *render.RenderGroup,
+    draw_buffer: *asset.LoadedBitmap,
+    cutscene: *PlayingCutscene,
+) void {
+    // Prefetch assets for the next shot.
+    _ = renderCutsceneAtTime(assets, null, draw_buffer, cutscene, cutscene.time + CUTSCENE_WARMUP_SECONDS);
+
+    // Render the current shot.
+    const cutscene_complete = renderCutsceneAtTime(assets, render_group, draw_buffer, cutscene, cutscene.time);
+    if (!cutscene_complete) {
+        cutscene.time = 0;
     }
 }
 
 fn renderLayeredScene(
     assets: *asset.Assets,
-    render_group: *render.RenderGroup,
+    opt_render_group: ?*render.RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
     scene: *const LayeredScene,
     normal_time: f32,
@@ -235,13 +279,20 @@ fn renderLayeredScene(
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
     const camera_offset: Vector3 = scene.camera_start.lerp(scene.camera_end, normal_time);
-    render_group.perspectiveMode(
-        draw_buffer.width,
-        draw_buffer.height,
-        meters_to_pixels,
-        focal_length,
-        0,
-    );
+
+    if (opt_render_group) |render_group| {
+        render_group.perspectiveMode(
+            draw_buffer.width,
+            draw_buffer.height,
+            meters_to_pixels,
+            focal_length,
+            0,
+        );
+
+        if (scene.layers.len == 0) {
+            render_group.pushClear(Color.new(0, 0, 0, 0));
+        }
+    }
 
     var match_vector = asset.AssetVector{};
     var weight_vector = asset.AssetVector{};
@@ -260,31 +311,35 @@ fn renderLayeredScene(
         }
 
         if (active) {
-            if (layer.flags & @intFromEnum(SceneLayerFlags.AtInfinity) != 0) {
-                _ = position.setZ(position.z() + camera_offset.z());
-            }
-
-            if (layer.flags & @intFromEnum(SceneLayerFlags.Floaty) != 0) {
-                _ = position.setY(position.y() + (layer.params.x() * @sin(layer.params.y() * normal_time)));
-            }
-
-            if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraX) != 0) {
-                _ = render_group.transform.offset_position.setX(position.x() + camera_offset.x());
-            } else {
-                _ = render_group.transform.offset_position.setX(position.x() - camera_offset.x());
-            }
-
-            if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraY) != 0) {
-                _ = render_group.transform.offset_position.setY(position.y() + camera_offset.y());
-            } else {
-                _ = render_group.transform.offset_position.setY(position.y() - camera_offset.y());
-            }
-
-            _ = render_group.transform.offset_position.setZ(position.z() - camera_offset.z());
             match_vector.e[AssetTagId.LayerIndex.toInt()] = @floatFromInt(layer_index);
-
             const layer_image = assets.getBestMatchBitmap(scene.asset_type, &match_vector, &weight_vector);
-            render_group.pushBitmapId(layer_image, layer.height, Vector3.zero(), Color.white(), null);
+
+            if (opt_render_group) |render_group| {
+                if (layer.flags & @intFromEnum(SceneLayerFlags.AtInfinity) != 0) {
+                    _ = position.setZ(position.z() + camera_offset.z());
+                }
+
+                if (layer.flags & @intFromEnum(SceneLayerFlags.Floaty) != 0) {
+                    _ = position.setY(position.y() + (layer.params.x() * @sin(layer.params.y() * normal_time)));
+                }
+
+                if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraX) != 0) {
+                    _ = render_group.transform.offset_position.setX(position.x() + camera_offset.x());
+                } else {
+                    _ = render_group.transform.offset_position.setX(position.x() - camera_offset.x());
+                }
+
+                if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraY) != 0) {
+                    _ = render_group.transform.offset_position.setY(position.y() + camera_offset.y());
+                } else {
+                    _ = render_group.transform.offset_position.setY(position.y() - camera_offset.y());
+                }
+
+                _ = render_group.transform.offset_position.setZ(position.z() - camera_offset.z());
+                render_group.pushBitmapId(layer_image, layer.height, Vector3.zero(), Color.white(), null);
+            } else {
+                assets.prefetchBitmap(layer_image);
+            }
         }
     }
 }

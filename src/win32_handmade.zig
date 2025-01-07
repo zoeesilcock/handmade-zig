@@ -1626,7 +1626,7 @@ pub export fn wWinMain(
         .hInstance = instance,
         .hIcon = null,
         .hCursor = win32.LoadCursorW(null, win32.IDC_ARROW),
-        .hbrBackground = null,
+        .hbrBackground = win32.GetStockObject(win32.BLACK_BRUSH),
         .lpszMenuName = null,
         .lpszClassName = win32.L("HandmadeZigWindowClass"),
     };
@@ -1640,7 +1640,7 @@ pub export fn wWinMain(
             window_class.lpszClassName,
             win32.L("Handmade Zig"),
             win32.WINDOW_STYLE{
-                .VISIBLE = 1,
+                .VISIBLE = 0,
                 .TABSTOP = 1,
                 .GROUP = 1,
                 .THICKFRAME = 1,
@@ -1659,6 +1659,10 @@ pub export fn wWinMain(
         );
 
         if (opt_window_handle) |window_handle| {
+            toggleFullscreen(window_handle);
+
+            _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
+
             if (INTERNAL) {
                 _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);
             }
@@ -1881,6 +1885,10 @@ pub export fn wWinMain(
 
                     // Send all input to game.
                     game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
+
+                    if (game_memory.quit_requested) {
+                        running = false;
+                    }
 
                     timed_block.end();
 

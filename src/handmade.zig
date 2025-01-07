@@ -315,6 +315,7 @@ pub export fn updateAndRender(
             _ = addFamiliar(state, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
         }
 
+        state.current_cutscene = cutscene.makeIntroCutscene();
         state.is_initialized = true;
     }
 
@@ -416,6 +417,8 @@ pub export fn updateAndRender(
         state.audio_state.changeVolume(state.music, 0.01, music_volume);
     }
 
+    var heroes_exist = false;
+    var quit_requested = false;
     for (&input.controllers, 0..) |controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
         controlled_hero.movement_direction = Vector2.zero();
@@ -423,11 +426,15 @@ pub export fn updateAndRender(
         controlled_hero.sword_direction = Vector2.zero();
 
         if (controlled_hero.entity_index == 0) {
-            if (controller.start_button.ended_down) {
+            if (controller.back_button.wasPressed()) {
+                quit_requested = true;
+            } else if (controller.start_button.ended_down) {
                 controlled_hero.* = shared.ControlledHero{};
                 controlled_hero.entity_index = addPlayer(state).low_index;
             }
         } else {
+            heroes_exist = true;
+
             if (controller.is_analog) {
                 controlled_hero.movement_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
             } else {
@@ -465,6 +472,11 @@ pub export fn updateAndRender(
                 controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
                 state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
             }
+
+            if (controller.back_button.wasPressed()) {
+                deleteLowEntity(state, controlled_hero.entity_index);
+                controlled_hero.entity_index = 0;
+            }
         }
     }
 
@@ -493,14 +505,25 @@ pub export fn updateAndRender(
     );
     render_group.beginRender();
 
-    cutscene.renderCutscene(transient_state.assets, render_group, draw_buffer, &state.cutscene_time);
-    state.cutscene_time += input.frame_delta_time;
-    // updateAndRenderGame(state, transient_state, &input, render_group, draw_buffer);
+    if (heroes_exist) {
+        updateAndRenderGame(state, transient_state, &input, render_group, draw_buffer);
+    } else {
+        if (state.current_cutscene) |*current_cutscene| {
+            cutscene.renderCutscene(transient_state.assets, render_group, draw_buffer, current_cutscene);
+            current_cutscene.advance(input.frame_delta_time);
+        }
+    }
 
-    render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+    if (render_group.allResourcesPresent()) {
+        render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+    }
     render_group.endRender();
 
     transient_state.arena.endTemporaryMemory(render_memory);
+
+    if (!heroes_exist and quit_requested) {
+        memory.quit_requested = true;
+    }
 
     state.world_arena.checkArena();
     transient_state.arena.checkArena();
@@ -1299,6 +1322,12 @@ fn addLowEntity(state: *State, entity_type: sim.EntityType, world_position: Worl
         .low_index = low_entity_index,
         .low = low_entity,
     };
+}
+
+fn deleteLowEntity(state: *State, entity_index: u32) void {
+    _ = state;
+    _ = entity_index;
+    // TODO: Implement this.
 }
 
 fn addGroundedEntity(
