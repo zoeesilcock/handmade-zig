@@ -435,25 +435,24 @@ pub const Assets = struct {
         self.beginAssetLock();
         defer self.endAssetLock();
 
-        // TODO: This loop can get stuck, feels like there is a break condition missing.
         while (true) {
-            if (opt_block) |block| {
+            if (opt_block != null and size <= opt_block.?.size) {
                 // Use the block found.
-                if (size <= block.size) {
-                    block.flags |= @intFromEnum(AssetMemoryBlockFlags.Used);
+                const block = opt_block.?;
 
-                    result = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(block)) + 1);
+                block.flags |= @intFromEnum(AssetMemoryBlockFlags.Used);
 
-                    const remaining_size = block.size - size;
-                    const block_split_threshold = 4096;
+                result = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(block)) + 1);
 
-                    if (remaining_size > block_split_threshold) {
-                        block.size -= remaining_size;
-                        _ = self.insertBlock(block, remaining_size, @as([*]u8, @ptrCast(result)) + size);
-                    }
+                const remaining_size = block.size - size;
+                const block_split_threshold = 4096;
 
-                    break;
+                if (remaining_size > block_split_threshold) {
+                    block.size -= remaining_size;
+                    _ = self.insertBlock(block, remaining_size, @as([*]u8, @ptrCast(result)) + size);
                 }
+
+                break;
             } else {
                 // No block found, evict something to make space.
                 var header: ?*AssetMemoryHeader = self.loaded_asset_sentinel.previous;
