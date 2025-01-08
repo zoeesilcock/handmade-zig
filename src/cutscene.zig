@@ -35,6 +35,7 @@ const LayeredScene = struct {
     duration: f32,
     camera_start: Vector3,
     camera_end: Vector3,
+    fade_in_time: f32 = 0,
 };
 
 pub const PlayingCutscene = struct {
@@ -72,6 +73,7 @@ const intro_cutscene: []const LayeredScene = &.{
             SceneLayer{ .position = Vector3.new(0, -2, -20), .height = 40 }, // Orphanage.
             SceneLayer{ .position = Vector3.new(2, -1, -5), .height = 25 }, // Foreground.
         },
+        .fade_in_time = 0.5,
     },
     LayeredScene{
         .shot_index = 2,
@@ -279,6 +281,12 @@ fn renderLayeredScene(
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
     const camera_offset: Vector3 = scene.camera_start.lerp(scene.camera_end, normal_time);
+    var scene_fade_value: f32 = 1;
+
+    if (normal_time < scene.fade_in_time) {
+        scene_fade_value = math.clamp01MapToRange(0, scene.fade_in_time, normal_time);
+    }
+    const color = Color.new(scene_fade_value, scene_fade_value, scene_fade_value, 1);
 
     if (opt_render_group) |render_group| {
         render_group.perspectiveMode(
@@ -336,7 +344,7 @@ fn renderLayeredScene(
                 }
 
                 _ = render_group.transform.offset_position.setZ(position.z() - camera_offset.z());
-                render_group.pushBitmapId(layer_image, layer.height, Vector3.zero(), Color.white(), null);
+                render_group.pushBitmapId(layer_image, layer.height, Vector3.zero(), color, null);
             } else {
                 assets.prefetchBitmap(layer_image);
             }

@@ -144,6 +144,167 @@ const Win32State = struct {
     one_past_last_exe_file_name_slash: usize = 0,
 };
 
+const FaderState = enum {
+    FadingIn,
+    WaitingForShow,
+    Inactive,
+    FadingGame,
+    FadingOut,
+    WaitingForClose,
+};
+
+const Fader = struct {
+    window: ?win32.HWND = null,
+
+    alpha: f32 = 0,
+    state: FaderState = undefined,
+
+    pub fn init(self: *Fader, instance: win32.HINSTANCE) void {
+        const window_class: win32.WNDCLASSW = .{
+            .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
+            .lpfnWndProc = Fader.windowProcedure,
+            .cbClsExtra = 0,
+            .cbWndExtra = 0,
+            .hInstance = instance,
+            .hIcon = null,
+            .hbrBackground = win32.GetStockObject(win32.BLACK_BRUSH),
+            .hCursor = null,
+            .lpszMenuName = null,
+            .lpszClassName = win32.L("HandmadeZigFadeOutWindowClass"),
+        };
+
+        if (win32.RegisterClassW(&window_class) != 0) {
+            self.window = win32.CreateWindowExW(
+                .{
+                    .LAYERED = 1,
+                },
+                window_class.lpszClassName,
+                win32.L("Handmade Zig"),
+                win32.WINDOW_STYLE{
+                    .VISIBLE = 0,
+                    .TABSTOP = 1,
+                    .GROUP = 1,
+                    .THICKFRAME = 1,
+                    .SYSMENU = 1,
+                    .DLGFRAME = 1,
+                    .BORDER = 1,
+                },
+                win32.CW_USEDEFAULT,
+                win32.CW_USEDEFAULT,
+                win32.CW_USEDEFAULT,
+                win32.CW_USEDEFAULT,
+                null,
+                null,
+                instance,
+                null,
+                );
+
+            if (self.window) |fade_window| {
+                toggleFullscreen(fade_window);
+            }
+        }
+    }
+
+    pub fn beginFadeToGame(self: *Fader) void {
+        self.state = .FadingIn;
+        self.alpha = 0;
+    }
+
+    pub fn beginFadeToDesktop(self: *Fader) void {
+        if (self.state == .Inactive) {
+            self.state = .FadingGame;
+            self.alpha = 1;
+        }
+    }
+
+    pub fn update(self: *Fader, delta_time: f32, game_window: win32.HWND) FaderState {
+        switch (self.state) {
+            .FadingIn => {
+                if (self.alpha >= 1) {
+                    setFadeAlpha(self.window.?, 1);
+
+                    _ = win32.ShowWindow(game_window, win32.SW_SHOW);
+                    _ = win32.InvalidateRect(game_window, null, win32.TRUE);
+                    _ = win32.UpdateWindow(game_window);
+
+                    self.state = .WaitingForShow;
+                } else {
+                    setFadeAlpha(self.window.?, self.alpha);
+                    self.alpha += delta_time;
+                }
+            },
+            .WaitingForShow => {
+                setFadeAlpha(self.window.?, 0);
+                self.state = .Inactive;
+            },
+            .Inactive => {
+                // Nothing to do.
+            },
+            .FadingGame => {
+                if (self.alpha >= 1) {
+                    setFadeAlpha(self.window.?, 1);
+                    _ = win32.ShowWindow(game_window, win32.SW_HIDE);
+                    self.state = .FadingOut;
+                } else {
+                    setFadeAlpha(self.window.?, self.alpha);
+                    self.alpha += delta_time;
+                }
+            },
+            .FadingOut => {
+                self.alpha -= delta_time;
+
+                if (self.alpha <= 0) {
+                    setFadeAlpha(self.window.?, 0);
+                    self.state = .WaitingForClose;
+                } else {
+                    setFadeAlpha(self.window.?, self.alpha);
+                }
+            },
+            .WaitingForClose => {
+                // Nothing to do.
+            },
+        }
+
+        return self.state;
+    }
+
+    fn setFadeAlpha(fade_window: win32.HWND, alpha: f32) void {
+        const alpha_level: u8 = @intFromFloat(255 * alpha);
+
+        if (alpha == 0) {
+            if (win32.IsWindowVisible(fade_window) != 0) {
+                _ = win32.ShowWindow(fade_window, win32.SW_HIDE);
+            }
+        } else {
+            _ = win32.SetLayeredWindowAttributes(fade_window, 0, @intCast(alpha_level), win32.LWA_ALPHA);
+            if (win32.IsWindowVisible(fade_window) == 0) {
+                _ = win32.ShowWindow(fade_window, win32.SW_SHOW);
+            }
+        }
+    }
+
+    fn windowProcedure(
+        window: win32.HWND,
+        message: u32,
+        w_param: win32.WPARAM,
+        l_param: win32.LPARAM,
+    ) callconv(std.os.windows.WINAPI) win32.LRESULT {
+        var result: win32.LRESULT = 0;
+
+        switch (message) {
+            win32.WM_CLOSE => {},
+            win32.WM_SETCURSOR => {
+                _ = win32.SetCursor(null);
+            },
+            else => {
+                result = win32.DefWindowProc(window, message, w_param, l_param);
+            },
+        }
+
+        return result;
+    }
+};
+
 pub const Game = struct {
     dll: ?win32.HINSTANCE = undefined,
     last_write_time: win32.FILETIME = undefined,
@@ -1595,6 +1756,10 @@ pub export fn wWinMain(
     const sleep_is_grannular = win32.timeBeginPeriod(desired_scheduler_ms) == win32.TIMERR_NOERROR;
 
     loadXInput();
+
+    var fader: Fader = .{};
+    fader.init(instance.?);
+
     resizeDIBSection(&back_buffer, WIDTH, HEIGHT);
     var platform = shared.Platform{
         .addQueueEntry = addQueueEntry,
@@ -1660,8 +1825,6 @@ pub export fn wWinMain(
 
         if (opt_window_handle) |window_handle| {
             toggleFullscreen(window_handle);
-
-            _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
             if (INTERNAL) {
                 _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);
@@ -1808,6 +1971,10 @@ pub export fn wWinMain(
                     //
                     //
 
+                    if (fader.update(new_input.frame_delta_time, window_handle) == .WaitingForClose) {
+                        running = false;
+                    }
+
                     // Reload the game code if it has changed.
                     const last_dll_write_time = getLastWriteTime(&source_dll_path);
                     game_memory.executable_reloaded = false;
@@ -1887,7 +2054,7 @@ pub export fn wWinMain(
                     game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
 
                     if (game_memory.quit_requested) {
-                        running = false;
+                        fader.beginFadeToDesktop();
                     }
 
                     timed_block.end();
@@ -2029,7 +2196,7 @@ pub export fn wWinMain(
                     //
                     //
 
-                    if (false) {
+                    if (true) {
                         timed_block = TimedBlock.beginBlock(@src(), .FrameRateWait);
 
                         // Capture timing.
