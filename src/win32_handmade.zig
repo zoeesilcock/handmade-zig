@@ -1329,7 +1329,7 @@ fn toggleFullscreen(window: win32.HWND) void {
             _ = win32.SetWindowLong(window, win32.GWL_STYLE, style & ~@as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
             _ = win32.SetWindowPos(
                 window,
-                win32.HWND_TOPMOST,
+                if (INTERNAL) win32.HWND_NOTOPMOST else win32.HWND_TOPMOST,
                 monitor_info.rcMonitor.left,
                 monitor_info.rcMonitor.top,
                 monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,

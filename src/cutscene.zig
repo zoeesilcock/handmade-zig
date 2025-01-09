@@ -38,14 +38,14 @@ const LayeredScene = struct {
     fade_in_time: f32 = 0,
 };
 
-pub const PlayingCutscene = struct {
+pub const GameModeCutscene = struct {
     scene_count: u32,
     scenes: [*]const LayeredScene,
     time: f32 = 0,
+};
 
-    pub fn advance(self: *PlayingCutscene, delta_time: f32) void {
-        self.time += delta_time;
-    }
+pub const GameModeTitleScreen = struct {
+    time: f32,
 };
 
 const intro_cutscene: []const LayeredScene = &.{
@@ -218,20 +218,59 @@ const intro_cutscene: []const LayeredScene = &.{
     },
 };
 
-pub fn makeIntroCutscene() PlayingCutscene {
-    const result: PlayingCutscene = .{
-        .scene_count = intro_cutscene.len,
-        .scenes = @ptrCast(intro_cutscene),
-    };
+pub fn playIntroCutscene(state: *shared.State) void {
+    state.setGameMode(.Cutscene);
 
-    return result;
+    var cutscene: *GameModeCutscene = state.mode_arena.pushStruct(GameModeCutscene);
+
+    cutscene.scene_count = intro_cutscene.len;
+    cutscene.scenes = @ptrCast(intro_cutscene);
+    cutscene.time = 0;
+
+    state.mode = .{ .cutscene = cutscene };
+}
+
+pub fn updateAndRenderTitleScreen(
+    assets: *asset.Assets,
+    render_group: ?*render.RenderGroup,
+    draw_buffer: *asset.LoadedBitmap,
+    title_screen: *GameModeTitleScreen,
+) void {
+    _ = assets;
+    _ = render_group;
+    _ = draw_buffer;
+    _ = title_screen;
+}
+
+pub fn playTitleScreen(state: *shared.GameState) void {
+    state.setGameMode(.TitleScreen);
+    state.mode = .{ .title_screen = .{ .time = 0 } };
+}
+
+pub fn updateAndRenderCutscene(
+    assets: *asset.Assets,
+    render_group: ?*render.RenderGroup,
+    draw_buffer: *asset.LoadedBitmap,
+    input: *const shared.GameInput,
+    cutscene: *GameModeCutscene,
+) void {
+    // Prefetch assets for the next shot.
+    _ = renderCutsceneAtTime(assets, null, draw_buffer, cutscene, cutscene.time + CUTSCENE_WARMUP_SECONDS);
+
+    // Render the current shot.
+    const cutscene_complete = renderCutsceneAtTime(assets, render_group, draw_buffer, cutscene, cutscene.time);
+    if (!cutscene_complete) {
+        cutscene.time = 0;
+    }
+
+    cutscene.time += input.frame_delta_time;
 }
 
 fn renderCutsceneAtTime(
     assets: *asset.Assets,
     render_group: ?*render.RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
-    cutscene: *PlayingCutscene,
+    cutscene: *GameModeCutscene,
     cutscene_time: f32,
 ) bool {
     var cutscene_completed = false;
@@ -252,22 +291,6 @@ fn renderCutsceneAtTime(
     }
 
     return cutscene_completed;
-}
-
-pub fn renderCutscene(
-    assets: *asset.Assets,
-    render_group: *render.RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
-    cutscene: *PlayingCutscene,
-) void {
-    // Prefetch assets for the next shot.
-    _ = renderCutsceneAtTime(assets, null, draw_buffer, cutscene, cutscene.time + CUTSCENE_WARMUP_SECONDS);
-
-    // Render the current shot.
-    const cutscene_complete = renderCutsceneAtTime(assets, render_group, draw_buffer, cutscene, cutscene.time);
-    if (!cutscene_complete) {
-        cutscene.time = 0;
-    }
 }
 
 fn renderLayeredScene(

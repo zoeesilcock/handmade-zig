@@ -11,6 +11,7 @@ pub const DEFAULT_MEMORY_ALIGNMENT = 4;
 pub const intrinsics = @import("intrinsics.zig");
 pub const math = @import("math.zig");
 const world = @import("world.zig");
+const world_mode = @import("world_mode.zig");
 const sim = @import("sim.zig");
 const render = @import("render.zig");
 const file_formats = @import("file_formats");
@@ -418,7 +419,7 @@ pub const TemporaryMemory = struct {
     used: MemoryIndex,
 };
 
-pub const MemoryArena = struct {
+pub const MemoryArena = extern struct {
     size: MemoryIndex,
     base: [*]u8,
     used: MemoryIndex,
@@ -533,6 +534,10 @@ pub const MemoryArena = struct {
         self.temp_count -= 1;
     }
 
+    pub fn clear(self: *MemoryArena) void {
+        self.initialize(self.size, @ptrCast(self.base));
+    }
+
     pub fn checkArena(self: *MemoryArena) void {
         std.debug.assert(self.temp_count == 0);
     }
@@ -573,71 +578,40 @@ pub fn copy(size: MemoryIndex, source_init: *void, dest_init: *void) *void {
 // Game state.
 pub const State = struct {
     is_initialized: bool = false,
-    world_arena: MemoryArena = undefined,
-    meta_arena: MemoryArena = undefined,
-    world: *world.World = undefined,
-
-    typical_floor_height: f32 = 0,
-
-    camera_following_entity_index: u32 = 0,
-    camera_position: world.WorldPosition,
+    audio_arena: MemoryArena = undefined,
+    mode_arena: MemoryArena = undefined,
 
     controlled_heroes: [MAX_CONTROLLER_COUNT]ControlledHero = [1]ControlledHero{undefined} ** MAX_CONTROLLER_COUNT,
 
-    low_entity_count: u32 = 0,
-    low_entities: [90000]LowEntity = [1]LowEntity{undefined} ** 90000,
-
-    collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
-    first_free_collision_rule: ?*PairwiseCollisionRule = null,
-
-    null_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    standard_room_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    wall_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    stair_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
-    player_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
-    sword_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
-    familiar_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
-    monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
-
-    time: f32 = 0,
-
-    test_diffuse: LoadedBitmap,
-    test_normal: LoadedBitmap,
-
-    t_sine: f32 = 0,
+    current_mode: GameMode = undefined,
+    mode: union {
+        title_screen: *cutscene.GameModeTitleScreen,
+        cutscene: *cutscene.GameModeCutscene,
+        world: *world_mode.GameModeWorld,
+    } = undefined,
 
     audio_state: audio.AudioState = undefined,
     music: *PlayingSound = undefined,
 
-    effects_entropy: random.Series,
+    test_diffuse: LoadedBitmap,
+    test_normal: LoadedBitmap,
 
-    next_particle: u32 = 0,
-    particles: [256]Particle = [1]Particle{Particle{}} ** 256,
-    particle_cels: [PARTICLE_CEL_DIM][PARTICLE_CEL_DIM]ParticleCel = undefined,
-
-    current_cutscene: ?cutscene.PlayingCutscene = null,
+    pub fn setGameMode(self: *State, game_mode: GameMode) void {
+        self.mode_arena.clear();
+        self.current_mode = game_mode;
+    }
 };
 
-pub const PARTICLE_CEL_DIM = 32;
+pub const GameMode = enum {
+    TitleScreen,
+    Cutscene,
+    World,
+};
 
 pub const HeroBitmapIds = struct {
     head: ?BitmapId,
     torso: ?BitmapId,
     cape: ?BitmapId,
-};
-
-pub const ParticleCel = struct {
-    density: f32 = 0,
-    velocity_times_density: Vector3 = Vector3.zero(),
-};
-
-pub const Particle = struct {
-    position: Vector3 = Vector3.zero(),
-    velocity: Vector3 = Vector3.zero(),
-    acceleration: Vector3 = Vector3.zero(),
-    color: Color = Color.white(),
-    color_velocity: Color = Color.zero(),
-    bitmap_id: BitmapId = undefined,
 };
 
 pub const TaskWithMemory = struct {
@@ -670,19 +644,6 @@ pub const GroundBuffer = extern struct {
     bitmap: LoadedBitmap,
 };
 
-pub const PairwiseCollisionRuleFlag = enum(u8) {
-    CanCollide = 0x1,
-    Temporary = 0x2a,
-};
-
-pub const PairwiseCollisionRule = extern struct {
-    can_collide: bool,
-    storage_index_a: u32,
-    storage_index_b: u32,
-
-    next_in_hash: ?*PairwiseCollisionRule,
-};
-
 pub const ControlledHero = struct {
     entity_index: u32 = 0,
     movement_direction: Vector2 = Vector2.zero(),
@@ -699,14 +660,4 @@ pub const EntityResidence = enum(u8) {
     NonExistent,
     Low,
     High,
-};
-
-pub const LowEntity = struct {
-    sim: sim.SimEntity,
-    position: world.WorldPosition = undefined,
-};
-
-pub const AddLowEntityResult = struct {
-    low: *LowEntity,
-    low_index: u32,
 };

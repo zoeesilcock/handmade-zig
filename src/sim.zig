@@ -6,14 +6,14 @@ const config = @import("config.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
-const addCollisionRule = @import("handmade.zig").addCollisionRule;
-
 // Types.
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
-const State = shared.State;
+const GameModeWorld = @import("world_mode.zig").GameModeWorld;
+const LowEntity = @import("world_mode.zig").LowEntity;
+const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
 const World = world.World;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
@@ -179,16 +179,6 @@ const WallTestData = struct {
     normal: Vector3,
 };
 
-fn getLowEntity(state: *State, index: u32) ?*shared.LowEntity {
-    var entity: ?*shared.LowEntity = null;
-
-    if (index > 0 and index < state.low_entity_count) {
-        entity = &state.low_entities[index];
-    }
-
-    return entity;
-}
-
 pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: u32) *SimEntityHash {
     std.debug.assert(storage_index != 0);
 
@@ -216,15 +206,15 @@ pub fn getEntityByStorageIndex(sim_region: *SimRegion, storage_index: u32) ?*Sim
     return entry.ptr;
 }
 
-pub fn loadEntityReference(state: *State, sim_region: *SimRegion, reference: *EntityReference) void {
+pub fn loadEntityReference(world_mode: *GameModeWorld, sim_region: *SimRegion, reference: *EntityReference) void {
     if (reference.index != 0) {
         const entry = getHashFromStorageIndex(sim_region, reference.index);
 
         if (entry.ptr == null) {
             entry.index = reference.index;
-            if (getLowEntity(state, reference.index)) |low_entity| {
+            if (world_mode.getLowEntity(reference.index)) |low_entity| {
                 var position = getSimSpacePosition(sim_region, low_entity);
-                entry.ptr = addEntity(state, sim_region, reference.index, low_entity, &position);
+                entry.ptr = addEntity(world_mode, sim_region, reference.index, low_entity, &position);
             }
         }
 
@@ -239,10 +229,10 @@ pub fn storeEntityReference(reference: *EntityReference) void {
 }
 
 pub fn addEntityRaw(
-    state: *State,
+    world_mode: *GameModeWorld,
     sim_region: *SimRegion,
     storage_index: u32,
-    opt_source: ?*shared.LowEntity,
+    opt_source: ?*LowEntity,
 ) ?*SimEntity {
     var timed_block = TimedBlock.beginFunction(@src(), .AddEntityRaw);
     defer timed_block.end();
@@ -262,7 +252,7 @@ pub fn addEntityRaw(
 
             if (opt_source) |source| {
                 entity.?.* = source.sim;
-                loadEntityReference(state, sim_region, &entity.?.sword);
+                loadEntityReference(world_mode, sim_region, &entity.?.sword);
 
                 std.debug.assert(!source.sim.isSet(SimEntityFlags.Simming.toInt()));
                 source.sim.addFlags(SimEntityFlags.Simming.toInt());
@@ -278,7 +268,7 @@ pub fn addEntityRaw(
     return entity;
 }
 
-fn getSimSpacePosition(sim_region: *SimRegion, low_entity: *shared.LowEntity) Vector3 {
+fn getSimSpacePosition(sim_region: *SimRegion, low_entity: *LowEntity) Vector3 {
     var result = Vector3.invalidPosition();
 
     if (!low_entity.sim.isSet(SimEntityFlags.Nonspatial.toInt())) {
@@ -294,13 +284,13 @@ pub fn entityOverlapsRectangle(position: Vector3, volume: SimEntityCollisionVolu
 }
 
 pub fn addEntity(
-    state: *State,
+    world_mode: *GameModeWorld,
     sim_region: *SimRegion,
     storage_index: u32,
-    source: *shared.LowEntity,
+    source: *LowEntity,
     opt_sim_position: ?*Vector3,
 ) ?*SimEntity {
-    const opt_entity = addEntityRaw(state, sim_region, storage_index, source);
+    const opt_entity = addEntityRaw(world_mode, sim_region, storage_index, source);
 
     if (opt_entity) |sim_entity| {
         if (opt_sim_position) |sim_position| {
@@ -319,7 +309,7 @@ pub fn addEntity(
 }
 
 pub fn beginSimulation(
-    state: *State,
+    world_mode: *GameModeWorld,
     sim_arena: *shared.MemoryArena,
     game_world: *World,
     origin: world.WorldPosition,
@@ -374,7 +364,7 @@ pub fn beginSimulation(
                         var block_entity_index: u32 = 0;
                         while (block_entity_index < block.entity_count) : (block_entity_index += 1) {
                             const low_entity_index = block.low_entity_indices[block_entity_index];
-                            var low_entity = &state.low_entities[low_entity_index];
+                            var low_entity = &world_mode.low_entities[low_entity_index];
 
                             if (!low_entity.sim.isSet(SimEntityFlags.Nonspatial.toInt())) {
                                 var sim_space_position = getSimSpacePosition(sim_region, low_entity);
@@ -384,7 +374,7 @@ pub fn beginSimulation(
                                     low_entity.sim.collision.total_volume,
                                     sim_region.bounds,
                                 )) {
-                                    _ = addEntity(state, sim_region, low_entity_index, low_entity, &sim_space_position);
+                                    _ = addEntity(world_mode, sim_region, low_entity_index, low_entity, &sim_space_position);
                                 }
                             }
                         }
@@ -397,8 +387,8 @@ pub fn beginSimulation(
     return sim_region;
 }
 
-fn canOverlap(state: *State, mover: *SimEntity, region: *SimEntity) bool {
-    _ = state;
+fn canOverlap(world_mode: *GameModeWorld, mover: *SimEntity, region: *SimEntity) bool {
+    _ = world_mode;
 
     var result = false;
 
@@ -411,8 +401,8 @@ fn canOverlap(state: *State, mover: *SimEntity, region: *SimEntity) bool {
     return result;
 }
 
-fn handleOverlap(state: *State, mover: *SimEntity, region: *SimEntity, delta_time: f32, ground: *f32) void {
-    _ = state;
+fn handleOverlap(world_mode: *GameModeWorld, mover: *SimEntity, region: *SimEntity, delta_time: f32, ground: *f32) void {
+    _ = world_mode;
     _ = delta_time;
 
     if (region.type == .Stairwell) {
@@ -466,7 +456,7 @@ fn entitiesOverlap(entity: *SimEntity, test_entity: *SimEntity, epsilon: Vector3
     return overlapped;
 }
 
-fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
+fn canCollide(world_mode: *GameModeWorld, entity: *SimEntity, hit_entity: *SimEntity) bool {
     var result = false;
 
     if (entity != hit_entity) {
@@ -491,8 +481,8 @@ fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
             }
 
             // Specific rules.
-            const hash_bucket = a.storage_index & ((state.collision_rule_hash.len) - 1);
-            var opt_rule: ?*shared.PairwiseCollisionRule = state.collision_rule_hash[hash_bucket];
+            const hash_bucket = a.storage_index & ((world_mode.collision_rule_hash.len) - 1);
+            var opt_rule: ?*PairwiseCollisionRule = world_mode.collision_rule_hash[hash_bucket];
             while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
                 if ((rule.storage_index_a == a.storage_index) and (rule.storage_index_b == b.storage_index)) {
                     result = rule.can_collide;
@@ -505,12 +495,12 @@ fn canCollide(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
     return result;
 }
 
-pub fn handleCollision(state: *State, entity: *SimEntity, hit_entity: *SimEntity) bool {
+pub fn handleCollision(world_mode: *GameModeWorld, entity: *SimEntity, hit_entity: *SimEntity) bool {
     var stops_on_collision = false;
 
     if (entity.type == .Sword) {
         // Stop future collisons between these entities.
-        addCollisionRule(state, entity.storage_index, hit_entity.storage_index, false);
+        world_mode.addCollisionRule(entity.storage_index, hit_entity.storage_index, false);
 
         stops_on_collision = false;
     } else {
@@ -537,7 +527,7 @@ pub fn handleCollision(state: *State, entity: *SimEntity, hit_entity: *SimEntity
 }
 
 pub fn moveEntity(
-    state: *State,
+    world_mode: *GameModeWorld,
     sim_region: *SimRegion,
     entity: *SimEntity,
     delta_time: f32,
@@ -611,7 +601,7 @@ pub fn moveEntity(
 
                     if ((test_entity.isSet(SimEntityFlags.Traversable.toInt()) and
                         entitiesOverlap(entity, test_entity, overlap_epsilon)) or
-                        canCollide(state, entity, test_entity))
+                        canCollide(world_mode, entity, test_entity))
                     {
                         var entity_volume_index: u32 = 0;
                         while (entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
@@ -760,7 +750,7 @@ pub fn moveEntity(
                 // Remove the applied delta.
                 entity_delta = desired_position.minus(entity.position);
 
-                const stops_on_collision = handleCollision(state, entity, hit_entity);
+                const stops_on_collision = handleCollision(world_mode, entity, hit_entity);
                 if (stops_on_collision) {
                     // Remove velocity that is facing into the wall.
                     entity_delta = entity_delta.minus(wall_normal.scaledTo(entity_delta.dotProduct(wall_normal)));
@@ -781,8 +771,8 @@ pub fn moveEntity(
     while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
         const test_entity = &sim_region.entities[test_entity_index];
 
-        if (canOverlap(state, entity, test_entity) and entitiesOverlap(entity, test_entity, Vector3.zero())) {
-            handleOverlap(state, entity, test_entity, delta_time, &ground);
+        if (canOverlap(world_mode, entity, test_entity) and entitiesOverlap(entity, test_entity, Vector3.zero())) {
+            handleOverlap(world_mode, entity, test_entity, delta_time, &ground);
         }
     }
 
@@ -811,14 +801,14 @@ pub fn moveEntity(
     }
 }
 
-pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
+pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
     var timed_block = TimedBlock.beginFunction(@src(), .EndSimulation);
     defer timed_block.end();
 
     var sim_entity_index: u32 = 0;
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
         const entity = &sim_region.entities[sim_entity_index];
-        const stored = &state.low_entities[entity.storage_index];
+        const stored = &world_mode.low_entities[entity.storage_index];
 
         std.debug.assert(stored.sim.isSet(SimEntityFlags.Simming.toInt()));
         stored.sim = entity.*;
@@ -829,36 +819,36 @@ pub fn endSimulation(state: *State, sim_region: *SimRegion) void {
         const new_position = if (stored.sim.isSet(SimEntityFlags.Nonspatial.toInt()))
             world.WorldPosition.nullPosition()
         else
-            world.mapIntoChunkSpace(state.world, sim_region.origin, entity.position);
+            world.mapIntoChunkSpace(world_mode.world, sim_region.origin, entity.position);
         world.changeEntityLocation(
-            &state.world_arena,
-            state.world,
+            &world_mode.world.arena,
+            world_mode.world,
             stored,
             entity.storage_index,
             new_position,
         );
 
         // Update camera position.
-        if (entity.storage_index == state.camera_following_entity_index) {
-            var new_camera_position = state.camera_position;
+        if (entity.storage_index == world_mode.camera_following_entity_index) {
+            var new_camera_position = world_mode.camera_position;
             new_camera_position.chunk_z = stored.position.chunk_z;
 
             if (DebugInterface.debugIf(@src(), "Renderer_Camera_RoomBased")) {
                 if (entity.position.x() > 9.0) {
-                    new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(18, 0, 0));
+                    new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(18, 0, 0));
                 } else if (entity.position.x() < -9.0) {
-                    new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(-18, 0, 0));
+                    new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(-18, 0, 0));
                 }
                 if (entity.position.y() > 5.0) {
-                    new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(0, 10, 0));
+                    new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(0, 10, 0));
                 } else if (entity.position.y() < -5.0) {
-                    new_camera_position = world.mapIntoChunkSpace(state.world, new_camera_position, Vector3.new(0, -10, 0));
+                    new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(0, -10, 0));
                 }
             } else {
                 new_camera_position = stored.position;
             }
 
-            state.camera_position = new_camera_position;
+            world_mode.camera_position = new_camera_position;
         }
     }
 }

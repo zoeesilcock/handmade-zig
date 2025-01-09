@@ -2,12 +2,21 @@ const shared = @import("shared.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const sim = @import("sim.zig");
+const file_formats = @import("file_formats");
+const asset = @import("asset.zig");
+const audio = @import("audio.zig");
+const random = @import("random.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 // Types.
 const Vector3 = math.Vector3;
+const Color = math.Color;
 const TimedBlock = debug_interface.TimedBlock;
+const LoadedBitmap = asset.LoadedBitmap;
+const BitmapId = file_formats.BitmapId;
+const PlayingSound = audio.PlayingSound;
+const LowEntity = @import("world_mode.zig").LowEntity;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
@@ -19,6 +28,8 @@ pub const World = extern struct {
     first_free: ?*WorldEntityBlock,
 
     chunk_hash: [4096]WorldChunk,
+
+    arena: shared.MemoryArena,
 };
 
 pub const WorldChunk = extern struct {
@@ -73,10 +84,10 @@ pub const WorldPosition = extern struct {
     }
 };
 
-pub fn initializeWorld(world: *World, chunk_dimension_in_meters: Vector3) void {
+pub fn initializeWorld(world: *World, chunk_dimension_in_meters: Vector3, parent_arena: *shared.MemoryArena) void {
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
-
     world.first_free = null;
+    parent_arena.makeSubArena(&world.arena, parent_arena.getRemainingSize(null), null);
 
     for (&world.chunk_hash) |*chunk| {
         chunk.x = TILE_CHUNK_UNINITIALIZED;
@@ -167,7 +178,7 @@ pub fn getWorldChunk(
 pub fn changeEntityLocation(
     memory_arena: *shared.MemoryArena,
     world: *World,
-    low_entity: *shared.LowEntity,
+    low_entity: *LowEntity,
     low_entity_index: u32,
     new_position: WorldPosition,
 ) void {
