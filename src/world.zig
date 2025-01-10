@@ -84,7 +84,9 @@ pub const WorldPosition = extern struct {
     }
 };
 
-pub fn initializeWorld(world: *World, chunk_dimension_in_meters: Vector3, parent_arena: *shared.MemoryArena) void {
+pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *shared.MemoryArena) *World {
+    var world: *World = parent_arena.pushStruct(World);
+
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
     world.first_free = null;
     parent_arena.makeSubArena(&world.arena, parent_arena.getRemainingSize(null), null);
@@ -95,6 +97,8 @@ pub fn initializeWorld(world: *World, chunk_dimension_in_meters: Vector3, parent
         chunk.z = TILE_CHUNK_UNINITIALIZED;
         chunk.first_block.entity_count = 0;
     }
+
+    return world;
 }
 
 fn isCanonical(chunk_dimension: f32, relative: f32) bool {

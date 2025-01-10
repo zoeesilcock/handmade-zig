@@ -9,6 +9,7 @@ const random = @import("random.zig");
 const intrinsics = @import("intrinsics.zig");
 const file_formats = @import("file_formats");
 const handmade = @import("handmade.zig");
+const cutscene = @import("cutscene.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
@@ -180,11 +181,13 @@ pub const PairwiseCollisionRule = extern struct {
     next_in_hash: ?*PairwiseCollisionRule,
 };
 
-fn playWorld(state: *State) void {
+pub fn playWorld(state: *State) void {
     state.setGameMode(.World);
 
     var world_mode: *GameModeWorld = state.mode_arena.pushStruct(GameModeWorld);
-    state.mode = .{ .world = world };
+    world_mode.typical_floor_height = 3;
+
+    state.mode = .{ .world = world_mode };
 
     // TODO: Replace this with a value received from the renderer.
     const pixels_to_meters = 1.0 / 42.0;
@@ -194,14 +197,11 @@ fn playWorld(state: *State) void {
         world_mode.typical_floor_height,
     );
 
-    world_mode.world = world_mode.world.arena.pushStruct(world.World);
-    world.initializeWorld(world_mode.world, chunk_dimension_in_meters, &state.mode_arena);
+    world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
 
     _ = addLowEntity(world_mode, .Null, WorldPosition.nullPosition());
 
-    world_mode.typical_floor_height = 3;
     const tile_side_in_meters: f32 = 1.4;
-
     const tiles_per_width: u32 = 17;
     const tiles_per_height: u32 = 9;
     const tile_depth_in_meters = world_mode.typical_floor_height;
@@ -355,12 +355,17 @@ fn playWorld(state: *State) void {
 }
 
 pub fn updateAndRenderWorld(
+    state: *shared.State,
     world_mode: *GameModeWorld,
     transient_state: *TransientState,
-    input: *const shared.GameInput,
+    input: *shared.GameInput,
     render_group: *render.RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
-) void {
+) bool {
+    const result = false;
+    var heroes_exist = false;
+    var quit_requested = false;
+
     const width_of_monitor_in_meters = 0.635;
     const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
     const focal_length: f32 = 0.6;
@@ -471,6 +476,69 @@ pub fn updateAndRenderWorld(
                 }
             }
         }
+
+        for (&input.controllers, 0..) |*controller, controller_index| {
+            const controlled_hero = &state.controlled_heroes[controller_index];
+            controlled_hero.movement_direction = Vector2.zero();
+            controlled_hero.vertical_direction = 0;
+            controlled_hero.sword_direction = Vector2.zero();
+
+            if (controlled_hero.entity_index == 0) {
+                if (controller.back_button.wasPressed()) {
+                    quit_requested = true;
+                } else if (controller.start_button.wasPressed()) {
+                    controlled_hero.* = shared.ControlledHero{};
+                    controlled_hero.entity_index = state.mode.world.addPlayer().low_index;
+                }
+            }
+
+            if (controlled_hero.entity_index != 0) {
+                heroes_exist = true;
+
+                if (controller.is_analog) {
+                    controlled_hero.movement_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
+                } else {
+                    if (controller.move_up.ended_down) {
+                        controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, 1));
+                    }
+                    if (controller.move_down.ended_down) {
+                        controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, -1));
+                    }
+                    if (controller.move_left.ended_down) {
+                        controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(-1, 0));
+                    }
+                    if (controller.move_right.ended_down) {
+                        controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(1, 0));
+                    }
+                }
+
+                if (controller.start_button.ended_down) {
+                    controlled_hero.vertical_direction = 3;
+                }
+
+                if (controller.action_up.ended_down) {
+                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
+                    state.audio_state.changeVolume(state.music, 10, Vector2.one());
+                }
+                if (controller.action_down.ended_down) {
+                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
+                    state.audio_state.changeVolume(state.music, 10, Vector2.zero());
+                }
+                if (controller.action_left.ended_down) {
+                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
+                    state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
+                }
+                if (controller.action_right.ended_down) {
+                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
+                    state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
+                }
+
+                if (controller.back_button.wasPressed()) {
+                    state.mode.world.deleteLowEntity(controlled_hero.entity_index);
+                    controlled_hero.entity_index = 0;
+                }
+            }
+        }
     }
 
     const sim_bounds_expansion = Vector3.new(15, 15, 0);
@@ -528,42 +596,42 @@ pub fn updateAndRenderWorld(
             // Pre-physics entity work.
             switch (entity.type) {
                 .Hero => {
-                    // for (world_mode.controlled_heroes) |controlled_hero| {
-                    //     if (controlled_hero.entity_index == entity.storage_index) {
-                    //         if (controlled_hero.vertical_direction != 0) {
-                    //             entity.velocity = Vector3.new(
-                    //                 entity.velocity.x(),
-                    //                 entity.velocity.y(),
-                    //                 controlled_hero.vertical_direction,
-                    //             );
-                    //         }
-                    //
-                    //         move_spec = sim.MoveSpec{
-                    //             .speed = 50,
-                    //             .drag = 8,
-                    //             .unit_max_acceleration = true,
-                    //         };
-                    //         acceleration = controlled_hero.movement_direction.toVector3(0);
-                    //
-                    //         if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
-                    //             if (entity.sword.ptr) |sword| {
-                    //                 if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
-                    //                     sword.distance_limit = 5.0;
-                    //                     sword.makeSpatial(
-                    //                         entity.position,
-                    //                         entity.velocity.plus(
-                    //                             controlled_hero.sword_direction.toVector3(0).scaledTo(5.0),
-                    //                         ),
-                    //                     );
-                    //                     world_mode.addCollisionRule(sword.storage_index, entity.storage_index, false);
-                    //                     // _ = world_mode.audio_state.playSound(
-                    //                     //     transient_state.assets.getRandomSound(.Bloop, &world_mode.effects_entropy),
-                    //                     // );
-                    //                 }
-                    //             }
-                    //         }
-                    //     }
-                    // }
+                    for (state.controlled_heroes) |controlled_hero| {
+                        if (controlled_hero.entity_index == entity.storage_index) {
+                            if (controlled_hero.vertical_direction != 0) {
+                                entity.velocity = Vector3.new(
+                                    entity.velocity.x(),
+                                    entity.velocity.y(),
+                                    controlled_hero.vertical_direction,
+                                );
+                            }
+
+                            move_spec = sim.MoveSpec{
+                                .speed = 50,
+                                .drag = 8,
+                                .unit_max_acceleration = true,
+                            };
+                            acceleration = controlled_hero.movement_direction.toVector3(0);
+
+                            if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
+                                if (entity.sword.ptr) |sword| {
+                                    if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
+                                        sword.distance_limit = 5.0;
+                                        sword.makeSpatial(
+                                            entity.position,
+                                            entity.velocity.plus(
+                                                controlled_hero.sword_direction.toVector3(0).scaledTo(5.0),
+                                            ),
+                                        );
+                                        world_mode.addCollisionRule(sword.storage_index, entity.storage_index, false);
+                                        // _ = world_mode.audio_state.playSound(
+                                        //     transient_state.assets.getRandomSound(.Bloop, &world_mode.effects_entropy),
+                                        // );
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
                 .Sword => {
                     move_spec = sim.MoveSpec{
@@ -1086,8 +1154,13 @@ pub fn updateAndRenderWorld(
 
     sim.endSimulation(world_mode, screen_sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
-}
 
+    if (!heroes_exist) {
+        cutscene.playIntroCutscene(state);
+    }
+
+    return result;
+}
 
 fn addLowEntity(world_mode: *GameModeWorld, entity_type: sim.EntityType, world_position: WorldPosition) AddLowEntityResult {
     std.debug.assert(world_mode.low_entity_count < world_mode.low_entities.len);

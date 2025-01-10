@@ -2,6 +2,7 @@ const asset = @import("asset.zig");
 const math = @import("math.zig");
 const render = @import("render.zig");
 const shared = @import("shared.zig");
+const world_mode = @import("world_mode.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
@@ -80,9 +81,9 @@ const intro_cutscene: []const LayeredScene = &.{
         .duration = 20,
         .asset_type = .OpeningCutscene,
         .camera_start = Vector3.new(0, 0, 0),
-        .camera_end = Vector3.new(0.5, -0.5, -1),
+        .camera_end = Vector3.new(1, -1, -4),
         .layers = &.{
-            SceneLayer{ .position = Vector3.new(2, -1, -22), .height = 32 }, // Hero and tree.
+            SceneLayer{ .position = Vector3.new(3, -4, -62), .height = 102 }, // Hero and tree.
             SceneLayer{ .position = Vector3.new(0, 0, -14), .height = 22 }, // Wall and window.
             SceneLayer{ .position = Vector3.new(0, 2, -8), .height = 10 }, // Icicles.
         },
@@ -218,11 +219,61 @@ const intro_cutscene: []const LayeredScene = &.{
     },
 };
 
+fn checkForMetaInput(state: *shared.State, input: *shared.GameInput) bool {
+    var result: bool = false;
+
+    for (&input.controllers) |controller| {
+        if (controller.back_button.wasPressed()) {
+            input.quit_requested = true;
+            break;
+        } else if (controller.start_button.wasPressed()) {
+            world_mode.playWorld(state);
+            result = true;
+            break;
+        }
+    }
+
+    return result;
+}
+
+pub fn playTitleScreen(state: *shared.State) void {
+    state.setGameMode(.TitleScreen);
+
+    var title_screen: *GameModeTitleScreen = state.mode_arena.pushStruct(GameModeTitleScreen);
+    title_screen.time = 0;
+
+    state.mode = .{ .title_screen = title_screen };
+}
+
+pub fn updateAndRenderTitleScreen(
+    state: *shared.State,
+    assets: *asset.Assets,
+    render_group: ?*render.RenderGroup,
+    draw_buffer: *asset.LoadedBitmap,
+    input: *shared.GameInput,
+    title_screen: *GameModeTitleScreen,
+) bool {
+    const result = checkForMetaInput(state, input);
+    _ = assets;
+    _ = draw_buffer;
+
+    if (!result) {
+        render_group.?.pushClear(Color.new(1, 0.25, 0.25, 0));
+
+        if (title_screen.time > 10) {
+            playIntroCutscene(state);
+        } else {
+            title_screen.time += input.frame_delta_time;
+        }
+    }
+
+    return result;
+}
+
 pub fn playIntroCutscene(state: *shared.State) void {
     state.setGameMode(.Cutscene);
 
     var cutscene: *GameModeCutscene = state.mode_arena.pushStruct(GameModeCutscene);
-
     cutscene.scene_count = intro_cutscene.len;
     cutscene.scenes = @ptrCast(intro_cutscene);
     cutscene.time = 0;
@@ -230,40 +281,30 @@ pub fn playIntroCutscene(state: *shared.State) void {
     state.mode = .{ .cutscene = cutscene };
 }
 
-pub fn updateAndRenderTitleScreen(
-    assets: *asset.Assets,
-    render_group: ?*render.RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
-    title_screen: *GameModeTitleScreen,
-) void {
-    _ = assets;
-    _ = render_group;
-    _ = draw_buffer;
-    _ = title_screen;
-}
-
-pub fn playTitleScreen(state: *shared.GameState) void {
-    state.setGameMode(.TitleScreen);
-    state.mode = .{ .title_screen = .{ .time = 0 } };
-}
-
 pub fn updateAndRenderCutscene(
+    state: *shared.State,
     assets: *asset.Assets,
     render_group: ?*render.RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
-    input: *const shared.GameInput,
+    input: *shared.GameInput,
     cutscene: *GameModeCutscene,
-) void {
-    // Prefetch assets for the next shot.
-    _ = renderCutsceneAtTime(assets, null, draw_buffer, cutscene, cutscene.time + CUTSCENE_WARMUP_SECONDS);
+) bool {
+    const result = checkForMetaInput(state, input);
 
-    // Render the current shot.
-    const cutscene_complete = renderCutsceneAtTime(assets, render_group, draw_buffer, cutscene, cutscene.time);
-    if (!cutscene_complete) {
-        cutscene.time = 0;
+    if (!result) {
+        // Prefetch assets for the next shot.
+        _ = renderCutsceneAtTime(assets, null, draw_buffer, cutscene, cutscene.time + CUTSCENE_WARMUP_SECONDS);
+
+        // Render the current shot.
+        const cutscene_still_running = renderCutsceneAtTime(assets, render_group, draw_buffer, cutscene, cutscene.time);
+        if (!cutscene_still_running) {
+            playTitleScreen(state);
+        } else {
+            cutscene.time += 10 * input.frame_delta_time;
+        }
     }
 
-    cutscene.time += input.frame_delta_time;
+    return result;
 }
 
 fn renderCutsceneAtTime(
@@ -273,7 +314,7 @@ fn renderCutsceneAtTime(
     cutscene: *GameModeCutscene,
     cutscene_time: f32,
 ) bool {
-    var cutscene_completed = false;
+    var cutscene_still_running = false;
     var time_base: f32 = 0;
     var shot_index: u32 = 0;
     while (shot_index < cutscene.scene_count) : (shot_index += 1) {
@@ -284,13 +325,13 @@ fn renderCutsceneAtTime(
         if (cutscene_time >= time_start and cutscene_time < time_end) {
             const normal_time = math.clamp01MapToRange(time_start, time_end, cutscene_time);
             renderLayeredScene(assets, render_group, draw_buffer, scene, normal_time);
-            cutscene_completed = true;
+            cutscene_still_running = true;
         }
 
         time_base = time_end;
     }
 
-    return cutscene_completed;
+    return cutscene_still_running;
 }
 
 fn renderLayeredScene(

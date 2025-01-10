@@ -286,7 +286,7 @@ pub const Platform = if (INTERNAL) extern struct {
 pub var platform: Platform = undefined;
 
 // Data from platform.
-pub fn updateAndRenderStub(_: Platform, _: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) void {
+pub fn updateAndRenderStub(_: Platform, _: *Memory, _: *GameInput, _: *OffscreenBuffer) callconv(.C) void {
     return;
 }
 
@@ -333,6 +333,8 @@ pub const GameInput = extern struct {
     frame_delta_time: f32 = 0,
 
     controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{ControllerInput{}} ** MAX_CONTROLLER_COUNT,
+
+    quit_requested: bool = false,
 
     // For debugging only.
     mouse_buttons: [MOUSE_BUTTON_COUNT]ControllerButtonState = [1]ControllerButtonState{ControllerButtonState{}} ** MOUSE_BUTTON_COUNT,
@@ -412,7 +414,6 @@ pub const Memory = struct {
     low_priority_queue: *PlatformWorkQueue,
 
     executable_reloaded: bool = false,
-    quit_requested: bool = false,
 };
 
 pub const TemporaryMemory = struct {
@@ -450,7 +451,7 @@ pub const MemoryArena = extern struct {
 
     pub fn makeSubArena(self: *MemoryArena, arena: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) void {
         arena.size = size;
-        arena.base = self.pushSize(size, alignment orelse 16);
+        arena.base = self.pushSize(size, alignment);
         arena.used = 0;
         arena.temp_count = 0;
     }
@@ -474,6 +475,8 @@ pub const MemoryArena = extern struct {
         const alignment_offset = self.getAlignmentOffset(alignment orelse DEFAULT_MEMORY_ALIGNMENT);
         const result: [*]u8 = @ptrCast(self.base + self.used + alignment_offset);
         self.used += aligned_size;
+
+        zeroSize(size, @ptrCast(result));
 
         return result;
     }

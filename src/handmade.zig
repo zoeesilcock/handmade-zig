@@ -117,7 +117,7 @@ const DebugInterface = debug_interface.DebugInterface;
 pub export fn updateAndRender(
     platform: shared.Platform,
     memory: *shared.Memory,
-    input: shared.GameInput,
+    input: *shared.GameInput,
     buffer: *shared.OffscreenBuffer,
 ) void {
     shared.platform = platform;
@@ -151,7 +151,8 @@ pub export fn updateAndRender(
         total_arena.makeSubArena(&state.mode_arena, total_arena.getRemainingSize(null), null);
 
         state.audio_state.initialize(&state.audio_arena);
-        cutscene.playIntroCutscene(state);
+        // cutscene.playIntroCutscene(state);
+        cutscene.playTitleScreen(state);
 
         state.is_initialized = true;
     }
@@ -254,71 +255,6 @@ pub export fn updateAndRender(
         state.audio_state.changeVolume(state.music, 0.01, music_volume);
     }
 
-    const heroes_exist = false;
-    const quit_requested = false;
-    // var heroes_exist = false;
-    // var quit_requested = false;
-    // for (&input.controllers, 0..) |controller, controller_index| {
-    //     const controlled_hero = &state.controlled_heroes[controller_index];
-    //     controlled_hero.movement_direction = Vector2.zero();
-    //     controlled_hero.vertical_direction = 0;
-    //     controlled_hero.sword_direction = Vector2.zero();
-    //
-    //     if (controlled_hero.entity_index == 0) {
-    //         if (controller.back_button.wasPressed()) {
-    //             quit_requested = true;
-    //         } else if (controller.start_button.ended_down) {
-    //             controlled_hero.* = shared.ControlledHero{};
-    //             controlled_hero.entity_index = state.mode.world.addPlayer().low_index;
-    //         }
-    //     } else {
-    //         heroes_exist = true;
-    //
-    //         if (controller.is_analog) {
-    //             controlled_hero.movement_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
-    //         } else {
-    //             if (controller.move_up.ended_down) {
-    //                 controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, 1));
-    //             }
-    //             if (controller.move_down.ended_down) {
-    //                 controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, -1));
-    //             }
-    //             if (controller.move_left.ended_down) {
-    //                 controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(-1, 0));
-    //             }
-    //             if (controller.move_right.ended_down) {
-    //                 controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(1, 0));
-    //             }
-    //         }
-    //
-    //         if (controller.start_button.ended_down) {
-    //             controlled_hero.vertical_direction = 3;
-    //         }
-    //
-    //         if (controller.action_up.ended_down) {
-    //             controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
-    //             state.audio_state.changeVolume(state.music, 10, Vector2.one());
-    //         }
-    //         if (controller.action_down.ended_down) {
-    //             controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
-    //             state.audio_state.changeVolume(state.music, 10, Vector2.zero());
-    //         }
-    //         if (controller.action_left.ended_down) {
-    //             controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
-    //             state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
-    //         }
-    //         if (controller.action_right.ended_down) {
-    //             controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
-    //             state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
-    //         }
-    //
-    //         if (controller.back_button.wasPressed()) {
-    //             state.mode.world.deleteLowEntity(controlled_hero.entity_index);
-    //             controlled_hero.entity_index = 0;
-    //         }
-    //     }
-    // }
-
     // Create draw buffer.
     var draw_buffer_ = LoadedBitmap{
         .width = shared.safeTruncateToUInt16(buffer.width),
@@ -344,27 +280,40 @@ pub export fn updateAndRender(
     );
     render_group.beginRender();
 
-    switch (state.current_mode) {
-        .TitleScreen => {
-            cutscene.updateAndRenderTitleScreen(
-                transient_state.assets,
-                render_group,
-                draw_buffer,
-                state.mode.title_screen,
-            );
-        },
-        .Cutscene => {
-            cutscene.updateAndRenderCutscene(
-                transient_state.assets,
-                render_group,
-                draw_buffer,
-                &input,
-                state.mode.cutscene,
-            );
-        },
-        .World => {
-            world_mode.updateAndRenderWorld(state.mode.world, transient_state, &input, render_group, draw_buffer);
-        },
+    var rerun: bool = true;
+    while(rerun) {
+        switch (state.current_mode) {
+            .TitleScreen => {
+                rerun = cutscene.updateAndRenderTitleScreen(
+                    state,
+                    transient_state.assets,
+                    render_group,
+                    draw_buffer,
+                    input,
+                    state.mode.title_screen,
+                );
+            },
+            .Cutscene => {
+                rerun = cutscene.updateAndRenderCutscene(
+                    state,
+                    transient_state.assets,
+                    render_group,
+                    draw_buffer,
+                    input,
+                    state.mode.cutscene,
+                );
+            },
+            .World => {
+                rerun = world_mode.updateAndRenderWorld(
+                    state,
+                    state.mode.world,
+                    transient_state,
+                    input,
+                    render_group,
+                    draw_buffer,
+                );
+            },
+        }
     }
 
     if (render_group.allResourcesPresent()) {
@@ -373,10 +322,6 @@ pub export fn updateAndRender(
     render_group.endRender();
 
     transient_state.arena.endTemporaryMemory(render_memory);
-
-    if (!heroes_exist and quit_requested) {
-        memory.quit_requested = true;
-    }
 
     if (state.current_mode == .World) {
         state.mode.world.world.arena.checkArena();

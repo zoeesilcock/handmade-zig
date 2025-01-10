@@ -39,6 +39,7 @@ const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
+const DEBUG = shared.DEBUG;
 
 const shared = @import("shared.zig");
 const debug_interface = @import("debug_interface.zig");
@@ -1329,7 +1330,7 @@ fn toggleFullscreen(window: win32.HWND) void {
             _ = win32.SetWindowLong(window, win32.GWL_STYLE, style & ~@as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
             _ = win32.SetWindowPos(
                 window,
-                if (INTERNAL) win32.HWND_NOTOPMOST else win32.HWND_TOPMOST,
+                if (INTERNAL or DEBUG) win32.HWND_NOTOPMOST else win32.HWND_TOPMOST,
                 monitor_info.rcMonitor.left,
                 monitor_info.rcMonitor.top,
                 monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
@@ -2051,9 +2052,9 @@ pub export fn wWinMain(
                     }
 
                     // Send all input to game.
-                    game.updateAndRender(platform, &game_memory, new_input.*, &game_buffer);
+                    game.updateAndRender(platform, &game_memory, new_input, &game_buffer);
 
-                    if (game_memory.quit_requested) {
+                    if (new_input.quit_requested) {
                         fader.beginFadeToDesktop();
                     }
 
