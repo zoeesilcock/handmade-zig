@@ -85,7 +85,7 @@ pub const WorldPosition = extern struct {
 };
 
 pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *shared.MemoryArena) *World {
-    var world: *World = parent_arena.pushStruct(World);
+    var world: *World = parent_arena.pushStruct(World, null);
 
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
     world.first_free = null;
@@ -154,7 +154,7 @@ pub fn getWorldChunk(
 
         if (opt_memory_arena) |memory_arena| {
             if (chunk.x != TILE_CHUNK_UNINITIALIZED and chunk.next_in_hash == null) {
-                chunk.next_in_hash = memory_arena.pushStruct(WorldChunk);
+                chunk.next_in_hash = memory_arena.pushStruct(WorldChunk, null);
                 tile_chunk = chunk.next_in_hash;
                 tile_chunk.?.x = TILE_CHUNK_UNINITIALIZED;
 
@@ -312,7 +312,7 @@ pub fn changeEntityLocationRaw(
                         old_block = free_block;
                     } else {
                         // No free blocks, create a new block.
-                        old_block = memory_arena.pushStruct(WorldEntityBlock);
+                        old_block = memory_arena.pushStruct(WorldEntityBlock, null);
                     }
 
                     // Copy the existing block into the old block position.

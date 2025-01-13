@@ -319,8 +319,7 @@ pub fn beginSimulation(
     var timed_block = TimedBlock.beginFunction(@src(), .BeginSimulation);
     defer timed_block.end();
 
-    var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion);
-    shared.zeroStruct([4096]SimEntityHash, &sim_region.sim_entity_hash);
+    var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, null);
 
     sim_region.max_entity_radius = 5;
     sim_region.max_entity_velocity = 30;
@@ -337,7 +336,7 @@ pub fn beginSimulation(
     );
     sim_region.max_entity_count = 4096;
     sim_region.entity_count = 0;
-    sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, SimEntity);
+    sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, SimEntity, null);
 
     const min_chunk_position = world.mapIntoChunkSpace(
         sim_region.world,

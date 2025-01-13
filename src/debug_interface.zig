@@ -147,8 +147,7 @@ pub const DebugType = if (INTERNAL) enum(u8) {
 
     CounterThreadList,
     // CounterFunctionList,
-} else enum(u8) {
-};
+} else enum(u8) {};
 
 pub const DebugEvent = if (INTERNAL) extern struct {
     clock: u64 = 0,
@@ -175,7 +174,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     } = undefined,
 
     fn uniqueFileCounterString(comptime file_name: []const u8, comptime line_number: u32, comptime counter: DebugType) [*:0]const u8 {
-        return file_name ++ "(" ++ std.fmt.comptimePrint("{d}", .{ line_number }) ++ ")." ++ @tagName(counter);
+        return file_name ++ "(" ++ std.fmt.comptimePrint("{d}", .{line_number}) ++ ")." ++ @tagName(counter);
     }
 
     pub fn record(comptime source: std.builtin.SourceLocation, comptime event_type: DebugType, block: [*:0]const u8) *DebugEvent {
@@ -393,8 +392,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         _ = array;
     }
 
-    pub fn debugEndArray() void {
-    }
+    pub fn debugEndArray() void {}
 
     pub fn debugEndDataBlock(comptime source: std.builtin.SourceLocation) void {
         _ = DebugEvent.record(source, .CloseDataBlock, "End Data Block");
@@ -496,8 +494,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         _ = array;
     }
 
-    pub fn debugEndArray() void {
-    }
+    pub fn debugEndArray() void {}
 
     pub fn debugEndDataBlock(source: std.builtin.SourceLocation) void {
         _ = source;

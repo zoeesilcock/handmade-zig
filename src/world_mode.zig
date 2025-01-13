@@ -33,6 +33,7 @@ const TransientState = shared.TransientState;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
+const ArenaPushParams = shared.ArenaPushParams;
 
 pub const GameModeWorld = struct {
     world: *world.World = undefined,
@@ -128,7 +129,7 @@ pub const GameModeWorld = struct {
             if (found_rule) |rule| {
                 self.first_free_collision_rule = rule.next_in_hash;
             } else {
-                found_rule = self.world.arena.pushStruct(PairwiseCollisionRule);
+                found_rule = self.world.arena.pushStruct(PairwiseCollisionRule, null);
             }
 
             found_rule.?.next_in_hash = self.collision_rule_hash[hash_bucket];
@@ -181,10 +182,13 @@ pub const PairwiseCollisionRule = extern struct {
     next_in_hash: ?*PairwiseCollisionRule,
 };
 
-pub fn playWorld(state: *State) void {
-    state.setGameMode(.World);
+pub fn playWorld(state: *State, transient_state: *TransientState) void {
+    state.setGameMode(transient_state, .World);
 
-    var world_mode: *GameModeWorld = state.mode_arena.pushStruct(GameModeWorld);
+    var world_mode: *GameModeWorld = state.mode_arena.pushStruct(
+        GameModeWorld,
+        ArenaPushParams.aligned(@alignOf(GameModeWorld), true),
+    );
     world_mode.typical_floor_height = 3;
 
     state.mode = .{ .world = world_mode };
@@ -1156,7 +1160,7 @@ pub fn updateAndRenderWorld(
     transient_state.arena.endTemporaryMemory(sim_memory);
 
     if (!heroes_exist) {
-        cutscene.playIntroCutscene(state);
+        cutscene.playTitleScreen(state, transient_state);
     }
 
     return result;
@@ -1316,10 +1320,10 @@ fn makeSimpleGroundedCollision(
     y_dimension: f32,
     z_dimension: f32,
 ) *sim.SimEntityCollisionVolumeGroup {
-    const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup);
+    const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup, null);
 
     group.volume_count = 1;
-    group.volumes = world_mode.world.arena.pushArray(group.volume_count, sim.SimEntityCollisionVolume);
+    group.volumes = world_mode.world.arena.pushArray(group.volume_count, sim.SimEntityCollisionVolume, null);
     group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension);
     group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
     group.volumes[0] = group.total_volume;
@@ -1328,7 +1332,7 @@ fn makeSimpleGroundedCollision(
 }
 
 fn makeNullCollision(world_mode: *GameModeWorld) *sim.SimEntityCollisionVolumeGroup {
-    const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup);
+    const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup, null);
 
     group.volume_count = 0;
     group.volumes = undefined;
@@ -1377,8 +1381,11 @@ fn fillGroundChunk(
     ground_buffer: *shared.GroundBuffer,
     chunk_position: *const world.WorldPosition,
 ) void {
-    if (handmade.beginTaskWithMemory(transient_state)) |task| {
-        var work: *FillGroundChunkWork = task.arena.pushStruct(FillGroundChunkWork);
+    if (handmade.beginTaskWithMemory(transient_state, true)) |task| {
+        var work: *FillGroundChunkWork = task.arena.pushStruct(
+            FillGroundChunkWork,
+            ArenaPushParams.aligned(@alignOf(FillGroundChunkWork), true),
+        );
         work.world_mode = world_mode;
         work.transient_state = transient_state;
         work.ground_buffer = ground_buffer;
@@ -1498,9 +1505,8 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
 
     std.debug.assert(render_group.allResourcesPresent());
 
-    render_group.singleRenderTo(buffer);
+    render_group.singleRenderTo(buffer, &work.task.arena);
     render_group.endRender();
 
     handmade.endTaskWithMemory(work.task);
 }
-

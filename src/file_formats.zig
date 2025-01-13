@@ -65,9 +65,9 @@ pub const HHAHeader = extern struct {
     asset_type_count: u32,
     asset_count: u32,
 
-    tags: u64 = undefined,        // [tag_count]HHATag
+    tags: u64 = undefined, // [tag_count]HHATag
     asset_types: u64 = undefined, // [asset_type_count]HHAAssetType
-    assets: u64 = undefined,      // [asset_count]HHAAsset
+    assets: u64 = undefined, // [asset_count]HHAAsset
 };
 
 fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {
@@ -85,17 +85,11 @@ pub const HHAAssetType = extern struct {
     one_past_last_asset_index: u32 = 0,
 };
 
-pub const HHAAsset = extern struct {
-    data_offset: u64 align(1),
-    first_tag_index: u32,
-    one_past_last_tag_index: u32,
-
-    info: extern union {
-        bitmap: HHABitmap,
-        sound: HHASound,
-        font: HHAFont,
-    }
-};
+pub const HHAAsset = extern struct { data_offset: u64 align(1), first_tag_index: u32, one_past_last_tag_index: u32, info: extern union {
+    bitmap: HHABitmap,
+    sound: HHASound,
+    font: HHAFont,
+} };
 
 pub const HHABitmap = extern struct {
     dim: [2]u32,

@@ -113,6 +113,7 @@ const Particle = shared.Particle;
 const ParticleCel = shared.ParticleCel;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
+const ArenaPushParams = shared.ArenaPushParams;
 
 pub export fn updateAndRender(
     platform: shared.Platform,
@@ -151,8 +152,6 @@ pub export fn updateAndRender(
         total_arena.makeSubArena(&state.mode_arena, total_arena.getRemainingSize(null), null);
 
         state.audio_state.initialize(&state.audio_arena);
-        // cutscene.playIntroCutscene(state);
-        cutscene.playTitleScreen(state);
 
         state.is_initialized = true;
     }
@@ -188,10 +187,7 @@ pub export fn updateAndRender(
         // }
 
         transient_state.ground_buffer_count = 256;
-        transient_state.ground_buffers = transient_state.arena.pushArray(
-            transient_state.ground_buffer_count,
-            shared.GroundBuffer,
-        );
+        transient_state.ground_buffers = transient_state.arena.pushArray(transient_state.ground_buffer_count, shared.GroundBuffer, ArenaPushParams.aligned(@alignOf(shared.GroundBuffer), true));
 
         for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
             const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -239,6 +235,10 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
+    if (state.current_mode == .None) {
+        cutscene.playIntroCutscene(state, transient_state);
+    }
+
     if (DebugInterface.debugIf(@src(), "GroundChunks_RecomputeOnEXEChange")) {
         if (memory.executable_reloaded) {
             for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
@@ -281,12 +281,13 @@ pub export fn updateAndRender(
     render_group.beginRender();
 
     var rerun: bool = true;
-    while(rerun) {
+    while (rerun) {
         switch (state.current_mode) {
+            .None => {},
             .TitleScreen => {
                 rerun = cutscene.updateAndRenderTitleScreen(
                     state,
-                    transient_state.assets,
+                    transient_state,
                     render_group,
                     draw_buffer,
                     input,
@@ -296,7 +297,7 @@ pub export fn updateAndRender(
             .Cutscene => {
                 rerun = cutscene.updateAndRenderCutscene(
                     state,
-                    transient_state.assets,
+                    transient_state,
                     render_group,
                     draw_buffer,
                     input,
@@ -317,7 +318,7 @@ pub export fn updateAndRender(
     }
 
     if (render_group.allResourcesPresent()) {
-        render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+        render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
     }
     render_group.endRender();
 
@@ -345,7 +346,7 @@ pub export fn getSoundSamples(
     // audio.outputSineWave(sound_buffer, shared.MIDDLE_C, state);
 }
 
-pub fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMemory {
+pub fn beginTaskWithMemory(transient_state: *TransientState, depends_on_game_mode: bool) ?*shared.TaskWithMemory {
     var found_task: ?*shared.TaskWithMemory = null;
 
     var task_index: u32 = 0;
@@ -354,6 +355,7 @@ pub fn beginTaskWithMemory(transient_state: *TransientState) ?*shared.TaskWithMe
 
         if (!task.being_used) {
             task.being_used = true;
+            task.depends_on_game_mode = depends_on_game_mode;
             task.memory_flush = task.arena.beginTemporaryMemory();
 
             found_task = task;
@@ -378,7 +380,7 @@ fn clearBitmap(bitmap: *LoadedBitmap) void {
 }
 
 fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to_zero: bool) LoadedBitmap {
-    const result = arena.pushStruct(LoadedBitmap);
+    const result = arena.pushStruct(LoadedBitmap, null);
 
     result.alignment_percentage = Vector2.splat(0.5);
     result.width_over_height = math.safeRatio1(@floatFromInt(width), @floatFromInt(height));
@@ -389,7 +391,7 @@ fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to
 
     const total_bitmap_size: u32 =
         @as(u32, @intCast(result.width)) * @as(u32, @intCast(result.height)) * shared.BITMAP_BYTES_PER_PIXEL;
-    result.memory = @ptrCast(arena.pushSize(total_bitmap_size, 16));
+    result.memory = @ptrCast(arena.pushSize(total_bitmap_size, ArenaPushParams.aligned(16, clear_to_zero)));
 
     if (clear_to_zero) {
         clearBitmap(result);

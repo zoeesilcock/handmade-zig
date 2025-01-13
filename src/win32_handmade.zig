@@ -198,7 +198,7 @@ const Fader = struct {
                 null,
                 instance,
                 null,
-                );
+            );
 
             if (self.window) |fade_window| {
                 toggleFullscreen(fade_window);
@@ -434,7 +434,7 @@ fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, 
             // File read successfully.
         } else {
             const error_number = win32.GetLastError();
-            std.debug.print("Error loading file: {d}\n", .{ @intFromEnum(error_number) });
+            std.debug.print("Error loading file: {d}\n", .{@intFromEnum(error_number)});
             fileError(source, "Read file failed.");
         }
     }
@@ -1242,7 +1242,13 @@ fn calculateGameOffset(window: win32.HWND) GameBufferDimensions {
     };
 }
 
-fn displayBufferInWindow(buffer: *OffscreenBuffer, device_context: ?win32.HDC, window: win32.HWND, window_width: i32, window_height: i32,) void {
+fn displayBufferInWindow(
+    buffer: *OffscreenBuffer,
+    device_context: ?win32.HDC,
+    window: win32.HWND,
+    window_width: i32,
+    window_height: i32,
+) void {
     const dim = calculateGameOffset(window);
 
     // Clear areas outside of our drawing area.
@@ -2006,8 +2012,9 @@ pub export fn wWinMain(
                     var new_keyboard_controller = &new_input.controllers[0];
                     new_keyboard_controller.is_connected = true;
 
-                    // Transfer buttons state from previous loop to this one.
+                    // Transfer buttons state from previous frame to this one.
                     old_keyboard_controller.copyButtonStatesTo(new_keyboard_controller);
+                    old_keyboard_controller.resetButtonTransitionCounts();
 
                     // Process all messages provided by Windows.
                     while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
@@ -2197,7 +2204,7 @@ pub export fn wWinMain(
                     //
                     //
 
-                    if (true) {
+                    if (false) {
                         timed_block = TimedBlock.beginBlock(@src(), .FrameRateWait);
 
                         // Capture timing.

@@ -40,6 +40,7 @@ const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
+const ArenaPushParams = shared.ArenaPushParams;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
@@ -133,10 +134,17 @@ const RenderTransform = extern struct {
     scale: f32,
 };
 
+const TileSortEntry = struct {
+    sort_key: f32,
+    push_buffer_offset: u32,
+};
+
 const TileRenderWork = struct {
     group: *RenderGroup,
     output_target: *LoadedBitmap,
     clip_rect: Rectangle2i,
+
+    sort_space: [*]TileSortEntry,
 };
 
 pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
@@ -146,8 +154,7 @@ pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) cal
     _ = queue;
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
 
-    work.group.renderTo(work.output_target, work.clip_rect, true);
-    work.group.renderTo(work.output_target, work.clip_rect, false);
+    work.group.renderTo(work.output_target, work.clip_rect);
 }
 
 fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: Vector3) RenderEntityBasisResult {
@@ -200,6 +207,7 @@ pub const RenderGroup = extern struct {
     max_push_buffer_size: u32,
     push_buffer_size: u32,
     push_buffer_base: [*]u8,
+    push_buffer_element_count: u32,
 
     missing_resource_count: u32,
     renders_in_background: bool,
@@ -212,7 +220,7 @@ pub const RenderGroup = extern struct {
         max_push_buffer_size: u32,
         renders_in_background: bool,
     ) *RenderGroup {
-        var result = arena.pushStruct(RenderGroup);
+        var result = arena.pushStruct(RenderGroup, ArenaPushParams.aligned(@alignOf(RenderGroup), true));
 
         if (max_push_buffer_size == 0) {
             result.max_push_buffer_size = @intCast(arena.getRemainingSize(null));
@@ -221,7 +229,10 @@ pub const RenderGroup = extern struct {
         }
 
         result.push_buffer_size = 0;
-        result.push_buffer_base = @ptrCast(arena.pushSize(result.max_push_buffer_size, @alignOf(u8)));
+        result.push_buffer_element_count = 0;
+        result.push_buffer_base = @ptrCast(
+            arena.pushSize(result.max_push_buffer_size, ArenaPushParams.aligned(@alignOf(u8), false)),
+        );
 
         result.assets = assets;
         result.global_alpha = 1;
@@ -323,7 +334,9 @@ pub const RenderGroup = extern struct {
             const aligned_size = size + aligned_offset;
 
             result = @ptrFromInt(aligned_address);
+
             self.push_buffer_size += @intCast(aligned_size);
+            self.push_buffer_element_count += 1;
         } else {
             unreachable;
         }
@@ -553,9 +566,13 @@ pub const RenderGroup = extern struct {
     pub fn singleRenderTo(
         self: *RenderGroup,
         output_target: *LoadedBitmap,
+        temp_arena: *shared.MemoryArena,
     ) void {
         var timed_block = TimedBlock.beginFunction(@src(), .SingleRenderToOutput);
         defer timed_block.end();
+
+        const temp_mem = temp_arena.beginTemporaryMemory();
+        defer temp_arena.endTemporaryMemory(temp_mem);
 
         std.debug.assert(self.inside_renderer);
 
@@ -566,6 +583,8 @@ pub const RenderGroup = extern struct {
             .group = self,
             .output_target = output_target,
             .clip_rect = clip_rect,
+            .sort_space = undefined,
+            // .sort_space = temp_arena.pushArray(self.push_buffer_element_count, TileSortEntry, null),
         };
 
         doTileRenderWork(null, @ptrCast(&work));
@@ -575,11 +594,15 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         render_queue: *shared.PlatformWorkQueue,
         output_target: *LoadedBitmap,
+        temp_arena: *shared.MemoryArena,
     ) void {
         var timed_block = TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
         defer timed_block.end();
 
         std.debug.assert(self.inside_renderer);
+
+        const temp_mem = temp_arena.beginTemporaryMemory();
+        defer temp_arena.endTemporaryMemory(temp_mem);
 
         // TODO
         // * Make sure that tiles are all cache-aligned.
@@ -595,6 +618,8 @@ pub const RenderGroup = extern struct {
             .group = self,
             .output_target = output_target,
             .clip_rect = undefined,
+            .sort_space = undefined,
+            // .sort_space = temp_arena.pushArray(self.push_buffer_element_count, TileSortEntry, null),
         }} ** work_count;
 
         std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
@@ -638,7 +663,7 @@ pub const RenderGroup = extern struct {
         shared.platform.completeAllQueuedWork(render_queue);
     }
 
-    pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i, even: bool) void {
+    pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i) void {
         var timed_block = TimedBlock.beginFunction(@src(), .RenderToOutput);
         defer timed_block.end();
 
@@ -667,7 +692,7 @@ pub const RenderGroup = extern struct {
                 .RenderEntryClear => {
                     const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
                     const dimension = Vector2.newI(output_target.width, output_target.height);
-                    drawRectangle(output_target, Vector2.zero(), dimension, entry.color, clip_rect, even);
+                    drawRectangle(output_target, Vector2.zero(), dimension, entry.color, clip_rect);
 
                     base_address += @sizeOf(@TypeOf(entry.*));
                 },
@@ -705,7 +730,6 @@ pub const RenderGroup = extern struct {
                                 @constCast(bitmap),
                                 null_pixels_to_meters,
                                 clip_rect,
-                                even,
                             );
                         }
                     }
@@ -721,7 +745,6 @@ pub const RenderGroup = extern struct {
                         entry.position.plus(entry.dimension),
                         entry.color,
                         clip_rect,
-                        even,
                     );
 
                     base_address += @sizeOf(@TypeOf(entry.*));
@@ -784,6 +807,7 @@ pub const RenderGroup = extern struct {
         self.assets.endGeneration(self.generation_id);
         self.generation_id = 0;
         self.push_buffer_size = 0;
+        self.push_buffer_element_count = 0;
     }
 };
 
@@ -793,7 +817,6 @@ pub fn drawRectangle(
     max: Vector2,
     color: Color,
     clip_rect: Rectangle2i,
-    even: bool,
 ) void {
     var timed_block = TimedBlock.beginFunction(@src(), .DrawRectangle);
     defer timed_block.end();
@@ -805,9 +828,6 @@ pub fn drawRectangle(
         intrinsics.floorReal32ToInt32(max.y()),
     );
     fill_rect = fill_rect.getIntersectionWith(clip_rect);
-    if (@intFromBool(!even) == fill_rect.min.y() & 1) {
-        _ = fill_rect.min.setY(fill_rect.min.y() + 1);
-    }
 
     // Set the pointer to the top left corner of the rectangle.
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
@@ -818,7 +838,7 @@ pub fn drawRectangle(
     );
 
     var y = fill_rect.min.y();
-    while (y < fill_rect.max.y()) : (y += 2) {
+    while (y < fill_rect.max.y()) : (y += 1) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
 
         var x = fill_rect.min.x();
@@ -827,7 +847,7 @@ pub fn drawRectangle(
             pixel += 1;
         }
 
-        row += @as(usize, @intCast(draw_buffer.pitch * 2));
+        row += @as(usize, @intCast(draw_buffer.pitch));
     }
 }
 
@@ -866,7 +886,6 @@ pub fn drawRectangleQuickly(
     texture: *LoadedBitmap,
     pixels_to_meters: f32,
     clip_rect: Rectangle2i,
-    even: bool,
 ) void {
     _ = pixels_to_meters;
 
@@ -914,10 +933,6 @@ pub fn drawRectangleQuickly(
 
     // const clip_rect = Rectangle2i.new(0, 0, width_max, height_max);
     fill_rect = fill_rect.getIntersectionWith(clip_rect);
-
-    if (@intFromBool(!even) == fill_rect.min.y() & 1) {
-        _ = fill_rect.min.setY(fill_rect.min.y() + 1);
-    }
 
     if (fill_rect.hasArea()) {
         var start_clip_mask = mask_ffffffff;
@@ -982,7 +997,7 @@ pub fn drawRectangleQuickly(
         const origin_x: Vec4f = @splat(origin.x());
         const origin_y: Vec4f = @splat(origin.y());
 
-        const row_advance: usize = @intCast(draw_buffer.pitch * 2);
+        const row_advance: usize = @intCast(draw_buffer.pitch);
         var row: [*]u8 = @ptrCast(draw_buffer.memory);
         row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * draw_buffer.pitch)));
 
@@ -990,7 +1005,7 @@ pub fn drawRectangleQuickly(
         defer process_timed_block.end();
 
         var y: i32 = min_y;
-        while (y < max_y) : (y += 2) {
+        while (y < max_y) : (y += 1) {
             var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
             var pixel_position_x: Vec4f =
                 @as(Vec4f, @splat(@floatFromInt(min_x))) - origin_x + zero_to_three;

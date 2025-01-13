@@ -6,7 +6,6 @@ pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
 pub const HIT_POINT_SUB_COUNT = 4;
 pub const BITMAP_BYTES_PER_PIXEL = 4;
-pub const DEFAULT_MEMORY_ALIGNMENT = 4;
 
 pub const intrinsics = @import("intrinsics.zig");
 pub const math = @import("math.zig");
@@ -386,6 +385,24 @@ pub const ControllerInput = extern struct {
         target.start_button.ended_down = self.start_button.ended_down;
         target.back_button.ended_down = self.back_button.ended_down;
     }
+
+    pub fn resetButtonTransitionCounts(self: *ControllerInput) void {
+        self.move_up.half_transitions = 0;
+        self.move_down.half_transitions = 0;
+        self.move_left.half_transitions = 0;
+        self.move_right.half_transitions = 0;
+
+        self.action_up.half_transitions = 0;
+        self.action_down.half_transitions = 0;
+        self.action_left.half_transitions = 0;
+        self.action_right.half_transitions = 0;
+
+        self.left_shoulder.half_transitions = 0;
+        self.right_shoulder.half_transitions = 0;
+
+        self.start_button.half_transitions = 0;
+        self.back_button.half_transitions = 0;
+    }
 };
 
 pub const ControllerButtonState = extern struct {
@@ -420,6 +437,46 @@ pub const TemporaryMemory = struct {
     used: MemoryIndex,
 };
 
+const ArenaPushFlag = enum(u32) {
+    ClearToZero = 0x1,
+};
+
+pub const ArenaPushParams = extern struct {
+    flags: u32,
+    alignment: u32,
+
+    pub fn default() ArenaPushParams {
+        return ArenaPushParams{
+            .flags = @intFromEnum(ArenaPushFlag.ClearToZero),
+            .alignment = 4,
+        };
+    }
+
+    pub fn aligned(alignment: u32, clear: bool) ArenaPushParams {
+        var result = ArenaPushParams.default();
+        if (clear) {
+            result.flags |= @intFromEnum(ArenaPushFlag.ClearToZero);
+        } else {
+            result.flags &= ~@intFromEnum(ArenaPushFlag.ClearToZero);
+        }
+        result.alignment = alignment;
+        return result;
+    }
+
+    pub fn alignedNoClear(alignment: u32) ArenaPushParams {
+        var result = ArenaPushParams.default();
+        result.flags &= ~@intFromEnum(ArenaPushFlag.ClearToZero);
+        result.alignment = alignment;
+        return result;
+    }
+
+    pub fn noClear() ArenaPushParams {
+        var result = ArenaPushParams.default();
+        result.flags &= ~@intFromEnum(ArenaPushFlag.ClearToZero);
+        return result;
+    }
+};
+
 pub const MemoryArena = extern struct {
     size: MemoryIndex,
     base: [*]u8,
@@ -445,52 +502,53 @@ pub const MemoryArena = extern struct {
         return alignment_offset;
     }
 
-    pub fn getRemainingSize(self: *MemoryArena, alignent: ?MemoryIndex) MemoryIndex {
-        return self.size - (self.used + self.getAlignmentOffset(alignent orelse DEFAULT_MEMORY_ALIGNMENT));
+    pub fn getRemainingSize(self: *MemoryArena, in_params: ?ArenaPushParams) MemoryIndex {
+        const params = in_params orelse ArenaPushParams.default();
+        return self.size - (self.used + self.getAlignmentOffset(params.alignment));
     }
 
-    pub fn makeSubArena(self: *MemoryArena, arena: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) void {
+    pub fn makeSubArena(self: *MemoryArena, arena: *MemoryArena, size: MemoryIndex, params: ?ArenaPushParams) void {
         arena.size = size;
-        arena.base = self.pushSize(size, alignment);
+        arena.base = self.pushSize(size, params);
         arena.used = 0;
         arena.temp_count = 0;
     }
 
-    pub fn getEffectiveSizeFor(self: *MemoryArena, size: MemoryIndex, alignment: MemoryIndex) MemoryIndex {
-        const alignment_offset = self.getAlignmentOffset(alignment);
+    pub fn getEffectiveSizeFor(self: *MemoryArena, size: MemoryIndex, in_params: ?ArenaPushParams) MemoryIndex {
+        const params = in_params orelse ArenaPushParams.default();
+        const alignment_offset = self.getAlignmentOffset(params.alignment);
         const aligned_size = size + alignment_offset;
         return aligned_size;
     }
 
-    pub fn hasRoomFor(self: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) bool {
-        const effective_size = self.getEffectiveSizeFor(size, alignment orelse DEFAULT_MEMORY_ALIGNMENT);
+    pub fn hasRoomFor(self: *MemoryArena, size: MemoryIndex, params: ?ArenaPushParams) bool {
+        const effective_size = self.getEffectiveSizeFor(size, params);
         return (self.used + effective_size) <= self.size;
     }
 
-    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, alignment: ?MemoryIndex) [*]u8 {
-        const aligned_size = self.getEffectiveSizeFor(size, alignment orelse DEFAULT_MEMORY_ALIGNMENT);
+    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, in_params: ?ArenaPushParams) [*]u8 {
+        const params = in_params orelse ArenaPushParams.default();
+        const aligned_size = self.getEffectiveSizeFor(size, params);
 
         std.debug.assert((self.used + aligned_size) <= self.size);
 
-        const alignment_offset = self.getAlignmentOffset(alignment orelse DEFAULT_MEMORY_ALIGNMENT);
+        const alignment_offset = self.getAlignmentOffset(params.alignment);
         const result: [*]u8 = @ptrCast(self.base + self.used + alignment_offset);
         self.used += aligned_size;
 
-        zeroSize(size, @ptrCast(result));
+        if (params.flags & @intFromEnum(ArenaPushFlag.ClearToZero) != 0) {
+            zeroSize(size, @ptrCast(result));
+        }
 
         return result;
     }
 
-    pub fn pushStruct(self: *MemoryArena, comptime T: type) *T {
-        return @as(*T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T), @alignOf(T)))));
+    pub fn pushStruct(self: *MemoryArena, comptime T: type, params: ?ArenaPushParams) *T {
+        return @as(*T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T), params))));
     }
 
-    pub fn pushArray(self: *MemoryArena, count: MemoryIndex, comptime T: type) [*]T {
-        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, @alignOf(T)))));
-    }
-
-    pub fn pushArrayAligned(self: *MemoryArena, count: MemoryIndex, comptime T: type, alignment: MemoryIndex) [*]T {
-        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, alignment))));
+    pub fn pushArray(self: *MemoryArena, count: MemoryIndex, comptime T: type, params: ?ArenaPushParams) [*]T {
+        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, params))));
     }
 
     pub fn pushString(self: *MemoryArena, source: [*:0]const u8) [*:0]const u8 {
@@ -504,7 +562,7 @@ pub const MemoryArena = extern struct {
         // Include the sentinel.
         size += 1;
 
-        var dest = self.pushSize(size, null);
+        var dest = self.pushSize(size, ArenaPushParams.noClear());
 
         char_index = 0;
         while (char_index < size) : (char_index += 1) {
@@ -599,13 +657,24 @@ pub const State = struct {
     test_diffuse: LoadedBitmap,
     test_normal: LoadedBitmap,
 
-    pub fn setGameMode(self: *State, game_mode: GameMode) void {
+    pub fn setGameMode(self: *State, transient_state: *TransientState, game_mode: GameMode) void {
+        var need_to_wait: bool = false;
+        var task_index: u32 = 0;
+        while (task_index < transient_state.tasks.len) : (task_index += 1) {
+            need_to_wait = need_to_wait or transient_state.tasks[task_index].depends_on_game_mode;
+        }
+
+        if (need_to_wait) {
+            platform.completeAllQueuedWork(transient_state.low_priority_queue);
+        }
+
         self.mode_arena.clear();
         self.current_mode = game_mode;
     }
 };
 
 pub const GameMode = enum {
+    None,
     TitleScreen,
     Cutscene,
     World,
@@ -619,6 +688,7 @@ pub const HeroBitmapIds = struct {
 
 pub const TaskWithMemory = struct {
     being_used: bool,
+    depends_on_game_mode: bool,
     arena: MemoryArena,
 
     memory_flush: TemporaryMemory,

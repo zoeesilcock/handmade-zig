@@ -8,6 +8,8 @@ const std = @import("std");
 
 const CUTSCENE_WARMUP_SECONDS: f32 = 2;
 
+const TransientState = shared.TransientState;
+const Assets = asset.Assets;
 const AssetTagId = file_formats.AssetTagId;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -219,7 +221,7 @@ const intro_cutscene: []const LayeredScene = &.{
     },
 };
 
-fn checkForMetaInput(state: *shared.State, input: *shared.GameInput) bool {
+fn checkForMetaInput(state: *shared.State, transient_state: *TransientState, input: *shared.GameInput) bool {
     var result: bool = false;
 
     for (&input.controllers) |controller| {
@@ -227,7 +229,7 @@ fn checkForMetaInput(state: *shared.State, input: *shared.GameInput) bool {
             input.quit_requested = true;
             break;
         } else if (controller.start_button.wasPressed()) {
-            world_mode.playWorld(state);
+            world_mode.playWorld(state, transient_state);
             result = true;
             break;
         }
@@ -236,10 +238,10 @@ fn checkForMetaInput(state: *shared.State, input: *shared.GameInput) bool {
     return result;
 }
 
-pub fn playTitleScreen(state: *shared.State) void {
-    state.setGameMode(.TitleScreen);
+pub fn playTitleScreen(state: *shared.State, transient_state: *TransientState) void {
+    state.setGameMode(transient_state, .TitleScreen);
 
-    var title_screen: *GameModeTitleScreen = state.mode_arena.pushStruct(GameModeTitleScreen);
+    var title_screen: *GameModeTitleScreen = state.mode_arena.pushStruct(GameModeTitleScreen, null);
     title_screen.time = 0;
 
     state.mode = .{ .title_screen = title_screen };
@@ -247,21 +249,20 @@ pub fn playTitleScreen(state: *shared.State) void {
 
 pub fn updateAndRenderTitleScreen(
     state: *shared.State,
-    assets: *asset.Assets,
+    transient_state: *shared.TransientState,
     render_group: ?*render.RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
     input: *shared.GameInput,
     title_screen: *GameModeTitleScreen,
 ) bool {
-    const result = checkForMetaInput(state, input);
-    _ = assets;
+    const result = checkForMetaInput(state, transient_state, input);
     _ = draw_buffer;
 
     if (!result) {
         render_group.?.pushClear(Color.new(1, 0.25, 0.25, 0));
 
         if (title_screen.time > 10) {
-            playIntroCutscene(state);
+            playIntroCutscene(state, transient_state);
         } else {
             title_screen.time += input.frame_delta_time;
         }
@@ -270,10 +271,10 @@ pub fn updateAndRenderTitleScreen(
     return result;
 }
 
-pub fn playIntroCutscene(state: *shared.State) void {
-    state.setGameMode(.Cutscene);
+pub fn playIntroCutscene(state: *shared.State, transient_state: *TransientState) void {
+    state.setGameMode(transient_state, .Cutscene);
 
-    var cutscene: *GameModeCutscene = state.mode_arena.pushStruct(GameModeCutscene);
+    var cutscene: *GameModeCutscene = state.mode_arena.pushStruct(GameModeCutscene, null);
     cutscene.scene_count = intro_cutscene.len;
     cutscene.scenes = @ptrCast(intro_cutscene);
     cutscene.time = 0;
@@ -283,13 +284,14 @@ pub fn playIntroCutscene(state: *shared.State) void {
 
 pub fn updateAndRenderCutscene(
     state: *shared.State,
-    assets: *asset.Assets,
+    transient_state: *shared.TransientState,
     render_group: ?*render.RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
     input: *shared.GameInput,
     cutscene: *GameModeCutscene,
 ) bool {
-    const result = checkForMetaInput(state, input);
+    const assets: *Assets = transient_state.assets;
+    const result = checkForMetaInput(state, transient_state, input);
 
     if (!result) {
         // Prefetch assets for the next shot.
@@ -298,9 +300,9 @@ pub fn updateAndRenderCutscene(
         // Render the current shot.
         const cutscene_still_running = renderCutsceneAtTime(assets, render_group, draw_buffer, cutscene, cutscene.time);
         if (!cutscene_still_running) {
-            playTitleScreen(state);
+            playTitleScreen(state, transient_state);
         } else {
-            cutscene.time += 10 * input.frame_delta_time;
+            cutscene.time += input.frame_delta_time;
         }
     }
 

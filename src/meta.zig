@@ -30,4 +30,3 @@ pub const MemberDefinition = struct {
     field_name: []const u8,
     field_offset: u32,
 };
-

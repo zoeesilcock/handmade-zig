@@ -28,6 +28,7 @@ const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const PlatformFileHandle = shared.PlatformFileHandle;
+const ArenaPushParams = shared.ArenaPushParams;
 const TimedBlock = debug_interface.TimedBlock;
 
 pub const AssetTypeId = file_formats.AssetTypeId;
@@ -137,7 +138,7 @@ pub const Assets = struct {
         memory_size: MemoryIndex,
         transient_state: *shared.TransientState,
     ) *Assets {
-        var assets = arena.pushStruct(Assets);
+        var assets = arena.pushStruct(Assets, ArenaPushParams.aligned(@alignOf(Assets), true));
 
         assets.next_generation_id = 0;
         assets.in_flight_generation_count = 0;
@@ -152,7 +153,11 @@ pub const Assets = struct {
         assets.memory_sentinel.previous = &assets.memory_sentinel;
         assets.memory_sentinel.next = &assets.memory_sentinel;
 
-        _ = assets.insertBlock(&assets.memory_sentinel, memory_size, arena.pushSize(memory_size, null));
+        _ = assets.insertBlock(
+            &assets.memory_sentinel,
+            memory_size,
+            arena.pushSize(memory_size, ArenaPushParams.noClear()),
+        );
 
         assets.loaded_asset_sentinel.next = &assets.loaded_asset_sentinel;
         assets.loaded_asset_sentinel.previous = &assets.loaded_asset_sentinel;
@@ -168,7 +173,7 @@ pub const Assets = struct {
             defer shared.platform.getAllFilesOfTypeEnd(&file_group);
 
             assets.file_count = file_group.file_count;
-            assets.files = arena.pushArray(assets.file_count, AssetFile);
+            assets.files = arena.pushArray(assets.file_count, AssetFile, null);
 
             var file_index: u32 = 0;
             while (file_index < assets.file_count) : (file_index += 1) {
@@ -227,8 +232,8 @@ pub const Assets = struct {
             }
         }
 
-        assets.assets = arena.pushArray(assets.asset_count, Asset);
-        assets.tags = arena.pushArray(assets.tag_count, HHATag);
+        assets.assets = arena.pushArray(assets.asset_count, Asset, ArenaPushParams.aligned(@alignOf(Asset), true));
+        assets.tags = arena.pushArray(assets.tag_count, HHATag, null);
 
         shared.zeroStruct(HHATag, @ptrCast(assets.tags));
 
@@ -279,7 +284,7 @@ pub const Assets = struct {
 
                             const temp_mem = transient_state.arena.beginTemporaryMemory();
                             defer transient_state.arena.endTemporaryMemory(temp_mem);
-                            const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(asset_count_for_type, HHAAsset);
+                            const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(asset_count_for_type, HHAAsset, null);
 
                             shared.platform.readDataFromFile(
                                 &file[0].handle,
@@ -624,7 +629,7 @@ pub const Assets = struct {
                     var opt_task: ?*shared.TaskWithMemory = null;
 
                     if (!immediate) {
-                        opt_task = handmade.beginTaskWithMemory(self.transient_state);
+                        opt_task = handmade.beginTaskWithMemory(self.transient_state, false);
                     }
 
                     if (immediate or opt_task != null) {
@@ -662,9 +667,16 @@ pub const Assets = struct {
                         if (opt_task) |task| {
                             work.task = task;
 
-                            const task_work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+                            const task_work: *LoadAssetWork = task.arena.pushStruct(
+                                LoadAssetWork,
+                                ArenaPushParams.noClear(),
+                            );
                             task_work.* = work;
-                            shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, task_work);
+                            shared.platform.addQueueEntry(
+                                self.transient_state.low_priority_queue,
+                                doLoadAssetWork,
+                                task_work,
+                            );
                         } else {
                             doLoadAssetWorkDirectly(&work);
                         }
@@ -786,7 +798,7 @@ pub const Assets = struct {
                 .seq_cst,
                 .seq_cst,
             ) == null) {
-                if (handmade.beginTaskWithMemory(self.transient_state)) |task| {
+                if (handmade.beginTaskWithMemory(self.transient_state, false)) |task| {
                     const info = asset.hha.info.sound;
 
                     var size = AssetMemorySize{};
@@ -809,7 +821,7 @@ pub const Assets = struct {
                         sound_at += channel_size;
                     }
 
-                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork, null);
                     work.task = task;
                     work.asset = asset;
                     work.handle = self.getFileHandleFor(asset.file_index);
@@ -911,7 +923,7 @@ pub const Assets = struct {
                     var opt_task: ?*shared.TaskWithMemory = null;
 
                     if (!immediate) {
-                        opt_task = handmade.beginTaskWithMemory(self.transient_state);
+                        opt_task = handmade.beginTaskWithMemory(self.transient_state, false);
                     }
 
                     if (immediate or opt_task != null) {
@@ -949,9 +961,16 @@ pub const Assets = struct {
                         if (opt_task) |task| {
                             work.task = task;
 
-                            const task_work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork);
+                            const task_work: *LoadAssetWork = task.arena.pushStruct(
+                                LoadAssetWork,
+                                ArenaPushParams.noClear(),
+                            );
                             task_work.* = work;
-                            shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, task_work);
+                            shared.platform.addQueueEntry(
+                                self.transient_state.low_priority_queue,
+                                doLoadAssetWork,
+                                task_work,
+                            );
                         } else {
                             doLoadAssetWorkDirectly(&work);
                         }

@@ -22,6 +22,7 @@ const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
+const ArenaPushParams = shared.ArenaPushParams;
 
 pub var global_debug_table: debug_interface.DebugTable = debug_interface.DebugTable{};
 
@@ -261,7 +262,7 @@ pub const DebugState = struct {
                 self.first_free_frame = result.?.next;
             } else {
                 if (self.per_frame_arena.hasRoomFor(@sizeOf(DebugFrame), null)) {
-                    result = self.per_frame_arena.pushStruct(DebugFrame);
+                    result = self.per_frame_arena.pushStruct(DebugFrame, null);
                 } else {
                     std.debug.assert(self.oldest_frame != null);
                     self.freeOldestFrame();
@@ -330,7 +331,10 @@ pub const DebugState = struct {
                 self.first_free_stored_event = result.?.next;
             } else {
                 if (self.per_frame_arena.hasRoomFor(@sizeOf(DebugStoredEvent), null)) {
-                    result = self.per_frame_arena.pushStruct(DebugStoredEvent);
+                    result = self.per_frame_arena.pushStruct(
+                        DebugStoredEvent,
+                        ArenaPushParams.aligned(@alignOf(DebugStoredEvent), true),
+                    );
                 } else {
                     std.debug.assert(self.oldest_frame != null);
                     self.freeOldestFrame();
@@ -364,7 +368,7 @@ pub const DebugState = struct {
         if (result) |block| {
             self.first_free_block = block.next_free;
         } else {
-            result = self.debug_arena.pushStruct(OpenDebugBlock);
+            result = self.debug_arena.pushStruct(OpenDebugBlock, null);
         }
 
         result.?.staring_frame_index = frame_index;
@@ -412,7 +416,9 @@ pub const DebugState = struct {
         var first_underscore: ?[*]const u8 = null;
         var opt_scan: ?[*]const u8 = @ptrCast(name);
         while (opt_scan) |scan| : (opt_scan = scan + 1) {
-            if (scan[0] == 0) { break; }
+            if (scan[0] == 0) {
+                break;
+            }
 
             if (scan[0] == '_') {
                 first_underscore = scan;
@@ -440,7 +446,7 @@ pub const DebugState = struct {
     }
 
     fn createVariableGroup(self: *DebugState, name_length: u32, name: [*:0]const u8) *DebugVariableGroup {
-        var group: *DebugVariableGroup = self.debug_arena.pushStruct(DebugVariableGroup);
+        var group: *DebugVariableGroup = self.debug_arena.pushStruct(DebugVariableGroup, null);
         group.sentinel.next = &group.sentinel;
         group.sentinel.prev = &group.sentinel;
         group.name = name;
@@ -449,11 +455,12 @@ pub const DebugState = struct {
         return group;
     }
 
-    pub fn addElementToGroup(self: *DebugState,
+    pub fn addElementToGroup(
+        self: *DebugState,
         parent: *DebugVariableGroup,
         element: *DebugElement,
     ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink);
+        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink, null);
 
         link.next = parent.sentinel.next;
         link.prev = &parent.sentinel;
@@ -466,11 +473,12 @@ pub const DebugState = struct {
         return link;
     }
 
-    pub fn addGroupToGroup(self: *DebugState,
+    pub fn addGroupToGroup(
+        self: *DebugState,
         parent: *DebugVariableGroup,
         group: *DebugVariableGroup,
     ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink);
+        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink, null);
 
         link.next = parent.sentinel.next;
         link.prev = &parent.sentinel;
@@ -497,7 +505,7 @@ pub const DebugState = struct {
         }
 
         if (result == null) {
-            result = self.debug_arena.pushStruct(DebugElement);
+            result = self.debug_arena.pushStruct(DebugElement, null);
 
             result.?.guid = event.guid;
             result.?.next_in_hash = self.element_hash[index];
@@ -611,7 +619,6 @@ pub const DebugState = struct {
                     },
                     .OpenDataBlock => {
                         _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_data_block);
-
                     },
                     .CloseDataBlock => {
                         if (thread.first_open_data_block) |matching_block| {
@@ -653,7 +660,7 @@ pub const DebugState = struct {
             if (result != null) {
                 self.first_thread = result.?.next;
             } else {
-                result = self.debug_arena.pushStruct(DebugThread);
+                result = self.debug_arena.pushStruct(DebugThread, null);
             }
 
             result.?.id = thread_id;
@@ -682,7 +689,7 @@ pub const DebugState = struct {
     // }
 
     fn addTree(self: *DebugState, group: ?*DebugVariableGroup, position: Vector2) *DebugTree {
-        var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree);
+        var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree, null);
         tree.group = group;
         tree.ui_position = position;
 
@@ -737,7 +744,7 @@ pub const DebugState = struct {
         }
 
         if (result == null) {
-            result = self.debug_arena.pushStruct(DebugView);
+            result = self.debug_arena.pushStruct(DebugView, null);
             result.?.id = id;
             result.?.view_type = .Unknown;
             result.?.next_in_hash = hash_slot.*;
@@ -911,7 +918,7 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                     event.data.Vector3.y(),
                     event.data.Vector3.z(),
                 },
-                ) catch "";
+            ) catch "";
             len += @intCast(slice.len);
         },
         .Vector4 => {
@@ -924,7 +931,7 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                     event.data.Vector4.z(),
                     event.data.Vector4.w(),
                 },
-                ) catch "";
+            ) catch "";
             len += @intCast(slice.len);
         },
         .Rectangle2 => {
@@ -937,7 +944,7 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                     event.data.Rectangle2.max.x(),
                     event.data.Rectangle2.max.y(),
                 },
-                ) catch "";
+            ) catch "";
             len += @intCast(slice.len);
         },
         .Rectangle3 => {
@@ -952,17 +959,17 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                     event.data.Rectangle3.max.y(),
                     event.data.Rectangle3.max.z(),
                 },
-                ) catch "";
+            ) catch "";
             len += @intCast(slice.len);
         },
         .OpenDataBlock => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{ event.block_name }) catch "";
+            const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{event.block_name}) catch "";
             len += @intCast(slice.len);
         },
         .CounterThreadList => {},
         .Unknown => {},
         else => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{ event.block_name }) catch "";
+            const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{event.block_name}) catch "";
             len += @intCast(slice.len);
         },
     }
@@ -1087,7 +1094,6 @@ fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_posit
             lane_height = (pixels_per_frame - bar_spacing) / @as(f32, @floatFromInt(lane_count));
         }
 
-
         _ = mouse_position;
         // const bar_height: f32 = lane_height * @as(f32, @floatFromInt(lane_count));
         // const bars_plus_spacing: f32 = bar_height + bar_spacing;
@@ -1153,7 +1159,6 @@ fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_posit
         //         }
         //     }
         // }
-
 
         // // 30 FPS line.
         // group.pushRectangle(
@@ -1439,8 +1444,7 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
                 drawDebugEvent(layout, opt_event, debug_id);
             },
         }
-    } else {
-    }
+    } else {}
 }
 
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
@@ -2136,7 +2140,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
             textLine(slice);
 
             const slice2 = std.fmt.bufPrintZ(&buffer, "Per-frame arena space remaining: {d}kb", .{
-                debug_state.debug_arena.getRemainingSize(1) / 1024,
+                debug_state.debug_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
             }) catch "";
             textLine(slice2);
         }
@@ -2149,7 +2153,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
             }
         }
 
-        group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer);
+        group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer, &debug_state.debug_arena);
         group.endRender();
 
         shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);

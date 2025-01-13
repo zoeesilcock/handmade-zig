@@ -16,6 +16,7 @@ const Vector2 = math.Vector2;
 const Vec4f = math.Vec4f;
 const Vec4i = math.Vec4i;
 const TimedBlock = debug_interface.TimedBlock;
+const ArenaPushParams = shared.ArenaPushParams;
 
 pub const PlayingSound = struct {
     id: SoundId,
@@ -49,7 +50,7 @@ pub const AudioState = struct {
 
         if (opt_sound_id) |sound_id| {
             if (self.first_free_playing_sound == null) {
-                self.first_free_playing_sound = self.permanent_arena.pushStruct(PlayingSound);
+                self.first_free_playing_sound = self.permanent_arena.pushStruct(PlayingSound, null);
                 self.first_free_playing_sound.?.next = null;
             }
 
@@ -122,8 +123,16 @@ pub const AudioState = struct {
         std.debug.assert((sound_buffer.sample_count & 3) == 0);
         const chunk_count = sound_buffer.sample_count / 4;
 
-        const real_channel0: [*]Vec4f = temp_arena.pushArrayAligned(chunk_count, Vec4f, 16);
-        const real_channel1: [*]Vec4f = temp_arena.pushArrayAligned(chunk_count, Vec4f, 16);
+        const real_channel0: [*]Vec4f = temp_arena.pushArray(
+            chunk_count,
+            Vec4f,
+            ArenaPushParams.alignedNoClear(16),
+        );
+        const real_channel1: [*]Vec4f = temp_arena.pushArray(
+            chunk_count,
+            Vec4f,
+            ArenaPushParams.alignedNoClear(16),
+        );
 
         const seconds_per_sample = 1.0 / @as(f32, @floatFromInt(sound_buffer.samples_per_second));
         const output_channel_count = 2;

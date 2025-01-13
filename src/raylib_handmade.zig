@@ -95,7 +95,7 @@ fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
     rl.memFree(memory);
 }
 
-fn addQueueEntry (queue: *shared.PlatformWorkQueue, callback: shared.PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void {
+fn addQueueEntry(queue: *shared.PlatformWorkQueue, callback: shared.PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void {
     const original_next_entry_to_write = @atomicLoad(u32, &queue.next_entry_to_write, .acquire);
     const original_next_entry_to_read = @atomicLoad(u32, &queue.next_entry_to_read, .acquire);
     const new_next_entry_to_write: u32 = @mod(original_next_entry_to_write + 1, @as(u32, @intCast(queue.entries.len)));
@@ -113,7 +113,7 @@ fn addQueueEntry (queue: *shared.PlatformWorkQueue, callback: shared.PlatformWor
     @as(*std.Thread.Semaphore, @ptrCast(@alignCast(queue.semaphore_handle.?))).post();
 }
 
-fn completeAllQueuedWork (queue: *shared.PlatformWorkQueue) callconv(.C) void {
+fn completeAllQueuedWork(queue: *shared.PlatformWorkQueue) callconv(.C) void {
     while (@atomicLoad(u32, &queue.completion_goal, .acquire) != @atomicLoad(u32, &queue.completion_count, .acquire)) {
         _ = doNextWorkQueueEntry(queue);
     }
@@ -127,7 +127,7 @@ fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: u32) !void {
     queue.semaphore_handle = @ptrCast(&semaphore);
     var thread_index: u32 = 0;
     while (thread_index < thread_count) : (thread_index += 1) {
-        _ = try std.Thread.spawn(std.Thread.SpawnConfig{}, threadProc, .{ queue });
+        _ = try std.Thread.spawn(std.Thread.SpawnConfig{}, threadProc, .{queue});
     }
 }
 
