@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
 
     // Add the packages.
     if (package == .All or package == .Game or package == .Executable) {
-        addExecutable(b, build_options, target, optimize, package, backend);
+        addExecutable(b, build_options, target, optimize, package, backend, internal);
     }
 
     if (package == .All or package == .Game or package == .Library) {
@@ -64,6 +64,7 @@ fn addExecutable(
     optimize: std.builtin.OptimizeMode,
     package: Package,
     backend: Backend,
+    internal: bool,
 ) void {
     const file_formats_module = b.addModule("file_formats", .{
         .root_source_file = b.path("src/file_formats.zig"),
@@ -77,6 +78,10 @@ fn addExecutable(
     });
     exe.root_module.addOptions("build_options", build_options);
     exe.root_module.addImport("file_formats", file_formats_module);
+
+    if (backend == .Win32 and internal) {
+        exe.subsystem = .Windows;
+    }
 
     if (backend == .Win32) {
         // Add the win32 API wrapper.
