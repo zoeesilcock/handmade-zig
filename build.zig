@@ -79,7 +79,7 @@ fn addExecutable(
     exe.root_module.addOptions("build_options", build_options);
     exe.root_module.addImport("file_formats", file_formats_module);
 
-    if (backend == .Win32 and internal) {
+    if (backend == .Win32 and !internal) {
         exe.subsystem = .Windows;
     }
 

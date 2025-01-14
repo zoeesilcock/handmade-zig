@@ -397,6 +397,9 @@ pub fn updateAndRenderWorld(
 
     // Draw ground.
     if (true) {
+        render_group.transform.offset_position = Vector3.new(0, 0, -0.001);
+        defer render_group.transform.offset_position = Vector3.zero();
+
         var ground_buffer_index: u32 = 0;
         while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
             const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -480,67 +483,67 @@ pub fn updateAndRenderWorld(
                 }
             }
         }
+    }
 
-        for (&input.controllers, 0..) |*controller, controller_index| {
-            const controlled_hero = &state.controlled_heroes[controller_index];
-            controlled_hero.movement_direction = Vector2.zero();
-            controlled_hero.vertical_direction = 0;
-            controlled_hero.sword_direction = Vector2.zero();
+    for (&input.controllers, 0..) |*controller, controller_index| {
+        const controlled_hero = &state.controlled_heroes[controller_index];
+        controlled_hero.movement_direction = Vector2.zero();
+        controlled_hero.vertical_direction = 0;
+        controlled_hero.sword_direction = Vector2.zero();
 
-            if (controlled_hero.entity_index == 0) {
-                if (controller.back_button.wasPressed()) {
-                    quit_requested = true;
-                } else if (controller.start_button.wasPressed()) {
-                    controlled_hero.* = shared.ControlledHero{};
-                    controlled_hero.entity_index = state.mode.world.addPlayer().low_index;
+        if (controlled_hero.entity_index == 0) {
+            if (controller.back_button.wasPressed()) {
+                quit_requested = true;
+            } else if (controller.start_button.wasPressed()) {
+                controlled_hero.* = shared.ControlledHero{};
+                controlled_hero.entity_index = state.mode.world.addPlayer().low_index;
+            }
+        }
+
+        if (controlled_hero.entity_index != 0) {
+            heroes_exist = true;
+
+            if (controller.is_analog) {
+                controlled_hero.movement_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
+            } else {
+                if (controller.move_up.ended_down) {
+                    controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, 1));
+                }
+                if (controller.move_down.ended_down) {
+                    controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, -1));
+                }
+                if (controller.move_left.ended_down) {
+                    controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(-1, 0));
+                }
+                if (controller.move_right.ended_down) {
+                    controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(1, 0));
                 }
             }
 
-            if (controlled_hero.entity_index != 0) {
-                heroes_exist = true;
+            if (controller.start_button.ended_down) {
+                controlled_hero.vertical_direction = 3;
+            }
 
-                if (controller.is_analog) {
-                    controlled_hero.movement_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
-                } else {
-                    if (controller.move_up.ended_down) {
-                        controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, 1));
-                    }
-                    if (controller.move_down.ended_down) {
-                        controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, -1));
-                    }
-                    if (controller.move_left.ended_down) {
-                        controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(-1, 0));
-                    }
-                    if (controller.move_right.ended_down) {
-                        controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(1, 0));
-                    }
-                }
+            if (controller.action_up.ended_down) {
+                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
+                state.audio_state.changeVolume(state.music, 10, Vector2.one());
+            }
+            if (controller.action_down.ended_down) {
+                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
+                state.audio_state.changeVolume(state.music, 10, Vector2.zero());
+            }
+            if (controller.action_left.ended_down) {
+                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
+                state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
+            }
+            if (controller.action_right.ended_down) {
+                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
+                state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
+            }
 
-                if (controller.start_button.ended_down) {
-                    controlled_hero.vertical_direction = 3;
-                }
-
-                if (controller.action_up.ended_down) {
-                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
-                    state.audio_state.changeVolume(state.music, 10, Vector2.one());
-                }
-                if (controller.action_down.ended_down) {
-                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
-                    state.audio_state.changeVolume(state.music, 10, Vector2.zero());
-                }
-                if (controller.action_left.ended_down) {
-                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
-                    state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
-                }
-                if (controller.action_right.ended_down) {
-                    controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
-                    state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
-                }
-
-                if (controller.back_button.wasPressed()) {
-                    state.mode.world.deleteLowEntity(controlled_hero.entity_index);
-                    controlled_hero.entity_index = 0;
-                }
+            if (controller.back_button.wasPressed()) {
+                state.mode.world.deleteLowEntity(controlled_hero.entity_index);
+                controlled_hero.entity_index = 0;
             }
         }
     }
@@ -1423,7 +1426,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
     var half_dim = Vector2.new(width, height).scaledTo(0.5);
 
     const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-    var render_group = RenderGroup.allocate(work.transient_state.assets, &work.task.arena, 0, true);
+    var render_group = RenderGroup.allocate(work.transient_state.assets, &work.task.arena, shared.kilobytes(512), true);
     render_group.beginRender();
     render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
     render_group.pushClear(Color.new(1, 0, 1, 1));

@@ -69,6 +69,7 @@ pub const RenderEntityBasisResult = extern struct {
     position: Vector2 = Vector2.zero(),
     scale: f32 = 0,
     valid: bool = false,
+    sort_key: f32 = 0,
 };
 
 pub const RenderEntryType = enum(u8) {
@@ -191,6 +192,8 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
         }
     }
 
+    result.sort_key = 4096 * position.z() - position.y();
+
     return result;
 }
 
@@ -207,7 +210,9 @@ pub const RenderGroup = extern struct {
     max_push_buffer_size: u32,
     push_buffer_size: u32,
     push_buffer_base: [*]u8,
+
     push_buffer_element_count: u32,
+    sort_entry_at: usize,
 
     missing_resource_count: u32,
     renders_in_background: bool,
@@ -233,6 +238,7 @@ pub const RenderGroup = extern struct {
         result.push_buffer_base = @ptrCast(
             arena.pushSize(result.max_push_buffer_size, ArenaPushParams.aligned(@alignOf(u8), false)),
         );
+        result.sort_entry_at = max_push_buffer_size;
 
         result.assets = assets;
         result.global_alpha = 1;
@@ -305,18 +311,19 @@ pub const RenderGroup = extern struct {
         self.transform.scale = 1;
     }
 
-    fn pushRenderElement(self: *RenderGroup, comptime T: type) ?*T {
+    fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: f32) ?*T {
         var timed_block = TimedBlock.beginFunction(@src(), .PushRenderElement);
         defer timed_block.end();
 
         const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[7..]);
-        return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, @alignOf(T))));
+        return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, sort_key, @alignOf(T))));
     }
 
     fn pushRenderElement_(
         self: *RenderGroup,
         in_size: u32,
         entry_type: RenderEntryType,
+        sort_key: f32,
         comptime alignment: u32,
     ) ?*void {
         std.debug.assert(self.inside_renderer);
@@ -324,7 +331,7 @@ pub const RenderGroup = extern struct {
         var result: ?*void = null;
         const size = in_size + @sizeOf(RenderEntryHeader);
 
-        if ((self.push_buffer_size + size) < self.max_push_buffer_size) {
+        if ((self.push_buffer_size + size) < self.sort_entry_at - @sizeOf(TileSortEntry)) {
             const header: *RenderEntryHeader = @ptrCast(self.push_buffer_base + self.push_buffer_size);
             header.type = entry_type;
 
@@ -334,6 +341,11 @@ pub const RenderGroup = extern struct {
             const aligned_size = size + aligned_offset;
 
             result = @ptrFromInt(aligned_address);
+
+            self.sort_entry_at -= @sizeOf(TileSortEntry);
+            var sort_entry: *TileSortEntry = @ptrFromInt(@intFromPtr(self.push_buffer_base) + self.sort_entry_at);
+            sort_entry.sort_key = sort_key;
+            sort_entry.push_buffer_offset = self.push_buffer_size;
 
             self.push_buffer_size += @intCast(aligned_size);
             self.push_buffer_element_count += 1;
@@ -376,7 +388,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
-        if (self.pushRenderElement(RenderEntryClear)) |entry| {
+        if (self.pushRenderElement(RenderEntryClear, -std.math.floatMax(f32))) |entry| {
             entry.color = color;
         }
     }
@@ -415,7 +427,7 @@ pub const RenderGroup = extern struct {
         const dim = self.getBitmapDim(bitmap, height, offset, align_coefficient);
 
         if (dim.basis.valid) {
-            if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
+            if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key)) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
                 entry.size = dim.size.scaledTo(dim.basis.scale);
@@ -482,7 +494,7 @@ pub const RenderGroup = extern struct {
 
         const basis = getRenderEntityBasisPosition(&self.transform, position);
         if (basis.valid) {
-            if (self.pushRenderElement(RenderEntryRectangle)) |entry| {
+            if (self.pushRenderElement(RenderEntryRectangle, basis.sort_key)) |entry| {
                 entry.position = basis.position;
                 entry.dimension = dimension.scaledTo(basis.scale);
                 entry.color = color;
@@ -563,6 +575,26 @@ pub const RenderGroup = extern struct {
         // }
     }
 
+    fn sortEntries(self: *RenderGroup) void {
+        const count: u32 = self.push_buffer_element_count;
+        const entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(self.push_buffer_base) + self.sort_entry_at);
+
+        var outer: u32 = 0;
+        while (outer < count) : (outer += 1) {
+            var inner: u32 = 0;
+            while (inner < count - 1) : (inner += 1) {
+                const entry_a: [*]TileSortEntry = entries + inner;
+                const entry_b: [*]TileSortEntry = entry_a + 1;
+
+                if (entry_a[0].sort_key > entry_b[0].sort_key) {
+                    const swap: TileSortEntry = entry_b[0];
+                    entry_b[0] = entry_a[0];
+                    entry_a[0] = swap;
+                }
+            }
+        }
+    }
+
     pub fn singleRenderTo(
         self: *RenderGroup,
         output_target: *LoadedBitmap,
@@ -570,6 +602,8 @@ pub const RenderGroup = extern struct {
     ) void {
         var timed_block = TimedBlock.beginFunction(@src(), .SingleRenderToOutput);
         defer timed_block.end();
+
+        self.sortEntries();
 
         const temp_mem = temp_arena.beginTemporaryMemory();
         defer temp_arena.endTemporaryMemory(temp_mem);
@@ -583,8 +617,7 @@ pub const RenderGroup = extern struct {
             .group = self,
             .output_target = output_target,
             .clip_rect = clip_rect,
-            .sort_space = undefined,
-            // .sort_space = temp_arena.pushArray(self.push_buffer_element_count, TileSortEntry, null),
+            .sort_space = temp_arena.pushArray(self.push_buffer_element_count, TileSortEntry, null),
         };
 
         doTileRenderWork(null, @ptrCast(&work));
@@ -598,6 +631,8 @@ pub const RenderGroup = extern struct {
     ) void {
         var timed_block = TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
         defer timed_block.end();
+
+        self.sortEntries();
 
         std.debug.assert(self.inside_renderer);
 
@@ -618,8 +653,7 @@ pub const RenderGroup = extern struct {
             .group = self,
             .output_target = output_target,
             .clip_rect = undefined,
-            .sort_space = undefined,
-            // .sort_space = temp_arena.pushArray(self.push_buffer_element_count, TileSortEntry, null),
+            .sort_space = temp_arena.pushArray(self.push_buffer_element_count, TileSortEntry, null),
         }} ** work_count;
 
         std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
@@ -669,9 +703,15 @@ pub const RenderGroup = extern struct {
 
         const null_pixels_to_meters: f32 = 1.0;
 
-        var base_address: u32 = 0;
-        while (base_address < self.push_buffer_size) {
-            const header: *RenderEntryHeader = @ptrCast(self.push_buffer_base + base_address);
+        const sort_entry_count: u32 = self.push_buffer_element_count;
+        const sort_entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(self.push_buffer_base) + self.sort_entry_at);
+
+        var sort_entry: [*]TileSortEntry = sort_entries;
+        var sort_entry_index: u32 = 0;
+        while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
+            defer sort_entry += 1;
+
+            const header: *RenderEntryHeader = @ptrCast(self.push_buffer_base + sort_entry[0].push_buffer_offset);
             const alignment: usize = switch (header.type) {
                 .RenderEntryClear => @alignOf(RenderEntryClear),
                 .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
@@ -683,25 +723,18 @@ pub const RenderGroup = extern struct {
             const header_address = @intFromPtr(header);
             const data_address = header_address + @sizeOf(RenderEntryHeader);
             const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-            const aligned_offset: u32 = @intCast(aligned_address - data_address);
             const data: *void = @ptrFromInt(aligned_address);
-
-            base_address += @sizeOf(RenderEntryHeader) + aligned_offset;
 
             switch (header.type) {
                 .RenderEntryClear => {
                     const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
                     const dimension = Vector2.newI(output_target.width, output_target.height);
                     drawRectangle(output_target, Vector2.zero(), dimension, entry.color, clip_rect);
-
-                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
                 .RenderEntrySaturation => {
                     const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
 
                     changeSaturation(output_target, entry.level);
-
-                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
                 .RenderEntryBitmap => {
                     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
@@ -733,8 +766,6 @@ pub const RenderGroup = extern struct {
                             );
                         }
                     }
-
-                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
                 .RenderEntryRectangle => {
                     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
@@ -746,12 +777,9 @@ pub const RenderGroup = extern struct {
                         entry.color,
                         clip_rect,
                     );
-
-                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
                 .RenderEntryCoordinateSystem => {
-                    const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
-
+                    // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
                     // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
                     // drawRectangleSlowly(
                     //     output_target,
@@ -780,8 +808,6 @@ pub const RenderGroup = extern struct {
                     //
                     // position = max;
                     // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-
-                    base_address += @sizeOf(@TypeOf(entry.*));
                 },
             }
         }
