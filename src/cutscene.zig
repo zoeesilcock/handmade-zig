@@ -15,6 +15,7 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Color = math.Color;
+const ObjectTransform = render.ObjectTransform;
 
 const SceneLayerFlags = enum(u32) {
     AtInfinity = 0x1,
@@ -389,6 +390,8 @@ fn renderLayeredScene(
             const layer_image = assets.getBestMatchBitmap(scene.asset_type, &match_vector, &weight_vector);
 
             if (opt_render_group) |render_group| {
+                var transform = ObjectTransform.defaultFlat();
+
                 if (layer.flags & @intFromEnum(SceneLayerFlags.AtInfinity) != 0) {
                     _ = position.setZ(position.z() + camera_offset.z());
                 }
@@ -398,19 +401,19 @@ fn renderLayeredScene(
                 }
 
                 if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraX) != 0) {
-                    _ = render_group.transform.offset_position.setX(position.x() + camera_offset.x());
+                    _ = transform.offset_position.setX(position.x() + camera_offset.x());
                 } else {
-                    _ = render_group.transform.offset_position.setX(position.x() - camera_offset.x());
+                    _ = transform.offset_position.setX(position.x() - camera_offset.x());
                 }
 
                 if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraY) != 0) {
-                    _ = render_group.transform.offset_position.setY(position.y() + camera_offset.y());
+                    _ = transform.offset_position.setY(position.y() + camera_offset.y());
                 } else {
-                    _ = render_group.transform.offset_position.setY(position.y() - camera_offset.y());
+                    _ = transform.offset_position.setY(position.y() - camera_offset.y());
                 }
 
-                _ = render_group.transform.offset_position.setZ(position.z() - camera_offset.z());
-                render_group.pushBitmapId(layer_image, layer.height, Vector3.zero(), color, null);
+                _ = transform.offset_position.setZ(position.z() - camera_offset.z());
+                render_group.pushBitmapId(transform, layer_image, layer.height, Vector3.zero(), color, null);
             } else {
                 assets.prefetchBitmap(layer_image);
             }

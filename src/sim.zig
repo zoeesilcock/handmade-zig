@@ -17,6 +17,7 @@ const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
 const World = world.World;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
+const ArenaPushParams = shared.ArenaPushParams;
 
 // introspect("sim");
 pub const SimRegion = extern struct {
@@ -319,7 +320,7 @@ pub fn beginSimulation(
     var timed_block = TimedBlock.beginFunction(@src(), .BeginSimulation);
     defer timed_block.end();
 
-    var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, null);
+    var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, ArenaPushParams.aligned(@alignOf(SimRegion), true));
 
     sim_region.max_entity_radius = 5;
     sim_region.max_entity_velocity = 30;

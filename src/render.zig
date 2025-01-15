@@ -122,7 +122,29 @@ pub const RenderEntryCoordinateSystem = extern struct {
     bottom: *EnvironmentMap,
 };
 
-const RenderTransform = extern struct {
+pub const ObjectTransform = extern struct {
+    upright: bool,
+    offset_position: Vector3,
+    scale: f32,
+
+    pub fn defaultUpright() ObjectTransform {
+        return ObjectTransform{
+            .upright = true,
+            .offset_position = Vector3.zero(),
+            .scale = 1,
+        };
+    }
+
+    pub fn defaultFlat() ObjectTransform {
+        return ObjectTransform{
+            .upright = false,
+            .offset_position = Vector3.zero(),
+            .scale = 1,
+        };
+    }
+};
+
+const CameraTransform = extern struct {
     orthographic: bool,
 
     meters_to_pixels: f32,
@@ -130,9 +152,6 @@ const RenderTransform = extern struct {
 
     focal_length: f32,
     distance_above_target: f32,
-
-    offset_position: Vector3,
-    scale: f32,
 };
 
 const TileSortEntry = struct {
@@ -158,21 +177,25 @@ pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) cal
     work.group.renderTo(work.output_target, work.clip_rect);
 }
 
-fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: Vector3) RenderEntityBasisResult {
+fn getRenderEntityBasisPosition(
+    camera_transform: CameraTransform,
+    object_transform: ObjectTransform,
+    original_position: Vector3,
+) RenderEntityBasisResult {
     var timed_block = TimedBlock.beginFunction(@src(), .GetRenderEntityBasisPosition);
     defer timed_block.end();
 
     var result = RenderEntityBasisResult{};
 
-    const position = original_position.xy().toVector3(0).plus(transform.offset_position);
+    const position = original_position.xy().toVector3(0).plus(object_transform.offset_position);
 
-    if (transform.orthographic) {
-        result.position = transform.screen_center.plus(position.xy().scaledTo(transform.meters_to_pixels));
-        result.scale = transform.meters_to_pixels;
+    if (camera_transform.orthographic) {
+        result.position = camera_transform.screen_center.plus(position.xy().scaledTo(camera_transform.meters_to_pixels));
+        result.scale = camera_transform.meters_to_pixels;
         result.valid = true;
     } else {
         const offset_z: f32 = 0;
-        var distance_above_target = transform.distance_above_target;
+        var distance_above_target = camera_transform.distance_above_target;
 
         if (DebugInterface.debugIf(@src(), "Renderer_Camera_UseDebug")) {
             distance_above_target += DebugInterface.debugVariable(@src(), f32, "Renderer_Camera_DebugDistance");
@@ -184,15 +207,16 @@ fn getRenderEntityBasisPosition(transform: *RenderTransform, original_position: 
         const raw_xy = position.xy().toVector3(1);
 
         if (distance_to_position_z > near_clip_plane) {
-            const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * transform.focal_length);
-            result.scale = projected_xy.z() * transform.meters_to_pixels;
-            result.position = transform.screen_center.plus(projected_xy.xy().scaledTo(transform.meters_to_pixels))
+            const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * camera_transform.focal_length);
+            result.scale = projected_xy.z() * camera_transform.meters_to_pixels;
+            result.position = camera_transform.screen_center.plus(projected_xy.xy().scaledTo(camera_transform.meters_to_pixels))
                 .plus(Vector2.new(0, result.scale * offset_z));
             result.valid = true;
         }
     }
 
-    result.sort_key = 4096 * position.z() - position.y();
+    result.sort_key =
+        4096 * (2 * position.z() + 1 * @as(f32, @floatFromInt(@intFromBool(object_transform.upright)))) - position.y();
 
     return result;
 }
@@ -205,7 +229,7 @@ pub const RenderGroup = extern struct {
 
     monitor_half_dim_in_meters: Vector2,
 
-    transform: RenderTransform,
+    camera_transform: CameraTransform,
 
     max_push_buffer_size: u32,
     push_buffer_size: u32,
@@ -232,29 +256,26 @@ pub const RenderGroup = extern struct {
         } else {
             result.max_push_buffer_size = max_push_buffer_size;
         }
-
-        result.push_buffer_size = 0;
-        result.push_buffer_element_count = 0;
         result.push_buffer_base = @ptrCast(
             arena.pushSize(result.max_push_buffer_size, ArenaPushParams.aligned(@alignOf(u8), false)),
         );
-        result.sort_entry_at = max_push_buffer_size;
 
         result.assets = assets;
-        result.global_alpha = 1;
-
-        result.generation_id = 0;
-
-        // Default transform.
-        result.transform.offset_position = Vector3.zero();
-        result.transform.scale = 1;
-
-        result.missing_resource_count = 0;
         result.renders_in_background = renders_in_background;
-
         result.inside_renderer = false;
 
+        result.clearRenderValues();
+
         return result;
+    }
+
+    fn clearRenderValues(self: *RenderGroup) void {
+        self.sort_entry_at = self.max_push_buffer_size;
+        self.push_buffer_size = 0;
+        self.push_buffer_element_count = 0;
+        self.generation_id = 0;
+        self.global_alpha = 1;
+        self.missing_resource_count = 0;
     }
 
     pub fn allResourcesPresent(self: *RenderGroup) bool {
@@ -275,16 +296,14 @@ pub const RenderGroup = extern struct {
             0.5 * @as(f32, @floatFromInt(pixel_height)) * pixels_to_meters,
         );
 
-        self.transform.meters_to_pixels = meters_to_pixels;
-        self.transform.focal_length = focal_length;
-        self.transform.distance_above_target = distance_above_target;
-        self.transform.screen_center = Vector2.new(
+        self.camera_transform.meters_to_pixels = meters_to_pixels;
+        self.camera_transform.focal_length = focal_length;
+        self.camera_transform.distance_above_target = distance_above_target;
+        self.camera_transform.screen_center = Vector2.new(
             0.5 * @as(f32, @floatFromInt(pixel_width)),
             0.5 * @as(f32, @floatFromInt(pixel_height)),
         );
-        self.transform.orthographic = false;
-        self.transform.offset_position = Vector3.zero();
-        self.transform.scale = 1;
+        self.camera_transform.orthographic = false;
     }
 
     pub fn orthographicMode(
@@ -299,16 +318,14 @@ pub const RenderGroup = extern struct {
             0.5 * @as(f32, @floatFromInt(pixel_height)) * pixels_to_meters,
         );
 
-        self.transform.meters_to_pixels = meters_to_pixels;
-        self.transform.focal_length = 1;
-        self.transform.distance_above_target = 1;
-        self.transform.screen_center = Vector2.new(
+        self.camera_transform.meters_to_pixels = meters_to_pixels;
+        self.camera_transform.focal_length = 1;
+        self.camera_transform.distance_above_target = 1;
+        self.camera_transform.screen_center = Vector2.new(
             0.5 * @as(f32, @floatFromInt(pixel_width)),
             0.5 * @as(f32, @floatFromInt(pixel_height)),
         );
-        self.transform.orthographic = true;
-        self.transform.offset_position = Vector3.zero();
-        self.transform.scale = 1;
+        self.camera_transform.orthographic = true;
     }
 
     fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: f32) ?*T {
@@ -357,25 +374,30 @@ pub const RenderGroup = extern struct {
     }
 
     // Renderer API.
-    pub fn unproject(self: *RenderGroup, pixels_xy: Vector2) Vector3 {
+    pub fn unproject(self: *RenderGroup, object_transform: ObjectTransform, pixels_xy: Vector2) Vector3 {
         var unprojected_xy: Vector2 = undefined;
+        const camera_transform = self.camera_transform;
 
-        if (self.transform.orthographic) {
-            unprojected_xy = pixels_xy.minus(self.transform.screen_center).scaledTo(1.0 / self.transform.meters_to_pixels);
-        } else {
-            const a: Vector2 = pixels_xy.minus(self.transform.screen_center).scaledTo(1.0 / self.transform.meters_to_pixels);
+        if (camera_transform.orthographic) {
             unprojected_xy =
-                a.scaledTo((self.transform.distance_above_target - self.transform.offset_position.z()) / self.transform.focal_length);
+                pixels_xy.minus(camera_transform.screen_center).scaledTo(1.0 / camera_transform.meters_to_pixels);
+        } else {
+            const a: Vector2 =
+                pixels_xy.minus(camera_transform.screen_center).scaledTo(1.0 / camera_transform.meters_to_pixels);
+            unprojected_xy =
+                a.scaledTo(
+                (camera_transform.distance_above_target - object_transform.offset_position.z()) / camera_transform.focal_length,
+            );
         }
 
-        var result: Vector3 = unprojected_xy.toVector3(self.transform.offset_position.z());
-        result = result.minus(self.transform.offset_position);
+        var result: Vector3 = unprojected_xy.toVector3(object_transform.offset_position.z());
+        result = result.minus(object_transform.offset_position);
 
         return result;
     }
 
     pub fn unprojectOld(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
-        return projected_xy.scaledTo(distance_from_camera / self.transform.focal_length);
+        return projected_xy.scaledTo(distance_from_camera / self.camera_transform.focal_length);
     }
 
     pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle2 {
@@ -384,7 +406,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn getCameraRectangleAtTarget(self: *RenderGroup) Rectangle2 {
-        return self.getCameraRectangleAtDistance(self.transform.distance_above_target);
+        return self.getCameraRectangleAtDistance(self.camera_transform.distance_above_target);
     }
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
@@ -401,6 +423,7 @@ pub const RenderGroup = extern struct {
 
     pub fn getBitmapDim(
         self: *RenderGroup,
+        object_transform: ObjectTransform,
         bitmap: *const LoadedBitmap,
         height: f32,
         offset: Vector3,
@@ -411,20 +434,21 @@ pub const RenderGroup = extern struct {
         dim.size = Vector2.new(height * bitmap.width_over_height, height);
         dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size).scaledTo(align_coefficient);
         dim.position = offset.minus(dim.alignment.toVector3(0));
-        dim.basis = getRenderEntityBasisPosition(&self.transform, dim.position);
+        dim.basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, dim.position);
 
         return dim;
     }
 
     pub fn pushBitmap(
         self: *RenderGroup,
+        object_transform: ObjectTransform,
         bitmap: *const LoadedBitmap,
         height: f32,
         offset: Vector3,
         color: Color,
         align_coefficient: f32,
     ) void {
-        const dim = self.getBitmapDim(bitmap, height, offset, align_coefficient);
+        const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient);
 
         if (dim.basis.valid) {
             if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key)) |entry| {
@@ -438,6 +462,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushBitmapId(
         self: *RenderGroup,
+        object_transform: ObjectTransform,
         opt_id: ?file_formats.BitmapId,
         height: f32,
         offset: Vector3,
@@ -454,7 +479,7 @@ pub const RenderGroup = extern struct {
             }
 
             if (opt_bitmap) |bitmap| {
-                self.pushBitmap(bitmap, height, offset, color, align_coefficient);
+                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient);
             } else {
                 std.debug.assert(!self.renders_in_background);
 
@@ -486,13 +511,14 @@ pub const RenderGroup = extern struct {
 
     pub fn pushRectangle(
         self: *RenderGroup,
+        object_transform: ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
         color: Color,
     ) void {
         const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
 
-        const basis = getRenderEntityBasisPosition(&self.transform, position);
+        const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
         if (basis.valid) {
             if (self.pushRenderElement(RenderEntryRectangle, basis.sort_key)) |entry| {
                 entry.position = basis.position;
@@ -502,34 +528,39 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn pushRectangle2(self: *RenderGroup, rectangle: Rectangle2, z: f32, color: Color) void {
-        self.pushRectangle(rectangle.getDimension(), rectangle.toRectangle3(z, z).getCenter(), color);
+    pub fn pushRectangle2(self: *RenderGroup, object_transform: ObjectTransform, rectangle: Rectangle2, z: f32, color: Color) void {
+        self.pushRectangle(object_transform, rectangle.getDimension(), rectangle.toRectangle3(z, z).getCenter(), color);
     }
 
     pub fn pushRectangleOutline(
         self: *RenderGroup,
+        object_transform: ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
         color: Color,
         thickness: f32,
     ) void {
         self.pushRectangle(
+            object_transform,
             Vector2.new(dimension.x(), thickness),
             offset.minus(Vector3.new(0, 0.5 * dimension.y(), 0)),
             color,
         );
         self.pushRectangle(
+            object_transform,
             Vector2.new(dimension.x(), thickness),
             offset.plus(Vector3.new(0, 0.5 * dimension.y(), 0)),
             color,
         );
 
         self.pushRectangle(
+            object_transform,
             Vector2.new(thickness, dimension.y()),
             offset.minus(Vector3.new(0.5 * dimension.x(), 0, 0)),
             color,
         );
         self.pushRectangle(
+            object_transform,
             Vector2.new(thickness, dimension.y()),
             offset.plus(Vector3.new(0.5 * dimension.x(), 0, 0)),
             color,
@@ -831,9 +862,8 @@ pub const RenderGroup = extern struct {
         self.inside_renderer = false;
 
         self.assets.endGeneration(self.generation_id);
-        self.generation_id = 0;
-        self.push_buffer_size = 0;
-        self.push_buffer_element_count = 0;
+
+        self.clearRenderValues();
     }
 };
 

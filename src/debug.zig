@@ -23,6 +23,7 @@ const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const ArenaPushParams = shared.ArenaPushParams;
+const ObjectTransform = render.ObjectTransform;
 
 pub var global_debug_table: debug_interface.DebugTable = debug_interface.DebugTable{};
 
@@ -1068,7 +1069,7 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
 
 fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_position: Vector2) void {
     if (debug_state.render_group) |group| {
-        group.pushRectangle2(profile_rect, 0, Color.new(0, 0, 0, 0.25));
+        group.pushRectangle2(ObjectTransform.defaultFlat(), profile_rect, 0, Color.new(0, 0, 0, 0.25));
 
         const bar_spacing: f32 = 4;
         var lane_height: f32 = 0;
@@ -1210,6 +1211,7 @@ const LayoutElement = struct {
     }
 
     pub fn end(self: *LayoutElement) void {
+        const no_transform = ObjectTransform.defaultFlat();
         const debug_state: *DebugState = self.layout.debug_state;
 
         if (debug_state.render_group) |render_group| {
@@ -1242,6 +1244,7 @@ const LayoutElement = struct {
 
             if (self.size) |size| {
                 render_group.pushRectangle2(
+                    no_transform,
                     Rectangle2.fromMinMax(
                         Vector2.new(total_min_corner.x(), interior_min_corner.y()),
                         Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
@@ -1250,6 +1253,7 @@ const LayoutElement = struct {
                     Color.black(),
                 );
                 render_group.pushRectangle2(
+                    no_transform,
                     Rectangle2.fromMinMax(
                         Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
                         Vector2.new(total_max_corner.x(), total_max_corner.y()),
@@ -1258,6 +1262,7 @@ const LayoutElement = struct {
                     Color.black(),
                 );
                 render_group.pushRectangle2(
+                    no_transform,
                     Rectangle2.fromMinMax(
                         Vector2.new(interior_min_corner.x(), total_min_corner.y()),
                         Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
@@ -1266,6 +1271,7 @@ const LayoutElement = struct {
                     Color.black(),
                 );
                 render_group.pushRectangle2(
+                    no_transform,
                     Rectangle2.fromMinMax(
                         Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
                         Vector2.new(interior_max_corner.x(), total_max_corner.y()),
@@ -1285,7 +1291,7 @@ const LayoutElement = struct {
                 );
                 const size_box_color: Color =
                     if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
-                render_group.pushRectangle2(size_box, 0, size_box_color);
+                render_group.pushRectangle2(no_transform, size_box, 0, size_box_color);
 
                 if (self.layout.mouse_position.isInRectangle(size_box)) {
                     debug_state.next_hot_interaction = size_interaction;
@@ -1350,6 +1356,7 @@ pub fn requestedStub(id: DebugId) bool {
 }
 
 fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_id: DebugId) void {
+    const no_transform = ObjectTransform.defaultFlat();
     const debug_state: *DebugState = layout.debug_state;
 
     if (opt_stored_event) |stored_event| {
@@ -1365,7 +1372,7 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
                     .BitmapId => {
                         const bitmap_scale = view.data.inline_block.dimension.y();
                         if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
-                            var dim = render_group.getBitmapDim(bitmap, bitmap_scale, Vector3.zero(), 0);
+                            var dim = render_group.getBitmapDim(no_transform, bitmap, bitmap_scale, Vector3.zero(), 0);
                             _ = view.data.inline_block.dimension.setX(dim.size.x());
                         }
 
@@ -1375,8 +1382,9 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
                         element.defaultInteraction(tear_interaction);
                         element.end();
 
-                        render_group.pushRectangle2(element.bounds, 0, Color.black());
+                        render_group.pushRectangle2(no_transform, element.bounds, 0, Color.black());
                         render_group.pushBitmapId(
+                            no_transform,
                             event.data.BitmapId,
                             bitmap_scale,
                             element.bounds.min.toVector3(0),
@@ -1537,7 +1545,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup
                     tree.ui_position.minus(Vector2.new(4, 4)),
                     Vector2.new(4, 4),
                 );
-                render_group.pushRectangle2(move_box, 0, move_box_color);
+                render_group.pushRectangle2(ObjectTransform.defaultFlat(), move_box, 0, move_box_color);
 
                 if (mouse_position.isInRectangle(move_box)) {
                     debug_state.next_hot_interaction = move_interaction;
@@ -1807,7 +1815,11 @@ pub fn textOp(
                             at += 4;
                         }
 
-                        const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(font_info, prev_code_point, code_point);
+                        const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(
+                            font_info,
+                            prev_code_point,
+                            code_point,
+                        );
                         x += advance_x;
 
                         if (code_point != ' ') {
@@ -1818,13 +1830,29 @@ pub fn textOp(
                                 const bitamp_offset: Vector3 = Vector3.new(x, position.y(), 0);
 
                                 if (op == .DrawText) {
-                                    render_group.pushBitmapId(bitmap_id, bitmap_scale, bitamp_offset, color, null);
+                                    render_group.pushBitmapId(
+                                        ObjectTransform.defaultFlat(),
+                                        bitmap_id,
+                                        bitmap_scale,
+                                        bitamp_offset,
+                                        color,
+                                        null,
+                                    );
                                 } else {
                                     std.debug.assert(op == .SizeText);
 
                                     if (render_group.assets.getBitmap(bitmap_id, render_group.generation_id)) |bitmap| {
-                                        const dim = render_group.getBitmapDim(bitmap, bitmap_scale, bitamp_offset, 1);
-                                        var glyph_dim: Rectangle2 = Rectangle2.fromMinDimension(dim.position.xy(), dim.size);
+                                        const dim = render_group.getBitmapDim(
+                                            ObjectTransform.defaultFlat(),
+                                            bitmap,
+                                            bitmap_scale,
+                                            bitamp_offset,
+                                            1,
+                                        );
+                                        var glyph_dim: Rectangle2 = Rectangle2.fromMinDimension(
+                                            dim.position.xy(),
+                                            dim.size,
+                                        );
                                         result = result.getUnionWith(&glyph_dim);
                                         rect_found = true;
                                     }
@@ -2060,7 +2088,10 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
     defer overlay_timed_block.end();
 
     if (debug_state.render_group) |group| {
-        const mouse_position: Vector2 = group.unproject(Vector2.new(input.mouse_x, input.mouse_y)).xy();
+        const mouse_position: Vector2 = group.unproject(
+            ObjectTransform.defaultFlat(),
+            Vector2.new(input.mouse_x, input.mouse_y),
+        ).xy();
         const hot_event: ?*DebugEvent = null;
 
         drawDebugMainMenu(debug_state, group, mouse_position);
