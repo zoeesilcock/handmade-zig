@@ -25,6 +25,7 @@ const file_formats = @import("file_formats");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
+const INTERNAL = shared.INTERNAL;
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 
 // Types.
@@ -163,8 +164,6 @@ const TileRenderWork = struct {
     group: *RenderGroup,
     output_target: *LoadedBitmap,
     clip_rect: Rectangle2i,
-
-    sort_space: [*]TileSortEntry,
 };
 
 pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
@@ -606,22 +605,113 @@ pub const RenderGroup = extern struct {
         // }
     }
 
-    fn sortEntries(self: *RenderGroup) void {
+    fn swap(a: [*]TileSortEntry, b: [*]TileSortEntry) void {
+        const store: TileSortEntry = b[0];
+        b[0] = a[0];
+        a[0] = store;
+    }
+
+    fn mergeSort(count: u32, first: [*]TileSortEntry, temp: [*]TileSortEntry) void {
+        if (count <= 1) {
+            // Nothing to do.
+        } else if (count == 2) {
+            const entry_a: [*]TileSortEntry = first;
+            const entry_b: [*]TileSortEntry = entry_a + 1;
+            if (entry_a[0].sort_key > entry_b[0].sort_key) {
+                swap(entry_a, entry_b);
+            }
+        } else {
+            const half0: u32 = @divFloor(count, 2);
+            const half1: u32 = count - half0;
+
+            std.debug.assert(half0 >= 1);
+            std.debug.assert(half1 >= 1);
+
+            const in_half0: [*]TileSortEntry = first;
+            const in_half1: [*]TileSortEntry = first + half0;
+            const end: [*]TileSortEntry = first + count;
+
+            RenderGroup.mergeSort(half0, in_half0, temp);
+            RenderGroup.mergeSort(half1, in_half1, temp);
+
+            var read_half0: [*]TileSortEntry = in_half0;
+            var read_half1: [*]TileSortEntry = in_half1;
+
+            var out: [*]TileSortEntry = temp;
+            var index: u32 = 0;
+            while (index < count) : (index += 1) {
+                if (read_half0 == in_half1) {
+                    out[0] = read_half1[0];
+                    read_half1 += 1;
+                    out += 1;
+                } else if (read_half1 == end) {
+                    out[0] = read_half0[0];
+                    read_half0 += 1;
+                    out += 1;
+                } else if (read_half0[0].sort_key < read_half1[0].sort_key) {
+                    out[0] = read_half0[0];
+                    read_half0 += 1;
+                    out += 1;
+                } else {
+                    out[0] = read_half1[0];
+                    read_half1 += 1;
+                    out += 1;
+                }
+            }
+
+            std.debug.assert(out == (temp + count));
+            std.debug.assert(read_half0 == in_half1);
+            std.debug.assert(read_half1 == end);
+
+            index = 0;
+            while (index < count) : (index += 1) {
+                first[index] = temp[index];
+            }
+        }
+    }
+
+    fn sortEntries(self: *RenderGroup, temp_arena: *shared.MemoryArena) void {
+        const temp = temp_arena.beginTemporaryMemory();
+        defer temp_arena.endTemporaryMemory(temp);
+
         const count: u32 = self.push_buffer_element_count;
+        const temp_space = temp_arena.pushArray(count, TileSortEntry, null);
         const entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(self.push_buffer_base) + self.sort_entry_at);
 
-        var outer: u32 = 0;
-        while (outer < count) : (outer += 1) {
-            var inner: u32 = 0;
-            while (inner < count - 1) : (inner += 1) {
-                const entry_a: [*]TileSortEntry = entries + inner;
+        if (false) {
+            // Bubble sort, 0(n^2).
+            var outer: u32 = 0;
+            while (outer < count) : (outer += 1) {
+                var list_is_sorted = true;
+                var inner: u32 = 0;
+                while (inner < count - 1) : (inner += 1) {
+                    const entry_a: [*]TileSortEntry = entries + inner;
+                    const entry_b: [*]TileSortEntry = entry_a + 1;
+
+                    if (entry_a[0].sort_key > entry_b[0].sort_key) {
+                        swap(entry_a, entry_b);
+                        list_is_sorted = false;
+                    }
+                }
+
+                if (list_is_sorted) {
+                    break;
+                }
+            }
+        } else {
+            // Merge sort
+            RenderGroup.mergeSort(count, entries, temp_space);
+        }
+
+        if (INTERNAL) {
+            // Validate the sort result.
+
+            var index: u32 = 0;
+            while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
+                const entry_a: [*]TileSortEntry = entries + index;
                 const entry_b: [*]TileSortEntry = entry_a + 1;
 
-                if (entry_a[0].sort_key > entry_b[0].sort_key) {
-                    const swap: TileSortEntry = entry_b[0];
-                    entry_b[0] = entry_a[0];
-                    entry_a[0] = swap;
-                }
+                std.debug.assert(entry_a[0].sort_key <= entry_b[0].sort_key);
             }
         }
     }
@@ -634,7 +724,7 @@ pub const RenderGroup = extern struct {
         var timed_block = TimedBlock.beginFunction(@src(), .SingleRenderToOutput);
         defer timed_block.end();
 
-        self.sortEntries();
+        self.sortEntries(temp_arena);
 
         const temp_mem = temp_arena.beginTemporaryMemory();
         defer temp_arena.endTemporaryMemory(temp_mem);
@@ -648,7 +738,6 @@ pub const RenderGroup = extern struct {
             .group = self,
             .output_target = output_target,
             .clip_rect = clip_rect,
-            .sort_space = temp_arena.pushArray(self.push_buffer_element_count, TileSortEntry, null),
         };
 
         doTileRenderWork(null, @ptrCast(&work));
@@ -663,12 +752,9 @@ pub const RenderGroup = extern struct {
         var timed_block = TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
         defer timed_block.end();
 
-        self.sortEntries();
+        self.sortEntries(temp_arena);
 
         std.debug.assert(self.inside_renderer);
-
-        const temp_mem = temp_arena.beginTemporaryMemory();
-        defer temp_arena.endTemporaryMemory(temp_mem);
 
         // TODO
         // * Make sure that tiles are all cache-aligned.
@@ -684,7 +770,6 @@ pub const RenderGroup = extern struct {
             .group = self,
             .output_target = output_target,
             .clip_rect = undefined,
-            .sort_space = temp_arena.pushArray(self.push_buffer_element_count, TileSortEntry, null),
         }} ** work_count;
 
         std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
