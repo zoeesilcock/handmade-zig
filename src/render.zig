@@ -611,6 +611,27 @@ pub const RenderGroup = extern struct {
         a[0] = store;
     }
 
+    fn bubbleSort(count: u32, first: [*]TileSortEntry, _: [*]TileSortEntry) void {
+        var outer: u32 = 0;
+        while (outer < count) : (outer += 1) {
+            var list_is_sorted = true;
+            var inner: u32 = 0;
+            while (inner < count - 1) : (inner += 1) {
+                const entry_a: [*]TileSortEntry = first + inner;
+                const entry_b: [*]TileSortEntry = entry_a + 1;
+
+                if (entry_a[0].sort_key > entry_b[0].sort_key) {
+                    swap(entry_a, entry_b);
+                    list_is_sorted = false;
+                }
+            }
+
+            if (list_is_sorted) {
+                break;
+            }
+        }
+    }
+
     fn mergeSort(count: u32, first: [*]TileSortEntry, temp: [*]TileSortEntry) void {
         if (count <= 1) {
             // Nothing to do.
@@ -670,6 +691,59 @@ pub const RenderGroup = extern struct {
         }
     }
 
+    fn sortKeyToU32(sort_key: f32) u32 {
+        var result: u32 = @bitCast(sort_key);
+
+        if ((result & 0x80000000) != 0) {
+            // Signed bit is set.
+            result = ~result;
+        } else {
+            result |= 0x80000000;
+        }
+
+        return result;
+    }
+
+    fn radixSort(count: u32, first: [*]TileSortEntry, temp: [*]TileSortEntry) void {
+        var source: [*]TileSortEntry = first;
+        var dest: [*]TileSortEntry = temp;
+
+        var byte_index: u32 = 0;
+        while (byte_index < 32) : (byte_index += 8) {
+            var sort_key_offsets: [256]u32 = [1]u32{0} ** 256;
+
+            // First pass, count how many of each key.
+            var index: u32 = 0;
+            while (index < count) : (index += 1) {
+                const radix_value: u32 = sortKeyToU32(source[index].sort_key);
+                const radix_piece: u32 = (radix_value >> @as(u5, @intCast(byte_index))) & 0xff;
+                sort_key_offsets[radix_piece] += 1;
+            }
+
+            // Change counts to offsets.
+            var total: u32 = 0;
+            var sort_key_index: u32 = 0;
+            while (sort_key_index < sort_key_offsets.len) : (sort_key_index += 1) {
+                const key_count: u32 = sort_key_offsets[sort_key_index];
+                sort_key_offsets[sort_key_index] = total;
+                total += key_count;
+            }
+
+            // Second pass, place elements into the right location.
+            index = 0;
+            while (index < count) : (index += 1) {
+                const radix_value: u32 = sortKeyToU32(source[index].sort_key);
+                const radix_piece: u32 = (radix_value >> @as(u5, @intCast(byte_index))) & 0xff;
+                dest[sort_key_offsets[radix_piece]] = source[index];
+                sort_key_offsets[radix_piece] += 1;
+            }
+
+            const swap_temp: [*]TileSortEntry = dest;
+            dest = source;
+            source = swap_temp;
+        }
+    }
+
     fn sortEntries(self: *RenderGroup, temp_arena: *shared.MemoryArena) void {
         const temp = temp_arena.beginTemporaryMemory();
         defer temp_arena.endTemporaryMemory(temp);
@@ -678,30 +752,9 @@ pub const RenderGroup = extern struct {
         const temp_space = temp_arena.pushArray(count, TileSortEntry, null);
         const entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(self.push_buffer_base) + self.sort_entry_at);
 
-        if (false) {
-            // Bubble sort, 0(n^2).
-            var outer: u32 = 0;
-            while (outer < count) : (outer += 1) {
-                var list_is_sorted = true;
-                var inner: u32 = 0;
-                while (inner < count - 1) : (inner += 1) {
-                    const entry_a: [*]TileSortEntry = entries + inner;
-                    const entry_b: [*]TileSortEntry = entry_a + 1;
-
-                    if (entry_a[0].sort_key > entry_b[0].sort_key) {
-                        swap(entry_a, entry_b);
-                        list_is_sorted = false;
-                    }
-                }
-
-                if (list_is_sorted) {
-                    break;
-                }
-            }
-        } else {
-            // Merge sort
-            RenderGroup.mergeSort(count, entries, temp_space);
-        }
+        // bubbleSort(count, entries, temp_space);
+        // mergeSort(count, entries, temp_space);
+        radixSort(count, entries, temp_space);
 
         if (INTERNAL) {
             // Validate the sort result.
