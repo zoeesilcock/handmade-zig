@@ -30,7 +30,6 @@ const std = @import("std");
 ///     * Fix clicking bug at end of samples.
 ///
 /// * Rendering.
-///     * Get rid of "even" notion?
 ///     * Real projections with solid concept of project/unproject.
 ///     * Straighten out all coordinate systems!
 ///         * Screen.
@@ -39,6 +38,8 @@ const std = @import("std");
 ///     * Particle systems.
 ///     * Lighting.
 ///     * Final optimization.
+///
+/// ----
 ///
 /// Architecture exploration:
 ///

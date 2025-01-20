@@ -2,17 +2,17 @@
 ///
 /// Partial list of missing parts:
 ///
+/// * Hardware acceleration (OpenGL or Direct3D or BOTH?).
+/// * Blit speed improvements (BitBlt).
+///
 /// * Save game locations.
 /// * Getting a handle to our own executable file.
-/// * Asset loading path.
-/// * Threading (launching a thread).
 /// * Raw Input (support for multiple keyboards).
 /// * ClipCursor() (for multi-monitor support).
 /// * QueryCancelAutoplay.
 /// * WM_ACTIVATEAPP (for when we are not the active application).
-/// * Blit speed improvements (BitBlt).
-/// * Hardware acceleration (OpenGL or Direct3D or BOTH?).
 /// * Get KeyboardLayout (for international keyboards).
+
 pub const UNICODE = true;
 
 const MIDDLE_C: u32 = 261;
@@ -51,6 +51,7 @@ const std = @import("std");
 const win32 = struct {
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").graphics.gdi;
+    usingnamespace @import("win32").graphics.open_gl;
     usingnamespace @import("win32").media;
     usingnamespace @import("win32").media.audio;
     usingnamespace @import("win32").media.audio.direct_sound;
@@ -69,6 +70,15 @@ const win32 = struct {
     usingnamespace @import("win32").ui.windows_and_messaging;
     usingnamespace @import("win32").zig;
 };
+
+// Manual import of a function that is incorrectly defined in zigwin32.
+// Remove once this is resloved: https://github.com/marlersoft/zigwin32/issues/33
+pub extern "gdi32" fn DescribePixelFormat(
+    hdc: ?win32.HDC,
+    iPixelFormat: c_int, // The field that is wrong in zigwin32.
+    nBytes: u32,
+    ppfd: ?*win32.PIXELFORMATDESCRIPTOR,
+) callconv(@import("std").os.windows.WINAPI) i32;
 
 // Globals.
 var running: bool = false;
@@ -1168,6 +1178,75 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
     }
 }
 
+fn initOpenGL(window: win32.HWND) void {
+    if (win32.GetDC(window)) |window_dc| {
+        var desired_pixel_format: win32.PIXELFORMATDESCRIPTOR = .{
+            .nSize = @sizeOf(win32.PIXELFORMATDESCRIPTOR),
+            .nVersion = 1,
+            .iPixelType = win32.PFD_TYPE_RGBA,
+            .dwFlags = win32.PFD_FLAGS{
+                .SUPPORT_OPENGL = 1,
+                .DRAW_TO_WINDOW = 1,
+                .DOUBLEBUFFER = 1,
+            },
+            .cColorBits = 32,
+            .cAlphaBits = 8,
+            .iLayerType = win32.PFD_MAIN_PLANE,
+            // Clear the rest to zero.
+            .cRedBits = 0,
+            .cRedShift = 0,
+            .cGreenBits = 0,
+            .cGreenShift = 0,
+            .cBlueBits = 0,
+            .cBlueShift = 0,
+            .cAlphaShift = 0,
+            .cAccumBits = 0,
+            .cAccumRedBits = 0,
+            .cAccumGreenBits = 0,
+            .cAccumBlueBits = 0,
+            .cAccumAlphaBits = 0,
+            .cDepthBits = 0,
+            .cStencilBits = 0,
+            .cAuxBuffers = 0,
+            .bReserved = 0,
+            .dwLayerMask = 0,
+            .dwVisibleMask = 0,
+            .dwDamageMask = 0,
+        };
+
+        const suggested_pixel_format_index = win32.ChoosePixelFormat(window_dc, &desired_pixel_format);
+        if (suggested_pixel_format_index == 0) {
+            outputLastError("ChoosePixelFormat failed");
+        }
+
+        var suggested_pixel_format: win32.PIXELFORMATDESCRIPTOR = undefined;
+        const describe_result = DescribePixelFormat(
+            window_dc,
+            suggested_pixel_format_index,
+            // win32.PFD_TYPE_RGBA,
+            @sizeOf(win32.PIXELFORMATDESCRIPTOR),
+            &suggested_pixel_format,
+        );
+        if (describe_result == 0) {
+            outputLastError("DescribePixelFormat failed");
+        }
+
+        const set_result = win32.SetPixelFormat(window_dc, suggested_pixel_format_index, &suggested_pixel_format);
+        if (set_result == 0) {
+            outputLastError("SetPixelFormat failed");
+        }
+
+        const opengl_rc = win32.wglCreateContext(window_dc);
+        if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
+        } else {
+            outputLastError("wglCreateContext");
+            unreachable;
+        }
+
+        _ = win32.ReleaseDC(window, window_dc);
+    }
+}
+
 fn getWindowDimension(window: win32.HWND) WindowDimension {
     var client_rect: win32.RECT = undefined;
     _ = win32.GetClientRect(window, &client_rect);
@@ -1249,29 +1328,41 @@ fn displayBufferInWindow(
     window_width: i32,
     window_height: i32,
 ) void {
-    const dim = calculateGameOffset(window);
+    _ = buffer;
+    // _ = device_context;
+    _ = window;
+    _ = window_width;
+    _ = window_height;
 
-    // Clear areas outside of our drawing area.
-    _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
-    _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
-    _ = win32.PatBlt(device_context, 0, 0, dim.offset_x, window_height, win32.BLACKNESS);
-    _ = win32.PatBlt(device_context, dim.offset_x + dim.blit_width, 0, window_width, window_height, win32.BLACKNESS);
+    // const dim = calculateGameOffset(window);
+    //
+    // // Clear areas outside of our drawing area.
+    // _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
+    // _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
+    // _ = win32.PatBlt(device_context, 0, 0, dim.offset_x, window_height, win32.BLACKNESS);
+    // _ = win32.PatBlt(device_context, dim.offset_x + dim.blit_width, 0, window_width, window_height, win32.BLACKNESS);
+    //
+    // _ = win32.StretchDIBits(
+    //     device_context,
+    //     dim.offset_x,
+    //     dim.offset_y,
+    //     dim.blit_width,
+    //     dim.blit_height,
+    //     0,
+    //     0,
+    //     buffer.width,
+    //     buffer.height,
+    //     buffer.memory,
+    //     &buffer.info,
+    //     win32.DIB_RGB_COLORS,
+    //     win32.SRCCOPY,
+    // );
 
-    _ = win32.StretchDIBits(
-        device_context,
-        dim.offset_x,
-        dim.offset_y,
-        dim.blit_width,
-        dim.blit_height,
-        0,
-        0,
-        buffer.width,
-        buffer.height,
-        buffer.memory,
-        &buffer.info,
-        win32.DIB_RGB_COLORS,
-        win32.SRCCOPY,
-    );
+    // Test OpenGL output.
+    win32.glViewport(0, 0, WIDTH, HEIGHT);
+    win32.glClearColor(1, 0, 1, 0);
+    win32.glClear(win32.GL_COLOR_BUFFER_BIT);
+    _ = win32.SwapBuffers(device_context.?);
 }
 
 fn windowProcedure(
@@ -1701,6 +1792,22 @@ fn doWorkerWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C)
     win32.OutputDebugStringA(@ptrCast(slice.ptr));
 }
 
+fn outputLastError(title: []const u8) void {
+    const last_error = win32.GetLastError();
+
+    if (INTERNAL) {
+        std.debug.print("{s}: {d}\n", .{ title, @intFromEnum(last_error) });
+    } else {
+        var buffer: [128]u8 = undefined;
+        const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}\n", .{
+            title,
+            @intFromEnum(last_error),
+        }) catch "";
+
+        win32.OutputDebugStringA(@ptrCast(slice.ptr));
+    }
+}
+
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -1832,6 +1939,7 @@ pub export fn wWinMain(
 
         if (opt_window_handle) |window_handle| {
             toggleFullscreen(window_handle);
+            initOpenGL(window_handle);
 
             if (INTERNAL) {
                 _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);
