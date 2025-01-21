@@ -12,7 +12,6 @@
 /// * QueryCancelAutoplay.
 /// * WM_ACTIVATEAPP (for when we are not the active application).
 /// * Get KeyboardLayout (for international keyboards).
-
 pub const UNICODE = true;
 
 const MIDDLE_C: u32 = 261;
@@ -30,8 +29,9 @@ const BYTES_PER_PIXEL = 4;
 
 const DEBUG_WINDOW_POS_X = -7 + 210; // + 2560;
 const DEBUG_WINDOW_POS_Y = 0 + 30;
-const DEBUG_WINDOW_WIDTH = WIDTH + WINDOW_DECORATION_WIDTH + 20;
-const DEBUG_WINDOW_HEIGHT = HEIGHT + WINDOW_DECORATION_HEIGHT + 20;
+const DEBUG_WINDOW_SKIRT = 20;
+const DEBUG_WINDOW_WIDTH = WIDTH + WINDOW_DECORATION_WIDTH + DEBUG_WINDOW_SKIRT;
+const DEBUG_WINDOW_HEIGHT = HEIGHT + WINDOW_DECORATION_HEIGHT + DEBUG_WINDOW_SKIRT;
 const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
@@ -82,6 +82,7 @@ pub extern "gdi32" fn DescribePixelFormat(
 
 // Globals.
 var running: bool = false;
+var open_gl_blit_texture: u32 = 0;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
@@ -1223,7 +1224,6 @@ fn initOpenGL(window: win32.HWND) void {
         const describe_result = DescribePixelFormat(
             window_dc,
             suggested_pixel_format_index,
-            // win32.PFD_TYPE_RGBA,
             @sizeOf(win32.PIXELFORMATDESCRIPTOR),
             &suggested_pixel_format,
         );
@@ -1238,6 +1238,7 @@ fn initOpenGL(window: win32.HWND) void {
 
         const opengl_rc = win32.wglCreateContext(window_dc);
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
+            win32.glGenTextures(1, &open_gl_blit_texture);
         } else {
             outputLastError("wglCreateContext");
             unreachable;
@@ -1328,41 +1329,95 @@ fn displayBufferInWindow(
     window_width: i32,
     window_height: i32,
 ) void {
-    _ = buffer;
-    // _ = device_context;
-    _ = window;
-    _ = window_width;
-    _ = window_height;
+    const dim = calculateGameOffset(window);
 
-    // const dim = calculateGameOffset(window);
-    //
-    // // Clear areas outside of our drawing area.
-    // _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
-    // _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
-    // _ = win32.PatBlt(device_context, 0, 0, dim.offset_x, window_height, win32.BLACKNESS);
-    // _ = win32.PatBlt(device_context, dim.offset_x + dim.blit_width, 0, window_width, window_height, win32.BLACKNESS);
-    //
-    // _ = win32.StretchDIBits(
-    //     device_context,
-    //     dim.offset_x,
-    //     dim.offset_y,
-    //     dim.blit_width,
-    //     dim.blit_height,
-    //     0,
-    //     0,
-    //     buffer.width,
-    //     buffer.height,
-    //     buffer.memory,
-    //     &buffer.info,
-    //     win32.DIB_RGB_COLORS,
-    //     win32.SRCCOPY,
-    // );
+    if (false) {
+        // Clear areas outside of our drawing area.
+        _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
+        _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
+        _ = win32.PatBlt(device_context, 0, 0, dim.offset_x, window_height, win32.BLACKNESS);
+        _ = win32.PatBlt(device_context, dim.offset_x + dim.blit_width, 0, window_width, window_height, win32.BLACKNESS);
 
-    // Test OpenGL output.
-    win32.glViewport(0, 0, WIDTH, HEIGHT);
-    win32.glClearColor(1, 0, 1, 0);
-    win32.glClear(win32.GL_COLOR_BUFFER_BIT);
-    _ = win32.SwapBuffers(device_context.?);
+        _ = win32.StretchDIBits(
+            device_context,
+            dim.offset_x,
+            dim.offset_y,
+            dim.blit_width,
+            dim.blit_height,
+            0,
+            0,
+            buffer.width,
+            buffer.height,
+            buffer.memory,
+            &buffer.info,
+            win32.DIB_RGB_COLORS,
+            win32.SRCCOPY,
+        );
+    } else {
+        win32.glViewport(dim.offset_x, dim.offset_y, dim.blit_width, dim.blit_height);
+
+        win32.glBindTexture(win32.GL_TEXTURE_2D, open_gl_blit_texture);
+        win32.glTexImage2D(
+            win32.GL_TEXTURE_2D,
+            0,
+            win32.GL_RGBA8,
+            buffer.width,
+            buffer.height,
+            0,
+            win32.GL_BGRA_EXT,
+            win32.GL_UNSIGNED_BYTE,
+            buffer.memory.?,
+        );
+
+        win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_MIN_FILTER, win32.GL_NEAREST);
+        win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_MAG_FILTER, win32.GL_NEAREST);
+        win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_WRAP_S, win32.GL_CLAMP);
+        win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_WRAP_T, win32.GL_CLAMP);
+        win32.glTexEnvi(win32.GL_TEXTURE_ENV, win32.GL_TEXTURE_ENV_MODE, win32.GL_MODULATE);
+
+        win32.glEnable(win32.GL_TEXTURE_2D);
+
+        if (INTERNAL) {
+            win32.glClearColor(1, 0, 1, 0);
+        } else {
+            win32.glClearColor(0, 0, 0, 0);
+        }
+        win32.glClear(win32.GL_COLOR_BUFFER_BIT);
+
+        // Reset all transforms.
+        win32.glMatrixMode(win32.GL_TEXTURE);
+        win32.glLoadIdentity();
+
+        win32.glMatrixMode(win32.GL_MODELVIEW);
+        win32.glLoadIdentity();
+
+        win32.glMatrixMode(win32.GL_PROJECTION);
+        win32.glLoadIdentity();
+
+        win32.glBegin(win32.GL_TRIANGLES);
+        {
+            const p: f32 = 1;
+
+            // Lower triangle.
+            win32.glTexCoord2f(0, 0);
+            win32.glVertex2f(-p, -p);
+            win32.glTexCoord2f(1, 0);
+            win32.glVertex2f(p, -p);
+            win32.glTexCoord2f(1, 1);
+            win32.glVertex2f(p, p);
+
+            // Upper triangle
+            win32.glTexCoord2f(0, 0);
+            win32.glVertex2f(-p, -p);
+            win32.glTexCoord2f(1, 1);
+            win32.glVertex2f(p, p);
+            win32.glTexCoord2f(0, 1);
+            win32.glVertex2f(-p, p);
+        }
+        win32.glEnd();
+
+        _ = win32.SwapBuffers(device_context.?);
+    }
 }
 
 fn windowProcedure(
