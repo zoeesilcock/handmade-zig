@@ -48,6 +48,7 @@ const debug_interface = @import("debug_interface.zig");
 const TimedBlock = debug_interface.TimedBlock;
 
 const std = @import("std");
+const math = @import("math.zig");
 const win32 = struct {
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").graphics.gdi;
@@ -1392,27 +1393,38 @@ fn displayBufferInWindow(
         win32.glLoadIdentity();
 
         win32.glMatrixMode(win32.GL_PROJECTION);
-        win32.glLoadIdentity();
+        const a = math.safeRatio1(2, @as(f32, @floatFromInt(dim.blit_width)));
+        const b = math.safeRatio1(2, @as(f32, @floatFromInt(dim.blit_height)));
+        const projection: []const f32 = &.{
+            a,  0,  0, 0,
+            0,  b,  0, 0,
+            0,  0,  1, 0,
+            -1, -1, 0, 1,
+        };
+        win32.glLoadMatrixf(@ptrCast(projection));
 
+        const min_position = math.Vector2.new(0, 0);
+        const max_position = math.Vector2.new(@floatFromInt(dim.blit_width), @floatFromInt(dim.blit_height));
+        const color = math.Color.new(1, 1, 1, 1);
         win32.glBegin(win32.GL_TRIANGLES);
         {
-            const p: f32 = 1;
+            win32.glColor4f(color.r(), color.g(), color.b(), color.a());
 
             // Lower triangle.
             win32.glTexCoord2f(0, 0);
-            win32.glVertex2f(-p, -p);
+            win32.glVertex2f(min_position.x(), min_position.y());
             win32.glTexCoord2f(1, 0);
-            win32.glVertex2f(p, -p);
+            win32.glVertex2f(max_position.x(), min_position.y());
             win32.glTexCoord2f(1, 1);
-            win32.glVertex2f(p, p);
+            win32.glVertex2f(max_position.x(), max_position.y());
 
             // Upper triangle
             win32.glTexCoord2f(0, 0);
-            win32.glVertex2f(-p, -p);
+            win32.glVertex2f(min_position.x(), min_position.y());
             win32.glTexCoord2f(1, 1);
-            win32.glVertex2f(p, p);
+            win32.glVertex2f(max_position.x(), max_position.y());
             win32.glTexCoord2f(0, 1);
-            win32.glVertex2f(-p, p);
+            win32.glVertex2f(min_position.x(), max_position.y());
         }
         win32.glEnd();
 

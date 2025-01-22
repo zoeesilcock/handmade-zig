@@ -155,7 +155,7 @@ const CameraTransform = extern struct {
     distance_above_target: f32,
 };
 
-const TileSortEntry = struct {
+pub const TileSortEntry = struct {
     sort_key: f32,
     push_buffer_offset: u32,
 };
