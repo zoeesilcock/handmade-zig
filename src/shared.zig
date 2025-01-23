@@ -244,6 +244,8 @@ const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C)
 const debugExecuteSystemCommandType: type = fn (path: [*:0]const u8, command: [*:0]const u8, command_line: [*:0]const u8) callconv(.C) DebugExecutingProcess;
 const debugGetProcessStateType: type = fn (process: DebugExecutingProcess) callconv(.C) DebugExecutingProcessState;
 
+const openglRenderType: type = fn (render_group: *render.RenderGroup, output_target: *LoadedBitmap) callconv(.C) void;
+
 pub fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
     return file_handle.no_errors;
 }
@@ -261,6 +263,8 @@ pub const Platform = if (INTERNAL) extern struct {
 
     allocateMemory: *const allocateMemoryType = undefined,
     deallocateMemory: *const deallocateMemoryType = undefined,
+
+    openglRender: *const openglRenderType = undefined,
 
     debugFreeFileMemory: *const debugFreeFileMemoryType = undefined,
     debugWriteEntireFile: *const debugWriteEntireFileType = undefined,
@@ -280,6 +284,8 @@ pub const Platform = if (INTERNAL) extern struct {
 
     allocateMemory: *const allocateMemoryType = undefined,
     deallocateMemory: *const deallocateMemoryType = undefined,
+
+    openglRender: *const openglRenderType = undefined,
 };
 
 pub var platform: Platform = undefined;

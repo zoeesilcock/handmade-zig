@@ -39,6 +39,12 @@ const std = @import("std");
 ///     * Lighting.
 ///     * Final optimization.
 ///
+/// * Hardware Rendering
+///     * sRGB framebuffer and textures.
+///     * V-sync.
+///     * Background texture downloads.
+///     * Render-to-texture?
+///
 /// ----
 ///
 /// Architecture exploration:
@@ -319,7 +325,7 @@ pub export fn updateAndRender(
     }
 
     if (render_group.allResourcesPresent()) {
-        render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
+        render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
     }
     render_group.endRender();
 

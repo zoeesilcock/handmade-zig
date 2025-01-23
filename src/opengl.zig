@@ -23,14 +23,17 @@ const gl = struct {
     usingnamespace @import("win32").graphics.open_gl;
 };
 
-pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i) void {
-    _ = clip_rect;
+var texture_bind_count: u32 = 0;
 
-    var timed_block = TimedBlock.beginFunction(@src(), .RenderToOutput);
+pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBitmap) callconv(.C) void {
+    var timed_block = TimedBlock.beginFunction(@src(), .RenderToOutputOpenGL);
     defer timed_block.end();
 
-    gl.glEnable(gl.GL_TEXTURE_2D);
     gl.glViewport(0, 0, output_target.width, output_target.height);
+
+    gl.glEnable(gl.GL_TEXTURE_2D);
+    gl.glEnable(gl.GL_BLEND);
+    gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
 
     gl.glMatrixMode(gl.GL_TEXTURE);
     gl.glLoadIdentity();
@@ -78,18 +81,49 @@ pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBit
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT);
             },
             .RenderEntryBitmap => {
-                const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                const x_axis: Vector2 = Vector2.new(1, 0);
-                const y_axis: Vector2 = Vector2.new(0, 1);
-                const min_position: Vector2 = entry.position;
-                const max_position: Vector2 = min_position.plus(
-                    x_axis.scaledTo(entry.size.x).plus(y_axis.scaledTo(entry.size.y)),
-                );
-                openGLRectangle(min_position, max_position, entry.color);
+                var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+                if (entry.bitmap) |bitmap| {
+                    const x_axis: Vector2 = Vector2.new(1, 0);
+                    const y_axis: Vector2 = Vector2.new(0, 1);
+                    const min_position: Vector2 = entry.position;
+                    const max_position: Vector2 = min_position.plus(
+                        x_axis.scaledTo(entry.size.x()).plus(y_axis.scaledTo(entry.size.y())),
+                    );
+
+                    if (bitmap.handle > 0) {
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.handle);
+                    } else {
+                        texture_bind_count += 1;
+                        bitmap.handle = texture_bind_count;
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.handle);
+
+                        gl.glTexImage2D(
+                            gl.GL_TEXTURE_2D,
+                            0,
+                            gl.GL_RGBA8,
+                            bitmap.width,
+                            bitmap.height,
+                            0,
+                            gl.GL_BGRA_EXT,
+                            gl.GL_UNSIGNED_BYTE,
+                            bitmap.memory.?,
+                        );
+
+                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
+                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
+                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
+                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
+                        gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
+                    }
+
+                    openGLRectangle(min_position, max_position, entry.color);
+                }
             },
             .RenderEntryRectangle => {
                 const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
+                gl.glDisable(gl.GL_TEXTURE_2D);
                 openGLRectangle(entry.position, entry.position.plus(entry.dimension), entry.color);
+                gl.glEnable(gl.GL_TEXTURE_2D);
             },
             .RenderEntrySaturation => {
                 // const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));

@@ -652,6 +652,7 @@ pub const Assets = struct {
                         bitmap.height = height;
                         bitmap.pitch = shared.safeTruncateUInt32ToUInt16(size.section);
                         bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
+                        bitmap.handle = 0;
 
                         var work = LoadAssetWork{
                             .task = undefined,
@@ -1041,6 +1042,7 @@ pub const LoadedBitmap = extern struct {
     width: u16 = 0,
     height: u16 = 0,
     pitch: u16 = 0,
+    handle: u32 = 0,
 
     pub fn getPitch(self: *LoadedSound) i16 {
         return self.width;

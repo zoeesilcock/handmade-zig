@@ -42,6 +42,7 @@ const INTERNAL = shared.INTERNAL;
 const DEBUG = shared.DEBUG;
 
 const shared = @import("shared.zig");
+const opengl = @import("opengl.zig");
 const debug_interface = @import("debug_interface.zig");
 
 // Types
@@ -1355,78 +1356,80 @@ fn displayBufferInWindow(
             win32.SRCCOPY,
         );
     } else {
-        win32.glViewport(dim.offset_x, dim.offset_y, dim.blit_width, dim.blit_height);
+        if (false) {
+            win32.glViewport(dim.offset_x, dim.offset_y, dim.blit_width, dim.blit_height);
 
-        win32.glBindTexture(win32.GL_TEXTURE_2D, open_gl_blit_texture);
-        win32.glTexImage2D(
-            win32.GL_TEXTURE_2D,
-            0,
-            win32.GL_RGBA8,
-            buffer.width,
-            buffer.height,
-            0,
-            win32.GL_BGRA_EXT,
-            win32.GL_UNSIGNED_BYTE,
-            buffer.memory.?,
-        );
+            win32.glBindTexture(win32.GL_TEXTURE_2D, open_gl_blit_texture);
+            win32.glTexImage2D(
+                win32.GL_TEXTURE_2D,
+                0,
+                win32.GL_RGBA8,
+                buffer.width,
+                buffer.height,
+                0,
+                win32.GL_BGRA_EXT,
+                win32.GL_UNSIGNED_BYTE,
+                buffer.memory.?,
+            );
 
-        win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_MIN_FILTER, win32.GL_NEAREST);
-        win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_MAG_FILTER, win32.GL_NEAREST);
-        win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_WRAP_S, win32.GL_CLAMP);
-        win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_WRAP_T, win32.GL_CLAMP);
-        win32.glTexEnvi(win32.GL_TEXTURE_ENV, win32.GL_TEXTURE_ENV_MODE, win32.GL_MODULATE);
+            win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_MIN_FILTER, win32.GL_NEAREST);
+            win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_MAG_FILTER, win32.GL_NEAREST);
+            win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_WRAP_S, win32.GL_CLAMP);
+            win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_WRAP_T, win32.GL_CLAMP);
+            win32.glTexEnvi(win32.GL_TEXTURE_ENV, win32.GL_TEXTURE_ENV_MODE, win32.GL_MODULATE);
 
-        win32.glEnable(win32.GL_TEXTURE_2D);
+            win32.glEnable(win32.GL_TEXTURE_2D);
 
-        if (INTERNAL) {
-            win32.glClearColor(1, 0, 1, 0);
-        } else {
-            win32.glClearColor(0, 0, 0, 0);
+            if (INTERNAL) {
+                win32.glClearColor(1, 0, 1, 0);
+            } else {
+                win32.glClearColor(0, 0, 0, 0);
+            }
+            win32.glClear(win32.GL_COLOR_BUFFER_BIT);
+
+            // Reset all transforms.
+            win32.glMatrixMode(win32.GL_TEXTURE);
+            win32.glLoadIdentity();
+
+            win32.glMatrixMode(win32.GL_MODELVIEW);
+            win32.glLoadIdentity();
+
+            win32.glMatrixMode(win32.GL_PROJECTION);
+            const a = math.safeRatio1(2, @as(f32, @floatFromInt(dim.blit_width)));
+            const b = math.safeRatio1(2, @as(f32, @floatFromInt(dim.blit_height)));
+            const projection: []const f32 = &.{
+                a,  0,  0, 0,
+                0,  b,  0, 0,
+                0,  0,  1, 0,
+                -1, -1, 0, 1,
+            };
+            win32.glLoadMatrixf(@ptrCast(projection));
+
+            const min_position = math.Vector2.new(0, 0);
+            const max_position = math.Vector2.new(@floatFromInt(dim.blit_width), @floatFromInt(dim.blit_height));
+            const color = math.Color.new(1, 1, 1, 1);
+            win32.glBegin(win32.GL_TRIANGLES);
+            {
+                win32.glColor4f(color.r(), color.g(), color.b(), color.a());
+
+                // Lower triangle.
+                win32.glTexCoord2f(0, 0);
+                win32.glVertex2f(min_position.x(), min_position.y());
+                win32.glTexCoord2f(1, 0);
+                win32.glVertex2f(max_position.x(), min_position.y());
+                win32.glTexCoord2f(1, 1);
+                win32.glVertex2f(max_position.x(), max_position.y());
+
+                // Upper triangle
+                win32.glTexCoord2f(0, 0);
+                win32.glVertex2f(min_position.x(), min_position.y());
+                win32.glTexCoord2f(1, 1);
+                win32.glVertex2f(max_position.x(), max_position.y());
+                win32.glTexCoord2f(0, 1);
+                win32.glVertex2f(min_position.x(), max_position.y());
+            }
+            win32.glEnd();
         }
-        win32.glClear(win32.GL_COLOR_BUFFER_BIT);
-
-        // Reset all transforms.
-        win32.glMatrixMode(win32.GL_TEXTURE);
-        win32.glLoadIdentity();
-
-        win32.glMatrixMode(win32.GL_MODELVIEW);
-        win32.glLoadIdentity();
-
-        win32.glMatrixMode(win32.GL_PROJECTION);
-        const a = math.safeRatio1(2, @as(f32, @floatFromInt(dim.blit_width)));
-        const b = math.safeRatio1(2, @as(f32, @floatFromInt(dim.blit_height)));
-        const projection: []const f32 = &.{
-            a,  0,  0, 0,
-            0,  b,  0, 0,
-            0,  0,  1, 0,
-            -1, -1, 0, 1,
-        };
-        win32.glLoadMatrixf(@ptrCast(projection));
-
-        const min_position = math.Vector2.new(0, 0);
-        const max_position = math.Vector2.new(@floatFromInt(dim.blit_width), @floatFromInt(dim.blit_height));
-        const color = math.Color.new(1, 1, 1, 1);
-        win32.glBegin(win32.GL_TRIANGLES);
-        {
-            win32.glColor4f(color.r(), color.g(), color.b(), color.a());
-
-            // Lower triangle.
-            win32.glTexCoord2f(0, 0);
-            win32.glVertex2f(min_position.x(), min_position.y());
-            win32.glTexCoord2f(1, 0);
-            win32.glVertex2f(max_position.x(), min_position.y());
-            win32.glTexCoord2f(1, 1);
-            win32.glVertex2f(max_position.x(), max_position.y());
-
-            // Upper triangle
-            win32.glTexCoord2f(0, 0);
-            win32.glVertex2f(min_position.x(), min_position.y());
-            win32.glTexCoord2f(1, 1);
-            win32.glVertex2f(max_position.x(), max_position.y());
-            win32.glTexCoord2f(0, 1);
-            win32.glVertex2f(min_position.x(), max_position.y());
-        }
-        win32.glEnd();
 
         _ = win32.SwapBuffers(device_context.?);
     }
@@ -1954,6 +1957,8 @@ pub export fn wWinMain(
 
         .allocateMemory = allocateMemory,
         .deallocateMemory = deallocateMemory,
+
+        .openglRender = opengl.renderGroupToOutput,
     };
 
     if (INTERNAL) {

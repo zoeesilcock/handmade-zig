@@ -2184,7 +2184,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffe
             }
         }
 
-        group.tiledRenderTo(debug_state.high_priority_queue, draw_buffer, &debug_state.debug_arena);
+        group.renderToOutput(debug_state.high_priority_queue, draw_buffer, &debug_state.debug_arena);
         group.endRender();
 
         shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);

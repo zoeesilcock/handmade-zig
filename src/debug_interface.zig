@@ -52,6 +52,7 @@ pub const DebugCycleCounters = enum(u16) {
     DrawRectangleQuickly,
     ProcessPixel,
     RenderToOutput,
+    RenderToOutputOpenGL,
     TiledRenderToOutput,
     SingleRenderToOutput,
     DoTiledRenderWork,

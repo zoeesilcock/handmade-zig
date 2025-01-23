@@ -1300,7 +1300,7 @@ pub fn updateAndRenderWorld(
         0.2,
     );
 
-    // render_group.tiledRenderTo(transient_state.high_priority_queue, draw_buffer);
+    // render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer);
     //
     // render_group.endRender();
 

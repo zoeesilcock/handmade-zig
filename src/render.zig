@@ -94,7 +94,7 @@ pub const RenderEntrySaturation = extern struct {
 };
 
 pub const RenderEntryBitmap = extern struct {
-    bitmap: ?*const LoadedBitmap,
+    bitmap: ?*LoadedBitmap,
     position: Vector2,
     size: Vector2,
     color: Color,
@@ -441,7 +441,7 @@ pub const RenderGroup = extern struct {
     pub fn pushBitmap(
         self: *RenderGroup,
         object_transform: ObjectTransform,
-        bitmap: *const LoadedBitmap,
+        bitmap: *LoadedBitmap,
         height: f32,
         offset: Vector3,
         color: Color,
@@ -757,14 +757,16 @@ pub const RenderGroup = extern struct {
         radixSort(count, entries, temp_space);
 
         if (INTERNAL) {
-            // Validate the sort result.
+            if (count > 0) {
+                // Validate the sort result.
 
-            var index: u32 = 0;
-            while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
-                const entry_a: [*]TileSortEntry = entries + index;
-                const entry_b: [*]TileSortEntry = entry_a + 1;
+                var index: u32 = 0;
+                while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
+                    const entry_a: [*]TileSortEntry = entries + index;
+                    const entry_b: [*]TileSortEntry = entry_a + 1;
 
-                std.debug.assert(entry_a[0].sort_key <= entry_b[0].sort_key);
+                    std.debug.assert(entry_a[0].sort_key <= entry_b[0].sort_key);
+                }
             }
         }
     }
@@ -794,6 +796,21 @@ pub const RenderGroup = extern struct {
         };
 
         doTileRenderWork(null, @ptrCast(&work));
+    }
+
+    pub fn renderToOutput(
+        self: *RenderGroup,
+        render_queue: *shared.PlatformWorkQueue,
+        output_target: *LoadedBitmap,
+        temp_arena: *shared.MemoryArena,
+    ) void {
+        self.sortEntries(temp_arena);
+
+        if (true) { //(self.isHardware) {
+            shared.platform.openglRender(self, output_target);
+        } else {
+            self.tiledRenderTo(render_queue, output_target, temp_arena);
+        }
     }
 
     pub fn tiledRenderTo(
