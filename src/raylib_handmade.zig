@@ -106,8 +106,6 @@ fn addQueueEntry(queue: *shared.PlatformWorkQueue, callback: shared.PlatformWork
     entry.callback = callback;
     _ = @atomicRmw(u32, &queue.completion_goal, .Add, 1, .monotonic);
 
-    @fence(std.builtin.AtomicOrder.release);
-
     @atomicStore(u32, &queue.next_entry_to_write, new_next_entry_to_write, .release);
 
     @as(*std.Thread.Semaphore, @ptrCast(@alignCast(queue.semaphore_handle.?))).post();

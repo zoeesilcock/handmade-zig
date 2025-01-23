@@ -426,7 +426,6 @@ pub const Assets = struct {
     }
 
     fn endAssetLock(self: *Assets) void {
-        @fence(.seq_cst);
         self.operation_lock = 0;
     }
 
@@ -711,8 +710,6 @@ pub const Assets = struct {
                 if (header.generation_id < generation_id) {
                     header.generation_id = generation_id;
                 }
-
-                @fence(.acquire);
             }
         }
 
@@ -1138,8 +1135,6 @@ fn doLoadAssetWorkDirectly(
             },
         }
     }
-
-    @fence(.seq_cst);
 
     if (!shared.platform.noFileErrors(work.handle)) {
         shared.zeroSize(work.size, @ptrCast(work.destination));
