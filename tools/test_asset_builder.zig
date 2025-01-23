@@ -581,7 +581,7 @@ const RiffIterator = struct {
         return std.meta.intToEnum(WaveChunkId, chunk.id) catch null;
     }
 
-    fn getChunkData(self: RiffIterator) *void {
+    fn getChunkData(self: RiffIterator) *anyopaque {
         return @ptrCast(self.at + @sizeOf(WaveChunk));
     }
 
@@ -591,7 +591,7 @@ const RiffIterator = struct {
     }
 };
 
-fn parseWaveChunkAt(at: *void, stop: *void) RiffIterator {
+fn parseWaveChunkAt(at: *anyopaque, stop: *anyopaque) RiffIterator {
     return RiffIterator{ .at = @ptrCast(at), .stop = @ptrCast(stop) };
 }
 

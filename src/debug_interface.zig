@@ -101,7 +101,7 @@ pub const DebugTable = extern struct {
 };
 
 pub const DebugId = extern struct {
-    value: [2]*void,
+    value: [2]*anyopaque,
 
     pub fn fromLink(tree: *debug.DebugTree, link: *debug.DebugVariableLink) DebugId {
         return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };

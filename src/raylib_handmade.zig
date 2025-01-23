@@ -158,7 +158,7 @@ pub fn main() anyerror!void {
     };
     const total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size + game_memory.debug_storage_size;
     // const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
-    game_memory.permanent_storage = @as([*]void, @ptrCast(rl.memAlloc(@intCast(total_size))));
+    game_memory.permanent_storage = @as([*]u8, @ptrCast(rl.memAlloc(@intCast(total_size))));
     game_memory.transient_storage = game_memory.permanent_storage.? + game_memory.permanent_storage_size;
     game_memory.debug_storage = game_memory.transient_storage.? + game_memory.transient_storage_size;
 

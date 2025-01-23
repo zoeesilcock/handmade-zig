@@ -425,13 +425,13 @@ pub const MemoryIndex = usize;
 
 pub const Memory = struct {
     permanent_storage_size: u64,
-    permanent_storage: ?[*]void,
+    permanent_storage: ?[*]u8,
 
     transient_storage_size: u64,
-    transient_storage: ?[*]void,
+    transient_storage: ?[*]u8,
 
     debug_storage_size: u64,
-    debug_storage: ?[*]void,
+    debug_storage: ?[*]u8,
 
     high_priority_queue: *PlatformWorkQueue,
     low_priority_queue: *PlatformWorkQueue,
@@ -489,7 +489,7 @@ pub const MemoryArena = extern struct {
     used: MemoryIndex,
     temp_count: i32,
 
-    pub fn initialize(self: *MemoryArena, size: MemoryIndex, base: [*]void) void {
+    pub fn initialize(self: *MemoryArena, size: MemoryIndex, base: [*]u8) void {
         self.size = size;
         self.base = @ptrCast(base);
         self.used = 0;
@@ -578,7 +578,7 @@ pub const MemoryArena = extern struct {
         return @ptrCast(dest);
     }
 
-    pub fn pushCopy(self: *MemoryArena, size: MemoryIndex, source: *void) *void {
+    pub fn pushCopy(self: *MemoryArena, size: MemoryIndex, source: *anyopaque) *anyopaque {
         return copy(size, source, @ptrCast(self.pushSize(size, null)));
     }
 
@@ -610,7 +610,7 @@ pub const MemoryArena = extern struct {
     }
 };
 
-pub fn zeroSize(size: MemoryIndex, ptr: [*]void) void {
+pub fn zeroSize(size: MemoryIndex, ptr: *anyopaque) void {
     var byte: [*]u8 = @ptrCast(ptr);
     var index = size;
     while (index > 0) : (index -= 1) {
@@ -627,7 +627,7 @@ pub fn zeroArray(count: u32, ptr: *anyopaque) void {
     zeroSize(@sizeOf(ptr) * count, ptr);
 }
 
-pub fn copy(size: MemoryIndex, source_init: *void, dest_init: *void) *void {
+pub fn copy(size: MemoryIndex, source_init: *anyopaque, dest_init: *anyopaque) *anyopaque {
     var source: [*]u8 = @ptrCast(source_init);
     var dest: [*]u8 = @ptrCast(dest_init);
 

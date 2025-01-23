@@ -72,7 +72,7 @@ pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBit
         const header_address = @intFromPtr(header);
         const data_address = header_address + @sizeOf(RenderEntryHeader);
         const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-        const data: *void = @ptrFromInt(aligned_address);
+        const data: *anyopaque = @ptrFromInt(aligned_address);
 
         switch (header.type) {
             .RenderEntryClear => {

@@ -2078,7 +2078,7 @@ pub export fn wWinMain(
 
             if (state.game_memory_block) |memory_block| {
                 game_memory.permanent_storage = @ptrCast(memory_block);
-                game_memory.transient_storage = @as([*]void, @ptrCast(memory_block)) + game_memory.permanent_storage_size;
+                game_memory.transient_storage = @as([*]u8, @ptrCast(memory_block)) + game_memory.permanent_storage_size;
                 game_memory.debug_storage = game_memory.transient_storage.? + game_memory.transient_storage_size;
             }
 

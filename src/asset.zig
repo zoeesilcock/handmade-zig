@@ -1032,7 +1032,7 @@ pub const WritableBitmap = struct {
 };
 
 pub const LoadedBitmap = extern struct {
-    memory: ?[*]void,
+    memory: ?[*]u8,
 
     alignment_percentage: Vector2 = Vector2.zero(),
     width_over_height: f32 = 0,
