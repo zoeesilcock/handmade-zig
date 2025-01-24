@@ -1,6 +1,6 @@
 const shared = @import("shared.zig");
 const asset = @import("asset.zig");
-const render = @import("render.zig");
+const rendergroup = @import("rendergroup.zig");
 const math = @import("math.zig");
 const config = @import("config.zig");
 const sim = @import("sim.zig");
@@ -23,7 +23,8 @@ const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const ArenaPushParams = shared.ArenaPushParams;
-const ObjectTransform = render.ObjectTransform;
+const ObjectTransform = rendergroup.ObjectTransform;
+const RenderGroup = rendergroup.RenderGroup;
 
 pub var global_debug_table: debug_interface.DebugTable = debug_interface.DebugTable{};
 
@@ -190,7 +191,7 @@ pub const DebugState = struct {
     debug_arena: shared.MemoryArena,
     per_frame_arena: shared.MemoryArena,
 
-    render_group: ?*render.RenderGroup = null,
+    render_group: RenderGroup,
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
 
@@ -1068,113 +1069,112 @@ fn writeHandmadeConfig(debug_state: *DebugState) void {
 }
 
 fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_position: Vector2) void {
-    if (debug_state.render_group) |group| {
-        group.pushRectangle2(ObjectTransform.defaultFlat(), profile_rect, 0, Color.new(0, 0, 0, 0.25));
+    var render_group: *RenderGroup = &debug_state.render_group;
+    render_group.pushRectangle2(ObjectTransform.defaultFlat(), profile_rect, 0, Color.new(0, 0, 0, 0.25));
 
-        const bar_spacing: f32 = 4;
-        var lane_height: f32 = 0;
-        const lane_count: u32 = debug_state.frame_bar_lane_count;
-        var frame_bar_scale: f32 = std.math.floatMax(f32);
+    const bar_spacing: f32 = 4;
+    var lane_height: f32 = 0;
+    const lane_count: u32 = debug_state.frame_bar_lane_count;
+    var frame_bar_scale: f32 = std.math.floatMax(f32);
 
-        {
-            var opt_frame: ?*DebugFrame = debug_state.oldest_frame;
-            while (opt_frame) |frame| : (opt_frame = frame.next) {
-                if (frame_bar_scale < frame.frame_bar_scale) {
-                    frame_bar_scale = frame.frame_bar_scale;
-                }
+    {
+        var opt_frame: ?*DebugFrame = debug_state.oldest_frame;
+        while (opt_frame) |frame| : (opt_frame = frame.next) {
+            if (frame_bar_scale < frame.frame_bar_scale) {
+                frame_bar_scale = frame.frame_bar_scale;
             }
         }
-
-        var max_frame: u32 = debug_state.frame_count;
-        if (max_frame > 10) {
-            max_frame = 10;
-        }
-
-        if (lane_count > 0 and max_frame > 0) {
-            const pixels_per_frame: f32 = profile_rect.getDimension().y() / @as(f32, @floatFromInt(max_frame));
-            lane_height = (pixels_per_frame - bar_spacing) / @as(f32, @floatFromInt(lane_count));
-        }
-
-        _ = mouse_position;
-        // const bar_height: f32 = lane_height * @as(f32, @floatFromInt(lane_count));
-        // const bars_plus_spacing: f32 = bar_height + bar_spacing;
-        // const chart_left: f32 = profile_rect.min.x();
-        // // const chart_height: f32 = bars_plus_spacing * @as(f32, @floatFromInt(max_frame));
-        // const chart_width: f32 = profile_rect.getDimension().x();
-        // const chart_top: f32 = profile_rect.max.y();
-        // const scale: f32 = chart_width * frame_bar_scale;
-        //
-        // const colors: [12]Color3 = .{
-        //     Color3.new(1, 0, 0),
-        //     Color3.new(0, 1, 0),
-        //     Color3.new(0, 0, 1),
-        //     Color3.new(1, 1, 0),
-        //     Color3.new(0, 1, 1),
-        //     Color3.new(1, 0, 1),
-        //     Color3.new(1, 0.5, 0),
-        //     Color3.new(1, 0, 0.5),
-        //     Color3.new(0.5, 1, 0),
-        //     Color3.new(0, 1, 0.5),
-        //     Color3.new(0.5, 0, 1),
-        //     Color3.new(0, 0.5, 1),
-        // };
-
-        // var frame_index: u32 = 0;
-        // var opt_frame: ?*DebugFrame = debug_state.oldest_frame;
-        // while (opt_frame) |frame| : (opt_frame = frame.next) {
-        //     defer frame_index += 1;
-        //     const stack_x: f32 = chart_left;
-        //     const stack_y: f32 = chart_top - bars_plus_spacing * @as(f32, (@floatFromInt(frame_index)));
-        //
-        //     var region_index: u32 = 0;
-        //     while (region_index < frame.region_count) : (region_index += 1) {
-        //         const region: *const DebugFrameRegion = &frame.regions[region_index];
-        //
-        //         const color = colors[region.color_index % colors.len];
-        //         const this_min_x: f32 = stack_x + scale * region.min_t;
-        //         const this_max_x: f32 = stack_x + scale * region.max_t;
-        //         const lane: f32 = @as(f32, @floatFromInt(region.lane_index));
-        //
-        //         const region_rect = math.Rectangle2.new(
-        //             this_min_x,
-        //             stack_y - lane_height * (lane + 1),
-        //             this_max_x,
-        //             stack_y - lane_height * lane,
-        //         );
-        //
-        //         group.pushRectangle2(region_rect, 0, color.toColor(1));
-        //
-        //         if (mouse_position.isInRectangle(region_rect)) {
-        //             const event: *DebugEvent = region.event;
-        //
-        //             var buffer: [128]u8 = undefined;
-        //             const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
-        //                 event.block_name,
-        //                 region.cycle_count,
-        //                 event.file_name,
-        //                 event.line_number,
-        //             }) catch "";
-        //             textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
-        //
-        //             // hot_record = record;
-        //         }
-        //     }
-        // }
-
-        // // 30 FPS line.
-        // group.pushRectangle(
-        //     Vector2.new(chart_width, 1),
-        //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + chart_height, 0),
-        //     Color.white(),
-        // );
-        //
-        // // 60 FPS line.
-        // group.pushRectangle(
-        //     Vector2.new(chart_width, 1),
-        //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + (chart_height * 0.5), 0),
-        //     Color.new(0.5, 1, 0, 1),
-        // );
     }
+
+    var max_frame: u32 = debug_state.frame_count;
+    if (max_frame > 10) {
+        max_frame = 10;
+    }
+
+    if (lane_count > 0 and max_frame > 0) {
+        const pixels_per_frame: f32 = profile_rect.getDimension().y() / @as(f32, @floatFromInt(max_frame));
+        lane_height = (pixels_per_frame - bar_spacing) / @as(f32, @floatFromInt(lane_count));
+    }
+
+    _ = mouse_position;
+    // const bar_height: f32 = lane_height * @as(f32, @floatFromInt(lane_count));
+    // const bars_plus_spacing: f32 = bar_height + bar_spacing;
+    // const chart_left: f32 = profile_rect.min.x();
+    // // const chart_height: f32 = bars_plus_spacing * @as(f32, @floatFromInt(max_frame));
+    // const chart_width: f32 = profile_rect.getDimension().x();
+    // const chart_top: f32 = profile_rect.max.y();
+    // const scale: f32 = chart_width * frame_bar_scale;
+    //
+    // const colors: [12]Color3 = .{
+    //     Color3.new(1, 0, 0),
+    //     Color3.new(0, 1, 0),
+    //     Color3.new(0, 0, 1),
+    //     Color3.new(1, 1, 0),
+    //     Color3.new(0, 1, 1),
+    //     Color3.new(1, 0, 1),
+    //     Color3.new(1, 0.5, 0),
+    //     Color3.new(1, 0, 0.5),
+    //     Color3.new(0.5, 1, 0),
+    //     Color3.new(0, 1, 0.5),
+    //     Color3.new(0.5, 0, 1),
+    //     Color3.new(0, 0.5, 1),
+    // };
+
+    // var frame_index: u32 = 0;
+    // var opt_frame: ?*DebugFrame = debug_state.oldest_frame;
+    // while (opt_frame) |frame| : (opt_frame = frame.next) {
+    //     defer frame_index += 1;
+    //     const stack_x: f32 = chart_left;
+    //     const stack_y: f32 = chart_top - bars_plus_spacing * @as(f32, (@floatFromInt(frame_index)));
+    //
+    //     var region_index: u32 = 0;
+    //     while (region_index < frame.region_count) : (region_index += 1) {
+    //         const region: *const DebugFrameRegion = &frame.regions[region_index];
+    //
+    //         const color = colors[region.color_index % colors.len];
+    //         const this_min_x: f32 = stack_x + scale * region.min_t;
+    //         const this_max_x: f32 = stack_x + scale * region.max_t;
+    //         const lane: f32 = @as(f32, @floatFromInt(region.lane_index));
+    //
+    //         const region_rect = math.Rectangle2.new(
+    //             this_min_x,
+    //             stack_y - lane_height * (lane + 1),
+    //             this_max_x,
+    //             stack_y - lane_height * lane,
+    //         );
+    //
+    //         render_group.pushRectangle2(region_rect, 0, color.toColor(1));
+    //
+    //         if (mouse_position.isInRectangle(region_rect)) {
+    //             const event: *DebugEvent = region.event;
+    //
+    //             var buffer: [128]u8 = undefined;
+    //             const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
+    //                 event.block_name,
+    //                 region.cycle_count,
+    //                 event.file_name,
+    //                 event.line_number,
+    //             }) catch "";
+    //             textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
+    //
+    //             // hot_record = record;
+    //         }
+    //     }
+    // }
+
+    // // 30 FPS line.
+    // render_group.pushRectangle(
+    //     Vector2.new(chart_width, 1),
+    //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + chart_height, 0),
+    //     Color.white(),
+    // );
+    //
+    // // 60 FPS line.
+    // render_group.pushRectangle(
+    //     Vector2.new(chart_width, 1),
+    //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + (chart_height * 0.5), 0),
+    //     Color.new(0.5, 1, 0, 1),
+    // );
 }
 
 const Layout = struct {
@@ -1214,93 +1214,92 @@ const LayoutElement = struct {
         const no_transform = ObjectTransform.defaultFlat();
         const debug_state: *DebugState = self.layout.debug_state;
 
-        if (debug_state.render_group) |render_group| {
-            const size_handle_pixels: f32 = 4;
-            var frame: Vector2 = Vector2.new(0, 0);
+        var render_group: *RenderGroup = &debug_state.render_group;
+        const size_handle_pixels: f32 = 4;
+        var frame: Vector2 = Vector2.new(0, 0);
 
-            if (self.size != null) {
-                frame = Vector2.splat(size_handle_pixels);
-            }
-
-            const total_dimension: Vector2 = self.dimension.plus(frame.scaledTo(2));
-
-            const total_min_corner: Vector2 = Vector2.new(
-                self.layout.at.x() + @as(f32, @floatFromInt(self.layout.depth)) * 2 * self.layout.line_advance,
-                self.layout.at.y() - total_dimension.y(),
-            );
-            const total_max_corner: Vector2 = total_min_corner.plus(total_dimension);
-
-            const interior_min_corner: Vector2 = total_min_corner.plus(frame);
-            const interior_max_corner: Vector2 = interior_min_corner.plus(self.dimension.*);
-
-            const total_bounds: Rectangle2 = Rectangle2.fromMinMax(total_min_corner, total_max_corner);
-            self.bounds = Rectangle2.fromMinMax(interior_min_corner, interior_max_corner);
-
-            if (self.default_interaction) |interaction| {
-                if (interaction.interaction_type != .None and self.layout.mouse_position.isInRectangle(self.bounds)) {
-                    debug_state.next_hot_interaction = interaction;
-                }
-            }
-
-            if (self.size) |size| {
-                render_group.pushRectangle2(
-                    no_transform,
-                    Rectangle2.fromMinMax(
-                        Vector2.new(total_min_corner.x(), interior_min_corner.y()),
-                        Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
-                    ),
-                    0,
-                    Color.black(),
-                );
-                render_group.pushRectangle2(
-                    no_transform,
-                    Rectangle2.fromMinMax(
-                        Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
-                        Vector2.new(total_max_corner.x(), total_max_corner.y()),
-                    ),
-                    0,
-                    Color.black(),
-                );
-                render_group.pushRectangle2(
-                    no_transform,
-                    Rectangle2.fromMinMax(
-                        Vector2.new(interior_min_corner.x(), total_min_corner.y()),
-                        Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
-                    ),
-                    0,
-                    Color.black(),
-                );
-                render_group.pushRectangle2(
-                    no_transform,
-                    Rectangle2.fromMinMax(
-                        Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
-                        Vector2.new(interior_max_corner.x(), total_max_corner.y()),
-                    ),
-                    0,
-                    Color.black(),
-                );
-
-                const size_interaction: DebugInteraction = DebugInteraction{
-                    .interaction_type = .Resize,
-                    .target = .{ .position = size },
-                };
-
-                const size_box: Rectangle2 = Rectangle2.fromMinMax(
-                    Vector2.new(interior_max_corner.x(), total_min_corner.y()),
-                    Vector2.new(total_max_corner.x(), interior_min_corner.y()),
-                );
-                const size_box_color: Color =
-                    if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
-                render_group.pushRectangle2(no_transform, size_box, 0, size_box_color);
-
-                if (self.layout.mouse_position.isInRectangle(size_box)) {
-                    debug_state.next_hot_interaction = size_interaction;
-                }
-            }
-
-            const spacing_y: f32 = if (false) 0 else self.layout.spacing_y;
-            _ = self.layout.at.setY(total_bounds.min.y() - spacing_y);
+        if (self.size != null) {
+            frame = Vector2.splat(size_handle_pixels);
         }
+
+        const total_dimension: Vector2 = self.dimension.plus(frame.scaledTo(2));
+
+        const total_min_corner: Vector2 = Vector2.new(
+            self.layout.at.x() + @as(f32, @floatFromInt(self.layout.depth)) * 2 * self.layout.line_advance,
+            self.layout.at.y() - total_dimension.y(),
+        );
+        const total_max_corner: Vector2 = total_min_corner.plus(total_dimension);
+
+        const interior_min_corner: Vector2 = total_min_corner.plus(frame);
+        const interior_max_corner: Vector2 = interior_min_corner.plus(self.dimension.*);
+
+        const total_bounds: Rectangle2 = Rectangle2.fromMinMax(total_min_corner, total_max_corner);
+        self.bounds = Rectangle2.fromMinMax(interior_min_corner, interior_max_corner);
+
+        if (self.default_interaction) |interaction| {
+            if (interaction.interaction_type != .None and self.layout.mouse_position.isInRectangle(self.bounds)) {
+                debug_state.next_hot_interaction = interaction;
+            }
+        }
+
+        if (self.size) |size| {
+            render_group.pushRectangle2(
+                no_transform,
+                Rectangle2.fromMinMax(
+                    Vector2.new(total_min_corner.x(), interior_min_corner.y()),
+                    Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
+                ),
+                0,
+                Color.black(),
+            );
+            render_group.pushRectangle2(
+                no_transform,
+                Rectangle2.fromMinMax(
+                    Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
+                    Vector2.new(total_max_corner.x(), total_max_corner.y()),
+                ),
+                0,
+                Color.black(),
+            );
+            render_group.pushRectangle2(
+                no_transform,
+                Rectangle2.fromMinMax(
+                    Vector2.new(interior_min_corner.x(), total_min_corner.y()),
+                    Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
+                ),
+                0,
+                Color.black(),
+            );
+            render_group.pushRectangle2(
+                no_transform,
+                Rectangle2.fromMinMax(
+                    Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
+                    Vector2.new(interior_max_corner.x(), total_max_corner.y()),
+                ),
+                0,
+                Color.black(),
+            );
+
+            const size_interaction: DebugInteraction = DebugInteraction{
+                .interaction_type = .Resize,
+                .target = .{ .position = size },
+            };
+
+            const size_box: Rectangle2 = Rectangle2.fromMinMax(
+                Vector2.new(interior_max_corner.x(), total_min_corner.y()),
+                Vector2.new(total_max_corner.x(), interior_min_corner.y()),
+            );
+            const size_box_color: Color =
+                if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
+            render_group.pushRectangle2(no_transform, size_box, 0, size_box_color);
+
+            if (self.layout.mouse_position.isInRectangle(size_box)) {
+                debug_state.next_hot_interaction = size_interaction;
+            }
+        }
+
+        const spacing_y: f32 = if (false) 0 else self.layout.spacing_y;
+        _ = self.layout.at.setY(total_bounds.min.y() - spacing_y);
     }
 };
 
@@ -1361,56 +1360,55 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
 
     if (opt_stored_event) |stored_event| {
         if (debug_state.debug_font_info) |font_info| {
-            if (debug_state.render_group) |render_group| {
-                const event = &stored_event.event;
-                const item_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .AutoModifyVariable);
-                const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
-                const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
-                const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
+            var render_group: *RenderGroup = &debug_state.render_group;
+            const event = &stored_event.event;
+            const item_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .AutoModifyVariable);
+            const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+            const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
+            const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
 
-                switch (event.event_type) {
-                    .BitmapId => {
-                        const bitmap_scale = view.data.inline_block.dimension.y();
-                        if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
-                            var dim = render_group.getBitmapDim(no_transform, bitmap, bitmap_scale, Vector3.zero(), 0);
-                            _ = view.data.inline_block.dimension.setX(dim.size.x());
-                        }
+            switch (event.event_type) {
+                .BitmapId => {
+                    const bitmap_scale = view.data.inline_block.dimension.y();
+                    if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
+                        var dim = render_group.getBitmapDim(no_transform, bitmap, bitmap_scale, Vector3.zero(), 0);
+                        _ = view.data.inline_block.dimension.setX(dim.size.x());
+                    }
 
-                        const tear_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .TearValue);
-                        var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
-                        element.makeSizable();
-                        element.defaultInteraction(tear_interaction);
-                        element.end();
+                    const tear_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .TearValue);
+                    var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                    element.makeSizable();
+                    element.defaultInteraction(tear_interaction);
+                    element.end();
 
-                        render_group.pushRectangle2(no_transform, element.bounds, 0, Color.black());
-                        render_group.pushBitmapId(
-                            no_transform,
-                            event.data.BitmapId,
-                            bitmap_scale,
-                            element.bounds.min.toVector3(0),
-                            Color.white(),
-                            0,
-                        );
-                    },
-                    else => {
-                        var text: [4096:0]u8 = undefined;
-                        var len: u32 = 0;
-                        len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
+                    render_group.pushRectangle2(no_transform, element.bounds, 0, Color.black());
+                    render_group.pushBitmapId(
+                        no_transform,
+                        event.data.BitmapId,
+                        bitmap_scale,
+                        element.bounds.min.toVector3(0),
+                        Color.white(),
+                        0,
+                    );
+                },
+                else => {
+                    var text: [4096:0]u8 = undefined;
+                    var len: u32 = 0;
+                    len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
 
-                        const text_bounds = getTextSize(debug_state, &text);
-                        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+                    const text_bounds = getTextSize(debug_state, &text);
+                    var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
 
-                        var element: LayoutElement = layout.beginElementRectangle(&dim);
-                        element.defaultInteraction(item_interaction);
-                        element.end();
+                    var element: LayoutElement = layout.beginElementRectangle(&dim);
+                    element.defaultInteraction(item_interaction);
+                    element.end();
 
-                        const text_position: Vector2 = Vector2.new(
-                            element.bounds.min.x(),
-                            element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
-                        );
-                        textOutAt(&text, text_position, item_color);
-                    },
-                }
+                    const text_position: Vector2 = Vector2.new(
+                        element.bounds.min.x(),
+                        element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
+                    );
+                    textOutAt(&text, text_position, item_color);
+                },
             }
         }
     }
@@ -1455,7 +1453,7 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
     } else {}
 }
 
-fn drawDebugMainMenu(debug_state: *DebugState, render_group: *render.RenderGroup, mouse_position: Vector2) void {
+fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse_position: Vector2) void {
     var opt_tree: ?*DebugTree = debug_state.tree_sentinel.next;
 
     if (debug_state.debug_font_info) |font_info| {
@@ -1766,104 +1764,103 @@ pub fn textOp(
     var rect_found = false;
     var color = color_in;
 
-    if (debug_state.render_group) |render_group| {
-        if (debug_state.debug_font) |font| {
-            if (debug_state.debug_font_info) |font_info| {
-                var match_vector = asset.AssetVector{};
-                var prev_code_point: u32 = 0;
-                var char_scale = debug_state.font_scale;
-                var x: f32 = position.x();
+    var render_group: *RenderGroup = &debug_state.render_group;
+    if (debug_state.debug_font) |font| {
+        if (debug_state.debug_font_info) |font_info| {
+            var match_vector = asset.AssetVector{};
+            var prev_code_point: u32 = 0;
+            var char_scale = debug_state.font_scale;
+            var x: f32 = position.x();
 
-                var at: [*]const u8 = @ptrCast(text);
-                while (at[0] != 0) {
+            var at: [*]const u8 = @ptrCast(text);
+            while (at[0] != 0) {
+                if (at[0] == '\\' and
+                    at[1] == '#' and
+                    at[2] != 0 and
+                    at[3] != 0 and
+                    at[4] != 0)
+                {
+                    const c_scale: f32 = 1.0 / 9.0;
+                    color = Color.new(
+                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
+                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
+                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
+                        1,
+                    );
+
+                    at += 5;
+                } else if (at[0] == '\\' and
+                    at[1] == '^' and
+                    at[2] != 0)
+                {
+                    const c_scale: f32 = 1.0 / 9.0;
+                    char_scale = debug_state.font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
+                    at += 3;
+                } else {
+                    var code_point: u32 = at[0];
+
                     if (at[0] == '\\' and
-                        at[1] == '#' and
-                        at[2] != 0 and
-                        at[3] != 0 and
-                        at[4] != 0)
+                        (isHex(at[1])) and
+                        (isHex(at[2])) and
+                        (isHex(at[3])) and
+                        (isHex(at[4])))
                     {
-                        const c_scale: f32 = 1.0 / 9.0;
-                        color = Color.new(
-                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
-                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
-                            math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
-                            1,
-                        );
+                        code_point = ((getHex(at[1]) << 12) |
+                            (getHex(at[2]) << 8) |
+                            (getHex(at[3]) << 4) |
+                            (getHex(at[4]) << 0));
 
-                        at += 5;
-                    } else if (at[0] == '\\' and
-                        at[1] == '^' and
-                        at[2] != 0)
-                    {
-                        const c_scale: f32 = 1.0 / 9.0;
-                        char_scale = debug_state.font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
-                        at += 3;
-                    } else {
-                        var code_point: u32 = at[0];
+                        at += 4;
+                    }
 
-                        if (at[0] == '\\' and
-                            (isHex(at[1])) and
-                            (isHex(at[2])) and
-                            (isHex(at[3])) and
-                            (isHex(at[4])))
-                        {
-                            code_point = ((getHex(at[1]) << 12) |
-                                (getHex(at[2]) << 8) |
-                                (getHex(at[3]) << 4) |
-                                (getHex(at[4]) << 0));
+                    const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(
+                        font_info,
+                        prev_code_point,
+                        code_point,
+                    );
+                    x += advance_x;
 
-                            at += 4;
-                        }
+                    if (code_point != ' ') {
+                        match_vector.e[@intFromEnum(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
+                        if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
+                            const info = render_group.assets.getBitmapInfo(bitmap_id);
+                            const bitmap_scale = char_scale * @as(f32, @floatFromInt(info.dim[1]));
+                            const bitamp_offset: Vector3 = Vector3.new(x, position.y(), 0);
 
-                        const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(
-                            font_info,
-                            prev_code_point,
-                            code_point,
-                        );
-                        x += advance_x;
+                            if (op == .DrawText) {
+                                render_group.pushBitmapId(
+                                    ObjectTransform.defaultFlat(),
+                                    bitmap_id,
+                                    bitmap_scale,
+                                    bitamp_offset,
+                                    color,
+                                    null,
+                                );
+                            } else {
+                                std.debug.assert(op == .SizeText);
 
-                        if (code_point != ' ') {
-                            match_vector.e[@intFromEnum(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
-                            if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
-                                const info = render_group.assets.getBitmapInfo(bitmap_id);
-                                const bitmap_scale = char_scale * @as(f32, @floatFromInt(info.dim[1]));
-                                const bitamp_offset: Vector3 = Vector3.new(x, position.y(), 0);
-
-                                if (op == .DrawText) {
-                                    render_group.pushBitmapId(
+                                if (render_group.assets.getBitmap(bitmap_id, render_group.generation_id)) |bitmap| {
+                                    const dim = render_group.getBitmapDim(
                                         ObjectTransform.defaultFlat(),
-                                        bitmap_id,
+                                        bitmap,
                                         bitmap_scale,
                                         bitamp_offset,
-                                        color,
-                                        null,
+                                        1,
                                     );
-                                } else {
-                                    std.debug.assert(op == .SizeText);
-
-                                    if (render_group.assets.getBitmap(bitmap_id, render_group.generation_id)) |bitmap| {
-                                        const dim = render_group.getBitmapDim(
-                                            ObjectTransform.defaultFlat(),
-                                            bitmap,
-                                            bitmap_scale,
-                                            bitamp_offset,
-                                            1,
-                                        );
-                                        var glyph_dim: Rectangle2 = Rectangle2.fromMinDimension(
-                                            dim.position.xy(),
-                                            dim.size,
-                                        );
-                                        result = result.getUnionWith(&glyph_dim);
-                                        rect_found = true;
-                                    }
+                                    var glyph_dim: Rectangle2 = Rectangle2.fromMinDimension(
+                                        dim.position.xy(),
+                                        dim.size,
+                                    );
+                                    result = result.getUnionWith(&glyph_dim);
+                                    rect_found = true;
                                 }
                             }
                         }
-
-                        prev_code_point = code_point;
-
-                        at += 1;
                     }
+
+                    prev_code_point = code_point;
+
+                    at += 1;
                 }
             }
         }
@@ -1905,7 +1902,14 @@ fn getHex(char: u8) u32 {
     return result;
 }
 
-fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, height: i32) void {
+fn debugStart(
+    debug_state: *DebugState,
+    commands: *shared.RenderCommands,
+    assets: *asset.Assets,
+    main_generation_id: u32,
+    width: i32,
+    height: i32,
+) void {
     var timed_block = TimedBlock.beginFunction(@src(), .DebugStart);
     defer timed_block.end();
 
@@ -1977,9 +1981,6 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
             // debug_variables.endVariableGroup(&context);
             // std.debug.assert(context.group_depth == 0);
 
-            debug_state.render_group =
-                render.RenderGroup.allocate(assets, &debug_state.debug_arena, shared.megabytes(16), false);
-
             debug_state.paused = false;
             debug_state.scope_to_record = null;
 
@@ -1991,12 +1992,11 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
             );
         }
 
-        if (debug_state.render_group) |group| {
-            group.beginRender();
-            if (group.pushFont(debug_state.font_id)) |font| {
-                debug_state.debug_font = font;
-                debug_state.debug_font_info = group.assets.getFontInfo(debug_state.font_id);
-            }
+        debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id, false);
+
+        if (debug_state.render_group.pushFont(debug_state.font_id)) |font| {
+            debug_state.debug_font = font;
+            debug_state.debug_font_info = debug_state.render_group.assets.getFontInfo(debug_state.font_id);
         }
 
         debug_state.global_width = @floatFromInt(width);
@@ -2014,10 +2014,7 @@ fn debugStart(debug_state: *DebugState, assets: *asset.Assets, width: i32, heigh
         debug_state.at_y = 0.5 * @as(f32, @floatFromInt(height));
         debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
         debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-
-        if (debug_state.render_group) |group| {
-            group.orthographicMode(width, height, 1);
-        }
+        debug_state.render_group.orthographicMode(width, height, 1);
     }
 }
 
@@ -2083,112 +2080,110 @@ pub fn debugDumpStruct(struct_ptr: *anyopaque, member_defs: [*]const meta.Member
     }
 }
 
-fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput, draw_buffer: *asset.LoadedBitmap) void {
+fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     var overlay_timed_block = TimedBlock.beginBlock(@src(), .DebugEnd);
     defer overlay_timed_block.end();
 
-    if (debug_state.render_group) |group| {
-        const mouse_position: Vector2 = group.unproject(
-            ObjectTransform.defaultFlat(),
-            Vector2.new(input.mouse_x, input.mouse_y),
-        ).xy();
-        const hot_event: ?*DebugEvent = null;
+    const group: *RenderGroup = &debug_state.render_group;
+    const mouse_position: Vector2 = group.unproject(
+        ObjectTransform.defaultFlat(),
+        Vector2.new(input.mouse_x, input.mouse_y),
+    ).xy();
+    const hot_event: ?*DebugEvent = null;
 
-        drawDebugMainMenu(debug_state, group, mouse_position);
-        interact(debug_state, input, mouse_position);
+    drawDebugMainMenu(debug_state, group, mouse_position);
+    interact(debug_state, input, mouse_position);
 
-        if (debug_state.is_compiling) {
-            const state = shared.platform.debugGetProcessState(debug_state.compiler);
-            if (state.is_running) {
-                textLine("COMPILING");
-            } else {
-                debug_state.is_compiling = false;
-            }
+    if (debug_state.is_compiling) {
+        const state = shared.platform.debugGetProcessState(debug_state.compiler);
+        if (state.is_running) {
+            textLine("COMPILING");
+        } else {
+            debug_state.is_compiling = false;
         }
-
-        if (false) {
-            var counter_index: u32 = 0;
-            while (counter_index < debug_state.counter_count) : (counter_index += 1) {
-                const counter = debug_state.counter_states[counter_index];
-
-                var hit_count = DebugStatistic.begin();
-                var cycle_count = DebugStatistic.begin();
-                var cycle_over_hit = DebugStatistic.begin();
-                for (counter.snapshots) |snapshot| {
-                    hit_count.accumulate(@floatFromInt(snapshot.hit_count));
-                    cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
-
-                    var coh: f64 = 0;
-                    if (snapshot.hit_count > 0) {
-                        coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
-                    }
-                    cycle_over_hit.accumulate(coh);
-                }
-                hit_count.end();
-                cycle_count.end();
-                cycle_over_hit.end();
-
-                if (counter.block_name) |block_name| {
-                    if (cycle_count.max > 0) {
-                        const bar_width: f32 = 4;
-                        const chart_left: f32 = 0;
-                        const chart_min_y: f32 = debug_state.at_y;
-                        const char_height: f32 = debug_state.debug_font_info.ascender_height * debug_state.font_scale;
-                        const scale: f32 = 1 / @as(f32, @floatCast(cycle_count.max));
-                        for (counter.snapshots, 0..) |snapshot, snapshot_index| {
-                            const this_proportion: f32 = scale * @as(f32, @floatFromInt(snapshot.cycle_count));
-                            const this_height: f32 = char_height * this_proportion;
-                            group.pushRectangle(
-                                Vector2.new(bar_width, this_height),
-                                Vector3.new(
-                                    chart_left + bar_width * @as(f32, (@floatFromInt(snapshot_index))) - 0.5 * bar_width,
-                                    chart_min_y + 0.5 * this_height,
-                                    0,
-                                ),
-                                Color.new(this_proportion, 1, 0, 1),
-                            );
-                        }
-                    }
-
-                    var buffer: [128]u8 = undefined;
-                    const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
-                        block_name,
-                        counter.line_number,
-                        @as(u64, @intFromFloat(cycle_count.average)),
-                        @as(u64, @intFromFloat(hit_count.average)),
-                        @as(u64, @intFromFloat(cycle_over_hit.average)),
-                    }) catch "";
-                    textLine(slice);
-                }
-            }
-        }
-
-        if (debug_state.most_recent_frame) |most_recent_frame| {
-            var buffer: [128]u8 = undefined;
-            const slice = std.fmt.bufPrintZ(&buffer, "Last frame time: {d:0.2}ms", .{
-                most_recent_frame.wall_seconds_elapsed * 1000,
-            }) catch "";
-            textLine(slice);
-
-            const slice2 = std.fmt.bufPrintZ(&buffer, "Per-frame arena space remaining: {d}kb", .{
-                debug_state.debug_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
-            }) catch "";
-            textLine(slice2);
-        }
-
-        if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
-            if (hot_event) |event| {
-                debug_state.scope_to_record = event.block_name;
-            } else {
-                debug_state.scope_to_record = null;
-            }
-        }
-
-        group.renderToOutput(debug_state.high_priority_queue, draw_buffer, &debug_state.debug_arena);
-        group.endRender();
-
-        shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
     }
+
+    if (false) {
+        var counter_index: u32 = 0;
+        while (counter_index < debug_state.counter_count) : (counter_index += 1) {
+            const counter = debug_state.counter_states[counter_index];
+
+            var hit_count = DebugStatistic.begin();
+            var cycle_count = DebugStatistic.begin();
+            var cycle_over_hit = DebugStatistic.begin();
+            for (counter.snapshots) |snapshot| {
+                hit_count.accumulate(@floatFromInt(snapshot.hit_count));
+                cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
+
+                var coh: f64 = 0;
+                if (snapshot.hit_count > 0) {
+                    coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
+                }
+                cycle_over_hit.accumulate(coh);
+            }
+            hit_count.end();
+            cycle_count.end();
+            cycle_over_hit.end();
+
+            if (counter.block_name) |block_name| {
+                if (cycle_count.max > 0) {
+                    const bar_width: f32 = 4;
+                    const chart_left: f32 = 0;
+                    const chart_min_y: f32 = debug_state.at_y;
+                    const char_height: f32 = debug_state.debug_font_info.ascender_height * debug_state.font_scale;
+                    const scale: f32 = 1 / @as(f32, @floatCast(cycle_count.max));
+                    for (counter.snapshots, 0..) |snapshot, snapshot_index| {
+                        const this_proportion: f32 = scale * @as(f32, @floatFromInt(snapshot.cycle_count));
+                        const this_height: f32 = char_height * this_proportion;
+                        group.pushRectangle(
+                            Vector2.new(bar_width, this_height),
+                            Vector3.new(
+                                chart_left + bar_width * @as(f32, (@floatFromInt(snapshot_index))) - 0.5 * bar_width,
+                                chart_min_y + 0.5 * this_height,
+                                0,
+                            ),
+                            Color.new(this_proportion, 1, 0, 1),
+                        );
+                    }
+                }
+
+                var buffer: [128]u8 = undefined;
+                const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
+                    block_name,
+                    counter.line_number,
+                    @as(u64, @intFromFloat(cycle_count.average)),
+                    @as(u64, @intFromFloat(hit_count.average)),
+                    @as(u64, @intFromFloat(cycle_over_hit.average)),
+                }) catch "";
+                textLine(slice);
+            }
+        }
+    }
+
+    if (debug_state.most_recent_frame) |most_recent_frame| {
+        var buffer: [128]u8 = undefined;
+        const slice = std.fmt.bufPrintZ(&buffer, "Last frame time: {d:0.2}ms", .{
+            most_recent_frame.wall_seconds_elapsed * 1000,
+        }) catch "";
+        textLine(slice);
+
+        const slice2 = std.fmt.bufPrintZ(&buffer, "Per-frame arena space remaining: {d}kb", .{
+            debug_state.debug_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
+        }) catch "";
+        textLine(slice2);
+    }
+
+    if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
+        if (hot_event) |event| {
+            debug_state.scope_to_record = event.block_name;
+        } else {
+            debug_state.scope_to_record = null;
+        }
+    }
+
+    group.end();
+
+    shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
 }
 
 fn getGameAssets(memory: *shared.Memory) ?*asset.Assets {
@@ -2200,6 +2195,17 @@ fn getGameAssets(memory: *shared.Memory) ?*asset.Assets {
     }
 
     return assets;
+}
+
+fn getMainGenerationID(memory: *shared.Memory) u32 {
+    var result: u32 = 0;
+    const transient_state: *shared.TransientState = @ptrCast(@alignCast(memory.transient_storage));
+
+    if (transient_state.is_initialized) {
+        result = transient_state.main_generation_id;
+    }
+
+    return result;
 }
 
 pub fn initializeDebugValue(
@@ -2224,7 +2230,11 @@ pub fn initializeDebugValue(
     return sub_event.*;
 }
 
-pub fn frameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) callconv(.C) *debug_interface.DebugTable {
+pub fn frameEnd(
+    memory: *shared.Memory,
+    input: shared.GameInput,
+    commands: *shared.RenderCommands,
+) callconv(.C) *debug_interface.DebugTable {
     global_debug_table.current_event_array_index = if (global_debug_table.current_event_array_index == 0) 1 else 0;
 
     const next_event_array_index: u64 = @as(u64, @intCast(global_debug_table.current_event_array_index)) << 32;
@@ -2240,17 +2250,16 @@ pub fn frameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared
         const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
 
         if (getGameAssets(memory)) |assets| {
-            debugStart(debug_state, assets, buffer.width, buffer.height);
+            debugStart(
+                debug_state,
+                commands,
+                assets,
+                getMainGenerationID(memory),
+                @intCast(commands.width),
+                @intCast(commands.height),
+            );
             debug_state.collateDebugRecords(event_count, &global_debug_table.events[event_array_index]);
-
-            var draw_buffer_: asset.LoadedBitmap = .{
-                .width = shared.safeTruncateToUInt16(buffer.width),
-                .height = shared.safeTruncateToUInt16(buffer.height),
-                .pitch = @intCast(buffer.pitch),
-                .memory = @ptrCast(buffer.memory),
-            };
-            const draw_buffer = &draw_buffer_;
-            debugEnd(debug_state, &input, draw_buffer);
+            debugEnd(debug_state, &input);
         }
     }
 

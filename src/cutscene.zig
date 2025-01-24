@@ -1,6 +1,6 @@
 const asset = @import("asset.zig");
 const math = @import("math.zig");
-const render = @import("render.zig");
+const rendergroup = @import("rendergroup.zig");
 const shared = @import("shared.zig");
 const world_mode = @import("world_mode.zig");
 const file_formats = @import("file_formats");
@@ -15,7 +15,8 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Color = math.Color;
-const ObjectTransform = render.ObjectTransform;
+const ObjectTransform = rendergroup.ObjectTransform;
+const RenderGroup = rendergroup.RenderGroup;
 
 const SceneLayerFlags = enum(u32) {
     AtInfinity = 0x1,
@@ -111,7 +112,7 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(0, 0, -0.5),
         .layers = &.{
-            SceneLayer{ .position = Vector3.new(0, 0, -4), .height = 6 }, // Background.
+            SceneLayer{ .position = Vector3.new(0, 0, -4.1), .height = 6 }, // Background.
             SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0, 0.5), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 1.
             SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 2.
             SceneLayer{ .position = Vector3.new(2.25, -1.5, -3), .height = 2 }, // Foreground 1.
@@ -251,7 +252,7 @@ pub fn playTitleScreen(state: *shared.State, transient_state: *TransientState) v
 pub fn updateAndRenderTitleScreen(
     state: *shared.State,
     transient_state: *shared.TransientState,
-    render_group: ?*render.RenderGroup,
+    render_group: *RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
     input: *shared.GameInput,
     title_screen: *GameModeTitleScreen,
@@ -260,7 +261,7 @@ pub fn updateAndRenderTitleScreen(
     _ = draw_buffer;
 
     if (!result) {
-        render_group.?.pushClear(Color.new(1, 0.25, 0.25, 0));
+        render_group.pushClear(Color.new(1, 0.25, 0.25, 0));
 
         if (title_screen.time > 10) {
             playIntroCutscene(state, transient_state);
@@ -286,7 +287,7 @@ pub fn playIntroCutscene(state: *shared.State, transient_state: *TransientState)
 pub fn updateAndRenderCutscene(
     state: *shared.State,
     transient_state: *shared.TransientState,
-    render_group: ?*render.RenderGroup,
+    render_group: ?*RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
     input: *shared.GameInput,
     cutscene: *GameModeCutscene,
@@ -312,7 +313,7 @@ pub fn updateAndRenderCutscene(
 
 fn renderCutsceneAtTime(
     assets: *asset.Assets,
-    render_group: ?*render.RenderGroup,
+    render_group: ?*RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
     cutscene: *GameModeCutscene,
     cutscene_time: f32,
@@ -339,7 +340,7 @@ fn renderCutsceneAtTime(
 
 fn renderLayeredScene(
     assets: *asset.Assets,
-    opt_render_group: ?*render.RenderGroup,
+    opt_render_group: ?*RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
     scene: *const LayeredScene,
     normal_time: f32,

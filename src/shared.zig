@@ -12,7 +12,7 @@ pub const math = @import("math.zig");
 const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
 const sim = @import("sim.zig");
-const render = @import("render.zig");
+const rendergroup = @import("rendergroup.zig");
 const file_formats = @import("file_formats");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
@@ -244,8 +244,6 @@ const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C)
 const debugExecuteSystemCommandType: type = fn (path: [*:0]const u8, command: [*:0]const u8, command_line: [*:0]const u8) callconv(.C) DebugExecutingProcess;
 const debugGetProcessStateType: type = fn (process: DebugExecutingProcess) callconv(.C) DebugExecutingProcessState;
 
-const openglRenderType: type = fn (render_group: *render.RenderGroup, output_target: *LoadedBitmap) callconv(.C) void;
-
 pub fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
     return file_handle.no_errors;
 }
@@ -263,8 +261,6 @@ pub const Platform = if (INTERNAL) extern struct {
 
     allocateMemory: *const allocateMemoryType = undefined,
     deallocateMemory: *const deallocateMemoryType = undefined,
-
-    openglRender: *const openglRenderType = undefined,
 
     debugFreeFileMemory: *const debugFreeFileMemoryType = undefined,
     debugWriteEntireFile: *const debugWriteEntireFileType = undefined,
@@ -284,14 +280,12 @@ pub const Platform = if (INTERNAL) extern struct {
 
     allocateMemory: *const allocateMemoryType = undefined,
     deallocateMemory: *const deallocateMemoryType = undefined,
-
-    openglRender: *const openglRenderType = undefined,
 };
 
 pub var platform: Platform = undefined;
 
 // Data from platform.
-pub fn updateAndRenderStub(_: Platform, _: *Memory, _: *GameInput, _: *OffscreenBuffer) callconv(.C) void {
+pub fn updateAndRenderStub(_: Platform, _: *Memory, _: *GameInput, _: *RenderCommands) callconv(.C) void {
     return;
 }
 
@@ -299,13 +293,46 @@ pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void 
     return;
 }
 
-pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *OffscreenBuffer) callconv(.C) *DebugTable {
+pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *RenderCommands) callconv(.C) *DebugTable {
     return undefined;
 }
 
 pub var global_debug_table: *DebugTable = if (INTERNAL) &@import("debug.zig").global_debug_table else undefined;
 pub var debug_global_memory: ?*Memory = null;
 pub var debugFrameEnd: *const @TypeOf(debugFrameEndStub) = if (INTERNAL) @import("debug.zig").frameEnd else debugFrameEndStub;
+
+pub const RenderCommands = extern struct {
+    width: u32 = 0,
+    height: u32 = 0,
+    offset_x: i32 = 0,
+    offset_y: i32 = 0,
+
+    max_push_buffer_size: u32,
+    push_buffer_size: u32,
+    push_buffer_base: [*]u8,
+
+    push_buffer_element_count: u32,
+    sort_entry_at: usize,
+};
+
+pub fn initializeRenderCommands(
+    max_push_buffer_size: u32,
+    push_buffer: *anyopaque,
+    width: u32,
+    height: u32,
+) RenderCommands {
+    return RenderCommands{
+        .width = width,
+        .height = height,
+
+        .push_buffer_base = @ptrCast(push_buffer),
+        .max_push_buffer_size = max_push_buffer_size,
+        .push_buffer_size = 0,
+
+        .push_buffer_element_count = 0,
+        .sort_entry_at = max_push_buffer_size,
+    };
+}
 
 pub const OffscreenBuffer = extern struct {
     memory: ?*anyopaque = undefined,
@@ -709,13 +736,14 @@ pub const TransientState = struct {
     tasks: [4]TaskWithMemory = [1]TaskWithMemory{undefined} ** 4,
 
     assets: *Assets,
+    main_generation_id: u32,
 
     ground_buffer_count: u32 = 0,
     ground_buffers: [*]GroundBuffer = undefined,
 
     env_map_width: i32,
     env_map_height: i32,
-    env_maps: [3]render.EnvironmentMap = [1]render.EnvironmentMap{undefined} ** 3,
+    env_maps: [3]rendergroup.EnvironmentMap = [1]rendergroup.EnvironmentMap{undefined} ** 3,
 };
 
 pub const GroundBuffer = extern struct {

@@ -1,7 +1,6 @@
 const shared = @import("shared.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
-const render = @import("render.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
 const file_formats = @import("file_formats");

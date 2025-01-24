@@ -44,7 +44,6 @@ pub const DebugCycleCounters = enum(u16) {
     FillGroundChunk,
     DebugStart,
     DebugEnd,
-    BeginRender,
     PushRenderElement,
     DrawRectangle,
     DrawBitmap,
@@ -56,7 +55,6 @@ pub const DebugCycleCounters = enum(u16) {
     TiledRenderToOutput,
     SingleRenderToOutput,
     DoTiledRenderWork,
-    EndRender,
 
     GetRenderEntityBasisPosition,
     ChangeSaturation,

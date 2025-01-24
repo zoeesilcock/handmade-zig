@@ -1,63 +1,39 @@
-//! Software renderer.
-//!
-//! 1: Everywhere outside the renderer, Y always goeas upward, X to the right.
-//!
-//! 2: All bitmaps including the render target are assumed to be bottom-up (meaning that the first row pointer points
-//! to the bottom-most row when viewed on the screen).
-//!
-//! 3: It is mandatory that all inputs to the renderer are in world coordinates (meters), not pixels. If for some
-//! reason something absolutely has to be specified in pixels, that will be explicitly marked in the API, but
-//! this should occur exceedingly sparingly.
-//!
-//! 4: Z is a special coordinate because it is broken up into discrete slices, and the renderer actually understands
-//! these slices. Z slices are what control the scaling of things, whereas Z offsets inside a slice are what control
-//! Y offsetting.
-//!
-//! 5: All color values specified to the renderer using the Color and Color3 types are in non-premultiplied alpha.
-//!
-
+const std = @import("std");
 const shared = @import("shared.zig");
 const math = @import("math.zig");
+const rendergroup = @import("rendergroup.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
-const config = @import("config.zig");
-const file_formats = @import("file_formats");
 const debug_interface = @import("debug_interface.zig");
-const std = @import("std");
+
+// TODO: How would we import other platforms here?
+const platform = @import("win32_handmade.zig");
 
 const INTERNAL = shared.INTERNAL;
-pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 
-// Types.
 const Vector2 = math.Vector2;
 const Vector2i = math.Vector2i;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
-const Color = math.Color;
-const Color3 = math.Color3;
-const Rectangle2 = math.Rectangle2;
-const Rectangle2i = math.Rectangle2i;
-const LoadedBitmap = asset.LoadedBitmap;
-const LoadedFont = asset.LoadedFont;
-const TimedBlock = debug_interface.TimedBlock;
-const DebugInterface = debug_interface.DebugInterface;
-const ArenaPushParams = shared.ArenaPushParams;
-
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
 const Vec4i = math.Vec4i;
-
-pub const UsedBitmapDim = struct {
-    basis: RenderEntityBasisResult = undefined,
-    size: Vector2 = undefined,
-    alignment: Vector2 = undefined,
-    position: Vector3 = undefined,
-};
-
-pub const EnvironmentMap = extern struct {
-    lod: [4]LoadedBitmap,
-    z_position: f32,
-};
+const Color = math.Color;
+const Color3 = math.Color3;
+const Rectangle2i = math.Rectangle2i;
+const RenderCommands = shared.RenderCommands;
+const RenderGroup = rendergroup.RenderGroup;
+const RenderEntryHeader = rendergroup.RenderEntryHeader;
+const RenderEntryClear = rendergroup.RenderEntryClear;
+const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
+const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
+const RenderEntryCoordinateSystem = rendergroup.RenderEntryCoordinateSystem;
+const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
+const EnvironmentMap = rendergroup.EnvironmentMap;
+const TileSortEntry = rendergroup.TileSortEntry;
+const LoadedBitmap = asset.LoadedBitmap;
+const TimedBlock = debug_interface.TimedBlock;
+const DebugInterface = debug_interface.DebugInterface;
 
 const BilinearSample = struct {
     a: u32,
@@ -66,105 +42,79 @@ const BilinearSample = struct {
     d: u32,
 };
 
-pub const RenderEntityBasisResult = extern struct {
-    position: Vector2 = Vector2.zero(),
-    scale: f32 = 0,
-    valid: bool = false,
-    sort_key: f32 = 0,
-};
-
-pub const RenderEntryType = enum(u8) {
-    RenderEntryClear,
-    RenderEntryBitmap,
-    RenderEntryRectangle,
-    RenderEntryCoordinateSystem,
-    RenderEntrySaturation,
-};
-
-pub const RenderEntryHeader = extern struct {
-    type: RenderEntryType,
-};
-
-pub const RenderEntryClear = extern struct {
-    color: Color,
-};
-
-pub const RenderEntrySaturation = extern struct {
-    level: f32,
-};
-
-pub const RenderEntryBitmap = extern struct {
-    bitmap: ?*LoadedBitmap,
-    position: Vector2,
-    size: Vector2,
-    color: Color,
-};
-
-pub const RenderEntryRectangle = extern struct {
-    position: Vector2,
-    dimension: Vector2 = Vector2.zero(),
-    color: Color,
-};
-
-/// This is only for testing.
-pub const RenderEntryCoordinateSystem = extern struct {
-    origin: Vector2,
-    x_axis: Vector2,
-    y_axis: Vector2,
-    color: Color,
-
-    texture: *LoadedBitmap,
-    normal_map: ?*LoadedBitmap,
-
-    pixels_to_meters: f32,
-
-    top: *EnvironmentMap,
-    middle: *EnvironmentMap,
-    bottom: *EnvironmentMap,
-};
-
-pub const ObjectTransform = extern struct {
-    upright: bool,
-    offset_position: Vector3,
-    scale: f32,
-
-    pub fn defaultUpright() ObjectTransform {
-        return ObjectTransform{
-            .upright = true,
-            .offset_position = Vector3.zero(),
-            .scale = 1,
-        };
-    }
-
-    pub fn defaultFlat() ObjectTransform {
-        return ObjectTransform{
-            .upright = false,
-            .offset_position = Vector3.zero(),
-            .scale = 1,
-        };
-    }
-};
-
-const CameraTransform = extern struct {
-    orthographic: bool,
-
-    meters_to_pixels: f32,
-    screen_center: Vector2,
-
-    focal_length: f32,
-    distance_above_target: f32,
-};
-
-pub const TileSortEntry = struct {
-    sort_key: f32,
-    push_buffer_offset: u32,
-};
-
-const TileRenderWork = struct {
-    group: *RenderGroup,
+pub const TileRenderWork = struct {
+    commands: *RenderCommands,
     output_target: *LoadedBitmap,
     clip_rect: Rectangle2i,
 };
+
+pub fn softwareRenderCommands(
+    render_queue: *shared.PlatformWorkQueue,
+    commands: *RenderCommands,
+    output_target: *LoadedBitmap,
+    sort_memory: *anyopaque,
+) void {
+    var timed_block = TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
+    defer timed_block.end();
+
+    sortEntries(commands, sort_memory);
+
+    // TODO
+    // * Make sure that tiles are all cache-aligned.
+    // * Can we get hyperthreads synced so they do interleaved lines?
+    // * How big should the tiles be for performance?
+    // * Actually ballpark the memory bandwith for drawRectangleQuickly.
+    // * Re-test some of our instruction choices.
+
+    const tile_count_x = 4;
+    const tile_count_y = 4;
+    const work_count = tile_count_x * tile_count_y;
+    var work_array: [work_count]TileRenderWork = [1]TileRenderWork{TileRenderWork{
+        .commands = commands,
+        .output_target = output_target,
+        .clip_rect = undefined,
+    }} ** work_count;
+
+    std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
+
+    var tile_width = @divFloor(output_target.width, tile_count_x);
+    const tile_height = @divFloor(output_target.height, tile_count_y);
+
+    tile_width = @divFloor(tile_width + 3, 4) * 4;
+
+    var work_index: u32 = 0;
+    var tile_y: i32 = 0;
+    while (tile_y < tile_count_y) : (tile_y += 1) {
+        var tile_x: i32 = 0;
+        while (tile_x < tile_count_x) : (tile_x += 1) {
+            var work = &work_array[work_index];
+            work_index += 1;
+
+            var clip_rect = Rectangle2i.zero();
+            _ = clip_rect.min.setX(tile_x * tile_width);
+            _ = clip_rect.min.setY(tile_y * tile_height);
+            _ = clip_rect.max.setX(clip_rect.min.x() + tile_width);
+            _ = clip_rect.max.setY(clip_rect.min.y() + tile_height);
+
+            if (tile_x == (tile_count_x - 1)) {
+                _ = clip_rect.max.setX(output_target.width);
+            }
+            if (tile_y == (tile_count_y - 1)) {
+                _ = clip_rect.max.setY(output_target.height);
+            }
+
+            work.clip_rect = clip_rect;
+
+            if (true) {
+                platform.platform.addQueueEntry(render_queue, &doTileRenderWork, work);
+            } else {
+                doTileRenderWork(render_queue, work);
+            }
+        }
+    }
+
+    platform.platform.completeAllQueuedWork(render_queue);
+}
 
 pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
     const timed_block = TimedBlock.beginFunction(@src(), .DoTiledRenderWork);
@@ -173,854 +123,286 @@ pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) cal
     _ = queue;
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
 
-    work.group.renderTo(work.output_target, work.clip_rect);
+    renderCommandsToBitmap(work.commands, work.output_target, work.clip_rect);
 }
 
-fn getRenderEntityBasisPosition(
-    camera_transform: CameraTransform,
-    object_transform: ObjectTransform,
-    original_position: Vector3,
-) RenderEntityBasisResult {
-    var timed_block = TimedBlock.beginFunction(@src(), .GetRenderEntityBasisPosition);
+pub fn renderCommandsToBitmap(commands: *RenderCommands, output_target: *LoadedBitmap, clip_rect: Rectangle2i) void {
+    var timed_block = TimedBlock.beginFunction(@src(), .RenderToOutput);
     defer timed_block.end();
 
-    var result = RenderEntityBasisResult{};
+    const null_pixels_to_meters: f32 = 1.0;
 
-    const position = original_position.xy().toVector3(0).plus(object_transform.offset_position);
+    const sort_entry_count: u32 = commands.push_buffer_element_count;
+    const sort_entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
 
-    if (camera_transform.orthographic) {
-        result.position = camera_transform.screen_center.plus(position.xy().scaledTo(camera_transform.meters_to_pixels));
-        result.scale = camera_transform.meters_to_pixels;
-        result.valid = true;
-    } else {
-        const offset_z: f32 = 0;
-        var distance_above_target = camera_transform.distance_above_target;
+    var sort_entry: [*]TileSortEntry = sort_entries;
+    var sort_entry_index: u32 = 0;
+    while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
+        defer sort_entry += 1;
 
-        if (DebugInterface.debugIf(@src(), "Renderer_Camera_UseDebug")) {
-            distance_above_target += DebugInterface.debugVariable(@src(), f32, "Renderer_Camera_DebugDistance");
-        }
+        const header: *RenderEntryHeader = @ptrCast(commands.push_buffer_base + sort_entry[0].push_buffer_offset);
+        const alignment: usize = switch (header.type) {
+            .RenderEntryClear => @alignOf(RenderEntryClear),
+            .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
+            .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
+            .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
+            .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
+        };
 
-        const distance_to_position_z = distance_above_target - position.z();
-        const near_clip_plane = 0.2;
+        const header_address = @intFromPtr(header);
+        const data_address = header_address + @sizeOf(RenderEntryHeader);
+        const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+        const data: *anyopaque = @ptrFromInt(aligned_address);
 
-        const raw_xy = position.xy().toVector3(1);
+        switch (header.type) {
+            .RenderEntryClear => {
+                const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
+                const dimension = Vector2.newI(output_target.width, output_target.height);
+                drawRectangle(output_target, Vector2.zero(), dimension, entry.color, clip_rect);
+            },
+            .RenderEntrySaturation => {
+                const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
 
-        if (distance_to_position_z > near_clip_plane) {
-            const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * camera_transform.focal_length);
-            result.scale = projected_xy.z() * camera_transform.meters_to_pixels;
-            result.position = camera_transform.screen_center.plus(projected_xy.xy().scaledTo(camera_transform.meters_to_pixels))
-                .plus(Vector2.new(0, result.scale * offset_z));
-            result.valid = true;
+                changeSaturation(output_target, entry.level);
+            },
+            .RenderEntryBitmap => {
+                const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+                if (entry.bitmap) |bitmap| {
+                    if (false) {
+                        drawRectangleSlowly(
+                            output_target,
+                            entry.position,
+                            Vector2.new(entry.size.x(), 0),
+                            Vector2.new(0, entry.size.y()),
+                            entry.color,
+                            @constCast(bitmap),
+                            null,
+                            undefined,
+                            undefined,
+                            undefined,
+                            null_pixels_to_meters,
+                        );
+                    } else {
+                        drawRectangleQuickly(
+                            output_target,
+                            entry.position,
+                            Vector2.new(entry.size.x(), 0),
+                            Vector2.new(0, entry.size.y()),
+                            entry.color,
+                            @constCast(bitmap),
+                            null_pixels_to_meters,
+                            clip_rect,
+                        );
+                    }
+                }
+            },
+            .RenderEntryRectangle => {
+                const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
+
+                drawRectangle(
+                    output_target,
+                    entry.position,
+                    entry.position.plus(entry.dimension),
+                    entry.color,
+                    clip_rect,
+                );
+            },
+            .RenderEntryCoordinateSystem => {
+                // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
+                // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
+                // drawRectangleSlowly(
+                //     output_target,
+                //     entry.origin,
+                //     entry.x_axis,
+                //     entry.y_axis,
+                //     entry.color,
+                //     entry.texture,
+                //     entry.normal_map,
+                //     entry.top,
+                //     entry.middle,
+                //     entry.bottom,
+                //     null_pixels_to_meters,
+                // );
+                //
+                // const color = Color.new(1, 1, 0, 1);
+                // const dimension = Vector2.new(2, 2);
+                // var position = entry.origin;
+                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                //
+                // position = entry.origin.plus(entry.x_axis);
+                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                //
+                // position = entry.origin.plus(entry.y_axis);
+                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                //
+                // position = max;
+                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+            },
         }
     }
+}
 
-    result.sort_key =
-        4096 * (2 * position.z() + 1 * @as(f32, @floatFromInt(@intFromBool(object_transform.upright)))) - position.y();
+fn swap(a: [*]TileSortEntry, b: [*]TileSortEntry) void {
+    const store: TileSortEntry = b[0];
+    b[0] = a[0];
+    a[0] = store;
+}
+
+fn bubbleSort(count: u32, first: [*]TileSortEntry, _: [*]TileSortEntry) void {
+    var outer: u32 = 0;
+    while (outer < count) : (outer += 1) {
+        var list_is_sorted = true;
+        var inner: u32 = 0;
+        while (inner < count - 1) : (inner += 1) {
+            const entry_a: [*]TileSortEntry = first + inner;
+            const entry_b: [*]TileSortEntry = entry_a + 1;
+
+            if (entry_a[0].sort_key > entry_b[0].sort_key) {
+                swap(entry_a, entry_b);
+                list_is_sorted = false;
+            }
+        }
+
+        if (list_is_sorted) {
+            break;
+        }
+    }
+}
+
+fn mergeSort(count: u32, first: [*]TileSortEntry, temp: [*]TileSortEntry) void {
+    if (count <= 1) {
+        // Nothing to do.
+    } else if (count == 2) {
+        const entry_a: [*]TileSortEntry = first;
+        const entry_b: [*]TileSortEntry = entry_a + 1;
+        if (entry_a[0].sort_key > entry_b[0].sort_key) {
+            swap(entry_a, entry_b);
+        }
+    } else {
+        const half0: u32 = @divFloor(count, 2);
+        const half1: u32 = count - half0;
+
+        std.debug.assert(half0 >= 1);
+        std.debug.assert(half1 >= 1);
+
+        const in_half0: [*]TileSortEntry = first;
+        const in_half1: [*]TileSortEntry = first + half0;
+        const end: [*]TileSortEntry = first + count;
+
+        mergeSort(half0, in_half0, temp);
+        mergeSort(half1, in_half1, temp);
+
+        var read_half0: [*]TileSortEntry = in_half0;
+        var read_half1: [*]TileSortEntry = in_half1;
+
+        var out: [*]TileSortEntry = temp;
+        var index: u32 = 0;
+        while (index < count) : (index += 1) {
+            if (read_half0 == in_half1) {
+                out[0] = read_half1[0];
+                read_half1 += 1;
+                out += 1;
+            } else if (read_half1 == end) {
+                out[0] = read_half0[0];
+                read_half0 += 1;
+                out += 1;
+            } else if (read_half0[0].sort_key < read_half1[0].sort_key) {
+                out[0] = read_half0[0];
+                read_half0 += 1;
+                out += 1;
+            } else {
+                out[0] = read_half1[0];
+                read_half1 += 1;
+                out += 1;
+            }
+        }
+
+        std.debug.assert(out == (temp + count));
+        std.debug.assert(read_half0 == in_half1);
+        std.debug.assert(read_half1 == end);
+
+        index = 0;
+        while (index < count) : (index += 1) {
+            first[index] = temp[index];
+        }
+    }
+}
+
+fn sortKeyToU32(sort_key: f32) u32 {
+    var result: u32 = @bitCast(sort_key);
+
+    if ((result & 0x80000000) != 0) {
+        // Signed bit is set.
+        result = ~result;
+    } else {
+        result |= 0x80000000;
+    }
 
     return result;
 }
 
-pub const RenderGroup = extern struct {
-    assets: *asset.Assets,
-    global_alpha: f32,
+fn radixSort(count: u32, first: [*]TileSortEntry, temp: [*]TileSortEntry) void {
+    var source: [*]TileSortEntry = first;
+    var dest: [*]TileSortEntry = temp;
 
-    generation_id: u32,
+    var byte_index: u32 = 0;
+    while (byte_index < 32) : (byte_index += 8) {
+        var sort_key_offsets: [256]u32 = [1]u32{0} ** 256;
 
-    monitor_half_dim_in_meters: Vector2,
-
-    camera_transform: CameraTransform,
-
-    max_push_buffer_size: u32,
-    push_buffer_size: u32,
-    push_buffer_base: [*]u8,
-
-    push_buffer_element_count: u32,
-    sort_entry_at: usize,
-
-    missing_resource_count: u32,
-    renders_in_background: bool,
-
-    inside_renderer: bool,
-
-    pub fn allocate(
-        assets: *asset.Assets,
-        arena: *shared.MemoryArena,
-        max_push_buffer_size: u32,
-        renders_in_background: bool,
-    ) *RenderGroup {
-        var result = arena.pushStruct(RenderGroup, ArenaPushParams.aligned(@alignOf(RenderGroup), true));
-
-        if (max_push_buffer_size == 0) {
-            result.max_push_buffer_size = @intCast(arena.getRemainingSize(null));
-        } else {
-            result.max_push_buffer_size = max_push_buffer_size;
-        }
-        result.push_buffer_base = @ptrCast(
-            arena.pushSize(result.max_push_buffer_size, ArenaPushParams.aligned(@alignOf(u8), false)),
-        );
-
-        result.assets = assets;
-        result.renders_in_background = renders_in_background;
-        result.inside_renderer = false;
-
-        result.clearRenderValues();
-
-        return result;
-    }
-
-    fn clearRenderValues(self: *RenderGroup) void {
-        self.sort_entry_at = self.max_push_buffer_size;
-        self.push_buffer_size = 0;
-        self.push_buffer_element_count = 0;
-        self.generation_id = 0;
-        self.global_alpha = 1;
-        self.missing_resource_count = 0;
-    }
-
-    pub fn allResourcesPresent(self: *RenderGroup) bool {
-        return self.missing_resource_count == 0;
-    }
-
-    pub fn perspectiveMode(
-        self: *RenderGroup,
-        pixel_width: i32,
-        pixel_height: i32,
-        meters_to_pixels: f32,
-        focal_length: f32,
-        distance_above_target: f32,
-    ) void {
-        const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
-        self.monitor_half_dim_in_meters = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(pixel_width)) * pixels_to_meters,
-            0.5 * @as(f32, @floatFromInt(pixel_height)) * pixels_to_meters,
-        );
-
-        self.camera_transform.meters_to_pixels = meters_to_pixels;
-        self.camera_transform.focal_length = focal_length;
-        self.camera_transform.distance_above_target = distance_above_target;
-        self.camera_transform.screen_center = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(pixel_width)),
-            0.5 * @as(f32, @floatFromInt(pixel_height)),
-        );
-        self.camera_transform.orthographic = false;
-    }
-
-    pub fn orthographicMode(
-        self: *RenderGroup,
-        pixel_width: i32,
-        pixel_height: i32,
-        meters_to_pixels: f32,
-    ) void {
-        const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
-        self.monitor_half_dim_in_meters = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(pixel_width)) * pixels_to_meters,
-            0.5 * @as(f32, @floatFromInt(pixel_height)) * pixels_to_meters,
-        );
-
-        self.camera_transform.meters_to_pixels = meters_to_pixels;
-        self.camera_transform.focal_length = 1;
-        self.camera_transform.distance_above_target = 1;
-        self.camera_transform.screen_center = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(pixel_width)),
-            0.5 * @as(f32, @floatFromInt(pixel_height)),
-        );
-        self.camera_transform.orthographic = true;
-    }
-
-    fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: f32) ?*T {
-        var timed_block = TimedBlock.beginFunction(@src(), .PushRenderElement);
-        defer timed_block.end();
-
-        const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[7..]);
-        return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, sort_key, @alignOf(T))));
-    }
-
-    fn pushRenderElement_(
-        self: *RenderGroup,
-        in_size: u32,
-        entry_type: RenderEntryType,
-        sort_key: f32,
-        comptime alignment: u32,
-    ) ?*anyopaque {
-        std.debug.assert(self.inside_renderer);
-
-        var result: ?*anyopaque = null;
-        const size = in_size + @sizeOf(RenderEntryHeader);
-
-        if ((self.push_buffer_size + size) < self.sort_entry_at - @sizeOf(TileSortEntry)) {
-            const header: *RenderEntryHeader = @ptrCast(self.push_buffer_base + self.push_buffer_size);
-            header.type = entry_type;
-
-            const data_address = @intFromPtr(header) + @sizeOf(RenderEntryHeader);
-            const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-            const aligned_offset = aligned_address - data_address;
-            const aligned_size = size + aligned_offset;
-
-            result = @ptrFromInt(aligned_address);
-
-            self.sort_entry_at -= @sizeOf(TileSortEntry);
-            var sort_entry: *TileSortEntry = @ptrFromInt(@intFromPtr(self.push_buffer_base) + self.sort_entry_at);
-            sort_entry.sort_key = sort_key;
-            sort_entry.push_buffer_offset = self.push_buffer_size;
-
-            self.push_buffer_size += @intCast(aligned_size);
-            self.push_buffer_element_count += 1;
-        } else {
-            unreachable;
+        // First pass, count how many of each key.
+        var index: u32 = 0;
+        while (index < count) : (index += 1) {
+            const radix_value: u32 = sortKeyToU32(source[index].sort_key);
+            const radix_piece: u32 = (radix_value >> @as(u5, @intCast(byte_index))) & 0xff;
+            sort_key_offsets[radix_piece] += 1;
         }
 
-        return result;
-    }
-
-    // Renderer API.
-    pub fn unproject(self: *RenderGroup, object_transform: ObjectTransform, pixels_xy: Vector2) Vector3 {
-        var unprojected_xy: Vector2 = undefined;
-        const camera_transform = self.camera_transform;
-
-        if (camera_transform.orthographic) {
-            unprojected_xy =
-                pixels_xy.minus(camera_transform.screen_center).scaledTo(1.0 / camera_transform.meters_to_pixels);
-        } else {
-            const a: Vector2 =
-                pixels_xy.minus(camera_transform.screen_center).scaledTo(1.0 / camera_transform.meters_to_pixels);
-            unprojected_xy =
-                a.scaledTo(
-                (camera_transform.distance_above_target - object_transform.offset_position.z()) / camera_transform.focal_length,
-            );
+        // Change counts to offsets.
+        var total: u32 = 0;
+        var sort_key_index: u32 = 0;
+        while (sort_key_index < sort_key_offsets.len) : (sort_key_index += 1) {
+            const key_count: u32 = sort_key_offsets[sort_key_index];
+            sort_key_offsets[sort_key_index] = total;
+            total += key_count;
         }
 
-        var result: Vector3 = unprojected_xy.toVector3(object_transform.offset_position.z());
-        result = result.minus(object_transform.offset_position);
-
-        return result;
-    }
-
-    pub fn unprojectOld(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
-        return projected_xy.scaledTo(distance_from_camera / self.camera_transform.focal_length);
-    }
-
-    pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle2 {
-        const raw_xy = self.unprojectOld(self.monitor_half_dim_in_meters, distance_from_camera);
-        return Rectangle2.fromCenterHalfDimension(Vector2.zero(), raw_xy);
-    }
-
-    pub fn getCameraRectangleAtTarget(self: *RenderGroup) Rectangle2 {
-        return self.getCameraRectangleAtDistance(self.camera_transform.distance_above_target);
-    }
-
-    pub fn pushClear(self: *RenderGroup, color: Color) void {
-        if (self.pushRenderElement(RenderEntryClear, -std.math.floatMax(f32))) |entry| {
-            entry.color = color;
-        }
-    }
-
-    pub fn pushSaturation(self: *RenderGroup, level: f32) void {
-        if (self.pushRenderElement(RenderEntrySaturation)) |entry| {
-            entry.level = level;
-        }
-    }
-
-    pub fn getBitmapDim(
-        self: *RenderGroup,
-        object_transform: ObjectTransform,
-        bitmap: *const LoadedBitmap,
-        height: f32,
-        offset: Vector3,
-        align_coefficient: f32,
-    ) UsedBitmapDim {
-        var dim = UsedBitmapDim{};
-
-        dim.size = Vector2.new(height * bitmap.width_over_height, height);
-        dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size).scaledTo(align_coefficient);
-        dim.position = offset.minus(dim.alignment.toVector3(0));
-        dim.basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, dim.position);
-
-        return dim;
-    }
-
-    pub fn pushBitmap(
-        self: *RenderGroup,
-        object_transform: ObjectTransform,
-        bitmap: *LoadedBitmap,
-        height: f32,
-        offset: Vector3,
-        color: Color,
-        align_coefficient: f32,
-    ) void {
-        const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient);
-
-        if (dim.basis.valid) {
-            if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key)) |entry| {
-                entry.bitmap = bitmap;
-                entry.position = dim.basis.position;
-                entry.size = dim.size.scaledTo(dim.basis.scale);
-                entry.color = color.scaledTo(self.global_alpha);
-            }
-        }
-    }
-
-    pub fn pushBitmapId(
-        self: *RenderGroup,
-        object_transform: ObjectTransform,
-        opt_id: ?file_formats.BitmapId,
-        height: f32,
-        offset: Vector3,
-        color: Color,
-        opt_align_coefficient: ?f32,
-    ) void {
-        const align_coefficient: f32 = opt_align_coefficient orelse 1;
-        if (opt_id) |id| {
-            var opt_bitmap = self.assets.getBitmap(id, self.generation_id);
-
-            if (self.renders_in_background and opt_bitmap == null) {
-                self.assets.loadBitmap(id, true);
-                opt_bitmap = self.assets.getBitmap(id, self.generation_id);
-            }
-
-            if (opt_bitmap) |bitmap| {
-                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient);
-            } else {
-                std.debug.assert(!self.renders_in_background);
-
-                self.assets.loadBitmap(id, false);
-                self.missing_resource_count += 1;
-            }
-        }
-    }
-
-    pub fn pushFont(
-        self: *RenderGroup,
-        opt_id: ?file_formats.FontId,
-    ) ?*LoadedFont {
-        var opt_font: ?*LoadedFont = null;
-
-        if (opt_id) |id| {
-            opt_font = self.assets.getFont(id, self.generation_id);
-
-            if (opt_font == null) {
-                std.debug.assert(!self.renders_in_background);
-
-                self.assets.loadFont(id, false);
-                self.missing_resource_count += 1;
-            }
+        // Second pass, place elements into the right location.
+        index = 0;
+        while (index < count) : (index += 1) {
+            const radix_value: u32 = sortKeyToU32(source[index].sort_key);
+            const radix_piece: u32 = (radix_value >> @as(u5, @intCast(byte_index))) & 0xff;
+            dest[sort_key_offsets[radix_piece]] = source[index];
+            sort_key_offsets[radix_piece] += 1;
         }
 
-        return opt_font;
+        const swap_temp: [*]TileSortEntry = dest;
+        dest = source;
+        source = swap_temp;
     }
+}
 
-    pub fn pushRectangle(
-        self: *RenderGroup,
-        object_transform: ObjectTransform,
-        dimension: Vector2,
-        offset: Vector3,
-        color: Color,
-    ) void {
-        const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
+pub fn sortEntries(commands: *RenderCommands, sort_memory: *anyopaque) void {
+    const count: u32 = commands.push_buffer_element_count;
+    const entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
 
-        const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
-        if (basis.valid) {
-            if (self.pushRenderElement(RenderEntryRectangle, basis.sort_key)) |entry| {
-                entry.position = basis.position;
-                entry.dimension = dimension.scaledTo(basis.scale);
-                entry.color = color;
-            }
-        }
-    }
+    // bubbleSort(count, entries, @ptrCast(@alignCast(sort_memory)));
+    // mergeSort(count, entries, @ptrCast(@alignCast(sort_memory)));
+    radixSort(count, entries, @ptrCast(@alignCast(sort_memory)));
 
-    pub fn pushRectangle2(self: *RenderGroup, object_transform: ObjectTransform, rectangle: Rectangle2, z: f32, color: Color) void {
-        self.pushRectangle(object_transform, rectangle.getDimension(), rectangle.toRectangle3(z, z).getCenter(), color);
-    }
+    if (INTERNAL) {
+        if (count > 0) {
+            // Validate the sort result.
 
-    pub fn pushRectangleOutline(
-        self: *RenderGroup,
-        object_transform: ObjectTransform,
-        dimension: Vector2,
-        offset: Vector3,
-        color: Color,
-        thickness: f32,
-    ) void {
-        self.pushRectangle(
-            object_transform,
-            Vector2.new(dimension.x(), thickness),
-            offset.minus(Vector3.new(0, 0.5 * dimension.y(), 0)),
-            color,
-        );
-        self.pushRectangle(
-            object_transform,
-            Vector2.new(dimension.x(), thickness),
-            offset.plus(Vector3.new(0, 0.5 * dimension.y(), 0)),
-            color,
-        );
-
-        self.pushRectangle(
-            object_transform,
-            Vector2.new(thickness, dimension.y()),
-            offset.minus(Vector3.new(0.5 * dimension.x(), 0, 0)),
-            color,
-        );
-        self.pushRectangle(
-            object_transform,
-            Vector2.new(thickness, dimension.y()),
-            offset.plus(Vector3.new(0.5 * dimension.x(), 0, 0)),
-            color,
-        );
-    }
-
-    pub fn pushCoordinateSystem(
-        self: *RenderGroup,
-        origin: Vector2,
-        x_axis: Vector2,
-        y_axis: Vector2,
-        color: Color,
-        texture: *LoadedBitmap,
-        normal_map: ?*LoadedBitmap,
-        top: *EnvironmentMap,
-        middle: *EnvironmentMap,
-        bottom: *EnvironmentMap,
-    ) void {
-        _ = self;
-        _ = origin;
-        _ = x_axis;
-        _ = y_axis;
-        _ = color;
-        _ = texture;
-        _ = normal_map;
-        _ = top;
-        _ = middle;
-        _ = bottom;
-        // const basis = getRenderEntityBasisPosition(&entry.entity_basis, screen_dimension);
-        //
-        // if (basis.valid) {
-        //     if (self.pushRenderElement(RenderEntryCoordinateSystem)) |entry| {
-        //         entry.origin = origin;
-        //         entry.x_axis = x_axis;
-        //         entry.y_axis = y_axis;
-        //         entry.color = color;
-        //         entry.texture = texture;
-        //         entry.normal_map = normal_map;
-        //         entry.top = top;
-        //         entry.middle = middle;
-        //         entry.bottom = bottom;
-        //     }
-        // }
-    }
-
-    fn swap(a: [*]TileSortEntry, b: [*]TileSortEntry) void {
-        const store: TileSortEntry = b[0];
-        b[0] = a[0];
-        a[0] = store;
-    }
-
-    fn bubbleSort(count: u32, first: [*]TileSortEntry, _: [*]TileSortEntry) void {
-        var outer: u32 = 0;
-        while (outer < count) : (outer += 1) {
-            var list_is_sorted = true;
-            var inner: u32 = 0;
-            while (inner < count - 1) : (inner += 1) {
-                const entry_a: [*]TileSortEntry = first + inner;
+            var index: u32 = 0;
+            while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
+                const entry_a: [*]TileSortEntry = entries + index;
                 const entry_b: [*]TileSortEntry = entry_a + 1;
 
-                if (entry_a[0].sort_key > entry_b[0].sort_key) {
-                    swap(entry_a, entry_b);
-                    list_is_sorted = false;
-                }
-            }
-
-            if (list_is_sorted) {
-                break;
+                std.debug.assert(entry_a[0].sort_key <= entry_b[0].sort_key);
             }
         }
     }
-
-    fn mergeSort(count: u32, first: [*]TileSortEntry, temp: [*]TileSortEntry) void {
-        if (count <= 1) {
-            // Nothing to do.
-        } else if (count == 2) {
-            const entry_a: [*]TileSortEntry = first;
-            const entry_b: [*]TileSortEntry = entry_a + 1;
-            if (entry_a[0].sort_key > entry_b[0].sort_key) {
-                swap(entry_a, entry_b);
-            }
-        } else {
-            const half0: u32 = @divFloor(count, 2);
-            const half1: u32 = count - half0;
-
-            std.debug.assert(half0 >= 1);
-            std.debug.assert(half1 >= 1);
-
-            const in_half0: [*]TileSortEntry = first;
-            const in_half1: [*]TileSortEntry = first + half0;
-            const end: [*]TileSortEntry = first + count;
-
-            RenderGroup.mergeSort(half0, in_half0, temp);
-            RenderGroup.mergeSort(half1, in_half1, temp);
-
-            var read_half0: [*]TileSortEntry = in_half0;
-            var read_half1: [*]TileSortEntry = in_half1;
-
-            var out: [*]TileSortEntry = temp;
-            var index: u32 = 0;
-            while (index < count) : (index += 1) {
-                if (read_half0 == in_half1) {
-                    out[0] = read_half1[0];
-                    read_half1 += 1;
-                    out += 1;
-                } else if (read_half1 == end) {
-                    out[0] = read_half0[0];
-                    read_half0 += 1;
-                    out += 1;
-                } else if (read_half0[0].sort_key < read_half1[0].sort_key) {
-                    out[0] = read_half0[0];
-                    read_half0 += 1;
-                    out += 1;
-                } else {
-                    out[0] = read_half1[0];
-                    read_half1 += 1;
-                    out += 1;
-                }
-            }
-
-            std.debug.assert(out == (temp + count));
-            std.debug.assert(read_half0 == in_half1);
-            std.debug.assert(read_half1 == end);
-
-            index = 0;
-            while (index < count) : (index += 1) {
-                first[index] = temp[index];
-            }
-        }
-    }
-
-    fn sortKeyToU32(sort_key: f32) u32 {
-        var result: u32 = @bitCast(sort_key);
-
-        if ((result & 0x80000000) != 0) {
-            // Signed bit is set.
-            result = ~result;
-        } else {
-            result |= 0x80000000;
-        }
-
-        return result;
-    }
-
-    fn radixSort(count: u32, first: [*]TileSortEntry, temp: [*]TileSortEntry) void {
-        var source: [*]TileSortEntry = first;
-        var dest: [*]TileSortEntry = temp;
-
-        var byte_index: u32 = 0;
-        while (byte_index < 32) : (byte_index += 8) {
-            var sort_key_offsets: [256]u32 = [1]u32{0} ** 256;
-
-            // First pass, count how many of each key.
-            var index: u32 = 0;
-            while (index < count) : (index += 1) {
-                const radix_value: u32 = sortKeyToU32(source[index].sort_key);
-                const radix_piece: u32 = (radix_value >> @as(u5, @intCast(byte_index))) & 0xff;
-                sort_key_offsets[radix_piece] += 1;
-            }
-
-            // Change counts to offsets.
-            var total: u32 = 0;
-            var sort_key_index: u32 = 0;
-            while (sort_key_index < sort_key_offsets.len) : (sort_key_index += 1) {
-                const key_count: u32 = sort_key_offsets[sort_key_index];
-                sort_key_offsets[sort_key_index] = total;
-                total += key_count;
-            }
-
-            // Second pass, place elements into the right location.
-            index = 0;
-            while (index < count) : (index += 1) {
-                const radix_value: u32 = sortKeyToU32(source[index].sort_key);
-                const radix_piece: u32 = (radix_value >> @as(u5, @intCast(byte_index))) & 0xff;
-                dest[sort_key_offsets[radix_piece]] = source[index];
-                sort_key_offsets[radix_piece] += 1;
-            }
-
-            const swap_temp: [*]TileSortEntry = dest;
-            dest = source;
-            source = swap_temp;
-        }
-    }
-
-    fn sortEntries(self: *RenderGroup, temp_arena: *shared.MemoryArena) void {
-        const temp = temp_arena.beginTemporaryMemory();
-        defer temp_arena.endTemporaryMemory(temp);
-
-        const count: u32 = self.push_buffer_element_count;
-        const temp_space = temp_arena.pushArray(count, TileSortEntry, null);
-        const entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(self.push_buffer_base) + self.sort_entry_at);
-
-        // bubbleSort(count, entries, temp_space);
-        // mergeSort(count, entries, temp_space);
-        radixSort(count, entries, temp_space);
-
-        if (INTERNAL) {
-            if (count > 0) {
-                // Validate the sort result.
-
-                var index: u32 = 0;
-                while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
-                    const entry_a: [*]TileSortEntry = entries + index;
-                    const entry_b: [*]TileSortEntry = entry_a + 1;
-
-                    std.debug.assert(entry_a[0].sort_key <= entry_b[0].sort_key);
-                }
-            }
-        }
-    }
-
-    pub fn singleRenderTo(
-        self: *RenderGroup,
-        output_target: *LoadedBitmap,
-        temp_arena: *shared.MemoryArena,
-    ) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .SingleRenderToOutput);
-        defer timed_block.end();
-
-        self.sortEntries(temp_arena);
-
-        const temp_mem = temp_arena.beginTemporaryMemory();
-        defer temp_arena.endTemporaryMemory(temp_mem);
-
-        std.debug.assert(self.inside_renderer);
-
-        std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
-
-        const clip_rect = Rectangle2i.new(0, 0, output_target.width, output_target.height);
-        var work = TileRenderWork{
-            .group = self,
-            .output_target = output_target,
-            .clip_rect = clip_rect,
-        };
-
-        doTileRenderWork(null, @ptrCast(&work));
-    }
-
-    pub fn renderToOutput(
-        self: *RenderGroup,
-        render_queue: *shared.PlatformWorkQueue,
-        output_target: *LoadedBitmap,
-        temp_arena: *shared.MemoryArena,
-    ) void {
-        self.sortEntries(temp_arena);
-
-        if (true) { //(self.isHardware) {
-            shared.platform.openglRender(self, output_target);
-        } else {
-            self.tiledRenderTo(render_queue, output_target, temp_arena);
-        }
-    }
-
-    pub fn tiledRenderTo(
-        self: *RenderGroup,
-        render_queue: *shared.PlatformWorkQueue,
-        output_target: *LoadedBitmap,
-        temp_arena: *shared.MemoryArena,
-    ) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
-        defer timed_block.end();
-
-        self.sortEntries(temp_arena);
-
-        std.debug.assert(self.inside_renderer);
-
-        // TODO
-        // * Make sure that tiles are all cache-aligned.
-        // * Can we get hyperthreads synced so they do interleaved lines?
-        // * How big should the tiles be for performance?
-        // * Actually ballpark the memory bandwith for drawRectangleQuickly.
-        // * Re-test some of our instruction choices.
-
-        const tile_count_x = 4;
-        const tile_count_y = 4;
-        const work_count = tile_count_x * tile_count_y;
-        var work_array: [work_count]TileRenderWork = [1]TileRenderWork{TileRenderWork{
-            .group = self,
-            .output_target = output_target,
-            .clip_rect = undefined,
-        }} ** work_count;
-
-        std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
-
-        var tile_width = @divFloor(output_target.width, tile_count_x);
-        const tile_height = @divFloor(output_target.height, tile_count_y);
-
-        tile_width = @divFloor(tile_width + 3, 4) * 4;
-
-        var work_index: u32 = 0;
-        var tile_y: i32 = 0;
-        while (tile_y < tile_count_y) : (tile_y += 1) {
-            var tile_x: i32 = 0;
-            while (tile_x < tile_count_x) : (tile_x += 1) {
-                var work = &work_array[work_index];
-                work_index += 1;
-
-                var clip_rect = Rectangle2i.zero();
-                _ = clip_rect.min.setX(tile_x * tile_width);
-                _ = clip_rect.min.setY(tile_y * tile_height);
-                _ = clip_rect.max.setX(clip_rect.min.x() + tile_width);
-                _ = clip_rect.max.setY(clip_rect.min.y() + tile_height);
-
-                if (tile_x == (tile_count_x - 1)) {
-                    _ = clip_rect.max.setX(output_target.width);
-                }
-                if (tile_y == (tile_count_y - 1)) {
-                    _ = clip_rect.max.setY(output_target.height);
-                }
-
-                work.clip_rect = clip_rect;
-
-                if (true) {
-                    shared.platform.addQueueEntry(render_queue, &doTileRenderWork, work);
-                } else {
-                    doTileRenderWork(render_queue, work);
-                }
-            }
-        }
-
-        shared.platform.completeAllQueuedWork(render_queue);
-    }
-
-    pub fn renderTo(self: *RenderGroup, output_target: *LoadedBitmap, clip_rect: Rectangle2i) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .RenderToOutput);
-        defer timed_block.end();
-
-        const null_pixels_to_meters: f32 = 1.0;
-
-        const sort_entry_count: u32 = self.push_buffer_element_count;
-        const sort_entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(self.push_buffer_base) + self.sort_entry_at);
-
-        var sort_entry: [*]TileSortEntry = sort_entries;
-        var sort_entry_index: u32 = 0;
-        while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
-            defer sort_entry += 1;
-
-            const header: *RenderEntryHeader = @ptrCast(self.push_buffer_base + sort_entry[0].push_buffer_offset);
-            const alignment: usize = switch (header.type) {
-                .RenderEntryClear => @alignOf(RenderEntryClear),
-                .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
-                .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
-                .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
-                .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
-            };
-
-            const header_address = @intFromPtr(header);
-            const data_address = header_address + @sizeOf(RenderEntryHeader);
-            const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-            const data: *anyopaque = @ptrFromInt(aligned_address);
-
-            switch (header.type) {
-                .RenderEntryClear => {
-                    const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
-                    const dimension = Vector2.newI(output_target.width, output_target.height);
-                    drawRectangle(output_target, Vector2.zero(), dimension, entry.color, clip_rect);
-                },
-                .RenderEntrySaturation => {
-                    const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
-
-                    changeSaturation(output_target, entry.level);
-                },
-                .RenderEntryBitmap => {
-                    const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                    if (entry.bitmap) |bitmap| {
-                        if (false) {
-                            drawRectangleSlowly(
-                                output_target,
-                                entry.position,
-                                Vector2.new(entry.size.x(), 0),
-                                Vector2.new(0, entry.size.y()),
-                                entry.color,
-                                @constCast(bitmap),
-                                null,
-                                undefined,
-                                undefined,
-                                undefined,
-                                null_pixels_to_meters,
-                            );
-                        } else {
-                            drawRectangleQuickly(
-                                output_target,
-                                entry.position,
-                                Vector2.new(entry.size.x(), 0),
-                                Vector2.new(0, entry.size.y()),
-                                entry.color,
-                                @constCast(bitmap),
-                                null_pixels_to_meters,
-                                clip_rect,
-                            );
-                        }
-                    }
-                },
-                .RenderEntryRectangle => {
-                    const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
-
-                    drawRectangle(
-                        output_target,
-                        entry.position,
-                        entry.position.plus(entry.dimension),
-                        entry.color,
-                        clip_rect,
-                    );
-                },
-                .RenderEntryCoordinateSystem => {
-                    // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
-                    // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
-                    // drawRectangleSlowly(
-                    //     output_target,
-                    //     entry.origin,
-                    //     entry.x_axis,
-                    //     entry.y_axis,
-                    //     entry.color,
-                    //     entry.texture,
-                    //     entry.normal_map,
-                    //     entry.top,
-                    //     entry.middle,
-                    //     entry.bottom,
-                    //     null_pixels_to_meters,
-                    // );
-                    //
-                    // const color = Color.new(1, 1, 0, 1);
-                    // const dimension = Vector2.new(2, 2);
-                    // var position = entry.origin;
-                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                    //
-                    // position = entry.origin.plus(entry.x_axis);
-                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                    //
-                    // position = entry.origin.plus(entry.y_axis);
-                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                    //
-                    // position = max;
-                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                },
-            }
-        }
-    }
-
-    pub fn beginRender(self: *RenderGroup) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .BeginRender);
-        defer timed_block.end();
-
-        std.debug.assert(!self.inside_renderer);
-        self.inside_renderer = true;
-
-        self.generation_id = self.assets.beginGeneration();
-    }
-
-    pub fn endRender(self: *RenderGroup) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .EndRender);
-        defer timed_block.end();
-
-        std.debug.assert(self.inside_renderer);
-        self.inside_renderer = false;
-
-        self.assets.endGeneration(self.generation_id);
-
-        self.clearRenderValues();
-    }
-};
+}
 
 pub fn drawRectangle(
     draw_buffer: *LoadedBitmap,

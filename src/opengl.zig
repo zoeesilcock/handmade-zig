@@ -1,17 +1,21 @@
-const render = @import("render.zig");
+const shared = @import("shared.zig");
+const rendergroup = @import("rendergroup.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
 const debug_interface = @import("debug_interface.zig");
+const platform = @import("win32_handmade.zig");
 const std = @import("std");
 
-const RenderGroup = render.RenderGroup;
-const TileSortEntry = render.TileSortEntry;
-const RenderEntryHeader = render.RenderEntryHeader;
-const RenderEntryClear = render.RenderEntryClear;
-const RenderEntryBitmap = render.RenderEntryBitmap;
-const RenderEntryRectangle = render.RenderEntryRectangle;
-const RenderEntryCoordinateSystem = render.RenderEntryCoordinateSystem;
-const RenderEntrySaturation = render.RenderEntrySaturation;
+const INTERNAL = shared.INTERNAL;
+
+const RenderGroup = rendergroup.RenderGroup;
+const TileSortEntry = rendergroup.TileSortEntry;
+const RenderEntryHeader = rendergroup.RenderEntryHeader;
+const RenderEntryClear = rendergroup.RenderEntryClear;
+const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
+const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
+const RenderEntryCoordinateSystem = rendergroup.RenderEntryCoordinateSystem;
+const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Color = math.Color;
@@ -23,13 +27,17 @@ const gl = struct {
     usingnamespace @import("win32").graphics.open_gl;
 };
 
+var default_internal_texture_format = &platform.default_internal_texture_format;
 var texture_bind_count: u32 = 0;
 
-pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBitmap) callconv(.C) void {
+pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, window_height: i32) callconv(.C) void {
+    _ = window_width;
+    _ = window_height;
+
     var timed_block = TimedBlock.beginFunction(@src(), .RenderToOutputOpenGL);
     defer timed_block.end();
 
-    gl.glViewport(0, 0, output_target.width, output_target.height);
+    gl.glViewport(commands.offset_x, commands.offset_y, @intCast(commands.width), @intCast(commands.height));
 
     gl.glEnable(gl.GL_TEXTURE_2D);
     gl.glEnable(gl.GL_BLEND);
@@ -38,29 +46,17 @@ pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBit
     gl.glMatrixMode(gl.GL_TEXTURE);
     gl.glLoadIdentity();
 
-    gl.glMatrixMode(gl.GL_MODELVIEW);
-    gl.glLoadIdentity();
+    setScreenSpace(commands.width, commands.height);
 
-    gl.glMatrixMode(gl.GL_PROJECTION);
-    const a = math.safeRatio1(2, @as(f32, @floatFromInt(output_target.width)));
-    const b = math.safeRatio1(2, @as(f32, @floatFromInt(output_target.height)));
-    const projection: []const f32 = &.{
-        a,  0,  0, 0,
-        0,  b,  0, 0,
-        0,  0,  1, 0,
-        -1, -1, 0, 1,
-    };
-    gl.glLoadMatrixf(@ptrCast(projection));
-
-    const sort_entry_count: u32 = render_group.push_buffer_element_count;
-    const sort_entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(render_group.push_buffer_base) + render_group.sort_entry_at);
+    const sort_entry_count: u32 = commands.push_buffer_element_count;
+    const sort_entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
 
     var sort_entry: [*]TileSortEntry = sort_entries;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
-        const header: *RenderEntryHeader = @ptrCast(render_group.push_buffer_base + sort_entry[0].push_buffer_offset);
+        const header: *RenderEntryHeader = @ptrCast(commands.push_buffer_base + sort_entry[0].push_buffer_offset);
         const alignment: usize = switch (header.type) {
             .RenderEntryClear => @alignOf(RenderEntryClear),
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
@@ -100,7 +96,7 @@ pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBit
                         gl.glTexImage2D(
                             gl.GL_TEXTURE_2D,
                             0,
-                            gl.GL_RGBA8,
+                            default_internal_texture_format.*,
                             bitmap.width,
                             bitmap.height,
                             0,
@@ -116,13 +112,13 @@ pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBit
                         gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
                     }
 
-                    openGLRectangle(min_position, max_position, entry.color);
+                    drawRectangle(min_position, max_position, entry.color);
                 }
             },
             .RenderEntryRectangle => {
                 const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                 gl.glDisable(gl.GL_TEXTURE_2D);
-                openGLRectangle(entry.position, entry.position.plus(entry.dimension), entry.color);
+                drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.color);
                 gl.glEnable(gl.GL_TEXTURE_2D);
             },
             .RenderEntrySaturation => {
@@ -135,7 +131,7 @@ pub fn renderGroupToOutput(render_group: *RenderGroup, output_target: *LoadedBit
     }
 }
 
-fn openGLRectangle(min_position: Vector2, max_position: Vector2, color: Color) void {
+fn drawRectangle(min_position: Vector2, max_position: Vector2, color: Color) void {
     gl.glBegin(gl.GL_TRIANGLES);
     {
         gl.glColor4f(color.r(), color.g(), color.b(), color.a());
@@ -157,4 +153,78 @@ fn openGLRectangle(min_position: Vector2, max_position: Vector2, color: Color) v
         gl.glVertex2f(min_position.x(), max_position.y());
     }
     gl.glEnd();
+}
+
+fn setScreenSpace(width: u32, height: u32) void {
+    gl.glMatrixMode(gl.GL_MODELVIEW);
+    gl.glLoadIdentity();
+
+    gl.glMatrixMode(gl.GL_PROJECTION);
+    const a = math.safeRatio1(2, @as(f32, @floatFromInt(width)));
+    const b = math.safeRatio1(2, @as(f32, @floatFromInt(height)));
+    const projection: []const f32 = &.{
+        a,  0,  0, 0,
+        0,  b,  0, 0,
+        0,  0,  1, 0,
+        -1, -1, 0, 1,
+    };
+    gl.glLoadMatrixf(@ptrCast(projection));
+}
+
+pub fn displayBitmap(
+    width: i32,
+    height: i32,
+    offset_x: i32,
+    offset_y: i32,
+    window_width: i32,
+    window_height: i32,
+    pitch: usize,
+    memory: ?*const anyopaque,
+) void {
+    _ = window_width;
+    _ = window_height;
+
+    std.debug.assert(pitch == width * 4);
+
+    gl.glViewport(offset_x, offset_y, width, height);
+
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 1);
+    gl.glTexImage2D(
+        gl.GL_TEXTURE_2D,
+        0,
+        gl.GL_RGBA8,
+        width,
+        height,
+        0,
+        gl.GL_BGRA_EXT,
+        gl.GL_UNSIGNED_BYTE,
+        memory,
+    );
+
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
+    gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
+
+    gl.glEnable(gl.GL_TEXTURE_2D);
+
+    if (INTERNAL) {
+        gl.glClearColor(1, 0, 1, 0);
+    } else {
+        gl.glClearColor(0, 0, 0, 0);
+    }
+    gl.glClear(gl.GL_COLOR_BUFFER_BIT);
+
+    // Reset all transforms.
+    gl.glMatrixMode(gl.GL_TEXTURE);
+    gl.glLoadIdentity();
+
+    setScreenSpace(@intCast(width), @intCast(height));
+
+    const min_position = math.Vector2.new(0, 0);
+    const max_position = math.Vector2.new(@floatFromInt(width), @floatFromInt(height));
+    const color = math.Color.new(1, 1, 1, 1);
+
+    drawRectangle(min_position, max_position, color);
 }

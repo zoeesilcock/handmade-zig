@@ -42,11 +42,16 @@ const INTERNAL = shared.INTERNAL;
 const DEBUG = shared.DEBUG;
 
 const shared = @import("shared.zig");
+const render = @import("render.zig");
+const rendergroup = @import("rendergroup.zig");
+const asset = @import("asset.zig");
 const opengl = @import("opengl.zig");
 const debug_interface = @import("debug_interface.zig");
 
 // Types
 const TimedBlock = debug_interface.TimedBlock;
+const DebugInterface = debug_interface.DebugInterface;
+const WINAPI = @import("std").os.windows.WINAPI;
 
 const std = @import("std");
 const math = @import("math.zig");
@@ -80,11 +85,19 @@ pub extern "gdi32" fn DescribePixelFormat(
     iPixelFormat: c_int, // The field that is wrong in zigwin32.
     nBytes: u32,
     ppfd: ?*win32.PIXELFORMATDESCRIPTOR,
-) callconv(@import("std").os.windows.WINAPI) i32;
+) callconv(WINAPI) i32;
+
+// OpenGL
+const WglSwapIntervalEXT: type = fn (interval: i32) callconv(WINAPI) bool;
+var optWglSwapInterval: ?*const WglSwapIntervalEXT = null;
+pub var default_internal_texture_format: i32 = 0;
+const GL_FRAMEBUFFER_SRGB = 0x8DB9;
+const GL_SRGB8_ALPHA8 = 0x8C43;
 
 // Globals.
+pub var platform: shared.Platform = undefined;
 var running: bool = false;
-var open_gl_blit_texture: u32 = 0;
+var use_software_rendering: bool = false;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
@@ -302,7 +315,7 @@ const Fader = struct {
         message: u32,
         w_param: win32.WPARAM,
         l_param: win32.LPARAM,
-    ) callconv(std.os.windows.WINAPI) win32.LRESULT {
+    ) callconv(WINAPI) win32.LRESULT {
         var result: win32.LRESULT = 0;
 
         switch (message) {
@@ -713,14 +726,14 @@ fn unloadGameCode(game: *Game) void {
     game.debugFrameEnd = null;
 }
 
-fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(std.os.windows.WINAPI) isize {
+fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(WINAPI) isize {
     return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
-fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(std.os.windows.WINAPI) isize {
+fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(WINAPI) isize {
     return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
-var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(std.os.windows.WINAPI) isize = XInputGetStateStub;
-var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(std.os.windows.WINAPI) isize = XInputSetStateStub;
+var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(WINAPI) isize = XInputGetStateStub;
+var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(WINAPI) isize = XInputSetStateStub;
 
 fn loadXInput() void {
     const x_input_library = win32.LoadLibraryA("xinput1_4.dll") orelse win32.LoadLibraryA("xinput1_3.dll") orelse win32.LoadLibraryA("xinput9_1_0.dll");
@@ -1240,7 +1253,23 @@ fn initOpenGL(window: win32.HWND) void {
 
         const opengl_rc = win32.wglCreateContext(window_dc);
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
-            win32.glGenTextures(1, &open_gl_blit_texture);
+            default_internal_texture_format = win32.GL_RGBA8;
+
+            // TODO: Actually check for extensions!
+            // if (openGLExtensionIsAvailable()) {
+            {
+                default_internal_texture_format = GL_SRGB8_ALPHA8;
+            }
+
+            // if (openGLExtensionIsAvailable()) {
+            {
+                win32.glEnable(GL_FRAMEBUFFER_SRGB);
+            }
+
+            optWglSwapInterval = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
+            if (optWglSwapInterval) |wglSwapInterval| {
+                _ = wglSwapInterval(1);
+            }
         } else {
             outputLastError("wglCreateContext");
             unreachable;
@@ -1287,7 +1316,12 @@ fn resizeDIBSection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
 
     buffer.pitch = shared.align16(@intCast(buffer.width * BYTES_PER_PIXEL));
     const bitmap_memory_size: usize = @intCast((@as(i32, @intCast(buffer.pitch)) * buffer.height) + 1);
-    buffer.memory = win32.VirtualAlloc(null, bitmap_memory_size, win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 }, win32.PAGE_READWRITE);
+    buffer.memory = win32.VirtualAlloc(
+        null,
+        bitmap_memory_size,
+        win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+        win32.PAGE_READWRITE,
+    );
 }
 
 fn getGameBuffer() shared.OffscreenBuffer {
@@ -1325,111 +1359,72 @@ fn calculateGameOffset(window: win32.HWND) GameBufferDimensions {
 }
 
 fn displayBufferInWindow(
-    buffer: *OffscreenBuffer,
+    render_queue: *shared.PlatformWorkQueue,
+    commands: *shared.RenderCommands,
     device_context: ?win32.HDC,
     window: win32.HWND,
     window_width: i32,
     window_height: i32,
+    sort_memory: *anyopaque,
 ) void {
     const dim = calculateGameOffset(window);
+    commands.offset_x = dim.offset_x;
+    commands.offset_y = dim.offset_y;
 
-    if (false) {
-        // Clear areas outside of our drawing area.
-        _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
-        _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
-        _ = win32.PatBlt(device_context, 0, 0, dim.offset_x, window_height, win32.BLACKNESS);
-        _ = win32.PatBlt(device_context, dim.offset_x + dim.blit_width, 0, window_width, window_height, win32.BLACKNESS);
+    render.sortEntries(commands, sort_memory);
 
-        _ = win32.StretchDIBits(
-            device_context,
-            dim.offset_x,
-            dim.offset_y,
-            dim.blit_width,
-            dim.blit_height,
-            0,
-            0,
-            buffer.width,
-            buffer.height,
-            buffer.memory,
-            &buffer.info,
-            win32.DIB_RGB_COLORS,
-            win32.SRCCOPY,
-        );
-    } else {
-        if (false) {
-            win32.glViewport(dim.offset_x, dim.offset_y, dim.blit_width, dim.blit_height);
+    // TODO: Do we want to check for resources like before?
+    // if (render_group.allResourcesPresent()) {
+    //     render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
+    // }
 
-            win32.glBindTexture(win32.GL_TEXTURE_2D, open_gl_blit_texture);
-            win32.glTexImage2D(
-                win32.GL_TEXTURE_2D,
-                0,
-                win32.GL_RGBA8,
-                buffer.width,
-                buffer.height,
-                0,
-                win32.GL_BGRA_EXT,
-                win32.GL_UNSIGNED_BYTE,
-                buffer.memory.?,
+    if (DebugInterface.debugIf(@src(), "Renderer_UseSoftware")) {
+        var output_target: asset.LoadedBitmap = .{
+            .memory = @ptrCast(back_buffer.memory.?),
+            .width = @intCast(back_buffer.width),
+            .height = @intCast(back_buffer.height),
+            .pitch = @intCast(back_buffer.pitch),
+        };
+        render.softwareRenderCommands(render_queue, commands, &output_target, sort_memory);
+
+        const display_via_hardware = true;
+        if (display_via_hardware) {
+            opengl.displayBitmap(
+                dim.blit_width,
+                dim.blit_height,
+                dim.offset_x,
+                dim.offset_y,
+                window_width,
+                window_height,
+                output_target.pitch,
+                back_buffer.memory,
             );
+            _ = win32.SwapBuffers(device_context.?);
+        } else {
+            // Clear areas outside of our drawing area.
+            _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
+            _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
+            _ = win32.PatBlt(device_context, 0, 0, dim.offset_x, window_height, win32.BLACKNESS);
+            _ = win32.PatBlt(device_context, dim.offset_x + dim.blit_width, 0, window_width, window_height, win32.BLACKNESS);
 
-            win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_MIN_FILTER, win32.GL_NEAREST);
-            win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_MAG_FILTER, win32.GL_NEAREST);
-            win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_WRAP_S, win32.GL_CLAMP);
-            win32.glTexParameteri(win32.GL_TEXTURE_2D, win32.GL_TEXTURE_WRAP_T, win32.GL_CLAMP);
-            win32.glTexEnvi(win32.GL_TEXTURE_ENV, win32.GL_TEXTURE_ENV_MODE, win32.GL_MODULATE);
-
-            win32.glEnable(win32.GL_TEXTURE_2D);
-
-            if (INTERNAL) {
-                win32.glClearColor(1, 0, 1, 0);
-            } else {
-                win32.glClearColor(0, 0, 0, 0);
-            }
-            win32.glClear(win32.GL_COLOR_BUFFER_BIT);
-
-            // Reset all transforms.
-            win32.glMatrixMode(win32.GL_TEXTURE);
-            win32.glLoadIdentity();
-
-            win32.glMatrixMode(win32.GL_MODELVIEW);
-            win32.glLoadIdentity();
-
-            win32.glMatrixMode(win32.GL_PROJECTION);
-            const a = math.safeRatio1(2, @as(f32, @floatFromInt(dim.blit_width)));
-            const b = math.safeRatio1(2, @as(f32, @floatFromInt(dim.blit_height)));
-            const projection: []const f32 = &.{
-                a,  0,  0, 0,
-                0,  b,  0, 0,
-                0,  0,  1, 0,
-                -1, -1, 0, 1,
-            };
-            win32.glLoadMatrixf(@ptrCast(projection));
-
-            const min_position = math.Vector2.new(0, 0);
-            const max_position = math.Vector2.new(@floatFromInt(dim.blit_width), @floatFromInt(dim.blit_height));
-            const color = math.Color.new(1, 1, 1, 1);
-            win32.glBegin(win32.GL_TRIANGLES);
-            {
-                win32.glColor4f(color.r(), color.g(), color.b(), color.a());
-
-                // Lower triangle.
-                win32.glTexCoord2f(0, 0);
-                win32.glVertex2f(min_position.x(), min_position.y());
-                win32.glTexCoord2f(1, 0);
-                win32.glVertex2f(max_position.x(), min_position.y());
-                win32.glTexCoord2f(1, 1);
-                win32.glVertex2f(max_position.x(), max_position.y());
-
-                // Upper triangle
-                win32.glTexCoord2f(0, 0);
-                win32.glVertex2f(min_position.x(), min_position.y());
-                win32.glTexCoord2f(1, 1);
-                win32.glVertex2f(max_position.x(), max_position.y());
-                win32.glTexCoord2f(0, 1);
-                win32.glVertex2f(min_position.x(), max_position.y());
-            }
-            win32.glEnd();
+            _ = win32.StretchDIBits(
+                device_context,
+                dim.offset_x,
+                dim.offset_y,
+                dim.blit_width,
+                dim.blit_height,
+                0,
+                0,
+                back_buffer.width,
+                back_buffer.height,
+                back_buffer.memory,
+                &back_buffer.info,
+                win32.DIB_RGB_COLORS,
+                win32.SRCCOPY,
+            );
         }
+    } else {
+        opengl.renderCommands(commands, window_width, window_height);
 
         _ = win32.SwapBuffers(device_context.?);
     }
@@ -1440,7 +1435,7 @@ fn windowProcedure(
     message: u32,
     w_param: win32.WPARAM,
     l_param: win32.LPARAM,
-) callconv(std.os.windows.WINAPI) win32.LRESULT {
+) callconv(WINAPI) win32.LRESULT {
     var result: win32.LRESULT = 0;
 
     switch (message) {
@@ -1465,10 +1460,11 @@ fn windowProcedure(
         win32.WM_PAINT => {
             var paint: win32.PAINTSTRUCT = undefined;
             const opt_device_context: ?win32.HDC = win32.BeginPaint(window, &paint);
-            if (opt_device_context) |device_context| {
-                const window_dimension = getWindowDimension(window);
-                displayBufferInWindow(&back_buffer, device_context, window, window_dimension.width, window_dimension.height);
-            }
+            _ = opt_device_context;
+            // if (opt_device_context) |device_context| {
+            //     const window_dimension = getWindowDimension(window);
+            //     displayBufferInWindow(&back_buffer, device_context, window, window_dimension.width, window_dimension.height);
+            // }
             _ = win32.EndPaint(window, &paint);
         },
         win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
@@ -1945,7 +1941,7 @@ pub export fn wWinMain(
     fader.init(instance.?);
 
     resizeDIBSection(&back_buffer, WIDTH, HEIGHT);
-    var platform = shared.Platform{
+    platform = shared.Platform{
         .addQueueEntry = addQueueEntry,
         .completeAllQueuedWork = completeAllQueuedWork,
 
@@ -1957,8 +1953,6 @@ pub export fn wWinMain(
 
         .allocateMemory = allocateMemory,
         .deallocateMemory = deallocateMemory,
-
-        .openglRender = opengl.renderGroupToOutput,
     };
 
     if (INTERNAL) {
@@ -2151,6 +2145,12 @@ pub export fn wWinMain(
 
                 running = true;
 
+                var current_sort_memory_size: u64 = shared.megabytes(1);
+                var sort_memory = allocateMemory(current_sort_memory_size);
+
+                const push_buffer_size: u32 = shared.megabytes(4);
+                const push_buffer = allocateMemory(push_buffer_size);
+
                 while (running) {
                     var timed_block = TimedBlock.beginBlock(@src(), .ExecutableRefresh);
 
@@ -2210,7 +2210,6 @@ pub export fn wWinMain(
                     }
 
                     // Prepare input to game.
-                    var game_buffer = getGameBuffer();
                     processMouseInput(old_input, new_input, window_handle);
                     processXInput(old_input, new_input);
 
@@ -2221,6 +2220,13 @@ pub export fn wWinMain(
                     //
 
                     timed_block = TimedBlock.beginBlock(@src(), .GameUpdate);
+
+                    var render_commands: shared.RenderCommands = shared.initializeRenderCommands(
+                        push_buffer_size,
+                        push_buffer.?,
+                        @intCast(back_buffer.width),
+                        @intCast(back_buffer.height),
+                    );
 
                     if (state.input_recording_index > 0) {
                         recordInput(&state, new_input);
@@ -2239,7 +2245,7 @@ pub export fn wWinMain(
                     }
 
                     // Send all input to game.
-                    game.updateAndRender(platform, &game_memory, new_input, &game_buffer);
+                    game.updateAndRender(platform, &game_memory, new_input, &render_commands);
 
                     if (new_input.quit_requested) {
                         fader.beginFadeToDesktop();
@@ -2374,7 +2380,7 @@ pub export fn wWinMain(
                         defer timed_block.end();
 
                         if (game.debugFrameEnd) |frameEndFn| {
-                            shared.global_debug_table = frameEndFn(&game_memory, new_input.*, &game_buffer);
+                            shared.global_debug_table = frameEndFn(&game_memory, new_input.*, &render_commands);
                         }
 
                         local_stub_debug_table.event_array_index_event_index = 0;
@@ -2438,7 +2444,23 @@ pub export fn wWinMain(
 
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
-                    displayBufferInWindow(&back_buffer, device_context, window_handle, window_dimension.width, window_dimension.height);
+                    const needed_sort_memory_size: u64 =
+                        render_commands.push_buffer_element_count * @sizeOf(rendergroup.TileSortEntry);
+                    if (current_sort_memory_size < needed_sort_memory_size) {
+                        deallocateMemory(sort_memory);
+                        current_sort_memory_size = needed_sort_memory_size;
+                        sort_memory = allocateMemory(current_sort_memory_size);
+                    }
+
+                    displayBufferInWindow(
+                        &high_priority_queue,
+                        &render_commands,
+                        device_context,
+                        window_handle,
+                        window_dimension.width,
+                        window_dimension.height,
+                        sort_memory.?,
+                    );
 
                     flip_wall_clock = getWallClock();
 

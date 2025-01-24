@@ -3,7 +3,7 @@ const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
-const render = @import("render.zig");
+const rendergroup = @import("rendergroup.zig");
 const asset = @import("asset.zig");
 const file_formats = @import("file_formats");
 const audio = @import("audio.zig");
@@ -109,7 +109,7 @@ const State = shared.State;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
-const RenderGroup = render.RenderGroup;
+const RenderGroup = rendergroup.RenderGroup;
 const Assets = asset.Assets;
 const AssetTypeId = asset.AssetTypeId;
 const AssetTagId = file_formats.AssetTagId;
@@ -126,7 +126,7 @@ pub export fn updateAndRender(
     platform: shared.Platform,
     memory: *shared.Memory,
     input: *shared.GameInput,
-    buffer: *shared.OffscreenBuffer,
+    render_commands: *shared.RenderCommands,
 ) void {
     shared.platform = platform;
 
@@ -242,6 +242,11 @@ pub export fn updateAndRender(
         transient_state.is_initialized = true;
     }
 
+    if (transient_state.main_generation_id != 0) {
+        transient_state.assets.endGeneration(transient_state.main_generation_id);
+    }
+    transient_state.main_generation_id = transient_state.assets.beginGeneration();
+
     if (state.current_mode == .None) {
         cutscene.playIntroCutscene(state, transient_state);
     }
@@ -255,37 +260,35 @@ pub export fn updateAndRender(
         }
     }
 
-    if (false) {
-        var music_volume = Vector2.zero();
-        _ = music_volume.setY(math.safeRatio0(input.mouse_x, @as(f32, @floatFromInt(buffer.width))));
-        _ = music_volume.setX(1.0 - music_volume.y());
-        state.audio_state.changeVolume(state.music, 0.01, music_volume);
-    }
+    // if (false) {
+    //     var music_volume = Vector2.zero();
+    //     _ = music_volume.setY(math.safeRatio0(input.mouse_x, @as(f32, @floatFromInt(buffer.width))));
+    //     _ = music_volume.setX(1.0 - music_volume.y());
+    //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
+    // }
 
-    // Create draw buffer.
-    var draw_buffer_ = LoadedBitmap{
-        .width = shared.safeTruncateToUInt16(buffer.width),
-        .height = shared.safeTruncateToUInt16(buffer.height),
-        .pitch = @intCast(buffer.pitch),
-        .memory = @ptrCast(buffer.memory),
-    };
-    const draw_buffer = &draw_buffer_;
-
-    if (DebugInterface.debugIf(@src(), "Renderer_TestWeirdDrawBufferSize")) {
-        // Enable this to test weird buffer sizes in the renderer.
-        draw_buffer.width = 1279;
-        draw_buffer.height = 719;
-    }
+    // if (DebugInterface.debugIf(@src(), "Renderer_TestWeirdDrawBufferSize")) {
+    //     // Enable this to test weird buffer sizes in the renderer.
+    //     draw_buffer.width = 1279;
+    //     draw_buffer.height = 719;
+    // }
 
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group = RenderGroup.allocate(
+    var render_group_ = RenderGroup.begin(
         transient_state.assets,
-        &transient_state.arena,
-        @intCast(shared.megabytes(4)),
+        render_commands,
+        transient_state.main_generation_id,
         false,
     );
-    render_group.beginRender();
+    var render_group = &render_group_;
+
+    // TODO: Replace this with a specification of the size of the render area.
+    var draw_buffer: LoadedBitmap = .{
+        .width = @intCast(render_commands.width),
+        .height = @intCast(render_commands.height),
+        .memory = undefined,
+    };
 
     var rerun: bool = true;
     while (rerun) {
@@ -296,7 +299,7 @@ pub export fn updateAndRender(
                     state,
                     transient_state,
                     render_group,
-                    draw_buffer,
+                    &draw_buffer,
                     input,
                     state.mode.title_screen,
                 );
@@ -306,7 +309,7 @@ pub export fn updateAndRender(
                     state,
                     transient_state,
                     render_group,
-                    draw_buffer,
+                    &draw_buffer,
                     input,
                     state.mode.cutscene,
                 );
@@ -318,16 +321,13 @@ pub export fn updateAndRender(
                     transient_state,
                     input,
                     render_group,
-                    draw_buffer,
+                    &draw_buffer,
                 );
             },
         }
     }
 
-    if (render_group.allResourcesPresent()) {
-        render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
-    }
-    render_group.endRender();
+    render_group.end();
 
     transient_state.arena.endTemporaryMemory(render_memory);
 
@@ -338,8 +338,12 @@ pub export fn updateAndRender(
     transient_state.arena.checkArena();
 }
 
-pub export fn debugFrameEnd(memory: *shared.Memory, input: shared.GameInput, buffer: *shared.OffscreenBuffer) *debug_interface.DebugTable {
-    return shared.debugFrameEnd(memory, input, buffer);
+pub export fn debugFrameEnd(
+    memory: *shared.Memory,
+    input: shared.GameInput,
+    commands: *shared.RenderCommands,
+) *debug_interface.DebugTable {
+    return shared.debugFrameEnd(memory, input, commands);
 }
 
 pub export fn getSoundSamples(
