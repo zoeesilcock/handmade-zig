@@ -2,9 +2,6 @@
 ///
 /// Partial list of missing parts:
 ///
-/// * Hardware acceleration (OpenGL or Direct3D or BOTH?).
-/// * Blit speed improvements (BitBlt).
-///
 /// * Save game locations.
 /// * Getting a handle to our own executable file.
 /// * Raw Input (support for multiple keyboards).
@@ -78,6 +75,10 @@ const win32 = struct {
     usingnamespace @import("win32").zig;
 };
 
+const gl = @cImport({
+    @cInclude("GL/glcorearb.h");
+});
+
 // Manual import of a function that is incorrectly defined in zigwin32.
 // Remove once this is resloved: https://github.com/marlersoft/zigwin32/issues/33
 pub extern "gdi32" fn DescribePixelFormat(
@@ -90,9 +91,11 @@ pub extern "gdi32" fn DescribePixelFormat(
 // OpenGL
 const WglSwapIntervalEXT: type = fn (interval: i32) callconv(WINAPI) bool;
 var optWglSwapInterval: ?*const WglSwapIntervalEXT = null;
-pub var default_internal_texture_format: i32 = 0;
-const GL_FRAMEBUFFER_SRGB = 0x8DB9;
-const GL_SRGB8_ALPHA8 = 0x8C43;
+const WglCreateContextAttribsARB: type = fn (
+    hdc: win32.HDC,
+    share_context: ?win32.HGLRC,
+    attrib_list: ?[*:0]const c_int,
+) callconv(WINAPI) ?win32.HGLRC;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -1251,20 +1254,46 @@ fn initOpenGL(window: win32.HWND) void {
             outputLastError("SetPixelFormat failed");
         }
 
-        const opengl_rc = win32.wglCreateContext(window_dc);
+        var opengl_rc = win32.wglCreateContext(window_dc);
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
-            default_internal_texture_format = win32.GL_RGBA8;
+            var is_modern_context: bool = false;
+            const optWglCreateContextAttribsARB: ?*const WglCreateContextAttribsARB =
+                @ptrCast(win32.wglGetProcAddress("wglCreateContextAttribsARB"));
+            if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
+                // This is a modern version of OpenGL.
+                const flags: c_int = if (INTERNAL)
+                    // Enable opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB for testing?
+                    // opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
+                    0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
+                else
+                    0;
+                const attribs = [_:0]c_int{
+                    opengl.WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+                    opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 0,
+                    opengl.WGL_CONTEXT_FLAGS_ARB,         flags,
+                    opengl.WGL_CONTEXT_FLAGS_ARB,         opengl.WGL_CONTEXT_DEBUG_BIT_ARB,
+                    opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+                    0,
+                };
 
-            // TODO: Actually check for extensions!
-            // if (openGLExtensionIsAvailable()) {
-            {
-                default_internal_texture_format = GL_SRGB8_ALPHA8;
+                const share_context: ?win32.HGLRC = null;
+                const modern_context = wglCreateContextAttribsARB(window_dc, share_context, &attribs);
+                if (modern_context != null) {
+                    if (win32.wglMakeCurrent(window_dc, modern_context) != 0) {
+                        _ = win32.wglDeleteContext(opengl_rc);
+                        opengl_rc = modern_context;
+                        is_modern_context = true;
+                    } else {
+                        std.debug.print("Failed to make modern context current, error: {d}\n", .{win32.glGetError()});
+                    }
+                } else {
+                    std.debug.print("Failed to create modern context, error: {d}\n", .{win32.glGetError()});
+                }
+            } else {
+                // This is an antiquated version of OpenGL.
             }
 
-            // if (openGLExtensionIsAvailable()) {
-            {
-                win32.glEnable(GL_FRAMEBUFFER_SRGB);
-            }
+            opengl.init(is_modern_context);
 
             optWglSwapInterval = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
             if (optWglSwapInterval) |wglSwapInterval| {

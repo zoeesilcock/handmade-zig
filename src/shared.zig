@@ -158,6 +158,27 @@ pub inline fn stringsWithLengthAreEqual(a: [*:0]const u8, a_length: MemoryIndex,
     return result;
 }
 
+pub inline fn stringsWithOneLengthAreEqual(a: [*]const u8, a_length: MemoryIndex, b: [*:0]const u8) bool {
+    var at = b;
+
+    for (0..a_length) |i| {
+        if (a[i] == 0 or a[i] != at[0]) {
+            return false;
+        }
+        at += 1;
+    }
+
+    return at[0] == 0;
+}
+
+pub fn isEndOfLine(char: u32) bool {
+    return char == '\n' or char == '\r';
+}
+
+pub fn isWhitespace(char: u32) bool {
+    return char == ' ' or char == '\t' or isEndOfLine(char);
+}
+
 test "stringsAreEqual" {
     try std.testing.expectEqual(true, stringsAreEqual("abc", "abc"));
     try std.testing.expectEqual(true, stringsAreEqual("", ""));

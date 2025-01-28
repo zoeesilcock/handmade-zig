@@ -6,6 +6,27 @@ const debug_interface = @import("debug_interface.zig");
 const platform = @import("win32_handmade.zig");
 const std = @import("std");
 
+pub const GL_FRAMEBUFFER_SRGB = 0x8DB9;
+pub const GL_SRGB8_ALPHA8 = 0x8C43;
+pub const GL_SHADING_LANGUAGE_VERSION = 0x8B8C;
+
+// Windows specific.
+pub const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
+pub const WGL_CONTEXT_MINOR_VERSION_ARB = 0x2092;
+pub const WGL_CONTEXT_LAYER_PLANE_ARB = 0x2093;
+pub const WGL_CONTEXT_FLAGS_ARB = 0x2094;
+pub const WGL_CONTEXT_PROFILE_MASK_ARB = 0x9126;
+
+pub const WGL_CONTEXT_DEBUG_BIT_ARB = 0x0001;
+pub const WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB = 0x0002;
+
+pub const WGL_CONTEXT_CORE_PROFILE_BIT_ARB = 0x00000001;
+pub const WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB = 0x00000002;
+
+pub const ERROR_INVALID_VERSION_ARB = 0x2095;
+pub const ERROR_INVALID_PROFILE_ARB = 0x2096;
+
+// Build options.
 const INTERNAL = shared.INTERNAL;
 
 const RenderGroup = rendergroup.RenderGroup;
@@ -27,8 +48,76 @@ const gl = struct {
     usingnamespace @import("win32").graphics.open_gl;
 };
 
-var default_internal_texture_format = &platform.default_internal_texture_format;
+var default_internal_texture_format: i32 = 0;
 var texture_bind_count: u32 = 0;
+
+pub const Info = struct {
+    is_modern_context: bool,
+    vendor: ?*const u8,
+    renderer: ?*const u8,
+    version: ?*const u8,
+    shader_language_version: ?*const u8,
+    extensions: ?*const u8,
+
+    gl_ext_texture_srgb: bool = false,
+    gl_ext_framebuffer_srgb: bool = false,
+
+    pub fn get(is_modern_context: bool) Info {
+        var result: Info = .{
+            .is_modern_context = is_modern_context,
+            .vendor = gl.glGetString(gl.GL_VENDOR),
+            .renderer = gl.glGetString(gl.GL_RENDERER),
+            .version = gl.glGetString(gl.GL_VERSION),
+            .shader_language_version = @ptrCast("(none)"),
+            .extensions = gl.glGetString(gl.GL_EXTENSIONS),
+        };
+
+        if (is_modern_context) {
+            result.shader_language_version = gl.glGetString(GL_SHADING_LANGUAGE_VERSION);
+        } else {
+            result.shader_language_version = @ptrCast("(none)");
+        }
+
+        if (result.extensions) |extensions| {
+            var at: [*]const u8 = @ptrCast(extensions);
+            while (at[0] != 0) {
+                while (shared.isWhitespace(at[0])) {
+                    at += 1;
+                }
+                var end = at;
+                while (end[0] != 0 and !shared.isWhitespace(end[0])) {
+                    end += 1;
+                }
+
+                const count = @intFromPtr(end) - @intFromPtr(at);
+
+                if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_texture_sRGB")) {
+                    result.gl_ext_texture_srgb = true;
+                } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_framebuffer_sRGB")) {
+                    result.gl_ext_framebuffer_srgb = true;
+                }
+
+                at = end;
+            }
+        }
+
+        return result;
+    }
+};
+
+pub fn init(is_modern_context: bool) void {
+    const info = Info.get(is_modern_context);
+
+    default_internal_texture_format = gl.GL_RGBA8;
+
+    if (info.gl_ext_texture_srgb) {
+        default_internal_texture_format = GL_SRGB8_ALPHA8;
+    }
+
+    if (info.gl_ext_framebuffer_srgb) {
+        gl.glEnable(GL_FRAMEBUFFER_SRGB);
+    }
+}
 
 pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, window_height: i32) callconv(.C) void {
     _ = window_width;
@@ -96,7 +185,7 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
                         gl.glTexImage2D(
                             gl.GL_TEXTURE_2D,
                             0,
-                            default_internal_texture_format.*,
+                            default_internal_texture_format,
                             bitmap.width,
                             bitmap.height,
                             0,
