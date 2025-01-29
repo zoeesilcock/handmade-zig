@@ -43,12 +43,12 @@ const Color = math.Color;
 const Rectangle2i = math.Rectangle2i;
 const TimedBlock = debug_interface.TimedBlock;
 
-const gl = struct {
+pub const gl = struct {
     // TODO: How do we import OpenGL on other platforms here?
     usingnamespace @import("win32").graphics.open_gl;
 };
 
-var default_internal_texture_format: i32 = 0;
+pub var default_internal_texture_format: i32 = 0;
 var texture_bind_count: u32 = 0;
 
 pub const Info = struct {
@@ -56,7 +56,7 @@ pub const Info = struct {
     vendor: ?*const u8,
     renderer: ?*const u8,
     version: ?*const u8,
-    shader_language_version: ?*const u8,
+    shader_language_version: ?*const u8 = undefined,
     extensions: ?*const u8,
 
     gl_ext_texture_srgb: bool = false,
@@ -68,7 +68,6 @@ pub const Info = struct {
             .vendor = gl.glGetString(gl.GL_VENDOR),
             .renderer = gl.glGetString(gl.GL_RENDERER),
             .version = gl.glGetString(gl.GL_VERSION),
-            .shader_language_version = @ptrCast("(none)"),
             .extensions = gl.glGetString(gl.GL_EXTENSIONS),
         };
 
@@ -175,32 +174,10 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
                         x_axis.scaledTo(entry.size.x()).plus(y_axis.scaledTo(entry.size.y())),
                     );
 
-                    if (bitmap.handle > 0) {
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.handle);
-                    } else {
-                        texture_bind_count += 1;
-                        bitmap.handle = texture_bind_count;
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.handle);
-
-                        gl.glTexImage2D(
-                            gl.GL_TEXTURE_2D,
-                            0,
-                            default_internal_texture_format,
-                            bitmap.width,
-                            bitmap.height,
-                            0,
-                            gl.GL_BGRA_EXT,
-                            gl.GL_UNSIGNED_BYTE,
-                            bitmap.memory.?,
-                        );
-
-                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
-                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
-                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
-                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
-                        gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
+                    if (bitmap.texture_handle) |texture| {
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, @as(*u32, @ptrCast(@alignCast(texture))).*);
+                        std.debug.print("bind texture!\n", .{});
                     }
-
                     drawRectangle(min_position, max_position, entry.color);
                 }
             },
@@ -316,4 +293,38 @@ pub fn displayBitmap(
     const color = math.Color.new(1, 1, 1, 1);
 
     drawRectangle(min_position, max_position, color);
+}
+
+pub fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) ?*anyopaque {
+    var handle: u32 = 0;
+
+    gl.glGenTextures(1, &handle);
+    gl.glBindTexture(gl.GL_TEXTURE_2D, handle);
+    gl.glTexImage2D(
+        gl.GL_TEXTURE_2D,
+        0,
+        default_internal_texture_format,
+        width,
+        height,
+        0,
+        gl.GL_BGRA_EXT,
+        gl.GL_UNSIGNED_BYTE,
+        data,
+    );
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
+    gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
+
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+
+    std.debug.assert(@sizeOf(u32) <= @sizeOf(*anyopaque));
+
+    // TODO: Surely this is a dangling pointer?
+    return @ptrCast(&handle);
+}
+
+pub fn deallocateTexture(texture: ?*anyopaque) callconv(.C) void {
+    gl.glDeleteTextures(1, @ptrCast(@alignCast(texture)));
 }

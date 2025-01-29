@@ -85,11 +85,16 @@ pub const HHAAssetType = extern struct {
     one_past_last_asset_index: u32 = 0,
 };
 
-pub const HHAAsset = extern struct { data_offset: u64 align(1), first_tag_index: u32, one_past_last_tag_index: u32, info: extern union {
-    bitmap: HHABitmap,
-    sound: HHASound,
-    font: HHAFont,
-} };
+pub const HHAAsset = extern struct {
+    data_offset: u64 align(1),
+    first_tag_index: u32,
+    one_past_last_tag_index: u32,
+    info: extern union {
+        bitmap: HHABitmap,
+        sound: HHASound,
+        font: HHAFont,
+    },
+};
 
 pub const HHABitmap = extern struct {
     dim: [2]u32,

@@ -214,6 +214,8 @@ pub const PlatformWorkQueue = extern struct {
     semaphore_handle: ?*anyopaque = null,
 
     entries: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{}} ** 256,
+
+    needs_opengl: bool,
 };
 
 pub const PlatformFileHandle = extern struct {
@@ -249,6 +251,9 @@ pub const DebugExecutingProcessState = extern struct {
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
+const allocateTextureType: type = fn (width: i32, height: i32, data: *anyopaque) callconv(.C) ?*anyopaque;
+const deallocateTextureType: type = fn (texture: ?*anyopaque) callconv(.C) void;
+
 const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.C) PlatformFileGroup;
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.C) void;
 const openNextFileType: type = fn (file_group: *PlatformFileGroup) callconv(.C) PlatformFileHandle;
@@ -273,6 +278,9 @@ pub const Platform = if (INTERNAL) extern struct {
     addQueueEntry: *const addQueueEntryType = undefined,
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
 
+    allocateTexture: *const allocateTextureType = undefined,
+    deallocateTexture: *const deallocateTextureType = undefined,
+
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
     openNextFile: *const openNextFileType = undefined,
@@ -291,6 +299,9 @@ pub const Platform = if (INTERNAL) extern struct {
 } else extern struct {
     addQueueEntry: *const addQueueEntryType = undefined,
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
+
+    allocateTexture: *const allocateTextureType = undefined,
+    deallocateTexture: *const deallocateTextureType = undefined,
 
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,

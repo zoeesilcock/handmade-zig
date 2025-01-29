@@ -96,6 +96,7 @@ const WglCreateContextAttribsARB: type = fn (
     share_context: ?win32.HGLRC,
     attrib_list: ?[*:0]const c_int,
 ) callconv(WINAPI) ?win32.HGLRC;
+var optWglCreateContextAttribsARB: ?*const WglCreateContextAttribsARB = null;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -107,6 +108,8 @@ var perf_count_frequency: i64 = 0;
 var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 var local_stub_debug_table: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
+var global_dc: ?win32.HDC = undefined;
+var global_opengl_rc: ?win32.HGLRC = undefined;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -172,6 +175,12 @@ const Win32State = struct {
 
     exe_file_name: [STATE_FILE_NAME_COUNT:0]u8 = undefined,
     one_past_last_exe_file_name_slash: usize = 0,
+};
+
+const ThreadStartup = struct {
+    window: win32.HWND,
+    opengl_rc: win32.HGLRC,
+    queue: *shared.PlatformWorkQueue,
 };
 
 const FaderState = enum {
@@ -1197,7 +1206,38 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
     }
 }
 
+const opengl_flags: c_int = if (INTERNAL)
+// Enable opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB for testing?
+// opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
+0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
+else
+0;
+const opengl_attribs = [_:0]c_int{
+    opengl.WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+    opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 0,
+    opengl.WGL_CONTEXT_FLAGS_ARB,         opengl_flags,
+    opengl.WGL_CONTEXT_FLAGS_ARB,         opengl.WGL_CONTEXT_DEBUG_BIT_ARB,
+    opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+    0,
+};
+
+fn createOpenGLContextForWorkerThread() void {
+    if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
+        const modern_context = wglCreateContextAttribsARB(global_dc.?, global_opengl_rc.?, &opengl_attribs);
+        if (modern_context != null) {
+            if (win32.wglMakeCurrent(global_dc.?, modern_context) != 0) {
+            } else {
+                std.debug.print("Failed to make modern context current for worker thread, error: {d}\n", .{win32.glGetError()});
+            }
+        } else {
+            std.debug.print("Failed to create modern context for worker thread, error: {d}\n", .{win32.glGetError()});
+        }
+    }
+}
+
 fn initOpenGL(window: win32.HWND) void {
+    var opengl_rc: ?win32.HGLRC = null;
+
     if (win32.GetDC(window)) |window_dc| {
         var desired_pixel_format: win32.PIXELFORMATDESCRIPTOR = .{
             .nSize = @sizeOf(win32.PIXELFORMATDESCRIPTOR),
@@ -1254,30 +1294,15 @@ fn initOpenGL(window: win32.HWND) void {
             outputLastError("SetPixelFormat failed");
         }
 
-        var opengl_rc = win32.wglCreateContext(window_dc);
+        opengl_rc = win32.wglCreateContext(window_dc);
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
             var is_modern_context: bool = false;
-            const optWglCreateContextAttribsARB: ?*const WglCreateContextAttribsARB =
-                @ptrCast(win32.wglGetProcAddress("wglCreateContextAttribsARB"));
+            optWglCreateContextAttribsARB = @ptrCast(win32.wglGetProcAddress("wglCreateContextAttribsARB"));
             if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
                 // This is a modern version of OpenGL.
-                const flags: c_int = if (INTERNAL)
-                    // Enable opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB for testing?
-                    // opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
-                    0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
-                else
-                    0;
-                const attribs = [_:0]c_int{
-                    opengl.WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-                    opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 0,
-                    opengl.WGL_CONTEXT_FLAGS_ARB,         flags,
-                    opengl.WGL_CONTEXT_FLAGS_ARB,         opengl.WGL_CONTEXT_DEBUG_BIT_ARB,
-                    opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
-                    0,
-                };
 
                 const share_context: ?win32.HGLRC = null;
-                const modern_context = wglCreateContextAttribsARB(window_dc, share_context, &attribs);
+                const modern_context = wglCreateContextAttribsARB(window_dc, share_context, &opengl_attribs);
                 if (modern_context != null) {
                     if (win32.wglMakeCurrent(window_dc, modern_context) != 0) {
                         _ = win32.wglDeleteContext(opengl_rc);
@@ -1304,7 +1329,8 @@ fn initOpenGL(window: win32.HWND) void {
             unreachable;
         }
 
-        _ = win32.ReleaseDC(window, window_dc);
+        global_dc = window_dc;
+        global_opengl_rc = opengl_rc;
     }
 }
 
@@ -1865,6 +1891,10 @@ fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
     if (lp_parameter) |parameter| {
         const queue: *shared.PlatformWorkQueue = @ptrCast(@alignCast(parameter));
 
+        if (queue.needs_opengl) {
+            createOpenGLContextForWorkerThread();
+        }
+
         while (true) {
             if (doNextWorkQueueEntry(queue)) {
                 _ = win32.WaitForSingleObjectEx(queue.semaphore_handle, std.math.maxInt(u32), 0);
@@ -1920,37 +1950,6 @@ pub export fn wWinMain(
     var state = Win32State{};
     getExeFileName(&state);
 
-    var high_priority_queue = shared.PlatformWorkQueue{};
-    makeQueue(&high_priority_queue, 6);
-    var low_priority_queue = shared.PlatformWorkQueue{};
-    makeQueue(&low_priority_queue, 2);
-
-    if (false) {
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A0")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A1")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A2")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A3")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A4")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A5")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A6")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A7")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A8")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String A9")));
-
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B0")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B1")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B2")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B3")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B4")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B5")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B6")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B7")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B8")));
-        addQueueEntry(&high_priority_queue, &doWorkerWork, @ptrCast(@constCast("String B9")));
-
-        completeAllQueuedWork(&high_priority_queue);
-    }
-
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
     buildExePathFileName(&state, "handmade.dll", &source_dll_path);
     var temp_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
@@ -1973,6 +1972,9 @@ pub export fn wWinMain(
     platform = shared.Platform{
         .addQueueEntry = addQueueEntry,
         .completeAllQueuedWork = completeAllQueuedWork,
+
+        .allocateTexture = opengl.allocateTexture,
+        .deallocateTexture = opengl.deallocateTexture,
 
         .getAllFilesOfTypeBegin = getAllFilesOfTypeBegin,
         .getAllFilesOfTypeEnd = getAllFilesOfTypeEnd,
@@ -2035,6 +2037,11 @@ pub export fn wWinMain(
         if (opt_window_handle) |window_handle| {
             toggleFullscreen(window_handle);
             initOpenGL(window_handle);
+
+            var high_priority_queue = shared.PlatformWorkQueue{ .needs_opengl = false };
+            makeQueue(&high_priority_queue, 6);
+            var low_priority_queue = shared.PlatformWorkQueue{ .needs_opengl = true };
+            makeQueue(&low_priority_queue, 2);
 
             if (INTERNAL) {
                 _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);

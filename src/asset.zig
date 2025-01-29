@@ -6,6 +6,7 @@ const intrinsics = @import("intrinsics.zig");
 const file_formats = @import("file_formats");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
+const gl = @import("opengl.zig").gl;
 
 // Types.
 const Vector2 = math.Vector2;
@@ -42,9 +43,17 @@ const Asset = struct {
     file_index: u32,
 };
 
+const AssetHeaderType = enum(u32) {
+    None,
+    Bitmap,
+    Sound,
+    Font,
+};
+
 const AssetMemoryHeader = extern struct {
     next: ?*AssetMemoryHeader,
     previous: ?*AssetMemoryHeader,
+    asset_type: AssetHeaderType,
     asset_index: u32,
     total_size: u32,
     generation_id: u32,
@@ -428,7 +437,7 @@ pub const Assets = struct {
         self.operation_lock = 0;
     }
 
-    fn acquireAssetMemory(self: *Assets, size: u32, asset_index: u32) ?*AssetMemoryHeader {
+    fn acquireAssetMemory(self: *Assets, size: u32, asset_index: u32, asset_type: AssetHeaderType) ?*AssetMemoryHeader {
         var timed_block = TimedBlock.beginFunction(@src(), .AcquireAssetMemory);
         defer timed_block.end();
 
@@ -468,6 +477,10 @@ pub const Assets = struct {
 
                         self.removeAssetHeaderFromList(header.?);
 
+                        if (header.?.asset_type == .Bitmap) {
+                            shared.platform.deallocateTexture(header.?.data.bitmap.texture_handle);
+                        }
+
                         opt_block = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(@alignCast(asset.header))) - 1);
                         opt_block.?.flags &= ~@intFromEnum(AssetMemoryBlockFlags.Used);
 
@@ -487,6 +500,7 @@ pub const Assets = struct {
         }
 
         if (result) |header| {
+            header.asset_type = asset_type;
             header.asset_index = asset_index;
             header.total_size = size;
             self.insertAssetHeaderAtFront(header);
@@ -640,7 +654,7 @@ pub const Assets = struct {
                         size.data = size.section * height;
                         size.total = size.data + @sizeOf(AssetMemoryHeader);
 
-                        asset.header = self.acquireAssetMemory(shared.align16(size.total), id.value);
+                        asset.header = self.acquireAssetMemory(shared.align16(size.total), id.value, .Bitmap);
 
                         var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
 
@@ -650,7 +664,7 @@ pub const Assets = struct {
                         bitmap.height = height;
                         bitmap.pitch = shared.safeTruncateUInt32ToUInt16(size.section);
                         bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
-                        bitmap.handle = 0;
+                        bitmap.texture_handle = null;
 
                         var work = LoadAssetWork{
                             .task = undefined,
@@ -803,7 +817,7 @@ pub const Assets = struct {
                     size.data = info.channel_count * size.section;
                     size.total = size.data + @sizeOf(AssetMemoryHeader);
 
-                    asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(shared.align16(size.total), id.value)));
+                    asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(shared.align16(size.total), id.value, .Sound)));
                     const sound = &asset.header.?.data.sound;
 
                     sound.sample_count = info.sample_count;
@@ -932,7 +946,7 @@ pub const Assets = struct {
                         const size_data: u32 = glyphs_size + horizontal_advance_size;
                         const size_total: u32 = size_data + @sizeOf(AssetMemoryHeader) + unicode_map_size;
 
-                        asset.header = self.acquireAssetMemory(shared.align16(size_total), id.value);
+                        asset.header = self.acquireAssetMemory(shared.align16(size_total), id.value, .Font);
 
                         var font: *LoadedFont = @ptrCast(@alignCast(&asset.header.?.data.font));
                         font.bitmap_id_offset = self.getFile(asset.file_index).font_bitmap_id_offset;
@@ -1038,7 +1052,7 @@ pub const LoadedBitmap = extern struct {
     width: u16 = 0,
     height: u16 = 0,
     pitch: u16 = 0,
-    handle: u32 = 0,
+    texture_handle: ?*anyopaque = null,
 
     pub fn getPitch(self: *LoadedSound) i16 {
         return self.width;
@@ -1091,6 +1105,7 @@ pub const LoadedFont = extern struct {
 const FinalizeLoadAssetOperation = enum(u8) {
     None,
     Font,
+    Bitmap,
 };
 
 const LoadAssetWork = struct {
@@ -1132,6 +1147,11 @@ fn doLoadAssetWorkDirectly(
                     font.unicode_map[glyph.unicode_code_point] = @intCast(glyph_index);
                 }
             },
+            .Bitmap => {
+                const bitmap: *LoadedBitmap = &work.asset.header.?.data.bitmap;
+                bitmap.texture_handle =
+                    shared.platform.allocateTexture(bitmap.width, bitmap.height, @ptrCast(bitmap.memory));
+            }
         }
     }
 
