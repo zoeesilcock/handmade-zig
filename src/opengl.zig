@@ -26,6 +26,14 @@ pub const WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB = 0x00000002;
 pub const ERROR_INVALID_VERSION_ARB = 0x2095;
 pub const ERROR_INVALID_PROFILE_ARB = 0x2096;
 
+pub const WGL_DRAW_TO_WINDOW_ARB = 0x2001;
+pub const WGL_ACCELERATION_ARB = 0x2003;
+pub const WGL_FULL_ACCELERATION_ARB = 0x2027;
+pub const WGL_SUPPORT_OPENGL_ARB = 0x2010;
+pub const WGL_DOUBLE_BUFFER_ARB = 0x2011;
+pub const WGL_PIXEL_TYPE_ARB = 0x2013;
+pub const WGL_TYPE_RGBA_ARB = 0x202B;
+
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
@@ -176,7 +184,6 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
 
                     if (bitmap.texture_handle) |texture| {
                         gl.glBindTexture(gl.GL_TEXTURE_2D, @as(*u32, @ptrCast(@alignCast(texture))).*);
-                        std.debug.print("bind texture!\n", .{});
                     }
                     drawRectangle(min_position, max_position, entry.color);
                 }

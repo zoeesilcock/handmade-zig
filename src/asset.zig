@@ -673,7 +673,7 @@ pub const Assets = struct {
                             .offset = asset.hha.data_offset,
                             .size = size.data,
                             .destination = @ptrCast(bitmap.memory),
-                            .finalize_operation = .None,
+                            .finalize_operation = .Bitmap,
                             .final_state = AssetState.Loaded.toInt(),
                         };
 

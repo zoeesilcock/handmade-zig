@@ -91,12 +91,24 @@ pub extern "gdi32" fn DescribePixelFormat(
 // OpenGL
 const WglSwapIntervalEXT: type = fn (interval: i32) callconv(WINAPI) bool;
 var optWglSwapInterval: ?*const WglSwapIntervalEXT = null;
+
 const WglCreateContextAttribsARB: type = fn (
     hdc: win32.HDC,
     share_context: ?win32.HGLRC,
     attrib_list: ?[*:0]const c_int,
 ) callconv(WINAPI) ?win32.HGLRC;
 var optWglCreateContextAttribsARB: ?*const WglCreateContextAttribsARB = null;
+
+const WglChoosePixelFormatARB: type = fn (
+    hdc: win32.HDC,
+    piAttribIList: [*:0]const c_int,
+    pfAttribFList: [*:0]const f32,
+    nMaxFormats: c_uint,
+    piFormats: *c_int,
+    nNumFormats: *c_uint,
+) callconv(WINAPI) win32.BOOL;
+var optWglChoosePixelFormatARB: ?*const WglChoosePixelFormatARB = null;
+
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -108,8 +120,8 @@ var perf_count_frequency: i64 = 0;
 var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 var local_stub_debug_table: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
-var global_dc: ?win32.HDC = undefined;
-var global_opengl_rc: ?win32.HGLRC = undefined;
+var global_dc: ?win32.HDC = null;
+var global_opengl_rc: ?win32.HGLRC = null;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -1216,66 +1228,99 @@ const opengl_attribs = [_:0]c_int{
     opengl.WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
     opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 0,
     opengl.WGL_CONTEXT_FLAGS_ARB,         opengl_flags,
-    opengl.WGL_CONTEXT_FLAGS_ARB,         opengl.WGL_CONTEXT_DEBUG_BIT_ARB,
     opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
     0,
 };
 
 fn createOpenGLContextForWorkerThread() void {
     if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
-        const modern_context = wglCreateContextAttribsARB(global_dc.?, global_opengl_rc.?, &opengl_attribs);
-        if (modern_context != null) {
-            if (win32.wglMakeCurrent(global_dc.?, modern_context) != 0) {
+        if (global_dc) |window_dc| {
+            std.debug.assert(global_opengl_rc != null);
+
+            if (wglCreateContextAttribsARB(window_dc, global_opengl_rc, &opengl_attribs)) |modern_context| {
+                if (win32.wglMakeCurrent(window_dc, modern_context) != 0) {
+                } else {
+                    outputLastGLError("Failed to make context current in worker thread");
+                }
             } else {
-                std.debug.print("Failed to make modern context current for worker thread, error: {d}\n", .{win32.glGetError()});
+                outputLastGLError("Failed to create context in worker thread");
             }
-        } else {
-            std.debug.print("Failed to create modern context for worker thread, error: {d}\n", .{win32.glGetError()});
         }
     }
 }
 
-fn initOpenGL(window: win32.HWND) void {
+fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
     var opengl_rc: ?win32.HGLRC = null;
 
-    if (win32.GetDC(window)) |window_dc| {
-        var desired_pixel_format: win32.PIXELFORMATDESCRIPTOR = .{
-            .nSize = @sizeOf(win32.PIXELFORMATDESCRIPTOR),
-            .nVersion = 1,
-            .iPixelType = win32.PFD_TYPE_RGBA,
-            .dwFlags = win32.PFD_FLAGS{
-                .SUPPORT_OPENGL = 1,
-                .DRAW_TO_WINDOW = 1,
-                .DOUBLEBUFFER = 1,
-            },
-            .cColorBits = 32,
-            .cAlphaBits = 8,
-            .iLayerType = win32.PFD_MAIN_PLANE,
-            // Clear the rest to zero.
-            .cRedBits = 0,
-            .cRedShift = 0,
-            .cGreenBits = 0,
-            .cGreenShift = 0,
-            .cBlueBits = 0,
-            .cBlueShift = 0,
-            .cAlphaShift = 0,
-            .cAccumBits = 0,
-            .cAccumRedBits = 0,
-            .cAccumGreenBits = 0,
-            .cAccumBlueBits = 0,
-            .cAccumAlphaBits = 0,
-            .cDepthBits = 0,
-            .cStencilBits = 0,
-            .cAuxBuffers = 0,
-            .bReserved = 0,
-            .dwLayerMask = 0,
-            .dwVisibleMask = 0,
-            .dwDamageMask = 0,
-        };
+    if (opt_window_dc) |window_dc| {
+        var suggested_pixel_format_index: c_int = 0;
+        var extended_pick: c_uint = 0;
 
-        const suggested_pixel_format_index = win32.ChoosePixelFormat(window_dc, &desired_pixel_format);
-        if (suggested_pixel_format_index == 0) {
-            outputLastError("ChoosePixelFormat failed");
+        optWglChoosePixelFormatARB = @ptrCast(win32.wglGetProcAddress("wglChoosePixelFormatARB"));
+        if (optWglChoosePixelFormatARB) |wglChoosePixelFormatARB| {
+            const int_attrib_list = [_:0]c_int{
+                opengl.WGL_DRAW_TO_WINDOW_ARB, win32.GL_TRUE,
+                opengl.WGL_ACCELERATION_ARB, opengl.WGL_FULL_ACCELERATION_ARB,
+                opengl.WGL_SUPPORT_OPENGL_ARB, win32.GL_TRUE,
+                opengl.WGL_DOUBLE_BUFFER_ARB, win32.GL_TRUE,
+                opengl.WGL_PIXEL_TYPE_ARB, opengl.WGL_TYPE_RGBA_ARB,
+                0
+            };
+            const float_attrib_list = [_:0]f32{ 0 };
+
+            if (wglChoosePixelFormatARB(
+                    window_dc,
+                    &int_attrib_list,
+                    &float_attrib_list,
+                    1,
+                    &suggested_pixel_format_index,
+                    &extended_pick,
+            ) != 0) {
+                outputLastGLError("wglChoosePixelFormatARB failed");
+            }
+        } else {
+            outputLastError("Failed to get wglChoosePixelFormatARB");
+        }
+
+        if (extended_pick == 0) {
+            var desired_pixel_format: win32.PIXELFORMATDESCRIPTOR = .{
+                .nSize = @sizeOf(win32.PIXELFORMATDESCRIPTOR),
+                .nVersion = 1,
+                .iPixelType = win32.PFD_TYPE_RGBA,
+                .dwFlags = win32.PFD_FLAGS{
+                    .SUPPORT_OPENGL = 1,
+                    .DRAW_TO_WINDOW = 1,
+                    .DOUBLEBUFFER = 1,
+                },
+                .cColorBits = 32,
+                .cAlphaBits = 8,
+                .iLayerType = win32.PFD_MAIN_PLANE,
+                // Clear the rest to zero.
+                .cRedBits = 0,
+                .cRedShift = 0,
+                .cGreenBits = 0,
+                .cGreenShift = 0,
+                .cBlueBits = 0,
+                .cBlueShift = 0,
+                .cAlphaShift = 0,
+                .cAccumBits = 0,
+                .cAccumRedBits = 0,
+                .cAccumGreenBits = 0,
+                .cAccumBlueBits = 0,
+                .cAccumAlphaBits = 0,
+                .cDepthBits = 0,
+                .cStencilBits = 0,
+                .cAuxBuffers = 0,
+                .bReserved = 0,
+                .dwLayerMask = 0,
+                .dwVisibleMask = 0,
+                .dwDamageMask = 0,
+            };
+
+            suggested_pixel_format_index = win32.ChoosePixelFormat(window_dc, &desired_pixel_format);
+            if (suggested_pixel_format_index == 0) {
+                outputLastError("ChoosePixelFormat failed");
+            }
         }
 
         var suggested_pixel_format: win32.PIXELFORMATDESCRIPTOR = undefined;
@@ -1297,10 +1342,10 @@ fn initOpenGL(window: win32.HWND) void {
         opengl_rc = win32.wglCreateContext(window_dc);
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
             var is_modern_context: bool = false;
+
             optWglCreateContextAttribsARB = @ptrCast(win32.wglGetProcAddress("wglCreateContextAttribsARB"));
             if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
                 // This is a modern version of OpenGL.
-
                 const share_context: ?win32.HGLRC = null;
                 const modern_context = wglCreateContextAttribsARB(window_dc, share_context, &opengl_attribs);
                 if (modern_context != null) {
@@ -1309,10 +1354,10 @@ fn initOpenGL(window: win32.HWND) void {
                         opengl_rc = modern_context;
                         is_modern_context = true;
                     } else {
-                        std.debug.print("Failed to make modern context current, error: {d}\n", .{win32.glGetError()});
+                        outputLastGLError("Failed to make modern context current");
                     }
                 } else {
-                    std.debug.print("Failed to create modern context, error: {d}\n", .{win32.glGetError()});
+                    outputLastGLError("Failed to create modern context");
                 }
             } else {
                 // This is an antiquated version of OpenGL.
@@ -1328,10 +1373,9 @@ fn initOpenGL(window: win32.HWND) void {
             outputLastError("wglCreateContext");
             unreachable;
         }
-
-        global_dc = window_dc;
-        global_opengl_rc = opengl_rc;
     }
+
+    return opengl_rc;
 }
 
 fn getWindowDimension(window: win32.HWND) WindowDimension {
@@ -1933,6 +1977,22 @@ fn outputLastError(title: []const u8) void {
     }
 }
 
+fn outputLastGLError(title: []const u8) void {
+    const last_error = win32.glGetError();
+
+    if (INTERNAL) {
+        std.debug.print("{s}: {d}\n", .{ title, last_error });
+    } else {
+        var buffer: [128]u8 = undefined;
+        const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}\n", .{
+            title,
+            @intFromEnum(last_error),
+        }) catch "";
+
+        win32.OutputDebugStringA(@ptrCast(slice.ptr));
+    }
+}
+
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -1995,7 +2055,7 @@ pub export fn wWinMain(
     }
 
     const window_class: win32.WNDCLASSW = .{
-        .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
+        .style = .{ .HREDRAW = 1, .VREDRAW = 1, .OWNDC = 1 },
         .lpfnWndProc = windowProcedure,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
@@ -2036,7 +2096,8 @@ pub export fn wWinMain(
 
         if (opt_window_handle) |window_handle| {
             toggleFullscreen(window_handle);
-            initOpenGL(window_handle);
+            global_dc = win32.GetDC(window_handle);
+            global_opengl_rc = initOpenGL(global_dc);
 
             var high_priority_queue = shared.PlatformWorkQueue{ .needs_opengl = false };
             makeQueue(&high_priority_queue, 6);
