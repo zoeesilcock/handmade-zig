@@ -33,6 +33,7 @@ pub const WGL_SUPPORT_OPENGL_ARB = 0x2010;
 pub const WGL_DOUBLE_BUFFER_ARB = 0x2011;
 pub const WGL_PIXEL_TYPE_ARB = 0x2013;
 pub const WGL_TYPE_RGBA_ARB = 0x202B;
+pub const WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB = 0x20A9;
 
 // Build options.
 const INTERNAL = shared.INTERNAL;

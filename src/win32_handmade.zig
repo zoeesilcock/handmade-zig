@@ -109,7 +109,6 @@ const WglChoosePixelFormatARB: type = fn (
 ) callconv(WINAPI) win32.BOOL;
 var optWglChoosePixelFormatARB: ?*const WglChoosePixelFormatARB = null;
 
-
 // Globals.
 pub var platform: shared.Platform = undefined;
 var running: bool = false;
@@ -1219,11 +1218,11 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
 }
 
 const opengl_flags: c_int = if (INTERNAL)
-// Enable opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB for testing?
-// opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
-0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
+    // Enable opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB for testing?
+    // opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
+    0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
 else
-0;
+    0;
 const opengl_attribs = [_:0]c_int{
     opengl.WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
     opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 0,
@@ -1249,129 +1248,173 @@ fn createOpenGLContextForWorkerThread() void {
     }
 }
 
+fn setPixelFormat(window_dc: win32.HDC) void {
+    var suggested_pixel_format_index: c_int = 0;
+    var extended_pick: c_uint = 0;
+
+    if (optWglChoosePixelFormatARB) |wglChoosePixelFormatARB| {
+        const int_attrib_list = [_:0]c_int{
+            opengl.WGL_DRAW_TO_WINDOW_ARB,           win32.GL_TRUE,
+            opengl.WGL_ACCELERATION_ARB,             opengl.WGL_FULL_ACCELERATION_ARB,
+            opengl.WGL_SUPPORT_OPENGL_ARB,           win32.GL_TRUE,
+            opengl.WGL_DOUBLE_BUFFER_ARB,            win32.GL_TRUE,
+            opengl.WGL_PIXEL_TYPE_ARB,               opengl.WGL_TYPE_RGBA_ARB,
+            opengl.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, win32.GL_TRUE,
+            0,
+        };
+        const float_attrib_list = [_:0]f32{0};
+
+        if (wglChoosePixelFormatARB(
+            window_dc,
+            &int_attrib_list,
+            &float_attrib_list,
+            1,
+            &suggested_pixel_format_index,
+            &extended_pick,
+        ) == 0) {
+            outputLastGLError("wglChoosePixelFormatARB failed");
+        }
+    }
+
+    if (extended_pick == 0) {
+        var desired_pixel_format: win32.PIXELFORMATDESCRIPTOR = .{
+            .nSize = @sizeOf(win32.PIXELFORMATDESCRIPTOR),
+            .nVersion = 1,
+            .iPixelType = win32.PFD_TYPE_RGBA,
+            .dwFlags = win32.PFD_FLAGS{
+                .SUPPORT_OPENGL = 1,
+                .DRAW_TO_WINDOW = 1,
+                .DOUBLEBUFFER = 1,
+            },
+            .cColorBits = 32,
+            .cAlphaBits = 8,
+            .iLayerType = win32.PFD_MAIN_PLANE,
+            // Clear the rest to zero.
+            .cRedBits = 0,
+            .cRedShift = 0,
+            .cGreenBits = 0,
+            .cGreenShift = 0,
+            .cBlueBits = 0,
+            .cBlueShift = 0,
+            .cAlphaShift = 0,
+            .cAccumBits = 0,
+            .cAccumRedBits = 0,
+            .cAccumGreenBits = 0,
+            .cAccumBlueBits = 0,
+            .cAccumAlphaBits = 0,
+            .cDepthBits = 0,
+            .cStencilBits = 0,
+            .cAuxBuffers = 0,
+            .bReserved = 0,
+            .dwLayerMask = 0,
+            .dwVisibleMask = 0,
+            .dwDamageMask = 0,
+        };
+
+        suggested_pixel_format_index = win32.ChoosePixelFormat(window_dc, &desired_pixel_format);
+        if (suggested_pixel_format_index == 0) {
+            outputLastError("ChoosePixelFormat failed");
+        }
+    }
+
+    var suggested_pixel_format: win32.PIXELFORMATDESCRIPTOR = undefined;
+    const describe_result = DescribePixelFormat(
+        window_dc,
+        suggested_pixel_format_index,
+        @sizeOf(win32.PIXELFORMATDESCRIPTOR),
+        &suggested_pixel_format,
+    );
+    if (describe_result == 0) {
+        outputLastError("DescribePixelFormat failed");
+    }
+
+    const set_result = win32.SetPixelFormat(window_dc, suggested_pixel_format_index, &suggested_pixel_format);
+    if (set_result == 0) {
+        outputLastError("SetPixelFormat failed");
+    }
+}
+
+fn loadWglExtensions() void {
+    const window_class: win32.WNDCLASSW = .{
+        .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
+        .lpfnWndProc = win32.DefWindowProc,
+        .cbClsExtra = 0,
+        .cbWndExtra = 0,
+        .hInstance = win32.GetModuleHandle(null),
+        .hIcon = null,
+        .hbrBackground = win32.GetStockObject(win32.BLACK_BRUSH),
+        .hCursor = null,
+        .lpszMenuName = null,
+        .lpszClassName = win32.L("HandmadeZigWglLoaderWindowClass"),
+    };
+
+    if (win32.RegisterClassW(&window_class) != 0) {
+        const opt_window = win32.CreateWindowExW(
+            .{},
+            window_class.lpszClassName,
+            win32.L("Handmade Zig WglLoader"),
+            win32.WINDOW_STYLE{},
+            win32.CW_USEDEFAULT,
+            win32.CW_USEDEFAULT,
+            win32.CW_USEDEFAULT,
+            win32.CW_USEDEFAULT,
+            null,
+            null,
+            window_class.hInstance,
+            null,
+        );
+
+        if (opt_window) |dummy_window| {
+            if (win32.GetDC(dummy_window)) |dummy_window_dc| {
+                setPixelFormat(dummy_window_dc);
+
+                const opengl_rc = win32.wglCreateContext(dummy_window_dc);
+                if (win32.wglMakeCurrent(dummy_window_dc, opengl_rc) != 0) {
+                    optWglCreateContextAttribsARB = @ptrCast(win32.wglGetProcAddress("wglCreateContextAttribsARB"));
+                    optWglChoosePixelFormatARB = @ptrCast(win32.wglGetProcAddress("wglChoosePixelFormatARB"));
+                    optWglSwapInterval = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
+
+                    _ = win32.wglMakeCurrent(null, null);
+                }
+
+                _ = win32.wglDeleteContext(opengl_rc);
+                _ = win32.ReleaseDC(dummy_window, dummy_window_dc);
+            }
+
+            _ = win32.DestroyWindow(dummy_window);
+        }
+    }
+}
+
 fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
     var opengl_rc: ?win32.HGLRC = null;
 
+    loadWglExtensions();
+
     if (opt_window_dc) |window_dc| {
-        var suggested_pixel_format_index: c_int = 0;
-        var extended_pick: c_uint = 0;
+        var is_modern_context: bool = true;
 
-        optWglChoosePixelFormatARB = @ptrCast(win32.wglGetProcAddress("wglChoosePixelFormatARB"));
-        if (optWglChoosePixelFormatARB) |wglChoosePixelFormatARB| {
-            const int_attrib_list = [_:0]c_int{
-                opengl.WGL_DRAW_TO_WINDOW_ARB, win32.GL_TRUE,
-                opengl.WGL_ACCELERATION_ARB, opengl.WGL_FULL_ACCELERATION_ARB,
-                opengl.WGL_SUPPORT_OPENGL_ARB, win32.GL_TRUE,
-                opengl.WGL_DOUBLE_BUFFER_ARB, win32.GL_TRUE,
-                opengl.WGL_PIXEL_TYPE_ARB, opengl.WGL_TYPE_RGBA_ARB,
-                0
-            };
-            const float_attrib_list = [_:0]f32{ 0 };
+        if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
+            setPixelFormat(window_dc);
+            opengl_rc = wglCreateContextAttribsARB(window_dc, null, &opengl_attribs);
 
-            if (wglChoosePixelFormatARB(
-                    window_dc,
-                    &int_attrib_list,
-                    &float_attrib_list,
-                    1,
-                    &suggested_pixel_format_index,
-                    &extended_pick,
-            ) != 0) {
-                outputLastGLError("wglChoosePixelFormatARB failed");
-            }
-        } else {
-            outputLastError("Failed to get wglChoosePixelFormatARB");
-        }
-
-        if (extended_pick == 0) {
-            var desired_pixel_format: win32.PIXELFORMATDESCRIPTOR = .{
-                .nSize = @sizeOf(win32.PIXELFORMATDESCRIPTOR),
-                .nVersion = 1,
-                .iPixelType = win32.PFD_TYPE_RGBA,
-                .dwFlags = win32.PFD_FLAGS{
-                    .SUPPORT_OPENGL = 1,
-                    .DRAW_TO_WINDOW = 1,
-                    .DOUBLEBUFFER = 1,
-                },
-                .cColorBits = 32,
-                .cAlphaBits = 8,
-                .iLayerType = win32.PFD_MAIN_PLANE,
-                // Clear the rest to zero.
-                .cRedBits = 0,
-                .cRedShift = 0,
-                .cGreenBits = 0,
-                .cGreenShift = 0,
-                .cBlueBits = 0,
-                .cBlueShift = 0,
-                .cAlphaShift = 0,
-                .cAccumBits = 0,
-                .cAccumRedBits = 0,
-                .cAccumGreenBits = 0,
-                .cAccumBlueBits = 0,
-                .cAccumAlphaBits = 0,
-                .cDepthBits = 0,
-                .cStencilBits = 0,
-                .cAuxBuffers = 0,
-                .bReserved = 0,
-                .dwLayerMask = 0,
-                .dwVisibleMask = 0,
-                .dwDamageMask = 0,
-            };
-
-            suggested_pixel_format_index = win32.ChoosePixelFormat(window_dc, &desired_pixel_format);
-            if (suggested_pixel_format_index == 0) {
-                outputLastError("ChoosePixelFormat failed");
+            if (opengl_rc == null) {
+                outputLastGLError("Failed to create modern context");
             }
         }
 
-        var suggested_pixel_format: win32.PIXELFORMATDESCRIPTOR = undefined;
-        const describe_result = DescribePixelFormat(
-            window_dc,
-            suggested_pixel_format_index,
-            @sizeOf(win32.PIXELFORMATDESCRIPTOR),
-            &suggested_pixel_format,
-        );
-        if (describe_result == 0) {
-            outputLastError("DescribePixelFormat failed");
+        if (opengl_rc == null) {
+            is_modern_context = false;
+            opengl_rc = win32.wglCreateContext(window_dc);
         }
 
-        const set_result = win32.SetPixelFormat(window_dc, suggested_pixel_format_index, &suggested_pixel_format);
-        if (set_result == 0) {
-            outputLastError("SetPixelFormat failed");
-        }
-
-        opengl_rc = win32.wglCreateContext(window_dc);
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
-            var is_modern_context: bool = false;
-
-            optWglCreateContextAttribsARB = @ptrCast(win32.wglGetProcAddress("wglCreateContextAttribsARB"));
-            if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
-                // This is a modern version of OpenGL.
-                const share_context: ?win32.HGLRC = null;
-                const modern_context = wglCreateContextAttribsARB(window_dc, share_context, &opengl_attribs);
-                if (modern_context != null) {
-                    if (win32.wglMakeCurrent(window_dc, modern_context) != 0) {
-                        _ = win32.wglDeleteContext(opengl_rc);
-                        opengl_rc = modern_context;
-                        is_modern_context = true;
-                    } else {
-                        outputLastGLError("Failed to make modern context current");
-                    }
-                } else {
-                    outputLastGLError("Failed to create modern context");
-                }
-            } else {
-                // This is an antiquated version of OpenGL.
-            }
-
             opengl.init(is_modern_context);
-
-            optWglSwapInterval = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
             if (optWglSwapInterval) |wglSwapInterval| {
                 _ = wglSwapInterval(1);
             }
         } else {
-            outputLastError("wglCreateContext");
-            unreachable;
+            outputLastGLError("Failed to make modern context current");
         }
     }
 
