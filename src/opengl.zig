@@ -183,10 +183,13 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
                         x_axis.scaledTo(entry.size.x()).plus(y_axis.scaledTo(entry.size.y())),
                     );
 
-                    if (bitmap.texture_handle) |texture| {
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, @as(*u32, @ptrCast(@alignCast(texture))).*);
+                    if (bitmap.texture_handle > 0) {
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
                     }
+
                     drawRectangle(min_position, max_position, entry.color);
+
+                    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
                 }
             },
             .RenderEntryRectangle => {
@@ -303,7 +306,7 @@ pub fn displayBitmap(
     drawRectangle(min_position, max_position, color);
 }
 
-pub fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) ?*anyopaque {
+pub fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) u32 {
     var handle: u32 = 0;
 
     gl.glGenTextures(1, &handle);
@@ -327,12 +330,9 @@ pub fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) ?
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 
-    std.debug.assert(@sizeOf(u32) <= @sizeOf(*anyopaque));
-
-    // TODO: Surely this is a dangling pointer?
-    return @ptrCast(&handle);
+    return handle;
 }
 
-pub fn deallocateTexture(texture: ?*anyopaque) callconv(.C) void {
-    gl.glDeleteTextures(1, @ptrCast(@alignCast(texture)));
+pub fn deallocateTexture(texture: u32) callconv(.C) void {
+    gl.glDeleteTextures(1, &texture);
 }

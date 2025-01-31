@@ -17,8 +17,6 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
-/// * Flush all thread queues before reloading DLL.
-///
 /// * Debug code.
 ///     * Logging.
 ///     * Diagramming.
@@ -38,12 +36,9 @@ const std = @import("std");
 ///     * Particle systems.
 ///     * Lighting.
 ///     * Final optimization.
-///
-/// * Hardware Rendering
-///     * sRGB framebuffer and textures.
-///     * V-sync.
-///     * Background texture downloads.
-///     * Render-to-texture?
+///     * Hardware Rendering
+///         * Shaders?
+///         * Render-to-texture?
 ///
 /// ----
 ///

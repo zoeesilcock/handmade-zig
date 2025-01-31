@@ -90,7 +90,7 @@ pub extern "gdi32" fn DescribePixelFormat(
 
 // OpenGL
 const WglSwapIntervalEXT: type = fn (interval: i32) callconv(WINAPI) bool;
-var optWglSwapInterval: ?*const WglSwapIntervalEXT = null;
+var optWglSwapIntervalEXT: ?*const WglSwapIntervalEXT = null;
 
 const WglCreateContextAttribsARB: type = fn (
     hdc: win32.HDC,
@@ -102,12 +102,16 @@ var optWglCreateContextAttribsARB: ?*const WglCreateContextAttribsARB = null;
 const WglChoosePixelFormatARB: type = fn (
     hdc: win32.HDC,
     piAttribIList: [*:0]const c_int,
-    pfAttribFList: [*:0]const f32,
+    pfAttribFList: ?[*:0]const f32,
     nMaxFormats: c_uint,
     piFormats: *c_int,
     nNumFormats: *c_uint,
 ) callconv(WINAPI) win32.BOOL;
 var optWglChoosePixelFormatARB: ?*const WglChoosePixelFormatARB = null;
+
+const WglGetExtensionsStringEXT: type = fn (hdc: win32.HDC) callconv(WINAPI) ?*u8;
+var optWglGetExtensionsStringEXT: ?*const WglGetExtensionsStringEXT = null;
+var opengl_supports_srgb_frame_buffer: bool = false;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -119,8 +123,6 @@ var perf_count_frequency: i64 = 0;
 var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 var local_stub_debug_table: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
-var global_dc: ?win32.HDC = null;
-var global_opengl_rc: ?win32.HGLRC = null;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -189,9 +191,9 @@ const Win32State = struct {
 };
 
 const ThreadStartup = struct {
-    window: win32.HWND,
-    opengl_rc: win32.HGLRC,
-    queue: *shared.PlatformWorkQueue,
+    window_dc: ?win32.HDC = null,
+    opengl_rc: ?win32.HGLRC = null,
+    queue: *shared.PlatformWorkQueue = undefined,
 };
 
 const FaderState = enum {
@@ -1218,8 +1220,6 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
 }
 
 const opengl_flags: c_int = if (INTERNAL)
-    // Enable opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB for testing?
-    // opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
     0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
 else
     0;
@@ -1231,21 +1231,20 @@ const opengl_attribs = [_:0]c_int{
     0,
 };
 
-fn createOpenGLContextForWorkerThread() void {
-    if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
-        if (global_dc) |window_dc| {
-            std.debug.assert(global_opengl_rc != null);
+pub fn getThreadStartupForGL(window_dc: ?win32.HDC, share_context: ?win32.HGLRC) ThreadStartup {
+    var result: ThreadStartup = .{
+        .window_dc = window_dc,
+    };
 
-            if (wglCreateContextAttribsARB(window_dc, global_opengl_rc, &opengl_attribs)) |modern_context| {
-                if (win32.wglMakeCurrent(window_dc, modern_context) != 0) {
-                } else {
-                    outputLastGLError("Failed to make context current in worker thread");
-                }
-            } else {
-                outputLastGLError("Failed to create context in worker thread");
-            }
+    if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
+        if (wglCreateContextAttribsARB(window_dc.?, share_context, &opengl_attribs)) |modern_context| {
+            result.opengl_rc = modern_context;
+        } else {
+            outputLastGLError("Failed to create context for worker thread");
         }
     }
+
+    return result;
 }
 
 fn setPixelFormat(window_dc: win32.HDC) void {
@@ -1253,7 +1252,7 @@ fn setPixelFormat(window_dc: win32.HDC) void {
     var extended_pick: c_uint = 0;
 
     if (optWglChoosePixelFormatARB) |wglChoosePixelFormatARB| {
-        const int_attrib_list = [_:0]c_int{
+        var int_attrib_list = [_:0]c_int{
             opengl.WGL_DRAW_TO_WINDOW_ARB,           win32.GL_TRUE,
             opengl.WGL_ACCELERATION_ARB,             opengl.WGL_FULL_ACCELERATION_ARB,
             opengl.WGL_SUPPORT_OPENGL_ARB,           win32.GL_TRUE,
@@ -1262,12 +1261,15 @@ fn setPixelFormat(window_dc: win32.HDC) void {
             opengl.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, win32.GL_TRUE,
             0,
         };
-        const float_attrib_list = [_:0]f32{0};
+
+        if (!opengl_supports_srgb_frame_buffer) {
+            int_attrib_list[10] = 0;
+        }
 
         if (wglChoosePixelFormatARB(
             window_dc,
             &int_attrib_list,
-            &float_attrib_list,
+            null,
             1,
             &suggested_pixel_format_index,
             &extended_pick,
@@ -1328,8 +1330,7 @@ fn setPixelFormat(window_dc: win32.HDC) void {
         outputLastError("DescribePixelFormat failed");
     }
 
-    const set_result = win32.SetPixelFormat(window_dc, suggested_pixel_format_index, &suggested_pixel_format);
-    if (set_result == 0) {
+    if (win32.SetPixelFormat(window_dc, suggested_pixel_format_index, &suggested_pixel_format) == 0) {
         outputLastError("SetPixelFormat failed");
     }
 }
@@ -1372,7 +1373,31 @@ fn loadWglExtensions() void {
                 if (win32.wglMakeCurrent(dummy_window_dc, opengl_rc) != 0) {
                     optWglCreateContextAttribsARB = @ptrCast(win32.wglGetProcAddress("wglCreateContextAttribsARB"));
                     optWglChoosePixelFormatARB = @ptrCast(win32.wglGetProcAddress("wglChoosePixelFormatARB"));
-                    optWglSwapInterval = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
+                    optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
+                    optWglGetExtensionsStringEXT = @ptrCast(win32.wglGetProcAddress("wglGetExtensionsStringEXT"));
+
+                    if (optWglGetExtensionsStringEXT) |wglGetExtensionsStringEXT| {
+                        const extensions = wglGetExtensionsStringEXT(dummy_window_dc);
+
+                        var at: [*]const u8 = @ptrCast(extensions);
+                        while (at[0] != 0) {
+                            while (shared.isWhitespace(at[0])) {
+                                at += 1;
+                            }
+                            var end = at;
+                            while (end[0] != 0 and !shared.isWhitespace(end[0])) {
+                                end += 1;
+                            }
+
+                            const count = @intFromPtr(end) - @intFromPtr(at);
+
+                            if (shared.stringsWithOneLengthAreEqual(at, count, "WGL_EXT_framebuffer_sRGB")) {
+                                opengl_supports_srgb_frame_buffer = true;
+                            }
+
+                            at = end;
+                        }
+                    }
 
                     _ = win32.wglMakeCurrent(null, null);
                 }
@@ -1410,8 +1435,8 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
 
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
             opengl.init(is_modern_context);
-            if (optWglSwapInterval) |wglSwapInterval| {
-                _ = wglSwapInterval(1);
+            if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
+                _ = wglSwapIntervalEXT(1);
             }
         } else {
             outputLastGLError("Failed to make modern context current");
@@ -1890,7 +1915,7 @@ fn endInputPlayback(state: *Win32State) void {
     state.playback_handle = undefined;
 }
 
-fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: i32) void {
+fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: i32, startups: [*]ThreadStartup) void {
     const initial_count = 0;
     const opt_semaphore_handle = win32.CreateSemaphoreEx(
         null,
@@ -1907,11 +1932,14 @@ fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: i32) void {
         var thread_index: u32 = 0;
         while (thread_index < thread_count) : (thread_index += 1) {
             var thread_id: std.os.windows.DWORD = undefined;
+            var startup: [*]ThreadStartup = startups + thread_index;
+            startup[0].queue = queue;
+
             const thread_handle = win32.CreateThread(
                 null,
                 0,
                 threadProc,
-                @ptrCast(@constCast(queue)),
+                @ptrCast(@constCast(startup)),
                 win32.THREAD_CREATE_RUN_IMMEDIATELY,
                 &thread_id,
             );
@@ -1976,10 +2004,15 @@ pub fn doNextWorkQueueEntry(queue: *shared.PlatformWorkQueue) bool {
 
 fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
     if (lp_parameter) |parameter| {
-        const queue: *shared.PlatformWorkQueue = @ptrCast(@alignCast(parameter));
+        const thread: *ThreadStartup = @ptrCast(@alignCast(parameter));
+        const queue: *shared.PlatformWorkQueue = thread.queue;
 
-        if (queue.needs_opengl) {
-            createOpenGLContextForWorkerThread();
+        if (thread.window_dc) |window_dc| {
+            if (thread.opengl_rc) |opengl_rc| {
+                if (win32.wglMakeCurrent(window_dc, opengl_rc) == 0) {
+                    outputLastGLError("Failed to make opengl context current on worker thread");
+                }
+            }
         }
 
         while (true) {
@@ -2027,11 +2060,7 @@ fn outputLastGLError(title: []const u8) void {
         std.debug.print("{s}: {d}\n", .{ title, last_error });
     } else {
         var buffer: [128]u8 = undefined;
-        const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}\n", .{
-            title,
-            @intFromEnum(last_error),
-        }) catch "";
-
+        const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}\n", .{ title, last_error }) catch "";
         win32.OutputDebugStringA(@ptrCast(slice.ptr));
     }
 }
@@ -2139,13 +2168,20 @@ pub export fn wWinMain(
 
         if (opt_window_handle) |window_handle| {
             toggleFullscreen(window_handle);
-            global_dc = win32.GetDC(window_handle);
-            global_opengl_rc = initOpenGL(global_dc);
+            const window_dc = win32.GetDC(window_handle);
+            const opengl_rc = initOpenGL(window_dc);
 
-            var high_priority_queue = shared.PlatformWorkQueue{ .needs_opengl = false };
-            makeQueue(&high_priority_queue, 6);
-            var low_priority_queue = shared.PlatformWorkQueue{ .needs_opengl = true };
-            makeQueue(&low_priority_queue, 2);
+            var high_priority_startups: [6]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 6;
+            var high_priority_queue = shared.PlatformWorkQueue{};
+            makeQueue(&high_priority_queue, high_priority_startups.len, @ptrCast(&high_priority_startups));
+
+            // TODO: Enable both threads once we have texture loading working.
+            var low_priority_startups: [1]ThreadStartup = [1]ThreadStartup{
+                getThreadStartupForGL(window_dc, opengl_rc),
+                // getThreadStartupForGL(window_dc, opengl_rc),
+            };
+            var low_priority_queue = shared.PlatformWorkQueue{};
+            makeQueue(&low_priority_queue, low_priority_startups.len, @ptrCast(&low_priority_startups));
 
             if (INTERNAL) {
                 _ = win32.SetLayeredWindowAttributes(window_handle, 0, DEBUG_WINDOW_ACTIVE_OPACITY, win32.LWA_ALPHA);
