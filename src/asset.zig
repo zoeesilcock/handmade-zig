@@ -1,6 +1,7 @@
 const shared = @import("shared.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
+const render = @import("render.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
 const file_formats = @import("file_formats");
@@ -30,6 +31,7 @@ const FontId = file_formats.FontId;
 const PlatformFileHandle = shared.PlatformFileHandle;
 const ArenaPushParams = shared.ArenaPushParams;
 const TimedBlock = debug_interface.TimedBlock;
+const TextureOp = render.TextureOp;
 
 pub const AssetTypeId = file_formats.AssetTypeId;
 pub const AssetTagId = file_formats.AssetTagId;
@@ -115,6 +117,8 @@ const AssetMemoryBlock = extern struct {
 };
 
 pub const Assets = struct {
+    texture_op_queue: *shared.PlatformTextureOpQueue,
+
     next_generation_id: u32,
 
     transient_state: *TransientState,
@@ -145,8 +149,11 @@ pub const Assets = struct {
         arena: *MemoryArena,
         memory_size: MemoryIndex,
         transient_state: *shared.TransientState,
+        texture_op_queue: *shared.PlatformTextureOpQueue,
     ) *Assets {
         var assets = arena.pushStruct(Assets, ArenaPushParams.aligned(@alignOf(Assets), true));
+
+        assets.texture_op_queue = texture_op_queue;
 
         assets.next_generation_id = 0;
         assets.in_flight_generation_count = 0;
@@ -478,7 +485,15 @@ pub const Assets = struct {
                         self.removeAssetHeaderFromList(header.?);
 
                         if (header.?.asset_type == .Bitmap) {
-                            shared.platform.deallocateTexture(header.?.data.bitmap.texture_handle);
+                            const op = TextureOp{
+                                .is_allocate = false,
+                                .op = .{
+                                    .deallocate = .{
+                                        .handle = header.?.data.bitmap.texture_handle,
+                                    },
+                                },
+                            };
+                            addOp(self.texture_op_queue, &op);
                         }
 
                         opt_block = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(@alignCast(asset.header))) - 1);
@@ -675,6 +690,7 @@ pub const Assets = struct {
                             .destination = @ptrCast(bitmap.memory),
                             .finalize_operation = .Bitmap,
                             .final_state = AssetState.Loaded.toInt(),
+                            .texture_op_queue = self.texture_op_queue,
                         };
 
                         if (opt_task) |task| {
@@ -841,6 +857,7 @@ pub const Assets = struct {
                     work.destination = memory;
                     work.finalize_operation = .None;
                     work.final_state = AssetState.Loaded.toInt();
+                    work.texture_op_queue = null;
 
                     shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
@@ -967,6 +984,7 @@ pub const Assets = struct {
                             .destination = @ptrCast(font.glyphs),
                             .finalize_operation = .Font,
                             .final_state = AssetState.Loaded.toInt(),
+                            .texture_op_queue = null,
                         };
 
                         if (opt_task) |task| {
@@ -1119,7 +1137,32 @@ const LoadAssetWork = struct {
 
     finalize_operation: FinalizeLoadAssetOperation,
     final_state: u32,
+
+    texture_op_queue: ?*shared.PlatformTextureOpQueue,
 };
+
+fn addOp(queue: *shared.PlatformTextureOpQueue, source: *const TextureOp) void {
+    queue.mutex.begin();
+
+    std.debug.assert(queue.first_free != null);
+
+    const dest: *TextureOp = queue.first_free.?;
+    queue.first_free = dest.next;
+
+    dest.* = source.*;
+
+    std.debug.assert(dest.next == null);
+
+    if (queue.last != null) {
+        queue.last.?.next = dest;
+        queue.last = dest;
+    } else {
+        queue.first = dest;
+        queue.last = dest;
+    }
+
+    queue.mutex.end();
+}
 
 fn doLoadAssetWorkDirectly(
     work: *LoadAssetWork,
@@ -1149,9 +1192,20 @@ fn doLoadAssetWorkDirectly(
             },
             .Bitmap => {
                 const bitmap: *LoadedBitmap = &work.asset.header.?.data.bitmap;
-                bitmap.texture_handle =
-                    shared.platform.allocateTexture(bitmap.width, bitmap.height, @ptrCast(bitmap.memory));
-            }
+                const op: TextureOp = .{
+                    .is_allocate = true,
+                    .op = .{
+                        .allocate = .{
+                            .width = bitmap.width,
+                            .height = bitmap.height,
+                            .data = @ptrCast(bitmap.memory),
+                            .result_handle = &bitmap.texture_handle,
+                        },
+                    },
+                };
+
+                addOp(work.texture_op_queue.?, &op);
+            },
         }
     }
 

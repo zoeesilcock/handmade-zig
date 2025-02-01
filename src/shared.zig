@@ -13,6 +13,7 @@ const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
 const sim = @import("sim.zig");
 const rendergroup = @import("rendergroup.zig");
+const render = @import("render.zig");
 const file_formats = @import("file_formats");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
@@ -86,6 +87,28 @@ pub fn getThreadId() u32 {
 
     return thread_id.*;
 }
+
+pub const TicketMutex = extern struct {
+    ticket: u64,
+    serving: u64,
+
+    pub fn begin(self: *TicketMutex) void {
+        const ticket = @atomicRmw(u64, &self.ticket, .Add, 1, .seq_cst);
+        while (ticket != self.serving) { }
+    }
+
+    pub fn end(self: *TicketMutex) void {
+        _ = @atomicRmw(u64, &self.serving, .Add, 1, .seq_cst);
+    }
+};
+
+pub const PlatformTextureOpQueue = extern struct {
+    mutex: TicketMutex = undefined,
+
+    first: ?*render.TextureOp = null,
+    last: ?*render.TextureOp = null,
+    first_free: ?*render.TextureOp = null,
+};
 
 pub inline fn alignPow2(value: u32, alignment: u32) u32 {
     return (value + (alignment - 1)) & ~@as(u32, alignment - 1);
@@ -249,9 +272,6 @@ pub const DebugExecutingProcessState = extern struct {
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
-const allocateTextureType: type = fn (width: i32, height: i32, data: *anyopaque) callconv(.C) u32;
-const deallocateTextureType: type = fn (texture: u32) callconv(.C) void;
-
 const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.C) PlatformFileGroup;
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.C) void;
 const openNextFileType: type = fn (file_group: *PlatformFileGroup) callconv(.C) PlatformFileHandle;
@@ -276,9 +296,6 @@ pub const Platform = if (INTERNAL) extern struct {
     addQueueEntry: *const addQueueEntryType = undefined,
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
 
-    allocateTexture: *const allocateTextureType = undefined,
-    deallocateTexture: *const deallocateTextureType = undefined,
-
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
     openNextFile: *const openNextFileType = undefined,
@@ -297,9 +314,6 @@ pub const Platform = if (INTERNAL) extern struct {
 } else extern struct {
     addQueueEntry: *const addQueueEntryType = undefined,
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
-
-    allocateTexture: *const allocateTextureType = undefined,
-    deallocateTexture: *const deallocateTextureType = undefined,
 
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
@@ -492,6 +506,7 @@ pub const Memory = struct {
 
     high_priority_queue: *PlatformWorkQueue,
     low_priority_queue: *PlatformWorkQueue,
+    texture_op_queue: PlatformTextureOpQueue = .{},
 
     executable_reloaded: bool = false,
 };

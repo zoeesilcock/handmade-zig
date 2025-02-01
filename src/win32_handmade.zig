@@ -191,8 +191,6 @@ const Win32State = struct {
 };
 
 const ThreadStartup = struct {
-    window_dc: ?win32.HDC = null,
-    opengl_rc: ?win32.HGLRC = null,
     queue: *shared.PlatformWorkQueue = undefined,
 };
 
@@ -1231,22 +1229,6 @@ const opengl_attribs = [_:0]c_int{
     0,
 };
 
-pub fn getThreadStartupForGL(window_dc: ?win32.HDC, share_context: ?win32.HGLRC) ThreadStartup {
-    var result: ThreadStartup = .{
-        .window_dc = window_dc,
-    };
-
-    if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
-        if (wglCreateContextAttribsARB(window_dc.?, share_context, &opengl_attribs)) |modern_context| {
-            result.opengl_rc = modern_context;
-        } else {
-            outputLastGLError("Failed to create context for worker thread");
-        }
-    }
-
-    return result;
-}
-
 fn setPixelFormat(window_dc: win32.HDC) void {
     var suggested_pixel_format_index: c_int = 0;
     var extended_pick: c_uint = 0;
@@ -2007,14 +1989,6 @@ fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
         const thread: *ThreadStartup = @ptrCast(@alignCast(parameter));
         const queue: *shared.PlatformWorkQueue = thread.queue;
 
-        if (thread.window_dc) |window_dc| {
-            if (thread.opengl_rc) |opengl_rc| {
-                if (win32.wglMakeCurrent(window_dc, opengl_rc) == 0) {
-                    outputLastGLError("Failed to make opengl context current on worker thread");
-                }
-            }
-        }
-
         while (true) {
             if (doNextWorkQueueEntry(queue)) {
                 _ = win32.WaitForSingleObjectEx(queue.semaphore_handle, std.math.maxInt(u32), 0);
@@ -2105,9 +2079,6 @@ pub export fn wWinMain(
         .addQueueEntry = addQueueEntry,
         .completeAllQueuedWork = completeAllQueuedWork,
 
-        .allocateTexture = opengl.allocateTexture,
-        .deallocateTexture = opengl.deallocateTexture,
-
         .getAllFilesOfTypeBegin = getAllFilesOfTypeBegin,
         .getAllFilesOfTypeEnd = getAllFilesOfTypeEnd,
         .openNextFile = openNextFile,
@@ -2169,17 +2140,13 @@ pub export fn wWinMain(
         if (opt_window_handle) |window_handle| {
             toggleFullscreen(window_handle);
             const window_dc = win32.GetDC(window_handle);
-            const opengl_rc = initOpenGL(window_dc);
+            _ = initOpenGL(window_dc);
 
             var high_priority_startups: [6]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 6;
             var high_priority_queue = shared.PlatformWorkQueue{};
             makeQueue(&high_priority_queue, high_priority_startups.len, @ptrCast(&high_priority_startups));
 
-            // TODO: Enable both threads once we have texture loading working.
-            var low_priority_startups: [1]ThreadStartup = [1]ThreadStartup{
-                getThreadStartupForGL(window_dc, opengl_rc),
-                // getThreadStartupForGL(window_dc, opengl_rc),
-            };
+            var low_priority_startups: [2]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 2;
             var low_priority_queue = shared.PlatformWorkQueue{};
             makeQueue(&low_priority_queue, low_priority_startups.len, @ptrCast(&low_priority_startups));
 
@@ -2236,6 +2203,22 @@ pub export fn wWinMain(
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
             };
+
+            const texture_op_count: u32 = 1024;
+            var texture_op_queue: *shared.PlatformTextureOpQueue = &game_memory.texture_op_queue;
+            texture_op_queue.first_free = @ptrCast(@alignCast(win32.VirtualAlloc(
+                null,
+                @sizeOf(render.TextureOp) * texture_op_count,
+                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+                win32.PAGE_READWRITE,
+            )));
+
+            var texture_op_index: u32 = 0;
+            while (texture_op_index < (texture_op_count - 1)) : (texture_op_index += 1) {
+                const first_free: [*]render.TextureOp = @ptrCast(game_memory.texture_op_queue.first_free.?);
+                var op: [*]render.TextureOp = first_free + texture_op_index;
+                op[0].next = @ptrCast(first_free + texture_op_index + 1);
+            }
 
             state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size + game_memory.debug_storage_size;
             const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
@@ -2626,6 +2609,24 @@ pub export fn wWinMain(
                         deallocateMemory(sort_memory);
                         current_sort_memory_size = needed_sort_memory_size;
                         sort_memory = allocateMemory(current_sort_memory_size);
+                    }
+
+                    texture_op_queue.mutex.begin();
+                    const first_texture_op: ?*render.TextureOp = texture_op_queue.first;
+                    const last_texture_op: ?*render.TextureOp = texture_op_queue.last;
+                    texture_op_queue.first = null;
+                    texture_op_queue.last = null;
+                    texture_op_queue.mutex.end();
+
+                    if (first_texture_op != null) {
+                        std.debug.assert(last_texture_op != null);
+
+                        _ = opengl.manageTextures(first_texture_op);
+
+                        texture_op_queue.mutex.begin();
+                        last_texture_op.?.next = texture_op_queue.first_free;
+                        texture_op_queue.first_free = first_texture_op;
+                        texture_op_queue.mutex.end();
                     }
 
                     displayBufferInWindow(

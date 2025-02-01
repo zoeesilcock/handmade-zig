@@ -1,5 +1,6 @@
 const shared = @import("shared.zig");
 const rendergroup = @import("rendergroup.zig");
+const render = @import("render.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
 const debug_interface = @import("debug_interface.zig");
@@ -51,6 +52,7 @@ const Vector2 = math.Vector2;
 const Color = math.Color;
 const Rectangle2i = math.Rectangle2i;
 const TimedBlock = debug_interface.TimedBlock;
+const TextureOp = render.TextureOp;
 
 pub const gl = struct {
     // TODO: How do we import OpenGL on other platforms here?
@@ -208,6 +210,48 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
     }
 }
 
+pub fn manageTextures(first_op: ?*TextureOp) void {
+    var opt_op: ?*render.TextureOp = first_op;
+    while (opt_op) |op| : (opt_op = op.next) {
+        if (op.is_allocate) {
+            op.op.allocate.result_handle.* = allocateTexture(
+                op.op.allocate.width,
+                op.op.allocate.height,
+                op.op.allocate.data,
+            );
+        } else {
+            gl.glDeleteTextures(1, &op.op.deallocate.handle);
+        }
+    }
+}
+
+fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) u32 {
+    var handle: u32 = 0;
+
+    gl.glGenTextures(1, &handle);
+    gl.glBindTexture(gl.GL_TEXTURE_2D, handle);
+    gl.glTexImage2D(
+        gl.GL_TEXTURE_2D,
+        0,
+        default_internal_texture_format,
+        width,
+        height,
+        0,
+        gl.GL_BGRA_EXT,
+        gl.GL_UNSIGNED_BYTE,
+        data,
+    );
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
+    gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
+
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+
+    return handle;
+}
+
 fn drawRectangle(min_position: Vector2, max_position: Vector2, color: Color) void {
     gl.glBegin(gl.GL_TRIANGLES);
     {
@@ -304,35 +348,4 @@ pub fn displayBitmap(
     const color = math.Color.new(1, 1, 1, 1);
 
     drawRectangle(min_position, max_position, color);
-}
-
-pub fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) u32 {
-    var handle: u32 = 0;
-
-    gl.glGenTextures(1, &handle);
-    gl.glBindTexture(gl.GL_TEXTURE_2D, handle);
-    gl.glTexImage2D(
-        gl.GL_TEXTURE_2D,
-        0,
-        default_internal_texture_format,
-        width,
-        height,
-        0,
-        gl.GL_BGRA_EXT,
-        gl.GL_UNSIGNED_BYTE,
-        data,
-    );
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
-    gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
-
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
-
-    return handle;
-}
-
-pub fn deallocateTexture(texture: u32) callconv(.C) void {
-    gl.glDeleteTextures(1, &texture);
 }

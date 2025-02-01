@@ -182,6 +182,7 @@ pub export fn updateAndRender(
             &transient_state.arena,
             shared.megabytes(256),
             transient_state,
+            &memory.texture_op_queue,
         );
 
         // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {

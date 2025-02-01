@@ -48,6 +48,27 @@ pub const TileRenderWork = struct {
     clip_rect: Rectangle2i,
 };
 
+const TextureOpAllocate = struct {
+    width: i32,
+    height: i32,
+    data: *anyopaque,
+    result_handle: *u32,
+};
+
+const TextureOpDeallocate = struct {
+    handle: u32,
+};
+
+pub const TextureOp = struct {
+    next: ?*TextureOp = null,
+    is_allocate: bool,
+
+    op: union {
+        allocate: TextureOpAllocate,
+        deallocate: TextureOpDeallocate,
+    }
+};
+
 pub fn softwareRenderCommands(
     render_queue: *shared.PlatformWorkQueue,
     commands: *RenderCommands,
