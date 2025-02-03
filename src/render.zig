@@ -8,6 +8,7 @@ const debug_interface = @import("debug_interface.zig");
 
 // TODO: How would we import other platforms here?
 const platform = @import("win32_handmade.zig");
+var show_lighting_samples: bool = false;
 
 const INTERNAL = shared.INTERNAL;
 
@@ -1302,7 +1303,7 @@ inline fn sampleEnvironmentMap(
     std.debug.assert(rounded_x >= 0 and rounded_x < lod.width);
     std.debug.assert(rounded_y >= 0 and rounded_y < lod.height);
 
-    if (DebugInterface.debugIf(@src(), "Renderer_ShowLightingSamples")) {
+    if (show_lighting_samples) {
         // Debug where we are sampling from on the environment map.
         const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
         const texture_base = shared.incrementPointer(lod.memory.?, test_offset);

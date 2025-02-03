@@ -48,6 +48,7 @@ const debug_interface = @import("debug_interface.zig");
 // Types
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
+const DebugId = debug_interface.DebugId;
 const WINAPI = @import("std").os.windows.WINAPI;
 
 const std = @import("std");
@@ -115,14 +116,20 @@ var opengl_supports_srgb_frame_buffer: bool = false;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
-var running: bool = false;
-var use_software_rendering: bool = false;
+pub var running: bool = false;
+pub var rendering_type: RenderingType = .RenderOpenGLDisplayOpenGL;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
 var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 var local_stub_debug_table: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
+
+const RenderingType = enum(u8) {
+   RenderOpenGLDisplayOpenGL,
+   RenderSoftwareDisplayOpenGL,
+   RenderSoftwareDisplayGDI,
+};
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -1527,7 +1534,11 @@ fn displayBufferInWindow(
     //     render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
     // }
 
-    if (DebugInterface.debugIf(@src(), "Renderer_UseSoftware")) {
+    if (rendering_type == .RenderOpenGLDisplayOpenGL) {
+        opengl.renderCommands(commands, window_width, window_height);
+
+        _ = win32.SwapBuffers(device_context.?);
+    } else {
         var output_target: asset.LoadedBitmap = .{
             .memory = @ptrCast(back_buffer.memory.?),
             .width = @intCast(back_buffer.width),
@@ -1536,8 +1547,7 @@ fn displayBufferInWindow(
         };
         render.softwareRenderCommands(render_queue, commands, &output_target, sort_memory);
 
-        const display_via_hardware = true;
-        if (display_via_hardware) {
+        if (rendering_type == .RenderSoftwareDisplayOpenGL) {
             opengl.displayBitmap(
                 dim.blit_width,
                 dim.blit_height,
@@ -1550,6 +1560,8 @@ fn displayBufferInWindow(
             );
             _ = win32.SwapBuffers(device_context.?);
         } else {
+            std.debug.assert(rendering_type == .RenderSoftwareDisplayGDI);
+
             // Clear areas outside of our drawing area.
             _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
             _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
@@ -1572,10 +1584,6 @@ fn displayBufferInWindow(
                 win32.SRCCOPY,
             );
         }
-    } else {
-        opengl.renderCommands(commands, window_width, window_height);
-
-        _ = win32.SwapBuffers(device_context.?);
     }
 }
 
@@ -2312,6 +2320,12 @@ pub export fn wWinMain(
 
                 while (running) {
                     var timed_block = TimedBlock.beginBlock(@src(), .ExecutableRefresh);
+
+                    const debug_id = DebugId.fromPointer(@ptrCast(@constCast(&debug_time_marker_index)));
+                    DebugInterface.debugBeginDataBlock(@src(), "Platform_Controls", debug_id);
+                    DebugInterface.debugValue(@src(), @This(), "running");
+                    DebugInterface.debugValue(@src(), @This(), "rendering_type");
+                    DebugInterface.debugEndDataBlock(@src());
 
                     //
                     //

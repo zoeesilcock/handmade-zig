@@ -28,6 +28,8 @@ const std = @import("std");
 const INTERNAL = shared.INTERNAL;
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 
+const global_config = @import("config.zig").global_config;
+
 // Types.
 const Vector2 = math.Vector2;
 const Vector2i = math.Vector2i;
@@ -174,8 +176,8 @@ fn getRenderEntityBasisPosition(
         const offset_z: f32 = 0;
         var distance_above_target = camera_transform.distance_above_target;
 
-        if (DebugInterface.debugIf(@src(), "Renderer_Camera_UseDebug")) {
-            distance_above_target += DebugInterface.debugVariable(@src(), f32, "Renderer_Camera_DebugDistance");
+        if (global_config.Renderer_Camera_UseDebug) {
+            distance_above_target += global_config.Renderer_Camera_DebugDistance;
         }
 
         const distance_to_position_z = distance_above_target - position.z();
@@ -406,11 +408,12 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
         align_coefficient: f32,
+        opt_sort_bias: ?f32,
     ) void {
         const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient);
 
         if (dim.basis.valid) {
-            if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key)) |entry| {
+            if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key + (opt_sort_bias orelse 0))) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
                 entry.size = dim.size.scaledTo(dim.basis.scale);
@@ -427,6 +430,7 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
         opt_align_coefficient: ?f32,
+        opt_sort_bias: ?f32,
     ) void {
         const align_coefficient: f32 = opt_align_coefficient orelse 1;
         if (opt_id) |id| {
@@ -438,7 +442,7 @@ pub const RenderGroup = extern struct {
             }
 
             if (opt_bitmap) |bitmap| {
-                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient);
+                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient, opt_sort_bias);
             } else {
                 std.debug.assert(!self.renders_in_background);
 

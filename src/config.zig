@@ -1,8 +1,6 @@
-pub const global_constants = GlobalConstants{};
+pub const global_config = Config{};
 
-pub const GlobalConstants = struct {
-    Renderer_ShowLightingSamples: bool = false,
-    Renderer_UseSoftware: bool = false,
+pub const Config = struct {
     Renderer_Camera_UseDebug: bool = false,
     Renderer_Camera_DebugDistance: f32 = 25,
     Renderer_Camera_RoomBased: bool = false,

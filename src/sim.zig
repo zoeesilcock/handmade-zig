@@ -6,6 +6,8 @@ const config = @import("config.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
+const global_config = @import("config.zig").global_config;
+
 // Types.
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -833,7 +835,7 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
             var new_camera_position = world_mode.camera_position;
             new_camera_position.chunk_z = stored.position.chunk_z;
 
-            if (DebugInterface.debugIf(@src(), "Renderer_Camera_RoomBased")) {
+            if (global_config.Renderer_Camera_RoomBased) {
                 if (entity.position.x() > 9.0) {
                     new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(18, 0, 0));
                 } else if (entity.position.x() < -9.0) {

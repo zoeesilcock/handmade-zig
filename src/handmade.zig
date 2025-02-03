@@ -93,6 +93,8 @@ const std = @import("std");
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
+const global_config = @import("config.zig").global_config;
+
 // Types.
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -247,7 +249,7 @@ pub export fn updateAndRender(
         cutscene.playIntroCutscene(state, transient_state);
     }
 
-    if (DebugInterface.debugIf(@src(), "GroundChunks_RecomputeOnEXEChange")) {
+    if (global_config.GroundChunks_RecomputeOnEXEChange) {
         if (memory.executable_reloaded) {
             for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
                 const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -263,7 +265,7 @@ pub export fn updateAndRender(
     //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
     // }
 
-    // if (DebugInterface.debugIf(@src(), "Renderer_TestWeirdDrawBufferSize")) {
+    // if (global_config.Renderer_TestWeirdDrawBufferSize) {
     //     // Enable this to test weird buffer sizes in the renderer.
     //     draw_buffer.width = 1279;
     //     draw_buffer.height = 719;

@@ -421,52 +421,6 @@ pub const DebugInterface = if (INTERNAL) struct {
             },
         });
     }
-
-    pub fn debugVariable(comptime source: std.builtin.SourceLocation, comptime T: type, comptime path: []const u8) T {
-        const LocalStorage = LocalStorageType();
-        const local_persist = struct {
-            var storage: LocalStorage = LocalStorage{};
-        };
-
-        const event: *?DebugEvent = &@field(local_persist.storage, path);
-        if (event.* == null) {
-            const default_value = @field(config.global_constants, path);
-            event.* = DebugEvent{};
-            event.* = debug.initializeDebugValue(
-                source,
-                .bool,
-                &event.*.?,
-                DebugEvent.uniqueFileCounterString(source.file, source.line, @field(DebugType, @typeName(T))),
-                path,
-            );
-            event.*.?.setValue(default_value);
-        }
-
-        return @field(event.*.?.data, @typeName(T));
-    }
-
-    pub fn debugIf(comptime source: std.builtin.SourceLocation, comptime path: []const u8) bool {
-        const LocalStorage = LocalStorageType();
-        const local_persist = struct {
-            var storage: LocalStorage = LocalStorage{};
-        };
-
-        const event: *?DebugEvent = &@field(local_persist.storage, path);
-        if (event.* == null) {
-            const default_value = @field(config.global_constants, path);
-            event.* = DebugEvent{};
-            event.* = debug.initializeDebugValue(
-                source,
-                .bool,
-                &event.*.?,
-                DebugEvent.uniqueFileCounterString(source.file, source.line, .bool),
-                path,
-            );
-            event.*.?.setValue(default_value);
-        }
-
-        return event.*.?.data.bool;
-    }
 } else struct {
     pub fn debugBeginDataBlock(
         source: std.builtin.SourceLocation,
@@ -497,14 +451,5 @@ pub const DebugInterface = if (INTERNAL) struct {
 
     pub fn debugEndDataBlock(source: std.builtin.SourceLocation) void {
         _ = source;
-    }
-    pub fn debugVariable(source: std.builtin.SourceLocation, comptime T: type, comptime path: []const u8) T {
-        _ = source;
-        return @field(config.global_constants, path);
-    }
-
-    pub fn debugIf(source: std.builtin.SourceLocation, comptime path: []const u8) bool {
-        _ = source;
-        return @field(config.global_constants, path);
     }
 };

@@ -1389,6 +1389,7 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
                         element.bounds.min.toVector3(0),
                         Color.white(),
                         0,
+                        null
                     );
                 },
                 else => {
@@ -1835,6 +1836,16 @@ pub fn textOp(
                                     bitamp_offset,
                                     color,
                                     null,
+                                    200000,
+                                );
+                                render_group.pushBitmapId(
+                                    ObjectTransform.defaultFlat(),
+                                    bitmap_id,
+                                    bitmap_scale,
+                                    bitamp_offset.plus(Vector3.new(2, -2, 0)),
+                                    Color.black(),
+                                    null,
+                                    100000,
                                 );
                             } else {
                                 std.debug.assert(op == .SizeText);
