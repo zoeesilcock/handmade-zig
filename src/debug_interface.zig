@@ -243,7 +243,9 @@ pub const DebugEvent = if (INTERNAL) extern struct {
                 self.event_type = .FontId;
                 self.data = .{ .FontId = value };
             },
-            else => {},
+            else => {
+                // TODO: Handle enums here?
+            },
         }
     }
 

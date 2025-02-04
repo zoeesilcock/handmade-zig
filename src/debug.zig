@@ -580,7 +580,7 @@ pub const DebugState = struct {
 
                 switch (event.event_type) {
                     .BeginBlock => {
-                        // _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_code_block);
+                        _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_code_block);
                     },
                     .EndBlock => {
                         if (thread.first_open_code_block) |matching_block| {
@@ -621,10 +621,11 @@ pub const DebugState = struct {
                     },
                     .OpenDataBlock => {
                         _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_data_block);
+                        _ = self.storeEvent(element, event);
                     },
                     .CloseDataBlock => {
                         if (thread.first_open_data_block) |matching_block| {
-                            _ = self.storeEvent(element, event);
+                            _ = self.storeEvent(matching_block.element.?, event);
 
                             const opening_event: *DebugEvent = matching_block.opening_event;
                             if (opening_event.matches(event)) {
@@ -634,11 +635,9 @@ pub const DebugState = struct {
                     },
                     else => {
                         var storage_element: *DebugElement = element;
-
                         if (thread.first_open_data_block) |first_open_data_block| {
                             storage_element = first_open_data_block.element.?;
                         }
-
                         _ = self.storeEvent(storage_element, event);
                     },
                 }
@@ -765,6 +764,8 @@ const DebugVariableToTextFlag = enum(u32) {
     NullTerminator = 0x10,
     LineFeedEnd = 0x20,
     Colon = 0x40,
+    StartAtLastUnderscore = 0x80,
+    Value = 0x100,
 
     pub fn toInt(self: DebugVariableToTextFlag) u32 {
         return @intFromEnum(self);
@@ -773,6 +774,7 @@ const DebugVariableToTextFlag = enum(u32) {
     pub fn declarationFlags() u32 {
         return DebugVariableToTextFlag.Declaration.toInt() |
             DebugVariableToTextFlag.Name.toInt() |
+            DebugVariableToTextFlag.Value.toInt() |
             DebugVariableToTextFlag.Type.toInt() |
             DebugVariableToTextFlag.SemiColonEnd.toInt() |
             DebugVariableToTextFlag.LineFeedEnd.toInt();
@@ -781,7 +783,15 @@ const DebugVariableToTextFlag = enum(u32) {
     pub fn displayFlags() u32 {
         return DebugVariableToTextFlag.Name.toInt() |
             DebugVariableToTextFlag.NullTerminator.toInt() |
+            DebugVariableToTextFlag.Value.toInt() |
             DebugVariableToTextFlag.Colon.toInt();
+    }
+
+    pub fn blockTitleFlags() u32 {
+        return DebugVariableToTextFlag.Name.toInt() |
+            DebugVariableToTextFlag.NullTerminator.toInt() |
+            DebugVariableToTextFlag.Colon.toInt() |
+            DebugVariableToTextFlag.StartAtLastUnderscore.toInt();
     }
 };
 
@@ -862,7 +872,19 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
     }
 
     if (flags & DebugVariableToTextFlag.Name.toInt() != 0) {
-        const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{event.block_name}) catch "";
+        var name = event.block_name;
+
+        if (flags & DebugVariableToTextFlag.StartAtLastUnderscore.toInt() != 0) {
+            var scan = name;
+
+            while (scan[0] != 0) : (scan += 1) {
+                if (scan[0] == '_' and scan[1] != 0) {
+                    name = scan + 1;
+                }
+            }
+        }
+
+        const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{name}) catch "";
         len += @intCast(slice.len);
     }
 
@@ -886,94 +908,96 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
         }
     }
 
-    switch (event.event_type) {
-        .bool => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{if (event.data.bool) "true" else "false"}) catch "";
-            len += @intCast(slice.len);
-        },
-        .i32 => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.i32}) catch "";
-            len += @intCast(slice.len);
-        },
-        .u32 => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.u32}) catch "";
-            len += @intCast(slice.len);
-        },
-        .f32 => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.f32}) catch "";
-            len += @intCast(slice.len);
-        },
-        .Vector2 => {
-            const slice = std.fmt.bufPrintZ(
-                buffer[len..],
-                "({d}, {d})",
-                .{ event.data.Vector2.x(), event.data.Vector2.y() },
-            ) catch "";
-            len += @intCast(slice.len);
-        },
-        .Vector3 => {
-            const slice = std.fmt.bufPrintZ(
-                buffer[len..],
-                "({d}, {d}, {d})",
-                .{
-                    event.data.Vector3.x(),
-                    event.data.Vector3.y(),
-                    event.data.Vector3.z(),
-                },
-            ) catch "";
-            len += @intCast(slice.len);
-        },
-        .Vector4 => {
-            const slice = std.fmt.bufPrintZ(
-                buffer[len..],
-                "({d}, {d}, {d}, {d})",
-                .{
-                    event.data.Vector4.x(),
-                    event.data.Vector4.y(),
-                    event.data.Vector4.z(),
-                    event.data.Vector4.w(),
-                },
-            ) catch "";
-            len += @intCast(slice.len);
-        },
-        .Rectangle2 => {
-            const slice = std.fmt.bufPrintZ(
-                buffer[len..],
-                "({d}, {d}, {d}, {d})",
-                .{
-                    event.data.Rectangle2.min.x(),
-                    event.data.Rectangle2.min.y(),
-                    event.data.Rectangle2.max.x(),
-                    event.data.Rectangle2.max.y(),
-                },
-            ) catch "";
-            len += @intCast(slice.len);
-        },
-        .Rectangle3 => {
-            const slice = std.fmt.bufPrintZ(
-                buffer[len..],
-                "({d}, {d}, {d}, {d}, {d}, {d})",
-                .{
-                    event.data.Rectangle3.min.x(),
-                    event.data.Rectangle3.min.y(),
-                    event.data.Rectangle3.min.z(),
-                    event.data.Rectangle3.max.x(),
-                    event.data.Rectangle3.max.y(),
-                    event.data.Rectangle3.max.z(),
-                },
-            ) catch "";
-            len += @intCast(slice.len);
-        },
-        .OpenDataBlock => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{event.block_name}) catch "";
-            len += @intCast(slice.len);
-        },
-        .CounterThreadList => {},
-        .Unknown => {},
-        else => {
-            const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{event.block_name}) catch "";
-            len += @intCast(slice.len);
-        },
+    if (flags & DebugVariableToTextFlag.Value.toInt() != 0) {
+        switch (event.event_type) {
+            .bool => {
+                const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{if (event.data.bool) "true" else "false"}) catch "";
+                len += @intCast(slice.len);
+            },
+            .i32 => {
+                const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.i32}) catch "";
+                len += @intCast(slice.len);
+            },
+            .u32 => {
+                const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.u32}) catch "";
+                len += @intCast(slice.len);
+            },
+            .f32 => {
+                const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.f32}) catch "";
+                len += @intCast(slice.len);
+            },
+            .Vector2 => {
+                const slice = std.fmt.bufPrintZ(
+                    buffer[len..],
+                    "({d}, {d})",
+                    .{ event.data.Vector2.x(), event.data.Vector2.y() },
+                ) catch "";
+                len += @intCast(slice.len);
+            },
+            .Vector3 => {
+                const slice = std.fmt.bufPrintZ(
+                    buffer[len..],
+                    "({d}, {d}, {d})",
+                    .{
+                        event.data.Vector3.x(),
+                        event.data.Vector3.y(),
+                        event.data.Vector3.z(),
+                    },
+                    ) catch "";
+                len += @intCast(slice.len);
+            },
+            .Vector4 => {
+                const slice = std.fmt.bufPrintZ(
+                    buffer[len..],
+                    "({d}, {d}, {d}, {d})",
+                    .{
+                        event.data.Vector4.x(),
+                        event.data.Vector4.y(),
+                        event.data.Vector4.z(),
+                        event.data.Vector4.w(),
+                    },
+                    ) catch "";
+                len += @intCast(slice.len);
+            },
+            .Rectangle2 => {
+                const slice = std.fmt.bufPrintZ(
+                    buffer[len..],
+                    "({d}, {d}, {d}, {d})",
+                    .{
+                        event.data.Rectangle2.min.x(),
+                        event.data.Rectangle2.min.y(),
+                        event.data.Rectangle2.max.x(),
+                        event.data.Rectangle2.max.y(),
+                    },
+                    ) catch "";
+                len += @intCast(slice.len);
+            },
+            .Rectangle3 => {
+                const slice = std.fmt.bufPrintZ(
+                    buffer[len..],
+                    "({d}, {d}, {d}, {d}, {d}, {d})",
+                    .{
+                        event.data.Rectangle3.min.x(),
+                        event.data.Rectangle3.min.y(),
+                        event.data.Rectangle3.min.z(),
+                        event.data.Rectangle3.max.x(),
+                        event.data.Rectangle3.max.y(),
+                        event.data.Rectangle3.max.z(),
+                    },
+                    ) catch "";
+                len += @intCast(slice.len);
+            },
+            .OpenDataBlock => {
+                const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{event.block_name}) catch "";
+                len += @intCast(slice.len);
+            },
+            .CounterThreadList => {},
+            .Unknown => {},
+            else => {
+                const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{event.block_name}) catch "";
+                len += @intCast(slice.len);
+            },
+        }
     }
 
     if (event.event_type != .OpenDataBlock and flags & DebugVariableToTextFlag.SemiColonEnd.toInt() != 0) {
@@ -998,75 +1022,6 @@ const DebugVariableIterator = struct {
     link: *DebugVariableLink = undefined,
     sentinel: *DebugVariableLink = undefined,
 };
-
-fn writeHandmadeConfig(debug_state: *DebugState) void {
-    _ = debug_state;
-    // var buffer: [4096:0]u8 = undefined;
-    // var length: u32 = 0;
-    // var depth: u32 = 0;
-    // var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
-    //
-    // {
-    //     const imports =
-    //         \\const math = @import("math.zig");
-    //         \\
-    //         \\const Vector2 = math.Vector2;
-    //         \\const Vector3 = math.Vector3;
-    //         \\const Vector4 = math.Vector4;
-    //         \\
-    //         \\
-    //     ;
-    //
-    //     const slice = std.fmt.bufPrintZ(buffer[length..], "{s}", .{imports}) catch "";
-    //     length += @intCast(slice.len);
-    // }
-    //
-    // if (debug_state.root_group) |root_group| {
-    //     stack[depth].link = root_group.data.var_group.next;
-    //     stack[depth].sentinel = &root_group.data.var_group;
-    //     depth += 1;
-    //
-    //     while (depth > 0) {
-    //         var iterator: *DebugVariableIterator = &stack[depth - 1];
-    //
-    //         if (iterator.link == iterator.sentinel) {
-    //             depth -= 1;
-    //         } else {
-    //             const variable: *DebugVariable = iterator.link.variable;
-    //             iterator.link = iterator.link.next;
-    //
-    //             if (variable.shouldBeWritten()) {
-    //                 for (0..depth) |_| {
-    //                     for (0..4) |_| {
-    //                         buffer[length] = ' ';
-    //                         length += 1;
-    //                     }
-    //                 }
-    //
-    //                 length = debugVariableToText(&buffer, length, variable, DebugVariableToTextFlag.declarationFlags());
-    //             }
-    //
-    //             if (variable.variable_type == .VarGroup) {
-    //                 iterator = &stack[depth];
-    //                 iterator.link = variable.data.var_group.next;
-    //                 iterator.sentinel = &variable.data.var_group;
-    //                 depth += 1;
-    //             }
-    //         }
-    //     }
-    //
-    //     _ = shared.platform.debugWriteEntireFile("../src/config.zig", length, &buffer);
-    //
-    //     if (!debug_state.is_compiling) {
-    //         debug_state.is_compiling = true;
-    //         debug_state.compiler = shared.platform.debugExecuteSystemCommand(
-    //             "../",
-    //             "C:/Windows/System32/cmd.exe",
-    //             "/C zig build -Dpackage=Library",
-    //         );
-    //     }
-    // }
-}
 
 fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_position: Vector2) void {
     var render_group: *RenderGroup = &debug_state.render_group;
@@ -1362,7 +1317,7 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
         if (debug_state.debug_font_info) |font_info| {
             var render_group: *RenderGroup = &debug_state.render_group;
             const event = &stored_event.event;
-            const item_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .AutoModifyVariable);
+            var item_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .AutoModifyVariable);
             const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
             const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
             const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
@@ -1391,6 +1346,10 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
                         0,
                         null
                     );
+                },
+                .OpenDataBlock => {
+                },
+                .CloseDataBlock => {
                 },
                 else => {
                     var text: [4096:0]u8 = undefined;
@@ -1440,10 +1399,37 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
                     }
                 }
 
-                opt_event = last_open_block;
-                while (opt_event) |event| : (opt_event = event.next) {
-                    const new_id: DebugId = DebugId.fromGuid(tree, event.event.guid);
-                    drawDebugEvent(layout, event, new_id);
+                const item_interaction = DebugInteraction.fromId(debug_id, .ToggleExpansion);
+
+                var text: [4096:0]u8 = undefined;
+                var len: u32 = 0;
+                len = debugEventToText(&text, len, &last_open_block.event, DebugVariableToTextFlag.blockTitleFlags());
+
+                const text_bounds = getTextSize(debug_state, &text);
+                var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+                var title_element: LayoutElement = layout.beginElementRectangle(&dim);
+                title_element.defaultInteraction(item_interaction);
+                title_element.end();
+
+                const text_position: Vector2 = Vector2.new(
+                    title_element.bounds.min.x(),
+                    title_element.bounds.max.y() - debug_state.font_scale * debug_state.debug_font_info.?.getStartingBaselineY(),
+                );
+
+                const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+                const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
+                textOutAt(&text, text_position, item_color);
+
+                if (view.view_type == .Collapsible and view.data.collapsible.expanded_always) {
+                    layout.depth += 1;
+
+                    opt_event = last_open_block;
+                    while (opt_event) |event| : (opt_event = event.next) {
+                        const new_id: DebugId = DebugId.fromGuid(tree, event.event.guid);
+                        drawDebugEvent(layout, event, new_id);
+                    }
+                    layout.depth -= 1;
                 }
             },
             else => {
@@ -1451,7 +1437,7 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
                 drawDebugEvent(layout, opt_event, debug_id);
             },
         }
-    } else {}
+    }
 }
 
 fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse_position: Vector2) void {
@@ -1474,7 +1460,8 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
 
             if (tree.group) |tree_group| {
                 var depth: u32 = 0;
-                var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator = [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
+                var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator =
+                    [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
 
                 stack[depth].link = tree_group.sentinel.next;
                 stack[depth].sentinel = &tree_group.sentinel;
@@ -1715,6 +1702,7 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
         .ToggleExpansion => {
             const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
 
+            view.view_type = .Collapsible;
             if (view.data != .collapsible) {
                 view.data = .{
                     .collapsible = .{ .expanded_always = false, .expanded_alt_view = false },
@@ -1737,8 +1725,6 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
         },
         else => {},
     }
-
-    writeHandmadeConfig(debug_state);
 
     debug_state.interaction.interaction_type = .None;
     debug_state.interaction.target = .{ .tree = null };
