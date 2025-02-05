@@ -76,8 +76,8 @@ pub fn softwareRenderCommands(
     output_target: *LoadedBitmap,
     sort_memory: *anyopaque,
 ) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
+    defer TimedBlock.endFunction(@src(), .TiledRenderToOutput);
 
     sortEntries(commands, sort_memory);
 
@@ -139,8 +139,8 @@ pub fn softwareRenderCommands(
 }
 
 pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
-    const timed_block = TimedBlock.beginFunction(@src(), .DoTiledRenderWork);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .DoTiledRenderWork);
+    defer TimedBlock.endFunction(@src(), .DoTiledRenderWork);
 
     _ = queue;
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
@@ -149,8 +149,8 @@ pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) cal
 }
 
 pub fn renderCommandsToBitmap(commands: *RenderCommands, output_target: *LoadedBitmap, clip_rect: Rectangle2i) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .RenderToOutput);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .RenderToOutput);
+    defer TimedBlock.endFunction(@src(), .RenderToOutput);
 
     const null_pixels_to_meters: f32 = 1.0;
 
@@ -433,8 +433,8 @@ pub fn drawRectangle(
     color: Color,
     clip_rect: Rectangle2i,
 ) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .DrawRectangle);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .DrawRectangle);
+    defer TimedBlock.endFunction(@src(), .DrawRectangle);
 
     var fill_rect = Rectangle2i.new(
         intrinsics.floorReal32ToInt32(min.x()),
@@ -467,8 +467,8 @@ pub fn drawRectangle(
 }
 
 fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .ChangeSaturation);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .ChangeSaturation);
+    defer TimedBlock.endFunction(@src(), .ChangeSaturation);
 
     var dest_row: [*]u8 = @ptrCast(draw_buffer.memory);
 
@@ -504,8 +504,8 @@ pub fn drawRectangleQuickly(
 ) void {
     _ = pixels_to_meters;
 
-    var timed_block = TimedBlock.beginFunction(@src(), .DrawRectangleQuickly);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .DrawRectangleQuickly);
+    defer TimedBlock.endFunction(@src(), .DrawRectangleQuickly);
 
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -616,8 +616,8 @@ pub fn drawRectangleQuickly(
         var row: [*]u8 = @ptrCast(draw_buffer.memory);
         row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * draw_buffer.pitch)));
 
-        var process_timed_block = TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast(@divFloor(fill_rect.getClampedArea(), 2)));
-        defer process_timed_block.end();
+        TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast(@divFloor(fill_rect.getClampedArea(), 2)));
+        defer TimedBlock.endBlock(@src(), .ProcessPixel);
 
         var y: i32 = min_y;
         while (y < max_y) : (y += 1) {
@@ -818,8 +818,8 @@ pub fn drawRectangleSlowly(
     bottom: *EnvironmentMap,
     pixels_to_meters: f32,
 ) void {
-    const timed_block = TimedBlock.beginFunction(@src(), .DrawRectangleSlowly);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .DrawRectangleSlowly);
+    defer TimedBlock.endFunction(@src(), .DrawRectangleSlowly);
 
     var color = color_in;
     _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -888,8 +888,8 @@ pub fn drawRectangleSlowly(
     var row: [*]u8 = @ptrCast(draw_buffer.memory);
     row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
 
-    const timed_block_pixel = TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
-    defer timed_block_pixel.end();
+    TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
+    defer TimedBlock.endBlock(@src(), .ProcessPixel);
 
     var y: i32 = y_min;
     while (y < y_max) : (y += 1) {
@@ -1077,8 +1077,8 @@ pub fn drawBitmap(
     real_y: f32,
     in_alpha: f32,
 ) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .DrawBitmap);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .DrawBitmap);
+    defer TimedBlock.endFunction(@src(), .DrawBitmap);
 
     // TODO: Should we really clamp here?
     const alpha = math.clampf01(in_alpha);

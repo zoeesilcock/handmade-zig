@@ -187,16 +187,12 @@ const DebugInteraction = struct {
 pub const DebugState = struct {
     initialized: bool,
 
-    high_priority_queue: *shared.PlatformWorkQueue,
     debug_arena: shared.MemoryArena,
     per_frame_arena: shared.MemoryArena,
 
     render_group: RenderGroup,
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
-
-    is_compiling: bool = false,
-    compiler: shared.DebugExecutingProcess,
 
     menu_position: Vector2,
     menu_active: bool,
@@ -347,6 +343,7 @@ pub const DebugState = struct {
         result.?.next = null;
         result.?.frame_index = self.collation_frame.?.frame_index;
         result.?.event = event.*;
+        result.?.event.guid = element.getName();
 
         if (element.most_recent_event != null) {
             element.most_recent_event.?.next = result;
@@ -415,22 +412,22 @@ pub const DebugState = struct {
         name: [*:0]const u8,
     ) ?*DebugVariableGroup {
         var result: ?*DebugVariableGroup = parent;
-        var first_underscore: ?[*]const u8 = null;
+        var first_separator: ?[*]const u8 = null;
         var opt_scan: ?[*]const u8 = @ptrCast(name);
         while (opt_scan) |scan| : (opt_scan = scan + 1) {
             if (scan[0] == 0) {
                 break;
             }
 
-            if (scan[0] == '_') {
-                first_underscore = scan;
+            if (scan[0] == '/') {
+                first_separator = scan;
                 break;
             }
         }
 
-        if (first_underscore != null) {
-            const sub_name_length: u32 = @intCast(@intFromPtr(first_underscore.?) - @intFromPtr(name));
-            const sub_name: [*:0]const u8 = @ptrCast(first_underscore.? + 1);
+        if (first_separator != null) {
+            const sub_name_length: u32 = @intCast(@intFromPtr(first_separator.?) - @intFromPtr(name));
+            const sub_name: [*:0]const u8 = @ptrCast(first_separator.? + 1);
             if (self.getOrCreateGroupWithName(parent, sub_name_length, name)) |sub_group| {
                 result = self.getGroupForHierarchicalName(sub_group, sub_name);
             }
@@ -448,7 +445,10 @@ pub const DebugState = struct {
     }
 
     fn createVariableGroup(self: *DebugState, name_length: u32, name: [*:0]const u8) *DebugVariableGroup {
-        var group: *DebugVariableGroup = self.debug_arena.pushStruct(DebugVariableGroup, null);
+        var group: *DebugVariableGroup = self.debug_arena.pushStruct(
+            DebugVariableGroup,
+            ArenaPushParams.alignedNoClear(@alignOf(DebugVariableGroup)),
+        );
         group.sentinel.next = &group.sentinel;
         group.sentinel.prev = &group.sentinel;
         group.name = name;
@@ -462,7 +462,10 @@ pub const DebugState = struct {
         parent: *DebugVariableGroup,
         element: *DebugElement,
     ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink, null);
+        const link: *DebugVariableLink = self.debug_arena.pushStruct(
+            DebugVariableLink,
+            ArenaPushParams.alignedNoClear(@alignOf(DebugVariableLink)),
+        );
 
         link.next = parent.sentinel.next;
         link.prev = &parent.sentinel;
@@ -480,7 +483,10 @@ pub const DebugState = struct {
         parent: *DebugVariableGroup,
         group: *DebugVariableGroup,
     ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.debug_arena.pushStruct(DebugVariableLink, null);
+        const link: *DebugVariableLink = self.debug_arena.pushStruct(
+            DebugVariableLink,
+            ArenaPushParams.alignedNoClear(@alignOf(DebugVariableLink)),
+        );
 
         link.next = parent.sentinel.next;
         link.prev = &parent.sentinel;
@@ -495,12 +501,29 @@ pub const DebugState = struct {
 
     fn getElementFromEvent(self: *DebugState, event: *DebugEvent) *DebugElement {
         var result: ?*DebugElement = null;
-        const hash_value: u32 = @intCast(@intFromPtr(event.guid) >> 2);
-        const index: u32 = @mod(hash_value, @as(u32, @intCast(self.element_hash.len)));
+        var hash_value: u32 = 0;
+        var file_name_count: u32 = 0;
+        var name_starts_at: u32 = 0;
+        var line_number: u32 = 0;
+        var pipe_count: u32 = 0;
+        var scan = event.guid;
+        while (scan[0] != 0) : (scan += 1) {
+            if (scan[0] == '|') {
+                if (pipe_count == 0) {
+                    file_name_count = @intCast(@intFromPtr(scan) - @intFromPtr(event.guid));
+                    line_number = std.mem.bytesToValue(u32, scan + 1);
+                } else if (pipe_count == 2) {
+                    name_starts_at = @intCast(@intFromPtr(scan) - @intFromPtr(event.guid) + 1);
+                }
+                pipe_count += 1;
+            }
 
+            hash_value %= 65599 * hash_value + scan[0];
+        }
+        const index: u32 = @mod(hash_value, @as(u32, @intCast(self.element_hash.len)));
         var opt_chain: ?*DebugElement = self.element_hash[index];
         while (opt_chain) |chain| : (opt_chain = chain.next_in_hash) {
-            if (@intFromPtr(chain.guid) == @intFromPtr(event.guid)) {
+            if (shared.stringsAreEqual(std.mem.span(chain.guid), std.mem.span(event.guid))) {
                 result = chain;
                 break;
             }
@@ -509,14 +532,17 @@ pub const DebugState = struct {
         if (result == null) {
             result = self.debug_arena.pushStruct(DebugElement, null);
 
-            result.?.guid = event.guid;
+            result.?.guid = self.debug_arena.pushString(event.guid);
+            result.?.file_name_count = file_name_count;
+            result.?.line_number = line_number;
+            result.?.name_starts_at = name_starts_at;
             result.?.next_in_hash = self.element_hash[index];
             self.element_hash[index] = result;
 
             result.?.oldest_event = null;
             result.?.most_recent_event = null;
 
-            if (self.getGroupForHierarchicalName(self.root_group, event.block_name)) |parent_group| {
+            if (self.getGroupForHierarchicalName(self.root_group, result.?.getName())) |parent_group| {
                 _ = self.addElementToGroup(parent_group, result.?);
             }
         }
@@ -534,9 +560,7 @@ pub const DebugState = struct {
                 self.collation_frame = self.newFrame(event.clock);
             }
 
-            if (event.event_type == .MarkDebugValue) {
-                _ = self.storeEvent(element, event);
-            } else if (event.event_type == .FrameMarker) {
+            if (event.event_type == .FrameMarker) {
                 std.debug.assert(self.collation_frame != null);
 
                 if (self.collation_frame) |collation_frame| {
@@ -591,7 +615,7 @@ pub const DebugState = struct {
                                     var match_name: ?[*:0]const u8 = null;
 
                                     if (matching_block.parent) |parent| {
-                                        match_name = parent.opening_event.block_name;
+                                        match_name = parent.opening_event.guid;
                                     }
 
                                     // if (match_name == self.scope_to_record) {
@@ -606,7 +630,7 @@ pub const DebugState = struct {
                                     //         region.lane_index = @intCast(thread.lane_index);
                                     //         region.min_t = min_t;
                                     //         region.max_t = max_t;
-                                    //         region.color_index = @truncate(@intFromPtr(opening_event.block_name));
+                                    //         region.color_index = @truncate(@intFromPtr(opening_event.guid));
                                     //     }
                                     // }
                                 } else {
@@ -764,8 +788,9 @@ const DebugVariableToTextFlag = enum(u32) {
     NullTerminator = 0x10,
     LineFeedEnd = 0x20,
     Colon = 0x40,
-    StartAtLastUnderscore = 0x80,
+    StartAtLastSlash = 0x80,
     Value = 0x100,
+    // TODO: Add a way to only show the last part of field, skipping past the type information. SkipPastLastPeriod?
 
     pub fn toInt(self: DebugVariableToTextFlag) u32 {
         return @intFromEnum(self);
@@ -791,7 +816,7 @@ const DebugVariableToTextFlag = enum(u32) {
         return DebugVariableToTextFlag.Name.toInt() |
             DebugVariableToTextFlag.NullTerminator.toInt() |
             DebugVariableToTextFlag.Colon.toInt() |
-            DebugVariableToTextFlag.StartAtLastUnderscore.toInt();
+            DebugVariableToTextFlag.StartAtLastSlash.toInt();
     }
 };
 
@@ -841,12 +866,33 @@ pub const DebugStoredEvent = struct {
     event: DebugEvent,
 };
 
+pub const DebugString = struct {
+    length: u32,
+    value: [*:0]const u8,
+};
+
 pub const DebugElement = struct {
     guid: [*:0]const u8,
+    file_name_count: u32,
+    line_number: u32,
+    name_count: u32,
+    name_starts_at: u32,
+
     next_in_hash: ?*DebugElement,
 
     oldest_event: ?*DebugStoredEvent,
     most_recent_event: ?*DebugStoredEvent,
+
+    pub fn getName(self: *DebugElement) [*:0]const u8 {
+        return self.guid + self.name_starts_at;
+    }
+
+    pub fn getFileName(self: *DebugElement) DebugString {
+        return DebugString{
+            .length = self.file_name_count,
+            .value = self.guid,
+        };
+    }
 };
 
 pub const DebugVariableLink = struct {
@@ -872,13 +918,13 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
     }
 
     if (flags & DebugVariableToTextFlag.Name.toInt() != 0) {
-        var name = event.block_name;
+        var name = event.guid;
 
-        if (flags & DebugVariableToTextFlag.StartAtLastUnderscore.toInt() != 0) {
+        if (flags & DebugVariableToTextFlag.StartAtLastSlash.toInt() != 0) {
             var scan = name;
 
             while (scan[0] != 0) : (scan += 1) {
-                if (scan[0] == '_' and scan[1] != 0) {
+                if (scan[0] == '/' and scan[1] != 0) {
                     name = scan + 1;
                 }
             }
@@ -943,7 +989,7 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                         event.data.Vector3.y(),
                         event.data.Vector3.z(),
                     },
-                    ) catch "";
+                ) catch "";
                 len += @intCast(slice.len);
             },
             .Vector4 => {
@@ -956,7 +1002,7 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                         event.data.Vector4.z(),
                         event.data.Vector4.w(),
                     },
-                    ) catch "";
+                ) catch "";
                 len += @intCast(slice.len);
             },
             .Rectangle2 => {
@@ -969,7 +1015,7 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                         event.data.Rectangle2.max.x(),
                         event.data.Rectangle2.max.y(),
                     },
-                    ) catch "";
+                ) catch "";
                 len += @intCast(slice.len);
             },
             .Rectangle3 => {
@@ -984,17 +1030,12 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                         event.data.Rectangle3.max.y(),
                         event.data.Rectangle3.max.z(),
                     },
-                    ) catch "";
+                ) catch "";
                 len += @intCast(slice.len);
             },
-            .OpenDataBlock => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{event.block_name}) catch "";
-                len += @intCast(slice.len);
-            },
-            .CounterThreadList => {},
-            .Unknown => {},
+            .OpenDataBlock, .CounterThreadList, .Unknown => {},
             else => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{event.block_name}) catch "";
+                const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{event.guid}) catch "";
                 len += @intCast(slice.len);
             },
         }
@@ -1105,7 +1146,7 @@ fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_posit
     //
     //             var buffer: [128]u8 = undefined;
     //             const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
-    //                 event.block_name,
+    //                 event.guid,
     //                 region.cycle_count,
     //                 event.file_name,
     //                 event.line_number,
@@ -1344,13 +1385,19 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
                         element.bounds.min.toVector3(0),
                         Color.white(),
                         0,
-                        null
+                        null,
                     );
                 },
-                .OpenDataBlock => {
+                .CounterFunctionList => {
+                    var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                    layout_element.makeSizable();
+                    // layout_element.defaultInteraction(item_interaction);
+                    layout_element.end();
+
+                    drawProfileIn(debug_state, layout_element.bounds, layout.mouse_position);
                 },
-                .CloseDataBlock => {
-                },
+                .OpenDataBlock => {},
+                .CloseDataBlock => {},
                 else => {
                     var text: [4096:0]u8 = undefined;
                     var len: u32 = 0;
@@ -1907,8 +1954,8 @@ fn debugStart(
     width: i32,
     height: i32,
 ) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .DebugStart);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .DebugStart);
+    defer TimedBlock.endFunction(@src(), .DebugStart);
 
     if (shared.debug_global_memory) |memory| {
         if (!debug_state.initialized) {
@@ -1924,8 +1971,6 @@ fn debugStart(
             debug_state.first_free_frame = null;
 
             debug_state.collation_frame = null;
-
-            debug_state.high_priority_queue = memory.high_priority_queue;
 
             debug_state.tree_sentinel.next = &debug_state.tree_sentinel;
             debug_state.tree_sentinel.prev = &debug_state.tree_sentinel;
@@ -2078,8 +2123,8 @@ pub fn debugDumpStruct(struct_ptr: *anyopaque, member_defs: [*]const meta.Member
 }
 
 fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
-    var overlay_timed_block = TimedBlock.beginBlock(@src(), .DebugEnd);
-    defer overlay_timed_block.end();
+    TimedBlock.beginBlock(@src(), .DebugEnd);
+    defer TimedBlock.endBlock(@src(), .DebugEnd);
 
     const group: *RenderGroup = &debug_state.render_group;
     const mouse_position: Vector2 = group.unproject(
@@ -2090,15 +2135,6 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
     drawDebugMainMenu(debug_state, group, mouse_position);
     interact(debug_state, input, mouse_position);
-
-    if (debug_state.is_compiling) {
-        const state = shared.platform.debugGetProcessState(debug_state.compiler);
-        if (state.is_running) {
-            textLine("COMPILING");
-        } else {
-            debug_state.is_compiling = false;
-        }
-    }
 
     if (false) {
         var counter_index: u32 = 0;
@@ -2203,28 +2239,6 @@ fn getMainGenerationID(memory: *shared.Memory) u32 {
     }
 
     return result;
-}
-
-pub fn initializeDebugValue(
-    comptime source: std.builtin.SourceLocation,
-    event_type: DebugType,
-    sub_event: *DebugEvent,
-    guid: [*:0]const u8,
-    name: []const u8,
-) DebugEvent {
-    const mark_event = DebugEvent.record(source, .MarkDebugValue, "");
-    mark_event.guid = guid;
-    mark_event.block_name = @ptrCast(name);
-    mark_event.data.value_debug_event = sub_event;
-
-    sub_event.clock = 0;
-    sub_event.guid = guid;
-    sub_event.block_name = @ptrCast(name);
-    sub_event.thread_id = 0;
-    sub_event.core_index = 0;
-    sub_event.event_type = event_type;
-
-    return sub_event.*;
 }
 
 pub fn frameEnd(

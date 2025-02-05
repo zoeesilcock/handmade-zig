@@ -129,8 +129,8 @@ pub fn getWorldChunk(
     chunk_z: i32,
     opt_memory_arena: ?*shared.MemoryArena,
 ) ?*WorldChunk {
-    var timed_block = TimedBlock.beginFunction(@src(), .GetWorldChunk);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .GetWorldChunk);
+    defer TimedBlock.endFunction(@src(), .GetWorldChunk);
 
     std.debug.assert(chunk_x > -TILE_CHUNK_SAFE_MARGIN);
     std.debug.assert(chunk_x > -TILE_CHUNK_SAFE_MARGIN);
@@ -186,8 +186,8 @@ pub fn changeEntityLocation(
     low_entity_index: u32,
     new_position: WorldPosition,
 ) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .ChangeEntityLocation);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .ChangeEntityLocation);
+    defer TimedBlock.endFunction(@src(), .ChangeEntityLocation);
 
     var opt_old_position: ?*WorldPosition = null;
     var opt_new_position: ?*WorldPosition = null;
@@ -224,8 +224,8 @@ pub fn changeEntityLocationRaw(
     opt_old_position: ?*WorldPosition,
     opt_new_position: ?*WorldPosition,
 ) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .ChangeEntityLocationRaw);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .ChangeEntityLocationRaw);
+    defer TimedBlock.endFunction(@src(), .ChangeEntityLocationRaw);
 
     std.debug.assert(opt_old_position == null or opt_old_position.?.isValid());
     std.debug.assert(opt_new_position == null or opt_new_position.?.isValid());

@@ -2319,12 +2319,13 @@ pub export fn wWinMain(
                 const push_buffer = allocateMemory(push_buffer_size);
 
                 while (running) {
-                    var timed_block = TimedBlock.beginBlock(@src(), .ExecutableRefresh);
+                    TimedBlock.beginBlock(@src(), .ExecutableRefresh);
 
-                    const debug_id = DebugId.fromPointer(@ptrCast(@constCast(&debug_time_marker_index)));
-                    DebugInterface.debugBeginDataBlock(@src(), "Platform_Controls", debug_id);
-                    DebugInterface.debugValue(@src(), @This(), "running");
-                    DebugInterface.debugValue(@src(), @This(), "rendering_type");
+                    DebugInterface.debugBeginDataBlock(@src(), "Platform/Controls");
+                    {
+                        DebugInterface.debugValue(@src(), @This(), "running");
+                        DebugInterface.debugValue(@src(), @This(), "rendering_type");
+                    }
                     DebugInterface.debugEndDataBlock(@src());
 
                     //
@@ -2351,13 +2352,13 @@ pub export fn wWinMain(
                         game_memory.executable_reloaded = true;
                     }
 
-                    timed_block.end();
+                    TimedBlock.endBlock(@src(), .ExecutableRefresh);
 
                     //
                     //
                     //
 
-                    timed_block = TimedBlock.beginBlock(@src(), .InputProcessing);
+                    TimedBlock.beginBlock(@src(), .InputProcessing);
 
                     var message: win32.MSG = undefined;
 
@@ -2386,13 +2387,13 @@ pub export fn wWinMain(
                     processMouseInput(old_input, new_input, window_handle);
                     processXInput(old_input, new_input);
 
-                    timed_block.end();
+                    TimedBlock.endBlock(@src(), .InputProcessing);
 
                     //
                     //
                     //
 
-                    timed_block = TimedBlock.beginBlock(@src(), .GameUpdate);
+                    TimedBlock.beginBlock(@src(), .GameUpdate);
 
                     var render_commands: shared.RenderCommands = shared.initializeRenderCommands(
                         push_buffer_size,
@@ -2424,13 +2425,13 @@ pub export fn wWinMain(
                         fader.beginFadeToDesktop();
                     }
 
-                    timed_block.end();
+                    TimedBlock.endBlock(@src(), .GameUpdate);
 
                     //
                     //
                     //
 
-                    timed_block = TimedBlock.beginBlock(@src(), .AudioUpdate);
+                    TimedBlock.beginBlock(@src(), .AudioUpdate);
 
                     // Output sound.
                     if (opt_secondary_buffer) |secondary_buffer| {
@@ -2542,15 +2543,15 @@ pub export fn wWinMain(
                         }
                     }
 
-                    timed_block.end();
+                    TimedBlock.endBlock(@src(), .AudioUpdate);
 
                     //
                     //
                     //
 
                     if (INTERNAL) {
-                        timed_block = TimedBlock.beginBlock(@src(), .DebugCollation);
-                        defer timed_block.end();
+                        TimedBlock.beginBlock(@src(), .DebugCollation);
+                        defer TimedBlock.endBlock(@src(), .DebugCollation);
 
                         if (game.debugFrameEnd) |frameEndFn| {
                             shared.global_debug_table = frameEndFn(&game_memory, new_input.*, &render_commands);
@@ -2564,7 +2565,8 @@ pub export fn wWinMain(
                     //
 
                     if (false) {
-                        timed_block = TimedBlock.beginBlock(@src(), .FrameRateWait);
+                        TimedBlock.beginBlock(@src(), .FrameRateWait);
+                        defer TimedBlock.endBlock(@src(), .FrameRateWait);
 
                         // Capture timing.
                         const work_counter = getWallClock();
@@ -2586,15 +2588,13 @@ pub export fn wWinMain(
                         } else {
                             // Target frame rate missed.
                         }
-
-                        timed_block.end();
                     }
 
                     //
                     //
                     //
 
-                    timed_block = TimedBlock.beginBlock(@src(), .FrameDisplay);
+                    TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     if (INTERNAL) {
                         if (false) {
@@ -2664,16 +2664,16 @@ pub export fn wWinMain(
                     //
                     //
 
-                    timed_block.end();
+                    TimedBlock.endBlock(@src(), .FrameDisplay);
 
                     const end_counter = getWallClock();
 
-                    var frame_marker = TimedBlock.frameMarker(
+                    TimedBlock.frameMarker(
                         @src(),
                         .TotalPlatformLoop,
                         getSecondsElapsed(last_counter, end_counter),
                     );
-                    defer frame_marker.end();
+                    TimedBlock.endBlock(@src(), .TotalPlatformLoop);
                     last_counter = end_counter;
                 }
             } else {

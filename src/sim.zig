@@ -237,8 +237,8 @@ pub fn addEntityRaw(
     storage_index: u32,
     opt_source: ?*LowEntity,
 ) ?*SimEntity {
-    var timed_block = TimedBlock.beginFunction(@src(), .AddEntityRaw);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .AddEntityRaw);
+    defer TimedBlock.endFunction(@src(), .AddEntityRaw);
 
     std.debug.assert(storage_index != 0);
 
@@ -319,8 +319,8 @@ pub fn beginSimulation(
     bounds: Rectangle3,
     delta_time: f32,
 ) *SimRegion {
-    var timed_block = TimedBlock.beginFunction(@src(), .BeginSimulation);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .BeginSimulation);
+    defer TimedBlock.endFunction(@src(), .BeginSimulation);
 
     var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, ArenaPushParams.aligned(@alignOf(SimRegion), true));
 
@@ -413,8 +413,8 @@ fn handleOverlap(world_mode: *GameModeWorld, mover: *SimEntity, region: *SimEnti
 }
 
 fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vector3) bool {
-    var timed_block = TimedBlock.beginFunction(@src(), .SpeculativeCollide);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .SpeculativeCollide);
+    defer TimedBlock.endFunction(@src(), .SpeculativeCollide);
 
     var result = true;
 
@@ -429,8 +429,8 @@ fn speculativeCollide(mover: *SimEntity, region: *SimEntity, test_position: Vect
 }
 
 fn entitiesOverlap(entity: *SimEntity, test_entity: *SimEntity, epsilon: Vector3) bool {
-    var timed_block = TimedBlock.beginFunction(@src(), .EntitiesOverlap);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .EntitiesOverlap);
+    defer TimedBlock.endFunction(@src(), .EntitiesOverlap);
 
     var overlapped = false;
 
@@ -536,8 +536,8 @@ pub fn moveEntity(
     in_acceleration: Vector3,
     move_spec: *const MoveSpec,
 ) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .MoveEntity);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .MoveEntity);
+    defer TimedBlock.endFunction(@src(), .MoveEntity);
 
     std.debug.assert(!entity.isSet(SimEntityFlags.Nonspatial.toInt()));
 
@@ -804,8 +804,8 @@ pub fn moveEntity(
 }
 
 pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .EndSimulation);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .EndSimulation);
+    defer TimedBlock.endFunction(@src(), .EndSimulation);
 
     var sim_entity_index: u32 = 0;
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {

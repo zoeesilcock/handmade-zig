@@ -445,8 +445,8 @@ pub const Assets = struct {
     }
 
     fn acquireAssetMemory(self: *Assets, size: u32, asset_index: u32, asset_type: AssetHeaderType) ?*AssetMemoryHeader {
-        var timed_block = TimedBlock.beginFunction(@src(), .AcquireAssetMemory);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .AcquireAssetMemory);
+        defer TimedBlock.endFunction(@src(), .AcquireAssetMemory);
 
         var result: ?*AssetMemoryHeader = null;
         var opt_block = self.findBlockForSize(size);
@@ -552,8 +552,8 @@ pub const Assets = struct {
     }
 
     pub fn getFirstAsset(self: *Assets, type_id: AssetTypeId) ?u32 {
-        var timed_block = TimedBlock.beginFunction(@src(), .GetFirstAsset);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .GetFirstAsset);
+        defer TimedBlock.endFunction(@src(), .GetFirstAsset);
 
         var result: ?u32 = null;
         const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
@@ -566,8 +566,8 @@ pub const Assets = struct {
     }
 
     pub fn getRandomAsset(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?u32 {
-        var timed_block = TimedBlock.beginFunction(@src(), .GetRandomAsset);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .GetRandomAsset);
+        defer TimedBlock.endFunction(@src(), .GetRandomAsset);
 
         var result: ?u32 = null;
         const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
@@ -587,8 +587,8 @@ pub const Assets = struct {
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
     ) ?u32 {
-        var timed_block = TimedBlock.beginFunction(@src(), .GetBestMatchAsset);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .GetBestMatchAsset);
+        defer TimedBlock.endFunction(@src(), .GetBestMatchAsset);
 
         var result: ?u32 = null;
         var best_diff: f32 = std.math.floatMax(f32);
@@ -639,8 +639,8 @@ pub const Assets = struct {
         opt_id: ?BitmapId,
         immediate: bool,
     ) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .LoadBitmap);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .LoadBitmap);
+        defer TimedBlock.endFunction(@src(), .LoadBitmap);
 
         if (opt_id) |id| {
             var asset = &self.assets[id.value];
@@ -811,8 +811,8 @@ pub const Assets = struct {
         self: *Assets,
         opt_id: ?SoundId,
     ) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .LoadSound);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .LoadSound);
+        defer TimedBlock.endFunction(@src(), .LoadSound);
 
         if (opt_id) |id| {
             var asset = &self.assets[id.value];
@@ -934,8 +934,8 @@ pub const Assets = struct {
         opt_id: ?FontId,
         immediate: bool,
     ) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .LoadFont);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .LoadFont);
+        defer TimedBlock.endFunction(@src(), .LoadFont);
 
         if (opt_id) |id| {
             var asset = &self.assets[id.value];
@@ -1167,8 +1167,8 @@ fn addOp(queue: *shared.PlatformTextureOpQueue, source: *const TextureOp) void {
 fn doLoadAssetWorkDirectly(
     work: *LoadAssetWork,
 ) callconv(.C) void {
-    var timed_block = TimedBlock.beginFunction(@src(), .LoadAssetWorkDirectly);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .LoadAssetWorkDirectly);
+    defer TimedBlock.endFunction(@src(), .LoadAssetWorkDirectly);
 
     shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);
 

@@ -43,8 +43,8 @@ pub const AudioState = struct {
     }
 
     pub fn playSound(self: *AudioState, opt_sound_id: ?SoundId) ?*PlayingSound {
-        var timed_block = TimedBlock.beginFunction(@src(), .PlaySound);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .PlaySound);
+        defer TimedBlock.endFunction(@src(), .PlaySound);
 
         var result: ?*PlayingSound = null;
 
@@ -111,8 +111,8 @@ pub const AudioState = struct {
         assets: *Assets,
         temp_arena: *MemoryArena,
     ) void {
-        var timed_block = TimedBlock.beginFunction(@src(), .OutputPlayingSounds);
-        defer timed_block.end();
+        TimedBlock.beginFunction(@src(), .OutputPlayingSounds);
+        defer TimedBlock.endFunction(@src(), .OutputPlayingSounds);
 
         const mixer_memory = temp_arena.beginTemporaryMemory();
         defer temp_arena.endTemporaryMemory(mixer_memory);

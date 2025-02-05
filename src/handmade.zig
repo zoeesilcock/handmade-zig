@@ -129,26 +129,55 @@ pub export fn updateAndRender(
 
     if (INTERNAL) {
         shared.debug_global_memory = memory;
+        DebugInterface.debugBeginDataBlock(@src(), "Renderer");
+        {
+            DebugInterface.debugValue(@src(), global_config, "Renderer_TestWeirdDrawBufferSize");
+            DebugInterface.debugBeginDataBlock(@src(), "Camera");
+            {
+                DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_UseDebug");
+                DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_DebugDistance");
+                DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_RoomBased");
+            }
+            DebugInterface.debugEndDataBlock(@src());
+        }
+        DebugInterface.debugEndDataBlock(@src());
 
-        const debug_id = debug_interface.DebugId.fromPointer(@ptrCast(@constCast(&memory)));
-        DebugInterface.debugBeginDataBlock(@src(), "Game", debug_id);
-        // DebugInterface.debugStruct(@src(), &global_config);
-        DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_UseDebug");
-        DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_DebugDistance");
-        DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_RoomBased");
-        DebugInterface.debugValue(@src(), global_config, "GroundChunks_Checkerboards");
-        DebugInterface.debugValue(@src(), global_config, "GroundChunks_RecomputeOnEXEChange");
-        DebugInterface.debugValue(@src(), global_config, "Renderer_TestWeirdDrawBufferSize");
-        DebugInterface.debugValue(@src(), global_config, "GroundChunks_Outlines");
-        DebugInterface.debugValue(@src(), global_config, "AI_Familiar_FollowsHero");
-        DebugInterface.debugValue(@src(), global_config, "Particles_Test");
-        DebugInterface.debugValue(@src(), global_config, "Particles_ShowGrid");
-        DebugInterface.debugValue(@src(), global_config, "Simulation_UseSpaceOutlines");
+        DebugInterface.debugBeginDataBlock(@src(), "GroundChunks");
+        {
+            DebugInterface.debugValue(@src(), global_config, "GroundChunks_Checkerboards");
+            DebugInterface.debugValue(@src(), global_config, "GroundChunks_RecomputeOnEXEChange");
+            DebugInterface.debugValue(@src(), global_config, "GroundChunks_Outlines");
+        }
+        DebugInterface.debugEndDataBlock(@src());
+
+        DebugInterface.debugBeginDataBlock(@src(), "AI/Familiar");
+        {
+            DebugInterface.debugValue(@src(), global_config, "AI_Familiar_FollowsHero");
+        }
+        DebugInterface.debugEndDataBlock(@src());
+
+        DebugInterface.debugBeginDataBlock(@src(), "Particles");
+        {
+            DebugInterface.debugValue(@src(), global_config, "Particles_Test");
+            DebugInterface.debugValue(@src(), global_config, "Particles_ShowGrid");
+        }
+        DebugInterface.debugEndDataBlock(@src());
+
+        DebugInterface.debugBeginDataBlock(@src(), "Simulation");
+        {
+            DebugInterface.debugValue(@src(), global_config, "Simulation_UseSpaceOutlines");
+        }
+        DebugInterface.debugEndDataBlock(@src());
+
+        DebugInterface.debugBeginDataBlock(@src(), "Profile");
+        {
+            DebugInterface.debugProfile(@src(), "updateAndRender");
+        }
         DebugInterface.debugEndDataBlock(@src());
     }
 
-    const timed_block = TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
+    defer TimedBlock.endFunction(@src(), .GameUpdateAndRender);
 
     std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));

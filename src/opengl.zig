@@ -133,8 +133,8 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
     _ = window_width;
     _ = window_height;
 
-    var timed_block = TimedBlock.beginFunction(@src(), .RenderToOutputOpenGL);
-    defer timed_block.end();
+    TimedBlock.beginFunction(@src(), .RenderToOutputOpenGL);
+    defer TimedBlock.endFunction(@src(), .RenderToOutputOpenGL);
 
     gl.glViewport(commands.offset_x, commands.offset_y, @intCast(commands.width), @intCast(commands.height));
 
