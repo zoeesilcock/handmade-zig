@@ -358,7 +358,7 @@ pub const DebugState = struct {
 
     fn allocateOpenDebugBlock(
         self: *DebugState,
-        element: *DebugElement,
+        element: ?*DebugElement,
         frame_index: u32,
         event: *DebugEvent,
         first_open_block: *?*OpenDebugBlock,
@@ -410,6 +410,7 @@ pub const DebugState = struct {
         self: *DebugState,
         parent: *DebugVariableGroup,
         name: [*:0]const u8,
+        create_terminal: bool,
     ) ?*DebugVariableGroup {
         var result: ?*DebugVariableGroup = parent;
         var first_separator: ?[*]const u8 = null;
@@ -425,11 +426,22 @@ pub const DebugState = struct {
             }
         }
 
-        if (first_separator != null) {
-            const sub_name_length: u32 = @intCast(@intFromPtr(first_separator.?) - @intFromPtr(name));
-            const sub_name: [*:0]const u8 = @ptrCast(first_separator.? + 1);
+        if (first_separator != null or create_terminal) {
+            var name_length: u32 = 0;
+            if (first_separator != null) {
+                name_length = @intCast(@intFromPtr(first_separator.?) - @intFromPtr(name));
+            } else {
+                name_length = @intCast(@intFromPtr(opt_scan.?) - @intFromPtr(name));
+            }
+
+            const sub_name_length: u32 = name_length;
             if (self.getOrCreateGroupWithName(parent, sub_name_length, name)) |sub_group| {
-                result = self.getGroupForHierarchicalName(sub_group, sub_name);
+                result = sub_group;
+
+                if (first_separator != null) {
+                    const sub_name: [*:0]const u8 = @ptrCast(first_separator.? + 1);
+                    result = self.getGroupForHierarchicalName(sub_group, sub_name, create_terminal);
+                }
             }
         }
 
@@ -499,28 +511,32 @@ pub const DebugState = struct {
         return link;
     }
 
-    fn getElementFromEvent(self: *DebugState, event: *DebugEvent) *DebugElement {
-        var result: ?*DebugElement = null;
-        var hash_value: u32 = 0;
-        var file_name_count: u32 = 0;
-        var name_starts_at: u32 = 0;
-        var line_number: u32 = 0;
+    fn parseName(guid: [*:0]const u8) DebugParsedName {
+        var result = DebugParsedName{};
         var pipe_count: u32 = 0;
-        var scan = event.guid;
+        var scan = guid;
         while (scan[0] != 0) : (scan += 1) {
             if (scan[0] == '|') {
                 if (pipe_count == 0) {
-                    file_name_count = @intCast(@intFromPtr(scan) - @intFromPtr(event.guid));
-                    line_number = std.mem.bytesToValue(u32, scan + 1);
+                    result.file_name_count = @intCast(@intFromPtr(scan) - @intFromPtr(guid));
+                    result.line_number = std.mem.bytesToValue(u32, scan + 1);
                 } else if (pipe_count == 2) {
-                    name_starts_at = @intCast(@intFromPtr(scan) - @intFromPtr(event.guid) + 1);
+                    result.name_starts_at = @intCast(@intFromPtr(scan) - @intFromPtr(guid) + 1);
                 }
                 pipe_count += 1;
             }
 
-            hash_value %= 65599 * hash_value + scan[0];
+            result.hash_value %= 65599 * result.hash_value + scan[0];
         }
-        const index: u32 = @mod(hash_value, @as(u32, @intCast(self.element_hash.len)));
+        result.name_length = @intCast((@intFromPtr(scan) - @intFromPtr(guid)) - result.name_starts_at);
+        result.name = guid + result.name_starts_at;
+        return result;
+    }
+
+    fn getElementFromEvent(self: *DebugState, event: *DebugEvent, parent: ?*DebugVariableGroup) *DebugElement {
+        var result: ?*DebugElement = null;
+        const parsed_name: DebugParsedName = parseName(event.guid);
+        const index: u32 = @mod(parsed_name.hash_value, @as(u32, @intCast(self.element_hash.len)));
         var opt_chain: ?*DebugElement = self.element_hash[index];
         while (opt_chain) |chain| : (opt_chain = chain.next_in_hash) {
             if (shared.stringsAreEqual(std.mem.span(chain.guid), std.mem.span(event.guid))) {
@@ -533,16 +549,16 @@ pub const DebugState = struct {
             result = self.debug_arena.pushStruct(DebugElement, null);
 
             result.?.guid = self.debug_arena.pushString(event.guid);
-            result.?.file_name_count = file_name_count;
-            result.?.line_number = line_number;
-            result.?.name_starts_at = name_starts_at;
+            result.?.file_name_count = parsed_name.file_name_count;
+            result.?.line_number = parsed_name.line_number;
+            result.?.name_starts_at = parsed_name.name_starts_at;
             result.?.next_in_hash = self.element_hash[index];
             self.element_hash[index] = result;
 
             result.?.oldest_event = null;
             result.?.most_recent_event = null;
 
-            if (self.getGroupForHierarchicalName(self.root_group, result.?.getName())) |parent_group| {
+            if (self.getGroupForHierarchicalName(parent orelse self.root_group, result.?.getName(), false)) |parent_group| {
                 _ = self.addElementToGroup(parent_group, result.?);
             }
         }
@@ -554,7 +570,6 @@ pub const DebugState = struct {
         var event_index: u32 = 0;
         while (event_index < event_count) : (event_index += 1) {
             const event: *DebugEvent = &event_array[event_index];
-            const element: *DebugElement = self.getElementFromEvent(event);
 
             if (self.collation_frame == null) {
                 self.collation_frame = self.newFrame(event.clock);
@@ -602,8 +617,16 @@ pub const DebugState = struct {
                 // const relative_clock: u64 = event.clock - collation_frame.begin_clock;
                 // _ = relative_clock;
 
+                var default_parent_group: *DebugVariableGroup = self.root_group;
+                if (thread.first_open_data_block) |first_open_data_block| {
+                    if (first_open_data_block.group) |group| {
+                        default_parent_group = group;
+                    }
+                }
+
                 switch (event.event_type) {
                     .BeginBlock => {
+                        const element: *DebugElement = self.getElementFromEvent(event, null);
                         _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_code_block);
                     },
                     .EndBlock => {
@@ -614,8 +637,8 @@ pub const DebugState = struct {
                                 if (matching_block.staring_frame_index == frame_index) {
                                     var match_name: ?[*:0]const u8 = null;
 
-                                    if (matching_block.parent) |parent| {
-                                        match_name = parent.opening_event.guid;
+                                    if (matching_block.parent) |parent_block| {
+                                        match_name = parent_block.opening_event.guid;
                                     }
 
                                     // if (match_name == self.scope_to_record) {
@@ -644,13 +667,15 @@ pub const DebugState = struct {
                         }
                     },
                     .OpenDataBlock => {
-                        _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_data_block);
-                        _ = self.storeEvent(element, event);
+                        var debug_block: *OpenDebugBlock =
+                            self.allocateOpenDebugBlock(null, frame_index, event, &thread.first_open_data_block);
+
+                        const parsed_name: DebugParsedName = parseName(event.guid);
+                        debug_block.group =
+                            self.getGroupForHierarchicalName(default_parent_group, parsed_name.name, true);
                     },
                     .CloseDataBlock => {
                         if (thread.first_open_data_block) |matching_block| {
-                            _ = self.storeEvent(matching_block.element.?, event);
-
                             const opening_event: *DebugEvent = matching_block.opening_event;
                             if (opening_event.matches(event)) {
                                 self.deallocateOpenDebugBlock(&thread.first_open_data_block);
@@ -658,11 +683,8 @@ pub const DebugState = struct {
                         }
                     },
                     else => {
-                        var storage_element: *DebugElement = element;
-                        if (thread.first_open_data_block) |first_open_data_block| {
-                            storage_element = first_open_data_block.element.?;
-                        }
-                        _ = self.storeEvent(storage_element, event);
+                        const element: *DebugElement = self.getElementFromEvent(event, default_parent_group);
+                        _ = self.storeEvent(element, event);
                     },
                 }
             }
@@ -790,6 +812,7 @@ const DebugVariableToTextFlag = enum(u32) {
     Colon = 0x40,
     StartAtLastSlash = 0x80,
     Value = 0x100,
+    StartAtLastPeriod = 0x120,
     // TODO: Add a way to only show the last part of field, skipping past the type information. SkipPastLastPeriod?
 
     pub fn toInt(self: DebugVariableToTextFlag) u32 {
@@ -809,7 +832,8 @@ const DebugVariableToTextFlag = enum(u32) {
         return DebugVariableToTextFlag.Name.toInt() |
             DebugVariableToTextFlag.NullTerminator.toInt() |
             DebugVariableToTextFlag.Value.toInt() |
-            DebugVariableToTextFlag.Colon.toInt();
+            DebugVariableToTextFlag.Colon.toInt() |
+            DebugVariableToTextFlag.StartAtLastPeriod.toInt();
     }
 
     pub fn blockTitleFlags() u32 {
@@ -895,6 +919,16 @@ pub const DebugElement = struct {
     }
 };
 
+pub const DebugParsedName = struct {
+    hash_value: u32 = 0,
+    file_name_count: u32 = 0,
+    name_starts_at: u32 = 0,
+    line_number: u32 = 0,
+
+    name_length: u32 = 0,
+    name: [*:0]const u8 = undefined,
+};
+
 pub const DebugVariableLink = struct {
     next: *DebugVariableLink,
     prev: *DebugVariableLink,
@@ -922,9 +956,17 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
 
         if (flags & DebugVariableToTextFlag.StartAtLastSlash.toInt() != 0) {
             var scan = name;
-
             while (scan[0] != 0) : (scan += 1) {
                 if (scan[0] == '/' and scan[1] != 0) {
+                    name = scan + 1;
+                }
+            }
+        }
+
+        if (flags & DebugVariableToTextFlag.StartAtLastPeriod.toInt() != 0) {
+            var scan = name;
+            while (scan[0] != 0) : (scan += 1) {
+                if (scan[0] == '.' and scan[1] != 0) {
                     name = scan + 1;
                 }
             }
@@ -1358,7 +1400,8 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
         if (debug_state.debug_font_info) |font_info| {
             var render_group: *RenderGroup = &debug_state.render_group;
             const event = &stored_event.event;
-            var item_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .AutoModifyVariable);
+            var item_interaction: DebugInteraction =
+                DebugInteraction.eventInteraction(debug_state, debug_id, event, .AutoModifyVariable);
             const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
             const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
             const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
@@ -1371,7 +1414,8 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
                         _ = view.data.inline_block.dimension.setX(dim.size.x());
                     }
 
-                    const tear_interaction: DebugInteraction = DebugInteraction.eventInteraction(debug_state, debug_id, event, .TearValue);
+                    const tear_interaction: DebugInteraction =
+                        DebugInteraction.eventInteraction(debug_state, debug_id, event, .TearValue);
                     var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
                     element.makeSizable();
                     element.defaultInteraction(tear_interaction);
@@ -1396,8 +1440,6 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
 
                     drawProfileIn(debug_state, layout_element.bounds, layout.mouse_position);
                 },
-                .OpenDataBlock => {},
-                .CloseDataBlock => {},
                 else => {
                     var text: [4096:0]u8 = undefined;
                     var len: u32 = 0;
@@ -1423,6 +1465,7 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
 
 fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, debug_id: DebugId) void {
     const debug_state: *DebugState = layout.debug_state;
+    _ = tree;
 
     if (element.oldest_event) |oldest_event| {
         const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
@@ -1435,49 +1478,6 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
                 layout_element.end();
 
                 drawProfileIn(debug_state, layout_element.bounds, layout.mouse_position);
-            },
-            .OpenDataBlock => {
-                var last_open_block: *DebugStoredEvent = oldest_event;
-
-                var opt_event: ?*DebugStoredEvent = element.oldest_event;
-                while (opt_event) |event| : (opt_event = event.next) {
-                    if (event.event.event_type == .OpenDataBlock) {
-                        last_open_block = event;
-                    }
-                }
-
-                const item_interaction = DebugInteraction.fromId(debug_id, .ToggleExpansion);
-
-                var text: [4096:0]u8 = undefined;
-                var len: u32 = 0;
-                len = debugEventToText(&text, len, &last_open_block.event, DebugVariableToTextFlag.blockTitleFlags());
-
-                const text_bounds = getTextSize(debug_state, &text);
-                var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
-
-                var title_element: LayoutElement = layout.beginElementRectangle(&dim);
-                title_element.defaultInteraction(item_interaction);
-                title_element.end();
-
-                const text_position: Vector2 = Vector2.new(
-                    title_element.bounds.min.x(),
-                    title_element.bounds.max.y() - debug_state.font_scale * debug_state.debug_font_info.?.getStartingBaselineY(),
-                );
-
-                const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
-                const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
-                textOutAt(&text, text_position, item_color);
-
-                if (view.view_type == .Collapsible and view.data.collapsible.expanded_always) {
-                    layout.depth += 1;
-
-                    opt_event = last_open_block;
-                    while (opt_event) |event| : (opt_event = event.next) {
-                        const new_id: DebugId = DebugId.fromGuid(tree, event.event.guid);
-                        drawDebugEvent(layout, event, new_id);
-                    }
-                    layout.depth -= 1;
-                }
             },
             else => {
                 const opt_event: ?*DebugStoredEvent = element.most_recent_event;

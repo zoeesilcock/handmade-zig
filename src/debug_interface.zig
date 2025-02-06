@@ -366,14 +366,6 @@ pub const DebugInterface = if (INTERNAL) struct {
         _ = DebugEvent.record(.CloseDataBlock, DebugEvent.debugName(source, null, "End Data Block"));
     }
 
-    fn formatFieldName(comptime name: []const u8) []const u8 {
-        var buf: [128]u8 = undefined;
-        _ = std.mem.replace(u8, name, "_", "-", &buf);
-        // return &buf[0..name.len];
-        const final = buf[0..name.len].*;
-        return &final;
-    }
-
     pub fn debugStruct(comptime source: std.builtin.SourceLocation, parent: anytype) void {
         const fields = std.meta.fields(@TypeOf(parent.*));
         inline for (fields) |field| {
@@ -386,13 +378,11 @@ pub const DebugInterface = if (INTERNAL) struct {
         parent: anytype,
         comptime field_name: []const u8,
     ) void {
-        // TODO: Is this still needed?
-        const display_name = comptime DebugInterface.formatFieldName(field_name);
         const value = @field(parent, field_name);
         const type_info = @typeInfo(@TypeOf(value));
         var event = DebugEvent.record(
             .Unknown,
-            DebugEvent.debugName(source, null, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ display_name)),
+            DebugEvent.debugName(source, null, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ field_name)),
         );
         switch (type_info) {
             .Optional => {
@@ -410,8 +400,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         comptime source: std.builtin.SourceLocation,
         comptime function_name: []const u8,
     ) void {
-        const display_name = comptime DebugInterface.formatFieldName(function_name);
-        _ = DebugEvent.record(.CounterFunctionList, DebugEvent.debugName(source, null, @ptrCast(display_name)));
+        _ = DebugEvent.record(.CounterFunctionList, DebugEvent.debugName(source, null, @ptrCast(function_name)));
     }
 
     pub fn debugBeginArray(array: anytype) void {
