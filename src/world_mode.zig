@@ -17,7 +17,7 @@ const PARTICLE_CEL_DIM = 32;
 pub const GROUND_BUFFER_WIDTH: u32 = 256;
 pub const GROUND_BUFFER_HEIGHT: u32 = 256;
 
-const global_config = @import("config.zig").global_config;
+var global_config = &@import("config.zig").global_config;
 
 // Types.
 const Vector2 = math.Vector2;
@@ -403,7 +403,7 @@ pub fn updateAndRenderWorld(
     const fade_bottom_end_z: f32 = -2.25 * world_mode.typical_floor_height;
 
     // Draw ground.
-    if (true) {
+    if (global_config.GroundChunks_Enabled) {
         var ground_buffer_index: u32 = 0;
         while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
             const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -448,7 +448,7 @@ pub fn updateAndRenderWorld(
     }
 
     // Populate ground chunks.
-    if (true) {
+    if (global_config.GroundChunks_Enabled) {
         const min_chunk_position = world.mapIntoChunkSpace(
             world_mode.world,
             world_mode.camera_position,
@@ -1150,28 +1150,20 @@ pub fn updateAndRenderWorld(
                 }
 
                 if (debug_interface.requested(entity_debug_id)) {
-                    // DebugInterface.debugBeginDataBlock(@src(), "Simulation_Entity", entity_debug_id);
-                    // {
-                    //     DebugInterface.debugStruct(@src(), entity);
-                    //     DebugInterface.debugValue(@src(), hero_bitmaps, "torso");
-                    //     // DebugInterface.debugStruct(@src(), &config.global_constants);
-                    // }
-                    // DebugInterface.debugEndDataBlock(@src());
-
                     DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
                     {
-                        DebugInterface.debugValue(@src(), entity, "storage_index");
-                        DebugInterface.debugValue(@src(), entity, "updatable");
-                        DebugInterface.debugValue(@src(), entity, "type");
-                        DebugInterface.debugValue(@src(), entity, "flags");
-                        DebugInterface.debugValue(@src(), entity, "position");
-                        DebugInterface.debugValue(@src(), entity, "velocity");
-                        DebugInterface.debugValue(@src(), entity, "distance_limit");
-                        DebugInterface.debugValue(@src(), entity, "facing_direction");
-                        DebugInterface.debugValue(@src(), entity, "head_bob_time");
-                        DebugInterface.debugValue(@src(), entity, "abs_tile_z_delta");
-                        DebugInterface.debugValue(@src(), entity, "hit_point_max");
-                        DebugInterface.debugValue(@src(), hero_bitmaps, "torso");
+                        DebugInterface.debugValue(@src(), &entity.storage_index, "storage_index");
+                        DebugInterface.debugValue(@src(), &entity.updatable, "updatable");
+                        DebugInterface.debugValue(@src(), &entity.type, "type");
+                        DebugInterface.debugValue(@src(), &entity.flags, "flags");
+                        DebugInterface.debugValue(@src(), &entity.position, "position");
+                        DebugInterface.debugValue(@src(), &entity.velocity, "velocity");
+                        DebugInterface.debugValue(@src(), &entity.distance_limit, "distance_limit");
+                        DebugInterface.debugValue(@src(), &entity.facing_direction, "facing_direction");
+                        DebugInterface.debugValue(@src(), &entity.facing_direction, "head_bob_time");
+                        DebugInterface.debugValue(@src(), &entity.abs_tile_z_delta, "abs_tile_z_delta");
+                        DebugInterface.debugValue(@src(), &entity.hit_point_max, "hit_point_max");
+                        DebugInterface.debugValue(@src(), &hero_bitmaps.torso, "torso");
                         // DebugInterface.debugBeginArray(entity.hit_points);
                         // var hit_point_index: u32 = 0;
                         // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
@@ -1179,8 +1171,8 @@ pub fn updateAndRenderWorld(
                         // }
                         // DebugInterface.debugEndArray();
                         // DebugInterface.debugValue(@src(), entity, "sword");
-                        DebugInterface.debugValue(@src(), entity, "walkable_dimension");
-                        DebugInterface.debugValue(@src(), entity, "walkable_height");
+                        DebugInterface.debugValue(@src(), &entity.walkable_dimension, "walkable_dimension");
+                        DebugInterface.debugValue(@src(), &entity.walkable_height, "walkable_height");
                     }
                     DebugInterface.debugEndDataBlock(@src());
 

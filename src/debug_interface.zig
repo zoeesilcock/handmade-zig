@@ -19,6 +19,7 @@ const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 
+var global_config = &@import("config.zig").global_config;
 pub const hit = if (INTERNAL) debug.hit else debug.hitStub;
 pub const highlighted = if (INTERNAL) debug.highlighted else debug.highlightedStub;
 pub const requested = if (INTERNAL) debug.requested else debug.requestedStub;
@@ -90,6 +91,7 @@ pub const DebugCycleCounters = enum(u16) {
 };
 
 pub const DebugTable = extern struct {
+    edit_event: DebugEvent = DebugEvent{},
     current_event_array_index: u32 = 0,
     event_array_index_event_index: u64 = 0,
 
@@ -200,55 +202,64 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         return event;
     }
 
-    pub fn setValue(self: *DebugEvent, value: anytype) void {
-        switch (@TypeOf(value)) {
+    pub fn setValue(self: *DebugEvent, source: anytype, dest: anytype) void {
+        std.debug.assert(@typeInfo(@TypeOf(dest)) == .Pointer);
+
+        switch (@TypeOf(source)) {
             bool => {
                 self.event_type = .bool;
-                self.data = .{ .bool = value };
+                if (shared.global_debug_table.edit_event.guid == self.guid) {
+                    var debugging_is_hard = true;
+                    dest.* = shared.global_debug_table.edit_event.data.bool;
+                    debugging_is_hard = true;
+                    // std.debug.print("Pointer (set): {d}\n", .{ @intFromPtr(dest) });
+                }
+
+                self.data = .{ .bool = dest.* };
             },
             u32 => {
                 self.event_type = .u32;
-                self.data = .{ .u32 = value };
+                self.data = .{ .u32 = source };
             },
             i32 => {
                 self.event_type = .i32;
-                self.data = .{ .i32 = value };
+                self.data = .{ .i32 = source };
             },
             f32 => {
                 self.event_type = .f32;
-                self.data = .{ .f32 = value };
+                self.data = .{ .f32 = source };
             },
             Vector2 => {
                 self.event_type = .Vector2;
-                self.data = .{ .Vector2 = value };
+                self.data = .{ .Vector2 = source };
             },
             Vector3 => {
                 self.event_type = .Vector3;
-                self.data = .{ .Vector3 = value };
+                self.data = .{ .Vector3 = source };
             },
             Vector4 => {
                 self.event_type = .Vector4;
-                self.data = .{ .Vector4 = value };
+                self.data = .{ .Vector4 = source };
             },
             Rectangle2 => {
                 self.event_type = .Rectangle2;
-                self.data = .{ .Rectangle2 = value };
+                self.data = .{ .Rectangle2 = source };
             },
             Rectangle3 => {
                 self.event_type = .Rectangle3;
-                self.data = .{ .Rectangle3 = value };
+                self.data = .{ .Rectangle3 = source };
             },
             BitmapId => {
                 self.event_type = .BitmapId;
-                self.data = .{ .BitmapId = value };
+                self.data = .{ .BitmapId = source };
             },
             SoundId => {
                 self.event_type = .SoundId;
-                self.data = .{ .SoundId = value };
+                self.data = .{ .SoundId = source };
             },
             FontId => {
                 self.event_type = .FontId;
-                self.data = .{ .FontId = value };
+                self.data = .{ .FontId = source };
             },
             else => {
                 // TODO: Handle enums here?
@@ -366,34 +377,14 @@ pub const DebugInterface = if (INTERNAL) struct {
         _ = DebugEvent.record(.CloseDataBlock, DebugEvent.debugName(source, null, "End Data Block"));
     }
 
-    pub fn debugStruct(comptime source: std.builtin.SourceLocation, parent: anytype) void {
-        const fields = std.meta.fields(@TypeOf(parent.*));
-        inline for (fields) |field| {
-            debugValue(source, parent, field.name);
-        }
-    }
-
     pub fn debugValue(
         comptime source: std.builtin.SourceLocation,
-        parent: anytype,
+        value_ptr: anytype,
         comptime field_name: []const u8,
     ) void {
-        const value = @field(parent, field_name);
-        const type_info = @typeInfo(@TypeOf(value));
-        var event = DebugEvent.record(
-            .Unknown,
-            DebugEvent.debugName(source, null, @ptrCast(@typeName(@TypeOf(parent)) ++ "." ++ field_name)),
-        );
-        switch (type_info) {
-            .Optional => {
-                if (value) |v| {
-                    event.setValue(v);
-                }
-            },
-            else => {
-                event.setValue(value);
-            },
-        }
+        const guid = DebugEvent.debugName(source, null, field_name);
+        var event = DebugEvent.record(.Unknown, guid);
+        event.setValue(value_ptr.*, value_ptr);
     }
 
     pub fn debugProfile(

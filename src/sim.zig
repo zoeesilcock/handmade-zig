@@ -6,7 +6,7 @@ const config = @import("config.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
-const global_config = @import("config.zig").global_config;
+var global_config = &@import("config.zig").global_config;
 
 // Types.
 const Vector2 = math.Vector2;

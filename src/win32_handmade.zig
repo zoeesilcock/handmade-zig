@@ -117,6 +117,7 @@ var opengl_supports_srgb_frame_buffer: bool = false;
 // Globals.
 pub var platform: shared.Platform = undefined;
 pub var running: bool = false;
+pub var paused: bool = false;
 pub var rendering_type: RenderingType = .RenderOpenGLDisplayOpenGL;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
@@ -1028,8 +1029,13 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
                     }
                 }
             },
+            'P' => {
+                if (INTERNAL and is_down) {
+                    paused = !paused;
+                }
+            },
             'L' => {
-                if (is_down) {
+                if (INTERNAL and is_down) {
                     if (state.input_recording_index == 0 and state.input_playing_index == 0) {
                         beginRecordingInput(state, 1);
                     } else if (state.input_recording_index > 0) {
@@ -2323,8 +2329,8 @@ pub export fn wWinMain(
 
                     DebugInterface.debugBeginDataBlock(@src(), "Platform/Controls");
                     {
-                        DebugInterface.debugValue(@src(), @This(), "running");
-                        DebugInterface.debugValue(@src(), @This(), "rendering_type");
+                        DebugInterface.debugValue(@src(), &paused, "paused");
+                        DebugInterface.debugValue(@src(), &rendering_type, "rendering_type");
                     }
                     DebugInterface.debugEndDataBlock(@src());
 
@@ -2383,9 +2389,11 @@ pub export fn wWinMain(
                         }
                     }
 
-                    // Prepare input to game.
-                    processMouseInput(old_input, new_input, window_handle);
-                    processXInput(old_input, new_input);
+                    if (!paused) {
+                        // Prepare input to game.
+                        processMouseInput(old_input, new_input, window_handle);
+                        processXInput(old_input, new_input);
+                    }
 
                     TimedBlock.endBlock(@src(), .InputProcessing);
 
@@ -2402,27 +2410,29 @@ pub export fn wWinMain(
                         @intCast(back_buffer.height),
                     );
 
-                    if (state.input_recording_index > 0) {
-                        recordInput(&state, new_input);
-                    } else if (state.input_playing_index > 0) {
-                        const temp: shared.GameInput = new_input.*;
+                    if (!paused) {
+                        if (state.input_recording_index > 0) {
+                            recordInput(&state, new_input);
+                        } else if (state.input_playing_index > 0) {
+                            const temp: shared.GameInput = new_input.*;
 
-                        playbackInput(&state, new_input);
+                            playbackInput(&state, new_input);
 
-                        new_input.mouse_buttons = temp.mouse_buttons;
-                        new_input.mouse_x = temp.mouse_x;
-                        new_input.mouse_y = temp.mouse_y;
-                        new_input.mouse_z = temp.mouse_z;
-                        new_input.shift_down = temp.shift_down;
-                        new_input.alt_down = temp.alt_down;
-                        new_input.control_down = temp.control_down;
-                    }
+                            new_input.mouse_buttons = temp.mouse_buttons;
+                            new_input.mouse_x = temp.mouse_x;
+                            new_input.mouse_y = temp.mouse_y;
+                            new_input.mouse_z = temp.mouse_z;
+                            new_input.shift_down = temp.shift_down;
+                            new_input.alt_down = temp.alt_down;
+                            new_input.control_down = temp.control_down;
+                        }
 
-                    // Send all input to game.
-                    game.updateAndRender(platform, &game_memory, new_input, &render_commands);
+                        // Send all input to game.
+                        game.updateAndRender(platform, &game_memory, new_input, &render_commands);
 
-                    if (new_input.quit_requested) {
-                        fader.beginFadeToDesktop();
+                        if (new_input.quit_requested) {
+                            fader.beginFadeToDesktop();
+                        }
                     }
 
                     TimedBlock.endBlock(@src(), .GameUpdate);
@@ -2434,112 +2444,114 @@ pub export fn wWinMain(
                     TimedBlock.beginBlock(@src(), .AudioUpdate);
 
                     // Output sound.
-                    if (opt_secondary_buffer) |secondary_buffer| {
-                        var play_cursor: std.os.windows.DWORD = undefined;
-                        var write_cursor: std.os.windows.DWORD = undefined;
-                        const audio_wall_clock = getWallClock();
-                        const from_begin_to_audio_seconds = getSecondsElapsed(flip_wall_clock, audio_wall_clock);
+                    if (!paused) {
+                        if (opt_secondary_buffer) |secondary_buffer| {
+                            var play_cursor: std.os.windows.DWORD = undefined;
+                            var write_cursor: std.os.windows.DWORD = undefined;
+                            const audio_wall_clock = getWallClock();
+                            const from_begin_to_audio_seconds = getSecondsElapsed(flip_wall_clock, audio_wall_clock);
 
-                        if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
-                            secondary_buffer,
-                            &play_cursor,
-                            &write_cursor,
-                        ))) {
-                            // We define a safety margin that is the number of samples that our game loop can vary by.
-                            // Check where play cursor is and forecast ahead where we think the play cursor will be on the
-                            // next frame boundary.
-                            //
-                            // Low latency: Check if the write cursor is before that by at least the safety margin. If so the
-                            // target fill position is the frame boundary plus one frame.
-                            //
-                            // High latency: If the write cursor is after that safety valye, we assume we can never
-                            // sync perfectly. So we write one frame's worth of audio plus the safety value number of samples.
-                            if (!sound_output_info.is_valid) {
-                                sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample;
-                                sound_output_info.is_valid = true;
-                            }
-
-                            sound_output_info.byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
-
-                            const expected_sound_bytes_per_frame =
-                                (sound_output.samples_per_second * sound_output.bytes_per_sample) / @as(u32, @intFromFloat(game_update_hz));
-
-                            const seconds_left_until_flip = target_seconds_per_frame - from_begin_to_audio_seconds;
-                            var expected_bytes_until_flip: std.os.windows.DWORD = expected_sound_bytes_per_frame;
-
-                            if (seconds_left_until_flip > 0) {
-                                expected_bytes_until_flip =
-                                    @intFromFloat((seconds_left_until_flip / target_seconds_per_frame) *
-                                    @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
-                            }
-
-                            const expected_frame_boundary_byte: std.os.windows.DWORD = play_cursor + expected_bytes_until_flip;
-
-                            var safety_write_cursor: std.os.windows.DWORD = write_cursor;
-                            if (safety_write_cursor < play_cursor) {
-                                safety_write_cursor += sound_output.secondary_buffer_size;
-                            }
-                            write_cursor += sound_output.safety_bytes;
-                            const audio_card_is_low_latency = (safety_write_cursor < expected_sound_bytes_per_frame);
-
-                            var target_cursor: u32 = 0;
-                            if (audio_card_is_low_latency) {
-                                target_cursor = (expected_frame_boundary_byte + expected_sound_bytes_per_frame);
-                            } else {
-                                target_cursor =
-                                    (write_cursor + expected_sound_bytes_per_frame + sound_output.safety_bytes);
-                            }
-                            target_cursor = (target_cursor % sound_output.secondary_buffer_size);
-
-                            if (sound_output_info.byte_to_lock > target_cursor) {
-                                sound_output_info.bytes_to_write = sound_output.secondary_buffer_size - sound_output_info.byte_to_lock;
-                                sound_output_info.bytes_to_write += target_cursor;
-                            } else {
-                                sound_output_info.bytes_to_write = target_cursor - sound_output_info.byte_to_lock;
-                            }
-
-                            sound_output_info.output_buffer = shared.SoundOutputBuffer{
-                                .samples = samples.?,
-                                .sample_count = shared.align8(@divFloor(sound_output_info.bytes_to_write, sound_output.bytes_per_sample)),
-                                .samples_per_second = sound_output.samples_per_second,
-                            };
-                            sound_output_info.bytes_to_write = sound_output_info.output_buffer.sample_count * sound_output.bytes_per_sample;
-
-                            game.getSoundSamples(&game_memory, &sound_output_info.output_buffer);
-
-                            if (INTERNAL) {
-                                var marker = &debug_time_markers[debug_time_marker_index];
-                                marker.output_play_cursor = play_cursor;
-                                marker.output_write_cursor = write_cursor;
-                                marker.expected_flip_play_coursor = expected_frame_boundary_byte;
-                                marker.output_location = sound_output_info.byte_to_lock;
-                                marker.output_byte_count = sound_output_info.bytes_to_write;
-
-                                var unwrapped_write_cursor = write_cursor;
-                                if (unwrapped_write_cursor < play_cursor) {
-                                    unwrapped_write_cursor += sound_output.secondary_buffer_size;
+                            if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
+                                        secondary_buffer,
+                                        &play_cursor,
+                                        &write_cursor,
+                            ))) {
+                                // We define a safety margin that is the number of samples that our game loop can vary by.
+                                // Check where play cursor is and forecast ahead where we think the play cursor will be on the
+                                // next frame boundary.
+                                //
+                                // Low latency: Check if the write cursor is before that by at least the safety margin. If so the
+                                // target fill position is the frame boundary plus one frame.
+                                //
+                                // High latency: If the write cursor is after that safety valye, we assume we can never
+                                // sync perfectly. So we write one frame's worth of audio plus the safety value number of samples.
+                                if (!sound_output_info.is_valid) {
+                                    sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample;
+                                    sound_output_info.is_valid = true;
                                 }
-                                const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
-                                const audio_latency_seconds: f32 =
-                                    (@as(f32, @floatFromInt(audio_latency_bytes)) /
-                                    @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
-                                    @as(f32, @floatFromInt(sound_output.samples_per_second));
-                                var buffer: [128]u8 = undefined;
-                                const slice = std.fmt.bufPrintZ(&buffer, "Audio: BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d:>3.4}\n", .{
-                                    sound_output_info.byte_to_lock,
-                                    target_cursor,
-                                    sound_output_info.bytes_to_write,
-                                    play_cursor,
-                                    write_cursor,
-                                    audio_latency_bytes,
-                                    audio_latency_seconds,
-                                }) catch "";
-                                win32.OutputDebugStringA(@ptrCast(slice.ptr));
-                            }
 
-                            fillSoundBuffer(&sound_output, secondary_buffer, &sound_output_info);
-                        } else {
-                            sound_output_info.is_valid = false;
+                                sound_output_info.byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
+
+                                const expected_sound_bytes_per_frame =
+                                    (sound_output.samples_per_second * sound_output.bytes_per_sample) / @as(u32, @intFromFloat(game_update_hz));
+
+                                const seconds_left_until_flip = target_seconds_per_frame - from_begin_to_audio_seconds;
+                                var expected_bytes_until_flip: std.os.windows.DWORD = expected_sound_bytes_per_frame;
+
+                                if (seconds_left_until_flip > 0) {
+                                    expected_bytes_until_flip =
+                                        @intFromFloat((seconds_left_until_flip / target_seconds_per_frame) *
+                                            @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
+                                }
+
+                                const expected_frame_boundary_byte: std.os.windows.DWORD = play_cursor + expected_bytes_until_flip;
+
+                                var safety_write_cursor: std.os.windows.DWORD = write_cursor;
+                                if (safety_write_cursor < play_cursor) {
+                                    safety_write_cursor += sound_output.secondary_buffer_size;
+                                }
+                                write_cursor += sound_output.safety_bytes;
+                                const audio_card_is_low_latency = (safety_write_cursor < expected_sound_bytes_per_frame);
+
+                                var target_cursor: u32 = 0;
+                                if (audio_card_is_low_latency) {
+                                    target_cursor = (expected_frame_boundary_byte + expected_sound_bytes_per_frame);
+                                } else {
+                                    target_cursor =
+                                        (write_cursor + expected_sound_bytes_per_frame + sound_output.safety_bytes);
+                                }
+                                target_cursor = (target_cursor % sound_output.secondary_buffer_size);
+
+                                if (sound_output_info.byte_to_lock > target_cursor) {
+                                    sound_output_info.bytes_to_write = sound_output.secondary_buffer_size - sound_output_info.byte_to_lock;
+                                    sound_output_info.bytes_to_write += target_cursor;
+                                } else {
+                                    sound_output_info.bytes_to_write = target_cursor - sound_output_info.byte_to_lock;
+                                }
+
+                                sound_output_info.output_buffer = shared.SoundOutputBuffer{
+                                    .samples = samples.?,
+                                    .sample_count = shared.align8(@divFloor(sound_output_info.bytes_to_write, sound_output.bytes_per_sample)),
+                                    .samples_per_second = sound_output.samples_per_second,
+                                };
+                                sound_output_info.bytes_to_write = sound_output_info.output_buffer.sample_count * sound_output.bytes_per_sample;
+
+                                game.getSoundSamples(&game_memory, &sound_output_info.output_buffer);
+
+                                if (INTERNAL) {
+                                    var marker = &debug_time_markers[debug_time_marker_index];
+                                    marker.output_play_cursor = play_cursor;
+                                    marker.output_write_cursor = write_cursor;
+                                    marker.expected_flip_play_coursor = expected_frame_boundary_byte;
+                                    marker.output_location = sound_output_info.byte_to_lock;
+                                    marker.output_byte_count = sound_output_info.bytes_to_write;
+
+                                    var unwrapped_write_cursor = write_cursor;
+                                    if (unwrapped_write_cursor < play_cursor) {
+                                        unwrapped_write_cursor += sound_output.secondary_buffer_size;
+                                    }
+                                    const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
+                                    const audio_latency_seconds: f32 =
+                                        (@as(f32, @floatFromInt(audio_latency_bytes)) /
+                                         @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
+                                        @as(f32, @floatFromInt(sound_output.samples_per_second));
+                                    var buffer: [128]u8 = undefined;
+                                    const slice = std.fmt.bufPrintZ(&buffer, "Audio: BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d:>3.4}\n", .{
+                                        sound_output_info.byte_to_lock,
+                                        target_cursor,
+                                        sound_output_info.bytes_to_write,
+                                        play_cursor,
+                                        write_cursor,
+                                        audio_latency_bytes,
+                                        audio_latency_seconds,
+                                    }) catch "";
+                                    win32.OutputDebugStringA(@ptrCast(slice.ptr));
+                                }
+
+                                fillSoundBuffer(&sound_output, secondary_buffer, &sound_output_info);
+                            } else {
+                                sound_output_info.is_valid = false;
+                            }
                         }
                     }
 
@@ -2568,25 +2580,27 @@ pub export fn wWinMain(
                         TimedBlock.beginBlock(@src(), .FrameRateWait);
                         defer TimedBlock.endBlock(@src(), .FrameRateWait);
 
-                        // Capture timing.
-                        const work_counter = getWallClock();
-                        const work_seconds_elapsed = getSecondsElapsed(last_counter, work_counter);
+                        if (!paused) {
+                            // Capture timing.
+                            const work_counter = getWallClock();
+                            const work_seconds_elapsed = getSecondsElapsed(last_counter, work_counter);
 
-                        // Wait until we reach frame rate target.
-                        var seconds_elapsed_for_frame = work_seconds_elapsed;
-                        if (seconds_elapsed_for_frame < target_seconds_per_frame) {
-                            if (sleep_is_grannular) {
-                                const sleep_ms: u32 = @intFromFloat(1000.0 * (target_seconds_per_frame - seconds_elapsed_for_frame));
-                                if (sleep_ms > 0) {
-                                    win32.Sleep(sleep_ms);
+                            // Wait until we reach frame rate target.
+                            var seconds_elapsed_for_frame = work_seconds_elapsed;
+                            if (seconds_elapsed_for_frame < target_seconds_per_frame) {
+                                if (sleep_is_grannular) {
+                                    const sleep_ms: u32 = @intFromFloat(1000.0 * (target_seconds_per_frame - seconds_elapsed_for_frame));
+                                    if (sleep_ms > 0) {
+                                        win32.Sleep(sleep_ms);
+                                    }
                                 }
-                            }
 
-                            while (seconds_elapsed_for_frame < target_seconds_per_frame) {
-                                seconds_elapsed_for_frame = getSecondsElapsed(last_counter, getWallClock());
+                                while (seconds_elapsed_for_frame < target_seconds_per_frame) {
+                                    seconds_elapsed_for_frame = getSecondsElapsed(last_counter, getWallClock());
+                                }
+                            } else {
+                                // Target frame rate missed.
                             }
-                        } else {
-                            // Target frame rate missed.
                         }
                     }
 

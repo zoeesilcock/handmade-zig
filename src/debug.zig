@@ -343,7 +343,6 @@ pub const DebugState = struct {
         result.?.next = null;
         result.?.frame_index = self.collation_frame.?.frame_index;
         result.?.event = event.*;
-        result.?.event.guid = element.getName();
 
         if (element.most_recent_event != null) {
             element.most_recent_event.?.next = result;
@@ -533,21 +532,28 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn getElementFromEvent(self: *DebugState, event: *DebugEvent, parent: ?*DebugVariableGroup) *DebugElement {
+    fn getElementFromEventByIndex(self: *DebugState, index: u32, guid: [*:0]const u8) ?*DebugElement {
         var result: ?*DebugElement = null;
-        const parsed_name: DebugParsedName = parseName(event.guid);
-        const index: u32 = @mod(parsed_name.hash_value, @as(u32, @intCast(self.element_hash.len)));
         var opt_chain: ?*DebugElement = self.element_hash[index];
         while (opt_chain) |chain| : (opt_chain = chain.next_in_hash) {
-            if (shared.stringsAreEqual(std.mem.span(chain.guid), std.mem.span(event.guid))) {
+            if (shared.stringsAreEqual(std.mem.span(chain.guid), std.mem.span(guid))) {
                 result = chain;
                 break;
             }
         }
+        return result;
+    }
+
+    fn getElementFromEvent(self: *DebugState, event: *DebugEvent, parent: ?*DebugVariableGroup) ?*DebugElement {
+        var result: ?*DebugElement = null;
+        const parsed_name: DebugParsedName = parseName(event.guid);
+        const index: u32 = @mod(parsed_name.hash_value, @as(u32, @intCast(self.element_hash.len)));
+        result = self.getElementFromEventByIndex(index, event.guid);
 
         if (result == null) {
             result = self.debug_arena.pushStruct(DebugElement, null);
 
+            result.?.guid = event.guid;
             result.?.guid = self.debug_arena.pushString(event.guid);
             result.?.file_name_count = parsed_name.file_name_count;
             result.?.line_number = parsed_name.line_number;
@@ -563,7 +569,7 @@ pub const DebugState = struct {
             }
         }
 
-        return result.?;
+        return result;
     }
 
     pub fn collateDebugRecords(self: *DebugState, event_count: u32, event_array: [*]DebugEvent) void {
@@ -626,8 +632,9 @@ pub const DebugState = struct {
 
                 switch (event.event_type) {
                     .BeginBlock => {
-                        const element: *DebugElement = self.getElementFromEvent(event, null);
-                        _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_code_block);
+                        if (self.getElementFromEvent(event, null)) |element| {
+                            _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_code_block);
+                        }
                     },
                     .EndBlock => {
                         if (thread.first_open_code_block) |matching_block| {
@@ -683,8 +690,10 @@ pub const DebugState = struct {
                         }
                     },
                     else => {
-                        const element: *DebugElement = self.getElementFromEvent(event, default_parent_group);
-                        _ = self.storeEvent(element, event);
+                        if (self.getElementFromEvent(event, default_parent_group)) |element| {
+                            element.original_guid = event.guid;
+                            _ = self.storeEvent(element, event);
+                        }
                     },
                 }
             }
@@ -812,7 +821,6 @@ const DebugVariableToTextFlag = enum(u32) {
     Colon = 0x40,
     StartAtLastSlash = 0x80,
     Value = 0x100,
-    StartAtLastPeriod = 0x120,
     // TODO: Add a way to only show the last part of field, skipping past the type information. SkipPastLastPeriod?
 
     pub fn toInt(self: DebugVariableToTextFlag) u32 {
@@ -832,8 +840,7 @@ const DebugVariableToTextFlag = enum(u32) {
         return DebugVariableToTextFlag.Name.toInt() |
             DebugVariableToTextFlag.NullTerminator.toInt() |
             DebugVariableToTextFlag.Value.toInt() |
-            DebugVariableToTextFlag.Colon.toInt() |
-            DebugVariableToTextFlag.StartAtLastPeriod.toInt();
+            DebugVariableToTextFlag.Colon.toInt();
     }
 
     pub fn blockTitleFlags() u32 {
@@ -896,11 +903,13 @@ pub const DebugString = struct {
 };
 
 pub const DebugElement = struct {
+    original_guid: [*:0]const u8, // Can't be printed, it is only used for checking pointer equality.
     guid: [*:0]const u8,
     file_name_count: u32,
     line_number: u32,
     name_count: u32,
     name_starts_at: u32,
+    value_was_edited: bool,
 
     next_in_hash: ?*DebugElement,
 
@@ -958,15 +967,6 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
             var scan = name;
             while (scan[0] != 0) : (scan += 1) {
                 if (scan[0] == '/' and scan[1] != 0) {
-                    name = scan + 1;
-                }
-            }
-        }
-
-        if (flags & DebugVariableToTextFlag.StartAtLastPeriod.toInt() != 0) {
-            var scan = name;
-            while (scan[0] != 0) : (scan += 1) {
-                if (scan[0] == '.' and scan[1] != 0) {
                     name = scan + 1;
                 }
             }
@@ -1765,6 +1765,10 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
                 switch (event.event_type) {
                     .bool => {
                         event.data.bool = !event.data.bool;
+                        global_debug_table.edit_event = event.*;
+                        if (debug_state.getElementFromEvent(event, null)) |element| {
+                            global_debug_table.edit_event.guid = element.original_guid;
+                        }
                     },
                     else => {},
                 }
@@ -2246,6 +2250,8 @@ pub fn frameEnd(
     input: shared.GameInput,
     commands: *shared.RenderCommands,
 ) callconv(.C) *debug_interface.DebugTable {
+    shared.zeroStruct(DebugEvent, &global_debug_table.edit_event);
+
     global_debug_table.current_event_array_index = if (global_debug_table.current_event_array_index == 0) 1 else 0;
 
     const next_event_array_index: u64 = @as(u64, @intCast(global_debug_table.current_event_array_index)) << 32;

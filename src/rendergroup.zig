@@ -28,7 +28,7 @@ const std = @import("std");
 const INTERNAL = shared.INTERNAL;
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 
-const global_config = @import("config.zig").global_config;
+var global_config = &@import("config.zig").global_config;
 
 // Types.
 const Vector2 = math.Vector2;

@@ -93,7 +93,7 @@ const std = @import("std");
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
-const global_config = @import("config.zig").global_config;
+var global_config = &@import("config.zig").global_config;
 
 // Types.
 const Vector2 = math.Vector2;
@@ -131,12 +131,12 @@ pub export fn updateAndRender(
         shared.debug_global_memory = memory;
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
-            DebugInterface.debugValue(@src(), global_config, "Renderer_TestWeirdDrawBufferSize");
+            DebugInterface.debugValue(@src(), &global_config.Renderer_TestWeirdDrawBufferSize, "Renderer_TestWeirdDrawBufferSize");
             DebugInterface.debugBeginDataBlock(@src(), "Camera");
             {
-                DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_UseDebug");
-                DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_DebugDistance");
-                DebugInterface.debugValue(@src(), global_config, "Renderer_Camera_RoomBased");
+                DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_UseDebug, "Renderer_Camera_UseDebug");
+                DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_DebugDistance, "Renderer_Camera_DebugDistance");
+                DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_RoomBased, "Renderer_Camera_RoomBased");
             }
             DebugInterface.debugEndDataBlock(@src());
         }
@@ -144,28 +144,29 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "GroundChunks");
         {
-            DebugInterface.debugValue(@src(), global_config, "GroundChunks_Checkerboards");
-            DebugInterface.debugValue(@src(), global_config, "GroundChunks_RecomputeOnEXEChange");
-            DebugInterface.debugValue(@src(), global_config, "GroundChunks_Outlines");
+            DebugInterface.debugValue(@src(), &global_config.GroundChunks_Enabled, "GroundChunks_Enabled");
+            DebugInterface.debugValue(@src(), &global_config.GroundChunks_Checkerboards, "GroundChunks_Checkerboards");
+            DebugInterface.debugValue(@src(), &global_config.GroundChunks_RecomputeOnEXEChange, "GroundChunks_RecomputeOnEXEChange");
+            DebugInterface.debugValue(@src(), &global_config.GroundChunks_Outlines, "GroundChunks_Outlines");
         }
         DebugInterface.debugEndDataBlock(@src());
 
         DebugInterface.debugBeginDataBlock(@src(), "AI/Familiar");
         {
-            DebugInterface.debugValue(@src(), global_config, "AI_Familiar_FollowsHero");
+            DebugInterface.debugValue(@src(), &global_config.AI_Familiar_FollowsHero, "AI_Familiar_FollowsHero");
         }
         DebugInterface.debugEndDataBlock(@src());
 
         DebugInterface.debugBeginDataBlock(@src(), "Particles");
         {
-            DebugInterface.debugValue(@src(), global_config, "Particles_Test");
-            DebugInterface.debugValue(@src(), global_config, "Particles_ShowGrid");
+            DebugInterface.debugValue(@src(), &global_config.Particles_Test, "Particles_Test");
+            DebugInterface.debugValue(@src(), &global_config.Particles_ShowGrid, "Particles_ShowGrid");
         }
         DebugInterface.debugEndDataBlock(@src());
 
         DebugInterface.debugBeginDataBlock(@src(), "Simulation");
         {
-            DebugInterface.debugValue(@src(), global_config, "Simulation_UseSpaceOutlines");
+            DebugInterface.debugValue(@src(), &global_config.Simulation_UseSpaceOutlines, "Simulation_UseSpaceOutlines");
         }
         DebugInterface.debugEndDataBlock(@src());
 
