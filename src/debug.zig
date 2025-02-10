@@ -139,8 +139,9 @@ const DebugInteractionType = enum(u32) {
 };
 
 const DebugInteractionTargetType = enum(u32) {
-    event,
+    element,
     tree,
+    link,
     position,
 };
 
@@ -149,20 +150,22 @@ const DebugInteraction = struct {
     interaction_type: DebugInteractionType,
 
     target: union(DebugInteractionTargetType) {
-        event: ?*DebugEvent,
+        element: ?*DebugElement,
         tree: ?*DebugTree,
+        link: ?*DebugVariableLink,
         position: *Vector2,
     },
 
     pub fn equals(self: *const DebugInteraction, other: *const DebugInteraction) bool {
         return self.id.equals(other.id) and
-            self.interaction_type == other.interaction_type and std.meta.eql(self.target, other.target);
+            self.interaction_type == other.interaction_type and
+            std.meta.eql(self.target, other.target);
     }
 
-    pub fn eventInteraction(
+    pub fn elementInteraction(
         debug_state: *DebugState,
         debug_id: DebugId,
-        event: *DebugEvent,
+        element: *DebugElement,
         interaction_type: DebugInteractionType,
     ) DebugInteraction {
         _ = debug_state;
@@ -170,7 +173,7 @@ const DebugInteraction = struct {
             .id = debug_id,
             .interaction_type = interaction_type,
             .target = .{
-                .event = event,
+                .element = element,
             },
         };
     }
@@ -180,6 +183,14 @@ const DebugInteraction = struct {
             .id = id,
             .interaction_type = interaction_type,
             .target = undefined,
+        };
+    }
+
+    pub fn fromLink(link: *DebugVariableLink, interaction_type: DebugInteractionType) DebugInteraction {
+        return DebugInteraction{
+            .id = undefined,
+            .interaction_type = interaction_type,
+            .target = .{ .link = link },
         };
     }
 };
@@ -206,6 +217,7 @@ pub const DebugState = struct {
     tree_sentinel: DebugTree,
 
     last_mouse_position: Vector2,
+    alt_ui: bool,
     interaction: DebugInteraction,
     hot_interaction: DebugInteraction,
     next_hot_interaction: DebugInteraction,
@@ -468,10 +480,33 @@ pub const DebugState = struct {
         return group;
     }
 
+    fn cloneVariableGroup(self: *DebugState, source: *DebugVariableLink) *DebugVariableGroup {
+        const name = self.debug_arena.pushString("Cloned");
+        const result = self.createVariableGroup(shared.stringLength(name), name);
+        _ = self.cloneVariableLink(result, source);
+        return result;
+    }
+
+    fn cloneVariableLink(
+        self: *DebugState,
+        dest_group: *DebugVariableGroup,
+        source: *DebugVariableLink,
+    ) *DebugVariableLink {
+        const dest: *DebugVariableLink = self.addElementToGroup(dest_group, source.element);
+        if (source.children) |children| {
+            dest.children = self.createVariableGroup(children.name_length, children.name);
+            var child: *DebugVariableLink = children.sentinel.next;
+            while (child != &children.sentinel) : (child = child.next) {
+                _ = self.cloneVariableLink(dest.children.?, child);
+            }
+        }
+        return dest;
+    }
+
     pub fn addElementToGroup(
         self: *DebugState,
         parent: *DebugVariableGroup,
-        element: *DebugElement,
+        element: ?*DebugElement,
     ) *DebugVariableLink {
         const link: *DebugVariableLink = self.debug_arena.pushStruct(
             DebugVariableLink,
@@ -819,9 +854,8 @@ const DebugVariableToTextFlag = enum(u32) {
     NullTerminator = 0x10,
     LineFeedEnd = 0x20,
     Colon = 0x40,
-    StartAtLastSlash = 0x80,
+    ShowEntireGUID = 0x80,
     Value = 0x100,
-    // TODO: Add a way to only show the last part of field, skipping past the type information. SkipPastLastPeriod?
 
     pub fn toInt(self: DebugVariableToTextFlag) u32 {
         return @intFromEnum(self);
@@ -846,8 +880,7 @@ const DebugVariableToTextFlag = enum(u32) {
     pub fn blockTitleFlags() u32 {
         return DebugVariableToTextFlag.Name.toInt() |
             DebugVariableToTextFlag.NullTerminator.toInt() |
-            DebugVariableToTextFlag.Colon.toInt() |
-            DebugVariableToTextFlag.StartAtLastSlash.toInt();
+            DebugVariableToTextFlag.Colon.toInt();
     }
 };
 
@@ -963,10 +996,10 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
     if (flags & DebugVariableToTextFlag.Name.toInt() != 0) {
         var name = event.guid;
 
-        if (flags & DebugVariableToTextFlag.StartAtLastSlash.toInt() != 0) {
+        if (flags & DebugVariableToTextFlag.ShowEntireGUID.toInt() == 0) {
             var scan = name;
             while (scan[0] != 0) : (scan += 1) {
-                if (scan[0] == '/' and scan[1] != 0) {
+                if (scan[0] == '|' and scan[1] != 0) {
                     name = scan + 1;
                 }
             }
@@ -1392,7 +1425,12 @@ pub fn requestedStub(id: DebugId) bool {
     return false;
 }
 
-fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_id: DebugId) void {
+fn drawDebugEvent(
+    layout: *Layout,
+    in_element: *DebugElement,
+    opt_stored_event: ?*DebugStoredEvent,
+    debug_id: DebugId,
+) void {
     const no_transform = ObjectTransform.defaultFlat();
     const debug_state: *DebugState = layout.debug_state;
 
@@ -1401,7 +1439,7 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
             var render_group: *RenderGroup = &debug_state.render_group;
             const event = &stored_event.event;
             var item_interaction: DebugInteraction =
-                DebugInteraction.eventInteraction(debug_state, debug_id, event, .AutoModifyVariable);
+                DebugInteraction.elementInteraction(debug_state, debug_id, in_element, .AutoModifyVariable);
             const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
             const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
             const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
@@ -1414,11 +1452,9 @@ fn drawDebugEvent(layout: *Layout, opt_stored_event: ?*DebugStoredEvent, debug_i
                         _ = view.data.inline_block.dimension.setX(dim.size.x());
                     }
 
-                    const tear_interaction: DebugInteraction =
-                        DebugInteraction.eventInteraction(debug_state, debug_id, event, .TearValue);
                     var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
                     element.makeSizable();
-                    element.defaultInteraction(tear_interaction);
+                    element.defaultInteraction(item_interaction);
                     element.end();
 
                     render_group.pushRectangle2(no_transform, element.bounds, 0, Color.black());
@@ -1481,7 +1517,7 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
             },
             else => {
                 const opt_event: ?*DebugStoredEvent = element.most_recent_event;
-                drawDebugEvent(layout, opt_event, debug_id);
+                drawDebugEvent(layout, element, opt_event, debug_id);
             },
         }
     }
@@ -1526,9 +1562,14 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
                         iterator.link = iterator.link.next;
 
                         if (link.children != null) {
+                            const id: DebugId = DebugId.fromLink(tree, link);
                             const debug_id: DebugId = DebugId.fromLink(tree, link);
                             const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
-                            const item_interaction: DebugInteraction = DebugInteraction.fromId(DebugId.fromLink(tree, link), .ToggleExpansion);
+                            var item_interaction: DebugInteraction = DebugInteraction.fromId(id, .ToggleExpansion);
+
+                            if (debug_state.alt_ui) {
+                                item_interaction = DebugInteraction.fromLink(link, .TearValue);
+                            }
 
                             var text: [256:0]u8 = undefined;
                             std.debug.assert(link.children.?.name_length + 1 < text.len);
@@ -1620,10 +1661,10 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
     // }
 }
 
-fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2, alt_ui: bool) void {
+fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
     if (debug_state.hot_interaction.interaction_type != .None) {
         if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
-            switch (debug_state.hot_interaction.target.event.?.event_type) {
+            switch (debug_state.hot_interaction.target.element.?.most_recent_event.?.event.event_type) {
                 .bool => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
@@ -1635,21 +1676,15 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
                 },
                 else => {},
             }
-
-            if (alt_ui) {
-                debug_state.hot_interaction.interaction_type = .TearValue;
-            }
         }
 
         switch (debug_state.hot_interaction.interaction_type) {
             .TearValue => {
-                _ = mouse_position;
-                // const root_group: *DebugVariable = debug_variables.addRootGroup(debug_state, "NewUserGroup");
-                // _ = debug_variables.addDebugVariableToGroup(debug_state, root_group, debug_state.hot_interaction.target.variable);
-                // const tree: *DebugTree = debug_state.addTree(root_group, Vector2.zero());
-                // tree.ui_position = mouse_position;
-                // debug_state.hot_interaction.interaction_type = .Move;
-                // debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
+                const root_group: *DebugVariableGroup =
+                    debug_state.cloneVariableGroup(debug_state.hot_interaction.target.link.?);
+                const tree: *DebugTree = debug_state.addTree(root_group, mouse_position);
+                debug_state.hot_interaction.interaction_type = .Move;
+                debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
             },
             .Select => {
                 if (!input.shift_down) {
@@ -1685,16 +1720,19 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
     // }
 
     if (debug_state.interaction.interaction_type != .None) {
-
         // Mouse move interaction.
         switch (debug_state.interaction.interaction_type) {
             .DragValue => {
-                if (debug_state.interaction.target.event) |event| {
-                    switch (event.event_type) {
-                        .f32 => {
-                            event.data.f32 += 0.1 * mouse_delta.y();
-                        },
-                        else => {},
+                if (debug_state.interaction.target.element) |element| {
+                    if (element.most_recent_event) |stored_event| {
+                        const event = &stored_event.event;
+                        switch (event.event_type) {
+                            .f32 => {
+                                event.data.f32 += 0.1 * mouse_delta.y();
+                            },
+                            else => {},
+                        }
+                        markEditedEvent(debug_state, event);
                     }
                 }
             },
@@ -1713,11 +1751,10 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
         }
 
         // Click interaction.
-        const alt_ui: bool = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
         var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
         while (transition_index > 1) : (transition_index -= 1) {
             endInteract(debug_state, input, mouse_position);
-            beginInteract(debug_state, input, mouse_position, alt_ui);
+            beginInteract(debug_state, input, mouse_position);
         }
 
         if (!input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down) {
@@ -1726,19 +1763,27 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
     } else {
         debug_state.hot_interaction = debug_state.next_hot_interaction;
 
-        const alt_ui: bool = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
         var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
         while (transition_index > 1) : (transition_index -= 1) {
-            beginInteract(debug_state, input, mouse_position, alt_ui);
+            beginInteract(debug_state, input, mouse_position);
             endInteract(debug_state, input, mouse_position);
         }
 
         if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down) {
-            beginInteract(debug_state, input, mouse_position, alt_ui);
+            beginInteract(debug_state, input, mouse_position);
         }
     }
 
     debug_state.last_mouse_position = mouse_position;
+}
+
+fn markEditedEvent(debug_state: *DebugState, opt_event: ?*DebugEvent) void {
+    if (opt_event) |event| {
+        global_debug_table.edit_event = event.*;
+        if (debug_state.getElementFromEvent(event, null)) |element| {
+            global_debug_table.edit_event.guid = element.original_guid;
+        }
+    }
 }
 
 fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
@@ -1759,18 +1804,16 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
             view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
         },
         .ToggleValue => {
-            std.debug.assert(debug_state.interaction.target == .event);
-
-            if (debug_state.interaction.target.event) |event| {
-                switch (event.event_type) {
-                    .bool => {
-                        event.data.bool = !event.data.bool;
-                        global_debug_table.edit_event = event.*;
-                        if (debug_state.getElementFromEvent(event, null)) |element| {
-                            global_debug_table.edit_event.guid = element.original_guid;
-                        }
-                    },
-                    else => {},
+            if (debug_state.interaction.target.element) |interaction_element| {
+                if (interaction_element.most_recent_event) |stored_event| {
+                    const event = &stored_event.event;
+                    switch (event.event_type) {
+                        .bool => {
+                            event.data.bool = !event.data.bool;
+                        },
+                        else => {},
+                    }
+                    markEditedEvent(debug_state, event);
                 }
             }
         },
@@ -2131,6 +2174,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     defer TimedBlock.endBlock(@src(), .DebugEnd);
 
     const group: *RenderGroup = &debug_state.render_group;
+    debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
     const mouse_position: Vector2 = group.unproject(
         ObjectTransform.defaultFlat(),
         Vector2.new(input.mouse_x, input.mouse_y),

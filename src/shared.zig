@@ -149,6 +149,15 @@ pub inline fn safeTruncateToInt16(value: i32) i16 {
     return @as(u16, @intCast(value));
 }
 
+pub inline fn stringLength(string: [*:0]const u8) u32 {
+    var count: u32 = 0;
+    var scan = string;
+    while (scan[0] != 0) : (scan += 1) {
+        count += 1;
+    }
+    return count;
+}
+
 pub inline fn stringsAreEqual(a: []const u8, b: []const u8) bool {
     var result: bool = true;
 

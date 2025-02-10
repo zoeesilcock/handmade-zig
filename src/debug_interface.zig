@@ -205,61 +205,92 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     pub fn setValue(self: *DebugEvent, source: anytype, dest: anytype) void {
         std.debug.assert(@typeInfo(@TypeOf(dest)) == .Pointer);
 
+        const guids_match = shared.global_debug_table.edit_event.guid == self.guid;
+        // TODO: Could we use comptime to avoid duplicating this logic for each type?
         switch (@TypeOf(source)) {
             bool => {
-                self.event_type = .bool;
-                if (shared.global_debug_table.edit_event.guid == self.guid) {
-                    var debugging_is_hard = true;
+                if (guids_match) {
                     dest.* = shared.global_debug_table.edit_event.data.bool;
-                    debugging_is_hard = true;
-                    // std.debug.print("Pointer (set): {d}\n", .{ @intFromPtr(dest) });
                 }
-
+                self.event_type = .bool;
                 self.data = .{ .bool = dest.* };
             },
             u32 => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.u32;
+                }
                 self.event_type = .u32;
-                self.data = .{ .u32 = source };
+                self.data = .{ .u32 = dest.* };
             },
             i32 => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.i32;
+                }
                 self.event_type = .i32;
-                self.data = .{ .i32 = source };
+                self.data = .{ .i32 = dest.* };
             },
             f32 => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.f32;
+                }
                 self.event_type = .f32;
-                self.data = .{ .f32 = source };
+                self.data = .{ .f32 = dest.* };
             },
             Vector2 => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.Vector2;
+                }
                 self.event_type = .Vector2;
-                self.data = .{ .Vector2 = source };
+                self.data = .{ .Vector2 = dest.* };
             },
             Vector3 => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.Vector3;
+                }
                 self.event_type = .Vector3;
-                self.data = .{ .Vector3 = source };
+                self.data = .{ .Vector3 = dest.* };
             },
             Vector4 => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.Vector4;
+                }
                 self.event_type = .Vector4;
-                self.data = .{ .Vector4 = source };
+                self.data = .{ .Vector4 = dest.* };
             },
             Rectangle2 => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.Rectangle2;
+                }
                 self.event_type = .Rectangle2;
-                self.data = .{ .Rectangle2 = source };
+                self.data = .{ .Rectangle2 = dest.* };
             },
             Rectangle3 => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.Rectangle3;
+                }
                 self.event_type = .Rectangle3;
-                self.data = .{ .Rectangle3 = source };
+                self.data = .{ .Rectangle3 = dest.* };
             },
             BitmapId => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.BitmapId;
+                }
                 self.event_type = .BitmapId;
-                self.data = .{ .BitmapId = source };
+                self.data = .{ .BitmapId = dest.* };
             },
             SoundId => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.SoudnId;
+                }
                 self.event_type = .SoundId;
-                self.data = .{ .SoundId = source };
+                self.data = .{ .SoundId = dest.* };
             },
             FontId => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.FontId;
+                }
                 self.event_type = .FontId;
-                self.data = .{ .FontId = source };
+                self.data = .{ .FontId = dest.* };
             },
             else => {
                 // TODO: Handle enums here?
