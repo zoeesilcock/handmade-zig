@@ -151,6 +151,9 @@ pub const Assets = struct {
         transient_state: *shared.TransientState,
         texture_op_queue: *shared.PlatformTextureOpQueue,
     ) *Assets {
+        TimedBlock.beginFunction(@src(), .AllocateGameAssets);
+        defer TimedBlock.endFunction(@src(), .AllocateGameAssets);
+
         var assets = arena.pushStruct(Assets, ArenaPushParams.aligned(@alignOf(Assets), true));
 
         assets.texture_op_queue = texture_op_queue;

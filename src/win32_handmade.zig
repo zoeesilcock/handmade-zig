@@ -2212,7 +2212,7 @@ pub export fn wWinMain(
                 .permanent_storage = null,
                 .transient_storage_size = shared.gigabytes(1),
                 .transient_storage = null,
-                .debug_storage_size = shared.megabytes(64),
+                .debug_storage_size = shared.megabytes(256),
                 .debug_storage = null,
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,

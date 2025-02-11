@@ -214,6 +214,7 @@ pub const DebugState = struct {
     element_hash: [1024]?*DebugElement = [1]?*DebugElement{null} ** 1024,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
     root_group: *DebugVariableGroup,
+    profile_group: *DebugVariableGroup,
     tree_sentinel: DebugTree,
 
     last_mouse_position: Vector2,
@@ -309,6 +310,8 @@ pub const DebugState = struct {
                                 free_event.next = self.first_free_stored_event;
                                 self.first_free_stored_event = free_event;
                             }
+                        } else {
+                            break;
                         }
                     }
                 }
@@ -321,10 +324,13 @@ pub const DebugState = struct {
 
     fn freeOldestFrame(self: *DebugState) void {
         if (self.oldest_frame) |oldest_frame| {
-            self.oldest_frame = oldest_frame.next;
+            const frame = oldest_frame;
+            self.oldest_frame = frame.next;
 
-            if (self.most_recent_frame == oldest_frame) {
-                std.debug.assert(oldest_frame.next == null);
+            std.debug.assert(self.oldest_frame != null);
+
+            if (self.most_recent_frame == frame) {
+                std.debug.assert(frame.next == null);
                 self.most_recent_frame = null;
             }
 
@@ -579,7 +585,12 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn getElementFromEvent(self: *DebugState, event: *DebugEvent, parent: ?*DebugVariableGroup) ?*DebugElement {
+    fn getElementFromEvent(
+        self: *DebugState,
+        event: *DebugEvent,
+        parent: ?*DebugVariableGroup,
+        create_hierarchy: bool,
+    ) ?*DebugElement {
         var result: ?*DebugElement = null;
         const parsed_name: DebugParsedName = parseName(event.guid);
         const index: u32 = @mod(parsed_name.hash_value, @as(u32, @intCast(self.element_hash.len)));
@@ -599,7 +610,17 @@ pub const DebugState = struct {
             result.?.oldest_event = null;
             result.?.most_recent_event = null;
 
-            if (self.getGroupForHierarchicalName(parent orelse self.root_group, result.?.getName(), false)) |parent_group| {
+            var opt_parent_group = parent;
+            if (create_hierarchy) {
+                if (self.getGroupForHierarchicalName(
+                    parent orelse self.root_group,
+                    result.?.getName(),
+                    false,
+                )) |hierarchy_parent_group| {
+                    opt_parent_group = hierarchy_parent_group;
+                }
+            }
+            if (opt_parent_group) |parent_group| {
                 _ = self.addElementToGroup(parent_group, result.?);
             }
         }
@@ -638,11 +659,13 @@ pub const DebugState = struct {
                         self.freeFrame(self.collation_frame);
                     } else {
                         if (self.most_recent_frame != null) {
-                            self.most_recent_frame = collation_frame;
                             self.most_recent_frame.?.next = collation_frame;
-                        } else {
-                            self.oldest_frame = collation_frame;
                             self.most_recent_frame = collation_frame;
+                        } else {
+                            self.most_recent_frame = collation_frame;
+                            self.oldest_frame = collation_frame;
+
+                            std.debug.assert(self.oldest_frame != null);
                         }
                         self.frame_count += 1;
                     }
@@ -652,11 +675,8 @@ pub const DebugState = struct {
             } else {
                 std.debug.assert(self.collation_frame != null);
 
-                // const collation_frame: *DebugFrame = self.collation_frame.?;
                 const frame_index: u32 = self.frame_count -% 1;
                 const thread: *DebugThread = self.getDebugThread(event.thread_id);
-                // const relative_clock: u64 = event.clock - collation_frame.begin_clock;
-                // _ = relative_clock;
 
                 var default_parent_group: *DebugVariableGroup = self.root_group;
                 if (thread.first_open_data_block) |first_open_data_block| {
@@ -667,8 +687,9 @@ pub const DebugState = struct {
 
                 switch (event.event_type) {
                     .BeginBlock => {
-                        if (self.getElementFromEvent(event, null)) |element| {
+                        if (self.getElementFromEvent(event, self.profile_group, false)) |element| {
                             _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_code_block);
+                            _ = self.storeEvent(element, event);
                         }
                     },
                     .EndBlock => {
@@ -676,32 +697,9 @@ pub const DebugState = struct {
                             const opening_event: *DebugEvent = matching_block.opening_event;
 
                             if (opening_event.matches(event)) {
-                                if (matching_block.staring_frame_index == frame_index) {
-                                    var match_name: ?[*:0]const u8 = null;
-
-                                    if (matching_block.parent) |parent_block| {
-                                        match_name = parent_block.opening_event.guid;
-                                    }
-
-                                    // if (match_name == self.scope_to_record) {
-                                    //     const min_t: f32 = @floatFromInt(opening_event.clock - collation_frame.begin_clock);
-                                    //     const max_t: f32 = @floatFromInt(event.clock - collation_frame.begin_clock);
-                                    //     const threshold_t: f32 = 0.01;
-                                    //
-                                    //     if ((max_t - min_t) > threshold_t) {
-                                    //         var region: *DebugFrameRegion = self.addRegion(collation_frame);
-                                    //         region.event = opening_event;
-                                    //         region.cycle_count = event.clock - opening_event.clock;
-                                    //         region.lane_index = @intCast(thread.lane_index);
-                                    //         region.min_t = min_t;
-                                    //         region.max_t = max_t;
-                                    //         region.color_index = @truncate(@intFromPtr(opening_event.guid));
-                                    //     }
-                                    // }
-                                } else {
-                                    // Started on some previous frame.
+                                if (matching_block.element) |element| {
+                                    _ = self.storeEvent(element, event);
                                 }
-
                                 self.deallocateOpenDebugBlock(&thread.first_open_code_block);
                             } else {
                                 // No begin block.
@@ -725,7 +723,7 @@ pub const DebugState = struct {
                         }
                     },
                     else => {
-                        if (self.getElementFromEvent(event, default_parent_group)) |element| {
+                        if (self.getElementFromEvent(event, default_parent_group, true)) |element| {
                             element.original_guid = event.guid;
                             _ = self.storeEvent(element, event);
                         }
@@ -1108,7 +1106,7 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                 ) catch "";
                 len += @intCast(slice.len);
             },
-            .OpenDataBlock, .CounterThreadList, .Unknown => {},
+            .BitmapId => {},
             else => {
                 const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{event.guid}) catch "";
                 len += @intCast(slice.len);
@@ -1140,112 +1138,94 @@ const DebugVariableIterator = struct {
 };
 
 fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_position: Vector2) void {
+    const no_transform = ObjectTransform.defaultFlat();
     var render_group: *RenderGroup = &debug_state.render_group;
-    render_group.pushRectangle2(ObjectTransform.defaultFlat(), profile_rect, 0, Color.new(0, 0, 0, 0.25));
+    render_group.pushRectangle2(no_transform, profile_rect, 0, Color.new(0, 0, 0, 0.25));
 
-    const bar_spacing: f32 = 4;
-    var lane_height: f32 = 0;
-    const lane_count: u32 = debug_state.frame_bar_lane_count;
-    var frame_bar_scale: f32 = std.math.floatMax(f32);
+    if (debug_state.most_recent_frame) |frame| {
+        const frame_span: f32 = @floatFromInt(frame.end_clock - frame.begin_clock);
+        const pixel_span: f32 = profile_rect.getDimension().x();
+        var scale: f32 = 0;
+        if (frame_span > 0) {
+            scale = pixel_span / frame_span;
+        }
 
-    {
-        var opt_frame: ?*DebugFrame = debug_state.oldest_frame;
-        while (opt_frame) |frame| : (opt_frame = frame.next) {
-            if (frame_bar_scale < frame.frame_bar_scale) {
-                frame_bar_scale = frame.frame_bar_scale;
+        const lane_count: u32 = debug_state.frame_bar_lane_count;
+        var lane_height: f32 = 0;
+        if (lane_count > 0) {
+            lane_height = profile_rect.getDimension().y() / @as(f32, @floatFromInt(lane_count));
+        }
+
+        const colors: [12]Color3 = .{
+            Color3.new(1, 0, 0),
+            Color3.new(0, 1, 0),
+            Color3.new(0, 0, 1),
+            Color3.new(1, 1, 0),
+            Color3.new(0, 1, 1),
+            Color3.new(1, 0, 1),
+            Color3.new(1, 0.5, 0),
+            Color3.new(1, 0, 0.5),
+            Color3.new(0.5, 1, 0),
+            Color3.new(0, 1, 0.5),
+            Color3.new(0.5, 0, 1),
+            Color3.new(0, 0.5, 1),
+        };
+
+        var link: *DebugVariableLink = debug_state.profile_group.sentinel.next;
+        while (link != &debug_state.profile_group.sentinel) : (link = link.next) {
+            if (link.element) |element| {
+                var opt_open_event: ?*DebugEvent = null;
+                var opt_event: ?*DebugStoredEvent = element.oldest_event;
+                while (opt_event) |event| : (opt_event = event.next) {
+                    if (event.frame_index == frame.frame_index) {
+                        if (event.event.event_type == .BeginBlock) {
+                            opt_open_event = &event.event;
+                        }
+
+                        if (event.event.event_type == .EndBlock) {
+                            if (opt_open_event) |open_event| {
+                                const close_event = &event.event;
+                                const color = colors[@intFromPtr(close_event.guid)%colors.len];
+                                const this_min_x: f32 =
+                                    profile_rect.min.x() + scale * @as(f32, @floatFromInt(open_event.clock - frame.begin_clock));
+                                const this_max_x: f32 =
+                                    profile_rect.min.x() + scale * @as(f32, @floatFromInt(close_event.clock - frame.begin_clock));
+                                const lane_index: u32 = 0;
+                                const lane: f32 = @as(f32, @floatFromInt(lane_index));
+
+                                const region_rect = math.Rectangle2.new(
+                                    this_min_x,
+                                    profile_rect.max.y() - lane_height * (lane + 1),
+                                    this_max_x,
+                                    profile_rect.max.y() - lane_height * lane,
+                                );
+
+                                // _ = region_rect;
+                                // _ = color;
+                                render_group.pushRectangle2(no_transform, region_rect, 0, color.toColor(1));
+
+                                _ = mouse_position;
+                                // if (mouse_position.isInRectangle(region_rect)) {
+                                //     const hot_event: *DebugEvent = open_event;
+                                //
+                                //     var buffer: [128]u8 = undefined;
+                                //     const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
+                                //         hot_event.guid,
+                                //         region.cycle_count,
+                                //         hot_event.file_name,
+                                //         hot_event.line_number,
+                                //     }) catch "";
+                                //     textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
+                                // }
+                            }
+                        }
+                    }
+                }
+            } else {
+                unreachable;
             }
         }
     }
-
-    var max_frame: u32 = debug_state.frame_count;
-    if (max_frame > 10) {
-        max_frame = 10;
-    }
-
-    if (lane_count > 0 and max_frame > 0) {
-        const pixels_per_frame: f32 = profile_rect.getDimension().y() / @as(f32, @floatFromInt(max_frame));
-        lane_height = (pixels_per_frame - bar_spacing) / @as(f32, @floatFromInt(lane_count));
-    }
-
-    _ = mouse_position;
-    // const bar_height: f32 = lane_height * @as(f32, @floatFromInt(lane_count));
-    // const bars_plus_spacing: f32 = bar_height + bar_spacing;
-    // const chart_left: f32 = profile_rect.min.x();
-    // // const chart_height: f32 = bars_plus_spacing * @as(f32, @floatFromInt(max_frame));
-    // const chart_width: f32 = profile_rect.getDimension().x();
-    // const chart_top: f32 = profile_rect.max.y();
-    // const scale: f32 = chart_width * frame_bar_scale;
-    //
-    // const colors: [12]Color3 = .{
-    //     Color3.new(1, 0, 0),
-    //     Color3.new(0, 1, 0),
-    //     Color3.new(0, 0, 1),
-    //     Color3.new(1, 1, 0),
-    //     Color3.new(0, 1, 1),
-    //     Color3.new(1, 0, 1),
-    //     Color3.new(1, 0.5, 0),
-    //     Color3.new(1, 0, 0.5),
-    //     Color3.new(0.5, 1, 0),
-    //     Color3.new(0, 1, 0.5),
-    //     Color3.new(0.5, 0, 1),
-    //     Color3.new(0, 0.5, 1),
-    // };
-
-    // var frame_index: u32 = 0;
-    // var opt_frame: ?*DebugFrame = debug_state.oldest_frame;
-    // while (opt_frame) |frame| : (opt_frame = frame.next) {
-    //     defer frame_index += 1;
-    //     const stack_x: f32 = chart_left;
-    //     const stack_y: f32 = chart_top - bars_plus_spacing * @as(f32, (@floatFromInt(frame_index)));
-    //
-    //     var region_index: u32 = 0;
-    //     while (region_index < frame.region_count) : (region_index += 1) {
-    //         const region: *const DebugFrameRegion = &frame.regions[region_index];
-    //
-    //         const color = colors[region.color_index % colors.len];
-    //         const this_min_x: f32 = stack_x + scale * region.min_t;
-    //         const this_max_x: f32 = stack_x + scale * region.max_t;
-    //         const lane: f32 = @as(f32, @floatFromInt(region.lane_index));
-    //
-    //         const region_rect = math.Rectangle2.new(
-    //             this_min_x,
-    //             stack_y - lane_height * (lane + 1),
-    //             this_max_x,
-    //             stack_y - lane_height * lane,
-    //         );
-    //
-    //         render_group.pushRectangle2(region_rect, 0, color.toColor(1));
-    //
-    //         if (mouse_position.isInRectangle(region_rect)) {
-    //             const event: *DebugEvent = region.event;
-    //
-    //             var buffer: [128]u8 = undefined;
-    //             const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
-    //                 event.guid,
-    //                 region.cycle_count,
-    //                 event.file_name,
-    //                 event.line_number,
-    //             }) catch "";
-    //             textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
-    //
-    //             // hot_record = record;
-    //         }
-    //     }
-    // }
-
-    // // 30 FPS line.
-    // render_group.pushRectangle(
-    //     Vector2.new(chart_width, 1),
-    //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + chart_height, 0),
-    //     Color.white(),
-    // );
-    //
-    // // 60 FPS line.
-    // render_group.pushRectangle(
-    //     Vector2.new(chart_width, 1),
-    //     Vector3.new(chart_left + 0.5 * chart_width, chart_min_y + (chart_height * 0.5), 0),
-    //     Color.new(0.5, 1, 0, 1),
-    // );
 }
 
 const Layout = struct {
@@ -1425,21 +1405,19 @@ pub fn requestedStub(id: DebugId) bool {
     return false;
 }
 
-fn drawDebugEvent(
-    layout: *Layout,
-    in_element: *DebugElement,
-    opt_stored_event: ?*DebugStoredEvent,
-    debug_id: DebugId,
-) void {
+fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, debug_id: DebugId) void {
+    _ = tree;
+
     const no_transform = ObjectTransform.defaultFlat();
     const debug_state: *DebugState = layout.debug_state;
+    const opt_stored_event: ?*DebugStoredEvent = element.most_recent_event;
 
     if (opt_stored_event) |stored_event| {
         if (debug_state.debug_font_info) |font_info| {
             var render_group: *RenderGroup = &debug_state.render_group;
             const event = &stored_event.event;
             var item_interaction: DebugInteraction =
-                DebugInteraction.elementInteraction(debug_state, debug_id, in_element, .AutoModifyVariable);
+                DebugInteraction.elementInteraction(debug_state, debug_id, element, .AutoModifyVariable);
             const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
             const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
             const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
@@ -1452,23 +1430,23 @@ fn drawDebugEvent(
                         _ = view.data.inline_block.dimension.setX(dim.size.x());
                     }
 
-                    var element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
-                    element.makeSizable();
-                    element.defaultInteraction(item_interaction);
-                    element.end();
+                    var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                    layout_element.makeSizable();
+                    layout_element.defaultInteraction(item_interaction);
+                    layout_element.end();
 
-                    render_group.pushRectangle2(no_transform, element.bounds, 0, Color.black());
+                    render_group.pushRectangle2(no_transform, layout_element.bounds, 0, Color.black());
                     render_group.pushBitmapId(
                         no_transform,
                         event.data.BitmapId,
                         bitmap_scale,
-                        element.bounds.min.toVector3(0),
+                        layout_element.bounds.min.toVector3(0),
                         Color.white(),
                         0,
                         null,
                     );
                 },
-                .CounterFunctionList => {
+                .ThreadIntervalGraph => {
                     var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
                     layout_element.makeSizable();
                     // layout_element.defaultInteraction(item_interaction);
@@ -1484,41 +1462,17 @@ fn drawDebugEvent(
                     const text_bounds = getTextSize(debug_state, &text);
                     var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
 
-                    var element: LayoutElement = layout.beginElementRectangle(&dim);
-                    element.defaultInteraction(item_interaction);
-                    element.end();
+                    var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
+                    layout_element.defaultInteraction(item_interaction);
+                    layout_element.end();
 
                     const text_position: Vector2 = Vector2.new(
-                        element.bounds.min.x(),
-                        element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
+                        layout_element.bounds.min.x(),
+                        layout_element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
                     );
                     textOutAt(&text, text_position, item_color);
                 },
             }
-        }
-    }
-}
-
-fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, debug_id: DebugId) void {
-    const debug_state: *DebugState = layout.debug_state;
-    _ = tree;
-
-    if (element.oldest_event) |oldest_event| {
-        const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
-
-        switch (oldest_event.event.event_type) {
-            .CounterThreadList => {
-                var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
-                layout_element.makeSizable();
-                // layout_element.defaultInteraction(item_interaction);
-                layout_element.end();
-
-                drawProfileIn(debug_state, layout_element.bounds, layout.mouse_position);
-            },
-            else => {
-                const opt_event: ?*DebugStoredEvent = element.most_recent_event;
-                drawDebugEvent(layout, element, opt_event, debug_id);
-            },
         }
     }
 }
@@ -1780,7 +1734,7 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
 fn markEditedEvent(debug_state: *DebugState, opt_event: ?*DebugEvent) void {
     if (opt_event) |event| {
         global_debug_table.edit_event = event.*;
-        if (debug_state.getElementFromEvent(event, null)) |element| {
+        if (debug_state.getElementFromEvent(event, null, true)) |element| {
             global_debug_table.edit_event.guid = element.original_guid;
         }
     }
@@ -2036,6 +1990,7 @@ fn debugStart(
             );
 
             debug_state.root_group = debug_state.createVariableGroup(4, "Root");
+            debug_state.profile_group = debug_state.createVariableGroup(7, "Profile");
 
             // var context: debug_variables.DebugVariableDefinitionContext = .{
             //     .state = debug_state,
@@ -2170,8 +2125,8 @@ pub fn debugDumpStruct(struct_ptr: *anyopaque, member_defs: [*]const meta.Member
 }
 
 fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
-    TimedBlock.beginBlock(@src(), .DebugEnd);
-    defer TimedBlock.endBlock(@src(), .DebugEnd);
+    TimedBlock.beginFunction(@src(), .DebugEnd);
+    defer TimedBlock.endFunction(@src(), .DebugEnd);
 
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
@@ -2249,7 +2204,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
         textLine(slice);
 
         const slice2 = std.fmt.bufPrintZ(&buffer, "Per-frame arena space remaining: {d}kb", .{
-            debug_state.debug_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
+            debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
         }) catch "";
         textLine(slice2);
     }

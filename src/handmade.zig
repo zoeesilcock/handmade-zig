@@ -172,7 +172,7 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "Profile");
         {
-            DebugInterface.debugProfile(@src(), "updateAndRender");
+            DebugInterface.debugThreadIntervalGraph(@src(), "updateAndRender");
         }
         DebugInterface.debugEndDataBlock(@src());
     }

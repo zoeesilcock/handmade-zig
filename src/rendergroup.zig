@@ -161,8 +161,8 @@ fn getRenderEntityBasisPosition(
     object_transform: ObjectTransform,
     original_position: Vector3,
 ) RenderEntityBasisResult {
-    TimedBlock.beginFunction(@src(), .GetRenderEntityBasisPosition);
-    defer TimedBlock.endFunction(@src(), .GetRenderEntityBasisPosition);
+    // TimedBlock.beginFunction(@src(), .GetRenderEntityBasisPosition);
+    // defer TimedBlock.endFunction(@src(), .GetRenderEntityBasisPosition);
 
     var result = RenderEntityBasisResult{};
 
@@ -290,8 +290,8 @@ pub const RenderGroup = extern struct {
     }
 
     fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: f32) ?*T {
-        TimedBlock.beginFunction(@src(), .PushRenderElement);
-        defer TimedBlock.endFunction(@src(), .PushRenderElement);
+        // TimedBlock.beginFunction(@src(), .PushRenderElement);
+        // defer TimedBlock.endFunction(@src(), .PushRenderElement);
 
         // This depends on the name of this file, if the file name changes the magic number may need to be adjusted.
         const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[12..]);

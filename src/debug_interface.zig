@@ -51,8 +51,8 @@ pub const DebugCycleCounters = enum(u16) {
     DrawRectangleSlowly,
     DrawRectangleQuickly,
     ProcessPixel,
-    RenderToOutput,
-    RenderToOutputOpenGL,
+    RenderCommandsToBitmap,
+    RenderCommandsToOpenGL,
     TiledRenderToOutput,
     SingleRenderToOutput,
     DoTiledRenderWork,
@@ -74,6 +74,7 @@ pub const DebugCycleCounters = enum(u16) {
     OutputPlayingSounds,
 
     LoadAssetWorkDirectly,
+    AllocateGameAssets,
     AcquireAssetMemory,
     LoadBitmap,
     LoadSound,
@@ -144,8 +145,8 @@ pub const DebugType = if (INTERNAL) enum(u8) {
     SoundId,
     FontId,
 
-    CounterThreadList,
-    CounterFunctionList,
+    ThreadIntervalGraph,
+    // CounterFunctionList,
 } else enum(u8) {};
 
 pub const DebugEvent = if (INTERNAL) extern struct {
@@ -418,11 +419,11 @@ pub const DebugInterface = if (INTERNAL) struct {
         event.setValue(value_ptr.*, value_ptr);
     }
 
-    pub fn debugProfile(
+    pub fn debugThreadIntervalGraph(
         comptime source: std.builtin.SourceLocation,
         comptime function_name: []const u8,
     ) void {
-        _ = DebugEvent.record(.CounterFunctionList, DebugEvent.debugName(source, null, @ptrCast(function_name)));
+        _ = DebugEvent.record(.ThreadIntervalGraph, DebugEvent.debugName(source, null, @ptrCast(function_name)));
     }
 
     pub fn debugBeginArray(array: anytype) void {

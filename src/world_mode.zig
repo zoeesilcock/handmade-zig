@@ -1160,7 +1160,7 @@ pub fn updateAndRenderWorld(
                         DebugInterface.debugValue(@src(), &entity.velocity, "velocity");
                         DebugInterface.debugValue(@src(), &entity.distance_limit, "distance_limit");
                         DebugInterface.debugValue(@src(), &entity.facing_direction, "facing_direction");
-                        DebugInterface.debugValue(@src(), &entity.facing_direction, "head_bob_time");
+                        DebugInterface.debugValue(@src(), &entity.head_bob_time, "head_bob_time");
                         DebugInterface.debugValue(@src(), &entity.abs_tile_z_delta, "abs_tile_z_delta");
                         DebugInterface.debugValue(@src(), &entity.hit_point_max, "hit_point_max");
                         DebugInterface.debugValue(@src(), &hero_bitmaps.torso, "torso");
