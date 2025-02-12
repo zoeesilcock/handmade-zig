@@ -301,6 +301,7 @@ pub fn displayBitmap(
     window_height: i32,
     pitch: usize,
     memory: ?*const anyopaque,
+    blit_texture: u32,
 ) void {
     _ = window_width;
     _ = window_height;
@@ -309,11 +310,11 @@ pub fn displayBitmap(
 
     gl.glViewport(offset_x, offset_y, width, height);
 
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 1);
+    gl.glBindTexture(gl.GL_TEXTURE_2D, blit_texture);
     gl.glTexImage2D(
         gl.GL_TEXTURE_2D,
         0,
-        gl.GL_RGBA8,
+        GL_SRGB8_ALPHA8,
         width,
         height,
         0,
@@ -348,4 +349,6 @@ pub fn displayBitmap(
     const color = math.Color.new(1, 1, 1, 1);
 
     drawRectangle(min_position, max_position, color);
+
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 }

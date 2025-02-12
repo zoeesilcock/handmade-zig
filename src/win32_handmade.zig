@@ -125,11 +125,12 @@ var perf_count_frequency: i64 = 0;
 var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 var local_stub_debug_table: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
+var reserved_blit_texture: u32 = 0;
 
 const RenderingType = enum(u8) {
-   RenderOpenGLDisplayOpenGL,
-   RenderSoftwareDisplayOpenGL,
-   RenderSoftwareDisplayGDI,
+    RenderOpenGLDisplayOpenGL,
+    RenderSoftwareDisplayOpenGL,
+    RenderSoftwareDisplayGDI,
 };
 
 const OffscreenBuffer = struct {
@@ -780,6 +781,9 @@ fn loadXInput() void {
 }
 
 fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput, window: win32.HWND) void {
+    TimedBlock.beginBlock(@src(), .ProcessMouseInput);
+    defer TimedBlock.endBlock(@src(), .ProcessMouseInput);
+
     var mouse_point: win32.POINT = undefined;
     if (win32.GetCursorPos(&mouse_point) == win32.TRUE) {
         _ = win32.ScreenToClient(window, &mouse_point);
@@ -814,7 +818,14 @@ fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput,
     }
 }
 
-fn processXInput(old_input: *shared.GameInput, new_input: *shared.GameInput) void {
+fn processXInput(
+    xbox_controller_present: *[win32.XUSER_MAX_COUNT]bool,
+    old_input: *shared.GameInput,
+    new_input: *shared.GameInput,
+) void {
+    TimedBlock.beginBlock(@src(), .ProcessXInput);
+    defer TimedBlock.endBlock(@src(), .ProcessXInput);
+
     var dwResult: isize = 0;
     var controller_index: u8 = 0;
 
@@ -829,122 +840,127 @@ fn processXInput(old_input: *shared.GameInput, new_input: *shared.GameInput) voi
         const new_controller = &new_input.controllers[our_controller_index];
 
         var controller_state: win32.XINPUT_STATE = undefined;
-        dwResult = XInputGetState(controller_index, &controller_state);
 
-        if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
-            // Controller is connected
-            const pad = &controller_state.Gamepad;
-            new_controller.is_connected = true;
-            new_controller.is_analog = old_controller.is_analog;
+        if (xbox_controller_present[controller_index]) {
+            dwResult = XInputGetState(controller_index, &controller_state);
 
-            // Left stick X.
-            new_controller.stick_average_x = processXInputStick(pad.sThumbLX, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+            if (dwResult == @intFromEnum(win32.ERROR_SUCCESS)) {
+                // Controller is connected
+                const pad = &controller_state.Gamepad;
+                new_controller.is_connected = true;
+                new_controller.is_analog = old_controller.is_analog;
 
-            // Left stick Y.
-            new_controller.stick_average_y = processXInputStick(pad.sThumbLY, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+                // Left stick X.
+                new_controller.stick_average_x = processXInputStick(pad.sThumbLX, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
 
-            if (new_controller.stick_average_x != 0.0 or new_controller.stick_average_y != 0.0) {
-                new_controller.is_analog = true;
+                // Left stick Y.
+                new_controller.stick_average_y = processXInputStick(pad.sThumbLY, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+
+                if (new_controller.stick_average_x != 0.0 or new_controller.stick_average_y != 0.0) {
+                    new_controller.is_analog = true;
+                }
+
+                // D-pad overrides the stick value.
+                if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_UP) > 0) {
+                    new_controller.stick_average_y = 1.0;
+                    new_controller.is_analog = false;
+                } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_DOWN) > 0) {
+                    new_controller.stick_average_y = -1.0;
+                    new_controller.is_analog = false;
+                }
+                if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0) {
+                    new_controller.stick_average_x = -1.0;
+                    new_controller.is_analog = false;
+                } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0) {
+                    new_controller.stick_average_x = 1.0;
+                    new_controller.is_analog = false;
+                }
+
+                // Movement buttons based on left stick.
+                const threshold = 0.5;
+                processXInputDigitalButton(
+                    if (new_controller.stick_average_y > threshold) 1 else 0,
+                    1,
+                    &old_controller.move_up,
+                    &new_controller.move_up,
+                );
+                processXInputDigitalButton(
+                    if (new_controller.stick_average_y < -threshold) 1 else 0,
+                    1,
+                    &old_controller.move_down,
+                    &new_controller.move_down,
+                );
+                processXInputDigitalButton(
+                    if (new_controller.stick_average_x < -threshold) 1 else 0,
+                    1,
+                    &old_controller.move_left,
+                    &new_controller.move_left,
+                );
+                processXInputDigitalButton(
+                    if (new_controller.stick_average_x > threshold) 1 else 0,
+                    1,
+                    &old_controller.move_right,
+                    &new_controller.move_right,
+                );
+
+                // Main buttons.
+                processXInputDigitalButton(
+                    pad.wButtons,
+                    win32.XINPUT_GAMEPAD_A,
+                    &old_controller.action_down,
+                    &new_controller.action_down,
+                );
+                processXInputDigitalButton(
+                    pad.wButtons,
+                    win32.XINPUT_GAMEPAD_B,
+                    &old_controller.action_right,
+                    &new_controller.action_right,
+                );
+                processXInputDigitalButton(
+                    pad.wButtons,
+                    win32.XINPUT_GAMEPAD_X,
+                    &old_controller.action_left,
+                    &new_controller.action_left,
+                );
+                processXInputDigitalButton(
+                    pad.wButtons,
+                    win32.XINPUT_GAMEPAD_Y,
+                    &old_controller.action_up,
+                    &new_controller.action_up,
+                );
+
+                // Shoulder buttons.
+                processXInputDigitalButton(
+                    pad.wButtons,
+                    win32.XINPUT_GAMEPAD_LEFT_SHOULDER,
+                    &old_controller.left_shoulder,
+                    &new_controller.left_shoulder,
+                );
+                processXInputDigitalButton(
+                    pad.wButtons,
+                    win32.XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                    &old_controller.right_shoulder,
+                    &new_controller.right_shoulder,
+                );
+
+                // Special buttons.
+                processXInputDigitalButton(
+                    pad.wButtons,
+                    win32.XINPUT_GAMEPAD_START,
+                    &old_controller.start_button,
+                    &new_controller.start_button,
+                );
+                processXInputDigitalButton(
+                    pad.wButtons,
+                    win32.XINPUT_GAMEPAD_BACK,
+                    &old_controller.back_button,
+                    &new_controller.back_button,
+                );
+            } else {
+                // Controller is not connected
+                new_controller.is_connected = false;
+                xbox_controller_present[controller_index] = false;
             }
-
-            // D-pad overrides the stick value.
-            if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_UP) > 0) {
-                new_controller.stick_average_y = 1.0;
-                new_controller.is_analog = false;
-            } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_DOWN) > 0) {
-                new_controller.stick_average_y = -1.0;
-                new_controller.is_analog = false;
-            }
-            if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0) {
-                new_controller.stick_average_x = -1.0;
-                new_controller.is_analog = false;
-            } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0) {
-                new_controller.stick_average_x = 1.0;
-                new_controller.is_analog = false;
-            }
-
-            // Movement buttons based on left stick.
-            const threshold = 0.5;
-            processXInputDigitalButton(
-                if (new_controller.stick_average_y > threshold) 1 else 0,
-                1,
-                &old_controller.move_up,
-                &new_controller.move_up,
-            );
-            processXInputDigitalButton(
-                if (new_controller.stick_average_y < -threshold) 1 else 0,
-                1,
-                &old_controller.move_down,
-                &new_controller.move_down,
-            );
-            processXInputDigitalButton(
-                if (new_controller.stick_average_x < -threshold) 1 else 0,
-                1,
-                &old_controller.move_left,
-                &new_controller.move_left,
-            );
-            processXInputDigitalButton(
-                if (new_controller.stick_average_x > threshold) 1 else 0,
-                1,
-                &old_controller.move_right,
-                &new_controller.move_right,
-            );
-
-            // Main buttons.
-            processXInputDigitalButton(
-                pad.wButtons,
-                win32.XINPUT_GAMEPAD_A,
-                &old_controller.action_down,
-                &new_controller.action_down,
-            );
-            processXInputDigitalButton(
-                pad.wButtons,
-                win32.XINPUT_GAMEPAD_B,
-                &old_controller.action_right,
-                &new_controller.action_right,
-            );
-            processXInputDigitalButton(
-                pad.wButtons,
-                win32.XINPUT_GAMEPAD_X,
-                &old_controller.action_left,
-                &new_controller.action_left,
-            );
-            processXInputDigitalButton(
-                pad.wButtons,
-                win32.XINPUT_GAMEPAD_Y,
-                &old_controller.action_up,
-                &new_controller.action_up,
-            );
-
-            // Shoulder buttons.
-            processXInputDigitalButton(
-                pad.wButtons,
-                win32.XINPUT_GAMEPAD_LEFT_SHOULDER,
-                &old_controller.left_shoulder,
-                &new_controller.left_shoulder,
-            );
-            processXInputDigitalButton(
-                pad.wButtons,
-                win32.XINPUT_GAMEPAD_RIGHT_SHOULDER,
-                &old_controller.right_shoulder,
-                &new_controller.right_shoulder,
-            );
-
-            // Special buttons.
-            processXInputDigitalButton(
-                pad.wButtons,
-                win32.XINPUT_GAMEPAD_START,
-                &old_controller.start_button,
-                &new_controller.start_button,
-            );
-            processXInputDigitalButton(
-                pad.wButtons,
-                win32.XINPUT_GAMEPAD_BACK,
-                &old_controller.back_button,
-                &new_controller.back_button,
-            );
-        } else {
-            // Controller is not connected
         }
     }
 }
@@ -1436,6 +1452,8 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
         } else {
             outputLastGLError("Failed to make modern context current");
         }
+
+        win32.glGenTextures(1, &reserved_blit_texture);
     }
 
     return opengl_rc;
@@ -1563,6 +1581,7 @@ fn displayBufferInWindow(
                 window_height,
                 output_target.pitch,
                 back_buffer.memory,
+                reserved_blit_texture,
             );
             _ = win32.SwapBuffers(device_context.?);
         } else {
@@ -2298,6 +2317,8 @@ pub export fn wWinMain(
             }
 
             if (samples != null and game_memory.permanent_storage != null and game_memory.transient_storage != null) {
+                // TODO: This currently doesn't support connecting controllers after the game has started.
+                var xbox_controller_present: [win32.XUSER_MAX_COUNT]bool = [1]bool{true} ** win32.XUSER_MAX_COUNT;
                 var game_input = [2]shared.GameInput{
                     shared.GameInput{
                         .frame_delta_time = target_seconds_per_frame,
@@ -2364,10 +2385,9 @@ pub export fn wWinMain(
                     //
                     //
 
-                    TimedBlock.beginBlock(@src(), .InputProcessing);
+                    // TimedBlock.beginBlock(@src(), .InputProcessing);
 
-                    var message: win32.MSG = undefined;
-
+                    TimedBlock.beginBlock(@src(), .ControllerClearing);
                     const old_keyboard_controller = &old_input.controllers[0];
                     var new_keyboard_controller = &new_input.controllers[0];
                     new_keyboard_controller.is_connected = true;
@@ -2375,6 +2395,10 @@ pub export fn wWinMain(
                     // Transfer buttons state from previous frame to this one.
                     old_keyboard_controller.copyButtonStatesTo(new_keyboard_controller);
                     old_keyboard_controller.resetButtonTransitionCounts();
+                    TimedBlock.endBlock(@src(), .ControllerClearing);
+
+                    TimedBlock.beginBlock(@src(), .MessageProcessing);
+                    var message: win32.MSG = undefined;
 
                     // Process all messages provided by Windows.
                     while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
@@ -2388,14 +2412,15 @@ pub export fn wWinMain(
                             },
                         }
                     }
+                    TimedBlock.endBlock(@src(), .MessageProcessing);
 
                     if (!paused) {
                         // Prepare input to game.
                         processMouseInput(old_input, new_input, window_handle);
-                        processXInput(old_input, new_input);
+                        processXInput(&xbox_controller_present, old_input, new_input);
                     }
 
-                    TimedBlock.endBlock(@src(), .InputProcessing);
+                    // TimedBlock.endBlock(@src(), .InputProcessing);
 
                     //
                     //
@@ -2452,9 +2477,9 @@ pub export fn wWinMain(
                             const from_begin_to_audio_seconds = getSecondsElapsed(flip_wall_clock, audio_wall_clock);
 
                             if (win32.SUCCEEDED(secondary_buffer.vtable.GetCurrentPosition(
-                                        secondary_buffer,
-                                        &play_cursor,
-                                        &write_cursor,
+                                secondary_buffer,
+                                &play_cursor,
+                                &write_cursor,
                             ))) {
                                 // We define a safety margin that is the number of samples that our game loop can vary by.
                                 // Check where play cursor is and forecast ahead where we think the play cursor will be on the
@@ -2481,7 +2506,7 @@ pub export fn wWinMain(
                                 if (seconds_left_until_flip > 0) {
                                     expected_bytes_until_flip =
                                         @intFromFloat((seconds_left_until_flip / target_seconds_per_frame) *
-                                            @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
+                                        @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
                                 }
 
                                 const expected_frame_boundary_byte: std.os.windows.DWORD = play_cursor + expected_bytes_until_flip;
@@ -2533,7 +2558,7 @@ pub export fn wWinMain(
                                     const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
                                     const audio_latency_seconds: f32 =
                                         (@as(f32, @floatFromInt(audio_latency_bytes)) /
-                                         @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
+                                        @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
                                         @as(f32, @floatFromInt(sound_output.samples_per_second));
                                     var buffer: [128]u8 = undefined;
                                     const slice = std.fmt.bufPrintZ(&buffer, "Audio: BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d:>3.4}\n", .{

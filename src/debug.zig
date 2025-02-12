@@ -214,6 +214,10 @@ pub const DebugState = struct {
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
 
+    backing_transform: ObjectTransform,
+    shadow_transform: ObjectTransform,
+    text_transform: ObjectTransform,
+
     menu_position: Vector2,
     menu_active: bool,
 
@@ -657,6 +661,11 @@ pub const DebugState = struct {
                     collation_frame.end_clock = event.clock;
                     collation_frame.wall_seconds_elapsed = event.data.f32;
 
+                    if (collation_frame.root_profile_node) |root_profile_node| {
+                        root_profile_node.data.profile_node.duration =
+                            @truncate(collation_frame.end_clock -% collation_frame.begin_clock);
+                    }
+
                     if (false) {
                         const clock_range: f32 = @floatFromInt(collation_frame.end_clock - collation_frame.begin_clock);
                         if (clock_range > 0) {
@@ -722,12 +731,13 @@ pub const DebugState = struct {
                                             .first_child = null,
                                             .next_same_parent = null,
                                             .parent_relative_clock = 0,
-                                            .duration = @truncate(collation_frame.end_clock -% collation_frame.begin_clock),
+                                            .duration = 0,
                                             .aggregate_count = 0,
                                             .thread_ordinal = 0,
                                             .core_index = 0,
                                         },
                                     };
+                                    clock_basis = collation_frame.begin_clock;
                                     collation_frame.root_profile_node = parent_event;
                                 }
 
@@ -740,7 +750,6 @@ pub const DebugState = struct {
                                 node.thread_ordinal = @intCast(thread.lane_index);
                                 node.core_index = event.core_index;
 
-                                parent_event.?.data = .{ .profile_node = .{} };
                                 node.next_same_parent = parent_event.?.data.profile_node.first_child;
                                 parent_event.?.data.profile_node.first_child = stored_event;
 
@@ -1223,9 +1232,8 @@ fn drawProfileIn(
     root_event: *DebugStoredEvent,
 ) void {
     const root_node: *DebugProfileNode = &root_event.data.profile_node;
-    const no_transform = ObjectTransform.defaultFlat();
     var render_group: *RenderGroup = &debug_state.render_group;
-    render_group.pushRectangle2(no_transform, profile_rect, 0, Color.new(0, 0, 0, 0.25));
+    render_group.pushRectangle2(debug_state.backing_transform, profile_rect, 0, Color.new(0, 0, 0, 0.25));
 
     const frame_span: f32 = @floatFromInt(root_node.duration);
     const pixel_span: f32 = profile_rect.getDimension().x();
@@ -1234,13 +1242,14 @@ fn drawProfileIn(
         scale = pixel_span / frame_span;
     }
 
-    const lane_count: u32 = debug_state.frame_bar_lane_count;
+    // const lane_count: u32 = debug_state.frame_bar_lane_count;
+    const lane_count: u32 = 4;
     var lane_height: f32 = 0;
     if (lane_count > 0) {
         lane_height = profile_rect.getDimension().y() / @as(f32, @floatFromInt(lane_count));
     }
 
-    const colors: [12]Color3 = .{
+    const colors: [11]Color3 = .{
         Color3.new(1, 0, 0),
         Color3.new(0, 1, 0),
         Color3.new(0, 0, 1),
@@ -1252,7 +1261,6 @@ fn drawProfileIn(
         Color3.new(0.5, 1, 0),
         Color3.new(0, 1, 0.5),
         Color3.new(0.5, 0, 1),
-        Color3.new(0, 0.5, 1),
     };
 
     var opt_stored_event: ?*DebugStoredEvent = root_node.first_child;
@@ -1275,19 +1283,16 @@ fn drawProfileIn(
             this_max_x,
             profile_rect.max.y() - lane_height * lane,
         );
-        render_group.pushRectangle2(no_transform, region_rect, 0, color.toColor(1));
+        render_group.pushRectangle2(debug_state.backing_transform, region_rect, 0, color.toColor(1));
 
-        _ = mouse_position;
-        // if (mouse_position.isInRectangle(region_rect)) {
-        //     var buffer: [128]u8 = undefined;
-        //     const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
-        //         hot_event.guid,
-        //         region.cycle_count,
-        //         hot_event.file_name,
-        //         hot_event.line_number,
-        //     }) catch "";
-        //     textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
-        // }
+        if (mouse_position.isInRectangle(region_rect)) {
+            var buffer: [128]u8 = undefined;
+            const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy", .{
+                element.guid,
+                node.duration,
+            }) catch "";
+            textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
+        }
     }
 }
 
@@ -1325,8 +1330,8 @@ const LayoutElement = struct {
     }
 
     pub fn end(self: *LayoutElement) void {
-        const no_transform = ObjectTransform.defaultFlat();
         const debug_state: *DebugState = self.layout.debug_state;
+        const no_transform = debug_state.backing_transform;
 
         var render_group: *RenderGroup = &debug_state.render_group;
         const size_handle_pixels: f32 = 4;
@@ -1471,8 +1476,8 @@ pub fn requestedStub(id: DebugId) bool {
 fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, debug_id: DebugId) void {
     _ = tree;
 
-    const no_transform = ObjectTransform.defaultFlat();
     const debug_state: *DebugState = layout.debug_state;
+    const no_transform = debug_state.backing_transform;
     const opt_stored_event: ?*DebugStoredEvent = element.most_recent_event;
 
     if (opt_stored_event) |stored_event| {
@@ -1506,7 +1511,6 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
                         layout_element.bounds.min.toVector3(0),
                         Color.white(),
                         0,
-                        null,
                     );
                 },
                 .ThreadIntervalGraph => {
@@ -1936,22 +1940,20 @@ pub fn textOp(
 
                             if (op == .DrawText) {
                                 render_group.pushBitmapId(
-                                    ObjectTransform.defaultFlat(),
+                                    debug_state.text_transform,
                                     bitmap_id,
                                     bitmap_scale,
                                     bitamp_offset,
                                     color,
                                     null,
-                                    200000,
                                 );
                                 render_group.pushBitmapId(
-                                    ObjectTransform.defaultFlat(),
+                                    debug_state.shadow_transform,
                                     bitmap_id,
                                     bitmap_scale,
                                     bitamp_offset.plus(Vector3.new(2, -2, 0)),
                                     Color.black(),
                                     null,
-                                    100000,
                                 );
                             } else {
                                 std.debug.assert(op == .SizeText);
@@ -2131,6 +2133,13 @@ fn debugStart(
         debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
         debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
         debug_state.render_group.orthographicMode(width, height, 1);
+
+        debug_state.backing_transform = ObjectTransform.defaultFlat();
+        debug_state.shadow_transform = ObjectTransform.defaultFlat();
+        debug_state.text_transform = ObjectTransform.defaultFlat();
+        debug_state.backing_transform.sort_bias = 100000;
+        debug_state.shadow_transform.sort_bias = 200000;
+        debug_state.text_transform.sort_bias = 300000;
     }
 }
 

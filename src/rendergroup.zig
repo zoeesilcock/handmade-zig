@@ -123,6 +123,7 @@ pub const ObjectTransform = extern struct {
     upright: bool,
     offset_position: Vector3,
     scale: f32,
+    sort_bias: f32 = 0,
 
     pub fn defaultUpright() ObjectTransform {
         return ObjectTransform{
@@ -195,6 +196,7 @@ fn getRenderEntityBasisPosition(
     }
 
     result.sort_key =
+        object_transform.sort_bias +
         4096 * (2 * position.z() + 1 * @as(f32, @floatFromInt(@intFromBool(object_transform.upright)))) - position.y();
 
     return result;
@@ -408,12 +410,11 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
         align_coefficient: f32,
-        opt_sort_bias: ?f32,
     ) void {
         const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient);
 
         if (dim.basis.valid) {
-            if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key + (opt_sort_bias orelse 0))) |entry| {
+            if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key)) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
                 entry.size = dim.size.scaledTo(dim.basis.scale);
@@ -430,7 +431,6 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
         opt_align_coefficient: ?f32,
-        opt_sort_bias: ?f32,
     ) void {
         const align_coefficient: f32 = opt_align_coefficient orelse 1;
         if (opt_id) |id| {
@@ -442,7 +442,7 @@ pub const RenderGroup = extern struct {
             }
 
             if (opt_bitmap) |bitmap| {
-                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient, opt_sort_bias);
+                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient);
             } else {
                 std.debug.assert(!self.renders_in_background);
 

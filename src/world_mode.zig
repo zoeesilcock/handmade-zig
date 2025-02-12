@@ -431,7 +431,7 @@ pub fn updateAndRenderWorld(
                 transform.offset_position = delta;
 
                 const ground_side_in_meters = world_mode.world.chunk_dimension_in_meters.x();
-                render_group.pushBitmap(transform, bitmap, ground_side_in_meters, Vector3.zero(), Color.white(), 1, null);
+                render_group.pushBitmap(transform, bitmap, ground_side_in_meters, Vector3.zero(), Color.white(), 1);
 
                 if (global_config.GroundChunks_Outlines) {
                     render_group.pushRectangleOutline(
@@ -775,7 +775,6 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         shadow_color,
                         null,
-                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
@@ -783,7 +782,6 @@ pub fn updateAndRenderWorld(
                         hero_scale * 1.2,
                         Vector3.zero(),
                         Color.white(),
-                        null,
                         null,
                     );
                     render_group.pushBitmapId(
@@ -793,7 +791,6 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         Color.white(),
                         null,
-                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
@@ -801,7 +798,6 @@ pub fn updateAndRenderWorld(
                         hero_scale * 1.2,
                         Vector3.zero(),
                         Color.white(),
-                        null,
                         null,
                     );
 
@@ -992,7 +988,6 @@ pub fn updateAndRenderWorld(
                                 particle.position,
                                 color,
                                 null,
-                                null,
                             );
                         }
                     }
@@ -1005,7 +1000,6 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         shadow_color,
                         null,
-                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
@@ -1013,7 +1007,6 @@ pub fn updateAndRenderWorld(
                         0.5,
                         Vector3.zero(),
                         Color.white(),
-                        null,
                         null,
                     );
                 },
@@ -1024,7 +1017,6 @@ pub fn updateAndRenderWorld(
                         2.5,
                         Vector3.zero(),
                         Color.white(),
-                        null,
                         null,
                     );
                 },
@@ -1052,7 +1044,6 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         shadow_color,
                         null,
-                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
@@ -1060,7 +1051,6 @@ pub fn updateAndRenderWorld(
                         4.5,
                         Vector3.zero(),
                         Color.white(),
-                        null,
                         null,
                     );
 
@@ -1084,7 +1074,6 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         head_shadow_color,
                         null,
-                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
@@ -1092,7 +1081,6 @@ pub fn updateAndRenderWorld(
                         2.5,
                         Vector3.new(0, 0, head_z),
                         Color.white(),
-                        null,
                         null,
                     );
                 },
@@ -1629,7 +1617,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
     //                 );
     //                 const position = center.plus(offset);
     //
-    //                 render_group.pushBitmapId(no_transform, stamp, 2, position.toVector3(0), color, null, null);
+    //                 render_group.pushBitmapId(no_transform, stamp, 2, position.toVector3(0), color, null);
     //             }
     //         }
     //     }
@@ -1661,7 +1649,7 @@ pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque)
     //                 );
     //                 const position = center.plus(offset);
     //
-    //                 render_group.pushBitmapId(no_transform, stamp, 0.1, position.toVector3(0), Color.white(), null, null);
+    //                 render_group.pushBitmapId(no_transform, stamp, 0.1, position.toVector3(0), Color.white(), null);
     //             }
     //         }
     //     }
