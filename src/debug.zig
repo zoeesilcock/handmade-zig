@@ -57,6 +57,12 @@ const DebugFrame = struct {
     frame_bar_scale: f32,
 
     frame_index: u32,
+
+    stored_event_count: u32,
+    profile_block_count: u32,
+    data_block_count: u32,
+
+    root_profile_node: ?*DebugStoredEvent,
 };
 
 const DebugFrameRegion = struct {
@@ -75,6 +81,9 @@ const OpenDebugBlock = struct {
     staring_frame_index: u32,
     opening_event: *DebugEvent,
     element: ?*DebugElement,
+
+    node: ?*DebugStoredEvent,
+
     group: ?*DebugVariableGroup,
 };
 
@@ -360,7 +369,11 @@ pub const DebugState = struct {
 
         result.?.next = null;
         result.?.frame_index = self.collation_frame.?.frame_index;
-        result.?.event = event.*;
+        result.?.data = .{ .event = event.* };
+
+        if (self.collation_frame) |collation_frame| {
+            collation_frame.stored_event_count += 1;
+        }
 
         if (element.most_recent_event != null) {
             element.most_recent_event.?.next = result;
@@ -687,9 +700,58 @@ pub const DebugState = struct {
 
                 switch (event.event_type) {
                     .BeginBlock => {
-                        if (self.getElementFromEvent(event, self.profile_group, false)) |element| {
-                            _ = self.allocateOpenDebugBlock(element, frame_index, event, &thread.first_open_code_block);
-                            _ = self.storeEvent(element, event);
+                        if (self.collation_frame) |collation_frame| {
+                            collation_frame.profile_block_count += 1;
+
+                            if (self.getElementFromEvent(event, self.profile_group, false)) |element| {
+                                var stored_event: *DebugStoredEvent = self.storeEvent(element, event);
+                                stored_event.data = .{ .profile_node = .{} };
+                                var node = &stored_event.data.profile_node;
+
+                                var parent_event: ?*DebugStoredEvent = collation_frame.root_profile_node;
+                                var clock_basis: u64 = collation_frame.begin_clock;
+                                if (thread.first_open_code_block) |first_open_code_block| {
+                                    parent_event = first_open_code_block.node;
+                                    clock_basis = first_open_code_block.opening_event.clock;
+                                } else if (parent_event == null) {
+                                    var null_event: DebugEvent = .{};
+                                    parent_event = self.storeEvent(element, &null_event);
+                                    parent_event.?.data = .{
+                                        .profile_node = .{
+                                            .element = null,
+                                            .first_child = null,
+                                            .next_same_parent = null,
+                                            .parent_relative_clock = 0,
+                                            .duration = @truncate(collation_frame.end_clock -% collation_frame.begin_clock),
+                                            .aggregate_count = 0,
+                                            .thread_ordinal = 0,
+                                            .core_index = 0,
+                                        },
+                                    };
+                                    collation_frame.root_profile_node = parent_event;
+                                }
+
+                                node.element = element;
+                                node.first_child = null;
+                                node.next_same_parent = null;
+                                node.parent_relative_clock = @truncate(event.clock -% clock_basis);
+                                node.duration = 0;
+                                node.aggregate_count = 0;
+                                node.thread_ordinal = @intCast(thread.lane_index);
+                                node.core_index = event.core_index;
+
+                                parent_event.?.data = .{ .profile_node = .{} };
+                                node.next_same_parent = parent_event.?.data.profile_node.first_child;
+                                parent_event.?.data.profile_node.first_child = stored_event;
+
+                                var debug_block: *OpenDebugBlock = self.allocateOpenDebugBlock(
+                                    element,
+                                    frame_index,
+                                    event,
+                                    &thread.first_open_code_block,
+                                );
+                                debug_block.node = stored_event;
+                            }
                         }
                     },
                     .EndBlock => {
@@ -697,9 +759,8 @@ pub const DebugState = struct {
                             const opening_event: *DebugEvent = matching_block.opening_event;
 
                             if (opening_event.matches(event)) {
-                                if (matching_block.element) |element| {
-                                    _ = self.storeEvent(element, event);
-                                }
+                                var node: *DebugProfileNode = &matching_block.node.?.data.profile_node;
+                                node.duration = @intCast(event.clock - opening_event.clock);
                                 self.deallocateOpenDebugBlock(&thread.first_open_code_block);
                             } else {
                                 // No begin block.
@@ -707,6 +768,10 @@ pub const DebugState = struct {
                         }
                     },
                     .OpenDataBlock => {
+                        if (self.collation_frame) |collation_frame| {
+                            collation_frame.data_block_count += 1;
+                        }
+
                         var debug_block: *OpenDebugBlock =
                             self.allocateOpenDebugBlock(null, frame_index, event, &thread.first_open_data_block);
 
@@ -922,10 +987,24 @@ pub const DebugViewInlineBlock = struct {
     dimension: Vector2,
 };
 
+const DebugProfileNode = extern struct {
+    element: ?*DebugElement = null,
+    first_child: ?*DebugStoredEvent = null,
+    next_same_parent: ?*DebugStoredEvent = null,
+    parent_relative_clock: u32 = 0,
+    duration: u32 = 0,
+    aggregate_count: u32 = 0,
+    thread_ordinal: u16 = 0,
+    core_index: u16 = 0,
+};
+
 pub const DebugStoredEvent = struct {
     next: ?*DebugStoredEvent,
     frame_index: u32,
-    event: DebugEvent,
+    data: union {
+        event: DebugEvent,
+        profile_node: DebugProfileNode,
+    },
 };
 
 pub const DebugString = struct {
@@ -1137,94 +1216,78 @@ const DebugVariableIterator = struct {
     sentinel: *DebugVariableLink = undefined,
 };
 
-fn drawProfileIn(debug_state: *DebugState, profile_rect: Rectangle2, mouse_position: Vector2) void {
+fn drawProfileIn(
+    debug_state: *DebugState,
+    profile_rect: Rectangle2,
+    mouse_position: Vector2,
+    root_event: *DebugStoredEvent,
+) void {
+    const root_node: *DebugProfileNode = &root_event.data.profile_node;
     const no_transform = ObjectTransform.defaultFlat();
     var render_group: *RenderGroup = &debug_state.render_group;
     render_group.pushRectangle2(no_transform, profile_rect, 0, Color.new(0, 0, 0, 0.25));
 
-    if (debug_state.most_recent_frame) |frame| {
-        const frame_span: f32 = @floatFromInt(frame.end_clock - frame.begin_clock);
-        const pixel_span: f32 = profile_rect.getDimension().x();
-        var scale: f32 = 0;
-        if (frame_span > 0) {
-            scale = pixel_span / frame_span;
-        }
+    const frame_span: f32 = @floatFromInt(root_node.duration);
+    const pixel_span: f32 = profile_rect.getDimension().x();
+    var scale: f32 = 0;
+    if (frame_span > 0) {
+        scale = pixel_span / frame_span;
+    }
 
-        const lane_count: u32 = debug_state.frame_bar_lane_count;
-        var lane_height: f32 = 0;
-        if (lane_count > 0) {
-            lane_height = profile_rect.getDimension().y() / @as(f32, @floatFromInt(lane_count));
-        }
+    const lane_count: u32 = debug_state.frame_bar_lane_count;
+    var lane_height: f32 = 0;
+    if (lane_count > 0) {
+        lane_height = profile_rect.getDimension().y() / @as(f32, @floatFromInt(lane_count));
+    }
 
-        const colors: [12]Color3 = .{
-            Color3.new(1, 0, 0),
-            Color3.new(0, 1, 0),
-            Color3.new(0, 0, 1),
-            Color3.new(1, 1, 0),
-            Color3.new(0, 1, 1),
-            Color3.new(1, 0, 1),
-            Color3.new(1, 0.5, 0),
-            Color3.new(1, 0, 0.5),
-            Color3.new(0.5, 1, 0),
-            Color3.new(0, 1, 0.5),
-            Color3.new(0.5, 0, 1),
-            Color3.new(0, 0.5, 1),
-        };
+    const colors: [12]Color3 = .{
+        Color3.new(1, 0, 0),
+        Color3.new(0, 1, 0),
+        Color3.new(0, 0, 1),
+        Color3.new(1, 1, 0),
+        Color3.new(0, 1, 1),
+        Color3.new(1, 0, 1),
+        Color3.new(1, 0.5, 0),
+        Color3.new(1, 0, 0.5),
+        Color3.new(0.5, 1, 0),
+        Color3.new(0, 1, 0.5),
+        Color3.new(0.5, 0, 1),
+        Color3.new(0, 0.5, 1),
+    };
 
-        var link: *DebugVariableLink = debug_state.profile_group.sentinel.next;
-        while (link != &debug_state.profile_group.sentinel) : (link = link.next) {
-            if (link.element) |element| {
-                var opt_open_event: ?*DebugEvent = null;
-                var opt_event: ?*DebugStoredEvent = element.oldest_event;
-                while (opt_event) |event| : (opt_event = event.next) {
-                    if (event.frame_index == frame.frame_index) {
-                        if (event.event.event_type == .BeginBlock) {
-                            opt_open_event = &event.event;
-                        }
+    var opt_stored_event: ?*DebugStoredEvent = root_node.first_child;
+    while (opt_stored_event) |stored_event| : (opt_stored_event = stored_event.data.profile_node.next_same_parent) {
+        const node: *DebugProfileNode = &stored_event.data.profile_node;
+        std.debug.assert(node.element != null);
+        const element: *DebugElement = node.element.?;
 
-                        if (event.event.event_type == .EndBlock) {
-                            if (opt_open_event) |open_event| {
-                                const close_event = &event.event;
-                                const color = colors[@intFromPtr(close_event.guid)%colors.len];
-                                const this_min_x: f32 =
-                                    profile_rect.min.x() + scale * @as(f32, @floatFromInt(open_event.clock - frame.begin_clock));
-                                const this_max_x: f32 =
-                                    profile_rect.min.x() + scale * @as(f32, @floatFromInt(close_event.clock - frame.begin_clock));
-                                const lane_index: u32 = 0;
-                                const lane: f32 = @as(f32, @floatFromInt(lane_index));
+        const color = colors[@intFromPtr(element.guid) % colors.len];
+        const this_min_x: f32 =
+            profile_rect.min.x() + scale * @as(f32, @floatFromInt(node.parent_relative_clock));
+        const this_max_x: f32 =
+            profile_rect.min.x() + scale * @as(f32, @floatFromInt(node.duration));
+        const lane_index: u32 = 0;
+        const lane: f32 = @as(f32, @floatFromInt(lane_index));
 
-                                const region_rect = math.Rectangle2.new(
-                                    this_min_x,
-                                    profile_rect.max.y() - lane_height * (lane + 1),
-                                    this_max_x,
-                                    profile_rect.max.y() - lane_height * lane,
-                                );
+        const region_rect = math.Rectangle2.new(
+            this_min_x,
+            profile_rect.max.y() - lane_height * (lane + 1),
+            this_max_x,
+            profile_rect.max.y() - lane_height * lane,
+        );
+        render_group.pushRectangle2(no_transform, region_rect, 0, color.toColor(1));
 
-                                // _ = region_rect;
-                                // _ = color;
-                                render_group.pushRectangle2(no_transform, region_rect, 0, color.toColor(1));
-
-                                _ = mouse_position;
-                                // if (mouse_position.isInRectangle(region_rect)) {
-                                //     const hot_event: *DebugEvent = open_event;
-                                //
-                                //     var buffer: [128]u8 = undefined;
-                                //     const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
-                                //         hot_event.guid,
-                                //         region.cycle_count,
-                                //         hot_event.file_name,
-                                //         hot_event.line_number,
-                                //     }) catch "";
-                                //     textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
-                                // }
-                            }
-                        }
-                    }
-                }
-            } else {
-                unreachable;
-            }
-        }
+        _ = mouse_position;
+        // if (mouse_position.isInRectangle(region_rect)) {
+        //     var buffer: [128]u8 = undefined;
+        //     const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy [{s}({d})]", .{
+        //         hot_event.guid,
+        //         region.cycle_count,
+        //         hot_event.file_name,
+        //         hot_event.line_number,
+        //     }) catch "";
+        //     textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
+        // }
     }
 }
 
@@ -1415,7 +1478,7 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
     if (opt_stored_event) |stored_event| {
         if (debug_state.debug_font_info) |font_info| {
             var render_group: *RenderGroup = &debug_state.render_group;
-            const event = &stored_event.event;
+            const event = &stored_event.data.event;
             var item_interaction: DebugInteraction =
                 DebugInteraction.elementInteraction(debug_state, debug_id, element, .AutoModifyVariable);
             const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
@@ -1452,7 +1515,16 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
                     // layout_element.defaultInteraction(item_interaction);
                     layout_element.end();
 
-                    drawProfileIn(debug_state, layout_element.bounds, layout.mouse_position);
+                    if (debug_state.most_recent_frame) |most_recent_frame| {
+                        if (most_recent_frame.root_profile_node) |root_profile_node| {
+                            drawProfileIn(
+                                debug_state,
+                                layout_element.bounds,
+                                layout.mouse_position,
+                                root_profile_node,
+                            );
+                        }
+                    }
                 },
                 else => {
                     var text: [4096:0]u8 = undefined;
@@ -1618,7 +1690,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
 fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
     if (debug_state.hot_interaction.interaction_type != .None) {
         if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
-            switch (debug_state.hot_interaction.target.element.?.most_recent_event.?.event.event_type) {
+            switch (debug_state.hot_interaction.target.element.?.most_recent_event.?.data.event.event_type) {
                 .bool => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
@@ -1679,7 +1751,7 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
             .DragValue => {
                 if (debug_state.interaction.target.element) |element| {
                     if (element.most_recent_event) |stored_event| {
-                        const event = &stored_event.event;
+                        const event = &stored_event.data.event;
                         switch (event.event_type) {
                             .f32 => {
                                 event.data.f32 += 0.1 * mouse_delta.y();
@@ -1760,7 +1832,7 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
         .ToggleValue => {
             if (debug_state.interaction.target.element) |interaction_element| {
                 if (interaction_element.most_recent_event) |stored_event| {
-                    const event = &stored_event.event;
+                    const event = &stored_event.data.event;
                     switch (event.event_type) {
                         .bool => {
                             event.data.bool = !event.data.bool;
@@ -2198,8 +2270,11 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
     if (debug_state.most_recent_frame) |most_recent_frame| {
         var buffer: [128]u8 = undefined;
-        const slice = std.fmt.bufPrintZ(&buffer, "Last frame time: {d:0.2}ms", .{
+        const slice = std.fmt.bufPrintZ(&buffer, "Last frame time: {d:0.2}ms {d}e {d}p {d}d", .{
             most_recent_frame.wall_seconds_elapsed * 1000,
+            most_recent_frame.stored_event_count,
+            most_recent_frame.profile_block_count,
+            most_recent_frame.data_block_count,
         }) catch "";
         textLine(slice);
 
