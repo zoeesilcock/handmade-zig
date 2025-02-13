@@ -148,6 +148,7 @@ pub const DebugType = if (INTERNAL) enum(u8) {
     BitmapId,
     SoundId,
     FontId,
+    Enum,
 
     ThreadIntervalGraph,
     // CounterFunctionList,
@@ -172,8 +173,9 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         Rectangle2: Rectangle2,
         Rectangle3: Rectangle3,
         BitmapId: BitmapId,
-        SoudnId: SoundId,
+        SoundId: SoundId,
         FontId: FontId,
+        Enum: u32,
     } = undefined,
 
     fn debugName(
@@ -285,7 +287,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
             },
             SoundId => {
                 if (guids_match) {
-                    dest.* = shared.global_debug_table.edit_event.data.SoudnId;
+                    dest.* = shared.global_debug_table.edit_event.data.SoundId;
                 }
                 self.event_type = .SoundId;
                 self.data = .{ .SoundId = dest.* };
@@ -298,7 +300,20 @@ pub const DebugEvent = if (INTERNAL) extern struct {
                 self.data = .{ .FontId = dest.* };
             },
             else => {
-                // TODO: Handle enums here?
+                switch (@typeInfo(@TypeOf(source))) {
+                    .Enum => |enum_info| {
+                        if (guids_match) {
+                            if (shared.global_debug_table.edit_event.data.Enum >= enum_info.fields.len) {
+                                shared.global_debug_table.edit_event.data.Enum = 0;
+                            }
+                            dest.* = @enumFromInt(shared.global_debug_table.edit_event.data.Enum);
+                        }
+
+                        self.event_type = .Enum;
+                        self.data = .{ .Enum = @intFromEnum(dest.*) };
+                    },
+                    else => {},
+                }
             },
         }
     }

@@ -1195,6 +1195,10 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
                 len += @intCast(slice.len);
             },
             .BitmapId => {},
+            .Enum => {
+                const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.Enum}) catch "";
+                len += @intCast(slice.len);
+            },
             else => {
                 const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{event.guid}) catch "";
                 len += @intCast(slice.len);
@@ -1695,7 +1699,7 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
     if (debug_state.hot_interaction.interaction_type != .None) {
         if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
             switch (debug_state.hot_interaction.target.element.?.most_recent_event.?.data.event.event_type) {
-                .bool => {
+                .bool, .Enum => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
                 .f32 => {
@@ -1840,6 +1844,9 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
                     switch (event.event_type) {
                         .bool => {
                             event.data.bool = !event.data.bool;
+                        },
+                        .Enum => {
+                            event.data.Enum = event.data.Enum + 1;
                         },
                         else => {},
                     }
