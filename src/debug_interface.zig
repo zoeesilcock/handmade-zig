@@ -384,30 +384,36 @@ pub const TimedBlock = if (INTERNAL) struct {
         TimedBlock.beginBlock(source, counter);
     }
 } else struct {
-    pub fn beginBlock(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+    pub fn beginBlock(source: std.builtin.SourceLocation, counter: DebugCycleCounters) void {
         _ = source;
         _ = counter;
-        return undefined;
     }
 
-    pub fn beginFunction(source: std.builtin.SourceLocation, counter: DebugCycleCounters) TimedBlock {
+    pub fn endBlock(comptime source: std.builtin.SourceLocation, comptime counter: DebugCycleCounters) void {
         _ = source;
         _ = counter;
-        return undefined;
     }
 
-    pub fn frameMarker(source: std.builtin.SourceLocation, counter: DebugCycleCounters, seconds_elapsed: f32) TimedBlock {
+    pub fn beginFunction(source: std.builtin.SourceLocation, counter: DebugCycleCounters) void {
+        _ = source;
+        _ = counter;
+    }
+
+    pub fn endFunction(comptime source: std.builtin.SourceLocation, comptime counter: DebugCycleCounters) void {
+        _ = source;
+        _ = counter;
+    }
+
+    pub fn frameMarker(source: std.builtin.SourceLocation, counter: DebugCycleCounters, seconds_elapsed: f32) void {
         _ = source;
         _ = counter;
         _ = seconds_elapsed;
-        return undefined;
     }
 
-    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: DebugCycleCounters, hit_count: u32) TimedBlock {
+    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: DebugCycleCounters, hit_count: u32) void {
         _ = source;
         _ = counter;
         _ = hit_count;
-        return undefined;
     }
 
     pub fn end(self: TimedBlock) void {

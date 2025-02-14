@@ -346,11 +346,11 @@ pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void 
     return;
 }
 
-pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *RenderCommands) callconv(.C) *DebugTable {
+pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *RenderCommands) callconv(.C) void {
     return undefined;
 }
 
-pub var global_debug_table: *DebugTable = if (INTERNAL) &@import("debug.zig").global_debug_table else undefined;
+pub var global_debug_table: *DebugTable = undefined;
 pub var debug_global_memory: ?*Memory = null;
 pub var debugFrameEnd: *const @TypeOf(debugFrameEndStub) = if (INTERNAL) @import("debug.zig").frameEnd else debugFrameEndStub;
 
@@ -512,6 +512,7 @@ pub const Memory = struct {
 
     debug_storage_size: u64,
     debug_storage: ?[*]u8,
+    debug_table: *DebugTable,
 
     high_priority_queue: *PlatformWorkQueue,
     low_priority_queue: *PlatformWorkQueue,
@@ -655,6 +656,18 @@ pub const MemoryArena = extern struct {
         while (char_index < size) : (char_index += 1) {
             dest[char_index] = source[char_index];
         }
+
+        return @ptrCast(dest);
+    }
+
+    pub fn pushAndNullTerminateString(self: *MemoryArena, length: u32, source: [*:0]const u8) [*:0]const u8 {
+        var dest = self.pushSize(length + 1, ArenaPushParams.noClear());
+
+        var char_index: u32 = 0;
+        while (char_index < length) : (char_index += 1) {
+            dest[char_index] = source[char_index];
+        }
+        dest[length] = 0;
 
         return @ptrCast(dest);
     }

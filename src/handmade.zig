@@ -129,6 +129,7 @@ pub export fn updateAndRender(
 
     if (INTERNAL) {
         shared.debug_global_memory = memory;
+        shared.global_debug_table = memory.debug_table;
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
             DebugInterface.debugValue(@src(), &global_config.Renderer_TestWeirdDrawBufferSize, "Renderer_TestWeirdDrawBufferSize");
@@ -382,12 +383,8 @@ pub export fn updateAndRender(
     transient_state.arena.checkArena();
 }
 
-pub export fn debugFrameEnd(
-    memory: *shared.Memory,
-    input: shared.GameInput,
-    commands: *shared.RenderCommands,
-) *debug_interface.DebugTable {
-    return shared.debugFrameEnd(memory, input, commands);
+pub export fn debugFrameEnd( memory: *shared.Memory, input: shared.GameInput, commands: *shared.RenderCommands) void {
+    shared.debugFrameEnd(memory, input, commands);
 }
 
 pub export fn getSoundSamples(
