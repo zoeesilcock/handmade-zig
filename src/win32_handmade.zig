@@ -205,11 +205,12 @@ const ThreadStartup = struct {
 };
 
 pub const Game = struct {
+    is_valid: bool = false,
     dll: ?win32.HINSTANCE = undefined,
     last_write_time: win32.FILETIME = undefined,
-    updateAndRender: *const @TypeOf(shared.updateAndRenderStub) = undefined,
-    getSoundSamples: *const @TypeOf(shared.getSoundSamplesStub) = undefined,
-    debugFrameEnd: ?*const @TypeOf(shared.debugFrameEndStub) = undefined,
+    updateAndRender: ?*const @TypeOf(shared.updateAndRenderStub) = null,
+    getSoundSamples: ?*const @TypeOf(shared.getSoundSamplesStub) = null,
+    debugFrameEnd: ?*const @TypeOf(shared.debugFrameEndStub) = null,
 };
 
 const Win32PlatformFileGroup = extern struct {
@@ -566,8 +567,6 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
 
     result.last_write_time = getLastWriteTime(source_dll_name);
     result.dll = win32.LoadLibraryA(temp_dll_name);
-    result.updateAndRender = shared.updateAndRenderStub;
-    result.getSoundSamples = shared.getSoundSamplesStub;
     result.debugFrameEnd = null;
 
     if (result.dll) |library| {
@@ -582,6 +581,13 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
         if (win32.GetProcAddress(library, "debugFrameEnd")) |procedure| {
             result.debugFrameEnd = @as(@TypeOf(result.debugFrameEnd), @ptrCast(procedure));
         }
+
+        result.is_valid = result.updateAndRender != null and result.getSoundSamples != null;
+    }
+
+    if (!result.is_valid) {
+        result.updateAndRender = null;
+        result.getSoundSamples = null;
     }
 
     return result;
@@ -593,8 +599,8 @@ fn unloadGameCode(game: *Game) void {
         game.dll = undefined;
     }
 
-    game.updateAndRender = shared.updateAndRenderStub;
-    game.getSoundSamples = shared.getSoundSamplesStub;
+    game.updateAndRender = null;
+    game.getSoundSamples = null;
     game.debugFrameEnd = null;
 }
 
@@ -1922,6 +1928,7 @@ pub export fn wWinMain(
     _ = cmd_line;
     _ = cmd_show;
 
+    global_debug_table.setEventRecording(true);
     var state = Win32State{};
     getExeFileName(&state);
 
@@ -2186,32 +2193,12 @@ pub export fn wWinMain(
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
                 while (running) {
-                    TimedBlock.beginBlock(@src(), .ExecutableRefresh);
-
                     DebugInterface.debugBeginDataBlock(@src(), "Platform/Controls");
                     {
                         DebugInterface.debugValue(@src(), &paused, "paused");
                         DebugInterface.debugValue(@src(), &rendering_type, "rendering_type");
                     }
                     DebugInterface.debugEndDataBlock(@src());
-
-                    //
-                    //
-                    //
-
-                    // Reload the game code if it has changed.
-                    const last_dll_write_time = getLastWriteTime(&source_dll_path);
-                    game_memory.executable_reloaded = false;
-                    if (win32.CompareFileTime(&last_dll_write_time, &game.last_write_time) != 0) {
-                        completeAllQueuedWork(&high_priority_queue);
-                        completeAllQueuedWork(&low_priority_queue);
-
-                        unloadGameCode(&game);
-                        game = loadGameCode(&source_dll_path, &temp_dll_path);
-                        game_memory.executable_reloaded = true;
-                    }
-
-                    TimedBlock.endBlock(@src(), .ExecutableRefresh);
 
                     //
                     //
@@ -2285,7 +2272,7 @@ pub export fn wWinMain(
                         }
 
                         // Send all input to game.
-                        game.updateAndRender(platform, &game_memory, new_input, &render_commands);
+                        game.updateAndRender.?(platform, &game_memory, new_input, &render_commands);
 
                         if (new_input.quit_requested) {
                             running = false;
@@ -2373,7 +2360,7 @@ pub export fn wWinMain(
                                 };
                                 sound_output_info.bytes_to_write = sound_output_info.output_buffer.sample_count * sound_output.bytes_per_sample;
 
-                                game.getSoundSamples(&game_memory, &sound_output_info.output_buffer);
+                                game.getSoundSamples.?(&game_memory, &sound_output_info.output_buffer);
 
                                 if (INTERNAL) {
                                     var marker = &debug_time_markers[debug_time_marker_index];
@@ -2422,10 +2409,26 @@ pub export fn wWinMain(
                         TimedBlock.beginBlock(@src(), .DebugCollation);
                         defer TimedBlock.endBlock(@src(), .DebugCollation);
 
+                        const last_dll_write_time = getLastWriteTime(&source_dll_path);
+                        const executable_needs_reloading: bool =
+                            win32.CompareFileTime(&last_dll_write_time, &game.last_write_time) != 0;
+
+                        game_memory.executable_reloaded = false;
+                        if (executable_needs_reloading) {
+                            completeAllQueuedWork(&high_priority_queue);
+                            completeAllQueuedWork(&low_priority_queue);
+                            global_debug_table.setEventRecording(false);
+                        }
+
                         if (game.debugFrameEnd) |frameEndFn| {
                             frameEndFn(&game_memory, new_input.*, &render_commands);
-                        } else {
-                            global_debug_table.event_array_index_event_index = 0;
+                        }
+
+                        if (executable_needs_reloading) {
+                            unloadGameCode(&game);
+                            game = loadGameCode(&source_dll_path, &temp_dll_path);
+                            game_memory.executable_reloaded = true;
+                            global_debug_table.setEventRecording(game.is_valid);
                         }
                     }
 

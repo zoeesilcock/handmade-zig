@@ -33,7 +33,6 @@ pub const DEBUG_UI_ENABLED = true;
 
 pub const DebugCycleCounters = enum(u16) {
     TotalPlatformLoop,
-    ExecutableRefresh,
     InputProcessing,
     ControllerClearing,
     MessageProcessing,
@@ -97,12 +96,17 @@ pub const DebugCycleCounters = enum(u16) {
 
 pub const DebugTable = extern struct {
     edit_event: DebugEvent = DebugEvent{},
+    record_increment: u32 = 0,
     current_event_array_index: u32 = 0,
     event_array_index_event_index: u64 = 0,
 
     events: [2][16 * 65536]DebugEvent = [1][16 * 65536]DebugEvent{
         [1]DebugEvent{DebugEvent{}} ** (16 * 65536),
     } ** 2,
+
+    pub fn setEventRecording(self: *DebugTable, enabled: bool) void {
+        self.record_increment = if (enabled) 1 else 0;
+    }
 };
 
 pub const DebugId = extern struct {
@@ -194,7 +198,13 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         guid: [*:0]const u8,
     ) *DebugEvent {
         const event_array_index_event_index =
-            @atomicRmw(u64, &shared.global_debug_table.event_array_index_event_index, .Add, 1, .seq_cst);
+            @atomicRmw(
+            u64,
+            &shared.global_debug_table.event_array_index_event_index,
+            .Add,
+            shared.global_debug_table.record_increment,
+            .seq_cst,
+        );
         const array_index = event_array_index_event_index >> 32;
         const event_index = event_array_index_event_index & 0xffffffff;
         std.debug.assert(event_index < shared.global_debug_table.events[0].len);

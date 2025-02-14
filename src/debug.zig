@@ -1271,7 +1271,7 @@ fn drawProfileIn(
         const this_min_x: f32 =
             profile_rect.min.x() + scale * @as(f32, @floatFromInt(node.parent_relative_clock));
         const this_max_x: f32 =
-            profile_rect.min.x() + scale * @as(f32, @floatFromInt(node.duration));
+            this_min_x + scale * @as(f32, @floatFromInt(node.duration));
         const lane_index: u32 = 0;
         const lane: f32 = @as(f32, @floatFromInt(lane_index));
 

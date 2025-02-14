@@ -44,13 +44,21 @@ const LayeredScene = struct {
 };
 
 pub const GameModeCutscene = struct {
+    cutscene_id: CutsceneId,
+    time: f32 = 0,
+};
+
+pub const Cutscene = struct {
     scene_count: u32,
     scenes: [*]const LayeredScene,
-    time: f32 = 0,
 };
 
 pub const GameModeTitleScreen = struct {
     time: f32,
+};
+
+const CutsceneId = enum(u8) {
+    Intro,
 };
 
 const intro_cutscene: []const LayeredScene = &.{
@@ -223,6 +231,10 @@ const intro_cutscene: []const LayeredScene = &.{
     },
 };
 
+const cutscenes = [_]Cutscene {
+    Cutscene{ .scene_count = intro_cutscene.len, .scenes = @ptrCast(intro_cutscene) },
+};
+
 fn checkForMetaInput(state: *shared.State, transient_state: *TransientState, input: *shared.GameInput) bool {
     var result: bool = false;
 
@@ -277,8 +289,7 @@ pub fn playIntroCutscene(state: *shared.State, transient_state: *TransientState)
     state.setGameMode(transient_state, .Cutscene);
 
     var cutscene: *GameModeCutscene = state.mode_arena.pushStruct(GameModeCutscene, null);
-    cutscene.scene_count = intro_cutscene.len;
-    cutscene.scenes = @ptrCast(intro_cutscene);
+    cutscene.cutscene_id = .Intro;
     cutscene.time = 0;
 
     state.mode = .{ .cutscene = cutscene };
@@ -319,10 +330,11 @@ fn renderCutsceneAtTime(
     cutscene_time: f32,
 ) bool {
     var cutscene_still_running = false;
+    const info: Cutscene = cutscenes[@intFromEnum(cutscene.cutscene_id)];
     var time_base: f32 = 0;
     var shot_index: u32 = 0;
-    while (shot_index < cutscene.scene_count) : (shot_index += 1) {
-        const scene: *const LayeredScene = &cutscene.scenes[shot_index];
+    while (shot_index < info.scene_count) : (shot_index += 1) {
+        const scene: *const LayeredScene = &info.scenes[shot_index];
         const time_start: f32 = time_base;
         const time_end = time_start + scene.duration;
 
