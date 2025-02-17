@@ -212,6 +212,7 @@ pub const DebugState = struct {
 
     backing_transform: ObjectTransform,
     shadow_transform: ObjectTransform,
+    ui_transform: ObjectTransform,
     text_transform: ObjectTransform,
 
     menu_position: Vector2,
@@ -814,20 +815,18 @@ pub const DebugState = struct {
         }
 
         if (result == null) {
-            result = self.first_thread;
+            result = self.first_free_thread;
             if (result != null) {
-                self.first_thread = result.?.next;
+                self.first_free_thread = result.?.next;
             } else {
                 result = self.debug_arena.pushStruct(DebugThread, null);
             }
 
             result.?.id = thread_id;
-            result.?.first_open_code_block = null;
-            result.?.first_open_data_block = null;
-
             result.?.lane_index = self.frame_bar_lane_count;
             self.frame_bar_lane_count += 1;
-
+            result.?.first_open_code_block = null;
+            result.?.first_open_data_block = null;
             result.?.next = self.first_thread;
             self.first_thread = result.?;
         }
@@ -1240,8 +1239,7 @@ fn drawProfileIn(
         scale = pixel_span / frame_span;
     }
 
-    // const lane_count: u32 = debug_state.frame_bar_lane_count;
-    const lane_count: u32 = 4;
+    const lane_count: u32 = debug_state.frame_bar_lane_count;
     var lane_height: f32 = 0;
     if (lane_count > 0) {
         lane_height = profile_rect.getDimension().y() / @as(f32, @floatFromInt(lane_count));
@@ -1272,7 +1270,7 @@ fn drawProfileIn(
             profile_rect.min.x() + scale * @as(f32, @floatFromInt(node.parent_relative_clock));
         const this_max_x: f32 =
             this_min_x + scale * @as(f32, @floatFromInt(node.duration));
-        const lane_index: u32 = 0;
+        const lane_index: u32 = node.thread_ordinal;
         const lane: f32 = @as(f32, @floatFromInt(lane_index));
 
         const region_rect = math.Rectangle2.new(
@@ -1281,7 +1279,7 @@ fn drawProfileIn(
             this_max_x,
             profile_rect.max.y() - lane_height * lane,
         );
-        render_group.pushRectangle2(debug_state.backing_transform, region_rect, 0, color.toColor(1));
+        render_group.pushRectangle2(debug_state.ui_transform, region_rect, 0, color.toColor(1));
 
         if (mouse_position.isInRectangle(region_rect)) {
             var buffer: [128]u8 = undefined;
@@ -2133,10 +2131,12 @@ fn debugStart(
 
         debug_state.backing_transform = ObjectTransform.defaultFlat();
         debug_state.shadow_transform = ObjectTransform.defaultFlat();
+        debug_state.ui_transform = ObjectTransform.defaultFlat();
         debug_state.text_transform = ObjectTransform.defaultFlat();
         debug_state.backing_transform.sort_bias = 100000;
         debug_state.shadow_transform.sort_bias = 200000;
-        debug_state.text_transform.sort_bias = 300000;
+        debug_state.ui_transform.sort_bias = 300000;
+        debug_state.text_transform.sort_bias = 400000;
     }
 }
 

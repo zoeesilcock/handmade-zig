@@ -430,7 +430,7 @@ pub fn drawRectangle(
     draw_buffer: *LoadedBitmap,
     min: Vector2,
     max: Vector2,
-    color: Color,
+    color_in: Color,
     clip_rect: Rectangle2i,
 ) void {
     // TimedBlock.beginFunction(@src(), .DrawRectangle);
@@ -444,25 +444,170 @@ pub fn drawRectangle(
     );
     fill_rect = fill_rect.getIntersectionWith(clip_rect);
 
-    // Set the pointer to the top left corner of the rectangle.
-    var row: [*]u8 = @ptrCast(draw_buffer.memory);
-    row += @as(
-        u32,
-        @intCast((fill_rect.min.x() * shared.BITMAP_BYTES_PER_PIXEL) +
-            (fill_rect.min.y() * @as(i32, @intCast(draw_buffer.pitch)))),
-    );
+    if (false) {
+        // Set the pointer to the top left corner of the rectangle.
+        var row: [*]u8 = @ptrCast(draw_buffer.memory);
+        row += @as(
+            u32,
+            @intCast((fill_rect.min.x() * shared.BITMAP_BYTES_PER_PIXEL) +
+                (fill_rect.min.y() * @as(i32, @intCast(draw_buffer.pitch)))),
+        );
 
-    var y = fill_rect.min.y();
-    while (y < fill_rect.max.y()) : (y += 1) {
-        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+        var y = fill_rect.min.y();
+        while (y < fill_rect.max.y()) : (y += 1) {
+            var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
 
-        var x = fill_rect.min.x();
-        while (x < fill_rect.max.x()) : (x += 1) {
-            pixel[0] = color.packColor();
-            pixel += 1;
+            var x = fill_rect.min.x();
+            while (x < fill_rect.max.x()) : (x += 1) {
+                pixel[0] = color_in.packColor();
+                pixel += 1;
+            }
+
+            row += @as(usize, @intCast(draw_buffer.pitch));
         }
+    } else {
+        var color = color_in;
+        _ = color.setRGB(color.rgb().scaledTo(color.a()));
+        color = color.scaledTo(255);
 
-        row += @as(usize, @intCast(draw_buffer.pitch));
+        const mask_ffffffff: Vec4u = @splat(0xFFFFFFFF);
+        const one: Vec4f = @splat(1);
+        const two: Vec4f = @splat(2);
+        const three: Vec4f = @splat(3);
+        const four: Vec4f = @splat(4);
+
+        if (fill_rect.hasArea()) {
+            var start_clip_mask = mask_ffffffff;
+            var end_clip_mask = mask_ffffffff;
+
+            const start_clip_masks: [4]Vec4u = .{
+                start_clip_mask,
+                start_clip_mask << one * four,
+                start_clip_mask << two * four,
+                start_clip_mask << three * four,
+            };
+
+            const end_clip_masks: [4]Vec4u = .{
+                end_clip_mask,
+                end_clip_mask >> three * four,
+                end_clip_mask >> two * four,
+                end_clip_mask >> one * four,
+            };
+
+            if (fill_rect.min.x() & 3 != 0) {
+                start_clip_mask = start_clip_masks[@intCast(fill_rect.min.x() & 3)];
+                _ = fill_rect.min.setX(fill_rect.min.x() & ~@as(i32, @intCast(3)));
+            }
+
+            if (fill_rect.max.x() & 3 != 0) {
+                end_clip_mask = end_clip_masks[@intCast(fill_rect.max.x() & 3)];
+                _ = fill_rect.max.setX((fill_rect.max.x() & ~@as(i32, @intCast(3))) + 4);
+            }
+
+            const min_x = fill_rect.min.x();
+            const min_y = fill_rect.min.y();
+            const max_x = fill_rect.max.x();
+            const max_y = fill_rect.max.y();
+
+            const inv_255: Vec4f = @splat(1.0 / 255.0);
+            const max_color_value: Vec4f = @splat(255.0 * 255.0);
+            const color_r: Vec4f = @splat(color.r());
+            const color_g: Vec4f = @splat(color.g());
+            const color_b: Vec4f = @splat(color.b());
+            const color_a: Vec4f = @splat(color.a());
+            const one_255: Vec4f = @splat(255.0);
+            const zero: Vec4f = @splat(0);
+            // const half: Vec4f = @splat(0.5);
+            // const zero_to_three: Vec4f = .{ 0, 1, 2, 3 };
+            const shift_24: Vec4u = @splat(24);
+            const shift_16: Vec4u = @splat(16);
+            const shift_8: Vec4u = @splat(8);
+            // const shift_2: Vec4u = @splat(2);
+            const mask_ff: Vec4u = @splat(0xFF);
+
+            const row_advance: usize = @intCast(draw_buffer.pitch);
+            var row: [*]u8 = @ptrCast(draw_buffer.memory);
+            row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * draw_buffer.pitch)));
+
+            // TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast(@divFloor(fill_rect.getClampedArea(), 2)));
+            // defer TimedBlock.endBlock(@src(), .ProcessPixel);
+
+            var y: i32 = min_y;
+            while (y < max_y) : (y += 1) {
+                var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+                var clip_mask: Vec4u = start_clip_mask;
+
+                var xi: i32 = min_x;
+                while (xi < max_x) : (xi += 4) {
+                    asm volatile ("# LLVM-MCA-BEGIN ProcessPixel");
+
+                    const original_dest: Vec4u = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(pixel))).*;
+                    const write_mask: Vec4u = clip_mask;
+
+                    // Load destination.
+                    var dest_r: Vec4f = @floatFromInt((original_dest >> shift_16) & mask_ff);
+                    var dest_g: Vec4f = @floatFromInt((original_dest >> shift_8) & mask_ff);
+                    var dest_b: Vec4f = @floatFromInt((original_dest) & mask_ff);
+                    const dest_a: Vec4f = @floatFromInt((original_dest >> shift_24) & mask_ff);
+
+                    // Modulate by incoming color.
+                    var texelr = color_r * color_r;
+                    var texelg = color_g * color_g;
+                    var texelb = color_b * color_b;
+                    var texela = color_a;
+
+                    // Clamp colors to valid range.
+                    texelr = @max(zero, texelr);
+                    texelr = @min(max_color_value, texelr);
+                    texelg = @max(zero, texelg);
+                    texelg = @min(max_color_value, texelg);
+                    texelb = @max(zero, texelb);
+                    texelb = @min(max_color_value, texelb);
+                    texela = @max(zero, texela);
+                    texela = @min(one_255, texela);
+
+                    // Go from sRGB to linear brightness space.
+                    dest_r = math.square_v4(dest_r);
+                    dest_g = math.square_v4(dest_g);
+                    dest_b = math.square_v4(dest_b);
+
+                    // Destination blend.
+                    const inv_texel_a = one - (inv_255 * texela);
+                    var blended_r: Vec4f = dest_r * inv_texel_a + texelr;
+                    var blended_g: Vec4f = dest_g * inv_texel_a + texelg;
+                    var blended_b: Vec4f = dest_b * inv_texel_a + texelb;
+                    const blended_a: Vec4f = dest_a * inv_texel_a + texela;
+
+                    // Go from linear brightness space to sRGB.
+                    blended_r = @sqrt(blended_r);
+                    blended_g = @sqrt(blended_g);
+                    blended_b = @sqrt(blended_b);
+
+                    const int_r: Vec4u = @intFromFloat(blended_r);
+                    const int_g: Vec4u = @intFromFloat(blended_g);
+                    const int_b: Vec4u = @intFromFloat(blended_b);
+                    const int_a: Vec4u = @intFromFloat(blended_a);
+
+                    const out: Vec4u = int_r << shift_16 | int_g << shift_8 | int_b | int_a << shift_24;
+                    const masked_out: Vec4u = (write_mask & out) | (~write_mask & original_dest);
+
+                    const pixels = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(pixel)));
+                    pixels.* = masked_out;
+
+                    pixel += 4;
+
+                    if ((xi + 8) < max_x) {
+                        clip_mask = mask_ffffffff;
+                    } else {
+                        clip_mask = end_clip_mask;
+                    }
+
+                    asm volatile ("# LLVM-MCA-END ProcessPixel");
+                }
+
+                row += row_advance;
+            }
+        }
     }
 }
 

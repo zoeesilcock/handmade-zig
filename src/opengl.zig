@@ -105,6 +105,8 @@ pub const Info = struct {
                     result.gl_ext_texture_srgb = true;
                 } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_framebuffer_sRGB")) {
                     result.gl_ext_framebuffer_srgb = true;
+                } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_sRGB")) {
+                    result.gl_ext_framebuffer_srgb = true;
                 }
 
                 at = end;
@@ -115,16 +117,13 @@ pub const Info = struct {
     }
 };
 
-pub fn init(is_modern_context: bool) void {
+pub fn init(is_modern_context: bool, framebuffer_supports_sRGB: bool) void {
     const info = Info.get(is_modern_context);
 
     default_internal_texture_format = gl.GL_RGBA8;
 
-    if (info.gl_ext_texture_srgb) {
+    if (framebuffer_supports_sRGB and info.gl_ext_texture_srgb and info.gl_ext_framebuffer_srgb) {
         default_internal_texture_format = GL_SRGB8_ALPHA8;
-    }
-
-    if (info.gl_ext_framebuffer_srgb) {
         gl.glEnable(GL_FRAMEBUFFER_SRGB);
     }
 }
@@ -178,26 +177,32 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
             .RenderEntryBitmap => {
                 var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                 if (entry.bitmap) |bitmap| {
-                    const x_axis: Vector2 = Vector2.new(1, 0);
-                    const y_axis: Vector2 = Vector2.new(0, 1);
-                    const min_position: Vector2 = entry.position;
-                    const max_position: Vector2 = min_position.plus(
-                        x_axis.scaledTo(entry.size.x()).plus(y_axis.scaledTo(entry.size.y())),
-                    );
+                    if (bitmap.width > 0 and bitmap.height > 0) {
+                        const x_axis: Vector2 = Vector2.new(1, 0);
+                        const y_axis: Vector2 = Vector2.new(0, 1);
+                        const min_position: Vector2 = entry.position;
+                        const max_position: Vector2 = min_position.plus(
+                            x_axis.scaledTo(entry.size.x()).plus(y_axis.scaledTo(entry.size.y())),
+                        );
 
-                    if (bitmap.texture_handle > 0) {
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
+                        if (bitmap.texture_handle > 0) {
+                            gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
+                        }
+
+                        const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
+                        const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
+                        const min_uv = Vector2.new(one_texel_u, one_texel_v);
+                        const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
+                        drawRectangle(min_position, max_position, entry.color, min_uv, max_uv);
+
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
                     }
-
-                    drawRectangle(min_position, max_position, entry.color);
-
-                    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
                 }
             },
             .RenderEntryRectangle => {
                 const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                 gl.glDisable(gl.GL_TEXTURE_2D);
-                drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.color);
+                drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.color, null, null);
                 gl.glEnable(gl.GL_TEXTURE_2D);
             },
             .RenderEntrySaturation => {
@@ -252,25 +257,34 @@ fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) u32 {
     return handle;
 }
 
-fn drawRectangle(min_position: Vector2, max_position: Vector2, color: Color) void {
+fn drawRectangle(
+    min_position: Vector2,
+    max_position: Vector2,
+    color: Color,
+    opt_min_uv: ?Vector2,
+    opt_max_uv: ?Vector2,
+) void {
+    const min_uv = opt_min_uv orelse Vector2.splat(0);
+    const max_uv = opt_max_uv orelse Vector2.splat(1);
+
     gl.glBegin(gl.GL_TRIANGLES);
     {
         gl.glColor4f(color.r(), color.g(), color.b(), color.a());
 
         // Lower triangle.
-        gl.glTexCoord2f(0, 0);
+        gl.glTexCoord2f(min_uv.x(), min_uv.y());
         gl.glVertex2f(min_position.x(), min_position.y());
-        gl.glTexCoord2f(1, 0);
+        gl.glTexCoord2f(max_uv.x(), min_uv.y());
         gl.glVertex2f(max_position.x(), min_position.y());
-        gl.glTexCoord2f(1, 1);
+        gl.glTexCoord2f(max_uv.x(), max_uv.y());
         gl.glVertex2f(max_position.x(), max_position.y());
 
         // Upper triangle
-        gl.glTexCoord2f(0, 0);
+        gl.glTexCoord2f(min_uv.x(), min_uv.y());
         gl.glVertex2f(min_position.x(), min_position.y());
-        gl.glTexCoord2f(1, 1);
+        gl.glTexCoord2f(max_uv.x(), max_uv.y());
         gl.glVertex2f(max_position.x(), max_position.y());
-        gl.glTexCoord2f(0, 1);
+        gl.glTexCoord2f(min_uv.x(), max_uv.y());
         gl.glVertex2f(min_position.x(), max_position.y());
     }
     gl.glEnd();
@@ -331,11 +345,7 @@ pub fn displayBitmap(
 
     gl.glEnable(gl.GL_TEXTURE_2D);
 
-    if (INTERNAL) {
-        gl.glClearColor(1, 0, 1, 0);
-    } else {
-        gl.glClearColor(0, 0, 0, 0);
-    }
+    gl.glClearColor(0, 0, 0, 0);
     gl.glClear(gl.GL_COLOR_BUFFER_BIT);
 
     // Reset all transforms.
@@ -348,7 +358,7 @@ pub fn displayBitmap(
     const max_position = math.Vector2.new(@floatFromInt(width), @floatFromInt(height));
     const color = math.Color.new(1, 1, 1, 1);
 
-    drawRectangle(min_position, max_position, color);
+    drawRectangle(min_position, max_position, color, null, null);
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 }

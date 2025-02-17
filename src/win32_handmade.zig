@@ -1291,7 +1291,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
         }
 
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
-            opengl.init(is_modern_context);
+            opengl.init(is_modern_context, opengl_supports_srgb_frame_buffer);
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
                 _ = wglSwapIntervalEXT(1);
             }
