@@ -2187,7 +2187,7 @@ pub export fn wWinMain(
                 var current_sort_memory_size: u64 = shared.megabytes(1);
                 var sort_memory = allocateMemory(current_sort_memory_size);
 
-                const push_buffer_size: u32 = shared.megabytes(4);
+                const push_buffer_size: u32 = shared.megabytes(64);
                 const push_buffer = allocateMemory(push_buffer_size);
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);

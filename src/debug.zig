@@ -141,6 +141,7 @@ const DebugInteractionType = enum(u32) {
     Move,
     Select,
     ToggleExpansion,
+    SetProfileGraphRoot,
 };
 
 const DebugInteractionTargetType = enum(u32) {
@@ -241,6 +242,8 @@ pub const DebugState = struct {
     font_id: file_formats.FontId = undefined,
     global_width: f32 = 0,
     global_height: f32 = 0,
+
+    mouse_text_stack_y: f32,
 
     scope_to_record: ?[*:0]const u8,
 
@@ -593,7 +596,17 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn getElementFromEventByIndex(self: *DebugState, index: u32, guid: [*:0]const u8) ?*DebugElement {
+    fn getElementFromGuid(self: *DebugState, opt_guid: ?[*:0]const u8) ?*DebugElement {
+        var result: ?*DebugElement = null;
+        if (opt_guid) |guid| {
+            const parsed_name: DebugParsedName = parseName(guid);
+            const index: u32 = @mod(parsed_name.hash_value, @as(u32, @intCast(self.element_hash.len)));
+            result = self.getElementFromGuidHash(index, guid);
+        }
+        return result;
+    }
+
+    fn getElementFromGuidHash(self: *DebugState, index: u32, guid: [*:0]const u8) ?*DebugElement {
         var result: ?*DebugElement = null;
         var opt_chain: ?*DebugElement = self.element_hash[index];
         while (opt_chain) |chain| : (opt_chain = chain.next_in_hash) {
@@ -614,7 +627,7 @@ pub const DebugState = struct {
         var result: ?*DebugElement = null;
         const parsed_name: DebugParsedName = parseName(event.guid);
         const index: u32 = @mod(parsed_name.hash_value, @as(u32, @intCast(self.element_hash.len)));
-        result = self.getElementFromEventByIndex(index, event.guid);
+        result = self.getElementFromGuidHash(index, event.guid);
 
         if (result == null) {
             result = self.debug_arena.pushStruct(DebugElement, null);
@@ -910,6 +923,14 @@ pub const DebugState = struct {
 
         return result.?;
     }
+
+    fn getLineAdvance(self: *DebugState) f32 {
+        var result: f32 = 0;
+        if (self.debug_font_info) |font_info| {
+            result = font_info.getLineAdvance() * self.font_scale;
+        }
+        return result;
+    }
 };
 
 const DebugVariableToTextFlag = enum(u32) {
@@ -963,14 +984,16 @@ const DebugViewType = enum(u32) {
     Basic,
     InlineBlock,
     Collapsible,
+    ProfileGraph,
 };
 
 const DebugViewDataType = enum(u32) {
     inline_block,
     collapsible,
+    profile_graph,
 };
 
-pub const DebugView = struct {
+const DebugView = struct {
     id: DebugId,
     next_in_hash: *DebugView = undefined,
 
@@ -978,16 +1001,22 @@ pub const DebugView = struct {
     data: union(DebugViewDataType) {
         inline_block: DebugViewInlineBlock,
         collapsible: DebugViewCollapsible,
+        profile_graph: DebugViewProfileGraph,
     },
 };
 
-pub const DebugViewCollapsible = struct {
+const DebugViewInlineBlock = struct {
+    dimension: Vector2,
+};
+
+const DebugViewCollapsible = struct {
     expanded_always: bool,
     expanded_alt_view: bool,
 };
 
-pub const DebugViewInlineBlock = struct {
-    dimension: Vector2,
+const DebugViewProfileGraph = struct {
+    block: DebugViewInlineBlock,
+    guid: ?[*:0]const u8,
 };
 
 const DebugProfileNode = extern struct {
@@ -1222,27 +1251,20 @@ const DebugVariableIterator = struct {
     sentinel: *DebugVariableLink = undefined,
 };
 
-fn drawProfileIn(
+fn drawProfileBars(
     debug_state: *DebugState,
+    graph_id: DebugId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
-    root_event: *DebugStoredEvent,
+    root_node: *DebugProfileNode,
+    lane_stride: f32,
+    lane_height: f32,
 ) void {
-    const root_node: *DebugProfileNode = &root_event.data.profile_node;
-    var render_group: *RenderGroup = &debug_state.render_group;
-    render_group.pushRectangle2(debug_state.backing_transform, profile_rect, 0, Color.new(0, 0, 0, 0.25));
-
     const frame_span: f32 = @floatFromInt(root_node.duration);
     const pixel_span: f32 = profile_rect.getDimension().x();
     var scale: f32 = 0;
     if (frame_span > 0) {
         scale = pixel_span / frame_span;
-    }
-
-    const lane_count: u32 = debug_state.frame_bar_lane_count;
-    var lane_height: f32 = 0;
-    if (lane_count > 0) {
-        lane_height = profile_rect.getDimension().y() / @as(f32, @floatFromInt(lane_count));
     }
 
     const colors: [11]Color3 = .{
@@ -1270,16 +1292,13 @@ fn drawProfileIn(
             profile_rect.min.x() + scale * @as(f32, @floatFromInt(node.parent_relative_clock));
         const this_max_x: f32 =
             this_min_x + scale * @as(f32, @floatFromInt(node.duration));
+
         const lane_index: u32 = node.thread_ordinal;
         const lane: f32 = @as(f32, @floatFromInt(lane_index));
+        const lane_y: f32 = profile_rect.max.y() - lane_stride * lane;
 
-        const region_rect = math.Rectangle2.new(
-            this_min_x,
-            profile_rect.max.y() - lane_height * (lane + 1),
-            this_max_x,
-            profile_rect.max.y() - lane_height * lane,
-        );
-        render_group.pushRectangle2(debug_state.ui_transform, region_rect, 0, color.toColor(1));
+        const region_rect = math.Rectangle2.new(this_min_x, lane_y - lane_height, this_max_x, lane_y);
+        debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, region_rect, 0, color.toColor(1), 2);
 
         if (mouse_position.isInRectangle(region_rect)) {
             var buffer: [128]u8 = undefined;
@@ -1287,9 +1306,55 @@ fn drawProfileIn(
                 element.guid,
                 node.duration,
             }) catch "";
-            textOutAt(slice, mouse_position.plus(Vector2.new(0, 10)), Color.white());
+            textOutAt(slice, mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)), Color.white());
+            debug_state.mouse_text_stack_y -= debug_state.getLineAdvance();
+
+            const zoom_interaction: DebugInteraction = DebugInteraction{
+                .id = graph_id,
+                .interaction_type = .SetProfileGraphRoot,
+                .target = .{ .element = element },
+            };
+            debug_state.next_hot_interaction = zoom_interaction;
         }
+
+        drawProfileBars(
+            debug_state,
+            graph_id,
+            region_rect,
+            mouse_position,
+            node,
+            0,
+            lane_height / 2,
+        );
     }
+}
+
+fn drawProfileIn(
+    debug_state: *DebugState,
+    graph_id: DebugId,
+    profile_rect: Rectangle2,
+    mouse_position: Vector2,
+    root_event: *DebugStoredEvent,
+) void {
+    debug_state.mouse_text_stack_y = 10;
+
+    debug_state.render_group.pushRectangle2(debug_state.backing_transform, profile_rect, 0, Color.new(0, 0, 0, 0.25));
+
+    const lane_count: u32 = debug_state.frame_bar_lane_count;
+    var lane_height: f32 = 0;
+    if (lane_count > 0) {
+        lane_height = profile_rect.getDimension().y() / @as(f32, @floatFromInt(lane_count));
+    }
+
+    drawProfileBars(
+        debug_state,
+        graph_id,
+        profile_rect,
+        mouse_position,
+        &root_event.data.profile_node,
+        lane_height,
+        lane_height,
+    );
 }
 
 const Layout = struct {
@@ -1510,20 +1575,43 @@ fn drawDebugElement(layout: *Layout, tree: *DebugTree, element: *DebugElement, d
                     );
                 },
                 .ThreadIntervalGraph => {
-                    var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+                    if (view.view_type != .ProfileGraph) {
+                        view.view_type = .ProfileGraph;
+                        view.data = .{ .profile_graph = .{ .guid = null, .block = view.data.inline_block } };
+                    }
+
+                    var layout_element: LayoutElement =
+                        layout.beginElementRectangle(&view.data.profile_graph.block.dimension);
                     layout_element.makeSizable();
-                    // layout_element.defaultInteraction(item_interaction);
                     layout_element.end();
 
+                    var opt_root_node: ?*DebugStoredEvent = null;
+                    const opt_viewing_element: ?*DebugElement =
+                        debug_state.getElementFromGuid(view.data.profile_graph.guid);
+
                     if (debug_state.most_recent_frame) |most_recent_frame| {
-                        if (most_recent_frame.root_profile_node) |root_profile_node| {
-                            drawProfileIn(
-                                debug_state,
-                                layout_element.bounds,
-                                layout.mouse_position,
-                                root_profile_node,
-                            );
+                        if (opt_viewing_element) |viewing_element| {
+                            var opt_search: ?*DebugStoredEvent = viewing_element.oldest_event;
+                            while (opt_search) |search| : (opt_search = search.next) {
+                                if (search.frame_index == most_recent_frame.frame_index) {
+                                    opt_root_node = search;
+                                }
+                            }
                         }
+
+                        if (opt_root_node == null) {
+                            opt_root_node = most_recent_frame.root_profile_node;
+                        }
+                    }
+
+                    if (opt_root_node) |root_profile_node| {
+                        drawProfileIn(
+                            debug_state,
+                            debug_id,
+                            layout_element.bounds,
+                            layout.mouse_position,
+                            root_profile_node,
+                        );
                     }
                 },
                 else => {
@@ -1825,6 +1913,18 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
 
             view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
         },
+        .SetProfileGraphRoot => {
+            const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
+
+            view.view_type = .ProfileGraph;
+            if (view.data != .profile_graph) {
+                view.data = .{
+                    .profile_graph = .{ .guid = null, .block = undefined },
+                };
+            }
+
+            view.data.profile_graph.guid = debug_state.interaction.target.element.?.guid;
+        },
         .ToggleValue => {
             if (debug_state.interaction.target.element) |interaction_element| {
                 if (interaction_element.most_recent_event) |stored_event| {
@@ -1995,7 +2095,7 @@ pub fn textLine(text: [:0]const u8) void {
                 debug_state.at_y - debug_state.font_scale * font_info.getStartingBaselineY(),
             );
             textOutAt(text, position, Color.white());
-            debug_state.at_y -= font_info.getLineAdvance() * debug_state.font_scale;
+            debug_state.at_y -= debug_state.getLineAdvance();
         }
     }
 }

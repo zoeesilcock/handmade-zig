@@ -491,8 +491,36 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn pushRectangle2(self: *RenderGroup, object_transform: ObjectTransform, rectangle: Rectangle2, z: f32, color: Color) void {
-        self.pushRectangle(object_transform, rectangle.getDimension(), rectangle.toRectangle3(z, z).getCenter(), color);
+    pub fn pushRectangle2(
+        self: *RenderGroup,
+        object_transform: ObjectTransform,
+        rectangle: Rectangle2,
+        z: f32,
+        color: Color,
+    ) void {
+        self.pushRectangle(
+            object_transform,
+            rectangle.getDimension(),
+            rectangle.toRectangle3(z, z).getCenter(),
+            color,
+        );
+    }
+
+    pub fn pushRectangle2Outline(
+        self: *RenderGroup,
+        object_transform: ObjectTransform,
+        rectangle: Rectangle2,
+        z: f32,
+        color: Color,
+        thickness: f32,
+    ) void {
+        self.pushRectangleOutline(
+            object_transform,
+            rectangle.getDimension(),
+            rectangle.toRectangle3(z, z).getCenter(),
+            color,
+            thickness,
+        );
     }
 
     pub fn pushRectangleOutline(
