@@ -7,11 +7,6 @@ const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
 const BACKEND_DEFAULT = .Win32;
 
-const Backend = enum {
-    Win32,
-    Raylib,
-};
-
 const Package = enum {
     All,
     Game,
@@ -29,19 +24,17 @@ pub fn build(b: *std.Build) void {
     // Retrieve build options.
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const backend = b.option(Backend, "backend", "platform backend") orelse BACKEND_DEFAULT;
     const package = b.option(Package, "package", "which part to build") orelse PACKAGE_DEFAULT;
     const internal = b.option(bool, "internal", "use this for internal builds") orelse INTERNAL_DEFAULT;
 
     // Add build options.
     const build_options = b.addOptions();
     build_options.addOption(Package, "package", package);
-    build_options.addOption(Backend, "backend", backend);
     build_options.addOption(bool, "internal", internal);
 
     // Add the packages.
     if (package == .All or package == .Game or package == .Executable) {
-        addExecutable(b, build_options, target, optimize, package, backend, internal);
+        addExecutable(b, build_options, target, optimize, package, internal);
     }
 
     if (package == .All or package == .Game or package == .Library) {
@@ -63,7 +56,6 @@ fn addExecutable(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     package: Package,
-    backend: Backend,
     internal: bool,
 ) void {
     const file_formats_module = b.addModule("file_formats", .{
@@ -72,35 +64,20 @@ fn addExecutable(
 
     const exe = b.addExecutable(.{
         .name = "handmade-zig",
-        .root_source_file = if (backend == .Win32) b.path("src/win32_handmade.zig") else b.path("src/raylib_handmade.zig"),
+        .root_source_file = b.path("src/win32_handmade.zig"),
         .target = target,
         .optimize = optimize,
     });
     exe.root_module.addOptions("build_options", build_options);
     exe.root_module.addImport("file_formats", file_formats_module);
 
-    if (backend == .Win32 and !internal) {
+    if (!internal) {
         exe.subsystem = .Windows;
     }
 
-    if (backend == .Win32) {
-        // Add the win32 API wrapper.
-        const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
-        exe.root_module.addImport("win32", zigwin32);
-    } else if (backend == .Raylib) {
-        // Add the raylib API wrapper and library.
-        const raylib_dep = b.dependency("raylib-zig", .{
-            .target = target,
-            .optimize = optimize,
-        });
-
-        const raylib = raylib_dep.module("raylib");
-        const raygui = raylib_dep.module("raygui");
-        const raylib_artifact = raylib_dep.artifact("raylib");
-        exe.linkLibrary(raylib_artifact);
-        exe.root_module.addImport("raylib", raylib);
-        exe.root_module.addImport("raygui", raygui);
-    }
+    // Add the win32 API wrapper.
+    const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
+    exe.root_module.addImport("win32", zigwin32);
 
     if (package == .All) {
         // Emit generated assembly of the main executable.
