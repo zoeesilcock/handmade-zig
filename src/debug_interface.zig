@@ -46,6 +46,7 @@ pub const DebugCycleCounters = enum(u16) {
 
     GameUpdateAndRender,
     FillGroundChunk,
+    RootProfile,
     DebugStart,
     DebugEnd,
     PushRenderElement,
@@ -182,7 +183,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         Enum: u32,
     } = undefined,
 
-    fn debugName(
+    pub fn debugName(
         comptime source: std.builtin.SourceLocation,
         comptime counter: ?DebugCycleCounters,
         comptime name: []const u8,
@@ -343,8 +344,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         };
     }
 } else struct {
-    pub fn record(source: std.builtin.SourceLocation, event_type: DebugType, block: [*:0]const u8) *DebugEvent {
-        _ = source;
+    pub fn record(event_type: DebugType, block: [*:0]const u8) *DebugEvent {
         _ = event_type;
         _ = block;
         return undefined;

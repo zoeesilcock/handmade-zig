@@ -244,6 +244,8 @@ pub const DebugState = struct {
     frames: [MAX_FRAME_COUNT]DebugFrame = [1]DebugFrame{undefined} ** MAX_FRAME_COUNT,
     collation_frame: DebugFrame,
 
+    root_profile_element: ?*DebugElement,
+
     frame_bar_lane_count: u32,
     first_thread: ?*DebugThread,
     first_free_thread: ?*DebugThread,
@@ -367,7 +369,10 @@ pub const DebugState = struct {
         if (result) |block| {
             self.first_free_block = block.next_free;
         } else {
-            result = self.debug_arena.pushStruct(OpenDebugBlock, null);
+            result = self.debug_arena.pushStruct(
+                OpenDebugBlock,
+                ArenaPushParams.aligned(@alignOf(OpenDebugBlock), true),
+            );
         }
 
         result.?.staring_frame_index = frame_index;
@@ -389,7 +394,12 @@ pub const DebugState = struct {
         self.first_free_block = free_block;
     }
 
-    fn getOrCreateGroupWithName(self: *DebugState, parent: *DebugVariableGroup, name_length: u32, name: [*:0]const u8) ?*DebugVariableGroup {
+    fn getOrCreateGroupWithName(
+        self: *DebugState,
+        parent: *DebugVariableGroup,
+        name_length: u32,
+        name: [*:0]const u8,
+    ) ?*DebugVariableGroup {
         var result: ?*DebugVariableGroup = null;
         var link: *DebugVariableLink = parent.sentinel.next;
         while (link != &parent.sentinel) : (link = link.next) {
@@ -596,7 +606,10 @@ pub const DebugState = struct {
         result = self.getElementFromGuidHash(index, event.guid);
 
         if (result == null) {
-            result = self.debug_arena.pushStruct(DebugElement, null);
+            result = self.debug_arena.pushStruct(
+                DebugElement,
+                ArenaPushParams.aligned(@alignOf(DebugElement), true),
+            );
 
             result.?.guid = event.guid;
             result.?.guid = self.debug_arena.pushString(event.guid);
@@ -615,9 +628,10 @@ pub const DebugState = struct {
                 )) |hierarchy_parent_group| {
                     opt_parent_group = hierarchy_parent_group;
                 }
-            }
-            if (opt_parent_group) |parent_group| {
-                _ = self.addElementToGroup(parent_group, result.?);
+
+                if (opt_parent_group) |parent_group| {
+                    _ = self.addElementToGroup(parent_group, result.?);
+                }
             }
         }
 
@@ -636,7 +650,7 @@ pub const DebugState = struct {
 
                 if (collation_frame.root_profile_node) |root_profile_node| {
                     root_profile_node.data.profile_node.duration =
-                        @truncate(collation_frame.end_clock -% collation_frame.begin_clock);
+                        collation_frame.end_clock -% collation_frame.begin_clock;
                 }
 
                 self.total_frame_count += 1;
@@ -677,7 +691,7 @@ pub const DebugState = struct {
                                 clock_basis = first_open_code_block.begin_clock;
                             } else if (parent_event == null) {
                                 var null_event: DebugEvent = .{};
-                                parent_event = self.storeEvent(element, &null_event);
+                                parent_event = self.storeEvent(self.root_profile_element.?, &null_event);
                                 parent_event.?.data = .{
                                     .profile_node = .{
                                         .element = null,
@@ -685,7 +699,6 @@ pub const DebugState = struct {
                                         .next_same_parent = null,
                                         .parent_relative_clock = 0,
                                         .duration = 0,
-                                        .aggregate_count = 0,
                                         .thread_ordinal = 0,
                                         .core_index = 0,
                                     },
@@ -697,9 +710,8 @@ pub const DebugState = struct {
                             node.element = element;
                             node.first_child = null;
                             node.next_same_parent = null;
-                            node.parent_relative_clock = @truncate(event.clock -% clock_basis);
+                            node.parent_relative_clock = event.clock -% clock_basis;
                             node.duration = 0;
-                            node.aggregate_count = 0;
                             node.thread_ordinal = @intCast(thread.lane_index);
                             node.core_index = event.core_index;
 
@@ -720,7 +732,7 @@ pub const DebugState = struct {
                             std.debug.assert(thread.id == event.thread_id);
 
                             var node: *DebugProfileNode = &matching_block.node.?.data.profile_node;
-                            node.duration = @truncate(event.clock -% matching_block.begin_clock);
+                            node.duration = event.clock -% matching_block.begin_clock;
                             self.deallocateOpenDebugBlock(&thread.first_open_code_block);
                         }
                     },
@@ -733,19 +745,19 @@ pub const DebugState = struct {
                         const parsed_name: DebugParsedName = parseName(event.guid);
                         debug_block.group =
                             self.getGroupForHierarchicalName(default_parent_group, parsed_name.name, true);
-                        },
-                        .CloseDataBlock => {
-                            std.debug.assert(thread.id == event.thread_id);
+                    },
+                    .CloseDataBlock => {
+                        std.debug.assert(thread.id == event.thread_id);
 
-                            self.deallocateOpenDebugBlock(&thread.first_open_data_block);
-                        },
-                        else => {
-                            if (self.getElementFromEvent(event, default_parent_group, true)) |element| {
-                                element.original_guid = event.guid;
-                                _ = self.storeEvent(element, event);
-                            }
-                        },
-                    }
+                        self.deallocateOpenDebugBlock(&thread.first_open_data_block);
+                    },
+                    else => {
+                        if (self.getElementFromEvent(event, default_parent_group, true)) |element| {
+                            element.original_guid = event.guid;
+                            _ = self.storeEvent(element, event);
+                        }
+                    },
+                }
             }
         }
     }
@@ -766,7 +778,7 @@ pub const DebugState = struct {
             if (result != null) {
                 self.first_free_thread = result.?.next;
             } else {
-                result = self.debug_arena.pushStruct(DebugThread, null);
+                result = self.debug_arena.pushStruct(DebugThread, ArenaPushParams.aligned(@alignOf(DebugThread), true));
             }
 
             result.?.id = thread_id;
@@ -782,7 +794,7 @@ pub const DebugState = struct {
     }
 
     fn addTree(self: *DebugState, group: ?*DebugVariableGroup, position: Vector2) *DebugTree {
-        var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree, null);
+        var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree, ArenaPushParams.aligned(@alignOf(DebugTree), true));
         tree.group = group;
         tree.ui_position = position;
 
@@ -837,7 +849,7 @@ pub const DebugState = struct {
         }
 
         if (result == null) {
-            result = self.debug_arena.pushStruct(DebugView, null);
+            result = self.debug_arena.pushStruct(DebugView, ArenaPushParams.aligned(@alignOf(DebugView), true));
             result.?.id = id;
             result.?.view_type = .Unknown;
             result.?.next_in_hash = hash_slot.*;
@@ -946,9 +958,9 @@ const DebugProfileNode = extern struct {
     element: ?*DebugElement = null,
     first_child: ?*DebugStoredEvent = null,
     next_same_parent: ?*DebugStoredEvent = null,
-    parent_relative_clock: u32 = 0,
-    duration: u32 = 0,
-    aggregate_count: u32 = 0,
+    duration: u64 = 0,
+    reserved: u32 = 0,
+    parent_relative_clock: u64 = 0,
     thread_ordinal: u16 = 0,
     core_index: u16 = 0,
 };
@@ -968,7 +980,6 @@ pub const DebugString = struct {
 };
 
 const DebugElementFrame = struct {
-    total_clocks: u64,
     oldest_event: ?*DebugStoredEvent,
     most_recent_event: ?*DebugStoredEvent,
 };
@@ -1193,6 +1204,15 @@ const color_table: [11]Color3 = .{
     Color3.new(0.5, 0, 1),
 };
 
+fn getTotalClocks(frame: *DebugElementFrame) u64 {
+    var result: u64 = 0;
+    var opt_event = frame.oldest_event;
+    while (opt_event) |event| : (opt_event = event.next) {
+        result += event.data.profile_node.duration;
+    }
+    return result;
+}
+
 fn drawProfileBars(
     debug_state: *DebugState,
     graph_id: DebugId,
@@ -1262,7 +1282,7 @@ fn drawProfileIn(
     graph_id: DebugId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
-    root_event: *DebugStoredEvent,
+    root_element: *DebugElement,
 ) void {
     debug_state.mouse_text_stack_y = 10;
 
@@ -1274,15 +1294,34 @@ fn drawProfileIn(
         lane_height = profile_rect.getDimension().y() / @as(f32, @floatFromInt(lane_count));
     }
 
-    drawProfileBars(
-        debug_state,
-        graph_id,
-        profile_rect,
-        mouse_position,
-        &root_event.data.profile_node,
-        lane_height,
-        lane_height,
-    );
+    const root_frame: *DebugElementFrame = &root_element.frames[debug_state.most_recent_frame_ordinal];
+    const total_clock: u64 = getTotalClocks(root_frame);
+    var next_x: f32 = profile_rect.min.x();
+    var relative_clock: u64 = 0;
+
+    var opt_event: ?*DebugStoredEvent = root_frame.oldest_event;
+    while (opt_event) |event| : (opt_event = event.next) {
+        const node: *DebugProfileNode = &event.data.profile_node;
+
+        var event_rect: Rectangle2 = profile_rect;
+        relative_clock += node.duration;
+        const t: f32 = @floatCast(@as(f64, @floatFromInt(relative_clock)) / @as(f64, @floatFromInt(total_clock)));
+
+        _ = event_rect.min.setX(next_x);
+
+        _ = event_rect.max.setX((1 - t) * profile_rect.min.x() + t * profile_rect.max.x());
+        next_x = event_rect.max.x();
+
+        drawProfileBars(
+            debug_state,
+            graph_id,
+            event_rect,
+            mouse_position,
+            node,
+            lane_height,
+            lane_height,
+        );
+    }
 }
 
 fn drawFrameBars(
@@ -1290,23 +1329,18 @@ fn drawFrameBars(
     graph_id: DebugId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
-    first_event: *DebugStoredEvent,
-    opt_frame_count: ?u32,
+    root_element: *DebugElement,
 ) void {
-    const frame_count: u32 = opt_frame_count orelse 128;
-    if (frame_count > 0) {
-        const bar_width: f32 = profile_rect.getDimension().x() / @as(f32, @floatFromInt(frame_count));
-        var at_x: f32 = profile_rect.min.x();
+    const frame_count: u32 = root_element.frames.len;
+    const bar_width: f32 = profile_rect.getDimension().x() / @as(f32, @floatFromInt(frame_count));
+    var at_x: f32 = profile_rect.min.x();
 
-        debug_state.mouse_text_stack_y = 10;
-        debug_state.render_group.pushRectangle2(debug_state.backing_transform, profile_rect, 0, Color.new(0, 0, 0, 0.25));
+    debug_state.mouse_text_stack_y = 10;
+    debug_state.render_group.pushRectangle2(debug_state.backing_transform, profile_rect, 0, Color.new(0, 0, 0, 0.25));
 
-        var opt_root_event: ?*DebugStoredEvent = first_event;
-        var frame_index: u32 = 0;
-        while (opt_root_event != null and frame_index < frame_count) : (frame_index += 1) {
-            const root_event: *DebugStoredEvent = opt_root_event.?;
-            defer opt_root_event = root_event.next;
-
+    var frame_index: u32 = 0;
+    while (frame_index < frame_count) : (frame_index += 1) {
+        if (root_element.frames[frame_index].most_recent_event) |root_event| {
             const root_node: *DebugProfileNode = &root_event.data.profile_node;
             const frame_span: f32 = @floatFromInt(root_node.duration);
             const pixel_span: f32 = profile_rect.getDimension().y();
@@ -1347,9 +1381,9 @@ fn drawFrameBars(
                     debug_state.next_hot_interaction = zoom_interaction;
                 }
             }
-
-            at_x += bar_width;
         }
+
+        at_x += bar_width;
     }
 }
 
@@ -1592,35 +1626,28 @@ fn drawDebugElement(
                     layout_element.makeSizable();
                     layout_element.end();
 
-                    var opt_root_node: ?*DebugStoredEvent = null;
-                    const opt_viewing_element: ?*DebugElement =
+                    var opt_viewing_element: ?*DebugElement =
                         debug_state.getElementFromGuid(view.data.profile_graph.guid);
 
-                    const most_recent_frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
+                    if (opt_viewing_element == null) {
+                        opt_viewing_element = debug_state.root_profile_element;
+                    }
+
                     if (opt_viewing_element) |viewing_element| {
-                        opt_root_node = viewing_element.frames[most_recent_frame_ordinal].oldest_event;
-                    }
-
-                    if (opt_root_node == null) {
-                        opt_root_node = debug_state.frames[most_recent_frame_ordinal].root_profile_node;
-                    }
-
-                    if (opt_root_node) |root_profile_node| {
-                        // drawProfileIn(
-                        //     debug_state,
-                        //     debug_id,
-                        //     layout_element.bounds,
-                        //     layout.mouse_position,
-                        //     root_profile_node,
-                        // );
-                        drawFrameBars(
+                        drawProfileIn(
                             debug_state,
                             debug_id,
                             layout_element.bounds,
                             layout.mouse_position,
-                            root_profile_node,
-                            null,
+                            viewing_element,
                         );
+                        // drawFrameBars(
+                        //     debug_state,
+                        //     debug_id,
+                        //     layout_element.bounds,
+                        //     layout.mouse_position,
+                        //     viewing_element,
+                        // );
                     }
                 },
                 else => {
@@ -2203,6 +2230,11 @@ fn debugStart(
             // debug_variables.endVariableGroup(&context);
             // debug_variables.endVariableGroup(&context);
             // std.debug.assert(context.group_depth == 0);
+
+            var root_profile_event: DebugEvent = .{
+                .guid = DebugEvent.debugName(@src(), .RootProfile, "RootProfile"),
+            };
+            debug_state.root_profile_element = debug_state.getElementFromEvent(&root_profile_event, null, false);
 
             debug_state.paused = false;
             debug_state.scope_to_record = null;
