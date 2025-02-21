@@ -156,7 +156,9 @@ pub const DebugType = if (INTERNAL) enum(u8) {
     Enum,
 
     ThreadIntervalGraph,
-    // CounterFunctionList,
+    LastFrameInfo,
+    DebugMemoryInfo,
+    FrameSlider,
 } else enum(u8) {};
 
 pub const DebugEvent = if (INTERNAL) extern struct {
@@ -454,11 +456,12 @@ pub const DebugInterface = if (INTERNAL) struct {
         event.setValue(value_ptr.*, value_ptr);
     }
 
-    pub fn debugThreadIntervalGraph(
+    pub fn debugUIElement(
         comptime source: std.builtin.SourceLocation,
-        comptime function_name: []const u8,
+        comptime element_type: DebugType,
+        comptime name: []const u8,
     ) void {
-        _ = DebugEvent.record(.ThreadIntervalGraph, DebugEvent.debugName(source, null, @ptrCast(function_name)));
+        _ = DebugEvent.record(element_type, DebugEvent.debugName(source, null, @ptrCast(name)));
     }
 
     pub fn debugBeginArray(array: anytype) void {

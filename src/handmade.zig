@@ -130,6 +130,12 @@ pub export fn updateAndRender(
     if (INTERNAL) {
         shared.debug_global_memory = memory;
         shared.global_debug_table = memory.debug_table;
+        DebugInterface.debugBeginDataBlock(@src(), "Debug control");
+        {
+            DebugInterface.debugUIElement(@src(), .FrameSlider, "FrameSlider");
+        }
+        DebugInterface.debugEndDataBlock(@src());
+
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
             DebugInterface.debugValue(@src(), &global_config.Renderer_TestWeirdDrawBufferSize, "Renderer_TestWeirdDrawBufferSize");
@@ -173,7 +179,9 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "Profile");
         {
-            DebugInterface.debugThreadIntervalGraph(@src(), "updateAndRender");
+            DebugInterface.debugUIElement(@src(), .LastFrameInfo, "LastFrameInfo");
+            DebugInterface.debugUIElement(@src(), .DebugMemoryInfo, "DebugMemoryInfo");
+            DebugInterface.debugUIElement(@src(), .ThreadIntervalGraph, "updateAndRender");
         }
         DebugInterface.debugEndDataBlock(@src());
     }
