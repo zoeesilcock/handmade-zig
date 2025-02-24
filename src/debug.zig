@@ -132,32 +132,35 @@ const DebugInteractionType = enum(u32) {
     ToggleExpansion,
     SetProfileGraphRoot,
     SetViewFrameOrdinal,
+    SetElementType,
 };
 
 const DebugInteractionTargetType = enum(u32) {
     uint32,
-    element,
     tree,
     link,
     position,
+    debug_type,
 };
 
 const DebugInteraction = struct {
     id: DebugId = undefined,
     interaction_type: DebugInteractionType,
+    element: ?*DebugElement = null,
 
-    target: union(DebugInteractionTargetType) {
+    data: union(DebugInteractionTargetType) {
         uint32: u32,
-        element: ?*DebugElement,
         tree: ?*DebugTree,
         link: ?*DebugVariableLink,
         position: *Vector2,
-    },
+        debug_type: DebugType,
+    } = .{ .uint32 = 0 },
 
     pub fn equals(self: *const DebugInteraction, other: *const DebugInteraction) bool {
         return self.id.equals(other.id) and
             self.interaction_type == other.interaction_type and
-            std.meta.eql(self.target, other.target);
+            self.element == other.element and
+            std.meta.eql(self.data, other.data);
     }
 
     pub fn elementInteraction(
@@ -170,9 +173,8 @@ const DebugInteraction = struct {
         return DebugInteraction{
             .id = debug_id,
             .interaction_type = interaction_type,
-            .target = .{
-                .element = element,
-            },
+            .element = element,
+            .data = .{ .uint32 = 0 },
         };
     }
 
@@ -180,7 +182,7 @@ const DebugInteraction = struct {
         return DebugInteraction{
             .id = id,
             .interaction_type = interaction_type,
-            .target = undefined,
+            .data = undefined,
         };
     }
 
@@ -188,8 +190,18 @@ const DebugInteraction = struct {
         return DebugInteraction{
             .id = undefined,
             .interaction_type = interaction_type,
-            .target = .{ .link = link },
+            .data = .{ .link = link },
         };
+    }
+
+    fn setElementType(debug_id: DebugId, element: *DebugElement, element_type: DebugType) DebugInteraction {
+        const result: DebugInteraction = DebugInteraction{
+            .id = debug_id,
+            .interaction_type = .SetElementType,
+            .element = element,
+            .data = .{ .debug_type = element_type },
+        };
+        return result;
     }
 };
 
@@ -621,6 +633,7 @@ pub const DebugState = struct {
             result.?.line_number = parsed_name.line_number;
             result.?.name_starts_at = parsed_name.name_starts_at;
             result.?.next_in_hash = self.element_hash[index];
+            result.?.type = event.event_type;
             self.element_hash[index] = result;
 
             var opt_parent_group = parent;
@@ -816,7 +829,13 @@ pub const DebugState = struct {
     }
 
     fn interactionIsHot(self: *const DebugState, interaction: *const DebugInteraction) bool {
-        return interaction.equals(&self.hot_interaction);
+        var result: bool = interaction.equals(&self.hot_interaction);
+
+        if (interaction.interaction_type == .None) {
+            result = false;
+        }
+
+        return result;
     }
 
     pub fn isSelected(self: *DebugState, id: DebugId) bool {
@@ -998,8 +1017,10 @@ const DebugElement = struct {
     guid: [*:0]const u8,
     file_name_count: u32,
     line_number: u32,
-    name_count: u32,
     name_starts_at: u32,
+
+    type: DebugType,
+
     value_was_edited: bool,
 
     frames: [MAX_FRAME_COUNT]DebugElementFrame = [1]DebugElementFrame{undefined} ** MAX_FRAME_COUNT,
@@ -1269,7 +1290,7 @@ fn drawProfileBars(
             const zoom_interaction: DebugInteraction = DebugInteraction{
                 .id = graph_id,
                 .interaction_type = .SetProfileGraphRoot,
-                .target = .{ .element = element },
+                .element = element,
             };
             debug_state.next_hot_interaction = zoom_interaction;
         }
@@ -1334,13 +1355,13 @@ fn drawFrameSlider(
 
             if (mouse_position.isInRectangle(region_rect)) {
                 var buffer: [128]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "{d}", .{ frame_index }) catch "";
+                const slice = std.fmt.bufPrintZ(&buffer, "{d}", .{frame_index}) catch "";
                 textOutAt(slice, mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)), Color.white());
 
                 const interaction: DebugInteraction = DebugInteraction{
                     .id = slider_id,
                     .interaction_type = .SetViewFrameOrdinal,
-                    .target = .{ .uint32 = frame_index },
+                    .data = .{ .uint32 = frame_index },
                 };
                 debug_state.next_hot_interaction = interaction;
             }
@@ -1449,7 +1470,6 @@ fn drawFrameBars(
                     const zoom_interaction: DebugInteraction = DebugInteraction{
                         .id = graph_id,
                         .interaction_type = .SetProfileGraphRoot,
-                        .target = .{ .element = element },
                     };
                     debug_state.next_hot_interaction = zoom_interaction;
                 }
@@ -1463,10 +1483,14 @@ fn drawFrameBars(
 const Layout = struct {
     debug_state: *DebugState,
     mouse_position: Vector2,
+    base_corner: Vector2,
     at: Vector2,
     depth: u32,
     line_advance: f32,
+    next_y_delta: f32 = 0,
+    spacing_x: f32,
     spacing_y: f32,
+    no_line_feed: u32 = 0,
 
     pub fn beginElementRectangle(self: *Layout, dimension: *Vector2) LayoutElement {
         const element: LayoutElement = .{
@@ -1474,6 +1498,40 @@ const Layout = struct {
             .dimension = dimension,
         };
         return element;
+    }
+
+    pub fn beginRow(self: *Layout) void {
+        self.no_line_feed += 1;
+    }
+
+    pub fn actionButton(self: *Layout, name: [:0]const u8, interaction: DebugInteraction) void {
+        basicTextElement(name, self, interaction, null, null);
+    }
+
+    pub fn booleanButton(self: *Layout, name: [:0]const u8, highlight: bool, interaction: DebugInteraction) void {
+        basicTextElement(name, self, interaction, if (highlight) Color.white() else Color.new(0.5, 0.5, 0.5, 1), null);
+    }
+
+    pub fn advanceElement(self: *Layout, element_rect: Rectangle2) void {
+        self.next_y_delta = @min(self.next_y_delta, element_rect.min.y() - self.at.y());
+
+        if (self.no_line_feed > 0) {
+            _ = self.at.setX(element_rect.getMaxCorner().x() + self.spacing_x);
+        } else {
+            _ = self.at.setY(self.at.y() + self.next_y_delta - self.spacing_y);
+            _ = self.at.setX(
+                self.base_corner.x() + @as(f32, @floatFromInt(self.depth)) * 2 * self.line_advance,
+            );
+
+            self.next_y_delta = 0;
+        }
+    }
+
+    pub fn endRow(self: *Layout) void {
+        std.debug.assert(self.no_line_feed > 0);
+
+        self.no_line_feed -= 1;
+        self.advanceElement(Rectangle2.fromMinMax(self.at, self.at));
     }
 };
 
@@ -1508,7 +1566,7 @@ const LayoutElement = struct {
         const total_dimension: Vector2 = self.dimension.plus(frame.scaledTo(2));
 
         const total_min_corner: Vector2 = Vector2.new(
-            self.layout.at.x() + @as(f32, @floatFromInt(self.layout.depth)) * 2 * self.layout.line_advance,
+            self.layout.at.x(),
             self.layout.at.y() - total_dimension.y(),
         );
         const total_max_corner: Vector2 = total_min_corner.plus(total_dimension);
@@ -1565,7 +1623,7 @@ const LayoutElement = struct {
 
             const size_interaction: DebugInteraction = DebugInteraction{
                 .interaction_type = .Resize,
-                .target = .{ .position = size },
+                .data = .{ .position = size },
             };
 
             const size_box: Rectangle2 = Rectangle2.fromMinMax(
@@ -1581,8 +1639,7 @@ const LayoutElement = struct {
             }
         }
 
-        const spacing_y: f32 = if (false) 0 else self.layout.spacing_y;
-        _ = self.layout.at.setY(total_bounds.min.y() - spacing_y);
+        self.layout.advanceElement(total_bounds);
     }
 };
 
@@ -1637,9 +1694,16 @@ pub fn requestedStub(id: DebugId) bool {
     return false;
 }
 
-fn basicTextElement(text: [:0]u8, layout: *Layout, item_interaction: DebugInteraction, opt_color: ?Color) void {
+fn basicTextElement(
+    text: [:0]const u8,
+    layout: *Layout,
+    item_interaction: DebugInteraction,
+    opt_color: ?Color,
+    opt_hot_color: ?Color,
+) void {
     if (layout.debug_state.debug_font_info) |font_info| {
-        const item_color = opt_color orelse Color.white();
+        const item_color = opt_color orelse Color.new(0.8, 0.8, 0.8, 1);
+        const hot_color = opt_hot_color orelse Color.white();
         const text_bounds = getTextSize(layout.debug_state, text);
         var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
 
@@ -1647,11 +1711,13 @@ fn basicTextElement(text: [:0]u8, layout: *Layout, item_interaction: DebugIntera
         layout_element.defaultInteraction(item_interaction);
         layout_element.end();
 
+        const is_hot: bool = layout.debug_state.interactionIsHot(&item_interaction);
+
         const text_position: Vector2 = Vector2.new(
             layout_element.bounds.min.x(),
             layout_element.bounds.max.y() - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
         );
-        textOutAt(text, text_position, item_color);
+        textOutAt(text, text_position, if (is_hot) hot_color else item_color);
     }
 }
 
@@ -1666,116 +1732,158 @@ fn drawDebugElement(
 
     const debug_state: *DebugState = layout.debug_state;
     const no_transform = debug_state.backing_transform;
-    const opt_stored_event: ?*DebugStoredEvent = element.frames[frame_ordinal].most_recent_event;
+    _ = frame_ordinal;
+    // const opt_stored_event: ?*DebugStoredEvent = element.frames[frame_ordinal].most_recent_event;
 
-    if (opt_stored_event) |stored_event| {
-        var render_group: *RenderGroup = &debug_state.render_group;
-        const event = &stored_event.data.event;
-        var item_interaction: DebugInteraction =
-            DebugInteraction.elementInteraction(debug_state, debug_id, element, .AutoModifyVariable);
-        const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
-        const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
-        const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
+    var render_group: *RenderGroup = &debug_state.render_group;
+    // const event = &stored_event.data.event;
+    var item_interaction: DebugInteraction =
+        DebugInteraction.elementInteraction(debug_state, debug_id, element, .AutoModifyVariable);
+    const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+    const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
+    const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
 
-        switch (event.event_type) {
-            .BitmapId => {
-                const bitmap_scale = view.data.inline_block.dimension.y();
+    const opt_oldest_event: ?*DebugStoredEvent = element.frames[debug_state.viewing_frame_ordinal].oldest_event;
+
+    switch (element.type) {
+        .BitmapId => {
+            var opt_bitmap: ?*asset.LoadedBitmap = null;
+            const bitmap_scale = view.data.inline_block.dimension.y();
+
+            const opt_event: ?*DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else null;
+            if (opt_event) |event| {
                 if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
                     var dim = render_group.getBitmapDim(no_transform, bitmap, bitmap_scale, Vector3.zero(), 0);
                     _ = view.data.inline_block.dimension.setX(dim.size.x());
+                    opt_bitmap = bitmap;
                 }
+            }
 
-                var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
-                layout_element.makeSizable();
-                layout_element.defaultInteraction(item_interaction);
-                layout_element.end();
+            var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+            layout_element.makeSizable();
+            layout_element.defaultInteraction(item_interaction);
+            layout_element.end();
 
+            if (opt_bitmap) |bitmap| {
                 render_group.pushRectangle2(no_transform, layout_element.bounds, 0, Color.black());
-                render_group.pushBitmapId(
+                render_group.pushBitmap(
                     no_transform,
-                    event.data.BitmapId,
+                    bitmap,
                     bitmap_scale,
                     layout_element.bounds.min.toVector3(0),
                     Color.white(),
                     0,
                 );
-            },
-            .ThreadIntervalGraph => {
-                if (view.view_type != .ProfileGraph) {
-                    view.view_type = .ProfileGraph;
-                    view.data = .{ .profile_graph = .{ .guid = null, .block = view.data.inline_block } };
+            }
+        },
+        .ThreadIntervalGraph, .FrameBarGraph => {
+            if (view.view_type != .ProfileGraph) {
+                view.view_type = .ProfileGraph;
+                view.data = .{ .profile_graph = .{ .guid = null, .block = view.data.inline_block } };
+            }
+
+            const graph: *DebugViewProfileGraph = &view.data.profile_graph;
+            if (graph.block.dimension.x() == 0 and graph.block.dimension.y() == 0) {
+                graph.block.dimension = Vector2.new(1800, 480);
+            }
+
+            const zoom_root_interaction: DebugInteraction = DebugInteraction{
+                .id = debug_id,
+                .interaction_type = .SetProfileGraphRoot,
+                .element = null,
+                .data = .{ .uint32 = 0 },
+            };
+
+            layout.beginRow();
+            layout.actionButton("Root", zoom_root_interaction);
+            layout.booleanButton(
+                "Threads",
+                element.type == .ThreadIntervalGraph,
+                DebugInteraction.setElementType(debug_id, element, .ThreadIntervalGraph),
+            );
+            layout.booleanButton(
+                "Frames",
+                element.type == .FrameBarGraph,
+                DebugInteraction.setElementType(debug_id, element, .FrameBarGraph),
+            );
+            layout.endRow();
+
+            var layout_element: LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
+            layout_element.makeSizable();
+            layout_element.end();
+
+            var opt_viewing_element: ?*DebugElement =
+                debug_state.getElementFromGuid(view.data.profile_graph.guid);
+
+            if (opt_viewing_element == null) {
+                opt_viewing_element = debug_state.root_profile_element;
+            }
+
+            if (opt_viewing_element) |viewing_element| {
+                switch (element.type) {
+                    .ThreadIntervalGraph => {
+                        drawProfileIn(
+                            debug_state,
+                            debug_id,
+                            layout_element.bounds,
+                            layout.mouse_position,
+                            viewing_element,
+                        );
+                    },
+                    .FrameBarGraph => {
+                        drawFrameBars(
+                            debug_state,
+                            debug_id,
+                            layout_element.bounds,
+                            layout.mouse_position,
+                            viewing_element,
+                        );
+                    },
+                    else => {},
                 }
-
-                const graph: *DebugViewProfileGraph = &view.data.profile_graph;
-                if (graph.block.dimension.x() == 0 and graph.block.dimension.y() == 0) {
-                    graph.block.dimension = Vector2.new(1800, 480);
-                }
-
-                var layout_element: LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
-                layout_element.makeSizable();
-                layout_element.end();
-
-                var opt_viewing_element: ?*DebugElement =
-                    debug_state.getElementFromGuid(view.data.profile_graph.guid);
-
-                if (opt_viewing_element == null) {
-                    opt_viewing_element = debug_state.root_profile_element;
-                }
-
-                if (opt_viewing_element) |viewing_element| {
-                    drawProfileIn(
-                        debug_state,
-                        debug_id,
-                        layout_element.bounds,
-                        layout.mouse_position,
-                        viewing_element,
-                    );
-                    // drawFrameBars(
-                    //     debug_state,
-                    //     debug_id,
-                    //     layout_element.bounds,
-                    //     layout.mouse_position,
-                    //     viewing_element,
-                    // );
-                }
-            },
-            .FrameSlider => {
-                var dimension = Vector2.new(1800, 32);
-                var layout_element: LayoutElement = layout.beginElementRectangle(&dimension);
-                layout_element.end();
-                drawFrameSlider(
-                    debug_state,
-                    debug_id,
-                    layout_element.bounds,
-                    layout.mouse_position,
-                    element,
-                );
-            },
-            .LastFrameInfo => {
-                const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
-                var text: [128:0]u8 = undefined;
-                _ = std.fmt.bufPrintZ(&text, "Viewing frame time: {d:0.2}ms {d}e {d}p {d}d", .{
-                    most_recent_frame.wall_seconds_elapsed * 1000,
-                    most_recent_frame.stored_event_count,
-                    most_recent_frame.profile_block_count,
-                    most_recent_frame.data_block_count,
-                }) catch "";
-                basicTextElement(&text, layout, item_interaction, null);
-            },
-            .DebugMemoryInfo => {
-                var text: [128:0]u8 = undefined;
-                _ = std.fmt.bufPrintZ(&text, "Per-frame arena space remaining: {d}kb", .{
-                    debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
-                }) catch "";
-                basicTextElement(&text, layout, item_interaction, null);
-            },
-            else => {
-                var text: [4096:0]u8 = undefined;
-                var len: u32 = 0;
-                len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
-                basicTextElement(&text, layout, item_interaction, item_color);
-            },
-        }
+            }
+        },
+        .FrameSlider => {
+            var dimension = Vector2.new(1800, 32);
+            var layout_element: LayoutElement = layout.beginElementRectangle(&dimension);
+            layout_element.end();
+            drawFrameSlider(
+                debug_state,
+                debug_id,
+                layout_element.bounds,
+                layout.mouse_position,
+                element,
+            );
+        },
+        .LastFrameInfo => {
+            const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
+            var text: [128:0]u8 = undefined;
+            _ = std.fmt.bufPrintZ(&text, "Viewing frame time: {d:0.2}ms {d}e {d}p {d}d", .{
+                most_recent_frame.wall_seconds_elapsed * 1000,
+                most_recent_frame.stored_event_count,
+                most_recent_frame.profile_block_count,
+                most_recent_frame.data_block_count,
+            }) catch "";
+            basicTextElement(&text, layout, item_interaction, null, null);
+        },
+        .DebugMemoryInfo => {
+            var text: [128:0]u8 = undefined;
+            _ = std.fmt.bufPrintZ(&text, "Per-frame arena space remaining: {d}kb", .{
+                debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
+            }) catch "";
+            basicTextElement(&text, layout, item_interaction, null, null);
+        },
+        else => {
+            var null_event: DebugEvent = .{
+                .guid = element.guid,
+                .event_type = element.type,
+            };
+            const event: *DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else &null_event;
+            var text: [4096:0]u8 = undefined;
+            var len: u32 = 0;
+            len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
+            basicTextElement(&text, layout, item_interaction, item_color, null);
+        },
     }
 }
 
@@ -1792,9 +1900,11 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
             var layout: Layout = .{
                 .debug_state = debug_state,
                 .mouse_position = mouse_position,
+                .base_corner = tree.ui_position,
                 .at = tree.ui_position,
                 .depth = 0,
                 .line_advance = font_info.getLineAdvance() * debug_state.font_scale,
+                .spacing_x = 4,
                 .spacing_y = 4,
             };
 
@@ -1864,7 +1974,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
             if (true) {
                 const move_interaction: DebugInteraction = DebugInteraction{
                     .interaction_type = .Move,
-                    .target = .{ .position = &tree.ui_position },
+                    .data = .{ .position = &tree.ui_position },
                 };
                 const move_box_color: Color =
                     if (debug_state.interactionIsHot(&move_interaction)) Color.new(1, 1, 0, 1) else Color.white();
@@ -1918,7 +2028,7 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
     const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
     if (debug_state.hot_interaction.interaction_type != .None) {
         if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
-            switch (debug_state.hot_interaction.target.element.?.frames[frame_ordinal].most_recent_event.?.data.event.event_type) {
+            switch (debug_state.hot_interaction.element.?.frames[frame_ordinal].most_recent_event.?.data.event.event_type) {
                 .bool, .Enum => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
@@ -1935,10 +2045,10 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
         switch (debug_state.hot_interaction.interaction_type) {
             .TearValue => {
                 const root_group: *DebugVariableGroup =
-                    debug_state.cloneVariableGroup(debug_state.hot_interaction.target.link.?);
+                    debug_state.cloneVariableGroup(debug_state.hot_interaction.data.link.?);
                 const tree: *DebugTree = debug_state.addTree(root_group, mouse_position);
                 debug_state.hot_interaction.interaction_type = .Move;
-                debug_state.hot_interaction.target = .{ .position = &tree.ui_position };
+                debug_state.hot_interaction.data = .{ .position = &tree.ui_position };
             },
             .Select => {
                 if (!input.shift_down) {
@@ -1978,7 +2088,7 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
         const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
         switch (debug_state.interaction.interaction_type) {
             .DragValue => {
-                if (debug_state.interaction.target.element) |element| {
+                if (debug_state.interaction.element) |element| {
                     if (element.frames[frame_ordinal].most_recent_event) |stored_event| {
                         const event = &stored_event.data.event;
                         switch (event.event_type) {
@@ -1992,14 +2102,14 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
                 }
             },
             .Resize => {
-                var position = debug_state.interaction.target.position;
+                var position = debug_state.interaction.data.position;
                 const flipped_delta: Vector2 = Vector2.new(mouse_delta.x(), -mouse_delta.y());
                 position.* = position.plus(flipped_delta);
                 _ = position.setX(@max(position.x(), 10));
                 _ = position.setY(@max(position.y(), 10));
             },
             .Move => {
-                var position = debug_state.interaction.target.position;
+                var position = debug_state.interaction.data.position;
                 position.* = position.plus(mouse_delta);
             },
             else => {},
@@ -2069,14 +2179,23 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
                 };
             }
 
-            view.data.profile_graph.guid = debug_state.interaction.target.element.?.guid;
+            if (debug_state.interaction.element) |element| {
+                view.data.profile_graph.guid = element.guid;
+            } else {
+                view.data.profile_graph.guid = null;
+            }
+        },
+        .SetElementType => {
+            if (debug_state.interaction.element) |element| {
+                element.type = debug_state.interaction.data.debug_type;
+            }
         },
         .SetViewFrameOrdinal => {
-            debug_state.viewing_frame_ordinal = debug_state.interaction.target.uint32;
+            debug_state.viewing_frame_ordinal = debug_state.interaction.data.uint32;
             debug_state.paused = true;
         },
         .ToggleValue => {
-            if (debug_state.interaction.target.element) |interaction_element| {
+            if (debug_state.interaction.element) |interaction_element| {
                 if (interaction_element.frames[frame_ordinal].most_recent_event) |stored_event| {
                     const event = &stored_event.data.event;
                     switch (event.event_type) {
@@ -2096,7 +2215,7 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     }
 
     debug_state.interaction.interaction_type = .None;
-    debug_state.interaction.target = .{ .tree = null };
+    debug_state.interaction.data = .{ .tree = null };
 }
 
 pub fn textOutAt(text: [:0]const u8, position: Vector2, color: Color) void {
@@ -2300,8 +2419,8 @@ fn debugStart(
             );
             debug_state.debug_arena.makeSubArena(
                 &debug_state.per_frame_arena,
-                // total_memory_size / 2,
-                8 * 1024 * 1024,
+                total_memory_size / 2,
+                // 8 * 1024 * 1024,
                 null,
             );
 

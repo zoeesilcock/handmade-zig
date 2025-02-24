@@ -156,6 +156,7 @@ pub const DebugType = if (INTERNAL) enum(u8) {
     Enum,
 
     ThreadIntervalGraph,
+    FrameBarGraph,
     LastFrameInfo,
     DebugMemoryInfo,
     FrameSlider,
