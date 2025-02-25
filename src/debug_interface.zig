@@ -131,7 +131,7 @@ pub const DebugId = extern struct {
     }
 };
 
-pub const DebugType = if (INTERNAL) enum(u8) {
+pub const DebugType = if (INTERNAL) enum(u32) {
     Unknown,
 
     FrameMarker,
@@ -160,7 +160,7 @@ pub const DebugType = if (INTERNAL) enum(u8) {
     LastFrameInfo,
     DebugMemoryInfo,
     FrameSlider,
-} else enum(u8) {};
+} else enum(u32) {};
 
 pub const DebugEvent = if (INTERNAL) extern struct {
     clock: u64 = 0,

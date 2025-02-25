@@ -6,6 +6,7 @@ const config = @import("config.zig");
 const sim = @import("sim.zig");
 const file_formats = @import("file_formats");
 const debug_interface = @import("debug_interface.zig");
+const debug_ui = @import("debug_ui.zig");
 const std = @import("std");
 
 // Types.
@@ -13,6 +14,9 @@ const TimedBlock = debug_interface.TimedBlock;
 const DebugType = debug_interface.DebugType;
 const DebugEvent = debug_interface.DebugEvent;
 const DebugId = debug_interface.DebugId;
+const DebugInteraction = debug_ui.DebugInteraction;
+const Layout = debug_ui.Layout;
+const LayoutElement = debug_ui.LayoutElement;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -24,13 +28,11 @@ const ArenaPushParams = shared.ArenaPushParams;
 const ObjectTransform = rendergroup.ObjectTransform;
 const RenderGroup = rendergroup.RenderGroup;
 
+const textOutAt = debug_ui.textOutAt;
+const basicTextElement = debug_ui.basicTextElement;
+
 const MAX_FRAME_COUNT = 256;
 pub const MAX_VARIABLE_STACK_DEPTH = 64;
-
-const DebugTextOp = enum {
-    DrawText,
-    SizeText,
-};
 
 pub const DebugCounterSnapshot = struct {
     hit_count: u32 = 0,
@@ -116,92 +118,6 @@ pub const DebugStatistic = struct {
             self.min = 0;
             self.max = 0;
         }
-    }
-};
-
-const DebugInteractionType = enum(u32) {
-    None,
-    NoOp,
-    AutoModifyVariable,
-    ToggleValue,
-    DragValue,
-    TearValue,
-    Resize,
-    Move,
-    Select,
-    ToggleExpansion,
-    SetProfileGraphRoot,
-    SetViewFrameOrdinal,
-    SetElementType,
-};
-
-const DebugInteractionTargetType = enum(u32) {
-    uint32,
-    tree,
-    link,
-    position,
-    debug_type,
-};
-
-const DebugInteraction = struct {
-    id: DebugId = undefined,
-    interaction_type: DebugInteractionType,
-    element: ?*DebugElement = null,
-
-    data: union(DebugInteractionTargetType) {
-        uint32: u32,
-        tree: ?*DebugTree,
-        link: ?*DebugVariableLink,
-        position: *Vector2,
-        debug_type: DebugType,
-    } = .{ .uint32 = 0 },
-
-    pub fn equals(self: *const DebugInteraction, other: *const DebugInteraction) bool {
-        return self.id.equals(other.id) and
-            self.interaction_type == other.interaction_type and
-            self.element == other.element and
-            std.meta.eql(self.data, other.data);
-    }
-
-    pub fn elementInteraction(
-        debug_state: *DebugState,
-        debug_id: DebugId,
-        element: *DebugElement,
-        interaction_type: DebugInteractionType,
-    ) DebugInteraction {
-        _ = debug_state;
-        return DebugInteraction{
-            .id = debug_id,
-            .interaction_type = interaction_type,
-            .element = element,
-            .data = .{ .uint32 = 0 },
-        };
-    }
-
-    pub fn fromId(id: DebugId, interaction_type: DebugInteractionType) DebugInteraction {
-        return DebugInteraction{
-            .id = id,
-            .interaction_type = interaction_type,
-            .data = undefined,
-        };
-    }
-
-    pub fn fromLink(link: *DebugVariableLink, interaction_type: DebugInteractionType) DebugInteraction {
-        return DebugInteraction{
-            .id = undefined,
-            .interaction_type = interaction_type,
-            .data = .{ .link = link },
-        };
-    }
-
-    fn setElementType(debug_id: DebugId, element: *DebugElement, element_type: DebugType) DebugInteraction {
-        const result: DebugInteraction = DebugInteraction{
-            .id = debug_id,
-            .interaction_type = .SetElementType,
-            .element = element,
-            .data = .{ .debug_type = element_type },
-        };
-        return result;
     }
 };
 
@@ -828,16 +744,6 @@ pub const DebugState = struct {
         return tree;
     }
 
-    fn interactionIsHot(self: *const DebugState, interaction: *const DebugInteraction) bool {
-        var result: bool = interaction.equals(&self.hot_interaction);
-
-        if (interaction.interaction_type == .None) {
-            result = false;
-        }
-
-        return result;
-    }
-
     pub fn isSelected(self: *DebugState, id: DebugId) bool {
         var result = false;
 
@@ -1002,17 +908,12 @@ pub const DebugStoredEvent = struct {
     },
 };
 
-pub const DebugString = struct {
-    length: u32,
-    value: [*:0]const u8,
-};
-
 const DebugElementFrame = struct {
     oldest_event: ?*DebugStoredEvent,
     most_recent_event: ?*DebugStoredEvent,
 };
 
-const DebugElement = struct {
+pub const DebugElement = struct {
     original_guid: [*:0]const u8, // Can't be printed, it is only used for checking pointer equality.
     guid: [*:0]const u8,
     file_name_count: u32,
@@ -1029,13 +930,6 @@ const DebugElement = struct {
 
     pub fn getName(self: *DebugElement) [*:0]const u8 {
         return self.guid + self.name_starts_at;
-    }
-
-    pub fn getFileName(self: *DebugElement) DebugString {
-        return DebugString{
-            .length = self.file_name_count,
-            .value = self.guid,
-        };
     }
 };
 
@@ -1284,15 +1178,15 @@ fn drawProfileBars(
                 element.guid,
                 node.duration,
             }) catch "";
-            textOutAt(slice, mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)), Color.white());
+            textOutAt(debug_state, slice, mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)), Color.white(),);
             debug_state.mouse_text_stack_y -= debug_state.getLineAdvance();
 
-            const zoom_interaction: DebugInteraction = DebugInteraction{
-                .id = graph_id,
-                .interaction_type = .SetProfileGraphRoot,
-                .element = element,
-            };
-            debug_state.next_hot_interaction = zoom_interaction;
+            const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
+            debug_state.next_hot_interaction = DebugInteraction.setPointer(
+                graph_id,
+                @ptrCast(&view.data.profile_graph.guid),
+                @ptrCast(element.guid),
+            );
         }
 
         drawProfileBars(
@@ -1356,14 +1250,13 @@ fn drawFrameSlider(
             if (mouse_position.isInRectangle(region_rect)) {
                 var buffer: [128]u8 = undefined;
                 const slice = std.fmt.bufPrintZ(&buffer, "{d}", .{frame_index}) catch "";
-                textOutAt(slice, mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)), Color.white());
+                textOutAt(debug_state, slice, mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)), Color.white(),);
 
-                const interaction: DebugInteraction = DebugInteraction{
-                    .id = slider_id,
-                    .interaction_type = .SetViewFrameOrdinal,
-                    .data = .{ .uint32 = frame_index },
-                };
-                debug_state.next_hot_interaction = interaction;
+                debug_state.next_hot_interaction = DebugInteraction.setUInt32(
+                    slider_id,
+                    &debug_state.viewing_frame_ordinal,
+                    frame_index,
+                );
             }
 
             at_x += bar_width;
@@ -1464,14 +1357,15 @@ fn drawFrameBars(
                         element.guid,
                         node.duration,
                     }) catch "";
-                    textOutAt(slice, mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)), Color.white());
+                    textOutAt(debug_state, slice, mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)), Color.white(),);
                     debug_state.mouse_text_stack_y -= debug_state.getLineAdvance();
 
-                    const zoom_interaction: DebugInteraction = DebugInteraction{
-                        .id = graph_id,
-                        .interaction_type = .SetProfileGraphRoot,
-                    };
-                    debug_state.next_hot_interaction = zoom_interaction;
+                    const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
+                    debug_state.next_hot_interaction = DebugInteraction.setPointer(
+                        graph_id,
+                        @ptrCast(&view.data.profile_graph.guid),
+                        @ptrCast(element.guid),
+                    );
                 }
             }
         }
@@ -1479,169 +1373,6 @@ fn drawFrameBars(
         at_x += bar_width;
     }
 }
-
-const Layout = struct {
-    debug_state: *DebugState,
-    mouse_position: Vector2,
-    base_corner: Vector2,
-    at: Vector2,
-    depth: u32,
-    line_advance: f32,
-    next_y_delta: f32 = 0,
-    spacing_x: f32,
-    spacing_y: f32,
-    no_line_feed: u32 = 0,
-
-    pub fn beginElementRectangle(self: *Layout, dimension: *Vector2) LayoutElement {
-        const element: LayoutElement = .{
-            .layout = self,
-            .dimension = dimension,
-        };
-        return element;
-    }
-
-    pub fn beginRow(self: *Layout) void {
-        self.no_line_feed += 1;
-    }
-
-    pub fn actionButton(self: *Layout, name: [:0]const u8, interaction: DebugInteraction) void {
-        basicTextElement(name, self, interaction, null, null);
-    }
-
-    pub fn booleanButton(self: *Layout, name: [:0]const u8, highlight: bool, interaction: DebugInteraction) void {
-        basicTextElement(name, self, interaction, if (highlight) Color.white() else Color.new(0.5, 0.5, 0.5, 1), null);
-    }
-
-    pub fn advanceElement(self: *Layout, element_rect: Rectangle2) void {
-        self.next_y_delta = @min(self.next_y_delta, element_rect.min.y() - self.at.y());
-
-        if (self.no_line_feed > 0) {
-            _ = self.at.setX(element_rect.getMaxCorner().x() + self.spacing_x);
-        } else {
-            _ = self.at.setY(self.at.y() + self.next_y_delta - self.spacing_y);
-            _ = self.at.setX(
-                self.base_corner.x() + @as(f32, @floatFromInt(self.depth)) * 2 * self.line_advance,
-            );
-
-            self.next_y_delta = 0;
-        }
-    }
-
-    pub fn endRow(self: *Layout) void {
-        std.debug.assert(self.no_line_feed > 0);
-
-        self.no_line_feed -= 1;
-        self.advanceElement(Rectangle2.fromMinMax(self.at, self.at));
-    }
-};
-
-const LayoutElement = struct {
-    layout: *Layout,
-    dimension: *Vector2,
-    size: ?*Vector2 = null,
-    default_interaction: ?DebugInteraction = null,
-
-    bounds: Rectangle2 = undefined,
-
-    pub fn makeSizable(self: *LayoutElement) void {
-        self.size = self.dimension;
-    }
-
-    pub fn defaultInteraction(self: *LayoutElement, interaction: DebugInteraction) void {
-        self.default_interaction = interaction;
-    }
-
-    pub fn end(self: *LayoutElement) void {
-        const debug_state: *DebugState = self.layout.debug_state;
-        const no_transform = debug_state.backing_transform;
-
-        var render_group: *RenderGroup = &debug_state.render_group;
-        const size_handle_pixels: f32 = 4;
-        var frame: Vector2 = Vector2.new(0, 0);
-
-        if (self.size != null) {
-            frame = Vector2.splat(size_handle_pixels);
-        }
-
-        const total_dimension: Vector2 = self.dimension.plus(frame.scaledTo(2));
-
-        const total_min_corner: Vector2 = Vector2.new(
-            self.layout.at.x(),
-            self.layout.at.y() - total_dimension.y(),
-        );
-        const total_max_corner: Vector2 = total_min_corner.plus(total_dimension);
-
-        const interior_min_corner: Vector2 = total_min_corner.plus(frame);
-        const interior_max_corner: Vector2 = interior_min_corner.plus(self.dimension.*);
-
-        const total_bounds: Rectangle2 = Rectangle2.fromMinMax(total_min_corner, total_max_corner);
-        self.bounds = Rectangle2.fromMinMax(interior_min_corner, interior_max_corner);
-
-        if (self.default_interaction) |interaction| {
-            if (interaction.interaction_type != .None and self.layout.mouse_position.isInRectangle(self.bounds)) {
-                debug_state.next_hot_interaction = interaction;
-            }
-        }
-
-        if (self.size) |size| {
-            render_group.pushRectangle2(
-                no_transform,
-                Rectangle2.fromMinMax(
-                    Vector2.new(total_min_corner.x(), interior_min_corner.y()),
-                    Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
-                ),
-                0,
-                Color.black(),
-            );
-            render_group.pushRectangle2(
-                no_transform,
-                Rectangle2.fromMinMax(
-                    Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
-                    Vector2.new(total_max_corner.x(), total_max_corner.y()),
-                ),
-                0,
-                Color.black(),
-            );
-            render_group.pushRectangle2(
-                no_transform,
-                Rectangle2.fromMinMax(
-                    Vector2.new(interior_min_corner.x(), total_min_corner.y()),
-                    Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
-                ),
-                0,
-                Color.black(),
-            );
-            render_group.pushRectangle2(
-                no_transform,
-                Rectangle2.fromMinMax(
-                    Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
-                    Vector2.new(interior_max_corner.x(), total_max_corner.y()),
-                ),
-                0,
-                Color.black(),
-            );
-
-            const size_interaction: DebugInteraction = DebugInteraction{
-                .interaction_type = .Resize,
-                .data = .{ .position = size },
-            };
-
-            const size_box: Rectangle2 = Rectangle2.fromMinMax(
-                Vector2.new(interior_max_corner.x(), total_min_corner.y()),
-                Vector2.new(total_max_corner.x(), interior_min_corner.y()),
-            );
-            const size_box_color: Color =
-                if (debug_state.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
-            render_group.pushRectangle2(no_transform, size_box, 0, size_box_color);
-
-            if (self.layout.mouse_position.isInRectangle(size_box)) {
-                debug_state.next_hot_interaction = size_interaction;
-            }
-        }
-
-        self.layout.advanceElement(total_bounds);
-    }
-};
 
 pub fn hit(id: DebugId, z_value: f32) void {
     _ = z_value;
@@ -1694,33 +1425,6 @@ pub fn requestedStub(id: DebugId) bool {
     return false;
 }
 
-fn basicTextElement(
-    text: [:0]const u8,
-    layout: *Layout,
-    item_interaction: DebugInteraction,
-    opt_color: ?Color,
-    opt_hot_color: ?Color,
-) void {
-    if (layout.debug_state.debug_font_info) |font_info| {
-        const item_color = opt_color orelse Color.new(0.8, 0.8, 0.8, 1);
-        const hot_color = opt_hot_color orelse Color.white();
-        const text_bounds = getTextSize(layout.debug_state, text);
-        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
-
-        var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
-        layout_element.defaultInteraction(item_interaction);
-        layout_element.end();
-
-        const is_hot: bool = layout.debug_state.interactionIsHot(&item_interaction);
-
-        const text_position: Vector2 = Vector2.new(
-            layout_element.bounds.min.x(),
-            layout_element.bounds.max.y() - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
-        );
-        textOutAt(text, text_position, if (is_hot) hot_color else item_color);
-    }
-}
-
 fn drawDebugElement(
     layout: *Layout,
     tree: *DebugTree,
@@ -1739,7 +1443,7 @@ fn drawDebugElement(
     // const event = &stored_event.data.event;
     var item_interaction: DebugInteraction =
         DebugInteraction.elementInteraction(debug_state, debug_id, element, .AutoModifyVariable);
-    const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+    const is_hot: bool = item_interaction.isHot(debug_state);
     const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
     const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
 
@@ -1787,24 +1491,17 @@ fn drawDebugElement(
                 graph.block.dimension = Vector2.new(1800, 480);
             }
 
-            const zoom_root_interaction: DebugInteraction = DebugInteraction{
-                .id = debug_id,
-                .interaction_type = .SetProfileGraphRoot,
-                .element = null,
-                .data = .{ .uint32 = 0 },
-            };
-
             layout.beginRow();
-            layout.actionButton("Root", zoom_root_interaction);
+            layout.actionButton("Root", DebugInteraction.setPointer(debug_id, @ptrCast(&graph.guid), null));
             layout.booleanButton(
                 "Threads",
                 element.type == .ThreadIntervalGraph,
-                DebugInteraction.setElementType(debug_id, element, .ThreadIntervalGraph),
+                DebugInteraction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ThreadIntervalGraph)),
             );
             layout.booleanButton(
                 "Frames",
                 element.type == .FrameBarGraph,
-                DebugInteraction.setElementType(debug_id, element, .FrameBarGraph),
+                DebugInteraction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.FrameBarGraph)),
             );
             layout.endRow();
 
@@ -1847,6 +1544,31 @@ fn drawDebugElement(
             var dimension = Vector2.new(1800, 32);
             var layout_element: LayoutElement = layout.beginElementRectangle(&dimension);
             layout_element.end();
+
+            layout.beginRow();
+            layout.booleanButton(
+                "Pause",
+                debug_state.paused,
+                DebugInteraction.setBool(debug_id, &debug_state.paused, !debug_state.paused),
+            );
+            layout.actionButton(
+                "Oldest",
+                DebugInteraction.setUInt32(
+                    debug_id,
+                    &debug_state.viewing_frame_ordinal,
+                    debug_state.oldest_frame_ordinal,
+                ),
+            );
+            layout.actionButton(
+                "Most Recent",
+                DebugInteraction.setUInt32(
+                    debug_id,
+                    &debug_state.viewing_frame_ordinal,
+                    debug_state.most_recent_frame_ordinal,
+                ),
+            );
+            layout.endRow();
+
             drawFrameSlider(
                 debug_state,
                 debug_id,
@@ -1864,14 +1586,14 @@ fn drawDebugElement(
                 most_recent_frame.profile_block_count,
                 most_recent_frame.data_block_count,
             }) catch "";
-            basicTextElement(&text, layout, item_interaction, null, null);
+            _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         .DebugMemoryInfo => {
             var text: [128:0]u8 = undefined;
             _ = std.fmt.bufPrintZ(&text, "Per-frame arena space remaining: {d}kb", .{
                 debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
             }) catch "";
-            basicTextElement(&text, layout, item_interaction, null, null);
+            _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         else => {
             var null_event: DebugEvent = .{
@@ -1882,7 +1604,7 @@ fn drawDebugElement(
             var text: [4096:0]u8 = undefined;
             var len: u32 = 0;
             len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
-            basicTextElement(&text, layout, item_interaction, item_color, null);
+            _ = basicTextElement(&text, layout, item_interaction, item_color, null, null, null);
         },
     }
 }
@@ -1897,16 +1619,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
                 break;
             }
 
-            var layout: Layout = .{
-                .debug_state = debug_state,
-                .mouse_position = mouse_position,
-                .base_corner = tree.ui_position,
-                .at = tree.ui_position,
-                .depth = 0,
-                .line_advance = font_info.getLineAdvance() * debug_state.font_scale,
-                .spacing_x = 4,
-                .spacing_y = 4,
-            };
+            var layout: Layout = Layout.begin(debug_state, mouse_position, tree.ui_position);
 
             if (tree.group) |tree_group| {
                 var depth: u32 = 0;
@@ -1939,21 +1652,21 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
                             }
 
                             const text = std.mem.span(link.children.?.name);
-                            const text_bounds = getTextSize(debug_state, text);
+                            const text_bounds = debug_ui.getTextSize(debug_state, text);
                             var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
 
                             var element: LayoutElement = layout.beginElementRectangle(&dim);
                             element.defaultInteraction(item_interaction);
                             element.end();
 
-                            const is_hot: bool = debug_state.interactionIsHot(&item_interaction);
+                            const is_hot: bool = item_interaction.isHot(debug_state);
                             const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
 
                             const text_position: Vector2 = Vector2.new(
                                 element.bounds.min.x(),
                                 element.bounds.max.y() - debug_state.font_scale * font_info.getStartingBaselineY(),
                             );
-                            textOutAt(text, text_position, item_color);
+                            textOutAt(debug_state, text, text_position, item_color);
 
                             if (view.data == .collapsible and view.data.collapsible.expanded_always) {
                                 iterator = &stack[depth];
@@ -1977,7 +1690,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
                     .data = .{ .position = &tree.ui_position },
                 };
                 const move_box_color: Color =
-                    if (debug_state.interactionIsHot(&move_interaction)) Color.new(1, 1, 0, 1) else Color.white();
+                    if (move_interaction.isHot(debug_state)) Color.new(1, 1, 0, 1) else Color.white();
                 const move_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(
                     tree.ui_position.minus(Vector2.new(4, 4)),
                     Vector2.new(4, 4),
@@ -1988,6 +1701,8 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
                     debug_state.next_hot_interaction = move_interaction;
                 }
             }
+
+            layout.end();
         }
     }
 
@@ -2013,7 +1728,7 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
     //         best_distance_sq = this_distance_sq;
     //     }
     //
-    //     const text_bounds: Rectangle2 = getTextSize(debug_state, text);
+    //     const text_bounds: Rectangle2 = debug_ui.getTextSize(debug_state, text);
     //     textOutAt(text, text_position.minus(text_bounds.getDimension().scaledTo(0.5)), item_color);
     // }
     //
@@ -2028,7 +1743,7 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
     const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
     if (debug_state.hot_interaction.interaction_type != .None) {
         if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
-            switch (debug_state.hot_interaction.element.?.frames[frame_ordinal].most_recent_event.?.data.event.event_type) {
+            switch (debug_state.hot_interaction.data.element.?.frames[frame_ordinal].most_recent_event.?.data.event.event_type) {
                 .bool, .Enum => {
                     debug_state.hot_interaction.interaction_type = .ToggleValue;
                 },
@@ -2088,7 +1803,7 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
         const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
         switch (debug_state.interaction.interaction_type) {
             .DragValue => {
-                if (debug_state.interaction.element) |element| {
+                if (debug_state.interaction.data.element) |element| {
                     if (element.frames[frame_ordinal].most_recent_event) |stored_event| {
                         const event = &stored_event.data.event;
                         switch (event.event_type) {
@@ -2169,33 +1884,25 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
 
             view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
         },
-        .SetProfileGraphRoot => {
-            const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
-
-            view.view_type = .ProfileGraph;
-            if (view.data != .profile_graph) {
-                view.data = .{
-                    .profile_graph = .{ .guid = null, .block = undefined },
-                };
-            }
-
-            if (debug_state.interaction.element) |element| {
-                view.data.profile_graph.guid = element.guid;
-            } else {
-                view.data.profile_graph.guid = null;
+        .SetUInt32 => {
+            if (debug_state.interaction.target) |target| {
+                const u32_target = @as(*u32, @ptrCast(@alignCast(target)));
+                u32_target.* = debug_state.interaction.data.uint32;
             }
         },
-        .SetElementType => {
-            if (debug_state.interaction.element) |element| {
-                element.type = debug_state.interaction.data.debug_type;
+        .SetBool => {
+            if (debug_state.interaction.target) |target| {
+                const bool_target = @as(*bool, @ptrCast(@alignCast(target)));
+                bool_target.* = debug_state.interaction.data.bool;
             }
         },
-        .SetViewFrameOrdinal => {
-            debug_state.viewing_frame_ordinal = debug_state.interaction.data.uint32;
-            debug_state.paused = true;
+        .SetPointer => {
+            if (debug_state.interaction.pointer_target) |target| {
+                target.* = debug_state.interaction.data.pointer;
+            }
         },
         .ToggleValue => {
-            if (debug_state.interaction.element) |interaction_element| {
+            if (debug_state.interaction.data.element) |interaction_element| {
                 if (interaction_element.frames[frame_ordinal].most_recent_event) |stored_event| {
                     const event = &stored_event.data.event;
                     switch (event.event_type) {
@@ -2216,173 +1923,6 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
 
     debug_state.interaction.interaction_type = .None;
     debug_state.interaction.data = .{ .tree = null };
-}
-
-pub fn textOutAt(text: [:0]const u8, position: Vector2, color: Color) void {
-    if (DebugState.get()) |debug_state| {
-        _ = textOp(debug_state, .DrawText, text, position, color);
-    }
-}
-
-pub fn getTextSize(debug_state: *DebugState, text: [:0]const u8) Rectangle2 {
-    return textOp(debug_state, .SizeText, text, Vector2.zero(), Color.white());
-}
-
-pub fn textOp(
-    debug_state: *DebugState,
-    op: DebugTextOp,
-    text: [:0]const u8,
-    position: Vector2,
-    color_in: Color,
-) Rectangle2 {
-    var result: Rectangle2 = Rectangle2.invertedInfinity();
-    var rect_found = false;
-    var color = color_in;
-
-    var render_group: *RenderGroup = &debug_state.render_group;
-    if (debug_state.debug_font) |font| {
-        if (debug_state.debug_font_info) |font_info| {
-            var match_vector = asset.AssetVector{};
-            var prev_code_point: u32 = 0;
-            var char_scale = debug_state.font_scale;
-            var x: f32 = position.x();
-
-            var at: [*]const u8 = @ptrCast(text);
-            while (at[0] != 0) {
-                if (at[0] == '\\' and
-                    at[1] == '#' and
-                    at[2] != 0 and
-                    at[3] != 0 and
-                    at[4] != 0)
-                {
-                    const c_scale: f32 = 1.0 / 9.0;
-                    color = Color.new(
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
-                        1,
-                    );
-
-                    at += 5;
-                } else if (at[0] == '\\' and
-                    at[1] == '^' and
-                    at[2] != 0)
-                {
-                    const c_scale: f32 = 1.0 / 9.0;
-                    char_scale = debug_state.font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
-                    at += 3;
-                } else {
-                    var code_point: u32 = at[0];
-
-                    if (at[0] == '\\' and
-                        (isHex(at[1])) and
-                        (isHex(at[2])) and
-                        (isHex(at[3])) and
-                        (isHex(at[4])))
-                    {
-                        code_point = ((getHex(at[1]) << 12) |
-                            (getHex(at[2]) << 8) |
-                            (getHex(at[3]) << 4) |
-                            (getHex(at[4]) << 0));
-
-                        at += 4;
-                    }
-
-                    const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(
-                        font_info,
-                        prev_code_point,
-                        code_point,
-                    );
-                    x += advance_x;
-
-                    if (code_point != ' ') {
-                        match_vector.e[@intFromEnum(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
-                        if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
-                            const info = render_group.assets.getBitmapInfo(bitmap_id);
-                            const bitmap_scale = char_scale * @as(f32, @floatFromInt(info.dim[1]));
-                            const bitamp_offset: Vector3 = Vector3.new(x, position.y(), 0);
-
-                            if (op == .DrawText) {
-                                render_group.pushBitmapId(
-                                    debug_state.text_transform,
-                                    bitmap_id,
-                                    bitmap_scale,
-                                    bitamp_offset,
-                                    color,
-                                    null,
-                                );
-                                render_group.pushBitmapId(
-                                    debug_state.shadow_transform,
-                                    bitmap_id,
-                                    bitmap_scale,
-                                    bitamp_offset.plus(Vector3.new(2, -2, 0)),
-                                    Color.black(),
-                                    null,
-                                );
-                            } else {
-                                std.debug.assert(op == .SizeText);
-
-                                if (render_group.assets.getBitmap(bitmap_id, render_group.generation_id)) |bitmap| {
-                                    const dim = render_group.getBitmapDim(
-                                        ObjectTransform.defaultFlat(),
-                                        bitmap,
-                                        bitmap_scale,
-                                        bitamp_offset,
-                                        1,
-                                    );
-                                    var glyph_dim: Rectangle2 = Rectangle2.fromMinDimension(
-                                        dim.position.xy(),
-                                        dim.size,
-                                    );
-                                    result = result.getUnionWith(&glyph_dim);
-                                    rect_found = true;
-                                }
-                            }
-                        }
-                    }
-
-                    prev_code_point = code_point;
-
-                    at += 1;
-                }
-            }
-        }
-    }
-
-    if (!rect_found) {
-        result = Rectangle2.zero();
-    }
-
-    return result;
-}
-
-pub fn textLine(text: [:0]const u8) void {
-    if (DebugState.get()) |debug_state| {
-        if (debug_state.debug_font_info) |font_info| {
-            const position = Vector2.new(
-                debug_state.left_edge,
-                debug_state.at_y - debug_state.font_scale * font_info.getStartingBaselineY(),
-            );
-            textOutAt(text, position, Color.white());
-            debug_state.at_y -= debug_state.getLineAdvance();
-        }
-    }
-}
-
-fn isHex(char: u8) bool {
-    return (char >= '0' and char <= '9') or (char >= 'A' and char <= 'F');
-}
-
-fn getHex(char: u8) u32 {
-    var result: u32 = 0;
-
-    if (char >= '0' and char <= '9') {
-        result = char - '0';
-    } else if (char >= 'A' and char <= 'F') {
-        result = 0xA + (char - 'A');
-    }
-
-    return result;
 }
 
 fn debugStart(
@@ -2582,7 +2122,8 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
                     @as(u64, @intFromFloat(hit_count.average)),
                     @as(u64, @intFromFloat(cycle_over_hit.average)),
                 }) catch "";
-                textLine(slice);
+                _ = slice;
+                // textLine(slice);
             }
         }
     }
