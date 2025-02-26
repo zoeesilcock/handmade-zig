@@ -3,6 +3,7 @@ const rendergroup = @import("rendergroup.zig");
 const render = @import("render.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
+const sort = @import("sort.zig");
 const debug_interface = @import("debug_interface.zig");
 const platform = @import("win32_handmade.zig");
 const std = @import("std");
@@ -40,7 +41,6 @@ pub const WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB = 0x20A9;
 const INTERNAL = shared.INTERNAL;
 
 const RenderGroup = rendergroup.RenderGroup;
-const TileSortEntry = rendergroup.TileSortEntry;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryClear = rendergroup.RenderEntryClear;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
@@ -51,6 +51,7 @@ const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Color = math.Color;
 const Rectangle2i = math.Rectangle2i;
+const SortEntry = sort.SortEntry;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
 
@@ -147,14 +148,14 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
     setScreenSpace(commands.width, commands.height);
 
     const sort_entry_count: u32 = commands.push_buffer_element_count;
-    const sort_entries: [*]TileSortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+    const sort_entries: [*]SortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
 
-    var sort_entry: [*]TileSortEntry = sort_entries;
+    var sort_entry: [*]SortEntry = sort_entries;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
-        const header: *RenderEntryHeader = @ptrCast(commands.push_buffer_base + sort_entry[0].push_buffer_offset);
+        const header: *RenderEntryHeader = @ptrCast(commands.push_buffer_base + sort_entry[0].index);
         const alignment: usize = switch (header.type) {
             .RenderEntryClear => @alignOf(RenderEntryClear),
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),

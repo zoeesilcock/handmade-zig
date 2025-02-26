@@ -170,7 +170,7 @@ fn addAssetBuilder(
     const stb_dep = b.dependency("stb", .{});
     asset_builder_exe.linkLibC();
     asset_builder_exe.addIncludePath(stb_dep.path(""));
-    asset_builder_exe.addCSourceFiles(.{ .files = &[_][]const u8{"src/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
+    asset_builder_exe.addCSourceFiles(.{ .files = &[_][]const u8{"tools/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
 
     const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
     asset_builder_exe.root_module.addImport("win32", zigwin32);

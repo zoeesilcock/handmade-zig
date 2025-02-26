@@ -42,6 +42,7 @@ const shared = @import("shared.zig");
 const render = @import("render.zig");
 const rendergroup = @import("rendergroup.zig");
 const asset = @import("asset.zig");
+const sort = @import("sort.zig");
 const opengl = @import("opengl.zig");
 const debug_interface = @import("debug_interface.zig");
 
@@ -2220,7 +2221,15 @@ pub export fn wWinMain(
                     var message: win32.MSG = undefined;
 
                     // Process all messages provided by Windows.
-                    while (win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0) {
+                    while (true) {
+                        TimedBlock.beginBlock(@src(), .PeekMessage);
+                        const got_message = win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0;
+                        TimedBlock.endBlock(@src(), .PeekMessage);
+
+                        if (!got_message) {
+                            break;
+                        }
+
                         switch (message.message) {
                             win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
                                 processKeyboardInput(message, new_keyboard_controller, &state);
@@ -2492,7 +2501,7 @@ pub export fn wWinMain(
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
                     const needed_sort_memory_size: u64 =
-                        render_commands.push_buffer_element_count * @sizeOf(rendergroup.TileSortEntry);
+                        render_commands.push_buffer_element_count * @sizeOf(sort.SortEntry);
                     if (current_sort_memory_size < needed_sort_memory_size) {
                         deallocateMemory(sort_memory);
                         current_sort_memory_size = needed_sort_memory_size;

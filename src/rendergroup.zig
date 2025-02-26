@@ -22,6 +22,7 @@ const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
 const config = @import("config.zig");
 const file_formats = @import("file_formats");
+const sort = @import("sort.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
@@ -45,6 +46,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const RenderCommands = shared.RenderCommands;
 const ArenaPushParams = shared.ArenaPushParams;
+const SortEntry = sort.SortEntry;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
@@ -150,11 +152,6 @@ const CameraTransform = extern struct {
 
     focal_length: f32,
     distance_above_target: f32,
-};
-
-pub const TileSortEntry = struct {
-    sort_key: f32,
-    push_buffer_offset: u32,
 };
 
 fn getRenderEntityBasisPosition(
@@ -311,7 +308,7 @@ pub const RenderGroup = extern struct {
         const size = in_size + @sizeOf(RenderEntryHeader);
         const commands: *RenderCommands = self.commands;
 
-        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(TileSortEntry)) {
+        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortEntry)) {
             const header: *RenderEntryHeader = @ptrCast(commands.push_buffer_base + commands.push_buffer_size);
             header.type = entry_type;
 
@@ -322,10 +319,10 @@ pub const RenderGroup = extern struct {
 
             result = @ptrFromInt(aligned_address);
 
-            commands.sort_entry_at -= @sizeOf(TileSortEntry);
-            var sort_entry: *TileSortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+            commands.sort_entry_at -= @sizeOf(SortEntry);
+            var sort_entry: *SortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
             sort_entry.sort_key = sort_key;
-            sort_entry.push_buffer_offset = commands.push_buffer_size;
+            sort_entry.index = commands.push_buffer_size;
 
             commands.push_buffer_size += @intCast(aligned_size);
             commands.push_buffer_element_count += 1;

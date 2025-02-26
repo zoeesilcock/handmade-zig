@@ -36,6 +36,7 @@ pub const DebugCycleCounters = enum(u16) {
     InputProcessing,
     ControllerClearing,
     MessageProcessing,
+    PeekMessage,
     ProcessMouseInput,
     ProcessXInput,
     GameUpdate,
@@ -160,6 +161,7 @@ pub const DebugType = if (INTERNAL) enum(u32) {
     LastFrameInfo,
     DebugMemoryInfo,
     FrameSlider,
+    TopClocksList,
 } else enum(u32) {};
 
 pub const DebugEvent = if (INTERNAL) extern struct {
@@ -191,10 +193,9 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         comptime counter: ?DebugCycleCounters,
         comptime name: []const u8,
     ) [*:0]const u8 {
-        return source.fn_name ++ "|" ++
-            std.fmt.comptimePrint("{d}", .{source.line}) ++ "|" ++
-            if (counter != null) @tagName(counter.?) else "NOCOUNTER" ++ "|" ++
-            name;
+        const counter_name = if (counter != null) @tagName(counter.?) else "NOCOUNTER";
+        const line_number = std.fmt.comptimePrint("{d}", .{source.line});
+        return source.fn_name ++ "|" ++ line_number ++ "|" ++ counter_name ++ "|" ++ name;
     }
 
     pub fn record(

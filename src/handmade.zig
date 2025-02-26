@@ -130,11 +130,6 @@ pub export fn updateAndRender(
     if (INTERNAL) {
         shared.debug_global_memory = memory;
         shared.global_debug_table = memory.debug_table;
-        DebugInterface.debugBeginDataBlock(@src(), "Debug control");
-        {
-            DebugInterface.debugUIElement(@src(), .FrameSlider, "FrameSlider");
-        }
-        DebugInterface.debugEndDataBlock(@src());
 
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
@@ -179,9 +174,10 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "Profile");
         {
+            DebugInterface.debugUIElement(@src(), .FrameSlider, "FrameSlider");
             DebugInterface.debugUIElement(@src(), .LastFrameInfo, "LastFrameInfo");
             DebugInterface.debugUIElement(@src(), .DebugMemoryInfo, "DebugMemoryInfo");
-            DebugInterface.debugUIElement(@src(), .ThreadIntervalGraph, "updateAndRender");
+            DebugInterface.debugUIElement(@src(), .TopClocksList, "updateAndRender");
         }
         DebugInterface.debugEndDataBlock(@src());
     }

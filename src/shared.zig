@@ -158,19 +158,17 @@ pub inline fn stringLength(string: [*:0]const u8) u32 {
     return count;
 }
 
-pub inline fn stringsAreEqual(a: []const u8, b: []const u8) bool {
-    var result: bool = true;
+pub inline fn stringsAreEqual(a: [*:0]const u8, b: [*:0]const u8) bool {
+    var result: bool = a == b;
 
-    if (a.len != b.len) {
-        result = false;
-    } else {
-        for (a, 0..) |a_char, i| {
-            if (a_char != b[i]) {
-                result = false;
-                break;
-            }
-        }
+    var a_scan = a;
+    var b_scan = b;
+    while (a_scan[0] != 0 and b_scan[0] != 0 and a_scan[0] == b_scan[0]) {
+        a_scan += 1;
+        b_scan += 1;
     }
+
+    result = a_scan[0] == 0 and b_scan[0] == 0;
 
     return result;
 }
