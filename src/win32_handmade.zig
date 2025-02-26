@@ -63,6 +63,7 @@ const win32 = struct {
     usingnamespace @import("win32").media.audio.direct_sound;
     usingnamespace @import("win32").storage.file_system;
     usingnamespace @import("win32").system.com;
+    usingnamespace @import("win32").system.environment;
     usingnamespace @import("win32").system.io;
     usingnamespace @import("win32").system.diagnostics.debug;
     usingnamespace @import("win32").system.library_loader;
@@ -559,6 +560,10 @@ inline fn getLastWriteTime(file_name: [*:0]const u8) win32.FILETIME {
     }
 
     return last_write_time;
+}
+
+fn timeIsValid (time: win32.FILETIME) bool {
+    return time.dwLowDateTime != 0 or time.dwHighDateTime != 0;
 }
 
 fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Game {
@@ -1919,6 +1924,63 @@ fn outputLastGLError(title: []const u8) void {
     }
 }
 
+fn fullRestart(source_exe: [*:0]const u8, dest_exe: [*:0]const u8, delete_exe: [*:0]const u8) void {
+    _ = win32.DeleteFileA(delete_exe);
+
+    if (win32.MoveFileA(dest_exe, delete_exe) != 0) {
+        if (win32.MoveFileA(source_exe, dest_exe) != 0) {
+            var startup_info: win32.STARTUPINFOA = .{
+                .cb = @sizeOf(win32.STARTUPINFOA),
+                .lpReserved = null,
+                .lpDesktop = null,
+                .lpTitle = null,
+                .dwX = 0,
+                .dwY = 0,
+                .dwXSize = 0,
+                .dwYSize = 0,
+                .dwXCountChars = 0,
+                .dwYCountChars = 0,
+                .dwFillAttribute = 0,
+                .dwFlags = win32.STARTUPINFOW_FLAGS{ .USESHOWWINDOW = 1 },
+                .wShowWindow = 0,
+                .cbReserved2 = 0,
+                .lpReserved2 = null,
+                .hStdInput = null,
+                .hStdOutput = null,
+                .hStdError = null,
+            };
+
+            var process_info: win32.PROCESS_INFORMATION = .{
+                .hProcess = null,
+                .hThread = null,
+                .dwProcessId = 0,
+                .dwThreadId = 0,
+            };
+
+            if (win32.CreateProcessA(
+                    dest_exe,
+                    win32.GetCommandLineA(),
+                    null,
+                    null,
+                    win32.FALSE,
+                    win32.PROCESS_CREATION_FLAGS{},
+                    null,
+                    "C:\\", // TODO: Specify the full path to the data directory here.
+                    &startup_info,
+                    &process_info,
+            ) != 0) {
+                if (process_info.hProcess) |process_handle| {
+                    _ = win32.CloseHandle(process_handle);
+                }
+            } else {
+                std.log.err("Error performing full restart: {d}", .{@intFromEnum(win32.GetLastError())});
+            }
+
+            win32.ExitProcess(0);
+        }
+    }
+}
+
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -1936,6 +1998,13 @@ pub export fn wWinMain(
     if (INTERNAL) {
         shared.global_debug_table = global_debug_table;
     }
+
+    var exe_full_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    buildExePathFileName(&state, "handmade-zig.exe", &exe_full_path);
+    var temp_exe_full_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    buildExePathFileName(&state, "handmade-zig-temp.exe", &temp_exe_full_path);
+    var delete_exe_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    buildExePathFileName(&state, "handmade-zig-old.exe", &delete_exe_path);
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
     buildExePathFileName(&state, "handmade.dll", &source_dll_path);
@@ -2421,6 +2490,18 @@ pub export fn wWinMain(
                         const last_dll_write_time = getLastWriteTime(&source_dll_path);
                         const executable_needs_reloading: bool =
                             win32.CompareFileTime(&last_dll_write_time, &game.last_write_time) != 0;
+
+                        if (false) {
+                            const new_exe_time = getLastWriteTime(&exe_full_path);
+                            const old_exe_time = getLastWriteTime(&temp_exe_full_path);
+                            if (timeIsValid(new_exe_time)) {
+                                const needs_full_reload: bool = win32.CompareFileTime(&new_exe_time, &old_exe_time) != 0;
+
+                                if (needs_full_reload) {
+                                    fullRestart(&temp_exe_full_path, &exe_full_path, &delete_exe_path);
+                                }
+                            }
+                        }
 
                         game_memory.executable_reloaded = false;
                         if (executable_needs_reloading) {
