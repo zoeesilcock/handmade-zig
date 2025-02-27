@@ -43,6 +43,7 @@ const INTERNAL = shared.INTERNAL;
 const RenderGroup = rendergroup.RenderGroup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryClear = rendergroup.RenderEntryClear;
+const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
 const RenderEntryCoordinateSystem = rendergroup.RenderEntryCoordinateSystem;
@@ -50,6 +51,7 @@ const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Color = math.Color;
+const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
 const SortEntry = sort.SortEntry;
 const TimedBlock = debug_interface.TimedBlock;
@@ -139,6 +141,7 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
     gl.glViewport(commands.offset_x, commands.offset_y, @intCast(commands.width), @intCast(commands.height));
 
     gl.glEnable(gl.GL_TEXTURE_2D);
+    gl.glEnable(gl.GL_SCISSOR_TEST);
     gl.glEnable(gl.GL_BLEND);
     gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
 
@@ -150,24 +153,42 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
     const sort_entry_count: u32 = commands.push_buffer_element_count;
     const sort_entries: [*]SortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
 
+    var clip_rect_index: u32 = 0xffffffff;
     var sort_entry: [*]SortEntry = sort_entries;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
-        const header: *RenderEntryHeader = @ptrCast(commands.push_buffer_base + sort_entry[0].index);
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0].index));
         const alignment: usize = switch (header.type) {
             .RenderEntryClear => @alignOf(RenderEntryClear),
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
             .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
             .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
+            else => {
+                unreachable;
+            },
         };
 
         const header_address = @intFromPtr(header);
         const data_address = header_address + @sizeOf(RenderEntryHeader);
         const aligned_address = std.mem.alignForward(usize, data_address, alignment);
         const data: *anyopaque = @ptrFromInt(aligned_address);
+
+        if (clip_rect_index != header.clip_rect_index) {
+            clip_rect_index = header.clip_rect_index;
+
+            std.debug.assert(clip_rect_index < commands.clip_rect_count);
+
+            const clip: RenderEntryClipRect = commands.clip_rects[clip_rect_index];
+            gl.glScissor(
+                clip.rect.min.x() + commands.offset_x,
+                clip.rect.min.y() + commands.offset_y,
+                clip.rect.max.x() - clip.rect.min.x(),
+                clip.rect.max.y() - clip.rect.min.y(),
+            );
+        }
 
         switch (header.type) {
             .RenderEntryClear => {
@@ -211,6 +232,9 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
             },
             .RenderEntryCoordinateSystem => {
                 // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
+            },
+            else => {
+                unreachable;
             },
         }
     }
@@ -323,6 +347,7 @@ pub fn displayBitmap(
 
     std.debug.assert(pitch == width * 4);
 
+    gl.glDisable(gl.GL_SCISSOR_TEST);
     gl.glViewport(offset_x, offset_y, width, height);
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, blit_texture);

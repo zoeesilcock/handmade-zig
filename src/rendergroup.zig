@@ -71,8 +71,9 @@ pub const RenderEntityBasisResult = extern struct {
     sort_key: f32 = 0,
 };
 
-pub const RenderEntryType = enum(u8) {
+pub const RenderEntryType = enum(u16) {
     RenderEntryClear,
+    RenderEntryClipRect,
     RenderEntryBitmap,
     RenderEntryRectangle,
     RenderEntryCoordinateSystem,
@@ -81,10 +82,16 @@ pub const RenderEntryType = enum(u8) {
 
 pub const RenderEntryHeader = extern struct {
     type: RenderEntryType,
+    clip_rect_index: u16,
 };
 
 pub const RenderEntryClear = extern struct {
     color: Color,
+};
+
+pub const RenderEntryClipRect = extern struct {
+    next: ?*RenderEntryClipRect,
+    rect: Rectangle2i,
 };
 
 pub const RenderEntrySaturation = extern struct {
@@ -213,6 +220,8 @@ pub const RenderGroup = extern struct {
     generation_id: u32,
     commands: *RenderCommands,
 
+    current_clip_rect_index: u32,
+
     pub fn begin(
         assets: *asset.Assets,
         commands: *RenderCommands,
@@ -228,6 +237,7 @@ pub const RenderGroup = extern struct {
             .commands = commands,
             .monitor_half_dim_in_meters = undefined,
             .camera_transform = undefined,
+            .current_clip_rect_index = 0,
         };
     }
 
@@ -264,6 +274,8 @@ pub const RenderGroup = extern struct {
             0.5 * @as(f32, @floatFromInt(pixel_height)),
         );
         self.camera_transform.orthographic = false;
+
+        self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height));
     }
 
     pub fn orthographicMode(
@@ -286,6 +298,8 @@ pub const RenderGroup = extern struct {
             0.5 * @as(f32, @floatFromInt(pixel_height)),
         );
         self.camera_transform.orthographic = true;
+
+        self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height));
     }
 
     fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: f32) ?*T {
@@ -309,8 +323,9 @@ pub const RenderGroup = extern struct {
         const commands: *RenderCommands = self.commands;
 
         if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortEntry)) {
-            const header: *RenderEntryHeader = @ptrCast(commands.push_buffer_base + commands.push_buffer_size);
+            const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + commands.push_buffer_size));
             header.type = entry_type;
+            header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
 
             const data_address = @intFromPtr(header) + @sizeOf(RenderEntryHeader);
             const aligned_address = std.mem.alignForward(usize, data_address, alignment);
@@ -592,5 +607,69 @@ pub const RenderGroup = extern struct {
         //         entry.bottom = bottom;
         //     }
         // }
+    }
+
+    pub fn pushClipRectByTransform(
+        self: *RenderGroup,
+        object_transform: ObjectTransform,
+        dimension: Vector2,
+        offset: Vector3,
+    ) u32 {
+        var result: u32 = 0;
+        const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
+
+        const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
+        if (basis.valid) {
+            const basis_dimension: Vector2 = dimension.scaledTo(basis.scale);
+
+            result = self.pushClipRect(
+                intrinsics.roundReal32ToInt32(basis.position.x()),
+                intrinsics.roundReal32ToInt32(basis.position.y()),
+                intrinsics.roundReal32ToInt32(basis_dimension.x()),
+                intrinsics.roundReal32ToInt32(basis_dimension.y()),
+            );
+        }
+
+        return result;
+    }
+
+    pub fn pushClipRectByRectangle(
+        self: *RenderGroup,
+        object_transform: ObjectTransform,
+        rectangle: Rectangle2,
+        z: f32,
+    ) u32 {
+        return self.pushClipRectByTransform(
+            object_transform,
+            rectangle.getDimension(),
+            rectangle.getCenter().toVector3(z),
+        );
+    }
+
+    pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32) u32 {
+        var result: u32 = 0;
+        const size = @sizeOf(RenderEntryClipRect);
+        const commands: *RenderCommands = self.commands;
+
+        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortEntry)) {
+            const rect: *RenderEntryClipRect = @ptrCast(@alignCast(commands.push_buffer_base + commands.push_buffer_size));
+            commands.push_buffer_size += @intCast(size);
+
+            result = self.commands.clip_rect_count;
+            self.commands.clip_rect_count += 1;
+
+            if (self.commands.last_clip_rect != null) {
+                self.commands.last_clip_rect.?.next = rect;
+                self.commands.last_clip_rect = rect;
+            } else {
+                self.commands.last_clip_rect = rect;
+                self.commands.first_clip_rect = rect;
+            }
+            rect.next = null;
+
+            rect.rect = Rectangle2i.new(x, y, x + w, y + h);
+        }
+
+        return result;
     }
 };

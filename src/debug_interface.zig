@@ -398,7 +398,8 @@ pub const DebugInterface = if (INTERNAL) struct {
         comptime element_type: DebugType,
         comptime name: []const u8,
     ) void {
-        _ = DebugEvent.record(element_type, DebugEvent.debugName(source, null, @ptrCast(name)));
+        _ = source;
+        _ = DebugEvent.record(element_type, @ptrCast(name));
     }
 
     pub fn debugBeginArray(array: anytype) void {

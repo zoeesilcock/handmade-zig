@@ -18,16 +18,14 @@ const std = @import("std");
 /// TODO: An overview of upcoming tasks.
 ///
 /// * Debug code.
-///     * Logging.
 ///     * Diagramming.
-///     * Switches, sliders etc.
 ///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
-///     * Thread visualization.
 ///
 /// * Audio.
 ///     * Fix clicking bug at end of samples.
 ///
 /// * Rendering.
+///     * What's the deal with 18,000 drawRectangle calls?
 ///     * Real projections with solid concept of project/unproject.
 ///     * Straighten out all coordinate systems!
 ///         * Screen.

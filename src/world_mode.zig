@@ -369,6 +369,9 @@ pub fn updateAndRenderWorld(
     render_group: *RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
 ) bool {
+    TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
+    defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
+
     const result = false;
     var heroes_exist = false;
     var quit_requested = false;
@@ -404,6 +407,9 @@ pub fn updateAndRenderWorld(
 
     // Draw ground.
     if (global_config.GroundChunks_Enabled) {
+        TimedBlock.beginBlock(@src(), .GroundChunksOn);
+        defer TimedBlock.endBlock(@src(), .GroundChunksOn);
+
         var ground_buffer_index: u32 = 0;
         while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
             const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
@@ -445,10 +451,8 @@ pub fn updateAndRenderWorld(
             }
         }
         render_group.global_alpha = 1;
-    }
 
-    // Populate ground chunks.
-    if (global_config.GroundChunks_Enabled) {
+        // Populate ground chunks.
         const min_chunk_position = world.mapIntoChunkSpace(
             world_mode.world,
             world_mode.camera_position,
@@ -470,7 +474,7 @@ pub fn updateAndRenderWorld(
 
                     var opt_furthest_buffer: ?*shared.GroundBuffer = null;
                     var furthest_buffer_length_squared: f32 = 0;
-                    var ground_buffer_index: u32 = 0;
+                    ground_buffer_index = 0;
                     while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
                         const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
                         if (world.areInSameChunk(world_mode.world, &ground_buffer.position, &chunk_center)) {
@@ -613,6 +617,7 @@ pub fn updateAndRenderWorld(
 
     const camera_position = world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position);
 
+    TimedBlock.beginBlock(@src(), .EntityRender);
     var hot_entity_count: u32 = 0;
     var entity_index: u32 = 0;
     while (entity_index < screen_sim_region.entity_count) : (entity_index += 1) {
@@ -1169,6 +1174,7 @@ pub fn updateAndRenderWorld(
             }
         }
     }
+    TimedBlock.endBlock(@src(), .EntityRender);
 
     render_group.global_alpha = 1;
 

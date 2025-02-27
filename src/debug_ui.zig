@@ -347,7 +347,7 @@ pub const LayoutElement = struct {
             const size_box: Rectangle2 = Rectangle2.fromMinMax(
                 Vector2.new(interior_max_corner.x(), total_min_corner.y()),
                 Vector2.new(total_max_corner.x(), interior_min_corner.y()),
-            );
+            ).addRadius(Vector2.splat(4));
             const size_box_color: Color =
                 if (size_interaction.isHot(debug_state)) Color.new(1, 1, 0, 1) else Color.white();
             render_group.pushRectangle2(no_transform, size_box, 0, size_box_color);

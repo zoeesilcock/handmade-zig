@@ -653,6 +653,7 @@ pub const DebugState = struct {
                                         .next_same_parent = null,
                                         .parent_relative_clock = 0,
                                         .duration = 0,
+                                        .duration_of_children = 0,
                                         .thread_ordinal = 0,
                                         .core_index = 0,
                                     },
@@ -666,6 +667,7 @@ pub const DebugState = struct {
                             node.next_same_parent = null;
                             node.parent_relative_clock = event.clock -% clock_basis;
                             node.duration = 0;
+                            node.duration_of_children = 0;
                             node.thread_ordinal = @intCast(thread.lane_index);
                             node.core_index = event.core_index;
 
@@ -687,7 +689,14 @@ pub const DebugState = struct {
 
                             var node: *DebugProfileNode = &matching_block.node.?.data.profile_node;
                             node.duration = event.clock -% matching_block.begin_clock;
+
                             self.deallocateOpenDebugBlock(&thread.first_open_code_block);
+
+                            if (thread.first_open_code_block) |parent_block| {
+                                if (parent_block.node) |parent_node| {
+                                    parent_node.data.profile_node.duration_of_children += node.duration;
+                                }
+                            }
                         }
                     },
                     .OpenDataBlock => {
@@ -921,6 +930,7 @@ const DebugProfileNode = extern struct {
     first_child: ?*DebugStoredEvent = null,
     next_same_parent: ?*DebugStoredEvent = null,
     duration: u64 = 0,
+    duration_of_children: u64 = 0,
     reserved: u32 = 0,
     parent_relative_clock: u64 = 0,
     thread_ordinal: u16 = 0,
@@ -1460,7 +1470,9 @@ fn drawTopClocksList(
 
             var opt_event: ?*DebugStoredEvent = element.frames[debug_state.viewing_frame_ordinal].oldest_event;
             while (opt_event) |event| : (opt_event = event.next) {
-                entry.stats.accumulate(@floatFromInt(event.data.profile_node.duration));
+                const clocks_with_children: u64 = event.data.profile_node.duration;
+                const clocks_without_children: u64 = clocks_with_children - event.data.profile_node.duration_of_children;
+                entry.stats.accumulate(@floatFromInt(clocks_without_children));
             }
 
             entry.stats.end();
@@ -1498,7 +1510,12 @@ fn drawTopClocksList(
             at,
             Color.white(),
         );
-        _ = at.setY(at.y() - debug_state.getLineAdvance());
+
+        if (at.y() < profile_rect.min.y()) {
+            break;
+        } else {
+            _ = at.setY(at.y() - debug_state.getLineAdvance());
+        }
     }
 }
 
@@ -1647,6 +1664,15 @@ fn drawDebugElement(
                 layout_element.bounds,
                 0,
                 Color.new(0, 0, 0, 0.75),
+            );
+
+            const old_clip_rect: u32 = render_group.current_clip_rect_index;
+            defer render_group.current_clip_rect_index = old_clip_rect;
+
+            render_group.current_clip_rect_index = debug_state.render_group.pushClipRectByRectangle(
+                debug_state.backing_transform,
+                layout_element.bounds,
+                0,
             );
 
             var opt_viewing_element: ?*DebugElement =

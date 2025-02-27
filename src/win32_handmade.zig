@@ -1398,12 +1398,14 @@ fn displayBufferInWindow(
     window_width: i32,
     window_height: i32,
     sort_memory: *anyopaque,
+    clip_memory: *anyopaque,
 ) void {
     const dim = calculateGameOffset(window);
     commands.offset_x = dim.offset_x;
     commands.offset_y = dim.offset_y;
 
     render.sortEntries(commands, sort_memory);
+    render.linearizeClipRects(commands, clip_memory);
 
     // TODO: Do we want to check for resources like before?
     // if (render_group.allResourcesPresent()) {
@@ -2257,6 +2259,9 @@ pub export fn wWinMain(
                 var current_sort_memory_size: u64 = shared.megabytes(1);
                 var sort_memory = allocateMemory(current_sort_memory_size);
 
+                var current_clip_rect_memory_size: u64 = shared.megabytes(1);
+                var clip_memory = allocateMemory(current_clip_rect_memory_size);
+
                 const push_buffer_size: u32 = shared.megabytes(64);
                 const push_buffer = allocateMemory(push_buffer_size);
 
@@ -2589,6 +2594,14 @@ pub export fn wWinMain(
                         sort_memory = allocateMemory(current_sort_memory_size);
                     }
 
+                    const needed_clip_rect_memory_size: u64 =
+                        render_commands.push_buffer_element_count * @sizeOf(sort.SortEntry);
+                    if (current_clip_rect_memory_size < needed_clip_rect_memory_size) {
+                        deallocateMemory(clip_memory);
+                        current_clip_rect_memory_size = needed_clip_rect_memory_size;
+                        clip_memory = allocateMemory(current_clip_rect_memory_size);
+                    }
+
                     texture_op_queue.mutex.begin();
                     const first_texture_op: ?*render.TextureOp = texture_op_queue.first;
                     const last_texture_op: ?*render.TextureOp = texture_op_queue.last;
@@ -2615,6 +2628,7 @@ pub export fn wWinMain(
                         window_dimension.width,
                         window_dimension.height,
                         sort_memory.?,
+                        clip_memory.?,
                     );
 
                     flip_wall_clock = getWallClock();

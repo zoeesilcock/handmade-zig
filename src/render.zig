@@ -27,6 +27,7 @@ const RenderCommands = shared.RenderCommands;
 const RenderGroup = rendergroup.RenderGroup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryClear = rendergroup.RenderEntryClear;
+const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
 const RenderEntryCoordinateSystem = rendergroup.RenderEntryCoordinateSystem;
@@ -68,7 +69,7 @@ pub const TextureOp = struct {
     op: union {
         allocate: TextureOpAllocate,
         deallocate: TextureOpDeallocate,
-    }
+    },
 };
 
 pub fn softwareRenderCommands(
@@ -149,11 +150,18 @@ pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) cal
     renderCommandsToBitmap(work.commands, work.output_target, work.clip_rect);
 }
 
-pub fn renderCommandsToBitmap(commands: *RenderCommands, output_target: *LoadedBitmap, clip_rect: Rectangle2i) void {
+pub fn renderCommandsToBitmap(
+    commands: *RenderCommands,
+    output_target: *LoadedBitmap,
+    base_clip_rect: Rectangle2i,
+) void {
     // TimedBlock.beginFunction(@src(), .RenderCommandsToBitmap);
     // defer TimedBlock.endFunction(@src(), .RenderCommandsToBitmap);
 
     const null_pixels_to_meters: f32 = 1.0;
+
+    var clip_rect_index: u32 = 0xffffffff;
+    var clip_rect: Rectangle2i = base_clip_rect;
 
     const sort_entry_count: u32 = commands.push_buffer_element_count;
     const sort_entries: [*]SortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
@@ -163,19 +171,31 @@ pub fn renderCommandsToBitmap(commands: *RenderCommands, output_target: *LoadedB
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
-        const header: *RenderEntryHeader = @ptrCast(commands.push_buffer_base + sort_entry[0].index);
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0].index));
         const alignment: usize = switch (header.type) {
             .RenderEntryClear => @alignOf(RenderEntryClear),
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
             .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
             .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
+            else => {
+                unreachable;
+            },
         };
 
         const header_address = @intFromPtr(header);
         const data_address = header_address + @sizeOf(RenderEntryHeader);
         const aligned_address = std.mem.alignForward(usize, data_address, alignment);
         const data: *anyopaque = @ptrFromInt(aligned_address);
+
+        if (clip_rect_index != header.clip_rect_index) {
+            clip_rect_index = header.clip_rect_index;
+
+            std.debug.assert(clip_rect_index < commands.clip_rect_count);
+
+            const clip: RenderEntryClipRect = commands.clip_rects[clip_rect_index];
+            clip_rect = base_clip_rect.getIntersectionWith(clip.rect);
+        }
 
         switch (header.type) {
             .RenderEntryClear => {
@@ -261,6 +281,9 @@ pub fn renderCommandsToBitmap(commands: *RenderCommands, output_target: *LoadedB
                 // position = max;
                 // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
             },
+            else => {
+                unreachable;
+            },
         }
     }
 }
@@ -286,6 +309,18 @@ pub fn sortEntries(commands: *RenderCommands, sort_memory: *anyopaque) void {
             }
         }
     }
+}
+
+pub fn linearizeClipRects(commands: *RenderCommands, clip_memory: *anyopaque) void {
+    var out: [*]rendergroup.RenderEntryClipRect = @ptrCast(@alignCast(clip_memory));
+    var opt_rect: ?*rendergroup.RenderEntryClipRect = commands.first_clip_rect;
+
+    while (opt_rect) |rect| : (opt_rect = @ptrCast(rect.next)) {
+        out[0] = rect.*;
+        out += 1;
+    }
+
+    commands.clip_rects = @ptrCast(@alignCast(clip_memory));
 }
 
 pub fn drawRectangle(
