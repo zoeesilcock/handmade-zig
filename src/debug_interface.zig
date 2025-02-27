@@ -31,71 +31,6 @@ pub const INTERNAL = @import("build_options").internal;
 pub const MAX_DEBUG_REGIONS_PER_FRAME = 2 * 4096;
 pub const DEBUG_UI_ENABLED = true;
 
-pub const DebugCycleCounters = enum(u16) {
-    TotalPlatformLoop,
-    InputProcessing,
-    ControllerClearing,
-    MessageProcessing,
-    PeekMessage,
-    ProcessMouseInput,
-    ProcessXInput,
-    GameUpdate,
-    AudioUpdate,
-    FrameRateWait,
-    FrameDisplay,
-    DebugCollation,
-
-    GameUpdateAndRender,
-    FillGroundChunk,
-    RootProfile,
-    DebugStart,
-    DebugEnd,
-    PushRenderElement,
-    DrawRectangle,
-    DrawBitmap,
-    DrawRectangleSlowly,
-    DrawRectangleQuickly,
-    ProcessPixel,
-    RenderCommandsToBitmap,
-    RenderCommandsToOpenGL,
-    TiledRenderToOutput,
-    SingleRenderToOutput,
-    DoTiledRenderWork,
-
-    GetRenderEntityBasisPosition,
-    ChangeSaturation,
-    MoveEntity,
-    EntitiesOverlap,
-    SpeculativeCollide,
-    BeginSimulation,
-    EndSimulation,
-    AddEntityRaw,
-
-    ChangeEntityLocation,
-    ChangeEntityLocationRaw,
-    GetWorldChunk,
-
-    PlaySound,
-    OutputPlayingSounds,
-
-    LoadAssetWorkDirectly,
-    AllocateGameAssets,
-    AcquireAssetMemory,
-    LoadBitmap,
-    LoadSound,
-    LoadFont,
-    GetBestMatchAsset,
-    GetRandomAsset,
-    GetFirstAsset,
-
-    HotEntity,
-    HotEntity1,
-    HotEntity2,
-    HotEntity3,
-    HotEntity4,
-    HotEntity5,
-};
-
 pub const DebugTable = extern struct {
     edit_event: DebugEvent = DebugEvent{},
     record_increment: u32 = 0,
@@ -190,7 +125,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
 
     pub fn debugName(
         comptime source: std.builtin.SourceLocation,
-        comptime counter: ?DebugCycleCounters,
+        comptime counter: ?@TypeOf(.EnumLiteral),
         comptime name: []const u8,
     ) [*:0]const u8 {
         const counter_name = if (counter != null) @tagName(counter.?) else "NOCOUNTER";
@@ -356,19 +291,19 @@ pub const DebugEvent = if (INTERNAL) extern struct {
 };
 
 pub const TimedBlock = if (INTERNAL) struct {
-    pub fn beginBlock(comptime source: std.builtin.SourceLocation, comptime counter: DebugCycleCounters) void {
+    pub fn beginBlock(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         begin(DebugEvent.debugName(source, counter, @tagName(counter)));
     }
 
-    pub fn endBlock(comptime source: std.builtin.SourceLocation, comptime counter: DebugCycleCounters) void {
+    pub fn endBlock(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         end(DebugEvent.debugName(source, counter, "END_BLOCK_"));
     }
 
-    pub fn beginFunction(comptime source: std.builtin.SourceLocation, comptime counter: DebugCycleCounters) void {
+    pub fn beginFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         begin(DebugEvent.debugName(source, counter, source.fn_name));
     }
 
-    pub fn endFunction(comptime source: std.builtin.SourceLocation, comptime counter: DebugCycleCounters) void {
+    pub fn endFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         end(DebugEvent.debugName(source, counter, "END_BLOCK_"));
     }
 
@@ -382,7 +317,7 @@ pub const TimedBlock = if (INTERNAL) struct {
 
     pub fn frameMarker(
         comptime source: std.builtin.SourceLocation,
-        comptime counter: DebugCycleCounters,
+        comptime counter: @TypeOf(.EnumLiteral),
         seconds_elapsed: f32,
     ) void {
         var event = DebugEvent.record(.FrameMarker, DebugEvent.debugName(source, counter, "Frame Marker"));
@@ -391,40 +326,40 @@ pub const TimedBlock = if (INTERNAL) struct {
 
     pub fn beginWithCount(
         comptime source: std.builtin.SourceLocation,
-        comptime counter: DebugCycleCounters,
+        comptime counter: @TypeOf(.EnumLiteral),
         hit_count: u32,
     ) void {
         _ = hit_count;
         TimedBlock.beginBlock(source, counter);
     }
 } else struct {
-    pub fn beginBlock(source: std.builtin.SourceLocation, counter: DebugCycleCounters) void {
+    pub fn beginBlock(source: std.builtin.SourceLocation, counter: @TypeOf(.EnumLiteral)) void {
         _ = source;
         _ = counter;
     }
 
-    pub fn endBlock(comptime source: std.builtin.SourceLocation, comptime counter: DebugCycleCounters) void {
+    pub fn endBlock(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         _ = source;
         _ = counter;
     }
 
-    pub fn beginFunction(source: std.builtin.SourceLocation, counter: DebugCycleCounters) void {
+    pub fn beginFunction(source: std.builtin.SourceLocation, counter: @TypeOf(.EnumLiteral)) void {
         _ = source;
         _ = counter;
     }
 
-    pub fn endFunction(comptime source: std.builtin.SourceLocation, comptime counter: DebugCycleCounters) void {
+    pub fn endFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         _ = source;
         _ = counter;
     }
 
-    pub fn frameMarker(source: std.builtin.SourceLocation, counter: DebugCycleCounters, seconds_elapsed: f32) void {
+    pub fn frameMarker(source: std.builtin.SourceLocation, counter: @TypeOf(.EnumLiteral), seconds_elapsed: f32) void {
         _ = source;
         _ = counter;
         _ = seconds_elapsed;
     }
 
-    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: DebugCycleCounters, hit_count: u32) void {
+    pub fn beginWithCount(source: std.builtin.SourceLocation, counter: @TypeOf(.EnumLiteral), hit_count: u32) void {
         _ = source;
         _ = counter;
         _ = hit_count;
