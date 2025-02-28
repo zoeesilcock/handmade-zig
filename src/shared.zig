@@ -188,17 +188,25 @@ pub inline fn stringsWithLengthAreEqual(a: [*:0]const u8, a_length: MemoryIndex,
     return result;
 }
 
-pub inline fn stringsWithOneLengthAreEqual(a: [*]const u8, a_length: MemoryIndex, b: [*:0]const u8) bool {
-    var at = b;
+pub inline fn stringsWithOneLengthAreEqual(a: [*]const u8, a_length: MemoryIndex, opt_b: ?[*:0]const u8) bool {
+    var result: bool = false;
 
-    for (0..a_length) |i| {
-        if (a[i] == 0 or a[i] != at[0]) {
-            return false;
+    if (opt_b) |b| {
+        var at = b;
+
+        for (0..a_length) |i| {
+            if (a[i] == 0 or a[i] != at[0]) {
+                return false;
+            }
+            at += 1;
         }
-        at += 1;
+
+        result = at[0] == 0;
+    } else {
+        result = a_length == 0;
     }
 
-    return at[0] == 0;
+    return result;
 }
 
 pub fn isEndOfLine(char: u32) bool {

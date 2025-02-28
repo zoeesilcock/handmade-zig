@@ -73,7 +73,7 @@ const OpenDebugBlock = struct {
 
     node: ?*DebugStoredEvent,
 
-    group: ?*DebugVariableGroup,
+    group: ?*DebugVariableLink,
 };
 
 const DebugThread = struct {
@@ -154,8 +154,8 @@ pub const DebugState = struct {
 
     element_hash: [1024]?*DebugElement = [1]?*DebugElement{null} ** 1024,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
-    root_group: *DebugVariableGroup,
-    profile_group: *DebugVariableGroup,
+    root_group: *DebugVariableLink,
+    profile_group: *DebugVariableLink,
     tree_sentinel: DebugTree,
 
     last_mouse_position: Vector2,
@@ -167,15 +167,12 @@ pub const DebugState = struct {
 
     left_edge: f32 = 0,
     right_edge: f32 = 0,
-    at_y: f32 = 0,
     font_scale: f32 = 0,
     font_id: file_formats.FontId = undefined,
     global_width: f32 = 0,
     global_height: f32 = 0,
 
     mouse_text_stack_y: f32,
-
-    scope_to_record: ?[*:0]const u8,
 
     total_frame_count: u32,
 
@@ -338,21 +335,21 @@ pub const DebugState = struct {
 
     fn getOrCreateGroupWithName(
         self: *DebugState,
-        parent: *DebugVariableGroup,
+        parent: *DebugVariableLink,
         name_length: u32,
         name: [*:0]const u8,
-    ) ?*DebugVariableGroup {
-        var result: ?*DebugVariableGroup = null;
-        var link: *DebugVariableLink = parent.sentinel.next;
-        while (link != &parent.sentinel) : (link = link.next) {
-            if (link.children != null and shared.stringsWithOneLengthAreEqual(name, name_length, link.children.?.name)) {
-                result = link.children;
+    ) ?*DebugVariableLink {
+        var result: ?*DebugVariableLink = null;
+        var link: *DebugVariableLink = parent.first_child;
+        while (link != parent.getSentinel()) : (link = link.next) {
+            if (shared.stringsWithOneLengthAreEqual(name, name_length, link.name)) {
+                result = link;
             }
         }
 
         if (result == null) {
-            result = self.createVariableGroup(name_length, name);
-            _ = self.addGroupToGroup(parent, result.?);
+            result = self.createVariableLink(name_length, name);
+            _ = addLinkToGroup(parent, result.?);
         }
 
         return result;
@@ -360,11 +357,11 @@ pub const DebugState = struct {
 
     fn getGroupForHierarchicalName(
         self: *DebugState,
-        parent: *DebugVariableGroup,
+        parent: *DebugVariableLink,
         name: [*:0]const u8,
         create_terminal: bool,
-    ) ?*DebugVariableGroup {
-        var result: ?*DebugVariableGroup = parent;
+    ) ?*DebugVariableLink {
+        var result: ?*DebugVariableLink = parent;
         var first_separator: ?[*]const u8 = null;
         var opt_scan: ?[*]const u8 = @ptrCast(name);
         while (opt_scan) |scan| : (opt_scan = scan + 1) {
@@ -400,7 +397,7 @@ pub const DebugState = struct {
         return result;
     }
 
-    fn freeVariableGroup(self: *DebugState, group: ?*DebugVariableGroup) void {
+    fn freeVariableGroup(self: *DebugState, group: ?*DebugVariableLink) void {
         _ = self;
         _ = group;
 
@@ -408,88 +405,80 @@ pub const DebugState = struct {
         unreachable;
     }
 
-    fn createVariableGroup(self: *DebugState, name_length: u32, name: [*:0]const u8) *DebugVariableGroup {
-        var group: *DebugVariableGroup = self.debug_arena.pushStruct(
-            DebugVariableGroup,
-            ArenaPushParams.alignedNoClear(@alignOf(DebugVariableGroup)),
-        );
-        group.sentinel.next = &group.sentinel;
-        group.sentinel.prev = &group.sentinel;
-        group.name = self.debug_arena.pushAndNullTerminateString(name_length, name);
-
-        return group;
-    }
-
-    fn cloneVariableGroup(self: *DebugState, source: *DebugVariableLink) *DebugVariableGroup {
-        const name = self.debug_arena.pushString("Cloned");
-        const result = self.createVariableGroup(shared.stringLength(name), name);
-        _ = self.cloneVariableLink(result, source);
-        return result;
-    }
-
-    fn cloneVariableLink(
+    fn createVariableLink(
         self: *DebugState,
-        dest_group: *DebugVariableGroup,
-        source: *DebugVariableLink,
+        opt_name_length: ?u32,
+        opt_name: ?[*:0]const u8,
     ) *DebugVariableLink {
-        const dest: *DebugVariableLink = self.addElementToGroup(dest_group, source.element);
-        if (source.children) |children| {
-            dest.children = self.debug_arena.pushStruct(
-                DebugVariableGroup,
-                ArenaPushParams.alignedNoClear(@alignOf(DebugVariableGroup)),
-            );
-            dest.children.?.sentinel.next = &dest.children.?.sentinel;
-            dest.children.?.sentinel.prev = &dest.children.?.sentinel;
-            dest.children.?.name = source.children.?.name;
+        var link: *DebugVariableLink = self.debug_arena.pushStruct(
+            DebugVariableLink,
+            ArenaPushParams.aligned(@alignOf(DebugVariableLink), true),
+        );
+        link.getSentinel().next = link.getSentinel();
+        link.getSentinel().prev = link.getSentinel();
+        link.next = undefined;
+        link.prev = undefined;
+        link.element = null;
 
-            var child: *DebugVariableLink = children.sentinel.next;
-            while (child != &children.sentinel) : (child = child.next) {
-                _ = self.cloneVariableLink(dest.children.?, child);
+        if (opt_name_length) |name_length| {
+            if (opt_name) |name| {
+                link.name = self.debug_arena.pushAndNullTerminateString(name_length, name);
             }
         }
-        return dest;
+
+        return link;
     }
 
     pub fn addElementToGroup(
         self: *DebugState,
-        parent: *DebugVariableGroup,
+        opt_parent: ?*DebugVariableLink,
         element: ?*DebugElement,
     ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.debug_arena.pushStruct(
-            DebugVariableLink,
-            ArenaPushParams.alignedNoClear(@alignOf(DebugVariableLink)),
-        );
+        const link: *DebugVariableLink = self.createVariableLink(null, null);
 
-        link.next = &parent.sentinel;
-        link.prev = parent.sentinel.prev;
-        link.next.prev = link;
-        link.prev.next = link;
+        if (opt_parent) |parent| {
+            link.next = parent.getSentinel();
+            link.prev = parent.getSentinel().prev;
+            link.next.prev = link;
+            link.prev.next = link;
 
-        link.children = null;
-        link.element = element;
+            link.first_child = link.getSentinel();
+            link.last_child = link.getSentinel();
+            link.element = element;
+        }
 
         return link;
     }
 
-    pub fn addGroupToGroup(
-        self: *DebugState,
-        parent: *DebugVariableGroup,
-        group: *DebugVariableGroup,
-    ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.debug_arena.pushStruct(
-            DebugVariableLink,
-            ArenaPushParams.alignedNoClear(@alignOf(DebugVariableLink)),
-        );
-
-        link.next = &parent.sentinel;
-        link.prev = parent.sentinel.prev;
+    pub fn addLinkToGroup(
+        parent: *DebugVariableLink,
+        link: *DebugVariableLink,
+    ) void {
+        link.next = parent.getSentinel();
+        link.prev = parent.getSentinel().prev;
         link.next.prev = link;
         link.prev.next = link;
+    }
 
-        link.children = group;
-        link.element = null;
+    fn cloneVariableLink(self: *DebugState, source: *DebugVariableLink) *DebugVariableLink {
+        return self.cloneVariableLinkInto(null, source);
+    }
 
-        return link;
+    fn cloneVariableLinkInto(
+        self: *DebugState,
+        dest_group: ?*DebugVariableLink,
+        source: *DebugVariableLink,
+    ) *DebugVariableLink {
+        const dest: *DebugVariableLink = self.addElementToGroup(dest_group, source.element);
+        dest.name = source.name;
+
+        if (source.hasChildren()) {
+            var child: *DebugVariableLink = source.first_child;
+            while (child != source.getSentinel()) : (child = child.next) {
+                _ = self.cloneVariableLinkInto(dest, child);
+            }
+        }
+        return dest;
     }
 
     fn parseName(guid: [*:0]const u8) DebugParsedName {
@@ -539,7 +528,7 @@ pub const DebugState = struct {
     fn getElementFromEvent(
         self: *DebugState,
         event: *DebugEvent,
-        parent: ?*DebugVariableGroup,
+        parent: ?*DebugVariableLink,
         op: u32,
     ) ?*DebugElement {
         var result: ?*DebugElement = null;
@@ -618,7 +607,7 @@ pub const DebugState = struct {
                 const frame_index: u32 = self.total_frame_count -% 1;
                 const thread: *DebugThread = self.getDebugThread(event.thread_id);
 
-                var default_parent_group: *DebugVariableGroup = self.root_group;
+                var default_parent_group: *DebugVariableLink = self.root_group;
                 if (thread.first_open_data_block) |first_open_data_block| {
                     if (first_open_data_block.group) |group| {
                         default_parent_group = group;
@@ -760,7 +749,7 @@ pub const DebugState = struct {
         return result.?;
     }
 
-    fn addTree(self: *DebugState, group: ?*DebugVariableGroup, position: Vector2) *DebugTree {
+    fn addTree(self: *DebugState, group: ?*DebugVariableLink, position: Vector2) *DebugTree {
         var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree, ArenaPushParams.aligned(@alignOf(DebugTree), true));
         tree.group = group;
         tree.ui_position = position;
@@ -879,7 +868,7 @@ const DebugVariableToTextFlag = enum(u32) {
 
 pub const DebugTree = struct {
     ui_position: Vector2,
-    group: ?*DebugVariableGroup,
+    group: ?*DebugVariableLink,
 
     prev: ?*DebugTree,
     next: ?*DebugTree,
@@ -985,13 +974,20 @@ pub const DebugVariableLink = struct {
     next: *DebugVariableLink,
     prev: *DebugVariableLink,
 
-    children: ?*DebugVariableGroup,
-    element: ?*DebugElement,
-};
+    first_child: *DebugVariableLink,
+    last_child: *DebugVariableLink,
 
-pub const DebugVariableGroup = struct {
     name: [*:0]const u8,
-    sentinel: DebugVariableLink,
+    element: ?*DebugElement,
+
+    pub fn getSentinel(self: *DebugVariableLink) *DebugVariableLink {
+        const result: *DebugVariableLink = @ptrCast(&self.first_child);
+        return result;
+    }
+
+    pub fn hasChildren(self: *DebugVariableLink) bool {
+        return self.first_child != self.getSentinel();
+    }
 };
 
 fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, flags: u32) u32 {
@@ -1146,11 +1142,6 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
 
     return len;
 }
-
-const DebugVariableIterator = struct {
-    link: *DebugVariableLink = undefined,
-    sentinel: *DebugVariableLink = undefined,
-};
 
 const color_table: [11]Color3 = .{
     Color3.new(1, 0, 0),
@@ -1445,8 +1436,8 @@ fn drawTopClocksList(
 
     var link_count: u32 = 0;
     var total_time: f64 = 0;
-    var link: *DebugVariableLink = debug_state.profile_group.sentinel.next;
-    while (link != &debug_state.profile_group.sentinel) : (link = link.next) {
+    var link: *DebugVariableLink = debug_state.profile_group.getSentinel().next;
+    while (link != debug_state.profile_group.getSentinel()) : (link = link.next) {
         link_count += 1;
     }
 
@@ -1454,12 +1445,12 @@ fn drawTopClocksList(
     const sort_a: [*]SortEntry = debug_state.debug_arena.pushArray(link_count, SortEntry, ArenaPushParams.noClear());
     const sort_b: [*]SortEntry = debug_state.debug_arena.pushArray(link_count, SortEntry, ArenaPushParams.noClear());
 
-    link = debug_state.profile_group.sentinel.next;
+    link = debug_state.profile_group.getSentinel().next;
     var index: u32 = 0;
-    while (link != &debug_state.profile_group.sentinel) : (link = link.next) {
+    while (link != debug_state.profile_group.getSentinel()) : (link = link.next) {
         defer index += 1;
 
-        std.debug.assert(link.children == null);
+        std.debug.assert(link.first_child == link.getSentinel());
 
         var entry: *ClockEntry = &entries[index];
         var sort_entry: *SortEntry = &sort_a[index];
@@ -1784,10 +1775,56 @@ fn drawDebugElement(
     }
 }
 
-fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse_position: Vector2) void {
-    var opt_tree: ?*DebugTree = debug_state.tree_sentinel.next;
+fn drawTreeLink(debug_state: *DebugState, layout: *Layout, tree: *DebugTree, link: *DebugVariableLink) void {
+    const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
 
-    const frame_ordinal: u32 = debug_state.viewing_frame_ordinal;
+    if (link.hasChildren()) {
+        const id: DebugId = DebugId.fromLink(tree, link);
+        const debug_id: DebugId = DebugId.fromLink(tree, link);
+        const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
+        var item_interaction: DebugInteraction = DebugInteraction.fromId(id, .ToggleExpansion);
+
+        if (debug_state.alt_ui) {
+            item_interaction = DebugInteraction.fromLink(link, .TearValue);
+        }
+
+        const text = std.mem.span(link.name);
+        const text_bounds = debug_ui.getTextSize(debug_state, text);
+        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+        var element: LayoutElement = layout.beginElementRectangle(&dim);
+        element.defaultInteraction(item_interaction);
+        element.end();
+
+        const is_hot: bool = item_interaction.isHot(debug_state);
+        const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
+
+        const text_position: Vector2 = Vector2.new(
+            element.bounds.min.x(),
+            element.bounds.max.y() - debug_state.getBaseline(),
+        );
+        textOutAt(debug_state, text, text_position, item_color);
+
+        if (view.data == .collapsible and view.data.collapsible.expanded_always) {
+            layout.depth += 1;
+
+            var sublink: *DebugVariableLink = link.first_child;
+            while (sublink != link.getSentinel()) : (sublink = sublink.next) {
+                drawTreeLink(debug_state, layout, tree, sublink);
+            }
+
+            layout.depth -= 1;
+        }
+    } else {
+        const debug_id = DebugId.fromLink(tree, link);
+        drawDebugElement(layout, tree, link.element.?, debug_id, frame_ordinal);
+    }
+}
+
+fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
+    var opt_tree: ?*DebugTree = debug_state.tree_sentinel.next;
+    const render_group: *RenderGroup = &debug_state.render_group;
+
     while (opt_tree) |tree| : (opt_tree = tree.next) {
         if (tree == &debug_state.tree_sentinel) {
             break;
@@ -1796,84 +1833,26 @@ fn drawDebugMainMenu(debug_state: *DebugState, render_group: *RenderGroup, mouse
         var layout: Layout = Layout.begin(debug_state, mouse_position, tree.ui_position);
 
         if (tree.group) |tree_group| {
-            var depth: u32 = 0;
-            var stack: [MAX_VARIABLE_STACK_DEPTH]DebugVariableIterator =
-                [1]DebugVariableIterator{DebugVariableIterator{}} ** MAX_VARIABLE_STACK_DEPTH;
-
-            stack[depth].link = tree_group.sentinel.next;
-            stack[depth].sentinel = &tree_group.sentinel;
-            depth += 1;
-
-            while (depth > 0) {
-                var iterator: *DebugVariableIterator = &stack[depth - 1];
-
-                if (iterator.link == iterator.sentinel) {
-                    depth -= 1;
-                } else {
-                    layout.depth = depth;
-
-                    const link: *DebugVariableLink = iterator.link;
-                    iterator.link = iterator.link.next;
-
-                    if (link.children != null) {
-                        const id: DebugId = DebugId.fromLink(tree, link);
-                        const debug_id: DebugId = DebugId.fromLink(tree, link);
-                        const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
-                        var item_interaction: DebugInteraction = DebugInteraction.fromId(id, .ToggleExpansion);
-
-                        if (debug_state.alt_ui) {
-                            item_interaction = DebugInteraction.fromLink(link, .TearValue);
-                        }
-
-                        const text = std.mem.span(link.children.?.name);
-                        const text_bounds = debug_ui.getTextSize(debug_state, text);
-                        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
-
-                        var element: LayoutElement = layout.beginElementRectangle(&dim);
-                        element.defaultInteraction(item_interaction);
-                        element.end();
-
-                        const is_hot: bool = item_interaction.isHot(debug_state);
-                        const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
-
-                        const text_position: Vector2 = Vector2.new(
-                            element.bounds.min.x(),
-                            element.bounds.max.y() - debug_state.getBaseline(),
-                        );
-                        textOutAt(debug_state, text, text_position, item_color);
-
-                        if (view.data == .collapsible and view.data.collapsible.expanded_always) {
-                            iterator = &stack[depth];
-                            iterator.link = link.children.?.sentinel.next;
-                            iterator.sentinel = &link.children.?.sentinel;
-                            depth += 1;
-                        }
-                    } else {
-                        const debug_id = DebugId.fromLink(tree, link);
-                        drawDebugElement(&layout, tree, link.element.?, debug_id, frame_ordinal);
-                    }
-                }
+            var sublink: *DebugVariableLink = tree_group.first_child;
+            while (sublink != tree_group.getSentinel()) : (sublink = sublink.next) {
+                drawTreeLink(debug_state, &layout, tree, sublink);
             }
         }
 
-        debug_state.at_y = layout.at.y();
+        const move_interaction: DebugInteraction = DebugInteraction{
+            .interaction_type = .Move,
+            .data = .{ .position = &tree.ui_position },
+        };
+        const move_box_color: Color =
+            if (move_interaction.isHot(debug_state)) Color.new(1, 1, 0, 1) else Color.white();
+        const move_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(
+            tree.ui_position.minus(Vector2.new(4, 4)),
+            Vector2.new(4, 4),
+        );
+        render_group.pushRectangle2(ObjectTransform.defaultFlat(), move_box, 0, move_box_color);
 
-        if (true) {
-            const move_interaction: DebugInteraction = DebugInteraction{
-                .interaction_type = .Move,
-                .data = .{ .position = &tree.ui_position },
-            };
-            const move_box_color: Color =
-                if (move_interaction.isHot(debug_state)) Color.new(1, 1, 0, 1) else Color.white();
-            const move_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(
-                tree.ui_position.minus(Vector2.new(4, 4)),
-                Vector2.new(4, 4),
-            );
-            render_group.pushRectangle2(ObjectTransform.defaultFlat(), move_box, 0, move_box_color);
-
-            if (mouse_position.isInRectangle(move_box)) {
-                debug_state.next_hot_interaction = move_interaction;
-            }
+        if (mouse_position.isInRectangle(move_box)) {
+            debug_state.next_hot_interaction = move_interaction;
         }
 
         layout.end();
@@ -1932,8 +1911,8 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
 
         switch (debug_state.hot_interaction.interaction_type) {
             .TearValue => {
-                const root_group: *DebugVariableGroup =
-                    debug_state.cloneVariableGroup(debug_state.hot_interaction.data.link.?);
+                const root_group: *DebugVariableLink =
+                    debug_state.cloneVariableLink(debug_state.hot_interaction.data.link.?);
                 const tree: *DebugTree = debug_state.addTree(root_group, mouse_position);
                 debug_state.hot_interaction.interaction_type = .Move;
                 debug_state.hot_interaction.data = .{ .position = &tree.ui_position };
@@ -1956,20 +1935,6 @@ fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse
 
 fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
     const mouse_delta = mouse_position.minus(debug_state.last_mouse_position);
-    // if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down) {
-    //     if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
-    //         debug_state.menu_position = mouse_position;
-    //     }
-    //     drawDebugMainMenu(debug_state, group, mouse_position);
-    // } else if (input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].half_transitions > 0) {
-    //     drawDebugMainMenu(debug_state, group, mouse_position);
-    //
-    //     if (debug_state.hot_menu_index < debug_variable_list.len) {
-    //         debug_variable_list[debug_state.hot_menu_index].value =
-    //             !debug_variable_list[debug_state.hot_menu_index].value;
-    //     }
-    //     writeHandmadeConfig(debug_state);
-    // }
 
     if (debug_state.interaction.interaction_type != .None) {
         // Mouse move interaction.
@@ -2141,8 +2106,8 @@ fn debugStart(
                 null,
             );
 
-            debug_state.root_group = debug_state.createVariableGroup(4, "Root");
-            debug_state.profile_group = debug_state.createVariableGroup(7, "Profile");
+            debug_state.root_group = debug_state.createVariableLink(4, "Root");
+            debug_state.profile_group = debug_state.createVariableLink(7, "Profile");
 
             // var context: debug_variables.DebugVariableDefinitionContext = .{
             //     .state = debug_state,
@@ -2183,7 +2148,6 @@ fn debugStart(
             debug_state.root_profile_element = debug_state.getElementFromEvent(&root_profile_event, null, 0);
 
             debug_state.paused = false;
-            debug_state.scope_to_record = null;
 
             debug_state.initialized = true;
 
@@ -2212,7 +2176,6 @@ fn debugStart(
         }
 
         debug_state.font_scale = 1;
-        debug_state.at_y = 0.5 * @as(f32, @floatFromInt(height));
         debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
         debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
         debug_state.render_group.orthographicMode(width, height, 1);
@@ -2242,76 +2205,9 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
         ObjectTransform.defaultFlat(),
         Vector2.new(input.mouse_x, input.mouse_y),
     ).xy();
-    const hot_event: ?*DebugEvent = null;
 
-    drawDebugMainMenu(debug_state, group, mouse_position);
+    drawTrees(debug_state, mouse_position);
     interact(debug_state, input, mouse_position);
-
-    if (false) {
-        var counter_index: u32 = 0;
-        while (counter_index < debug_state.counter_count) : (counter_index += 1) {
-            const counter = debug_state.counter_states[counter_index];
-
-            var hit_count = DebugStatistic.begin();
-            var cycle_count = DebugStatistic.begin();
-            var cycle_over_hit = DebugStatistic.begin();
-            for (counter.snapshots) |snapshot| {
-                hit_count.accumulate(@floatFromInt(snapshot.hit_count));
-                cycle_count.accumulate(@floatFromInt(snapshot.cycle_count));
-
-                var coh: f64 = 0;
-                if (snapshot.hit_count > 0) {
-                    coh = @as(f64, @floatFromInt(snapshot.cycle_count)) / @as(f64, @floatFromInt(snapshot.hit_count));
-                }
-                cycle_over_hit.accumulate(coh);
-            }
-            hit_count.end();
-            cycle_count.end();
-            cycle_over_hit.end();
-
-            if (counter.block_name) |block_name| {
-                if (cycle_count.max > 0) {
-                    const bar_width: f32 = 4;
-                    const chart_left: f32 = 0;
-                    const chart_min_y: f32 = debug_state.at_y;
-                    const char_height: f32 = debug_state.debug_font_info.ascender_height * debug_state.font_scale;
-                    const scale: f32 = 1 / @as(f32, @floatCast(cycle_count.max));
-                    for (counter.snapshots, 0..) |snapshot, snapshot_index| {
-                        const this_proportion: f32 = scale * @as(f32, @floatFromInt(snapshot.cycle_count));
-                        const this_height: f32 = char_height * this_proportion;
-                        group.pushRectangle(
-                            Vector2.new(bar_width, this_height),
-                            Vector3.new(
-                                chart_left + bar_width * @as(f32, (@floatFromInt(snapshot_index))) - 0.5 * bar_width,
-                                chart_min_y + 0.5 * this_height,
-                                0,
-                            ),
-                            Color.new(this_proportion, 1, 0, 1),
-                        );
-                    }
-                }
-
-                var buffer: [128]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "{s:32}({d:4}): {d:10}cy, {d:8}h, {d:10}cy/h", .{
-                    block_name,
-                    counter.line_number,
-                    @as(u64, @intFromFloat(cycle_count.average)),
-                    @as(u64, @intFromFloat(hit_count.average)),
-                    @as(u64, @intFromFloat(cycle_over_hit.average)),
-                }) catch "";
-                _ = slice;
-                // textLine(slice);
-            }
-        }
-    }
-
-    if (input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].wasPressed()) {
-        if (hot_event) |event| {
-            debug_state.scope_to_record = event.block_name;
-        } else {
-            debug_state.scope_to_record = null;
-        }
-    }
 
     group.end();
 
