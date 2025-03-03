@@ -25,6 +25,7 @@ const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
+const MemoryArena = shared.MemoryArena;
 const ArenaPushParams = shared.ArenaPushParams;
 const SortEntry = sort.SortEntry;
 const ObjectTransform = rendergroup.ObjectTransform;
@@ -134,9 +135,10 @@ const ElementAddOp = enum(u32) {
 pub const DebugState = struct {
     initialized: bool,
 
-    debug_arena: shared.MemoryArena,
-    per_frame_arena: shared.MemoryArena,
+    debug_arena: MemoryArena,
+    per_frame_arena: MemoryArena,
 
+    default_clip_rect: u32,
     render_group: RenderGroup,
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
@@ -172,7 +174,7 @@ pub const DebugState = struct {
     global_width: f32 = 0,
     global_height: f32 = 0,
 
-    mouse_text_stack_y: f32,
+    mouse_text_layout: Layout,
 
     total_frame_count: u32,
 
@@ -192,6 +194,9 @@ pub const DebugState = struct {
 
     // Per-frame storage management.
     first_free_stored_event: ?*DebugStoredEvent,
+
+    root_info_size: u32,
+    root_info: [*:0]u8,
 
     pub fn get() ?*DebugState {
         var result: ?*DebugState = null;
@@ -880,12 +885,14 @@ const DebugViewType = enum(u32) {
     InlineBlock,
     Collapsible,
     ProfileGraph,
+    ArenaGraph,
 };
 
 const DebugViewDataType = enum(u32) {
     inline_block,
     collapsible,
     profile_graph,
+    arena_graph,
 };
 
 const DebugView = struct {
@@ -897,6 +904,7 @@ const DebugView = struct {
         inline_block: DebugViewInlineBlock,
         collapsible: DebugViewCollapsible,
         profile_graph: DebugViewProfileGraph,
+        arena_graph: DebugViewArenaGraph,
     },
 };
 
@@ -912,6 +920,10 @@ const DebugViewCollapsible = struct {
 const DebugViewProfileGraph = struct {
     block: DebugViewInlineBlock,
     guid: ?[*:0]const u8,
+};
+
+const DebugViewArenaGraph = struct {
+    block: DebugViewInlineBlock,
 };
 
 const DebugProfileNode = extern struct {
@@ -990,7 +1002,7 @@ pub const DebugVariableLink = struct {
     }
 };
 
-fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, flags: u32) u32 {
+fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, element: *DebugElement, event: *DebugEvent, flags: u32) u32 {
     var len: u32 = start_index;
 
     if (flags & DebugVariableToTextFlag.Declaration.toInt() != 0) {
@@ -999,7 +1011,7 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, event: *DebugEvent, f
     }
 
     if (flags & DebugVariableToTextFlag.Name.toInt() != 0) {
-        var name = event.guid;
+        var name = element.guid;
 
         if (flags & DebugVariableToTextFlag.ShowEntireGUID.toInt() == 0) {
             var scan = name;
@@ -1214,13 +1226,8 @@ fn drawFrameSlider(
 
             if (mouse_position.isInRectangle(region_rect)) {
                 var buffer: [128]u8 = undefined;
-                const slice = std.fmt.bufPrintZ(&buffer, "{d}", .{frame_index}) catch "";
-                textOutAt(
-                    debug_state,
-                    slice,
-                    mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)),
-                    Color.white(),
-                );
+                const text = std.fmt.bufPrintZ(&buffer, "{d}", .{frame_index}) catch "";
+                debug_ui.addTooltip(debug_state, text);
 
                 debug_state.next_hot_interaction = DebugInteraction.setUInt32(
                     slider_id,
@@ -1241,8 +1248,6 @@ fn drawProfileIn(
     mouse_position: Vector2,
     root_element: *DebugElement,
 ) void {
-    debug_state.mouse_text_stack_y = 10;
-
     const lane_count: u32 = debug_state.frame_bar_lane_count;
     var lane_height: f32 = 0;
     if (lane_count > 0) {
@@ -1275,6 +1280,7 @@ fn drawProfileIn(
             node,
             lane_height,
             lane_height,
+            1,
         );
     }
 }
@@ -1287,9 +1293,11 @@ fn drawProfileBars(
     root_node: *DebugProfileNode,
     lane_stride: f32,
     lane_height: f32,
+    depth_remaining: u32,
 ) void {
     const frame_span: f32 = @floatFromInt(root_node.duration);
     const pixel_span: f32 = profile_rect.getDimension().x();
+    const base_z: f32 = 100 - 10 * @as(f32, @floatFromInt(depth_remaining));
     var scale: f32 = 0;
     if (frame_span > 0) {
         scale = pixel_span / frame_span;
@@ -1312,21 +1320,16 @@ fn drawProfileBars(
         const lane_y: f32 = profile_rect.max.y() - lane_stride * lane;
 
         const region_rect = math.Rectangle2.new(this_min_x, lane_y - lane_height, this_max_x, lane_y);
-        debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, region_rect, 0, color.toColor(1), 2);
+        debug_state.render_group.pushRectangle2(debug_state.ui_transform, region_rect, base_z, color.toColor(1));
+        debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, region_rect, base_z + 1, Color.black(), 2);
 
         if (mouse_position.isInRectangle(region_rect)) {
             var buffer: [128]u8 = undefined;
-            const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy", .{
+            const text = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy", .{
                 element.guid,
                 node.duration,
             }) catch "";
-            textOutAt(
-                debug_state,
-                slice,
-                mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)),
-                Color.white(),
-            );
-            debug_state.mouse_text_stack_y -= debug_state.getLineAdvance();
+            debug_ui.addTooltip(debug_state, text);
 
             const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
             debug_state.next_hot_interaction = DebugInteraction.setPointer(
@@ -1336,15 +1339,18 @@ fn drawProfileBars(
             );
         }
 
-        drawProfileBars(
-            debug_state,
-            graph_id,
-            region_rect,
-            mouse_position,
-            node,
-            0,
-            lane_height / 2,
-        );
+        if (depth_remaining > 0) {
+            drawProfileBars(
+                debug_state,
+                graph_id,
+                region_rect,
+                mouse_position,
+                node,
+                0,
+                lane_height / 2,
+                depth_remaining - 1,
+            );
+        }
     }
 }
 
@@ -1359,14 +1365,14 @@ fn drawFrameBars(
     const bar_width: f32 = profile_rect.getDimension().x() / @as(f32, @floatFromInt(frame_count));
     var at_x: f32 = profile_rect.min.x();
 
-    debug_state.mouse_text_stack_y = 10;
-
     var frame_index: u32 = 0;
     while (frame_index < frame_count) : (frame_index += 1) {
         if (root_element.frames[frame_index].most_recent_event) |root_event| {
             const root_node: *DebugProfileNode = &root_event.data.profile_node;
             const frame_span: f32 = @floatFromInt(root_node.duration);
             const pixel_span: f32 = profile_rect.getDimension().y();
+            const highlight: bool = frame_index == debug_state.viewing_frame_ordinal;
+            const highlight_dim: f32 = if (highlight) 1 else 0.5;
             var scale: f32 = 0;
             if (frame_span > 0) {
                 scale = pixel_span / frame_span;
@@ -1385,21 +1391,27 @@ fn drawFrameBars(
                     this_min_y + scale * @as(f32, @floatFromInt(node.duration));
 
                 const region_rect = math.Rectangle2.new(at_x, this_min_y, at_x + bar_width, this_max_y);
-                debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, region_rect, 0, color.toColor(1), 2);
+                debug_state.render_group.pushRectangle2(
+                    debug_state.ui_transform,
+                    region_rect,
+                    0,
+                    color.toColor(1).scaledTo(highlight_dim),
+                );
+                debug_state.render_group.pushRectangle2Outline(
+                    debug_state.ui_transform,
+                    region_rect,
+                    0,
+                    Color.black(),
+                    2,
+                );
 
                 if (mouse_position.isInRectangle(region_rect)) {
                     var buffer: [128]u8 = undefined;
-                    const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy", .{
+                    const text = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy", .{
                         element.guid,
                         node.duration,
                     }) catch "";
-                    textOutAt(
-                        debug_state,
-                        slice,
-                        mouse_position.plus(Vector2.new(0, debug_state.mouse_text_stack_y)),
-                        Color.white(),
-                    );
-                    debug_state.mouse_text_stack_y -= debug_state.getLineAdvance();
+                    debug_ui.addTooltip(debug_state, text);
 
                     const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
                     debug_state.next_hot_interaction = DebugInteraction.setPointer(
@@ -1412,6 +1424,44 @@ fn drawFrameBars(
         }
 
         at_x += bar_width;
+    }
+}
+
+fn drawArenaOccupancy(
+    debug_state: *DebugState,
+    graph_id: DebugId,
+    frame_rect: Rectangle2,
+    mouse_position: Vector2,
+    root_element: *DebugElement,
+) void {
+    _ = graph_id;
+    _ = mouse_position;
+
+    const root_frame: *DebugElementFrame = &root_element.frames[debug_state.viewing_frame_ordinal];
+    if (root_frame.oldest_event) |event| {
+        const arena: *MemoryArena = event.data.event.data.MemoryArena;
+        const split_point: f32 = math.lerpf(
+            frame_rect.min.x(),
+            frame_rect.max.x(),
+            @floatCast(@as(f64, @floatFromInt(arena.used)) / @as(f64, @floatFromInt(arena.size))),
+        );
+        const used_rect = math.Rectangle2.new(
+            frame_rect.min.x(),
+            frame_rect.min.y(),
+            split_point,
+            frame_rect.max.y(),
+        );
+        const unused_rect = math.Rectangle2.new(
+            split_point,
+            frame_rect.min.y(),
+            frame_rect.max.x(),
+            frame_rect.max.y(),
+        );
+        debug_state.render_group.pushRectangle2(debug_state.ui_transform, used_rect, 0, Color.new(1, 0.5, 0, 1));
+        debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, used_rect, 0, Color.black(), 2);
+
+        debug_state.render_group.pushRectangle2(debug_state.ui_transform, unused_rect, 0, Color.new(0, 1, 0, 1));
+        debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, unused_rect, 0, Color.black(), 2);
     }
 }
 
@@ -1500,6 +1550,7 @@ fn drawTopClocksList(
             slice,
             at,
             Color.white(),
+            null,
         );
 
         if (at.y() < profile_rect.min.y()) {
@@ -1604,16 +1655,71 @@ fn drawDebugElement(
             layout_element.defaultInteraction(item_interaction);
             layout_element.end();
 
+            render_group.pushRectangle2(debug_state.backing_transform, layout_element.bounds, 0, Color.black());
+
             if (opt_bitmap) |bitmap| {
-                render_group.pushRectangle2(no_transform, layout_element.bounds, 0, Color.black());
                 render_group.pushBitmap(
-                    no_transform,
+                    debug_state.backing_transform,
                     bitmap,
                     bitmap_scale,
-                    layout_element.bounds.min.toVector3(0),
+                    layout_element.bounds.min.toVector3(1),
                     Color.white(),
                     0,
                 );
+            }
+        },
+        .MemoryArena,
+        .ArenaOccupancy => {
+            if (view.view_type != .ArenaGraph) {
+                view.view_type = .ArenaGraph;
+                view.data = .{ .arena_graph = .{ .block = view.data.inline_block } };
+            }
+
+            const graph: *DebugViewArenaGraph = &view.data.arena_graph;
+            if (graph.block.dimension.x() == 0 and graph.block.dimension.y() == 0) {
+                graph.block.dimension = Vector2.new(1400, 100);
+            }
+
+            layout.beginRow();
+            layout.label(std.mem.span(element.getName()));
+            layout.booleanButton(
+                "Occupancy",
+                element.type == .ArenaOccupancy,
+                DebugInteraction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ArenaOccupancy)),
+            );
+            layout.endRow();
+
+            var layout_element: LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
+            layout_element.makeSizable();
+            layout_element.end();
+
+            render_group.pushRectangle2(
+                debug_state.backing_transform,
+                layout_element.bounds,
+                0,
+                Color.new(0, 0, 0, 0.75),
+            );
+
+            const old_clip_rect: u32 = render_group.current_clip_rect_index;
+            defer render_group.current_clip_rect_index = old_clip_rect;
+
+            render_group.current_clip_rect_index = render_group.pushClipRectByRectangle(
+                debug_state.backing_transform,
+                layout_element.bounds,
+                0,
+            );
+
+            switch (element.type) {
+                .ArenaOccupancy => {
+                    drawArenaOccupancy(
+                        debug_state,
+                        debug_id,
+                        layout_element.bounds,
+                        layout.mouse_position,
+                        element,
+                    );
+                },
+                else => {},
             }
         },
         .ThreadIntervalGraph, .FrameBarGraph, .TopClocksList => {
@@ -1624,7 +1730,7 @@ fn drawDebugElement(
 
             const graph: *DebugViewProfileGraph = &view.data.profile_graph;
             if (graph.block.dimension.x() == 0 and graph.block.dimension.y() == 0) {
-                graph.block.dimension = Vector2.new(1800, 280);
+                graph.block.dimension = Vector2.new(1400, 280);
             }
 
             layout.beginRow();
@@ -1650,7 +1756,7 @@ fn drawDebugElement(
             layout_element.makeSizable();
             layout_element.end();
 
-            debug_state.render_group.pushRectangle2(
+            render_group.pushRectangle2(
                 debug_state.backing_transform,
                 layout_element.bounds,
                 0,
@@ -1660,7 +1766,7 @@ fn drawDebugElement(
             const old_clip_rect: u32 = render_group.current_clip_rect_index;
             defer render_group.current_clip_rect_index = old_clip_rect;
 
-            render_group.current_clip_rect_index = debug_state.render_group.pushClipRectByRectangle(
+            render_group.current_clip_rect_index = render_group.pushClipRectByRectangle(
                 debug_state.backing_transform,
                 layout_element.bounds,
                 0,
@@ -1707,8 +1813,14 @@ fn drawDebugElement(
             }
         },
         .FrameSlider => {
-            var dimension = Vector2.new(1800, 32);
-            var layout_element: LayoutElement = layout.beginElementRectangle(&dimension);
+            var dimension: *Vector2 = &view.data.inline_block.dimension;
+            if (dimension.x() == 0 and dimension.y() == 0) {
+                _ = dimension.setX(1400);
+                _ = dimension.setY(32);
+            }
+
+            var layout_element: LayoutElement = layout.beginElementRectangle(dimension);
+            layout_element.makeSizable();
             layout_element.end();
 
             layout.beginRow();
@@ -1769,7 +1881,7 @@ fn drawDebugElement(
             const event: *DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else &null_event;
             var text: [4096:0]u8 = undefined;
             var len: u32 = 0;
-            len = debugEventToText(&text, len, event, DebugVariableToTextFlag.displayFlags());
+            len = debugEventToText(&text, len, element, event, DebugVariableToTextFlag.displayFlags());
             _ = basicTextElement(&text, layout, item_interaction, item_color, null, null, null);
         },
     }
@@ -1803,7 +1915,7 @@ fn drawTreeLink(debug_state: *DebugState, layout: *Layout, tree: *DebugTree, lin
             element.bounds.min.x(),
             element.bounds.max.y() - debug_state.getBaseline(),
         );
-        textOutAt(debug_state, text, text_position, item_color);
+        textOutAt(debug_state, text, text_position, item_color, null);
 
         if (view.data == .collapsible and view.data.collapsible.expanded_always) {
             layout.depth += 1;
@@ -1833,10 +1945,7 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
         var layout: Layout = Layout.begin(debug_state, mouse_position, tree.ui_position);
 
         if (tree.group) |tree_group| {
-            var sublink: *DebugVariableLink = tree_group.first_child;
-            while (sublink != tree_group.getSentinel()) : (sublink = sublink.next) {
-                drawTreeLink(debug_state, &layout, tree, sublink);
-            }
+            drawTreeLink(debug_state, &layout, tree, tree_group);
         }
 
         const move_interaction: DebugInteraction = DebugInteraction{
@@ -2107,6 +2216,10 @@ fn debugStart(
             );
 
             debug_state.root_group = debug_state.createVariableLink(4, "Root");
+            debug_state.root_info_size = 256;
+            debug_state.root_info = @ptrCast(debug_state.debug_arena.pushSize(debug_state.root_info_size, null));
+            debug_state.root_group.name = debug_state.root_info;
+
             debug_state.profile_group = debug_state.createVariableLink(7, "Profile");
 
             // var context: debug_variables.DebugVariableDefinitionContext = .{
@@ -2189,6 +2302,8 @@ fn debugStart(
         debug_state.ui_transform.sort_bias = 300000;
         debug_state.text_transform.sort_bias = 400000;
 
+        debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
+
         if (!debug_state.paused) {
             debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
         }
@@ -2199,6 +2314,15 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     TimedBlock.beginFunction(@src(), .DebugEnd);
     defer TimedBlock.endFunction(@src(), .DebugEnd);
 
+    // Set the text shown in the root node of the debug menu.
+    const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
+    _ = std.fmt.bufPrintZ(debug_state.root_info[0..debug_state.root_info_size], "{d:0.2}ms {d}e {d}p {d}d", .{
+        most_recent_frame.wall_seconds_elapsed * 1000,
+        most_recent_frame.stored_event_count,
+        most_recent_frame.profile_block_count,
+        most_recent_frame.data_block_count,
+    }) catch "";
+
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
     const mouse_position: Vector2 = group.unproject(
@@ -2206,7 +2330,10 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
         Vector2.new(input.mouse_x, input.mouse_y),
     ).xy();
 
+    debug_state.mouse_text_layout = Layout.begin(debug_state, mouse_position, mouse_position);
     drawTrees(debug_state, mouse_position);
+    debug_state.mouse_text_layout.end();
+
     interact(debug_state, input, mouse_position);
 
     group.end();

@@ -622,6 +622,10 @@ pub fn updateAndRenderWorld(
     var entity_index: u32 = 0;
     while (entity_index < screen_sim_region.entity_count) : (entity_index += 1) {
         const entity = &screen_sim_region.entities[entity_index];
+        const entity_debug_id = debug_interface.DebugId.fromPointer(&world_mode.low_entities[entity.storage_index]);
+        if (debug_interface.requested(entity_debug_id)) {
+            DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
+        }
 
         if (entity.updatable) {
             const delta_time = input.frame_delta_time;
@@ -1016,14 +1020,20 @@ pub fn updateAndRenderWorld(
                     );
                 },
                 .Wall => {
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        transient_state.assets.getFirstBitmap(.Tree),
-                        2.5,
-                        Vector3.zero(),
-                        Color.white(),
-                        null,
-                    );
+                    var opt_bitmap_id = transient_state.assets.getFirstBitmap(.Tree);
+                    if (opt_bitmap_id) |bitmap_id| {
+                        if (debug_interface.requested(entity_debug_id)) {
+                            DebugInterface.debugNamedValue(@src(), &opt_bitmap_id.?, "bitmap_id");
+                        }
+                        render_group.pushBitmapId(
+                            entity_transform,
+                            bitmap_id,
+                            2.5,
+                            Vector3.zero(),
+                            Color.white(),
+                            null,
+                        );
+                    }
                 },
                 .Stairwell => {
                     const stairwell_color1 = Color.new(1, 0.5, 0, 1);
@@ -1072,6 +1082,11 @@ pub fn updateAndRenderWorld(
                     const head_z = 0.25 * head_bob_sine;
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
+                    var bitmap_id = hero_bitmaps.head;
+                    if (debug_interface.requested(entity_debug_id)) {
+                        DebugInterface.debugNamedValue(@src(), &bitmap_id.?, "bitmap_id");
+                    }
+
                     render_group.pushBitmapId(
                         entity_transform,
                         transient_state.assets.getFirstBitmap(.Shadow),
@@ -1082,7 +1097,7 @@ pub fn updateAndRenderWorld(
                     );
                     render_group.pushBitmapId(
                         entity_transform,
-                        hero_bitmaps.head,
+                        bitmap_id,
                         2.5,
                         Vector3.new(0, 0, head_z),
                         Color.white(),
@@ -1111,9 +1126,6 @@ pub fn updateAndRenderWorld(
             }
 
             if (debug_interface.DEBUG_UI_ENABLED) {
-                const entity_debug_id =
-                    debug_interface.DebugId.fromPointer(&world_mode.low_entities[entity.storage_index]);
-
                 var volume_index: u32 = 0;
                 while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
                     const volume = entity.collision.volumes[volume_index];
@@ -1141,36 +1153,33 @@ pub fn updateAndRenderWorld(
                         );
                     }
                 }
+            }
+        }
 
-                if (debug_interface.requested(entity_debug_id)) {
-                    DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
-                    {
-                        DebugInterface.debugValue(@src(), &entity.storage_index, "storage_index");
-                        DebugInterface.debugValue(@src(), &entity.updatable, "updatable");
-                        DebugInterface.debugValue(@src(), &entity.type, "type");
-                        DebugInterface.debugValue(@src(), &entity.flags, "flags");
-                        DebugInterface.debugValue(@src(), &entity.position, "position");
-                        DebugInterface.debugValue(@src(), &entity.velocity, "velocity");
-                        DebugInterface.debugValue(@src(), &entity.distance_limit, "distance_limit");
-                        DebugInterface.debugValue(@src(), &entity.facing_direction, "facing_direction");
-                        DebugInterface.debugValue(@src(), &entity.head_bob_time, "head_bob_time");
-                        DebugInterface.debugValue(@src(), &entity.abs_tile_z_delta, "abs_tile_z_delta");
-                        DebugInterface.debugValue(@src(), &entity.hit_point_max, "hit_point_max");
-                        DebugInterface.debugValue(@src(), &hero_bitmaps.torso, "torso");
-                        // DebugInterface.debugBeginArray(entity.hit_points);
-                        // var hit_point_index: u32 = 0;
-                        // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-                        //     DebugInterface.debugValue(@src(), entity.hit_points[hit_point_index]);
-                        // }
-                        // DebugInterface.debugEndArray();
-                        // DebugInterface.debugValue(@src(), entity, "sword");
-                        DebugInterface.debugValue(@src(), &entity.walkable_dimension, "walkable_dimension");
-                        DebugInterface.debugValue(@src(), &entity.walkable_height, "walkable_height");
-                    }
-                    DebugInterface.debugEndDataBlock(@src());
-
-                    hot_entity_count += 1;
-                }
+        if (debug_interface.DEBUG_UI_ENABLED) {
+            if (debug_interface.requested(entity_debug_id)) {
+                DebugInterface.debugValue(@src(), &entity.storage_index, "storage_index");
+                DebugInterface.debugValue(@src(), &entity.updatable, "updatable");
+                DebugInterface.debugValue(@src(), &entity.type, "type");
+                DebugInterface.debugValue(@src(), &entity.flags, "flags");
+                DebugInterface.debugValue(@src(), &entity.position, "position");
+                DebugInterface.debugValue(@src(), &entity.velocity, "velocity");
+                DebugInterface.debugValue(@src(), &entity.distance_limit, "distance_limit");
+                DebugInterface.debugValue(@src(), &entity.facing_direction, "facing_direction");
+                DebugInterface.debugValue(@src(), &entity.head_bob_time, "head_bob_time");
+                DebugInterface.debugValue(@src(), &entity.abs_tile_z_delta, "abs_tile_z_delta");
+                DebugInterface.debugValue(@src(), &entity.hit_point_max, "hit_point_max");
+                // DebugInterface.debugBeginArray(entity.hit_points);
+                // var hit_point_index: u32 = 0;
+                // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
+                //     DebugInterface.debugValue(@src(), entity.hit_points[hit_point_index]);
+                // }
+                // DebugInterface.debugEndArray();
+                // DebugInterface.debugValue(@src(), entity, "sword");
+                DebugInterface.debugValue(@src(), &entity.walkable_dimension, "walkable_dimension");
+                DebugInterface.debugValue(@src(), &entity.walkable_height, "walkable_height");
+                hot_entity_count += 1;
+                DebugInterface.debugEndDataBlock(@src());
             }
         }
     }

@@ -172,10 +172,10 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "Profile");
         {
-            DebugInterface.debugUIElement(@src(), .FrameSlider, "FrameSlider");
             DebugInterface.debugUIElement(@src(), .LastFrameInfo, "LastFrameInfo");
             DebugInterface.debugUIElement(@src(), .DebugMemoryInfo, "DebugMemoryInfo");
             DebugInterface.debugUIElement(@src(), .TopClocksList, "updateAndRender");
+            DebugInterface.debugUIElement(@src(), .FrameSlider, "FrameSlider");
         }
         DebugInterface.debugEndDataBlock(@src());
     }
@@ -288,6 +288,14 @@ pub export fn updateAndRender(
 
         transient_state.is_initialized = true;
     }
+
+    DebugInterface.debugBeginDataBlock(@src(), "Memory");
+    {
+        DebugInterface.debugValue(@src(), &state.mode_arena, "ModeArena");
+        DebugInterface.debugValue(@src(), &state.audio_arena, "AudioArena");
+        DebugInterface.debugValue(@src(), &transient_state.arena, "TransientArena");
+    }
+    DebugInterface.debugEndDataBlock(@src());
 
     if (transient_state.main_generation_id != 0) {
         transient_state.assets.endGeneration(transient_state.main_generation_id);

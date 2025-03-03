@@ -56,7 +56,7 @@ const DebugInteractionTargetType = enum(u32) {
 
 pub const DebugInteraction = struct {
     id: DebugId = undefined,
-    interaction_type: DebugInteractionType,
+    interaction_type: DebugInteractionType = .None,
 
     target: ?*anyopaque = null,
     pointer_target: ?*?*const anyopaque = null,
@@ -199,6 +199,11 @@ pub const Layout = struct {
 
     pub fn beginRow(self: *Layout) void {
         self.no_line_feed += 1;
+    }
+
+    pub fn label(self: *Layout, name: [:0]const u8) void {
+        const null_interaction: DebugInteraction = .{};
+        _ = basicTextElement(name, self, null_interaction, Color.white(), Color.white(), null, null);
     }
 
     pub fn actionButton(self: *Layout, name: [:0]const u8, interaction: DebugInteraction) void {
@@ -389,7 +394,7 @@ pub fn basicTextElement(
             layout_element.bounds.min.x() + border,
             layout_element.bounds.max.y() - border - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
         );
-        textOutAt(layout.debug_state, text, text_position, if (is_hot) hot_color else item_color);
+        textOutAt(layout.debug_state, text, text_position, if (is_hot) hot_color else item_color, null);
 
         if (opt_backdrop_color) |backdrop_color| {
             layout.debug_state.render_group.pushRectangle2(
@@ -403,12 +408,35 @@ pub fn basicTextElement(
     return dim;
 }
 
-pub fn textOutAt(debug_state: *DebugState, text: [:0]const u8, position: Vector2, color: Color) void {
-    _ = textOp(debug_state, .DrawText, text, position, color);
+pub fn textOutAt(debug_state: *DebugState, text: [:0]const u8, position: Vector2, color: Color, opt_z: ?f32) void {
+    _ = textOp(debug_state, .DrawText, text, position, color, opt_z);
 }
 
 pub fn getTextSize(debug_state: *DebugState, text: [:0]const u8) Rectangle2 {
-    return textOp(debug_state, .SizeText, text, Vector2.zero(), Color.white());
+    return textOp(debug_state, .SizeText, text, Vector2.zero(), Color.white(), null);
+}
+
+pub fn addTooltip(debug_state: *DebugState, text: [:0]const u8) void {
+    var layout: *Layout = &debug_state.mouse_text_layout;
+
+    if (layout.debug_state.debug_font_info) |font_info| {
+        const render_group: *RenderGroup = &debug_state.render_group;
+        const old_clip_rect: u32 = render_group.current_clip_rect_index;
+        render_group.current_clip_rect_index = debug_state.default_clip_rect;
+        defer render_group.current_clip_rect_index = old_clip_rect;
+
+        const text_bounds = getTextSize(layout.debug_state, text);
+        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+        var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
+        layout_element.end();
+
+        const text_position: Vector2 = Vector2.new(
+            layout_element.bounds.min.x(),
+            layout_element.bounds.max.y() - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
+        );
+        textOutAt(layout.debug_state, text, text_position, Color.white(), 10000);
+    }
 }
 
 fn isHex(char: u8) bool {
@@ -433,10 +461,12 @@ pub fn textOp(
     text: [:0]const u8,
     position: Vector2,
     color_in: Color,
+    opt_z: ?f32,
 ) Rectangle2 {
     var result: Rectangle2 = Rectangle2.invertedInfinity();
     var rect_found = false;
     var color = color_in;
+    const z: f32 = opt_z orelse 0;
 
     var render_group: *RenderGroup = &debug_state.render_group;
     if (debug_state.debug_font) |font| {
@@ -499,7 +529,7 @@ pub fn textOp(
                         if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
                             const info = render_group.assets.getBitmapInfo(bitmap_id);
                             const bitmap_scale = char_scale * @as(f32, @floatFromInt(info.dim[1]));
-                            const bitamp_offset: Vector3 = Vector3.new(x, position.y(), 0);
+                            const bitamp_offset: Vector3 = Vector3.new(x, position.y(), z);
 
                             if (op == .DrawText) {
                                 render_group.pushBitmapId(

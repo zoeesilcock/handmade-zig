@@ -12,6 +12,7 @@ const Vector4 = math.Vector4;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
+const MemoryArena = shared.MemoryArena;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedSound = asset.LoadedSound;
 const Assets = asset.Assets;
@@ -90,6 +91,7 @@ pub const DebugType = if (INTERNAL) enum(u32) {
     SoundId,
     FontId,
     Enum,
+    MemoryArena,
 
     ThreadIntervalGraph,
     FrameBarGraph,
@@ -97,6 +99,7 @@ pub const DebugType = if (INTERNAL) enum(u32) {
     DebugMemoryInfo,
     FrameSlider,
     TopClocksList,
+    ArenaOccupancy,
 } else enum(u32) {};
 
 pub const DebugEvent = if (INTERNAL) extern struct {
@@ -121,6 +124,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         SoundId: SoundId,
         FontId: FontId,
         Enum: u32,
+        MemoryArena: *shared.MemoryArena,
     } = undefined,
 
     pub fn debugName(
@@ -248,6 +252,13 @@ pub const DebugEvent = if (INTERNAL) extern struct {
                 }
                 self.event_type = .FontId;
                 self.data = .{ .FontId = dest.* };
+            },
+            MemoryArena => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.MemoryArena.*;
+                }
+                self.event_type = .MemoryArena;
+                self.data = .{ .MemoryArena = dest };
             },
             else => {
                 switch (@typeInfo(@TypeOf(source))) {
@@ -390,6 +401,15 @@ pub const DebugInterface = if (INTERNAL) struct {
     ) void {
         const guid = DebugEvent.debugName(source, null, field_name);
         var event = DebugEvent.record(.Unknown, guid);
+        event.setValue(value_ptr.*, value_ptr);
+    }
+
+    pub fn debugNamedValue(
+        comptime source: std.builtin.SourceLocation,
+        value_ptr: anytype,
+        comptime field_name: []const u8,
+    ) void {
+        var event = DebugEvent.record(.Unknown, source.fn_name ++ field_name);
         event.setValue(value_ptr.*, value_ptr);
     }
 

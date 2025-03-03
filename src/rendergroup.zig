@@ -201,7 +201,10 @@ fn getRenderEntityBasisPosition(
 
     result.sort_key =
         object_transform.sort_bias +
-        4096 * (2 * position.z() + 1 * @as(f32, @floatFromInt(@intFromBool(object_transform.upright)))) - position.y();
+        4096 * (2 * position.z() +
+        original_position.z() +
+        1 * @as(f32, @floatFromInt(@intFromBool(object_transform.upright)))) -
+        position.y();
 
     return result;
 }
