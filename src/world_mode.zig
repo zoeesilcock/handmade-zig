@@ -52,7 +52,7 @@ pub const GameModeWorld = struct {
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
 
     null_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    standard_room_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
+    floor_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
     wall_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
     stair_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     player_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
@@ -213,10 +213,10 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     const tiles_per_height: u32 = 9;
     const tile_depth_in_meters = world_mode.typical_floor_height;
     world_mode.null_collision = makeNullCollision(world_mode);
-    world_mode.standard_room_collision = makeSimpleGroundedCollision(
+    world_mode.floor_collision = makeSimpleFloorCollision(
         world_mode,
-        tile_side_in_meters * tiles_per_width,
-        tile_side_in_meters * tiles_per_height,
+        tile_side_in_meters,
+        tile_side_in_meters,
         tile_depth_in_meters,
     );
     world_mode.wall_collision = makeSimpleGroundedCollision(
@@ -250,7 +250,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..200) |_| {
+    for (0..1) |_| {
         // const door_direction = 3;
         const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
         // const door_direction = series.randomChoice(2);
@@ -405,112 +405,6 @@ pub fn updateAndRenderWorld(
     const fade_bottom_start_z: f32 = -2 * world_mode.typical_floor_height;
     const fade_bottom_end_z: f32 = -2.25 * world_mode.typical_floor_height;
 
-    // Draw ground.
-    if (global_config.GroundChunks_Enabled) {
-        TimedBlock.beginBlock(@src(), .GroundChunksOn);
-        defer TimedBlock.endBlock(@src(), .GroundChunksOn);
-
-        var ground_buffer_index: u32 = 0;
-        while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
-            const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
-
-            if (ground_buffer.position.isValid()) {
-                const bitmap = &ground_buffer.bitmap;
-                const delta = world.subtractPositions(world_mode.world, &ground_buffer.position, &world_mode.camera_position);
-
-                render_group.global_alpha = 1;
-                if (delta.z() > fade_top_start_z) {
-                    render_group.global_alpha = math.clamp01MapToRange(
-                        fade_top_end_z,
-                        fade_top_start_z,
-                        delta.z(),
-                    );
-                } else if (delta.z() < fade_bottom_start_z) {
-                    render_group.global_alpha = math.clamp01MapToRange(
-                        fade_bottom_end_z,
-                        fade_bottom_start_z,
-                        delta.z(),
-                    );
-                }
-
-                var transform = ObjectTransform.defaultFlat();
-                transform.offset_position = delta;
-
-                const ground_side_in_meters = world_mode.world.chunk_dimension_in_meters.x();
-                render_group.pushBitmap(transform, bitmap, ground_side_in_meters, Vector3.zero(), Color.white(), 1);
-
-                if (global_config.GroundChunks_Outlines) {
-                    render_group.pushRectangleOutline(
-                        transform,
-                        Vector2.splat(ground_side_in_meters),
-                        delta,
-                        Color.new(1, 1, 0, 1),
-                        0.2,
-                    );
-                }
-            }
-        }
-        render_group.global_alpha = 1;
-
-        // Populate ground chunks.
-        const min_chunk_position = world.mapIntoChunkSpace(
-            world_mode.world,
-            world_mode.camera_position,
-            camera_bounds_in_meters.getMinCorner(),
-        );
-        const max_chunk_position = world.mapIntoChunkSpace(
-            world_mode.world,
-            world_mode.camera_position,
-            camera_bounds_in_meters.getMaxCorner(),
-        );
-
-        var chunk_z = min_chunk_position.chunk_z;
-        while (chunk_z <= max_chunk_position.chunk_z) : (chunk_z += 1) {
-            var chunk_y = min_chunk_position.chunk_y;
-            while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
-                var chunk_x = min_chunk_position.chunk_x;
-                while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
-                    const chunk_center = world.centeredChunkPoint(chunk_x, chunk_y, chunk_z);
-
-                    var opt_furthest_buffer: ?*shared.GroundBuffer = null;
-                    var furthest_buffer_length_squared: f32 = 0;
-                    ground_buffer_index = 0;
-                    while (ground_buffer_index < transient_state.ground_buffer_count) : (ground_buffer_index += 1) {
-                        const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
-                        if (world.areInSameChunk(world_mode.world, &ground_buffer.position, &chunk_center)) {
-                            // Buffer already exists.
-                            opt_furthest_buffer = null;
-                            break;
-                        } else if (ground_buffer.position.isValid()) {
-                            const buffer_relative_position = world.subtractPositions(
-                                world_mode.world,
-                                &ground_buffer.position,
-                                &world_mode.camera_position,
-                            );
-                            const buffer_length_squared = buffer_relative_position.xy().lengthSquared();
-                            if (buffer_length_squared > furthest_buffer_length_squared) {
-                                opt_furthest_buffer = ground_buffer;
-                                furthest_buffer_length_squared = buffer_length_squared;
-                            }
-                        } else {
-                            furthest_buffer_length_squared = std.math.floatMax(f32);
-                            opt_furthest_buffer = ground_buffer;
-                        }
-                    }
-
-                    if (opt_furthest_buffer) |furthest_buffer| {
-                        fillGroundChunk(
-                            world_mode,
-                            transient_state,
-                            furthest_buffer,
-                            &chunk_center,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
     for (&input.controllers, 0..) |*controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
         controlled_hero.movement_direction = Vector2.zero();
@@ -544,10 +438,6 @@ pub fn updateAndRenderWorld(
                 if (controller.move_right.ended_down) {
                     controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(1, 0));
                 }
-            }
-
-            if (controller.start_button.ended_down) {
-                controlled_hero.vertical_direction = 3;
             }
 
             if (controller.action_up.ended_down) {
@@ -739,7 +629,7 @@ pub fn updateAndRenderWorld(
                 .Wall => {},
                 .Stairwell => {},
                 .Monster => {},
-                .Space => {},
+                .Floor => {},
                 else => {
                     unreachable;
                 },
@@ -1104,20 +994,28 @@ pub fn updateAndRenderWorld(
                         null,
                     );
                 },
-                .Space => {
-                    if (global_config.Simulation_UseSpaceOutlines) {
-                        const space_color = Color.new(0, 0.5, 1, 1);
-                        var volume_index: u32 = 0;
-                        while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                            const volume = entity.collision.volumes[volume_index];
-                            render_group.pushRectangleOutline(
-                                entity_transform,
-                                volume.dimension.xy(),
-                                volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                                space_color,
-                                0.1,
-                            );
-                        }
+                .Floor => {
+                    var volume_index: u32 = 0;
+                    while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+                        const volume = entity.collision.volumes[volume_index];
+                        render_group.pushRectangleOutline(
+                            entity_transform,
+                            volume.dimension.xy(),
+                            volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                            Color.new(0, 0.5, 1, 1),
+                            0.1,
+                        );
+                    }
+
+                    var traversable_index: u32 = 0;
+                    while (traversable_index < entity.collision.traversable_count) : (traversable_index += 1) {
+                        const traversable = entity.collision.traversables[traversable_index];
+                        render_group.pushRectangle(
+                            entity_transform,
+                            Vector2.new(0.1, 0.1),
+                            traversable.position,
+                            Color.new(1, 0.5, 0, 1),
+                        );
                     }
                 },
                 else => {
@@ -1361,13 +1259,21 @@ fn addGroundedEntity(
     return entity;
 }
 
-fn addStandardRoom(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
-    const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = addGroundedEntity(world_mode, .Space, world_position, world_mode.standard_room_collision);
-
-    entity.low.sim.addFlags(sim.SimEntityFlags.Traversable.toInt());
-
-    return entity;
+fn addStandardRoom(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
+    var offset_x: i32 = -8;
+    while (offset_x <= 8) : (offset_x += 1) {
+        var offset_y: i32 = -4;
+        while (offset_y <= 4) : (offset_y += 1) {
+            const world_position = chunkPositionFromTilePosition(
+                world_mode.world,
+                abs_tile_x + offset_x,
+                abs_tile_y + offset_y,
+                abs_tile_z,
+                null,
+            );
+            _ = addGroundedEntity(world_mode, .Floor, world_position, world_mode.floor_collision);
+        }
+    }
 }
 
 fn addWall(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
@@ -1496,6 +1402,24 @@ fn makeSimpleGroundedCollision(
     return group;
 }
 
+fn makeSimpleFloorCollision(
+    world_mode: *GameModeWorld,
+    x_dimension: f32,
+    y_dimension: f32,
+    z_dimension: f32,
+) *sim.SimEntityCollisionVolumeGroup {
+    const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup, null);
+
+    group.volume_count = 0;
+    group.traversable_count = 1;
+    group.traversables = world_mode.world.arena.pushArray(group.traversable_count, sim.SimEntityTraversablePoint, null);
+    group.traversables[0].position = Vector3.zero();
+    group.total_volume.offset_position = Vector3.new(0, 0, 0);
+    group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
+
+    return group;
+}
+
 fn makeNullCollision(world_mode: *GameModeWorld) *sim.SimEntityCollisionVolumeGroup {
     const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup, null);
 
@@ -1538,142 +1462,4 @@ pub fn chunkPositionFromTilePosition(
     std.debug.assert(world.isVector3Canonical(game_world, result.offset));
 
     return result;
-}
-
-fn fillGroundChunk(
-    world_mode: *GameModeWorld,
-    transient_state: *TransientState,
-    ground_buffer: *shared.GroundBuffer,
-    chunk_position: *const world.WorldPosition,
-) void {
-    if (handmade.beginTaskWithMemory(transient_state, true)) |task| {
-        var work: *FillGroundChunkWork = task.arena.pushStruct(
-            FillGroundChunkWork,
-            ArenaPushParams.aligned(@alignOf(FillGroundChunkWork), true),
-        );
-        work.world_mode = world_mode;
-        work.transient_state = transient_state;
-        work.ground_buffer = ground_buffer;
-        work.chunk_position = chunk_position.*;
-        work.task = task;
-        ground_buffer.position = chunk_position.*;
-        shared.platform.addQueueEntry(transient_state.low_priority_queue, doFillGroundChunkWork, work);
-    }
-}
-
-const FillGroundChunkWork = struct {
-    transient_state: *TransientState,
-    world_mode: *GameModeWorld,
-    ground_buffer: *shared.GroundBuffer,
-    chunk_position: world.WorldPosition,
-
-    task: *shared.TaskWithMemory,
-};
-
-pub fn doFillGroundChunkWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
-    _ = queue;
-
-    TimedBlock.beginFunction(@src(), .FillGroundChunk);
-    defer TimedBlock.endFunction(@src(), .FillGroundChunk);
-
-    const work: *FillGroundChunkWork = @ptrCast(@alignCast(data));
-    //
-    // const buffer = &work.ground_buffer.bitmap;
-    // buffer.alignment_percentage = Vector2.new(0.5, 0.5);
-    // buffer.width_over_height = 1.0;
-    //
-    // const width: f32 = work.world_mode.world.chunk_dimension_in_meters.x();
-    // const height: f32 = work.world_mode.world.chunk_dimension_in_meters.y();
-    // std.debug.assert(width == height);
-    // var half_dim = Vector2.new(width, height).scaledTo(0.5);
-    //
-    // const meters_to_pixels = @as(f32, @floatFromInt(buffer.width - 2)) / width;
-    // var render_group = RenderGroup.begin(work.transient_state.assets, chunk_generation_id, true);
-    // render_group.beginRender();
-    // render_group.orthographicMode(buffer.width, buffer.height, meters_to_pixels);
-    // render_group.pushClear(Color.new(1, 0, 1, 1));
-    //
-    // const no_transform = ObjectTransform.defaultFlat();
-    //
-    // var chunk_offset_y: i32 = -1;
-    // while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
-    //     var chunk_offset_x: i32 = -1;
-    //     while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
-    //         const chunk_x = work.chunk_position.chunk_x + chunk_offset_x;
-    //         const chunk_y = work.chunk_position.chunk_y + chunk_offset_y;
-    //         const chunk_z = work.chunk_position.chunk_z;
-    //         const center = Vector2.new(
-    //             @as(f32, @floatFromInt(chunk_offset_x)) * width,
-    //             @as(f32, @floatFromInt(chunk_offset_y)) * height,
-    //         );
-    //
-    //         const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
-    //         const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
-    //         var series = random.Series.seed(seed);
-    //
-    //         var color = Color.white();
-    //         if (global_config.GroundChunks_Checkerboards) {
-    //             color = Color.new(1, 0, 0, 1);
-    //             if (@mod(chunk_x, 2) == @mod(chunk_y, 2)) {
-    //                 color = Color.new(0, 0, 1, 1);
-    //             }
-    //         }
-    //
-    //         var grass_index: u32 = 0;
-    //         while (grass_index < 100) : (grass_index += 1) {
-    //             const opt_stamp = work.transient_state.assets.getRandomBitmap(
-    //                 if (series.randomChoice(2) == 1) .Grass else .Stone,
-    //                 &series,
-    //             );
-    //
-    //             if (opt_stamp) |stamp| {
-    //                 const offset = half_dim.hadamardProduct(
-    //                     Vector2.new(series.randomBilateral(), series.randomBilateral()),
-    //                 );
-    //                 const position = center.plus(offset);
-    //
-    //                 render_group.pushBitmapId(no_transform, stamp, 2, position.toVector3(0), color, null);
-    //             }
-    //         }
-    //     }
-    // }
-    //
-    // chunk_offset_y = -1;
-    // while (chunk_offset_y <= 1) : (chunk_offset_y += 1) {
-    //     var chunk_offset_x: i32 = -1;
-    //     while (chunk_offset_x <= 1) : (chunk_offset_x += 1) {
-    //         const chunk_x = work.chunk_position.chunk_x + chunk_offset_x;
-    //         const chunk_y = work.chunk_position.chunk_y + chunk_offset_y;
-    //         const chunk_z = work.chunk_position.chunk_z;
-    //         const center = Vector2.new(
-    //             @as(f32, @floatFromInt(chunk_offset_x)) * width,
-    //             @as(f32, @floatFromInt(chunk_offset_y)) * height,
-    //         );
-    //
-    //         const raw_seed: i32 = 139 * chunk_x + 593 * chunk_y + 329 * chunk_z;
-    //         const seed: u32 = if (raw_seed >= 0) @intCast(raw_seed) else 0 -% @abs(raw_seed);
-    //         var series = random.Series.seed(seed);
-    //
-    //         var grass_index: u32 = 0;
-    //         while (grass_index < 50) : (grass_index += 1) {
-    //             const opt_stamp = work.transient_state.assets.getRandomBitmap(.Tuft, &series);
-    //
-    //             if (opt_stamp) |stamp| {
-    //                 const offset = half_dim.hadamardProduct(
-    //                     Vector2.new(series.randomBilateral(), series.randomBilateral()),
-    //                 );
-    //                 const position = center.plus(offset);
-    //
-    //                 render_group.pushBitmapId(no_transform, stamp, 0.1, position.toVector3(0), Color.white(), null);
-    //             }
-    //         }
-    //     }
-    // }
-    //
-    // std.debug.assert(render_group.allResourcesPresent());
-    //
-    // render_group.singleRenderTo(buffer, &work.task.arena);
-    // render_group.endRender();
-    //
-    handmade.endTaskWithMemory(work.task);
 }

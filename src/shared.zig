@@ -226,10 +226,6 @@ test "stringsAreEqual" {
     try std.testing.expectEqual(false, stringsAreEqual("abcd", "abc"));
 }
 
-pub fn introspect(input: []const u8) void {
-    _ = input;
-}
-
 // Platform.
 pub const DebugReadFileResult = extern struct {
     contents: *anyopaque = undefined,
@@ -815,9 +811,6 @@ pub const TransientState = struct {
 
     assets: *Assets,
     main_generation_id: u32,
-
-    ground_buffer_count: u32 = 0,
-    ground_buffers: [*]GroundBuffer = undefined,
 
     env_map_width: i32,
     env_map_height: i32,

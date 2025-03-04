@@ -52,7 +52,6 @@ pub const WorldEntityBlock = extern struct {
     next: ?*WorldEntityBlock,
 };
 
-// introspect("world");
 pub const WorldPosition = extern struct {
     chunk_x: i32,
     chunk_y: i32,

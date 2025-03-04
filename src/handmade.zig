@@ -142,15 +142,6 @@ pub export fn updateAndRender(
         }
         DebugInterface.debugEndDataBlock(@src());
 
-        DebugInterface.debugBeginDataBlock(@src(), "GroundChunks");
-        {
-            DebugInterface.debugValue(@src(), &global_config.GroundChunks_Enabled, "GroundChunks_Enabled");
-            DebugInterface.debugValue(@src(), &global_config.GroundChunks_Checkerboards, "GroundChunks_Checkerboards");
-            DebugInterface.debugValue(@src(), &global_config.GroundChunks_RecomputeOnEXEChange, "GroundChunks_RecomputeOnEXEChange");
-            DebugInterface.debugValue(@src(), &global_config.GroundChunks_Outlines, "GroundChunks_Outlines");
-        }
-        DebugInterface.debugEndDataBlock(@src());
-
         DebugInterface.debugBeginDataBlock(@src(), "AI/Familiar");
         {
             DebugInterface.debugValue(@src(), &global_config.AI_Familiar_FollowsHero, "AI_Familiar_FollowsHero");
@@ -161,12 +152,6 @@ pub export fn updateAndRender(
         {
             DebugInterface.debugValue(@src(), &global_config.Particles_Test, "Particles_Test");
             DebugInterface.debugValue(@src(), &global_config.Particles_ShowGrid, "Particles_ShowGrid");
-        }
-        DebugInterface.debugEndDataBlock(@src());
-
-        DebugInterface.debugBeginDataBlock(@src(), "Simulation");
-        {
-            DebugInterface.debugValue(@src(), &global_config.Simulation_UseSpaceOutlines, "Simulation_UseSpaceOutlines");
         }
         DebugInterface.debugEndDataBlock(@src());
 
@@ -240,20 +225,6 @@ pub export fn updateAndRender(
         //     state.music = music;
         // }
 
-        transient_state.ground_buffer_count = 256;
-        transient_state.ground_buffers = transient_state.arena.pushArray(transient_state.ground_buffer_count, shared.GroundBuffer, ArenaPushParams.aligned(@alignOf(shared.GroundBuffer), true));
-
-        for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
-            const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
-            ground_buffer.bitmap = makeEmptyBitmap(
-                &transient_state.arena,
-                world_mode.GROUND_BUFFER_WIDTH,
-                world_mode.GROUND_BUFFER_HEIGHT,
-                false,
-            );
-            ground_buffer.position = WorldPosition.nullPosition();
-        }
-
         state.test_diffuse = makeEmptyBitmap(&transient_state.arena, 256, 256, false);
         // render.drawRectangle(
         //     &state.test_diffuse,
@@ -304,15 +275,6 @@ pub export fn updateAndRender(
 
     if (state.current_mode == .None) {
         cutscene.playIntroCutscene(state, transient_state);
-    }
-
-    if (global_config.GroundChunks_RecomputeOnEXEChange) {
-        if (memory.executable_reloaded) {
-            for (0..transient_state.ground_buffer_count) |ground_buffer_index| {
-                const ground_buffer = &transient_state.ground_buffers[ground_buffer_index];
-                ground_buffer.position = WorldPosition.nullPosition();
-            }
-        }
     }
 
     // if (false) {
