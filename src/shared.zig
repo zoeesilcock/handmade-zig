@@ -408,7 +408,7 @@ pub const SoundOutputBuffer = extern struct {
     sample_count: u32,
 };
 
-pub const MOUSE_BUTTON_COUNT = @typeInfo(GameInputMouseButton).Enum.fields.len;
+pub const MOUSE_BUTTON_COUNT = @typeInfo(GameInputMouseButton).@"enum".fields.len;
 pub const GameInputMouseButton = enum(u8) {
     Left,
     Middle,

@@ -1,7 +1,8 @@
 .{
-    .name = "handmade-zig",
+    .name = .handmade_zig,
     .version = "0.0.1",
-    .minimum_zig_version = "0.12.0",
+    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0x309e02702e3f459,
     .dependencies = .{
         .zigwin32 = .{
             .url = "https://github.com/marlersoft/zigwin32/archive/407a4c7b869ee3d10db520fdfae8b9faf9b2adb5.tar.gz",
