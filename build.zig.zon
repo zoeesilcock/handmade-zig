@@ -5,8 +5,8 @@
     .fingerprint = 0x309e02702e3f459,
     .dependencies = .{
         .zigwin32 = .{
-            .url = "https://github.com/marlersoft/zigwin32/archive/407a4c7b869ee3d10db520fdfae8b9faf9b2adb5.tar.gz",
-            .hash = "1220cc9c9028e20f4ec2ece1155ae3479acc1cc509f9ab93acb74e8f5bbf8eefd2a9",
+            .url = "https://github.com/marlersoft/zigwin32/archive/e8739b32a33ce48a3286aba31918b26a9dfc6ef0.tar.gz",
+            .hash = "1220219ca4acfa5804ca39945f92554e93507b077c03605b7a4c1c0401f0c7121339",
         },
         .stb = .{
             .url = "git+https://github.com/nothings/stb#f75e8d1cad7d90d72ef7a4661f1b994ef78b4e31",
