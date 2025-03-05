@@ -275,6 +275,11 @@ pub export fn updateAndRender(
 
     if (state.current_mode == .None) {
         cutscene.playIntroCutscene(state, transient_state);
+
+        if (global_config.Game_SkipIntro) {
+            input.controllers[0].start_button.ended_down = true;
+            input.controllers[0].start_button.half_transitions = 1;
+        }
     }
 
     // if (false) {

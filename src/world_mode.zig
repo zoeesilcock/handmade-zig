@@ -37,6 +37,8 @@ const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
 const ArenaPushParams = shared.ArenaPushParams;
+const SimEntityTraversablePoint = sim.SimEntityTraversablePoint;
+const SimEntityCollisionVolumeGroup = sim.SimEntityCollisionVolumeGroup;
 
 pub const GameModeWorld = struct {
     world: *world.World = undefined,
@@ -55,7 +57,8 @@ pub const GameModeWorld = struct {
     floor_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
     wall_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
     stair_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
-    player_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
+    hero_body_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
+    hero_head_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
     sword_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     familiar_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
@@ -81,20 +84,23 @@ pub const GameModeWorld = struct {
     }
 
     pub fn addPlayer(self: *GameModeWorld) AddLowEntityResult {
-        const entity = addGroundedEntity(self, .Hero, self.camera_position, self.player_collsion);
+        const body = addGroundedEntity(self, .HeroBody, self.camera_position, self.hero_body_collision);
+        body.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
 
-        entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
+        const head = addGroundedEntity(self, .HeroHead, self.camera_position, self.hero_head_collision);
+        head.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
 
-        initHitPoints(&entity.low.sim, 3);
+        initHitPoints(&body.low.sim, 3);
 
         const sword = addSword(self);
-        entity.low.sim.sword = sim.EntityReference{ .index = sword.low_index };
+        head.low.sim.sword = sim.EntityReference{ .index = sword.low_index };
+        body.low.sim.head = sim.EntityReference{ .index = head.low_index };
 
         if (self.camera_following_entity_index == 0) {
-            self.camera_following_entity_index = entity.low_index;
+            self.camera_following_entity_index = body.low_index;
         }
 
-        return entity;
+        return head;
     }
 
     pub fn deleteLowEntity(self: *GameModeWorld, entity_index: u32) void {
@@ -194,8 +200,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     );
     world_mode.typical_floor_height = 3;
 
-    state.mode = .{ .world = world_mode };
-
     // TODO: Replace this with a value received from the renderer.
     const pixels_to_meters = 1.0 / 42.0;
     const chunk_dimension_in_meters = Vector3.new(
@@ -224,17 +228,20 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         tile_side_in_meters,
         tile_side_in_meters,
         tile_depth_in_meters - 0.1,
+        0,
     );
     world_mode.stair_collsion = makeSimpleGroundedCollision(
         world_mode,
         tile_side_in_meters,
         tile_side_in_meters * 2.0,
         tile_depth_in_meters * 1.1,
+        0,
     );
-    world_mode.player_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 1.2);
-    world_mode.sword_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.1);
-    world_mode.monster_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5);
-    world_mode.familiar_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5);
+    world_mode.hero_body_collision = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
+    world_mode.hero_head_collision = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
+    world_mode.sword_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.1, 0);
+    world_mode.monster_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
+    world_mode.familiar_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
 
     var series = random.Series.seed(3);
     const screen_base_x: i32 = 0;
@@ -359,6 +366,8 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
         _ = addFamiliar(world_mode, camera_tile_x + familiar_offset_x, camera_tile_y + familiar_offset_y, camera_tile_z);
     }
+
+    state.mode = .{ .world = world_mode };
 }
 
 pub fn updateAndRenderWorld(
@@ -542,7 +551,7 @@ pub fn updateAndRenderWorld(
 
             // Pre-physics entity work.
             switch (entity.type) {
-                .Hero => {
+                .HeroHead => {
                     for (state.controlled_heroes) |controlled_hero| {
                         if (controlled_hero.entity_index == entity.storage_index) {
                             if (controlled_hero.vertical_direction != 0) {
@@ -580,6 +589,35 @@ pub fn updateAndRenderWorld(
                         }
                     }
                 },
+                .HeroBody => {
+                    if (entity.head.ptr) |head| {
+                        var closest_distance_squared: f32 = math.square(1000);
+                        var closest_position: Vector3 = entity.position;
+                        var hero_entity_index: u32 = 0;
+                        while (hero_entity_index < screen_sim_region.entity_count) : (hero_entity_index += 1) {
+                            var test_entity = &screen_sim_region.entities[hero_entity_index];
+                            const volume_group: *sim.SimEntityCollisionVolumeGroup = test_entity.collision;
+                            var point_index: u32 = 0;
+                            while (point_index < volume_group.traversable_count) : (point_index += 1) {
+                                const point: SimEntityTraversablePoint = test_entity.getTraversable(point_index);
+                                const head_to_point: Vector3 = point.position.minus(head.position);
+
+                                const test_distance_squared = head_to_point.lengthSquared();
+                                if (test_distance_squared < closest_distance_squared) {
+                                    closest_position = point.position;
+                                    closest_distance_squared = test_distance_squared;
+                                }
+                            }
+                        }
+
+                        acceleration = closest_position.minus(entity.position);
+                        move_spec = sim.MoveSpec{
+                            .speed = 100,
+                            .drag = 10,
+                            .unit_max_acceleration = true,
+                        };
+                    }
+                },
                 .Sword => {
                     move_spec = sim.MoveSpec{
                         .speed = 0,
@@ -600,7 +638,7 @@ pub fn updateAndRenderWorld(
                     var hero_entity_index: u32 = 0;
                     while (hero_entity_index < screen_sim_region.entity_count) : (hero_entity_index += 1) {
                         var test_entity = &screen_sim_region.entities[hero_entity_index];
-                        if (test_entity.type == .Hero) {
+                        if (test_entity.type == .HeroBody) {
                             const distance = test_entity.position.minus(entity.position).lengthSquared();
 
                             if (distance < closest_hero_squared) {
@@ -664,9 +702,8 @@ pub fn updateAndRenderWorld(
 
             // Post-physics entity work.
             switch (entity.type) {
-                .Hero => {
+                .HeroBody => {
                     const hero_scale = 2.5;
-
                     render_group.pushBitmapId(
                         entity_transform,
                         transient_state.assets.getFirstBitmap(.Shadow),
@@ -691,6 +728,11 @@ pub fn updateAndRenderWorld(
                         Color.white(),
                         null,
                     );
+
+                    drawHitPoints(entity, render_group, entity_transform);
+                },
+                .HeroHead => {
+                    const hero_scale = 2.5;
                     render_group.pushBitmapId(
                         entity_transform,
                         hero_bitmaps.head,
@@ -699,197 +741,6 @@ pub fn updateAndRenderWorld(
                         Color.white(),
                         null,
                     );
-
-                    drawHitPoints(entity, render_group, entity_transform);
-
-                    if (global_config.Particles_Test) {
-                        // Particle system test.
-                        var particle_spawn_index: u32 = 0;
-                        while (particle_spawn_index < 3) : (particle_spawn_index += 1) {
-                            const particle: *Particle = &world_mode.particles[world_mode.next_particle];
-
-                            world_mode.next_particle += 1;
-                            if (world_mode.next_particle >= world_mode.particles.len) {
-                                world_mode.next_particle = 0;
-                            }
-
-                            particle.position = Vector3.new(
-                                world_mode.effects_entropy.randomFloatBetween(-0.05, 0.05),
-                                0,
-                                0,
-                            );
-                            particle.velocity = Vector3.new(
-                                world_mode.effects_entropy.randomFloatBetween(-0.01, 0.01),
-                                7 * world_mode.effects_entropy.randomFloatBetween(0.7, 1),
-                                0,
-                            );
-                            particle.acceleration = Vector3.new(0, -9.8, 0);
-                            particle.color = Color.new(
-                                world_mode.effects_entropy.randomFloatBetween(0.75, 1),
-                                world_mode.effects_entropy.randomFloatBetween(0.75, 1),
-                                world_mode.effects_entropy.randomFloatBetween(0.75, 1),
-                                1,
-                            );
-                            particle.color_velocity = Color.new(0, 0, 0, -0.5);
-
-                            const nothings = "NOTHINGS";
-                            var particle_match_vector = asset.AssetVector{};
-                            var particle_weight_vector = asset.AssetVector{};
-                            particle_match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] =
-                                @floatFromInt(nothings[world_mode.effects_entropy.randomChoice(nothings.len)]);
-                            particle_weight_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = 1;
-                            particle.bitmap_id = transient_state.assets.getBestMatchBitmap(
-                                .Font,
-                                &particle_match_vector,
-                                &particle_weight_vector,
-                            ).?;
-
-                            particle.bitmap_id = transient_state.assets.getRandomBitmap(
-                                .Head,
-                                &world_mode.effects_entropy,
-                            ).?;
-                        }
-
-                        const grid_scale: f32 = 0.25;
-                        const inv_grid_scale: f32 = 1 / grid_scale;
-                        const grid_origin = Vector3.new(-0.5 * grid_scale * PARTICLE_CEL_DIM, 0, 0);
-
-                        {
-                            // Zero the paricle cels.
-                            {
-                                var y: u32 = 0;
-                                while (y < PARTICLE_CEL_DIM) : (y += 1) {
-                                    var x: u32 = 0;
-                                    while (x < PARTICLE_CEL_DIM) : (x += 1) {
-                                        world_mode.particle_cels[y][x] = ParticleCel{};
-                                    }
-                                }
-                            }
-
-                            var particle_index: u32 = 0;
-                            while (particle_index < world_mode.particles.len) : (particle_index += 1) {
-                                const particle: *Particle = &world_mode.particles[particle_index];
-                                const position = particle.position.minus(grid_origin).scaledTo(inv_grid_scale);
-                                const ix: i32 = intrinsics.floorReal32ToInt32(position.x());
-                                const iy: i32 = intrinsics.floorReal32ToInt32(position.y());
-                                var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
-                                var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
-
-                                if (x < 0) {
-                                    x = 0;
-                                }
-                                if (x > (PARTICLE_CEL_DIM - 1)) {
-                                    x = (PARTICLE_CEL_DIM - 1);
-                                }
-                                if (y < 0) {
-                                    y = 0;
-                                }
-                                if (y > (PARTICLE_CEL_DIM - 1)) {
-                                    y = (PARTICLE_CEL_DIM - 1);
-                                }
-
-                                const cel = &world_mode.particle_cels[y][x];
-                                const density: f32 = particle.color.a();
-                                cel.density += density;
-                                cel.velocity_times_density =
-                                    cel.velocity_times_density.plus(particle.velocity.scaledTo(density));
-                            }
-                        }
-
-                        if (global_config.Particles_ShowGrid) {
-                            var y: u32 = 0;
-                            while (y < PARTICLE_CEL_DIM) : (y += 1) {
-                                var x: u32 = 0;
-                                while (x < PARTICLE_CEL_DIM) : (x += 1) {
-                                    const cel = &world_mode.particle_cels[y][x];
-                                    const alpha: f32 = math.clampf01(0.1 * cel.density);
-                                    render_group.pushRectangle(
-                                        entity_transform,
-                                        Vector2.one().scaledTo(grid_scale),
-                                        Vector3.new(
-                                            @floatFromInt(x),
-                                            @floatFromInt(y),
-                                            0,
-                                        ).scaledTo(grid_scale).plus(grid_origin),
-                                        Color.new(alpha, alpha, alpha, 0),
-                                    );
-                                }
-                            }
-                        }
-
-                        var particle_index: u32 = 0;
-                        while (particle_index < world_mode.particles.len) : (particle_index += 1) {
-                            const particle: *Particle = &world_mode.particles[particle_index];
-                            const position = particle.position.minus(grid_origin).scaledTo(inv_grid_scale);
-                            const ix: i32 = intrinsics.floorReal32ToInt32(position.x());
-                            const iy: i32 = intrinsics.floorReal32ToInt32(position.y());
-                            var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
-                            var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
-
-                            if (x < 1) {
-                                x = 1;
-                            }
-                            if (x > (PARTICLE_CEL_DIM - 2)) {
-                                x = (PARTICLE_CEL_DIM - 2);
-                            }
-                            if (y < 1) {
-                                y = 1;
-                            }
-                            if (y > (PARTICLE_CEL_DIM - 2)) {
-                                y = (PARTICLE_CEL_DIM - 2);
-                            }
-
-                            const cel_center = &world_mode.particle_cels[y][x];
-                            const cel_left = &world_mode.particle_cels[y][x - 1];
-                            const cel_right = &world_mode.particle_cels[y][x + 1];
-                            const cel_down = &world_mode.particle_cels[y - 1][x];
-                            const cel_up = &world_mode.particle_cels[y + 1][x];
-
-                            var dispersion = Vector3.zero();
-                            const dispersion_coefficient: f32 = 1;
-                            dispersion = dispersion.plus(Vector3.new(-1, 0, 0)
-                                .scaledTo(dispersion_coefficient * (cel_center.density - cel_left.density)));
-                            dispersion = dispersion.plus(Vector3.new(1, 0, 0)
-                                .scaledTo(dispersion_coefficient * (cel_center.density - cel_right.density)));
-                            dispersion = dispersion.plus(Vector3.new(0, -1, 0)
-                                .scaledTo(dispersion_coefficient * (cel_center.density - cel_down.density)));
-                            dispersion = dispersion.plus(Vector3.new(0, 1, 0)
-                                .scaledTo(dispersion_coefficient * (cel_center.density - cel_up.density)));
-
-                            // Simulate particle.
-                            const particle_acceleration = particle.acceleration.plus(dispersion);
-                            particle.position = particle.position.plus(
-                                particle_acceleration.scaledTo(0.5 * math.square(input.frame_delta_time) * input.frame_delta_time),
-                            ).plus(
-                                particle.velocity.scaledTo(input.frame_delta_time),
-                            );
-                            particle.velocity = particle.velocity.plus(particle_acceleration.scaledTo(input.frame_delta_time));
-                            particle.color = particle.color.plus(particle.color_velocity.scaledTo(input.frame_delta_time));
-
-                            if (particle.position.y() < 0) {
-                                const coefficient_of_restitution = 0.3;
-                                const coefficient_of_friction = 0.7;
-                                _ = particle.position.setY(-particle.position.y());
-                                _ = particle.velocity.setY(-coefficient_of_restitution * particle.velocity.y());
-                                _ = particle.velocity.setX(coefficient_of_friction * particle.velocity.x());
-                            }
-
-                            var color = particle.color.clamp01();
-                            if (particle.color.a() > 0.9) {
-                                _ = color.setA(0.9 * math.clamp01MapToRange(1, 0.9, color.a()));
-                            }
-
-                            // Render particle.
-                            render_group.pushBitmapId(
-                                entity_transform,
-                                particle.bitmap_id,
-                                1,
-                                particle.position,
-                                color,
-                                null,
-                            );
-                        }
-                    }
                 },
                 .Sword => {
                     render_group.pushBitmapId(
@@ -1390,12 +1241,14 @@ fn makeSimpleGroundedCollision(
     x_dimension: f32,
     y_dimension: f32,
     z_dimension: f32,
+    opt_z_offset: ?f32,
 ) *sim.SimEntityCollisionVolumeGroup {
+    const z_offset: f32 = opt_z_offset orelse 0;
     const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup, null);
 
     group.volume_count = 1;
     group.volumes = world_mode.world.arena.pushArray(group.volume_count, sim.SimEntityCollisionVolume, null);
-    group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension);
+    group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension + z_offset);
     group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
     group.volumes[0] = group.total_volume;
 
@@ -1416,6 +1269,14 @@ fn makeSimpleFloorCollision(
     group.traversables[0].position = Vector3.zero();
     group.total_volume.offset_position = Vector3.new(0, 0, 0);
     group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
+
+    if (false) {
+        group.volume_count = 1;
+        group.volumes = world_mode.world.arena.pushArray(group.volume_count, sim.SimEntityCollisionVolume, null);
+        group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension);
+        group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
+        group.volumes[0] = group.total_volume;
+    }
 
     return group;
 }
@@ -1462,4 +1323,201 @@ pub fn chunkPositionFromTilePosition(
     std.debug.assert(world.isVector3Canonical(game_world, result.offset));
 
     return result;
+}
+
+fn particleTest(
+    world_mode: *GameModeWorld,
+    input: *shared.GameInput,
+    transient_state: *TransientState,
+    render_group: *RenderGroup,
+    entity_transform: ObjectTransform,
+) void {
+    if (global_config.Particles_Test) {
+        // Particle system test.
+        var particle_spawn_index: u32 = 0;
+        while (particle_spawn_index < 3) : (particle_spawn_index += 1) {
+            const particle: *Particle = &world_mode.particles[world_mode.next_particle];
+
+            world_mode.next_particle += 1;
+            if (world_mode.next_particle >= world_mode.particles.len) {
+                world_mode.next_particle = 0;
+            }
+
+            particle.position = Vector3.new(
+                world_mode.effects_entropy.randomFloatBetween(-0.05, 0.05),
+                0,
+                0,
+            );
+            particle.velocity = Vector3.new(
+                world_mode.effects_entropy.randomFloatBetween(-0.01, 0.01),
+                7 * world_mode.effects_entropy.randomFloatBetween(0.7, 1),
+                0,
+            );
+            particle.acceleration = Vector3.new(0, -9.8, 0);
+            particle.color = Color.new(
+                world_mode.effects_entropy.randomFloatBetween(0.75, 1),
+                world_mode.effects_entropy.randomFloatBetween(0.75, 1),
+                world_mode.effects_entropy.randomFloatBetween(0.75, 1),
+                1,
+            );
+            particle.color_velocity = Color.new(0, 0, 0, -0.5);
+
+            const nothings = "NOTHINGS";
+            var particle_match_vector = asset.AssetVector{};
+            var particle_weight_vector = asset.AssetVector{};
+            particle_match_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] =
+                @floatFromInt(nothings[world_mode.effects_entropy.randomChoice(nothings.len)]);
+            particle_weight_vector.e[@intFromEnum(AssetTagId.UnicodeCodepoint)] = 1;
+            particle.bitmap_id = transient_state.assets.getBestMatchBitmap(
+                .Font,
+                &particle_match_vector,
+                &particle_weight_vector,
+            ).?;
+
+            particle.bitmap_id = transient_state.assets.getRandomBitmap(
+                .Head,
+                &world_mode.effects_entropy,
+            ).?;
+        }
+
+        const grid_scale: f32 = 0.25;
+        const inv_grid_scale: f32 = 1 / grid_scale;
+        const grid_origin = Vector3.new(-0.5 * grid_scale * PARTICLE_CEL_DIM, 0, 0);
+
+        {
+            // Zero the paricle cels.
+            {
+                var y: u32 = 0;
+                while (y < PARTICLE_CEL_DIM) : (y += 1) {
+                    var x: u32 = 0;
+                    while (x < PARTICLE_CEL_DIM) : (x += 1) {
+                        world_mode.particle_cels[y][x] = ParticleCel{};
+                    }
+                }
+            }
+
+            var particle_index: u32 = 0;
+            while (particle_index < world_mode.particles.len) : (particle_index += 1) {
+                const particle: *Particle = &world_mode.particles[particle_index];
+                const position = particle.position.minus(grid_origin).scaledTo(inv_grid_scale);
+                const ix: i32 = intrinsics.floorReal32ToInt32(position.x());
+                const iy: i32 = intrinsics.floorReal32ToInt32(position.y());
+                var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
+                var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
+
+                if (x < 0) {
+                    x = 0;
+                }
+                if (x > (PARTICLE_CEL_DIM - 1)) {
+                    x = (PARTICLE_CEL_DIM - 1);
+                }
+                if (y < 0) {
+                    y = 0;
+                }
+                if (y > (PARTICLE_CEL_DIM - 1)) {
+                    y = (PARTICLE_CEL_DIM - 1);
+                }
+
+                const cel = &world_mode.particle_cels[y][x];
+                const density: f32 = particle.color.a();
+                cel.density += density;
+                cel.velocity_times_density =
+                    cel.velocity_times_density.plus(particle.velocity.scaledTo(density));
+            }
+        }
+
+        if (global_config.Particles_ShowGrid) {
+            var y: u32 = 0;
+            while (y < PARTICLE_CEL_DIM) : (y += 1) {
+                var x: u32 = 0;
+                while (x < PARTICLE_CEL_DIM) : (x += 1) {
+                    const cel = &world_mode.particle_cels[y][x];
+                    const alpha: f32 = math.clampf01(0.1 * cel.density);
+                    render_group.pushRectangle(
+                        entity_transform,
+                        Vector2.one().scaledTo(grid_scale),
+                        Vector3.new(
+                            @floatFromInt(x),
+                            @floatFromInt(y),
+                            0,
+                        ).scaledTo(grid_scale).plus(grid_origin),
+                        Color.new(alpha, alpha, alpha, 0),
+                    );
+                }
+            }
+        }
+
+        var particle_index: u32 = 0;
+        while (particle_index < world_mode.particles.len) : (particle_index += 1) {
+            const particle: *Particle = &world_mode.particles[particle_index];
+            const position = particle.position.minus(grid_origin).scaledTo(inv_grid_scale);
+            const ix: i32 = intrinsics.floorReal32ToInt32(position.x());
+            const iy: i32 = intrinsics.floorReal32ToInt32(position.y());
+            var x: u32 = if (ix > 0) 0 +% @as(u32, @intCast(ix)) else 0 -% @abs(ix);
+            var y: u32 = if (iy > 0) 0 +% @as(u32, @intCast(iy)) else 0 -% @abs(iy);
+
+            if (x < 1) {
+                x = 1;
+            }
+            if (x > (PARTICLE_CEL_DIM - 2)) {
+                x = (PARTICLE_CEL_DIM - 2);
+            }
+            if (y < 1) {
+                y = 1;
+            }
+            if (y > (PARTICLE_CEL_DIM - 2)) {
+                y = (PARTICLE_CEL_DIM - 2);
+            }
+
+            const cel_center = &world_mode.particle_cels[y][x];
+            const cel_left = &world_mode.particle_cels[y][x - 1];
+            const cel_right = &world_mode.particle_cels[y][x + 1];
+            const cel_down = &world_mode.particle_cels[y - 1][x];
+            const cel_up = &world_mode.particle_cels[y + 1][x];
+
+            var dispersion = Vector3.zero();
+            const dispersion_coefficient: f32 = 1;
+            dispersion = dispersion.plus(Vector3.new(-1, 0, 0)
+                .scaledTo(dispersion_coefficient * (cel_center.density - cel_left.density)));
+            dispersion = dispersion.plus(Vector3.new(1, 0, 0)
+                .scaledTo(dispersion_coefficient * (cel_center.density - cel_right.density)));
+            dispersion = dispersion.plus(Vector3.new(0, -1, 0)
+                .scaledTo(dispersion_coefficient * (cel_center.density - cel_down.density)));
+            dispersion = dispersion.plus(Vector3.new(0, 1, 0)
+                .scaledTo(dispersion_coefficient * (cel_center.density - cel_up.density)));
+
+            // Simulate particle.
+            const particle_acceleration = particle.acceleration.plus(dispersion);
+            particle.position = particle.position.plus(
+                particle_acceleration.scaledTo(0.5 * math.square(input.frame_delta_time) * input.frame_delta_time),
+            ).plus(
+                particle.velocity.scaledTo(input.frame_delta_time),
+            );
+            particle.velocity = particle.velocity.plus(particle_acceleration.scaledTo(input.frame_delta_time));
+            particle.color = particle.color.plus(particle.color_velocity.scaledTo(input.frame_delta_time));
+
+            if (particle.position.y() < 0) {
+                const coefficient_of_restitution = 0.3;
+                const coefficient_of_friction = 0.7;
+                _ = particle.position.setY(-particle.position.y());
+                _ = particle.velocity.setY(-coefficient_of_restitution * particle.velocity.y());
+                _ = particle.velocity.setX(coefficient_of_friction * particle.velocity.x());
+            }
+
+            var color = particle.color.clamp01();
+            if (particle.color.a() > 0.9) {
+                _ = color.setA(0.9 * math.clamp01MapToRange(1, 0.9, color.a()));
+            }
+
+            // Render particle.
+            render_group.pushBitmapId(
+                entity_transform,
+                particle.bitmap_id,
+                1,
+                particle.position,
+                color,
+                null,
+            );
+        }
+    }
 }

@@ -105,6 +105,7 @@ pub const SimEntity = extern struct {
     hit_points: [16]HitPoint,
 
     sword: EntityReference = undefined,
+    head: EntityReference = undefined,
 
     walkable_dimension: Vector2,
     walkable_height: f32 = 0,
@@ -148,12 +149,22 @@ pub const SimEntity = extern struct {
         const barycentric = region_rectangle.getBarycentricPosition(at_ground_point.xy()).clamp01();
         return self.position.z() + barycentric.y() * self.walkable_height;
     }
+
+    pub fn getTraversable(self: *const SimEntity, index: u32) SimEntityTraversablePoint {
+        std.debug.assert(index < self.collision.traversable_count);
+
+        var result = self.collision.traversables[index];
+        result.position = result.position.plus(self.position);
+
+        return result;
+    }
 };
 
 pub const EntityType = enum(u8) {
     Null,
 
-    Hero,
+    HeroBody,
+    HeroHead,
     Wall,
     Floor,
     Familiar,
@@ -258,6 +269,7 @@ pub fn addEntityRaw(
             if (opt_source) |source| {
                 entity.?.* = source.sim;
                 loadEntityReference(world_mode, sim_region, &entity.?.sword);
+                loadEntityReference(world_mode, sim_region, &entity.?.head);
 
                 std.debug.assert(!source.sim.isSet(SimEntityFlags.Simming.toInt()));
                 source.sim.addFlags(SimEntityFlags.Simming.toInt());
@@ -736,6 +748,7 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
         std.debug.assert(!stored.sim.isSet(SimEntityFlags.Simming.toInt()));
 
         storeEntityReference(&stored.sim.sword);
+        storeEntityReference(&stored.sim.head);
 
         const new_position = if (stored.sim.isSet(SimEntityFlags.Nonspatial.toInt()))
             world.WorldPosition.nullPosition()
