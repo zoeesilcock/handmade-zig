@@ -907,26 +907,13 @@ pub fn updateAndRenderWorld(
 
         if (debug_interface.DEBUG_UI_ENABLED) {
             if (debug_interface.requested(entity_debug_id)) {
-                DebugInterface.debugValue(@src(), &entity.storage_index, "storage_index");
-                DebugInterface.debugValue(@src(), &entity.updatable, "updatable");
-                DebugInterface.debugValue(@src(), &entity.type, "type");
-                DebugInterface.debugValue(@src(), &entity.flags, "flags");
-                DebugInterface.debugValue(@src(), &entity.position, "position");
-                DebugInterface.debugValue(@src(), &entity.velocity, "velocity");
-                DebugInterface.debugValue(@src(), &entity.distance_limit, "distance_limit");
-                DebugInterface.debugValue(@src(), &entity.facing_direction, "facing_direction");
-                DebugInterface.debugValue(@src(), &entity.head_bob_time, "head_bob_time");
-                DebugInterface.debugValue(@src(), &entity.abs_tile_z_delta, "abs_tile_z_delta");
-                DebugInterface.debugValue(@src(), &entity.hit_point_max, "hit_point_max");
+                DebugInterface.debugStruct(@src(), entity);
                 // DebugInterface.debugBeginArray(entity.hit_points);
                 // var hit_point_index: u32 = 0;
                 // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
                 //     DebugInterface.debugValue(@src(), entity.hit_points[hit_point_index]);
                 // }
                 // DebugInterface.debugEndArray();
-                // DebugInterface.debugValue(@src(), entity, "sword");
-                DebugInterface.debugValue(@src(), &entity.walkable_dimension, "walkable_dimension");
-                DebugInterface.debugValue(@src(), &entity.walkable_height, "walkable_height");
                 hot_entity_count += 1;
                 DebugInterface.debugEndDataBlock(@src());
             }

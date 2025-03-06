@@ -381,6 +381,12 @@ pub const TimedBlock = if (INTERNAL) struct {
     }
 };
 
+fn runtimeFieldPointer(ptr: anytype, comptime field_name: []const u8) *@TypeOf(@field(ptr.*, field_name)) {
+    const field_offset = @offsetOf(@TypeOf(ptr.*), field_name);
+    const base_ptr: [*]u8 = @ptrCast(ptr);
+    return @ptrCast(@alignCast(&base_ptr[field_offset]));
+}
+
 pub const DebugInterface = if (INTERNAL) struct {
     pub fn debugBeginDataBlock(
         comptime source: std.builtin.SourceLocation,
@@ -402,6 +408,13 @@ pub const DebugInterface = if (INTERNAL) struct {
         const guid = DebugEvent.debugName(source, null, field_name);
         var event = DebugEvent.record(.Unknown, guid);
         event.setValue(value_ptr.*, value_ptr);
+    }
+
+    pub fn debugStruct(comptime source: std.builtin.SourceLocation, parent: anytype) void {
+        const fields = std.meta.fields(@TypeOf(parent.*));
+        inline for (fields) |field| {
+            debugValue(source, runtimeFieldPointer(parent, field.name), field.name);
+        }
     }
 
     pub fn debugNamedValue(
