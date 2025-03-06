@@ -139,7 +139,7 @@ pub const DebugInteraction = struct {
         return result;
     }
 
-    pub fn setPointer(debug_id: DebugId, target: *?*anyopaque, value: ?*const anyopaque) DebugInteraction {
+    pub fn setPointer(debug_id: DebugId, target: ?*?*const anyopaque, value: ?*const anyopaque) DebugInteraction {
         const result: DebugInteraction = DebugInteraction{
             .id = debug_id,
             .interaction_type = .SetPointer,

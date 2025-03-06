@@ -55,7 +55,7 @@ pub const AssetTypeId = enum(u32) {
     }
 };
 
-pub const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeId).Enum.fields.len;
+pub const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeId).@"enum".fields.len;
 
 pub const HHAHeader = extern struct {
     magic_value: u32 = HHA_MAGIC_VALUE,

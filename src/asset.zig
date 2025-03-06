@@ -67,8 +67,8 @@ const AssetMemoryHeader = extern struct {
 };
 
 const AssetType = struct {
-    first_asset_index: u32,
-    one_past_last_asset_index: u32,
+    first_asset_index: u32 = 0,
+    one_past_last_asset_index: u32 = 0,
 };
 
 pub const AssetVector = struct {
