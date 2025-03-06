@@ -82,6 +82,11 @@ pub const SimEntityCollisionVolumeGroup = extern struct {
     }
 };
 
+pub const MovementMode = enum(u32) {
+    Planted,
+    Hopping,
+};
+
 pub const SimEntity = extern struct {
     storage_index: u32 = 0,
     updatable: bool = false,
@@ -109,6 +114,11 @@ pub const SimEntity = extern struct {
 
     walkable_dimension: Vector2,
     walkable_height: f32 = 0,
+
+    movement_mode: MovementMode,
+    movement_time: f32,
+    movement_from: Vector3,
+    movement_to: Vector3,
 
     pub fn isSet(self: *const SimEntity, flag: u32) bool {
         return (self.flags & flag) != 0;

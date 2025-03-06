@@ -610,12 +610,32 @@ pub fn updateAndRenderWorld(
                             }
                         }
 
-                        acceleration = closest_position.minus(entity.position);
-                        move_spec = sim.MoveSpec{
-                            .speed = 100,
-                            .drag = 10,
-                            .unit_max_acceleration = true,
-                        };
+                        const body_delta: Vector3 = closest_position.minus(entity.position);
+                        const body_distance: f32 = body_delta.lengthSquared();
+
+                        switch (entity.movement_mode) {
+                            .Planted => {
+                                if (body_distance > math.square(0.05)) {
+                                    entity.movement_time = 0;
+                                    entity.movement_from = entity.position;
+                                    entity.movement_to = closest_position;
+                                    entity.movement_mode = .Hopping;
+                                }
+                            },
+                            .Hopping => {
+                                entity.movement_time += 6 * delta_time;
+
+                                const t: f32 = entity.movement_time;
+                                const a: Vector3 = Vector3.new(0, -2, 0);
+                                const b: Vector3 = entity.movement_to.minus(entity.movement_from).minus(a);
+                                entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(entity.movement_from);
+                                entity.velocity = Vector3.zero();
+
+                                if (entity.movement_time >= 1) {
+                                    entity.movement_mode = .Planted;
+                                }
+                            },
+                        }
                     }
                 },
                 .Sword => {

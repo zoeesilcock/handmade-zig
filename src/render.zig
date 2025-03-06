@@ -201,7 +201,7 @@ pub fn renderCommandsToBitmap(
             .RenderEntryClear => {
                 const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
                 const dimension = Vector2.newI(output_target.width, output_target.height);
-                drawRectangle(output_target, Vector2.zero(), dimension, entry.color, clip_rect);
+                drawRectangle(output_target, Vector2.zero(), dimension, entry.color.rgb().toColor(1), clip_rect);
             },
             .RenderEntrySaturation => {
                 const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
