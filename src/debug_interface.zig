@@ -483,6 +483,16 @@ pub const DebugInterface = if (INTERNAL) struct {
         _ = parent;
     }
 
+    pub fn debugNamedValue(
+        comptime source: std.builtin.SourceLocation,
+        value_ptr: anytype,
+        comptime field_name: []const u8,
+    ) void {
+        _ = source;
+        _ = value_ptr;
+        _ = field_name;
+    }
+
     pub fn debugValue(source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {
         _ = source;
         _ = parent;
