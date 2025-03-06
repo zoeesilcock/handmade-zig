@@ -140,11 +140,12 @@ pub fn softwareRenderCommands(
     platform.platform.completeAllQueuedWork(render_queue);
 }
 
-pub fn doTileRenderWork(queue: ?*shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+pub fn doTileRenderWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void {
+    _ = queue;
+
     TimedBlock.beginFunction(@src(), .DoTiledRenderWork);
     defer TimedBlock.endFunction(@src(), .DoTiledRenderWork);
 
-    _ = queue;
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
 
     renderCommandsToBitmap(work.commands, work.output_target, work.clip_rect);

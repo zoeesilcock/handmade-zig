@@ -1219,7 +1219,7 @@ fn doLoadAssetWorkDirectly(
     work.asset.state = work.final_state;
 }
 
-fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void {
     _ = queue;
 
     const work: *LoadAssetWork = @ptrCast(@alignCast(data));

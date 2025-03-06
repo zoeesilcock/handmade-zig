@@ -232,7 +232,8 @@ pub const DebugReadFileResult = extern struct {
     content_size: u32 = 0,
 };
 
-pub const PlatformWorkQueueCallback = *const fn (queue: *PlatformWorkQueue, data: *anyopaque) callconv(.C) void;
+pub const PlatformWorkQueuePtr = *anyopaque;
+pub const PlatformWorkQueueCallback = *const fn (queue: PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void;
 
 pub const WorkQueueEntry = extern struct {
     callback: PlatformWorkQueueCallback = undefined,
