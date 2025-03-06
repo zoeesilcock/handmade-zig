@@ -76,7 +76,7 @@ fn addExecutable(
     }
 
     // Add the win32 API wrapper.
-    const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
+    const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     exe.root_module.addImport("win32", zigwin32);
 
     if (package == .All) {

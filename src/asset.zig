@@ -67,8 +67,8 @@ const AssetMemoryHeader = extern struct {
 };
 
 const AssetType = struct {
-    first_asset_index: u32,
-    one_past_last_asset_index: u32,
+    first_asset_index: u32 = 0,
+    one_past_last_asset_index: u32 = 0,
 };
 
 pub const AssetVector = struct {
@@ -1219,7 +1219,7 @@ fn doLoadAssetWorkDirectly(
     work.asset.state = work.final_state;
 }
 
-fn doLoadAssetWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
+fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void {
     _ = queue;
 
     const work: *LoadAssetWork = @ptrCast(@alignCast(data));

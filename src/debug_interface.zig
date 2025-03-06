@@ -164,7 +164,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     }
 
     pub fn setValue(self: *DebugEvent, source: anytype, dest: anytype) void {
-        std.debug.assert(@typeInfo(@TypeOf(dest)) == .Pointer);
+        std.debug.assert(@typeInfo(@TypeOf(dest)) == .pointer);
 
         const guids_match = shared.global_debug_table.edit_event.guid == self.guid;
         // TODO: Could we use comptime to avoid duplicating this logic for each type?
@@ -262,7 +262,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
             },
             else => {
                 switch (@typeInfo(@TypeOf(source))) {
-                    .Enum => |enum_info| {
+                    .@"enum" => |enum_info| {
                         if (guids_match) {
                             if (shared.global_debug_table.edit_event.data.Enum >= enum_info.fields.len) {
                                 shared.global_debug_table.edit_event.data.Enum = 0;
@@ -481,6 +481,16 @@ pub const DebugInterface = if (INTERNAL) struct {
     pub fn debugStruct(source: std.builtin.SourceLocation, parent: anytype) void {
         _ = source;
         _ = parent;
+    }
+
+    pub fn debugNamedValue(
+        comptime source: std.builtin.SourceLocation,
+        value_ptr: anytype,
+        comptime field_name: []const u8,
+    ) void {
+        _ = source;
+        _ = value_ptr;
+        _ = field_name;
     }
 
     pub fn debugValue(source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {

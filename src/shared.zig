@@ -232,7 +232,8 @@ pub const DebugReadFileResult = extern struct {
     content_size: u32 = 0,
 };
 
-pub const PlatformWorkQueueCallback = *const fn (queue: *PlatformWorkQueue, data: *anyopaque) callconv(.C) void;
+pub const PlatformWorkQueuePtr = *anyopaque;
+pub const PlatformWorkQueueCallback = *const fn (queue: PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void;
 
 pub const WorkQueueEntry = extern struct {
     callback: PlatformWorkQueueCallback = undefined,
@@ -408,7 +409,7 @@ pub const SoundOutputBuffer = extern struct {
     sample_count: u32,
 };
 
-pub const MOUSE_BUTTON_COUNT = @typeInfo(GameInputMouseButton).Enum.fields.len;
+pub const MOUSE_BUTTON_COUNT = @typeInfo(GameInputMouseButton).@"enum".fields.len;
 pub const GameInputMouseButton = enum(u8) {
     Left,
     Middle,
