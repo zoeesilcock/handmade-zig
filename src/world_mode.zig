@@ -595,7 +595,7 @@ pub fn updateAndRenderWorld(
                         var closest_position: Vector3 = entity.position;
                         var hero_entity_index: u32 = 0;
                         while (hero_entity_index < screen_sim_region.entity_count) : (hero_entity_index += 1) {
-                            var test_entity = &screen_sim_region.entities[hero_entity_index];
+                            const test_entity = &screen_sim_region.entities[hero_entity_index];
                             const volume_group: *sim.SimEntityCollisionVolumeGroup = test_entity.collision;
                             var point_index: u32 = 0;
                             while (point_index < volume_group.traversable_count) : (point_index += 1) {
@@ -603,7 +603,7 @@ pub fn updateAndRenderWorld(
                                 const head_to_point: Vector3 = point.position.minus(head.position);
 
                                 const test_distance_squared = head_to_point.lengthSquared();
-                                if (test_distance_squared < closest_distance_squared) {
+                                if (closest_distance_squared > test_distance_squared) {
                                     closest_position = point.position;
                                     closest_distance_squared = test_distance_squared;
                                 }
@@ -612,10 +612,12 @@ pub fn updateAndRenderWorld(
 
                         const body_delta: Vector3 = closest_position.minus(entity.position);
                         const body_distance: f32 = body_delta.lengthSquared();
+                        entity.head_bob_time = 0;
+                        entity.facing_direction = head.facing_direction;
 
                         switch (entity.movement_mode) {
                             .Planted => {
-                                if (body_distance > math.square(0.05)) {
+                                if (body_distance > math.square(0.01)) {
                                     entity.movement_time = 0;
                                     entity.movement_from = entity.position;
                                     entity.movement_to = closest_position;
@@ -623,16 +625,35 @@ pub fn updateAndRenderWorld(
                                 }
                             },
                             .Hopping => {
-                                entity.movement_time += 6 * delta_time;
+                                const t_jump: f32 = 0.2;
+                                const t_mid: f32 = 0.5;
+                                const t_land: f32 = 0.8;
 
-                                const t: f32 = entity.movement_time;
-                                const a: Vector3 = Vector3.new(0, -2, 0);
-                                const b: Vector3 = entity.movement_to.minus(entity.movement_from).minus(a);
-                                entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(entity.movement_from);
+                                if (entity.movement_time < t_mid) {
+                                    const t: f32 = math.clamp01MapToRange(0, t_mid, entity.movement_time);
+                                    entity.head_bob_time = -0.1 * @sin(t * shared.TAU32);
+                                }
+
+                                if (entity.movement_time < t_land) {
+                                    const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
+                                    const a: Vector3 = Vector3.new(0, -2, 0);
+                                    const b: Vector3 = entity.movement_to.minus(entity.movement_from).minus(a);
+                                    entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(entity.movement_from);
+                                } else {
+                                    const t: f32 = math.clamp01MapToRange(t_land, 1, entity.movement_time);
+                                    entity.head_bob_time = -0.1 * @sin(t * shared.PI32);
+                                    entity.position = entity.movement_to;
+                                }
+
                                 entity.velocity = Vector3.zero();
 
                                 if (entity.movement_time >= 1) {
                                     entity.movement_mode = .Planted;
+                                }
+
+                                entity.movement_time += 5 * delta_time;
+                                if (entity.movement_time > 1) {
+                                    entity.movement_time = 1;
                                 }
                             },
                         }
@@ -736,7 +757,7 @@ pub fn updateAndRenderWorld(
                         entity_transform,
                         hero_bitmaps.cape,
                         hero_scale * 1.2,
-                        Vector3.zero(),
+                        Vector3.new(0, entity.head_bob_time, 1),
                         Color.white(),
                         null,
                     );
