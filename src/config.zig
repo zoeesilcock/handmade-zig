@@ -9,4 +9,5 @@ pub const Config = struct {
     Particles_Test: bool = false,
     Particles_ShowGrid: bool = false,
     Game_SkipIntro: bool = true,
+    Simulation_TimestepPercentage: f32 = 100,
 };

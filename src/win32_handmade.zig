@@ -2279,6 +2279,12 @@ pub export fn wWinMain(
                     //
                     //
 
+                    new_input.frame_delta_time = target_seconds_per_frame;
+
+                    //
+                    //
+                    //
+
                     // TimedBlock.beginBlock(@src(), .InputProcessing);
 
                     TimedBlock.beginBlock(@src(), .ControllerClearing);

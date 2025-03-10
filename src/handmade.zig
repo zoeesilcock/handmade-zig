@@ -155,6 +155,12 @@ pub export fn updateAndRender(
         }
         DebugInterface.debugEndDataBlock(@src());
 
+        DebugInterface.debugBeginDataBlock(@src(), "Simulation");
+        {
+            DebugInterface.debugValue(@src(), &global_config.Simulation_TimestepPercentage, "TimestepPercentage");
+        }
+        DebugInterface.debugEndDataBlock(@src());
+
         DebugInterface.debugBeginDataBlock(@src(), "Profile");
         {
             DebugInterface.debugUIElement(@src(), .LastFrameInfo, "LastFrameInfo");
@@ -167,6 +173,8 @@ pub export fn updateAndRender(
 
     TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
     defer TimedBlock.endFunction(@src(), .GameUpdateAndRender);
+
+    input.frame_delta_time *= (config.global_config.Simulation_TimestepPercentage / 100);
 
     std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
     const state: *State = @ptrCast(@alignCast(memory.permanent_storage));

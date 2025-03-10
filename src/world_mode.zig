@@ -94,6 +94,7 @@ pub const GameModeWorld = struct {
 
         const sword = addSword(self);
         head.low.sim.sword = sim.EntityReference{ .index = sword.low_index };
+        head.low.sim.head = sim.EntityReference{ .index = body.low_index };
         body.low.sim.head = sim.EntityReference{ .index = head.low_index };
 
         if (self.camera_following_entity_index == 0) {
@@ -563,11 +564,24 @@ pub fn updateAndRenderWorld(
                             }
 
                             move_spec = sim.MoveSpec{
-                                .speed = 50,
+                                .speed = 30,
                                 .drag = 8,
                                 .unit_max_acceleration = true,
                             };
                             acceleration = controlled_hero.movement_direction.toVector3(0);
+
+                            if (entity.head.ptr) |body| {
+                                var acceleration2: Vector3 = Vector3.new(0, 0, 0);
+                                for (0..2) |e| {
+                                    if (math.square(acceleration.values[e]) < 0.1) {
+                                        acceleration2.values[e] =
+                                            100 * (body.position.values[e] - entity.position.values[e]) -
+                                            30 * entity.velocity.values[e];
+                                    }
+                                }
+
+                                entity.velocity = entity.velocity.plus(acceleration2.scaledTo(delta_time));
+                            }
 
                             if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
                                 if (entity.sword.ptr) |sword| {
@@ -612,8 +626,15 @@ pub fn updateAndRenderWorld(
 
                         const body_delta: Vector3 = closest_position.minus(entity.position);
                         const body_distance: f32 = body_delta.lengthSquared();
-                        entity.head_bob_time = 0;
+
                         entity.facing_direction = head.facing_direction;
+                        var bob_acceleration: f32 = 0;
+
+                        entity.velocity = Vector3.zero();
+
+                        const head_distance: f32 = head.position.minus(entity.position).length();
+                        const max_head_distance: f32 = 0.5;
+                        const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
 
                         switch (entity.movement_mode) {
                             .Planted => {
@@ -623,15 +644,16 @@ pub fn updateAndRenderWorld(
                                     entity.movement_to = closest_position;
                                     entity.movement_mode = .Hopping;
                                 }
+
+                                bob_acceleration = -20 * t_head_distance;
                             },
                             .Hopping => {
-                                const t_jump: f32 = 0.2;
-                                const t_mid: f32 = 0.5;
-                                const t_land: f32 = 0.8;
+                                const t_jump: f32 = 0.1;
+                                const t_thrust: f32 = 0.2;
+                                const t_land: f32 = 0.9;
 
-                                if (entity.movement_time < t_mid) {
-                                    const t: f32 = math.clamp01MapToRange(0, t_mid, entity.movement_time);
-                                    entity.head_bob_time = -0.1 * @sin(t * shared.TAU32);
+                                if (entity.movement_time < t_thrust) {
+                                    bob_acceleration = 30;
                                 }
 
                                 if (entity.movement_time < t_land) {
@@ -639,24 +661,30 @@ pub fn updateAndRenderWorld(
                                     const a: Vector3 = Vector3.new(0, -2, 0);
                                     const b: Vector3 = entity.movement_to.minus(entity.movement_from).minus(a);
                                     entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(entity.movement_from);
-                                } else {
-                                    const t: f32 = math.clamp01MapToRange(t_land, 1, entity.movement_time);
-                                    entity.head_bob_time = -0.1 * @sin(t * shared.PI32);
-                                    entity.position = entity.movement_to;
                                 }
-
-                                entity.velocity = Vector3.zero();
 
                                 if (entity.movement_time >= 1) {
                                     entity.movement_mode = .Planted;
+                                    entity.position = entity.movement_to;
+                                    entity.bob_delta_time = -2;
                                 }
 
-                                entity.movement_time += 5 * delta_time;
+                                entity.movement_time += 4 * delta_time;
                                 if (entity.movement_time > 1) {
                                     entity.movement_time = 1;
                                 }
                             },
                         }
+
+                        const position_coefficient = 100;
+                        const velocity_coefficient = 10;
+                        bob_acceleration +=
+                            position_coefficient * (0 - entity.bob_time) +
+                            velocity_coefficient * (0 - entity.bob_delta_time);
+                        entity.bob_time +=
+                            bob_acceleration * delta_time * delta_time +
+                            entity.bob_delta_time * delta_time;
+                        entity.bob_delta_time += bob_acceleration * delta_time;
                     }
                 },
                 .Sword => {
@@ -757,7 +785,7 @@ pub fn updateAndRenderWorld(
                         entity_transform,
                         hero_bitmaps.cape,
                         hero_scale * 1.2,
-                        Vector3.new(0, entity.head_bob_time, 1),
+                        Vector3.new(0, entity.bob_time, 1),
                         Color.white(),
                         null,
                     );
@@ -855,12 +883,12 @@ pub fn updateAndRenderWorld(
                 },
                 .Familiar => {
                     // Update head bob.
-                    entity.head_bob_time += delta_time * 2;
-                    if (entity.head_bob_time > shared.TAU32) {
-                        entity.head_bob_time = -shared.TAU32;
+                    entity.bob_time += delta_time * 2;
+                    if (entity.bob_time > shared.TAU32) {
+                        entity.bob_time = -shared.TAU32;
                     }
 
-                    const head_bob_sine = @sin(2 * entity.head_bob_time);
+                    const head_bob_sine = @sin(2 * entity.bob_time);
                     const head_z = 0.25 * head_bob_sine;
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 

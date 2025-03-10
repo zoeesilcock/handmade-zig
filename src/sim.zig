@@ -102,7 +102,8 @@ pub const SimEntity = extern struct {
     distance_limit: f32 = 0,
 
     facing_direction: f32 = 0,
-    head_bob_time: f32 = 0,
+    bob_time: f32 = 0,
+    bob_delta_time: f32 = 0,
 
     abs_tile_z_delta: i32 = 0,
 
