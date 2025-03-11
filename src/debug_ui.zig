@@ -539,6 +539,8 @@ pub fn textOp(
                                     bitamp_offset,
                                     color,
                                     null,
+                                    null,
+                                    null,
                                 );
                                 render_group.pushBitmapId(
                                     debug_state.shadow_transform,
@@ -546,6 +548,8 @@ pub fn textOp(
                                     bitmap_scale,
                                     bitamp_offset.plus(Vector3.new(2, -2, 0)),
                                     Color.black(),
+                                    null,
+                                    null,
                                     null,
                                 );
                             } else {
@@ -558,6 +562,8 @@ pub fn textOp(
                                         bitmap_scale,
                                         bitamp_offset,
                                         1,
+                                        null,
+                                        null,
                                     );
                                     var glyph_dim: Rectangle2 = Rectangle2.fromMinDimension(
                                         dim.position.xy(),

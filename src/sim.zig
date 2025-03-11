@@ -121,6 +121,9 @@ pub const SimEntity = extern struct {
     movement_from: Vector3,
     movement_to: Vector3,
 
+    x_axis: Vector2,
+    y_axis: Vector2,
+
     pub fn isSet(self: *const SimEntity, flag: u32) bool {
         return (self.flags & flag) != 0;
     }
@@ -735,13 +738,6 @@ pub fn moveEntity(
 
     if (entity.distance_limit != 0) {
         entity.distance_limit = distance_remaining;
-    }
-
-    // Update facing direction based on velocity.
-    if (entity.velocity.x() == 0 and entity.velocity.y() == 0) {
-        // Keep existing facing direction when velocity is zero.
-    } else {
-        entity.facing_direction = intrinsics.atan2(entity.velocity.y(), entity.velocity.x());
     }
 }
 

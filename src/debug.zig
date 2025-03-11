@@ -1644,7 +1644,7 @@ fn drawDebugElement(
             const opt_event: ?*DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else null;
             if (opt_event) |event| {
                 if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
-                    var dim = render_group.getBitmapDim(no_transform, bitmap, bitmap_scale, Vector3.zero(), 0);
+                    var dim = render_group.getBitmapDim(no_transform, bitmap, bitmap_scale, Vector3.zero(), 0, null, null);
                     _ = view.data.inline_block.dimension.setX(dim.size.x());
                     opt_bitmap = bitmap;
                 }
@@ -1665,6 +1665,8 @@ fn drawDebugElement(
                     layout_element.bounds.min.toVector3(1),
                     Color.white(),
                     0,
+                    null,
+                    null,
                 );
             }
         },

@@ -101,6 +101,7 @@ fn Vector2Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeToZero = Shared.normalizeToZero;
+        pub const toGL = Shared.toGL;
     };
 }
 
@@ -205,6 +206,7 @@ fn Vector3Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeToZero = Shared.normalizeToZero;
+        pub const toGL = Shared.toGL;
     };
 }
 
@@ -335,6 +337,7 @@ fn Vector4Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeToZero = Shared.normalizeToZero;
+        pub const toGL = Shared.toGL;
     };
 }
 
@@ -393,6 +396,10 @@ fn Color3Type(comptime ScalarType: type) type {
 
         pub inline fn toColor(self: Self, in_a: ScalarType) Color {
             return Color.new(self.r(), self.g(), self.b(), in_a);
+        }
+
+        pub inline fn toGL(self: Self, in_a: ScalarType) *const f32 {
+            return @ptrCast(&self.toColor(in_a).values);
         }
 
         const Shared = VectorShared(3, ScalarType, Self);
@@ -546,6 +553,7 @@ fn Color4Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeToZero = Shared.normalizeToZero;
+        pub const toGL = Shared.toGL;
     };
 }
 
@@ -632,6 +640,10 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
                 result = self.scaledTo(1 / @sqrt(length_squared));
             }
             return result;
+        }
+
+        pub inline fn toGL(self: Self) *const f32 {
+            return @ptrCast(&self.values);
         }
     };
 }

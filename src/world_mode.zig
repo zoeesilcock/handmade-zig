@@ -522,6 +522,8 @@ pub fn updateAndRenderWorld(
     var entity_index: u32 = 0;
     while (entity_index < screen_sim_region.entity_count) : (entity_index += 1) {
         const entity = &screen_sim_region.entities[entity_index];
+        entity.x_axis = .new(1, 0);
+        entity.y_axis = .new(0, 1);
         const entity_debug_id = debug_interface.DebugId.fromPointer(&world_mode.low_entities[entity.storage_index]);
         if (debug_interface.requested(entity_debug_id)) {
             DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
@@ -570,12 +572,23 @@ pub fn updateAndRenderWorld(
                             };
                             acceleration = controlled_hero.movement_direction.toVector3(0);
 
-                            if (entity.head.ptr) |body| {
+                            if (controlled_hero.sword_direction.x() == 0 and controlled_hero.sword_direction.y() == 0) {
+                                // Keep existing facing direction when velocity is zero.
+                            } else {
+                                entity.facing_direction =
+                                    intrinsics.atan2(controlled_hero.sword_direction.y(), controlled_hero.sword_direction.x());
+                            }
+
+                            var closest_position: Vector3 = entity.position;
+                            if (getClosestTraversable(screen_sim_region, entity.position, &closest_position)) {
+                                const any_push: bool = acceleration.lengthSquared() < 0.1;
+                                const spring_coefficient: f32 = if (any_push) 300 else 50;
                                 var acceleration2: Vector3 = Vector3.new(0, 0, 0);
                                 for (0..2) |e| {
-                                    if (math.square(acceleration.values[e]) < 0.1) {
+                                    // if (math.square(acceleration.values[e]) < 0.1) {
+                                    if (any_push) {
                                         acceleration2.values[e] =
-                                            100 * (body.position.values[e] - entity.position.values[e]) -
+                                            spring_coefficient * (closest_position.values[e] - entity.position.values[e]) -
                                             30 * entity.velocity.values[e];
                                     }
                                 }
@@ -583,6 +596,7 @@ pub fn updateAndRenderWorld(
                                 entity.velocity = entity.velocity.plus(acceleration2.scaledTo(delta_time));
                             }
 
+                            if (false) {
                             if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
                                 if (entity.sword.ptr) |sword| {
                                     if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
@@ -600,30 +614,14 @@ pub fn updateAndRenderWorld(
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 },
                 .HeroBody => {
                     if (entity.head.ptr) |head| {
-                        var closest_distance_squared: f32 = math.square(1000);
                         var closest_position: Vector3 = entity.position;
-                        var hero_entity_index: u32 = 0;
-                        while (hero_entity_index < screen_sim_region.entity_count) : (hero_entity_index += 1) {
-                            const test_entity = &screen_sim_region.entities[hero_entity_index];
-                            const volume_group: *sim.SimEntityCollisionVolumeGroup = test_entity.collision;
-                            var point_index: u32 = 0;
-                            while (point_index < volume_group.traversable_count) : (point_index += 1) {
-                                const point: SimEntityTraversablePoint = test_entity.getTraversable(point_index);
-                                const head_to_point: Vector3 = point.position.minus(head.position);
-
-                                const test_distance_squared = head_to_point.lengthSquared();
-                                if (closest_distance_squared > test_distance_squared) {
-                                    closest_position = point.position;
-                                    closest_distance_squared = test_distance_squared;
-                                }
-                            }
-                        }
-
+                        _ = getClosestTraversable(screen_sim_region, head.position, &closest_position);
                         const body_delta: Vector3 = closest_position.minus(entity.position);
                         const body_distance: f32 = body_delta.lengthSquared();
 
@@ -632,7 +630,8 @@ pub fn updateAndRenderWorld(
 
                         entity.velocity = Vector3.zero();
 
-                        const head_distance: f32 = head.position.minus(entity.position).length();
+                        const head_delta: Vector3 = head.position.minus(entity.position);
+                        const head_distance: f32 = head_delta.length();
                         const max_head_distance: f32 = 0.5;
                         const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
 
@@ -685,6 +684,8 @@ pub fn updateAndRenderWorld(
                             bob_acceleration * delta_time * delta_time +
                             entity.bob_delta_time * delta_time;
                         entity.bob_delta_time += bob_acceleration * delta_time;
+
+                        entity.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(1));
                     }
                 },
                 .Sword => {
@@ -773,6 +774,9 @@ pub fn updateAndRenderWorld(
             switch (entity.type) {
                 .HeroBody => {
                     const hero_scale = 2.5;
+                    const color: Color = .white();
+                    const x_axis: Vector2 = entity.x_axis;
+                    const y_axis: Vector2 = entity.y_axis;
                     render_group.pushBitmapId(
                         entity_transform,
                         transient_state.assets.getFirstBitmap(.Shadow),
@@ -780,22 +784,28 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         shadow_color,
                         null,
+                        null,
+                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
                         hero_bitmaps.cape,
                         hero_scale * 1.2,
                         Vector3.new(0, entity.bob_time, 1),
-                        Color.white(),
+                        color,
                         null,
+                        x_axis,
+                        y_axis,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
                         hero_bitmaps.torso,
                         hero_scale * 1.2,
                         Vector3.zero(),
-                        Color.white(),
+                        color,
                         null,
+                        x_axis,
+                        y_axis,
                     );
 
                     drawHitPoints(entity, render_group, entity_transform);
@@ -809,6 +819,8 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         Color.white(),
                         null,
+                        null,
+                        null,
                     );
                 },
                 .Sword => {
@@ -819,6 +831,8 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         shadow_color,
                         null,
+                        null,
+                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
@@ -826,6 +840,8 @@ pub fn updateAndRenderWorld(
                         0.5,
                         Vector3.zero(),
                         Color.white(),
+                        null,
+                        null,
                         null,
                     );
                 },
@@ -842,6 +858,8 @@ pub fn updateAndRenderWorld(
                             Vector3.zero(),
                             Color.white(),
                             null,
+                        null,
+                        null,
                         );
                     }
                 },
@@ -869,6 +887,8 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         shadow_color,
                         null,
+                        null,
+                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
@@ -876,6 +896,8 @@ pub fn updateAndRenderWorld(
                         4.5,
                         Vector3.zero(),
                         Color.white(),
+                        null,
+                        null,
                         null,
                     );
 
@@ -904,6 +926,8 @@ pub fn updateAndRenderWorld(
                         Vector3.zero(),
                         head_shadow_color,
                         null,
+                        null,
+                        null,
                     );
                     render_group.pushBitmapId(
                         entity_transform,
@@ -911,6 +935,8 @@ pub fn updateAndRenderWorld(
                         2.5,
                         Vector3.new(0, 0, head_z),
                         Color.white(),
+                        null,
+                        null,
                         null,
                     );
                 },
@@ -1348,6 +1374,31 @@ fn makeNullCollision(world_mode: *GameModeWorld) *sim.SimEntityCollisionVolumeGr
     return group;
 }
 
+
+fn getClosestTraversable(sim_region: *sim.SimRegion, from_position: Vector3, result: *Vector3) bool {
+    var found: bool = false;
+    var closest_distance_squared: f32 = math.square(1000);
+    var hero_entity_index: u32 = 0;
+    while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
+        const test_entity = &sim_region.entities[hero_entity_index];
+        const volume_group: *sim.SimEntityCollisionVolumeGroup = test_entity.collision;
+        var point_index: u32 = 0;
+        while (point_index < volume_group.traversable_count) : (point_index += 1) {
+            const point: SimEntityTraversablePoint = test_entity.getTraversable(point_index);
+            const head_to_point: Vector3 = point.position.minus(from_position);
+
+            const test_distance_squared = head_to_point.lengthSquared();
+            if (closest_distance_squared > test_distance_squared) {
+                result.* = point.position;
+                closest_distance_squared = test_distance_squared;
+                found = true;
+            }
+        }
+    }
+
+    return found;
+}
+
 pub fn chunkPositionFromTilePosition(
     game_world: *world.World,
     abs_tile_x: i32,
@@ -1572,6 +1623,8 @@ fn particleTest(
                 1,
                 particle.position,
                 color,
+                null,
+                null,
                 null,
             );
         }

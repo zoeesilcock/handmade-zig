@@ -100,15 +100,17 @@ pub const RenderEntrySaturation = extern struct {
 
 pub const RenderEntryBitmap = extern struct {
     bitmap: ?*LoadedBitmap,
-    position: Vector2,
-    size: Vector2,
     color: Color,
+    position: Vector2,
+    // These are already scaled by the half dimension.
+    x_axis: Vector2,
+    y_axis: Vector2,
 };
 
 pub const RenderEntryRectangle = extern struct {
+    color: Color,
     position: Vector2,
     dimension: Vector2 = Vector2.zero(),
-    color: Color,
 };
 
 /// This is only for testing.
@@ -406,12 +408,19 @@ pub const RenderGroup = extern struct {
         height: f32,
         offset: Vector3,
         align_coefficient: f32,
+        opt_x_axis: ?Vector2,
+        opt_y_axis: ?Vector2,
     ) UsedBitmapDim {
+        const x_axis: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
+        const y_axis: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
         var dim = UsedBitmapDim{};
 
         dim.size = Vector2.new(height * bitmap.width_over_height, height);
         dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size).scaledTo(align_coefficient);
-        dim.position = offset.minus(dim.alignment.toVector3(0));
+        _ = dim.position.setZ(offset.z());
+        _ = dim.position.setXY(
+            offset.xy().minus(x_axis.scaledTo(dim.alignment.x())).minus(y_axis.scaledTo(dim.alignment.y())),
+        );
         dim.basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, dim.position);
 
         return dim;
@@ -425,15 +434,21 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
         align_coefficient: f32,
+        opt_x_axis: ?Vector2,
+        opt_y_axis: ?Vector2,
     ) void {
-        const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient);
+        const x_axis: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
+        const y_axis: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
+        const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient, x_axis, y_axis);
 
         if (dim.basis.valid) {
             if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key)) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
-                entry.size = dim.size.scaledTo(dim.basis.scale);
                 entry.color = color.scaledTo(self.global_alpha);
+                const size: Vector2 = dim.size.scaledTo(dim.basis.scale);
+                entry.x_axis = size.times(x_axis);
+                entry.y_axis = size.times(y_axis);
             }
         }
     }
@@ -446,6 +461,8 @@ pub const RenderGroup = extern struct {
         offset: Vector3,
         color: Color,
         opt_align_coefficient: ?f32,
+        opt_x_axis: ?Vector2,
+        opt_y_axis: ?Vector2,
     ) void {
         const align_coefficient: f32 = opt_align_coefficient orelse 1;
         if (opt_id) |id| {
@@ -457,7 +474,7 @@ pub const RenderGroup = extern struct {
             }
 
             if (opt_bitmap) |bitmap| {
-                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient);
+                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient, opt_x_axis, opt_y_axis);
             } else {
                 std.debug.assert(!self.renders_in_background);
 

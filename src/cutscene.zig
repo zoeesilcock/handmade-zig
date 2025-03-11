@@ -426,7 +426,7 @@ fn renderLayeredScene(
                 }
 
                 _ = transform.offset_position.setZ(position.z() - camera_offset.z());
-                render_group.pushBitmapId(transform, layer_image, layer.height, Vector3.zero(), color, null);
+                render_group.pushBitmapId(transform, layer_image, layer.height, Vector3.zero(), color, null, null, null);
             } else {
                 assets.prefetchBitmap(layer_image);
             }

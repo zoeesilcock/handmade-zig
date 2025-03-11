@@ -200,12 +200,9 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
                 var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                 if (entry.bitmap) |bitmap| {
                     if (bitmap.width > 0 and bitmap.height > 0) {
-                        const x_axis: Vector2 = Vector2.new(1, 0);
-                        const y_axis: Vector2 = Vector2.new(0, 1);
+                        const x_axis: Vector2 = entry.x_axis;
+                        const y_axis: Vector2 = entry.y_axis;
                         const min_position: Vector2 = entry.position;
-                        const max_position: Vector2 = min_position.plus(
-                            x_axis.scaledTo(entry.size.x()).plus(y_axis.scaledTo(entry.size.y())),
-                        );
 
                         if (bitmap.texture_handle > 0) {
                             gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
@@ -215,7 +212,34 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
                         const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
                         const min_uv = Vector2.new(one_texel_u, one_texel_v);
                         const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
-                        drawRectangle(min_position, max_position, entry.color, min_uv, max_uv);
+
+                        gl.glBegin(gl.GL_TRIANGLES);
+                        {
+                            gl.glColor4fv(entry.color.toGL());
+
+                            const min_x_min_y: Vector2 = min_position;
+                            const min_x_max_y: Vector2 = min_position.plus(y_axis);
+                            const max_x_min_y: Vector2 = min_position.plus(x_axis);
+                            const max_x_max_y: Vector2 = min_position.plus(x_axis).plus(y_axis);
+
+
+                            // Lower triangle.
+                            gl.glTexCoord2f(min_uv.x(), min_uv.y());
+                            gl.glVertex2fv(min_x_min_y.toGL());
+                            gl.glTexCoord2f(max_uv.x(), min_uv.y());
+                            gl.glVertex2fv(max_x_min_y.toGL());
+                            gl.glTexCoord2f(max_uv.x(), max_uv.y());
+                            gl.glVertex2fv(max_x_max_y.toGL());
+
+                            // Upper triangle
+                            gl.glTexCoord2f(min_uv.x(), min_uv.y());
+                            gl.glVertex2fv(min_x_min_y.toGL());
+                            gl.glTexCoord2f(max_uv.x(), max_uv.y());
+                            gl.glVertex2fv(max_x_max_y.toGL());
+                            gl.glTexCoord2f(min_uv.x(), max_uv.y());
+                            gl.glVertex2fv(min_x_max_y.toGL());
+                        }
+                        gl.glEnd();
 
                         gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
                     }
