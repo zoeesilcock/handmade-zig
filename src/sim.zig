@@ -124,6 +124,8 @@ pub const SimEntity = extern struct {
     x_axis: Vector2,
     y_axis: Vector2,
 
+    floor_displace: Vector2,
+
     pub fn isSet(self: *const SimEntity, flag: u32) bool {
         return (self.flags & flag) != 0;
     }

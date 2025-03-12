@@ -417,7 +417,6 @@ pub fn updateAndRenderWorld(
 
     for (&input.controllers, 0..) |*controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
-        controlled_hero.movement_direction = Vector2.zero();
         controlled_hero.vertical_direction = 0;
         controlled_hero.sword_direction = Vector2.zero();
 
@@ -436,17 +435,46 @@ pub fn updateAndRenderWorld(
             if (controller.is_analog) {
                 controlled_hero.movement_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
             } else {
-                if (controller.move_up.ended_down) {
-                    controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, 1));
+                const recenter: f32 = 0.5;
+                if (controller.move_up.wasPressed()) {
+                    _ = controlled_hero.movement_direction.setX(0);
+                    _ = controlled_hero.movement_direction.setY(1);
+                    controlled_hero.recenter_timer = recenter;
                 }
-                if (controller.move_down.ended_down) {
-                    controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(0, -1));
+                if (controller.move_down.wasPressed()) {
+                    _ = controlled_hero.movement_direction.setX(0);
+                    _ = controlled_hero.movement_direction.setY(-1);
+                    controlled_hero.recenter_timer = recenter;
                 }
-                if (controller.move_left.ended_down) {
-                    controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(-1, 0));
+                if (controller.move_left.wasPressed()) {
+                    _ = controlled_hero.movement_direction.setX(-1);
+                    _ = controlled_hero.movement_direction.setY(0);
+                    controlled_hero.recenter_timer = recenter;
                 }
-                if (controller.move_right.ended_down) {
-                    controlled_hero.movement_direction = controlled_hero.movement_direction.plus(Vector2.new(1, 0));
+                if (controller.move_right.wasPressed()) {
+                    _ = controlled_hero.movement_direction.setX(1);
+                    _ = controlled_hero.movement_direction.setY(0);
+                    controlled_hero.recenter_timer = recenter;
+                }
+
+                if (!controller.move_left.isDown() and !controller.move_right.isDown()) {
+                    _ = controlled_hero.movement_direction.setX(0);
+
+                    if (controller.move_up.isDown()) {
+                        _ = controlled_hero.movement_direction.setY(1);
+                    } else if (controller.move_down.isDown()) {
+                        _ = controlled_hero.movement_direction.setY(-1);
+                    }
+                }
+
+                if (!controller.move_up.isDown() and !controller.move_down.isDown()) {
+                    _ = controlled_hero.movement_direction.setY(0);
+
+                    if (controller.move_left.isDown()) {
+                        _ = controlled_hero.movement_direction.setX(-1);
+                    } else if (controller.move_right.isDown()) {
+                        _ = controlled_hero.movement_direction.setX(1);
+                    }
                 }
             }
 
@@ -555,14 +583,12 @@ pub fn updateAndRenderWorld(
             // Pre-physics entity work.
             switch (entity.type) {
                 .HeroHead => {
-                    for (state.controlled_heroes) |controlled_hero| {
+                    for (&state.controlled_heroes) |*controlled_hero| {
                         if (controlled_hero.entity_index == entity.storage_index) {
+                            controlled_hero.recenter_timer =
+                                math.clampAboveZero(controlled_hero.recenter_timer - delta_time);
                             if (controlled_hero.vertical_direction != 0) {
-                                entity.velocity = Vector3.new(
-                                    entity.velocity.x(),
-                                    entity.velocity.y(),
-                                    controlled_hero.vertical_direction,
-                                );
+                                _ = entity.velocity.setZ(controlled_hero.vertical_direction);
                             }
 
                             move_spec = sim.MoveSpec{
@@ -581,12 +607,13 @@ pub fn updateAndRenderWorld(
 
                             var closest_position: Vector3 = entity.position;
                             if (getClosestTraversable(screen_sim_region, entity.position, &closest_position)) {
-                                const any_push: bool = acceleration.lengthSquared() < 0.1;
-                                const spring_coefficient: f32 = if (any_push) 300 else 50;
+                                const timer_is_up: bool = controlled_hero.recenter_timer == 0;
+                                const no_push: bool = acceleration.lengthSquared() < 0.1;
+                                const spring_coefficient: f32 = if (no_push) 300 else 25;
                                 var acceleration2: Vector3 = Vector3.new(0, 0, 0);
                                 for (0..2) |e| {
-                                    // if (math.square(acceleration.values[e]) < 0.1) {
-                                    if (any_push) {
+                                    if (no_push or (timer_is_up and math.square(acceleration.values[e]) < 0.1)) {
+                                    // if (no_push) {
                                         acceleration2.values[e] =
                                             spring_coefficient * (closest_position.values[e] - entity.position.values[e]) -
                                             30 * entity.velocity.values[e];
@@ -597,23 +624,23 @@ pub fn updateAndRenderWorld(
                             }
 
                             if (false) {
-                            if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
-                                if (entity.sword.ptr) |sword| {
-                                    if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
-                                        sword.distance_limit = 5.0;
-                                        sword.makeSpatial(
-                                            entity.position,
-                                            entity.velocity.plus(
-                                                controlled_hero.sword_direction.toVector3(0).scaledTo(5.0),
-                                            ),
-                                        );
-                                        world_mode.addCollisionRule(sword.storage_index, entity.storage_index, false);
-                                        // _ = world_mode.audio_state.playSound(
-                                        //     transient_state.assets.getRandomSound(.Bloop, &world_mode.effects_entropy),
-                                        // );
+                                if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
+                                    if (entity.sword.ptr) |sword| {
+                                        if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
+                                            sword.distance_limit = 5.0;
+                                            sword.makeSpatial(
+                                                entity.position,
+                                                entity.velocity.plus(
+                                                    controlled_hero.sword_direction.toVector3(0).scaledTo(5.0),
+                                                ),
+                                            );
+                                            world_mode.addCollisionRule(sword.storage_index, entity.storage_index, false);
+                                            // _ = world_mode.audio_state.playSound(
+                                            //     transient_state.assets.getRandomSound(.Bloop, &world_mode.effects_entropy),
+                                            // );
+                                        }
                                     }
                                 }
-                            }
                             }
                         }
                     }
@@ -621,7 +648,7 @@ pub fn updateAndRenderWorld(
                 .HeroBody => {
                     if (entity.head.ptr) |head| {
                         var closest_position: Vector3 = entity.position;
-                        _ = getClosestTraversable(screen_sim_region, head.position, &closest_position);
+                        const found: bool = getClosestTraversable(screen_sim_region, head.position, &closest_position);
                         const body_delta: Vector3 = closest_position.minus(entity.position);
                         const body_distance: f32 = body_delta.lengthSquared();
 
@@ -635,9 +662,10 @@ pub fn updateAndRenderWorld(
                         const max_head_distance: f32 = 0.5;
                         const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
 
+                        entity.floor_displace = head_delta.xy().scaledTo(0.25);
                         switch (entity.movement_mode) {
                             .Planted => {
-                                if (body_distance > math.square(0.01)) {
+                                if (found and body_distance > math.square(0.01)) {
                                     entity.movement_time = 0;
                                     entity.movement_from = entity.position;
                                     entity.movement_to = closest_position;
@@ -685,7 +713,7 @@ pub fn updateAndRenderWorld(
                             entity.bob_delta_time * delta_time;
                         entity.bob_delta_time += bob_acceleration * delta_time;
 
-                        entity.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(1));
+                        entity.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(0.5));
                     }
                 },
                 .Sword => {
@@ -771,12 +799,13 @@ pub fn updateAndRenderWorld(
             };
 
             // Post-physics entity work.
+            const hero_scale = 3;
             switch (entity.type) {
                 .HeroBody => {
-                    const hero_scale = 2.5;
                     const color: Color = .white();
                     const x_axis: Vector2 = entity.x_axis;
                     const y_axis: Vector2 = entity.y_axis;
+                    const offset: Vector3 = entity.floor_displace.toVector3(0);
                     render_group.pushBitmapId(
                         entity_transform,
                         transient_state.assets.getFirstBitmap(.Shadow),
@@ -791,7 +820,7 @@ pub fn updateAndRenderWorld(
                         entity_transform,
                         hero_bitmaps.cape,
                         hero_scale * 1.2,
-                        Vector3.new(0, entity.bob_time, 1),
+                        offset.plus(Vector3.new(0, entity.bob_time - 0.1, -0.001)),
                         color,
                         null,
                         x_axis,
@@ -801,7 +830,7 @@ pub fn updateAndRenderWorld(
                         entity_transform,
                         hero_bitmaps.torso,
                         hero_scale * 1.2,
-                        Vector3.zero(),
+                        Vector3.new(0, 0, -0.002),
                         color,
                         null,
                         x_axis,
@@ -811,12 +840,11 @@ pub fn updateAndRenderWorld(
                     drawHitPoints(entity, render_group, entity_transform);
                 },
                 .HeroHead => {
-                    const hero_scale = 2.5;
                     render_group.pushBitmapId(
                         entity_transform,
                         hero_bitmaps.head,
                         hero_scale * 1.2,
-                        Vector3.zero(),
+                        Vector3.new(0, -0.6, 0),
                         Color.white(),
                         null,
                         null,
@@ -858,8 +886,8 @@ pub fn updateAndRenderWorld(
                             Vector3.zero(),
                             Color.white(),
                             null,
-                        null,
-                        null,
+                            null,
+                            null,
                         );
                     }
                 },
@@ -1373,7 +1401,6 @@ fn makeNullCollision(world_mode: *GameModeWorld) *sim.SimEntityCollisionVolumeGr
 
     return group;
 }
-
 
 fn getClosestTraversable(sim_region: *sim.SimRegion, from_position: Vector3, result: *Vector3) bool {
     var found: bool = false;

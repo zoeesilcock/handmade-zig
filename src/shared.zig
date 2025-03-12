@@ -94,7 +94,7 @@ pub const TicketMutex = extern struct {
 
     pub fn begin(self: *TicketMutex) void {
         const ticket = @atomicRmw(u64, &self.ticket, .Add, 1, .seq_cst);
-        while (ticket != self.serving) { }
+        while (ticket != self.serving) {}
     }
 
     pub fn end(self: *TicketMutex) void {
@@ -506,6 +506,10 @@ pub const ControllerButtonState = extern struct {
     pub fn wasPressed(self: ControllerButtonState) bool {
         return self.half_transitions > 1 or (self.half_transitions == 1 and self.ended_down);
     }
+
+    pub fn isDown(self: ControllerButtonState) bool {
+        return self.ended_down;
+    }
 };
 
 // Memory.
@@ -828,6 +832,7 @@ pub const ControlledHero = struct {
     movement_direction: Vector2 = Vector2.zero(),
     vertical_direction: f32 = 0,
     sword_direction: Vector2 = Vector2.zero(),
+    recenter_timer: f32 = 0,
 };
 
 pub const LowEntityChunkReference = struct {

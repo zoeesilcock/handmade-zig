@@ -969,6 +969,10 @@ pub inline fn clamp01MapToRange(min: f32, max: f32, value: f32) f32 {
     return result;
 }
 
+pub inline fn clampAboveZero(value: f32) f32 {
+    return if (value < 0) 0 else value;
+}
+
 pub inline fn safeRatioN(numerator: f32, divisor: f32, fallback: f32) f32 {
     var result: f32 = fallback;
 
