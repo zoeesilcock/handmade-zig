@@ -39,12 +39,12 @@ pub const SimRegion = extern struct {
 
 pub const EntityReference = packed union {
     ptr: ?*SimEntity,
-    index: u32,
+    index: EntityId,
 };
 
 pub const SimEntityHash = extern struct {
     ptr: ?*SimEntity = null,
-    index: u32 = 0,
+    index: EntityId = .{},
 };
 
 pub const SimEntityFlags = enum(u32) {
@@ -87,8 +87,12 @@ pub const MovementMode = enum(u32) {
     Hopping,
 };
 
+pub const EntityId = packed struct {
+    value: u32 = 0,
+};
+
 pub const SimEntity = extern struct {
-    storage_index: u32 = 0,
+    storage_index: EntityId = .{},
     updatable: bool = false,
 
     type: EntityType = .Null,
@@ -110,7 +114,6 @@ pub const SimEntity = extern struct {
     hit_point_max: u32,
     hit_points: [16]HitPoint,
 
-    sword: EntityReference = undefined,
     head: EntityReference = undefined,
 
     walkable_dimension: Vector2,
@@ -211,12 +214,12 @@ const WallTestData = struct {
     normal: Vector3,
 };
 
-pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: u32) *SimEntityHash {
-    std.debug.assert(storage_index != 0);
+pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: EntityId) ?*SimEntityHash {
+    std.debug.assert(storage_index.value != 0);
 
-    var result: *SimEntityHash = undefined;
+    var result: ?*SimEntityHash = null;
 
-    const hash_value = storage_index;
+    const hash_value = storage_index.value;
     var offset: u32 = 0;
 
     while (offset < sim_region.sim_entity_hash.len) : (offset += 1) {
@@ -224,7 +227,7 @@ pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: u32) *SimE
         const hash_index = (hash_value + offset) & hash_mask;
         const entry = &sim_region.sim_entity_hash[hash_index];
 
-        if (entry.index == 0 or entry.index == storage_index) {
+        if (entry.index.value == 0 or entry.index.value == storage_index.value) {
             result = entry;
             break;
         }
@@ -233,24 +236,17 @@ pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: u32) *SimE
     return result;
 }
 
-pub fn getEntityByStorageIndex(sim_region: *SimRegion, storage_index: u32) ?*SimEntity {
+pub fn getEntityByStorageIndex(sim_region: *SimRegion, storage_index: EntityId) ?*SimEntity {
     const entry = getHashFromStorageIndex(sim_region, storage_index);
     return entry.ptr;
 }
 
 pub fn loadEntityReference(world_mode: *GameModeWorld, sim_region: *SimRegion, reference: *EntityReference) void {
-    if (reference.index != 0) {
+    _ = world_mode;
+
+    if (reference.index.value != 0) {
         const entry = getHashFromStorageIndex(sim_region, reference.index);
-
-        if (entry.ptr == null) {
-            entry.index = reference.index;
-            if (world_mode.getLowEntity(reference.index)) |low_entity| {
-                var position = getSimSpacePosition(sim_region, low_entity);
-                entry.ptr = addEntity(world_mode, sim_region, reference.index, low_entity, &position);
-            }
-        }
-
-        reference.* = EntityReference{ .ptr = entry.ptr };
+        reference.* = EntityReference{ .ptr = if (entry != null) entry.?.ptr else null };
     }
 }
 
@@ -263,38 +259,38 @@ pub fn storeEntityReference(reference: *EntityReference) void {
 pub fn addEntityRaw(
     world_mode: *GameModeWorld,
     sim_region: *SimRegion,
-    storage_index: u32,
+    storage_index: EntityId,
     opt_source: ?*LowEntity,
 ) ?*SimEntity {
     TimedBlock.beginFunction(@src(), .AddEntityRaw);
     defer TimedBlock.endFunction(@src(), .AddEntityRaw);
 
-    std.debug.assert(storage_index != 0);
+    std.debug.assert(storage_index.value != 0);
 
     var entity: ?*SimEntity = null;
 
-    const entry = getHashFromStorageIndex(sim_region, storage_index);
-    if (entry.ptr == null) {
-        if (sim_region.entity_count < sim_region.max_entity_count) {
-            entity = &sim_region.entities[sim_region.entity_count];
-            sim_region.entity_count += 1;
+    if (getHashFromStorageIndex(sim_region, storage_index)) |entry| {
+        if (entry.ptr == null) {
+            if (sim_region.entity_count < sim_region.max_entity_count) {
+                entity = &sim_region.entities[sim_region.entity_count];
+                sim_region.entity_count += 1;
 
-            entry.index = storage_index;
-            entry.ptr = entity.?;
+                entry.index = storage_index;
+                entry.ptr = entity.?;
 
-            if (opt_source) |source| {
-                entity.?.* = source.sim;
-                loadEntityReference(world_mode, sim_region, &entity.?.sword);
-                loadEntityReference(world_mode, sim_region, &entity.?.head);
+                if (opt_source) |source| {
+                    entity.?.* = source.sim;
+                    loadEntityReference(world_mode, sim_region, &entity.?.head);
 
-                std.debug.assert(!source.sim.isSet(SimEntityFlags.Simming.toInt()));
-                source.sim.addFlags(SimEntityFlags.Simming.toInt());
+                    std.debug.assert(!source.sim.isSet(SimEntityFlags.Simming.toInt()));
+                    source.sim.addFlags(SimEntityFlags.Simming.toInt());
+                }
+
+                entity.?.storage_index = storage_index;
+                entity.?.updatable = false;
+            } else {
+                unreachable;
             }
-
-            entity.?.storage_index = storage_index;
-            entity.?.updatable = false;
-        } else {
-            unreachable;
         }
     }
 
@@ -319,7 +315,7 @@ pub fn entityOverlapsRectangle(position: Vector3, volume: SimEntityCollisionVolu
 pub fn addEntity(
     world_mode: *GameModeWorld,
     sim_region: *SimRegion,
-    storage_index: u32,
+    storage_index: EntityId,
     source: *LowEntity,
     opt_sim_position: ?*Vector3,
 ) ?*SimEntity {
@@ -393,10 +389,10 @@ pub fn beginSimulation(
                 if (opt_chunk) |chunk| {
                     var opt_block: ?*world.WorldEntityBlock = &chunk.first_block;
                     while (opt_block) |block| : (opt_block = block.next) {
-                        var block_entity_index: u32 = 0;
-                        while (block_entity_index < block.entity_count) : (block_entity_index += 1) {
-                            const low_entity_index = block.low_entity_indices[block_entity_index];
-                            var low_entity = &world_mode.low_entities[low_entity_index];
+                        var entity_index: u32 = 0;
+                        while (entity_index < block.entity_count) : (entity_index += 1) {
+                            const entities: [*]LowEntity = @ptrCast(@alignCast(&block.entity_data));
+                            var low_entity = &entities[entity_index];
 
                             if (!low_entity.sim.isSet(SimEntityFlags.Nonspatial.toInt())) {
                                 var sim_space_position = getSimSpacePosition(sim_region, low_entity);
@@ -406,7 +402,13 @@ pub fn beginSimulation(
                                     low_entity.sim.collision.total_volume,
                                     sim_region.bounds,
                                 )) {
-                                    _ = addEntity(world_mode, sim_region, low_entity_index, low_entity, &sim_space_position);
+                                    _ = addEntity(
+                                        world_mode,
+                                        sim_region,
+                                        low_entity.sim.storage_index,
+                                        low_entity,
+                                        &sim_space_position,
+                                    );
                                 }
                             }
                         }
@@ -473,7 +475,7 @@ fn canCollide(world_mode: *GameModeWorld, entity: *SimEntity, hit_entity: *SimEn
         var b = hit_entity;
 
         // Sort entities based on storage index.
-        if (a.storage_index > b.storage_index) {
+        if (a.storage_index.value > b.storage_index.value) {
             const temp = a;
             a = b;
             b = temp;
@@ -490,10 +492,11 @@ fn canCollide(world_mode: *GameModeWorld, entity: *SimEntity, hit_entity: *SimEn
             }
 
             // Specific rules.
-            const hash_bucket = a.storage_index & ((world_mode.collision_rule_hash.len) - 1);
+            const hash_bucket = a.storage_index.value & ((world_mode.collision_rule_hash.len) - 1);
             var opt_rule: ?*PairwiseCollisionRule = world_mode.collision_rule_hash[hash_bucket];
             while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
-                if ((rule.storage_index_a == a.storage_index) and (rule.storage_index_b == b.storage_index)) {
+                if ((rule.storage_index_a == a.storage_index.value) and
+                    (rule.storage_index_b == b.storage_index.value)) {
                     result = rule.can_collide;
                     break;
                 }
@@ -509,7 +512,7 @@ pub fn handleCollision(world_mode: *GameModeWorld, entity: *SimEntity, hit_entit
 
     if (entity.type == .Sword) {
         // Stop future collisons between these entities.
-        world_mode.addCollisionRule(entity.storage_index, hit_entity.storage_index, false);
+        world_mode.addCollisionRule(entity.storage_index.value, hit_entity.storage_index.value, false);
 
         stops_on_collision = false;
     } else {
@@ -747,16 +750,16 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
     TimedBlock.beginFunction(@src(), .EndSimulation);
     defer TimedBlock.endFunction(@src(), .EndSimulation);
 
+    if (false) {
     var sim_entity_index: u32 = 0;
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
         const entity = &sim_region.entities[sim_entity_index];
-        const stored = &world_mode.low_entities[entity.storage_index];
+        const stored = &world_mode.low_entities[entity.storage_index.value];
 
         std.debug.assert(stored.sim.isSet(SimEntityFlags.Simming.toInt()));
         stored.sim = entity.*;
         std.debug.assert(!stored.sim.isSet(SimEntityFlags.Simming.toInt()));
 
-        storeEntityReference(&stored.sim.sword);
         storeEntityReference(&stored.sim.head);
 
         const new_position = if (stored.sim.isSet(SimEntityFlags.Nonspatial.toInt()))
@@ -767,7 +770,7 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
             &world_mode.world.arena,
             world_mode.world,
             stored,
-            entity.storage_index,
+            entity.storage_index.value,
             new_position,
         );
 
@@ -793,5 +796,6 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
 
             world_mode.camera_position = new_camera_position;
         }
+    }
     }
 }

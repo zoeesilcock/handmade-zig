@@ -37,6 +37,7 @@ const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
 const ArenaPushParams = shared.ArenaPushParams;
+const EntityId = sim.EntityId;
 const SimEntityTraversablePoint = sim.SimEntityTraversablePoint;
 const SimEntityCollisionVolumeGroup = sim.SimEntityCollisionVolumeGroup;
 
@@ -44,11 +45,8 @@ pub const GameModeWorld = struct {
     world: *world.World = undefined,
     typical_floor_height: f32 = 0,
 
-    camera_following_entity_index: u32 = 0,
+    camera_following_entity_index: EntityId = .{},
     camera_position: WorldPosition,
-
-    low_entity_count: u32 = 0,
-    low_entities: [90000]LowEntity = [1]LowEntity{undefined} ** 90000,
 
     collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
@@ -59,7 +57,6 @@ pub const GameModeWorld = struct {
     stair_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     hero_body_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
     hero_head_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    sword_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     familiar_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
     monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
 
@@ -73,41 +70,32 @@ pub const GameModeWorld = struct {
     particles: [256]Particle = [1]Particle{Particle{}} ** 256,
     particle_cels: [PARTICLE_CEL_DIM][PARTICLE_CEL_DIM]ParticleCel = undefined,
 
-    pub fn getLowEntity(self: *GameModeWorld, index: u32) ?*LowEntity {
-        var entity: ?*LowEntity = null;
+    creation_buffer_locked: bool,
+    creation_buffer: LowEntity,
+    last_used_entity_storage_index: u32,
 
-        if (index > 0 and index < self.low_entity_count) {
-            entity = &self.low_entities[index];
+    pub fn addPlayer(self: *GameModeWorld) EntityId {
+        const body = beginGroundedEntity(self, .HeroBody, self.camera_position, self.hero_body_collision);
+        body.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
+
+        initHitPoints(&body.sim, 3);
+
+        if (self.camera_following_entity_index.value == 0) {
+            self.camera_following_entity_index = body.sim.storage_index;
         }
 
-        return entity;
-    }
+        endLowEntity(self, body);
 
-    pub fn addPlayer(self: *GameModeWorld) AddLowEntityResult {
-        const body = addGroundedEntity(self, .HeroBody, self.camera_position, self.hero_body_collision);
-        body.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
+        const head = beginGroundedEntity(self, .HeroHead, self.camera_position, self.hero_head_collision);
+        head.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
 
-        const head = addGroundedEntity(self, .HeroHead, self.camera_position, self.hero_head_collision);
-        head.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
+        body.sim.head = sim.EntityReference{ .index = head.sim.storage_index };
+        head.sim.head = sim.EntityReference{ .index = body.sim.storage_index };
 
-        initHitPoints(&body.low.sim, 3);
+        const result: EntityId = head.sim.storage_index;
+        endLowEntity(self, head);
 
-        const sword = addSword(self);
-        head.low.sim.sword = sim.EntityReference{ .index = sword.low_index };
-        head.low.sim.head = sim.EntityReference{ .index = body.low_index };
-        body.low.sim.head = sim.EntityReference{ .index = head.low_index };
-
-        if (self.camera_following_entity_index == 0) {
-            self.camera_following_entity_index = body.low_index;
-        }
-
-        return head;
-    }
-
-    pub fn deleteLowEntity(self: *GameModeWorld, entity_index: u32) void {
-        _ = self;
-        _ = entity_index;
-        // TODO: Implement this.
+        return result;
     }
 
     pub fn addCollisionRule(self: *GameModeWorld, in_storage_index_a: u32, in_storage_index_b: u32, can_collide: bool) void {
@@ -160,11 +148,6 @@ pub const LowEntity = struct {
     position: WorldPosition = undefined,
 };
 
-pub const AddLowEntityResult = struct {
-    low: *LowEntity,
-    low_index: u32,
-};
-
 pub const ParticleCel = struct {
     density: f32 = 0,
     velocity_times_density: Vector3 = Vector3.zero(),
@@ -211,8 +194,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
     world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
 
-    _ = addLowEntity(world_mode, .Null, WorldPosition.nullPosition());
-
     const tile_side_in_meters: f32 = 1.4;
     const tiles_per_width: u32 = 17;
     const tiles_per_height: u32 = 9;
@@ -240,7 +221,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     );
     world_mode.hero_body_collision = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
     world_mode.hero_head_collision = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
-    world_mode.sword_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.1, 0);
     world_mode.monster_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
     world_mode.familiar_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
 
@@ -420,16 +400,16 @@ pub fn updateAndRenderWorld(
         controlled_hero.vertical_direction = 0;
         controlled_hero.sword_direction = Vector2.zero();
 
-        if (controlled_hero.entity_index == 0) {
+        if (controlled_hero.entity_index.value == 0) {
             if (controller.back_button.wasPressed()) {
                 quit_requested = true;
             } else if (controller.start_button.wasPressed()) {
                 controlled_hero.* = shared.ControlledHero{};
-                controlled_hero.entity_index = state.mode.world.addPlayer().low_index;
+                controlled_hero.entity_index = state.mode.world.addPlayer();
             }
         }
 
-        if (controlled_hero.entity_index != 0) {
+        if (controlled_hero.entity_index.value != 0) {
             heroes_exist = true;
 
             if (controller.is_analog) {
@@ -496,8 +476,8 @@ pub fn updateAndRenderWorld(
             }
 
             if (controller.back_button.wasPressed()) {
-                state.mode.world.deleteLowEntity(controlled_hero.entity_index);
-                controlled_hero.entity_index = 0;
+                // state.mode.world.deleteLowEntity(controlled_hero.entity_index);
+                controlled_hero.entity_index = .{};
             }
         }
     }
@@ -552,7 +532,7 @@ pub fn updateAndRenderWorld(
         const entity = &screen_sim_region.entities[entity_index];
         entity.x_axis = .new(1, 0);
         entity.y_axis = .new(0, 1);
-        const entity_debug_id = debug_interface.DebugId.fromPointer(&world_mode.low_entities[entity.storage_index]);
+        const entity_debug_id = debug_interface.DebugId.fromPointer(&entity.storage_index.value);
         if (debug_interface.requested(entity_debug_id)) {
             DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
         }
@@ -621,26 +601,6 @@ pub fn updateAndRenderWorld(
                                 }
 
                                 entity.velocity = entity.velocity.plus(acceleration2.scaledTo(delta_time));
-                            }
-
-                            if (false) {
-                                if (controlled_hero.sword_direction.x() != 0 or controlled_hero.sword_direction.y() != 0) {
-                                    if (entity.sword.ptr) |sword| {
-                                        if (sword.isSet(sim.SimEntityFlags.Nonspatial.toInt())) {
-                                            sword.distance_limit = 5.0;
-                                            sword.makeSpatial(
-                                                entity.position,
-                                                entity.velocity.plus(
-                                                    controlled_hero.sword_direction.toVector3(0).scaledTo(5.0),
-                                                ),
-                                            );
-                                            world_mode.addCollisionRule(sword.storage_index, entity.storage_index, false);
-                                            // _ = world_mode.audio_state.playSound(
-                                            //     transient_state.assets.getRandomSound(.Bloop, &world_mode.effects_entropy),
-                                            // );
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -725,7 +685,7 @@ pub fn updateAndRenderWorld(
 
                     if (entity.distance_limit == 0) {
                         entity.makeNonSpatial();
-                        clearCollisionRulesFor(world_mode, entity.storage_index);
+                        clearCollisionRulesFor(world_mode, entity.storage_index.value);
                         continue;
                     }
                 },
@@ -1184,39 +1144,48 @@ pub fn updateAndRenderWorld(
     return result;
 }
 
-fn addLowEntity(world_mode: *GameModeWorld, entity_type: sim.EntityType, world_position: WorldPosition) AddLowEntityResult {
-    std.debug.assert(world_mode.low_entity_count < world_mode.low_entities.len);
+fn beginLowEntity(world_mode: *GameModeWorld, entity_type: sim.EntityType, world_position: WorldPosition) *LowEntity {
+    std.debug.assert(!world_mode.creation_buffer_locked);
+    world_mode.creation_buffer_locked = true;
 
-    const low_entity_index = world_mode.low_entity_count;
-    world_mode.low_entity_count += 1;
+    var low_entity: *LowEntity = &world_mode.creation_buffer;
+    world_mode.last_used_entity_storage_index += 1;
+    low_entity.sim.storage_index = .{ .value = world_mode.last_used_entity_storage_index };
 
-    var low_entity = &world_mode.low_entities[low_entity_index];
-    low_entity.sim.collision = world_mode.null_collision;
+    shared.zeroStruct(LowEntity, low_entity);
+
     low_entity.sim.type = entity_type;
+    low_entity.sim.collision = world_mode.null_collision;
+    low_entity.position = world_position;
 
-    low_entity.position = WorldPosition.nullPosition();
-    world.changeEntityLocation(
-        &world_mode.world.arena,
-        world_mode.world,
-        low_entity,
-        low_entity_index,
-        world_position,
-    );
-
-    return AddLowEntityResult{
-        .low_index = low_entity_index,
-        .low = low_entity,
-    };
+    return low_entity;
+}
+fn packEntityIntoChunk(
+    world_object: *world.World,
+    low_entity: *LowEntity,
+) void {
+    _ = world_object;
+    _ = low_entity;
 }
 
-fn addGroundedEntity(
+fn endLowEntity(world_mode: *GameModeWorld, low_entity: *LowEntity) void {
+    std.debug.assert(world_mode.creation_buffer_locked);
+    world_mode.creation_buffer_locked = false;
+
+    packEntityIntoChunk(
+        world_mode.world,
+        low_entity,
+    );
+}
+
+fn beginGroundedEntity(
     world_mode: *GameModeWorld,
     entity_type: sim.EntityType,
     world_position: WorldPosition,
     collision: *sim.SimEntityCollisionVolumeGroup,
-) AddLowEntityResult {
-    const entity = addLowEntity(world_mode, entity_type, world_position);
-    entity.low.sim.collision = collision;
+) *LowEntity {
+    const entity = beginLowEntity(world_mode, entity_type, world_position);
+    entity.sim.collision = collision;
     return entity;
 }
 
@@ -1232,59 +1201,51 @@ fn addStandardRoom(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32,
                 abs_tile_z,
                 null,
             );
-            _ = addGroundedEntity(world_mode, .Floor, world_position, world_mode.floor_collision);
+            const entity: *LowEntity = beginGroundedEntity(world_mode, .Floor, world_position, world_mode.floor_collision);
+            endLowEntity(world_mode, entity);
         }
     }
 }
 
-fn addWall(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
+fn addWall(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = addGroundedEntity(world_mode, .Wall, world_position, world_mode.wall_collision);
+    const entity = beginGroundedEntity(world_mode, .Wall, world_position, world_mode.wall_collision);
 
-    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
+    entity.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
 
-    return entity;
+    endLowEntity(world_mode, entity);
 }
 
-fn addStairs(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
+fn addStairs(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = addGroundedEntity(world_mode, .Stairwell, world_position, world_mode.stair_collsion);
+    const entity = beginGroundedEntity(world_mode, .Stairwell, world_position, world_mode.stair_collsion);
 
-    entity.low.sim.walkable_dimension = entity.low.sim.collision.total_volume.dimension.xy();
-    entity.low.sim.walkable_height = world_mode.typical_floor_height;
-    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
+    entity.sim.walkable_dimension = entity.sim.collision.total_volume.dimension.xy();
+    entity.sim.walkable_height = world_mode.typical_floor_height;
+    entity.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
 
-    return entity;
+    endLowEntity(world_mode, entity);
 }
 
-fn addSword(world_mode: *GameModeWorld) AddLowEntityResult {
-    const entity = addLowEntity(world_mode, .Sword, WorldPosition.nullPosition());
+fn addMonster(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
+    const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
+    const entity = beginGroundedEntity(world_mode, .Monster, world_position, world_mode.monster_collsion);
 
-    entity.low.sim.collision = world_mode.sword_collsion;
-    entity.low.sim.addFlags(sim.SimEntityFlags.Movable.toInt());
+    entity.sim.collision = world_mode.monster_collsion;
+    entity.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
 
-    return entity;
+    initHitPoints(&entity.sim, 3);
+
+    endLowEntity(world_mode, entity);
 }
 
-fn addMonster(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
+fn addFamiliar(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = addGroundedEntity(world_mode, .Monster, world_position, world_mode.monster_collsion);
+    const entity = beginGroundedEntity(world_mode, .Familiar, world_position, world_mode.familiar_collsion);
 
-    entity.low.sim.collision = world_mode.monster_collsion;
-    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
+    entity.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
 
-    initHitPoints(&entity.low.sim, 3);
-
-    return entity;
-}
-
-fn addFamiliar(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) AddLowEntityResult {
-    const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = addGroundedEntity(world_mode, .Familiar, world_position, world_mode.familiar_collsion);
-
-    entity.low.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
-
-    return entity;
+    endLowEntity(world_mode, entity);
 }
 
 pub fn clearCollisionRulesFor(world_mode: *GameModeWorld, storage_index: u32) void {

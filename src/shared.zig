@@ -37,6 +37,7 @@ const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const PlayingSound = audio.PlayingSound;
 const DebugTable = debug_interface.DebugTable;
+const EntityId = sim.EntityId;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -828,7 +829,7 @@ pub const GroundBuffer = extern struct {
 };
 
 pub const ControlledHero = struct {
-    entity_index: u32 = 0,
+    entity_index: EntityId = .{},
     movement_direction: Vector2 = Vector2.zero(),
     vertical_direction: f32 = 0,
     sword_direction: Vector2 = Vector2.zero(),

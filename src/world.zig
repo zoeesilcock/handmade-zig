@@ -20,14 +20,14 @@ const LowEntity = @import("world_mode.zig").LowEntity;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
-const TILES_PER_CHUNK = 8;
+const TILES_PER_CHUNK = 16;
 
 pub const World = extern struct {
     chunk_dimension_in_meters: Vector3,
 
     first_free: ?*WorldEntityBlock,
 
-    chunk_hash: [4096]WorldChunk,
+    chunk_hash: [4096]?*WorldChunk,
 
     arena: shared.MemoryArena,
 };
@@ -50,6 +50,15 @@ pub const WorldEntityBlock = extern struct {
     entity_count: u32,
     low_entity_indices: [TILES_PER_CHUNK]u32,
     next: ?*WorldEntityBlock,
+
+    entity_data_size: u32,
+    entity_data: [1 << 16]u8,
+
+    pub fn clear(self: *WorldEntityBlock) void {
+        self.entity_count = 0;
+        self.next = null;
+        self.entity_data_size = 0;
+    }
 };
 
 pub const WorldPosition = extern struct {
@@ -88,14 +97,7 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *shared.Mem
 
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
     world.first_free = null;
-    parent_arena.makeSubArena(&world.arena, parent_arena.getRemainingSize(null), null);
-
-    for (&world.chunk_hash) |*chunk| {
-        chunk.x = TILE_CHUNK_UNINITIALIZED;
-        chunk.y = TILE_CHUNK_UNINITIALIZED;
-        chunk.z = TILE_CHUNK_UNINITIALIZED;
-        chunk.first_block.entity_count = 0;
-    }
+    parent_arena.makeSubArena(&world.arena, parent_arena.getRemainingSize(null), shared.ArenaPushParams.noClear());
 
     return world;
 }
@@ -142,47 +144,39 @@ pub fn getWorldChunk(
     const hash_slot = @as(usize, @intCast(hash_value)) & (world.chunk_hash.len - 1);
     std.debug.assert(hash_slot < world.chunk_hash.len);
 
-    var tile_chunk: ?*WorldChunk = &world.chunk_hash[hash_slot];
-    while (tile_chunk) |chunk| {
+    var result: ?*WorldChunk = null;
+    var tile_chunk: ?*WorldChunk = world.chunk_hash[hash_slot];
+    while (tile_chunk) |chunk| : (tile_chunk = chunk.next_in_hash) {
         if ((chunk_x == chunk.x) and
             (chunk_y == chunk.y) and
             (chunk_z == chunk.z))
         {
+            result = chunk;
             break;
         }
-
-        if (opt_memory_arena) |memory_arena| {
-            if (chunk.x != TILE_CHUNK_UNINITIALIZED and chunk.next_in_hash == null) {
-                chunk.next_in_hash = memory_arena.pushStruct(WorldChunk, null);
-                tile_chunk = chunk.next_in_hash;
-                tile_chunk.?.x = TILE_CHUNK_UNINITIALIZED;
-
-                continue;
-            }
-        }
-
-        if (opt_memory_arena) |_| {
-            if (chunk.x == TILE_CHUNK_UNINITIALIZED) {
-                chunk.x = chunk_x;
-                chunk.y = chunk_y;
-                chunk.z = chunk_z;
-
-                chunk.next_in_hash = null;
-
-                break;
-            }
-        }
-
-        tile_chunk = chunk.next_in_hash;
     }
 
-    return tile_chunk;
+    if (result == null) {
+        if (opt_memory_arena) |memory_arena| {
+            result = memory_arena.pushStruct(WorldChunk, shared.ArenaPushParams.noClear());
+
+            result.?.first_block.clear();
+            result.?.x = chunk_x;
+            result.?.y = chunk_y;
+            result.?.z = chunk_z;
+
+            result.?.next_in_hash = world.chunk_hash[hash_slot];
+            world.chunk_hash[hash_slot] = result;
+        }
+    }
+
+    return result;
 }
 pub fn changeEntityLocation(
     memory_arena: *shared.MemoryArena,
     world: *World,
     low_entity: *LowEntity,
-    low_entity_index: u32,
+    low_entity_index: LowEntity,
     new_position: WorldPosition,
 ) void {
     TimedBlock.beginFunction(@src(), .ChangeEntityLocation);
