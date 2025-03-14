@@ -16,7 +16,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const LoadedBitmap = asset.LoadedBitmap;
 const BitmapId = file_formats.BitmapId;
 const PlayingSound = audio.PlayingSound;
-const LowEntity = @import("world_mode.zig").LowEntity;
+const Entity = sim.Entity;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
@@ -30,6 +30,9 @@ pub const World = extern struct {
     chunk_hash: [4096]?*WorldChunk,
 
     arena: shared.MemoryArena,
+
+    first_free_chunk: ?*WorldChunk,
+    first_free_block: ?*WorldEntityBlock,
 };
 
 pub const WorldChunk = extern struct {
@@ -37,7 +40,7 @@ pub const WorldChunk = extern struct {
     y: i32,
     z: i32,
 
-    first_block: WorldEntityBlock,
+    first_block: ?*WorldEntityBlock,
 
     next_in_hash: ?*WorldChunk = null,
 
@@ -58,6 +61,10 @@ pub const WorldEntityBlock = extern struct {
         self.entity_count = 0;
         self.next = null;
         self.entity_data_size = 0;
+    }
+
+    pub fn hasRoomFor(self: *WorldEntityBlock, size: u32) bool {
+        return (self.entity_data_size + size) <= self.entity_data.len;
     }
 };
 
@@ -123,6 +130,77 @@ pub fn areInSameChunk(world: *World, a: *const WorldPosition, b: *const WorldPos
         a.chunk_z == b.chunk_z;
 }
 
+fn packEntityIntoChunk(
+    world: *World,
+    source: *Entity,
+    chunk: *WorldChunk,
+) void {
+    const pack_size: u32 = @sizeOf(Entity);
+
+    if (chunk.first_block == null or !chunk.first_block.?.hasRoomFor(pack_size)) {
+        if (world.first_free_block == null) {
+            world.first_free_block = world.arena.pushStruct(WorldEntityBlock, null);
+            world.first_free_block.?.next = null;
+        }
+
+        chunk.first_block = world.first_free_block;
+        world.first_free_block = chunk.first_block.?.next;
+
+        chunk.first_block.?.clear();
+    }
+
+    const block: *WorldEntityBlock = chunk.first_block.?;
+
+    std.debug.assert(block.hasRoomFor(pack_size));
+
+    const dest: usize = @intFromPtr(&block.entity_data) + block.entity_data_size;
+    block.entity_data_size += pack_size;
+
+    @as(*align(1)Entity, @ptrFromInt(dest)).* = source.*;
+}
+
+pub fn packEntityIntoWorld(
+    world: *World,
+    source: *Entity,
+    at: WorldPosition,
+) void {
+    if (getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, &world.arena)) |chunk| {
+        packEntityIntoChunk(world, source, chunk);
+    }
+}
+
+pub fn addChunkToFreeList(
+    world: *World,
+    old: *WorldChunk,
+) void {
+    old.next_in_hash = world.first_free_chunk;
+    world.first_free_chunk = old;
+}
+
+pub fn addBlockToFreeList(
+    world: *World,
+    old: *WorldEntityBlock,
+) void {
+    old.next = world.first_free_block;
+    world.first_free_block = old;
+}
+
+pub fn removeWorldChunk(
+    world: *World,
+    chunk_x: i32,
+    chunk_y: i32,
+    chunk_z: i32,
+) ?*WorldChunk {
+    const chunk_ptr: *?*WorldChunk = getWorldChunkInternal(world, chunk_x, chunk_y, chunk_z);
+    const result: ?*WorldChunk = chunk_ptr.*;
+
+    if (result != null) {
+        chunk_ptr.* = result.?.next_in_hash;
+    }
+
+    return result;
+}
+
 pub fn getWorldChunk(
     world: *World,
     chunk_x: i32,
@@ -130,6 +208,32 @@ pub fn getWorldChunk(
     chunk_z: i32,
     opt_memory_arena: ?*shared.MemoryArena,
 ) ?*WorldChunk {
+    const chunk_ptr: *?*WorldChunk = getWorldChunkInternal(world, chunk_x, chunk_y, chunk_z);
+    var result: ?*WorldChunk = chunk_ptr.*;
+
+    if (result == null) {
+        if (opt_memory_arena) |memory_arena| {
+            result = memory_arena.pushStruct(WorldChunk, shared.ArenaPushParams.noClear());
+
+            result.?.first_block = null;
+            result.?.x = chunk_x;
+            result.?.y = chunk_y;
+            result.?.z = chunk_z;
+
+            result.?.next_in_hash = chunk_ptr.*;
+            chunk_ptr.* = result;
+        }
+    }
+
+    return result;
+}
+
+pub fn getWorldChunkInternal(
+    world: *World,
+    chunk_x: i32,
+    chunk_y: i32,
+    chunk_z: i32,
+) *?*WorldChunk {
     TimedBlock.beginFunction(@src(), .GetWorldChunk);
     defer TimedBlock.endFunction(@src(), .GetWorldChunk);
 
@@ -144,183 +248,17 @@ pub fn getWorldChunk(
     const hash_slot = @as(usize, @intCast(hash_value)) & (world.chunk_hash.len - 1);
     std.debug.assert(hash_slot < world.chunk_hash.len);
 
-    var result: ?*WorldChunk = null;
-    var tile_chunk: ?*WorldChunk = world.chunk_hash[hash_slot];
-    while (tile_chunk) |chunk| : (tile_chunk = chunk.next_in_hash) {
+    var opt_chunk: *?*WorldChunk = &world.chunk_hash[hash_slot];
+    while (opt_chunk.*) |chunk| : (opt_chunk = &chunk.next_in_hash) {
         if ((chunk_x == chunk.x) and
             (chunk_y == chunk.y) and
             (chunk_z == chunk.z))
         {
-            result = chunk;
             break;
         }
     }
 
-    if (result == null) {
-        if (opt_memory_arena) |memory_arena| {
-            result = memory_arena.pushStruct(WorldChunk, shared.ArenaPushParams.noClear());
-
-            result.?.first_block.clear();
-            result.?.x = chunk_x;
-            result.?.y = chunk_y;
-            result.?.z = chunk_z;
-
-            result.?.next_in_hash = world.chunk_hash[hash_slot];
-            world.chunk_hash[hash_slot] = result;
-        }
-    }
-
-    return result;
-}
-pub fn changeEntityLocation(
-    memory_arena: *shared.MemoryArena,
-    world: *World,
-    low_entity: *LowEntity,
-    low_entity_index: LowEntity,
-    new_position: WorldPosition,
-) void {
-    TimedBlock.beginFunction(@src(), .ChangeEntityLocation);
-    defer TimedBlock.endFunction(@src(), .ChangeEntityLocation);
-
-    var opt_old_position: ?*WorldPosition = null;
-    var opt_new_position: ?*WorldPosition = null;
-
-    if (!low_entity.sim.isSet(sim.SimEntityFlags.Nonspatial.toInt()) and low_entity.position.isValid()) {
-        opt_old_position = &low_entity.position;
-    }
-
-    if (new_position.isValid()) {
-        opt_new_position = @constCast(&new_position);
-    }
-
-    changeEntityLocationRaw(
-        memory_arena,
-        world,
-        low_entity_index,
-        opt_old_position,
-        opt_new_position,
-    );
-
-    if (new_position.isValid()) {
-        low_entity.position = new_position;
-        low_entity.sim.clearFlags(sim.SimEntityFlags.Nonspatial.toInt());
-    } else {
-        low_entity.position = WorldPosition.nullPosition();
-        low_entity.sim.addFlags(sim.SimEntityFlags.Nonspatial.toInt());
-    }
-}
-
-pub fn changeEntityLocationRaw(
-    memory_arena: *shared.MemoryArena,
-    world: *World,
-    low_entity_index: u32,
-    opt_old_position: ?*WorldPosition,
-    opt_new_position: ?*WorldPosition,
-) void {
-    TimedBlock.beginFunction(@src(), .ChangeEntityLocationRaw);
-    defer TimedBlock.endFunction(@src(), .ChangeEntityLocationRaw);
-
-    std.debug.assert(opt_old_position == null or opt_old_position.?.isValid());
-    std.debug.assert(opt_new_position == null or opt_new_position.?.isValid());
-
-    var in_same_chunk = false;
-    if (opt_new_position) |new_position| {
-        if (opt_old_position) |old_position| {
-            in_same_chunk = areInSameChunk(world, old_position, new_position);
-        }
-    }
-
-    if (!in_same_chunk) {
-        if (opt_old_position) |old_position| {
-            // Pull the entity out of it's current block.
-            const opt_chunk = getWorldChunk(
-                world,
-                old_position.chunk_x,
-                old_position.chunk_y,
-                old_position.chunk_z,
-                null,
-            );
-
-            std.debug.assert(opt_chunk != null);
-
-            if (opt_chunk) |old_chunk| {
-                const first_block = &old_chunk.first_block;
-
-                // Look through all the blocks.
-                var opt_block: ?*WorldEntityBlock = &old_chunk.first_block;
-                outer: while (opt_block) |block| : (opt_block = block.next) {
-                    // Look through the entity indices in the block.
-                    var index: u32 = 0;
-                    while (index < block.entity_count) : (index += 1) {
-                        if (low_entity_index == block.low_entity_indices[index]) {
-                            std.debug.assert(first_block.entity_count > 0);
-
-                            // Remove the entity from the block.
-                            block.entity_count -= 1;
-                            block.low_entity_indices[index] =
-                                first_block.low_entity_indices[first_block.entity_count];
-
-                            if (first_block.entity_count == 0) {
-                                // Last entity in the block, remove this block.
-                                if (first_block.next) |next_block| {
-                                    // Overwrite the empty block with the next block.
-                                    first_block.* = next_block.*;
-
-                                    // Free the empty block.
-                                    next_block.next = world.first_free;
-                                    world.first_free = next_block;
-                                }
-                            }
-
-                            break :outer;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (opt_new_position) |new_position| {
-            // Insert the entity into it's new entity block.
-            const opt_chunk = getWorldChunk(
-                world,
-                new_position.chunk_x,
-                new_position.chunk_y,
-                new_position.chunk_z,
-                memory_arena,
-            );
-
-            std.debug.assert(opt_chunk != null);
-
-            if (opt_chunk) |new_chunk| {
-                const block = &new_chunk.first_block;
-
-                if (block.entity_count == block.low_entity_indices.len) {
-                    // Out of space, get a new block.
-                    var old_block: ?*WorldEntityBlock = null;
-                    const opt_free_block = world.first_free;
-
-                    if (opt_free_block) |free_block| {
-                        // Use the free block.
-                        world.first_free = free_block.next;
-                        old_block = free_block;
-                    } else {
-                        // No free blocks, create a new block.
-                        old_block = memory_arena.pushStruct(WorldEntityBlock, null);
-                    }
-
-                    // Copy the existing block into the old block position.
-                    old_block.?.* = block.*;
-                    block.next = old_block;
-                    block.entity_count = 0;
-                }
-
-                // Add the entity to the block.
-                std.debug.assert(block.entity_count < block.low_entity_indices.len);
-                block.low_entity_indices[block.entity_count] = low_entity_index;
-                block.entity_count += 1;
-            }
-        }
-    }
+    return opt_chunk;
 }
 
 pub fn recannonicalizeCoordinate(chunk_dimension: f32, tile_abs: *i32, tile_rel: *const f32) f32 {

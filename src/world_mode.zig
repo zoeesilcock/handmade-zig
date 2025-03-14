@@ -37,9 +37,10 @@ const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
 const ArenaPushParams = shared.ArenaPushParams;
+const Entity = sim.Entity;
 const EntityId = sim.EntityId;
-const SimEntityTraversablePoint = sim.SimEntityTraversablePoint;
-const SimEntityCollisionVolumeGroup = sim.SimEntityCollisionVolumeGroup;
+const EntityTraversablePoint = sim.EntityTraversablePoint;
+const EntityCollisionVolumeGroup = sim.EntityCollisionVolumeGroup;
 
 pub const GameModeWorld = struct {
     world: *world.World = undefined,
@@ -51,14 +52,14 @@ pub const GameModeWorld = struct {
     collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
 
-    null_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    floor_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    wall_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    stair_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
-    hero_body_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    hero_head_collision: *sim.SimEntityCollisionVolumeGroup = undefined,
-    familiar_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
-    monster_collsion: *sim.SimEntityCollisionVolumeGroup = undefined,
+    null_collision: *sim.EntityCollisionVolumeGroup = undefined,
+    floor_collision: *sim.EntityCollisionVolumeGroup = undefined,
+    wall_collision: *sim.EntityCollisionVolumeGroup = undefined,
+    stair_collsion: *sim.EntityCollisionVolumeGroup = undefined,
+    hero_body_collision: *sim.EntityCollisionVolumeGroup = undefined,
+    hero_head_collision: *sim.EntityCollisionVolumeGroup = undefined,
+    familiar_collsion: *sim.EntityCollisionVolumeGroup = undefined,
+    monster_collsion: *sim.EntityCollisionVolumeGroup = undefined,
 
     time: f32 = 0,
 
@@ -70,30 +71,29 @@ pub const GameModeWorld = struct {
     particles: [256]Particle = [1]Particle{Particle{}} ** 256,
     particle_cels: [PARTICLE_CEL_DIM][PARTICLE_CEL_DIM]ParticleCel = undefined,
 
-    creation_buffer_locked: bool,
-    creation_buffer: LowEntity,
+    creation_buffer_index: u32,
+    creation_buffer: [4]Entity,
     last_used_entity_storage_index: u32,
 
     pub fn addPlayer(self: *GameModeWorld) EntityId {
-        const body = beginGroundedEntity(self, .HeroBody, self.camera_position, self.hero_body_collision);
-        body.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
+        var body = beginGroundedEntity(self, .HeroBody, self.hero_body_collision);
+        body.addFlags(sim.EntityFlags.Collides.toInt() | sim.EntityFlags.Movable.toInt());
 
-        initHitPoints(&body.sim, 3);
+        const head = beginGroundedEntity(self, .HeroHead, self.hero_head_collision);
+        head.addFlags(sim.EntityFlags.Collides.toInt() | sim.EntityFlags.Movable.toInt());
+
+        initHitPoints(body, 3);
+
+        body.head = sim.EntityReference{ .index = head.storage_index };
+        head.head = sim.EntityReference{ .index = body.storage_index };
 
         if (self.camera_following_entity_index.value == 0) {
-            self.camera_following_entity_index = body.sim.storage_index;
+            self.camera_following_entity_index = body.storage_index;
         }
 
-        endLowEntity(self, body);
-
-        const head = beginGroundedEntity(self, .HeroHead, self.camera_position, self.hero_head_collision);
-        head.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
-
-        body.sim.head = sim.EntityReference{ .index = head.sim.storage_index };
-        head.sim.head = sim.EntityReference{ .index = body.sim.storage_index };
-
-        const result: EntityId = head.sim.storage_index;
-        endLowEntity(self, head);
+        const result: EntityId = head.storage_index;
+        endLowEntity(self, head, self.camera_position);
+        endLowEntity(self, body, self.camera_position);
 
         return result;
     }
@@ -141,11 +141,6 @@ pub const GameModeWorld = struct {
             found.can_collide = can_collide;
         }
     }
-};
-
-pub const LowEntity = struct {
-    sim: sim.SimEntity,
-    position: WorldPosition = undefined,
 };
 
 pub const ParticleCel = struct {
@@ -322,8 +317,8 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
     if (false) {
         // Fill the low entity storage with walls.
-        while (world_mode.low_entity_count < (world_mode.low_entities.len - 16)) {
-            const coordinate: i32 = @intCast(1024 + world_mode.low_entity_count);
+        while (world_mode.entity_count < (world_mode.low_entities.len - 16)) {
+            const coordinate: i32 = @intCast(1024 + world_mode.entity_count);
             _ = addWall(world_mode, coordinate, coordinate, 0);
         }
     }
@@ -690,7 +685,7 @@ pub fn updateAndRenderWorld(
                     }
                 },
                 .Familiar => {
-                    var closest_hero: ?*sim.SimEntity = null;
+                    var closest_hero: ?*Entity = null;
                     var closest_hero_squared: f32 = math.square(10.0);
 
                     var hero_entity_index: u32 = 0;
@@ -731,8 +726,8 @@ pub fn updateAndRenderWorld(
                 },
             }
 
-            if (!entity.isSet(sim.SimEntityFlags.Nonspatial.toInt()) and
-                entity.isSet(sim.SimEntityFlags.Movable.toInt()))
+            if (!entity.isSet(sim.EntityFlags.Nonspatial.toInt()) and
+                entity.isSet(sim.EntityFlags.Movable.toInt()))
             {
                 sim.moveEntity(
                     world_mode,
@@ -1144,48 +1139,41 @@ pub fn updateAndRenderWorld(
     return result;
 }
 
-fn beginLowEntity(world_mode: *GameModeWorld, entity_type: sim.EntityType, world_position: WorldPosition) *LowEntity {
-    std.debug.assert(!world_mode.creation_buffer_locked);
-    world_mode.creation_buffer_locked = true;
+fn beginLowEntity(world_mode: *GameModeWorld, entity_type: sim.EntityType) *Entity {
+    std.debug.assert(world_mode.creation_buffer_index < world_mode.creation_buffer.len);
 
-    var low_entity: *LowEntity = &world_mode.creation_buffer;
+    var entity: *Entity = &world_mode.creation_buffer[world_mode.creation_buffer_index];
+    world_mode.creation_buffer_index += 1;
     world_mode.last_used_entity_storage_index += 1;
-    low_entity.sim.storage_index = .{ .value = world_mode.last_used_entity_storage_index };
+    entity.storage_index = .{ .value = world_mode.last_used_entity_storage_index };
 
-    shared.zeroStruct(LowEntity, low_entity);
+    shared.zeroStruct(Entity, entity);
 
-    low_entity.sim.type = entity_type;
-    low_entity.sim.collision = world_mode.null_collision;
-    low_entity.position = world_position;
+    entity.type = entity_type;
+    entity.collision = world_mode.null_collision;
 
-    return low_entity;
-}
-fn packEntityIntoChunk(
-    world_object: *world.World,
-    low_entity: *LowEntity,
-) void {
-    _ = world_object;
-    _ = low_entity;
+    return entity;
 }
 
-fn endLowEntity(world_mode: *GameModeWorld, low_entity: *LowEntity) void {
-    std.debug.assert(world_mode.creation_buffer_locked);
-    world_mode.creation_buffer_locked = false;
+fn endLowEntity(world_mode: *GameModeWorld, entity: *Entity, chunk_position: WorldPosition) void {
+    world_mode.creation_buffer_index -= 1;
 
-    packEntityIntoChunk(
+    std.debug.assert(@intFromPtr(entity) == @intFromPtr(&world_mode.creation_buffer[world_mode.creation_buffer_index]));
+
+    world.packEntityIntoWorld(
         world_mode.world,
-        low_entity,
+        entity,
+        chunk_position,
     );
 }
 
 fn beginGroundedEntity(
     world_mode: *GameModeWorld,
     entity_type: sim.EntityType,
-    world_position: WorldPosition,
-    collision: *sim.SimEntityCollisionVolumeGroup,
-) *LowEntity {
-    const entity = beginLowEntity(world_mode, entity_type, world_position);
-    entity.sim.collision = collision;
+    collision: *sim.EntityCollisionVolumeGroup,
+) *Entity {
+    const entity = beginLowEntity(world_mode, entity_type);
+    entity.collision = collision;
     return entity;
 }
 
@@ -1201,51 +1189,51 @@ fn addStandardRoom(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32,
                 abs_tile_z,
                 null,
             );
-            const entity: *LowEntity = beginGroundedEntity(world_mode, .Floor, world_position, world_mode.floor_collision);
-            endLowEntity(world_mode, entity);
+            const entity: *Entity = beginGroundedEntity(world_mode, .Floor, world_mode.floor_collision);
+            endLowEntity(world_mode, entity, world_position);
         }
     }
 }
 
 fn addWall(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode, .Wall, world_position, world_mode.wall_collision);
+    const entity = beginGroundedEntity(world_mode, .Wall, world_mode.wall_collision);
 
-    entity.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
+    entity.addFlags(sim.EntityFlags.Collides.toInt());
 
-    endLowEntity(world_mode, entity);
+    endLowEntity(world_mode, entity, world_position);
 }
 
 fn addStairs(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode, .Stairwell, world_position, world_mode.stair_collsion);
+    const entity = beginGroundedEntity(world_mode, .Stairwell, world_mode.stair_collsion);
 
-    entity.sim.walkable_dimension = entity.sim.collision.total_volume.dimension.xy();
-    entity.sim.walkable_height = world_mode.typical_floor_height;
-    entity.sim.addFlags(sim.SimEntityFlags.Collides.toInt());
+    entity.walkable_dimension = entity.collision.total_volume.dimension.xy();
+    entity.walkable_height = world_mode.typical_floor_height;
+    entity.addFlags(sim.EntityFlags.Collides.toInt());
 
-    endLowEntity(world_mode, entity);
+    endLowEntity(world_mode, entity, world_position);
 }
 
 fn addMonster(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode, .Monster, world_position, world_mode.monster_collsion);
+    var entity = beginGroundedEntity(world_mode, .Monster, world_mode.monster_collsion);
 
-    entity.sim.collision = world_mode.monster_collsion;
-    entity.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
+    entity.collision = world_mode.monster_collsion;
+    entity.addFlags(sim.EntityFlags.Collides.toInt() | sim.EntityFlags.Movable.toInt());
 
-    initHitPoints(&entity.sim, 3);
+    initHitPoints(entity, 3);
 
-    endLowEntity(world_mode, entity);
+    endLowEntity(world_mode, entity, world_position);
 }
 
 fn addFamiliar(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode, .Familiar, world_position, world_mode.familiar_collsion);
+    const entity = beginGroundedEntity(world_mode, .Familiar, world_mode.familiar_collsion);
 
-    entity.sim.addFlags(sim.SimEntityFlags.Collides.toInt() | sim.SimEntityFlags.Movable.toInt());
+    entity.addFlags(sim.EntityFlags.Collides.toInt() | sim.EntityFlags.Movable.toInt());
 
-    endLowEntity(world_mode, entity);
+    endLowEntity(world_mode, entity, world_position);
 }
 
 pub fn clearCollisionRulesFor(world_mode: *GameModeWorld, storage_index: u32) void {
@@ -1267,7 +1255,7 @@ pub fn clearCollisionRulesFor(world_mode: *GameModeWorld, storage_index: u32) vo
     }
 }
 
-fn initHitPoints(entity: *sim.SimEntity, count: u32) void {
+fn initHitPoints(entity: *Entity, count: u32) void {
     std.debug.assert(count <= entity.hit_points.len);
 
     entity.hit_point_max = count;
@@ -1281,7 +1269,7 @@ fn initHitPoints(entity: *sim.SimEntity, count: u32) void {
     }
 }
 
-fn drawHitPoints(entity: *sim.SimEntity, render_group: *RenderGroup, object_transform: ObjectTransform) void {
+fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, object_transform: ObjectTransform) void {
     if (entity.hit_point_max >= 1) {
         const hit_point_dimension = Vector2.new(0.2, 0.2);
         const hit_point_spacing_x = hit_point_dimension.x() * 2;
@@ -1313,12 +1301,12 @@ fn makeSimpleGroundedCollision(
     y_dimension: f32,
     z_dimension: f32,
     opt_z_offset: ?f32,
-) *sim.SimEntityCollisionVolumeGroup {
+) *sim.EntityCollisionVolumeGroup {
     const z_offset: f32 = opt_z_offset orelse 0;
-    const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup, null);
+    const group = world_mode.world.arena.pushStruct(sim.EntityCollisionVolumeGroup, null);
 
     group.volume_count = 1;
-    group.volumes = world_mode.world.arena.pushArray(group.volume_count, sim.SimEntityCollisionVolume, null);
+    group.volumes = world_mode.world.arena.pushArray(group.volume_count, sim.EntityCollisionVolume, null);
     group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension + z_offset);
     group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
     group.volumes[0] = group.total_volume;
@@ -1331,19 +1319,19 @@ fn makeSimpleFloorCollision(
     x_dimension: f32,
     y_dimension: f32,
     z_dimension: f32,
-) *sim.SimEntityCollisionVolumeGroup {
-    const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup, null);
+) *sim.EntityCollisionVolumeGroup {
+    const group = world_mode.world.arena.pushStruct(sim.EntityCollisionVolumeGroup, null);
 
     group.volume_count = 0;
     group.traversable_count = 1;
-    group.traversables = world_mode.world.arena.pushArray(group.traversable_count, sim.SimEntityTraversablePoint, null);
+    group.traversables = world_mode.world.arena.pushArray(group.traversable_count, sim.EntityTraversablePoint, null);
     group.traversables[0].position = Vector3.zero();
     group.total_volume.offset_position = Vector3.new(0, 0, 0);
     group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
 
     if (false) {
         group.volume_count = 1;
-        group.volumes = world_mode.world.arena.pushArray(group.volume_count, sim.SimEntityCollisionVolume, null);
+        group.volumes = world_mode.world.arena.pushArray(group.volume_count, sim.EntityCollisionVolume, null);
         group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension);
         group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
         group.volumes[0] = group.total_volume;
@@ -1352,8 +1340,8 @@ fn makeSimpleFloorCollision(
     return group;
 }
 
-fn makeNullCollision(world_mode: *GameModeWorld) *sim.SimEntityCollisionVolumeGroup {
-    const group = world_mode.world.arena.pushStruct(sim.SimEntityCollisionVolumeGroup, null);
+fn makeNullCollision(world_mode: *GameModeWorld) *sim.EntityCollisionVolumeGroup {
+    const group = world_mode.world.arena.pushStruct(sim.EntityCollisionVolumeGroup, null);
 
     group.volume_count = 0;
     group.volumes = undefined;
@@ -1369,10 +1357,10 @@ fn getClosestTraversable(sim_region: *sim.SimRegion, from_position: Vector3, res
     var hero_entity_index: u32 = 0;
     while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
         const test_entity = &sim_region.entities[hero_entity_index];
-        const volume_group: *sim.SimEntityCollisionVolumeGroup = test_entity.collision;
+        const volume_group: *sim.EntityCollisionVolumeGroup = test_entity.collision;
         var point_index: u32 = 0;
         while (point_index < volume_group.traversable_count) : (point_index += 1) {
-            const point: SimEntityTraversablePoint = test_entity.getTraversable(point_index);
+            const point: EntityTraversablePoint = test_entity.getTraversable(point_index);
             const head_to_point: Vector3 = point.position.minus(from_position);
 
             const test_distance_squared = head_to_point.lengthSquared();

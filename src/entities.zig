@@ -4,6 +4,6 @@ const math = @import("math.zig");
 
 // Types.
 const Vector3 = math.Vector3;
-const SimEntity = sim.SimEntity;
+const Entity = sim.Entity;
 const MoveSpec = sim.MoveSpec;
-const SimEntityFlags = sim.SimEntityFlags;
+const EntityFlags = sim.EntityFlags;
