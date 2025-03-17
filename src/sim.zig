@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const world = @import("world.zig");
+const entities = @import("entities.zig");
 const config = @import("config.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
@@ -16,6 +17,11 @@ const Rectangle3 = math.Rectangle3;
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
 const World = world.World;
+const Entity = entities.Entity;
+const EntityId = entities.EntityId;
+const EntityReference = entities.EntityReference;
+const EntityCollisionVolume = entities.EntityCollisionVolume;
+const EntityFlags = entities.EntityFlags;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const ArenaPushParams = shared.ArenaPushParams;
@@ -36,165 +42,9 @@ pub const SimRegion = extern struct {
     sim_entity_hash: [4096]EntityHash = [1]EntityHash{undefined} ** 4096,
 };
 
-pub const EntityReference = packed union {
-    ptr: ?*Entity,
-    index: EntityId,
-};
-
 pub const EntityHash = extern struct {
     ptr: ?*Entity = null,
     index: EntityId = .{},
-};
-
-pub const EntityFlags = enum(u32) {
-    Collides = (1 << 0),
-    Nonspatial = (1 << 1),
-    Movable = (1 << 2),
-
-    Simming = (1 << 30),
-
-    pub fn toInt(self: EntityFlags) u32 {
-        return @intFromEnum(self);
-    }
-};
-
-pub const EntityCollisionVolume = extern struct {
-    offset_position: Vector3,
-    dimension: Vector3,
-};
-
-pub const EntityTraversablePoint = extern struct {
-    position: Vector3,
-};
-
-pub const EntityCollisionVolumeGroup = extern struct {
-    total_volume: EntityCollisionVolume,
-
-    volume_count: u32,
-    volumes: [*]EntityCollisionVolume,
-
-    traversable_count: u32,
-    traversables: [*]EntityTraversablePoint,
-
-    pub fn getSpaceVolume(self: *const EntityCollisionVolumeGroup, index: u32) EntityCollisionVolume {
-        return self.volumes[index];
-    }
-};
-
-pub const MovementMode = enum(u32) {
-    Planted,
-    Hopping,
-};
-
-pub const EntityId = packed struct {
-    value: u32 = 0,
-};
-
-pub const Entity = extern struct {
-    storage_index: EntityId = .{},
-    updatable: bool = false,
-
-    type: EntityType = .Null,
-    flags: u32 = 0,
-
-    chunk_position: world.WorldPosition = undefined,
-    position: Vector3 = Vector3.zero(),
-    velocity: Vector3 = Vector3.zero(),
-
-    collision: *EntityCollisionVolumeGroup,
-
-    distance_limit: f32 = 0,
-
-    facing_direction: f32 = 0,
-    bob_time: f32 = 0,
-    bob_delta_time: f32 = 0,
-
-    abs_tile_z_delta: i32 = 0,
-
-    hit_point_max: u32,
-    hit_points: [16]HitPoint,
-
-    head: EntityReference = undefined,
-
-    walkable_dimension: Vector2,
-    walkable_height: f32 = 0,
-
-    movement_mode: MovementMode,
-    movement_time: f32,
-    movement_from: Vector3,
-    movement_to: Vector3,
-
-    x_axis: Vector2,
-    y_axis: Vector2,
-
-    floor_displace: Vector2,
-
-    pub fn isSet(self: *const Entity, flag: u32) bool {
-        return (self.flags & flag) != 0;
-    }
-
-    pub fn addFlags(self: *Entity, flags: u32) void {
-        self.flags = self.flags | flags;
-    }
-
-    pub fn clearFlags(self: *Entity, flags: u32) void {
-        self.flags = self.flags & ~flags;
-    }
-
-    pub fn makeNonSpatial(self: *Entity) void {
-        self.addFlags(EntityFlags.Nonspatial.toInt());
-        self.position = Vector3.invalidPosition();
-    }
-
-    pub fn makeSpatial(self: *Entity, position: Vector3, velocity: Vector3) void {
-        self.clearFlags(EntityFlags.Nonspatial.toInt());
-        self.position = position;
-        self.velocity = velocity;
-    }
-
-    pub fn getGroundPoint(self: *const Entity) Vector3 {
-        return self.position;
-    }
-
-    pub fn getGroundPointFor(self: *const Entity, position: Vector3) Vector3 {
-        _ = self;
-        return position;
-    }
-
-    pub fn getStairGround(self: *const Entity, at_ground_point: Vector3) f32 {
-        std.debug.assert(self.type == .Stairwell);
-
-        const region_rectangle = Rectangle2.fromCenterDimension(self.position.xy(), self.walkable_dimension);
-        const barycentric = region_rectangle.getBarycentricPosition(at_ground_point.xy()).clamp01();
-        return self.position.z() + barycentric.y() * self.walkable_height;
-    }
-
-    pub fn getTraversable(self: *const Entity, index: u32) EntityTraversablePoint {
-        std.debug.assert(index < self.collision.traversable_count);
-
-        var result = self.collision.traversables[index];
-        result.position = result.position.plus(self.position);
-
-        return result;
-    }
-};
-
-pub const EntityType = enum(u8) {
-    Null,
-
-    HeroBody,
-    HeroHead,
-    Wall,
-    Floor,
-    Familiar,
-    Monster,
-    Sword,
-    Stairwell,
-};
-
-pub const HitPoint = extern struct {
-    flags: u8,
-    filled_amount: u8,
 };
 
 pub const MoveSpec = struct {
@@ -214,12 +64,12 @@ const WallTestData = struct {
     normal: Vector3,
 };
 
-pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: EntityId) ?*EntityHash {
-    std.debug.assert(storage_index.value != 0);
+pub fn getHashFromId(sim_region: *SimRegion, id: EntityId) ?*EntityHash {
+    std.debug.assert(id.value != 0);
 
     var result: ?*EntityHash = null;
 
-    const hash_value = storage_index.value;
+    const hash_value = id.value;
     var offset: u32 = 0;
 
     while (offset < sim_region.sim_entity_hash.len) : (offset += 1) {
@@ -227,7 +77,7 @@ pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: EntityId) 
         const hash_index = (hash_value + offset) & hash_mask;
         const entry = &sim_region.sim_entity_hash[hash_index];
 
-        if (entry.index.value == 0 or entry.index.value == storage_index.value) {
+        if (entry.index.value == 0 or entry.index.value == id.value) {
             result = entry;
             break;
         }
@@ -236,75 +86,22 @@ pub fn getHashFromStorageIndex(sim_region: *SimRegion, storage_index: EntityId) 
     return result;
 }
 
-pub fn getEntityByStorageIndex(sim_region: *SimRegion, storage_index: EntityId) ?*Entity {
-    const entry = getHashFromStorageIndex(sim_region, storage_index);
+pub fn getEntityByStorageIndex(sim_region: *SimRegion, id: EntityId) ?*Entity {
+    const entry = getHashFromId(sim_region, id);
     return entry.ptr;
 }
 
-pub fn loadEntityReference(world_mode: *GameModeWorld, sim_region: *SimRegion, reference: *EntityReference) void {
-    _ = world_mode;
-
+pub fn loadEntityReference(sim_region: *SimRegion, reference: *EntityReference) void {
     if (reference.index.value != 0) {
-        const entry = getHashFromStorageIndex(sim_region, reference.index);
+        const entry = getHashFromId(sim_region, reference.index);
         reference.* = EntityReference{ .ptr = if (entry != null) entry.?.ptr else null };
     }
 }
 
 pub fn storeEntityReference(reference: *EntityReference) void {
     if (reference.ptr) |ptr| {
-        reference.* = EntityReference{ .index = ptr.storage_index };
+        reference.* = EntityReference{ .index = ptr.id };
     }
-}
-
-pub fn addEntityRaw(
-    world_mode: *GameModeWorld,
-    sim_region: *SimRegion,
-    storage_index: EntityId,
-    opt_source: ?*Entity,
-) ?*Entity {
-    TimedBlock.beginFunction(@src(), .AddEntityRaw);
-    defer TimedBlock.endFunction(@src(), .AddEntityRaw);
-
-    std.debug.assert(storage_index.value != 0);
-
-    var entity: ?*Entity = null;
-
-    if (getHashFromStorageIndex(sim_region, storage_index)) |entry| {
-        if (entry.ptr == null) {
-            if (sim_region.entity_count < sim_region.max_entity_count) {
-                entity = &sim_region.entities[sim_region.entity_count];
-                sim_region.entity_count += 1;
-
-                entry.index = storage_index;
-                entry.ptr = entity.?;
-
-                if (opt_source) |source| {
-                    entity.?.* = source.*;
-                    loadEntityReference(world_mode, sim_region, &entity.?.head);
-
-                    std.debug.assert(!source.isSet(EntityFlags.Simming.toInt()));
-                    source.addFlags(EntityFlags.Simming.toInt());
-                }
-
-                entity.?.storage_index = storage_index;
-                entity.?.updatable = false;
-            } else {
-                unreachable;
-            }
-        }
-    }
-
-    return entity;
-}
-
-fn getSimSpacePosition(sim_region: *SimRegion, entity: *Entity) Vector3 {
-    var result = Vector3.invalidPosition();
-
-    if (!entity.isSet(EntityFlags.Nonspatial.toInt())) {
-        result = world.subtractPositions(sim_region.world, &entity.chunk_position, &sim_region.origin);
-    }
-
-    return result;
 }
 
 pub fn entityOverlapsRectangle(position: Vector3, volume: EntityCollisionVolume, rectangle: Rectangle3) bool {
@@ -312,33 +109,57 @@ pub fn entityOverlapsRectangle(position: Vector3, volume: EntityCollisionVolume,
     return position.plus(volume.offset_position).isInRectangle(grown);
 }
 
-pub fn addEntity(
-    world_mode: *GameModeWorld,
+fn addEntity(
     sim_region: *SimRegion,
-    storage_index: EntityId,
-    source: *Entity,
-    opt_sim_position: ?*Vector3,
-) ?*Entity {
-    const opt_entity = addEntityRaw(world_mode, sim_region, storage_index, source);
+    opt_source: ?*Entity,
+    chunk_delta: Vector3,
+) void {
+    const id: EntityId = opt_source.?.id;
 
-    if (opt_entity) |sim_entity| {
-        if (opt_sim_position) |sim_position| {
-            sim_entity.position = sim_position.*;
-            sim_entity.updatable = entityOverlapsRectangle(
-                sim_entity.position,
-                sim_entity.collision.total_volume,
+    if (getHashFromId(sim_region, id)) |entry| {
+        std.debug.assert(entry.ptr == null);
+
+        if (sim_region.entity_count < sim_region.max_entity_count) {
+            const dest: *Entity = &sim_region.entities[sim_region.entity_count];
+            sim_region.entity_count += 1;
+
+            entry.index = id;
+            entry.ptr = dest;
+
+            if (opt_source) |source| {
+                dest.* = source.*;
+            }
+
+            dest.id = id;
+            dest.position = dest.position.plus(chunk_delta);
+            dest.movement_from = dest.movement_from.plus(chunk_delta);
+            dest.movement_to = dest.movement_to.plus(chunk_delta);
+
+            dest.updatable = entityOverlapsRectangle(
+                dest.position,
+                dest.collision.total_volume,
                 sim_region.updatable_bounds,
             );
         } else {
-            sim_entity.position = getSimSpacePosition(sim_region, source);
+            unreachable;
         }
     }
+}
 
-    return opt_entity;
+pub fn deleteEntity(sim_region: *SimRegion, entity: *Entity) void {
+    _ = sim_region;
+    entity.addFlags(EntityFlags.Deleted.toInt());
+}
+
+fn connectEntityPointers(sim_region: *SimRegion) void {
+    var entity_index: u32 = 0;
+    while (entity_index < sim_region.entity_count) : (entity_index += 1) {
+        const entity: *Entity = &sim_region.entities[entity_index];
+        loadEntityReference(sim_region, &entity.head);
+    }
 }
 
 pub fn beginSimulation(
-    world_mode: *GameModeWorld,
     sim_arena: *shared.MemoryArena,
     game_world: *World,
     origin: world.WorldPosition,
@@ -387,29 +208,34 @@ pub fn beginSimulation(
                 const opt_chunk = world.removeWorldChunk(sim_region.world, chunk_x, chunk_y, chunk_z);
 
                 if (opt_chunk) |chunk| {
+                    const chunk_position: world.WorldPosition = .{
+                        .chunk_x = chunk_x,
+                        .chunk_y = chunk_y,
+                        .chunk_z = chunk_z,
+                        .offset = .zero(),
+                    };
+                    const chunk_delta: Vector3 =
+                        world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);
                     var opt_block: ?*world.WorldEntityBlock = chunk.first_block;
                     while (opt_block) |block| {
                         var entity_index: u32 = 0;
                         while (entity_index < block.entity_count) : (entity_index += 1) {
-                            const entities: [*]Entity = @ptrCast(@alignCast(&block.entity_data));
-                            var entity = &entities[entity_index];
+                            const source_address = @intFromPtr(&block.entity_data);
+                            const source: usize = std.mem.alignForward(usize, source_address, @alignOf(Entity));
+                            const entities_ptr: [*]Entity = @ptrFromInt(source);
+                            const entity = &entities_ptr[entity_index];
+                            const sim_space_position = entity.position.plus(chunk_delta);
 
-                            if (!entity.isSet(EntityFlags.Nonspatial.toInt())) {
-                                var sim_space_position = getSimSpacePosition(sim_region, entity);
-
-                                if (entityOverlapsRectangle(
-                                    sim_space_position,
-                                    entity.collision.total_volume,
-                                    sim_region.bounds,
-                                )) {
-                                    _ = addEntity(
-                                        world_mode,
-                                        sim_region,
-                                        entity.storage_index,
-                                        entity,
-                                        &sim_space_position,
-                                    );
-                                }
+                            if (entityOverlapsRectangle(
+                                sim_space_position,
+                                entity.collision.total_volume,
+                                sim_region.bounds,
+                            )) {
+                                _ = addEntity(
+                                    sim_region,
+                                    entity,
+                                    chunk_delta,
+                                );
                             }
                         }
 
@@ -423,6 +249,8 @@ pub fn beginSimulation(
             }
         }
     }
+
+    connectEntityPointers(sim_region);
 
     return sim_region;
 }
@@ -481,7 +309,7 @@ fn canCollide(world_mode: *GameModeWorld, entity: *Entity, hit_entity: *Entity) 
         var b = hit_entity;
 
         // Sort entities based on storage index.
-        if (a.storage_index.value > b.storage_index.value) {
+        if (a.id.value > b.id.value) {
             const temp = a;
             a = b;
             b = temp;
@@ -491,18 +319,15 @@ fn canCollide(world_mode: *GameModeWorld, entity: *Entity, hit_entity: *Entity) 
         if (a.isSet(EntityFlags.Collides.toInt()) and
             b.isSet(EntityFlags.Collides.toInt()))
         {
-            if (!a.isSet(EntityFlags.Nonspatial.toInt()) and
-                !b.isSet(EntityFlags.Nonspatial.toInt()))
-            {
-                result = true;
-            }
+            result = true;
 
             // Specific rules.
-            const hash_bucket = a.storage_index.value & ((world_mode.collision_rule_hash.len) - 1);
+            const hash_bucket = a.id.value & ((world_mode.collision_rule_hash.len) - 1);
             var opt_rule: ?*PairwiseCollisionRule = world_mode.collision_rule_hash[hash_bucket];
             while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
-                if ((rule.storage_index_a == a.storage_index.value) and
-                    (rule.storage_index_b == b.storage_index.value)) {
+                if ((rule.id_a == a.id.value) and
+                    (rule.id_b == b.id.value))
+                {
                     result = rule.can_collide;
                     break;
                 }
@@ -514,17 +339,9 @@ fn canCollide(world_mode: *GameModeWorld, entity: *Entity, hit_entity: *Entity) 
 }
 
 pub fn handleCollision(world_mode: *GameModeWorld, entity: *Entity, hit_entity: *Entity) bool {
-    var stops_on_collision = false;
+    _ = world_mode;
 
-    if (entity.type == .Sword) {
-        // Stop future collisons between these entities.
-        world_mode.addCollisionRule(entity.storage_index.value, hit_entity.storage_index.value, false);
-
-        stops_on_collision = false;
-    } else {
-        stops_on_collision = true;
-    }
-
+    const stops_on_collision = true;
     var a = entity;
     var b = hit_entity;
 
@@ -533,12 +350,6 @@ pub fn handleCollision(world_mode: *GameModeWorld, entity: *Entity, hit_entity: 
         const temp = a;
         a = b;
         b = temp;
-    }
-
-    if (a.type == .Monster and b.type == .Sword) {
-        if (a.hit_point_max > 0) {
-            a.hit_point_max -= 1;
-        }
     }
 
     return stops_on_collision;
@@ -554,8 +365,6 @@ pub fn moveEntity(
 ) void {
     TimedBlock.beginFunction(@src(), .MoveEntity);
     defer TimedBlock.endFunction(@src(), .MoveEntity);
-
-    std.debug.assert(!entity.isSet(EntityFlags.Nonspatial.toInt()));
 
     var acceleration = in_acceleration;
 
@@ -607,102 +416,100 @@ pub fn moveEntity(
 
             const desired_position = entity.position.plus(entity_delta);
 
-            if (!entity.isSet(EntityFlags.Nonspatial.toInt())) {
-                var test_entity_index: u32 = 0;
-                while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
-                    const test_entity = &sim_region.entities[test_entity_index];
+            var test_entity_index: u32 = 0;
+            while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
+                const test_entity = &sim_region.entities[test_entity_index];
 
-                    if (entitiesOverlap(entity, test_entity, overlap_epsilon) or
-                        canCollide(world_mode, entity, test_entity))
-                    {
-                        var entity_volume_index: u32 = 0;
-                        while (entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
-                            const entity_volume = entity.collision.volumes[entity_volume_index];
-                            var test_volume_index: u32 = 0;
-                            while (test_volume_index < test_entity.collision.volume_count) : (test_volume_index += 1) {
-                                const test_volume = test_entity.collision.volumes[test_volume_index];
-                                const minkowski_diameter = Vector3.new(
-                                    test_volume.dimension.x() + entity_volume.dimension.x(),
-                                    test_volume.dimension.y() + entity_volume.dimension.y(),
-                                    test_volume.dimension.z() + entity_volume.dimension.z(),
-                                );
-                                const min_corner = minkowski_diameter.scaledTo(-0.5);
-                                const max_corner = minkowski_diameter.scaledTo(0.5);
-                                const relative = entity.position.plus(entity_volume.offset_position)
-                                    .minus(test_entity.position.plus(test_volume.offset_position));
+                if (entitiesOverlap(entity, test_entity, overlap_epsilon) or
+                    canCollide(world_mode, entity, test_entity))
+                {
+                    var entity_volume_index: u32 = 0;
+                    while (entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
+                        const entity_volume = entity.collision.volumes[entity_volume_index];
+                        var test_volume_index: u32 = 0;
+                        while (test_volume_index < test_entity.collision.volume_count) : (test_volume_index += 1) {
+                            const test_volume = test_entity.collision.volumes[test_volume_index];
+                            const minkowski_diameter = Vector3.new(
+                                test_volume.dimension.x() + entity_volume.dimension.x(),
+                                test_volume.dimension.y() + entity_volume.dimension.y(),
+                                test_volume.dimension.z() + entity_volume.dimension.z(),
+                            );
+                            const min_corner = minkowski_diameter.scaledTo(-0.5);
+                            const max_corner = minkowski_diameter.scaledTo(0.5);
+                            const relative = entity.position.plus(entity_volume.offset_position)
+                                .minus(test_entity.position.plus(test_volume.offset_position));
 
-                                if ((relative.z() >= min_corner.z()) and (relative.z() < max_corner.z())) {
-                                    const walls: [4]WallTestData = .{
-                                        .{
-                                            .x = min_corner.x(),
-                                            .rel_x = relative.x(),
-                                            .rel_y = relative.y(),
-                                            .delta_x = entity_delta.x(),
-                                            .delta_y = entity_delta.y(),
-                                            .min_y = min_corner.y(),
-                                            .max_y = max_corner.y(),
-                                            .normal = Vector3.new(-1, 0, 0),
-                                        },
-                                        .{
-                                            .x = max_corner.x(),
-                                            .rel_x = relative.x(),
-                                            .rel_y = relative.y(),
-                                            .delta_x = entity_delta.x(),
-                                            .delta_y = entity_delta.y(),
-                                            .min_y = min_corner.y(),
-                                            .max_y = max_corner.y(),
-                                            .normal = Vector3.new(1, 0, 0),
-                                        },
-                                        .{
-                                            .x = min_corner.y(),
-                                            .rel_x = relative.y(),
-                                            .rel_y = relative.x(),
-                                            .delta_x = entity_delta.y(),
-                                            .delta_y = entity_delta.x(),
-                                            .min_y = min_corner.x(),
-                                            .max_y = max_corner.x(),
-                                            .normal = Vector3.new(0, -1, 0),
-                                        },
-                                        .{
-                                            .x = max_corner.y(),
-                                            .rel_x = relative.y(),
-                                            .rel_y = relative.x(),
-                                            .delta_x = entity_delta.y(),
-                                            .delta_y = entity_delta.x(),
-                                            .min_y = min_corner.x(),
-                                            .max_y = max_corner.x(),
-                                            .normal = Vector3.new(0, 1, 0),
-                                        },
-                                    };
+                            if ((relative.z() >= min_corner.z()) and (relative.z() < max_corner.z())) {
+                                const walls: [4]WallTestData = .{
+                                    .{
+                                        .x = min_corner.x(),
+                                        .rel_x = relative.x(),
+                                        .rel_y = relative.y(),
+                                        .delta_x = entity_delta.x(),
+                                        .delta_y = entity_delta.y(),
+                                        .min_y = min_corner.y(),
+                                        .max_y = max_corner.y(),
+                                        .normal = Vector3.new(-1, 0, 0),
+                                    },
+                                    .{
+                                        .x = max_corner.x(),
+                                        .rel_x = relative.x(),
+                                        .rel_y = relative.y(),
+                                        .delta_x = entity_delta.x(),
+                                        .delta_y = entity_delta.y(),
+                                        .min_y = min_corner.y(),
+                                        .max_y = max_corner.y(),
+                                        .normal = Vector3.new(1, 0, 0),
+                                    },
+                                    .{
+                                        .x = min_corner.y(),
+                                        .rel_x = relative.y(),
+                                        .rel_y = relative.x(),
+                                        .delta_x = entity_delta.y(),
+                                        .delta_y = entity_delta.x(),
+                                        .min_y = min_corner.x(),
+                                        .max_y = max_corner.x(),
+                                        .normal = Vector3.new(0, -1, 0),
+                                    },
+                                    .{
+                                        .x = max_corner.y(),
+                                        .rel_x = relative.y(),
+                                        .rel_y = relative.x(),
+                                        .delta_x = entity_delta.y(),
+                                        .delta_y = entity_delta.x(),
+                                        .min_y = min_corner.x(),
+                                        .max_y = max_corner.x(),
+                                        .normal = Vector3.new(0, 1, 0),
+                                    },
+                                };
 
-                                    var test_min_time = min_time;
-                                    var hit_this = false;
-                                    var test_wall_normal = Vector3.zero();
-                                    var wall_index: u32 = 0;
+                                var test_min_time = min_time;
+                                var hit_this = false;
+                                var test_wall_normal = Vector3.zero();
+                                var wall_index: u32 = 0;
 
-                                    while (wall_index < walls.len) : (wall_index += 1) {
-                                        const wall = &walls[wall_index];
+                                while (wall_index < walls.len) : (wall_index += 1) {
+                                    const wall = &walls[wall_index];
 
-                                        if (wall.delta_x != 0.0) {
-                                            const result_time = (wall.x - wall.rel_x) / wall.delta_x;
-                                            const y = wall.rel_y + (result_time * wall.delta_y);
-                                            if (result_time >= 0 and test_min_time > result_time) {
-                                                if (y >= wall.min_y and y <= wall.max_y) {
-                                                    test_min_time = @max(0.0, result_time - time_epsilon);
-                                                    test_wall_normal = wall.normal;
-                                                    hit_this = true;
-                                                }
+                                    if (wall.delta_x != 0.0) {
+                                        const result_time = (wall.x - wall.rel_x) / wall.delta_x;
+                                        const y = wall.rel_y + (result_time * wall.delta_y);
+                                        if (result_time >= 0 and test_min_time > result_time) {
+                                            if (y >= wall.min_y and y <= wall.max_y) {
+                                                test_min_time = @max(0.0, result_time - time_epsilon);
+                                                test_wall_normal = wall.normal;
+                                                hit_this = true;
                                             }
                                         }
                                     }
+                                }
 
-                                    if (hit_this) {
-                                        const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
-                                        if (speculativeCollide(entity, test_entity, test_position)) {
-                                            min_time = test_min_time;
-                                            wall_normal_min = test_wall_normal;
-                                            opt_hit_entity_min = test_entity;
-                                        }
+                                if (hit_this) {
+                                    const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
+                                    if (speculativeCollide(entity, test_entity, test_position)) {
+                                        min_time = test_min_time;
+                                        wall_normal_min = test_wall_normal;
+                                        opt_hit_entity_min = test_entity;
                                     }
                                 }
                             }
@@ -760,34 +567,59 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
         const entity = &sim_region.entities[sim_entity_index];
 
-        const chunk_position: world.WorldPosition =
-            world.mapIntoChunkSpace(world_mode.world, sim_region.origin, entity.position);
+        if (!entity.isSet(EntityFlags.Deleted.toInt())) {
+            const entity_position: world.WorldPosition =
+                world.mapIntoChunkSpace(world_mode.world, sim_region.origin, entity.position);
+            var chunk_position: world.WorldPosition = entity_position;
+            chunk_position.offset = .zero();
 
-        storeEntityReference(&entity.head);
+            const chunk_delta: Vector3 =
+                world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin).negated();
 
-        // Update camera position.
-        if (entity.storage_index.value == world_mode.camera_following_entity_index.value) {
-            var new_camera_position = world_mode.camera_position;
-            new_camera_position.chunk_z = chunk_position.chunk_z;
+            // Update camera position.
+            if (entity.id.value == world_mode.camera_following_entity_index.value) {
+                var new_camera_position = world_mode.camera_position;
+                new_camera_position.chunk_z = entity_position.chunk_z;
 
-            if (global_config.Renderer_Camera_RoomBased) {
-                if (entity.position.x() > 9.0) {
-                    new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(18, 0, 0));
-                } else if (entity.position.x() < -9.0) {
-                    new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(-18, 0, 0));
+                if (global_config.Renderer_Camera_RoomBased) {
+                    if (entity.position.x() > 9.0) {
+                        new_camera_position = world.mapIntoChunkSpace(
+                            world_mode.world,
+                            new_camera_position,
+                            Vector3.new(18, 0, 0),
+                        );
+                    } else if (entity.position.x() < -9.0) {
+                        new_camera_position = world.mapIntoChunkSpace(
+                            world_mode.world,
+                            new_camera_position,
+                            Vector3.new(-18, 0, 0),
+                        );
+                    }
+                    if (entity.position.y() > 5.0) {
+                        new_camera_position = world.mapIntoChunkSpace(
+                            world_mode.world,
+                            new_camera_position,
+                            Vector3.new(0, 10, 0),
+                        );
+                    } else if (entity.position.y() < -5.0) {
+                        new_camera_position = world.mapIntoChunkSpace(
+                            world_mode.world,
+                            new_camera_position,
+                            Vector3.new(0, -10, 0),
+                        );
+                    }
+                } else {
+                    new_camera_position = entity_position;
                 }
-                if (entity.position.y() > 5.0) {
-                    new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(0, 10, 0));
-                } else if (entity.position.y() < -5.0) {
-                    new_camera_position = world.mapIntoChunkSpace(world_mode.world, new_camera_position, Vector3.new(0, -10, 0));
-                }
-            } else {
-                new_camera_position = chunk_position;
+
+                world_mode.camera_position = new_camera_position;
             }
 
-            world_mode.camera_position = new_camera_position;
+            entity.position = entity.position.plus(chunk_delta);
+            entity.movement_from = entity.movement_from.plus(chunk_delta);
+            entity.movement_to = entity.movement_to.plus(chunk_delta);
+            storeEntityReference(&entity.head);
+            world.packEntityIntoWorld(world_mode.world, entity, entity_position);
         }
-
-        world.packEntityIntoWorld(world_mode.world, entity, chunk_position);
     }
 }

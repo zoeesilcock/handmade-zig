@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const sim = @import("sim.zig");
+const entities = @import("entities.zig");
 const file_formats = @import("file_formats");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
@@ -16,7 +17,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const LoadedBitmap = asset.LoadedBitmap;
 const BitmapId = file_formats.BitmapId;
 const PlayingSound = audio.PlayingSound;
-const Entity = sim.Entity;
+const Entity = entities.Entity;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
@@ -151,12 +152,18 @@ fn packEntityIntoChunk(
 
     const block: *WorldEntityBlock = chunk.first_block.?;
 
-    std.debug.assert(block.hasRoomFor(pack_size));
+    const dest_address = @intFromPtr(&block.entity_data) + block.entity_data_size;
+    const dest: usize = std.mem.alignForward(usize, dest_address, @alignOf(Entity));
+    const aligned_offset = dest - dest_address;
+    const aligned_size = pack_size + aligned_offset;
 
-    const dest: usize = @intFromPtr(&block.entity_data) + block.entity_data_size;
-    block.entity_data_size += pack_size;
+    // If we hit this assertion it means that there was space for the unaligned size, but not once it was aligned.
+    std.debug.assert(block.hasRoomFor(@intCast(aligned_size)));
 
-    @as(*align(1)Entity, @ptrFromInt(dest)).* = source.*;
+    block.entity_count += 1;
+    block.entity_data_size += @intCast(aligned_size);
+
+    @as(*Entity, @ptrFromInt(dest)).* = source.*;
 }
 
 pub fn packEntityIntoWorld(
@@ -164,9 +171,9 @@ pub fn packEntityIntoWorld(
     source: *Entity,
     at: WorldPosition,
 ) void {
-    if (getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, &world.arena)) |chunk| {
-        packEntityIntoChunk(world, source, chunk);
-    }
+    const chunk: ?*WorldChunk = getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, &world.arena);
+    std.debug.assert(chunk != null);
+    packEntityIntoChunk(world, source, chunk.?);
 }
 
 pub fn addChunkToFreeList(
