@@ -53,6 +53,7 @@ pub const GameModeWorld = struct {
 
     camera_following_entity_index: EntityId = .{},
     camera_position: WorldPosition,
+    camera_offset: Vector3,
 
     collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
     first_free_collision_rule: ?*PairwiseCollisionRule = null,
@@ -93,7 +94,7 @@ pub const GameModeWorld = struct {
         head.head = EntityReference{ .index = body.id };
 
         if (self.camera_following_entity_index.value == 0) {
-            self.camera_following_entity_index = body.id;
+            self.camera_following_entity_index = head.id;
         }
 
         const result: EntityId = head.id;
@@ -493,35 +494,40 @@ pub fn updateAndRenderWorld(
         input.frame_delta_time,
     );
 
+    const camera_position =
+        world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
+        .plus(world_mode.camera_offset);
+
+    var world_transform = ObjectTransform.defaultUpright();
+    world_transform.offset_position = world_transform.offset_position.minus(camera_position);
+
     render_group.pushRectangleOutline(
-        ObjectTransform.defaultFlat(),
+        world_transform,
         screen_bounds.getDimension(),
         Vector3.zero(),
         Color.new(1, 1, 0, 1),
         0.1,
     );
     // render_group.pushRectangleOutline(
-    //     ObjectTransform.defaultFlat(),
+    //     world_transform,
     //     camera_bounds_in_meters.getDimension().xy(),
     //     Vector3.zero(),
     //     Color.new(1, 1, 1, 1),
     // );
     render_group.pushRectangleOutline(
-        ObjectTransform.defaultFlat(),
+        world_transform,
         sim_bounds.getDimension().xy(),
         Vector3.zero(),
         Color.new(0, 1, 1, 1),
         0.1,
     );
     render_group.pushRectangleOutline(
-        ObjectTransform.defaultFlat(),
+        world_transform,
         screen_sim_region.bounds.getDimension().xy(),
         Vector3.zero(),
         Color.new(1, 0, 1, 1),
         0.1,
     );
-
-    const camera_position = world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position);
 
     TimedBlock.beginBlock(@src(), .EntityRender);
     var hot_entity_count: u32 = 0;
@@ -733,7 +739,7 @@ pub fn updateAndRenderWorld(
             }
 
             var entity_transform = ObjectTransform.defaultUpright();
-            entity_transform.offset_position = entity.getGroundPoint();
+            entity_transform.offset_position = entity.getGroundPoint().minus(camera_position);
 
             var match_vector = asset.AssetVector{};
             match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;

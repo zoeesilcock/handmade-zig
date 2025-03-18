@@ -579,34 +579,66 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
             // Update camera position.
             if (entity.id.value == world_mode.camera_following_entity_index.value) {
                 var new_camera_position = world_mode.camera_position;
+
                 new_camera_position.chunk_z = entity_position.chunk_z;
 
+                const room_delta: Vector3 = .new(24, 12.5, 0);
+                const h_room_delta: Vector3 = room_delta.scaledTo(0.5);
+                const apron_size: f32 = 0.7;
+                const bounce_height: f32 = 0.5;
+                const h_room_apron: Vector3 = .new(h_room_delta.x() - apron_size, h_room_delta.y() - apron_size, 0);
+
                 if (global_config.Renderer_Camera_RoomBased) {
-                    if (entity.position.x() > 9.0) {
+                    world_mode.camera_offset = .zero();
+
+                    var applied_delta: Vector3 = .zero();
+                    if (entity.position.x() > h_room_delta.x()) {
+                        applied_delta = Vector3.new(room_delta.x(), 0, 0);
                         new_camera_position = world.mapIntoChunkSpace(
                             world_mode.world,
                             new_camera_position,
-                            Vector3.new(18, 0, 0),
+                            applied_delta,
                         );
-                    } else if (entity.position.x() < -9.0) {
+                    } else if (entity.position.x() < -h_room_delta.x()) {
+                        applied_delta = Vector3.new(-room_delta.x(), 0, 0);
                         new_camera_position = world.mapIntoChunkSpace(
                             world_mode.world,
                             new_camera_position,
-                            Vector3.new(-18, 0, 0),
+                            applied_delta,
                         );
                     }
-                    if (entity.position.y() > 5.0) {
+                    if (entity.position.y() > h_room_delta.y()) {
+                        applied_delta = Vector3.new(0, room_delta.y(), 0);
                         new_camera_position = world.mapIntoChunkSpace(
                             world_mode.world,
                             new_camera_position,
-                            Vector3.new(0, 10, 0),
+                            applied_delta,
                         );
-                    } else if (entity.position.y() < -5.0) {
+                    } else if (entity.position.y() < -h_room_delta.y()) {
+                        applied_delta = Vector3.new(0, -room_delta.y(), 0);
                         new_camera_position = world.mapIntoChunkSpace(
                             world_mode.world,
                             new_camera_position,
-                            Vector3.new(0, -10, 0),
+                            applied_delta,
                         );
+                    }
+
+                    const new_entity_position: Vector3 = entity.position.minus(applied_delta);
+                    if (new_entity_position.x() > h_room_apron.x()) {
+                        const t: f32 = math.clamp01MapToRange(h_room_apron.x(), h_room_delta.x(), new_entity_position.x());
+                        world_mode.camera_offset = .new(t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
+                    }
+                    if (new_entity_position.x() < -h_room_apron.x()) {
+                        const t: f32 = math.clamp01MapToRange(-h_room_apron.x(), -h_room_delta.x(), new_entity_position.x());
+                        world_mode.camera_offset = .new(-t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
+                    }
+                    if (new_entity_position.y() > h_room_apron.y()) {
+                        const t: f32 = math.clamp01MapToRange(h_room_apron.y(), h_room_delta.y(), new_entity_position.y());
+                        world_mode.camera_offset = .new(0, t * h_room_delta.y(), (-(t * t) + 2 * t) * bounce_height);
+                    }
+                    if (new_entity_position.y() < -h_room_apron.y()) {
+                        const t: f32 = math.clamp01MapToRange(-h_room_apron.y(), -h_room_delta.y(), new_entity_position.y());
+                        world_mode.camera_offset = .new(0, -t * h_room_delta.y(), (-(t * t) + 2 * t) * bounce_height);
                     }
                 } else {
                     new_camera_position = entity_position;
