@@ -239,7 +239,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..8) |_| {
+    for (0..1) |_| {
         // const door_direction = 3;
         // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
         const door_direction = series.randomChoice(2);
@@ -282,6 +282,10 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
                 }
                 if ((tile_y == (tiles_per_height - 1)) and (!door_top or (tile_x != (tiles_per_width / 2)))) {
                     should_be_door = false;
+                }
+
+                if (tile_x == 14) {
+                    _ = addWall(world_mode, abs_tile_x, abs_tile_y, abs_tile_z);
                 }
 
                 if (!should_be_door) {
@@ -482,7 +486,7 @@ pub fn updateAndRenderWorld(
         }
     }
 
-    const sim_bounds_expansion = Vector3.new(15, 15, 0);
+    const sim_bounds_expansion = Vector3.new(15, 15, 15);
     const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
     const sim_memory = transient_state.arena.beginTemporaryMemory();
     const sim_center_position = world_mode.camera_position;
@@ -496,7 +500,7 @@ pub fn updateAndRenderWorld(
 
     const camera_position =
         world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
-        .plus(world_mode.camera_offset);
+            .plus(world_mode.camera_offset);
 
     var world_transform = ObjectTransform.defaultUpright();
     world_transform.offset_position = world_transform.offset_position.minus(camera_position);
@@ -547,7 +551,7 @@ pub fn updateAndRenderWorld(
             var move_spec = sim.MoveSpec{};
             var acceleration = Vector3.zero();
 
-            const camera_relative_ground_position = entity.getGroundPoint().minus(camera_position);
+            var camera_relative_ground_position = entity.getGroundPoint().minus(camera_position);
             render_group.global_alpha = 1;
 
             if (camera_relative_ground_position.z() > fade_top_start_z) {
@@ -595,7 +599,7 @@ pub fn updateAndRenderWorld(
                                 const no_push: bool = acceleration.lengthSquared() < 0.1;
                                 const spring_coefficient: f32 = if (no_push) 300 else 25;
                                 var acceleration2: Vector3 = Vector3.new(0, 0, 0);
-                                for (0..2) |e| {
+                                for (0..3) |e| {
                                     if (no_push or (timer_is_up and math.square(acceleration.values[e]) < 0.1)) {
                                         acceleration2.values[e] =
                                             spring_coefficient * (closest_position.values[e] - entity.position.values[e]) -
@@ -720,7 +724,9 @@ pub fn updateAndRenderWorld(
                 },
                 .Wall => {},
                 .Stairwell => {},
-                .Monster => {},
+                .Monster => {
+                    DebugInterface.debugValue(@src(), &camera_relative_ground_position, "CameraGroundPosition");
+                },
                 .Floor => {},
                 else => {
                     unreachable;
@@ -1155,18 +1161,26 @@ fn beginGroundedEntity(
     return entity;
 }
 
-fn addStandardRoom(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
+fn addStandardRoom(
+    world_mode: *GameModeWorld,
+    abs_tile_x: i32,
+    abs_tile_y: i32,
+    abs_tile_z: i32,
+) void {
     var offset_x: i32 = -8;
     while (offset_x <= 8) : (offset_x += 1) {
         var offset_y: i32 = -4;
         while (offset_y <= 4) : (offset_y += 1) {
-            const world_position = chunkPositionFromTilePosition(
+            var world_position = chunkPositionFromTilePosition(
                 world_mode.world,
                 abs_tile_x + offset_x,
                 abs_tile_y + offset_y,
                 abs_tile_z,
                 null,
             );
+
+            _ = world_position.offset.setZ(0.25 * @as(f32, @floatFromInt(offset_x + offset_y)));
+
             const entity: *Entity = beginGroundedEntity(world_mode, .Floor, world_mode.floor_collision);
             endEntity(world_mode, entity, world_position);
         }
@@ -1339,7 +1353,9 @@ fn getClosestTraversable(sim_region: *sim.SimRegion, from_position: Vector3, res
         var point_index: u32 = 0;
         while (point_index < volume_group.traversable_count) : (point_index += 1) {
             const point: EntityTraversablePoint = test_entity.getTraversable(point_index);
-            const head_to_point: Vector3 = point.position.minus(from_position);
+            var head_to_point: Vector3 = point.position.minus(from_position);
+
+            _ = head_to_point.setZ(math.clampAboveZero(intrinsics.absoluteValue(head_to_point.z() - 1.5)));
 
             const test_distance_squared = head_to_point.lengthSquared();
             if (closest_distance_squared > test_distance_squared) {
