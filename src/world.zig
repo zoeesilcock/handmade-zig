@@ -18,6 +18,8 @@ const LoadedBitmap = asset.LoadedBitmap;
 const BitmapId = file_formats.BitmapId;
 const PlayingSound = audio.PlayingSound;
 const Entity = entities.Entity;
+const EntityReference = entities.EntityReference;
+const TraversableReference = entities.TraversableReference;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
@@ -131,6 +133,16 @@ pub fn areInSameChunk(world: *World, a: *const WorldPosition, b: *const WorldPos
         a.chunk_z == b.chunk_z;
 }
 
+fn packEntityReference(reference: *EntityReference) void {
+    if (reference.ptr) |ptr| {
+        reference.* = EntityReference{ .index = ptr.id };
+    }
+}
+
+fn packTraversableReference(reference: *TraversableReference) void {
+    packEntityReference(&reference.entity);
+}
+
 fn packEntityIntoChunk(
     world: *World,
     source: *Entity,
@@ -163,7 +175,12 @@ fn packEntityIntoChunk(
     block.entity_count += 1;
     block.entity_data_size += @intCast(aligned_size);
 
-    @as(*Entity, @ptrFromInt(dest)).* = source.*;
+    var dest_e: *Entity = @ptrFromInt(dest);
+    dest_e.* = source.*;
+
+    packEntityReference(&dest_e.head);
+    packTraversableReference(&dest_e.standing_on);
+    packTraversableReference(&dest_e.moving_to);
 }
 
 pub fn packEntityIntoWorld(

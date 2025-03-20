@@ -42,6 +42,7 @@ const Entity = entities.Entity;
 const EntityId = entities.EntityId;
 const EntityType = entities.EntityType;
 const EntityReference = entities.EntityReference;
+const TraversableReference = entities.TraversableReference;
 const EntityFlags = entities.EntityFlags;
 const EntityCollisionVolume = entities.EntityCollisionVolume;
 const EntityCollisionVolumeGroup = entities.EntityCollisionVolumeGroup;
@@ -81,7 +82,7 @@ pub const GameModeWorld = struct {
     creation_buffer: [4]Entity,
     last_used_entity_storage_index: u32,
 
-    pub fn addPlayer(self: *GameModeWorld) EntityId {
+    pub fn addPlayer(self: *GameModeWorld, standing_on: TraversableReference) EntityId {
         var body = beginGroundedEntity(self, .HeroBody, self.hero_body_collision);
         body.addFlags(EntityFlags.Collides.toInt() | EntityFlags.Movable.toInt());
 
@@ -90,8 +91,10 @@ pub const GameModeWorld = struct {
 
         initHitPoints(body, 3);
 
-        body.head = EntityReference{ .index = head.id };
-        head.head = EntityReference{ .index = body.id };
+        body.standing_on = standing_on;
+
+        body.head = EntityReference{ .ptr = head };
+        head.head = EntityReference{ .ptr = body };
 
         if (self.camera_following_entity_index.value == 0) {
             self.camera_following_entity_index = head.id;
@@ -400,6 +403,53 @@ pub fn updateAndRenderWorld(
     const fade_bottom_start_z: f32 = -2 * world_mode.typical_floor_height;
     const fade_bottom_end_z: f32 = -2.25 * world_mode.typical_floor_height;
 
+    const sim_bounds_expansion = Vector3.new(15, 15, 15);
+    const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
+    const sim_memory = transient_state.arena.beginTemporaryMemory();
+    const sim_center_position = world_mode.camera_position;
+    const screen_sim_region = sim.beginSimulation(
+        &transient_state.arena,
+        world_mode.world,
+        sim_center_position,
+        sim_bounds,
+        input.frame_delta_time,
+    );
+
+    const camera_position =
+        world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
+            .plus(world_mode.camera_offset);
+
+    var world_transform = ObjectTransform.defaultUpright();
+    world_transform.offset_position = world_transform.offset_position.minus(camera_position);
+
+    render_group.pushRectangleOutline(
+        world_transform,
+        screen_bounds.getDimension(),
+        Vector3.zero(),
+        Color.new(1, 1, 0, 1),
+        0.1,
+    );
+    // render_group.pushRectangleOutline(
+    //     world_transform,
+    //     camera_bounds_in_meters.getDimension().xy(),
+    //     Vector3.zero(),
+    //     Color.new(1, 1, 1, 1),
+    // );
+    render_group.pushRectangleOutline(
+        world_transform,
+        sim_bounds.getDimension().xy(),
+        Vector3.zero(),
+        Color.new(0, 1, 1, 1),
+        0.1,
+    );
+    render_group.pushRectangleOutline(
+        world_transform,
+        screen_sim_region.bounds.getDimension().xy(),
+        Vector3.zero(),
+        Color.new(1, 0, 1, 1),
+        0.1,
+    );
+
     for (&input.controllers, 0..) |*controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
         controlled_hero.vertical_direction = 0;
@@ -410,7 +460,11 @@ pub fn updateAndRenderWorld(
                 quit_requested = true;
             } else if (controller.start_button.wasPressed()) {
                 controlled_hero.* = shared.ControlledHero{};
-                controlled_hero.entity_index = state.mode.world.addPlayer();
+
+                var traversable: TraversableReference = undefined;
+                if (sim.getClosestTraversable(screen_sim_region, camera_position, &traversable)) {
+                    controlled_hero.entity_index = state.mode.world.addPlayer(traversable);
+                }
             }
         }
 
@@ -486,53 +540,6 @@ pub fn updateAndRenderWorld(
         }
     }
 
-    const sim_bounds_expansion = Vector3.new(15, 15, 15);
-    const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
-    const sim_memory = transient_state.arena.beginTemporaryMemory();
-    const sim_center_position = world_mode.camera_position;
-    const screen_sim_region = sim.beginSimulation(
-        &transient_state.arena,
-        world_mode.world,
-        sim_center_position,
-        sim_bounds,
-        input.frame_delta_time,
-    );
-
-    const camera_position =
-        world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
-            .plus(world_mode.camera_offset);
-
-    var world_transform = ObjectTransform.defaultUpright();
-    world_transform.offset_position = world_transform.offset_position.minus(camera_position);
-
-    render_group.pushRectangleOutline(
-        world_transform,
-        screen_bounds.getDimension(),
-        Vector3.zero(),
-        Color.new(1, 1, 0, 1),
-        0.1,
-    );
-    // render_group.pushRectangleOutline(
-    //     world_transform,
-    //     camera_bounds_in_meters.getDimension().xy(),
-    //     Vector3.zero(),
-    //     Color.new(1, 1, 1, 1),
-    // );
-    render_group.pushRectangleOutline(
-        world_transform,
-        sim_bounds.getDimension().xy(),
-        Vector3.zero(),
-        Color.new(0, 1, 1, 1),
-        0.1,
-    );
-    render_group.pushRectangleOutline(
-        world_transform,
-        screen_sim_region.bounds.getDimension().xy(),
-        Vector3.zero(),
-        Color.new(1, 0, 1, 1),
-        0.1,
-    );
-
     TimedBlock.beginBlock(@src(), .EntityRender);
     var hot_entity_count: u32 = 0;
     var entity_index: u32 = 0;
@@ -594,7 +601,9 @@ pub fn updateAndRenderWorld(
                             }
 
                             var closest_position: Vector3 = entity.position;
-                            if (getClosestTraversable(screen_sim_region, entity.position, &closest_position)) {
+                            var traversable: TraversableReference = undefined;
+                            if (sim.getClosestTraversable(screen_sim_region, entity.position, &traversable)) {
+                                closest_position = traversable.getTraversable().position;
                                 const timer_is_up: bool = controlled_hero.recenter_timer == 0;
                                 const no_push: bool = acceleration.lengthSquared() < 0.1;
                                 const spring_coefficient: f32 = if (no_push) 300 else 25;
@@ -620,8 +629,16 @@ pub fn updateAndRenderWorld(
                 },
                 .HeroBody => {
                     if (entity.head.ptr) |head| {
+                        if (entity.movement_mode == .Planted) {
+                            entity.position = entity.standing_on.getTraversable().position;
+                        }
+
                         var closest_position: Vector3 = entity.position;
-                        const found: bool = getClosestTraversable(screen_sim_region, head.position, &closest_position);
+                        var traversable: TraversableReference = undefined;
+                        const found: bool = sim.getClosestTraversable(screen_sim_region, head.position, &traversable);
+                        if (found) {
+                            closest_position = traversable.getTraversable().position;
+                        }
                         const body_delta: Vector3 = closest_position.minus(entity.position);
                         const body_distance: f32 = body_delta.lengthSquared();
 
@@ -640,14 +657,15 @@ pub fn updateAndRenderWorld(
                             .Planted => {
                                 if (found and body_distance > math.square(0.01)) {
                                     entity.movement_time = 0;
-                                    entity.movement_from = entity.position;
-                                    entity.movement_to = closest_position;
+                                    entity.moving_to = traversable;
                                     entity.movement_mode = .Hopping;
                                 }
 
                                 bob_acceleration = -20 * t_head_distance;
                             },
                             .Hopping => {
+                                const moving_to: Vector3 = entity.moving_to.getTraversable().position;
+                                const standing_on: Vector3 = entity.standing_on.getTraversable().position;
                                 const t_jump: f32 = 0.1;
                                 const t_thrust: f32 = 0.2;
                                 const t_land: f32 = 0.9;
@@ -659,13 +677,14 @@ pub fn updateAndRenderWorld(
                                 if (entity.movement_time < t_land) {
                                     const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
                                     const a: Vector3 = Vector3.new(0, -2, 0);
-                                    const b: Vector3 = entity.movement_to.minus(entity.movement_from).minus(a);
-                                    entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(entity.movement_from);
+                                    const b: Vector3 = moving_to.minus(standing_on).minus(a);
+                                    entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(standing_on);
                                 }
 
                                 if (entity.movement_time >= 1) {
+                                    entity.position = moving_to;
+                                    entity.standing_on = entity.moving_to;
                                     entity.movement_mode = .Planted;
-                                    entity.position = entity.movement_to;
                                     entity.bob_delta_time = -2;
                                 }
 
@@ -728,6 +747,10 @@ pub fn updateAndRenderWorld(
                     DebugInterface.debugValue(@src(), &camera_relative_ground_position, "CameraGroundPosition");
                 },
                 .Floor => {},
+                .FloatyThing => {
+                    _ = entity.position.setZ(2 * intrinsics.sin(entity.bob_time));
+                    entity.bob_time += delta_time;
+                },
                 else => {
                     unreachable;
                 },
@@ -906,7 +929,7 @@ pub fn updateAndRenderWorld(
                         null,
                     );
                 },
-                .Floor => {
+                .Floor, .FloatyThing => {
                     var volume_index: u32 = 0;
                     while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
                         const volume = entity.collision.volumes[volume_index];
@@ -1181,8 +1204,14 @@ fn addStandardRoom(
 
             _ = world_position.offset.setZ(0.25 * @as(f32, @floatFromInt(offset_x + offset_y)));
 
-            const entity: *Entity = beginGroundedEntity(world_mode, .Floor, world_mode.floor_collision);
-            endEntity(world_mode, entity, world_position);
+
+            if (offset_x == 2 and offset_y == 2) {
+                const entity: *Entity = beginGroundedEntity(world_mode, .FloatyThing, world_mode.floor_collision);
+                endEntity(world_mode, entity, world_position);
+            } else {
+                const entity: *Entity = beginGroundedEntity(world_mode, .Floor, world_mode.floor_collision);
+                endEntity(world_mode, entity, world_position);
+            }
         }
     }
 }
@@ -1341,32 +1370,6 @@ fn makeNullCollision(world_mode: *GameModeWorld) *EntityCollisionVolumeGroup {
     group.total_volume.dimension = Vector3.zero();
 
     return group;
-}
-
-fn getClosestTraversable(sim_region: *sim.SimRegion, from_position: Vector3, result: *Vector3) bool {
-    var found: bool = false;
-    var closest_distance_squared: f32 = math.square(1000);
-    var hero_entity_index: u32 = 0;
-    while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
-        const test_entity = &sim_region.entities[hero_entity_index];
-        const volume_group: *EntityCollisionVolumeGroup = test_entity.collision;
-        var point_index: u32 = 0;
-        while (point_index < volume_group.traversable_count) : (point_index += 1) {
-            const point: EntityTraversablePoint = test_entity.getTraversable(point_index);
-            var head_to_point: Vector3 = point.position.minus(from_position);
-
-            _ = head_to_point.setZ(math.clampAboveZero(intrinsics.absoluteValue(head_to_point.z() - 1.5)));
-
-            const test_distance_squared = head_to_point.lengthSquared();
-            if (closest_distance_squared > test_distance_squared) {
-                result.* = point.position;
-                closest_distance_squared = test_distance_squared;
-                found = true;
-            }
-        }
-    }
-
-    return found;
 }
 
 pub fn chunkPositionFromTilePosition(

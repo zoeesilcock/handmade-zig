@@ -20,7 +20,10 @@ const World = world.World;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
 const EntityReference = entities.EntityReference;
+const TraversableReference = entities.TraversableReference;
 const EntityCollisionVolume = entities.EntityCollisionVolume;
+const EntityCollisionVolumeGroup = entities.EntityCollisionVolumeGroup;
+const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityFlags = entities.EntityFlags;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
@@ -98,10 +101,8 @@ pub fn loadEntityReference(sim_region: *SimRegion, reference: *EntityReference) 
     }
 }
 
-pub fn storeEntityReference(reference: *EntityReference) void {
-    if (reference.ptr) |ptr| {
-        reference.* = EntityReference{ .index = ptr.id };
-    }
+pub fn loadTraversableReference(sim_region: *SimRegion, reference: *TraversableReference) void {
+    loadEntityReference(sim_region, &reference.entity);
 }
 
 pub fn entityOverlapsRectangle(position: Vector3, volume: EntityCollisionVolume, rectangle: Rectangle3) bool {
@@ -132,8 +133,6 @@ fn addEntity(
 
             dest.id = id;
             dest.position = dest.position.plus(chunk_delta);
-            dest.movement_from = dest.movement_from.plus(chunk_delta);
-            dest.movement_to = dest.movement_to.plus(chunk_delta);
 
             dest.updatable = entityOverlapsRectangle(
                 dest.position,
@@ -156,6 +155,8 @@ fn connectEntityPointers(sim_region: *SimRegion) void {
     while (entity_index < sim_region.entity_count) : (entity_index += 1) {
         const entity: *Entity = &sim_region.entities[entity_index];
         loadEntityReference(sim_region, &entity.head);
+        loadTraversableReference(sim_region, &entity.standing_on);
+        loadTraversableReference(sim_region, &entity.moving_to);
     }
 }
 
@@ -645,10 +646,38 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
             }
 
             entity.position = entity.position.plus(chunk_delta);
-            entity.movement_from = entity.movement_from.plus(chunk_delta);
-            entity.movement_to = entity.movement_to.plus(chunk_delta);
-            storeEntityReference(&entity.head);
             world.packEntityIntoWorld(world_mode.world, entity, entity_position);
         }
     }
+}
+
+pub fn getClosestTraversable(sim_region: *SimRegion, from_position: Vector3, result: *TraversableReference) bool {
+    var found: bool = false;
+    var closest_distance_squared: f32 = math.square(1000);
+    var hero_entity_index: u32 = 0;
+    while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
+        const test_entity = &sim_region.entities[hero_entity_index];
+        const volume_group: *EntityCollisionVolumeGroup = test_entity.collision;
+        var point_index: u32 = 0;
+        while (point_index < volume_group.traversable_count) : (point_index += 1) {
+            const point: EntityTraversablePoint = test_entity.getTraversable(point_index);
+            var head_to_point: Vector3 = point.position.minus(from_position);
+
+            _ = head_to_point.setZ(math.clampAboveZero(intrinsics.absoluteValue(head_to_point.z() - 1.5)));
+
+            const test_distance_squared = head_to_point.lengthSquared();
+            if (closest_distance_squared > test_distance_squared) {
+                result.entity.ptr = test_entity;
+                result.index = point_index;
+                closest_distance_squared = test_distance_squared;
+                found = true;
+            }
+        }
+    }
+
+    if (!found) {
+        result.* = .init;
+    }
+
+    return found;
 }

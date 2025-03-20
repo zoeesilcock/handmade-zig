@@ -21,6 +21,7 @@ pub const EntityType = enum(u8) {
     HeroHead,
     Wall,
     Floor,
+    FloatyThing,
     Familiar,
     Monster,
     Stairwell,
@@ -71,8 +72,8 @@ pub const Entity = extern struct {
 
     movement_mode: EntityMovementMode,
     movement_time: f32,
-    movement_from: Vector3,
-    movement_to: Vector3,
+    standing_on: TraversableReference,
+    moving_to: TraversableReference,
 
     x_axis: Vector2,
     y_axis: Vector2,
@@ -121,6 +122,20 @@ pub const Entity = extern struct {
 pub const EntityReference = packed union {
     ptr: ?*Entity,
     index: EntityId,
+};
+
+pub const TraversableReference = extern struct {
+    entity: EntityReference,
+    index: u32,
+
+    pub const init: TraversableReference = .{
+        .entity = .{ .ptr = null },
+        .index = 0,
+    };
+
+    pub fn getTraversable(self: TraversableReference) EntityTraversablePoint {
+        return self.entity.ptr.?.getTraversable(self.index);
+    }
 };
 
 pub const HitPoint = extern struct {
