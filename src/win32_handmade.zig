@@ -904,13 +904,17 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
             },
             'L' => {
                 if (INTERNAL and is_down) {
-                    if (state.input_recording_index == 0 and state.input_playing_index == 0) {
-                        beginRecordingInput(state, 1);
-                    } else if (state.input_recording_index > 0) {
-                        endRecordingInput(state);
+                    if (alt_was_down) {
                         beginInputPlayback(state, 1);
-                    } else if (state.input_playing_index > 0) {
-                        endInputPlayback(state);
+                    } else {
+                        if (state.input_recording_index == 0 and state.input_playing_index == 0) {
+                            beginRecordingInput(state, 1);
+                        } else if (state.input_recording_index > 0) {
+                            endRecordingInput(state);
+                            beginInputPlayback(state, 1);
+                        } else if (state.input_playing_index > 0) {
+                            endInputPlayback(state);
+                        }
                     }
                 }
             },

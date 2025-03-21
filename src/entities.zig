@@ -122,6 +122,10 @@ pub const Entity = extern struct {
 pub const EntityReference = packed union {
     ptr: ?*Entity,
     index: EntityId,
+
+    pub fn equals(self: EntityReference, other: EntityReference) bool {
+        return self.ptr == other.ptr and self.index.value == other.index.value;
+    }
 };
 
 pub const TraversableReference = extern struct {
@@ -135,6 +139,10 @@ pub const TraversableReference = extern struct {
 
     pub fn getTraversable(self: TraversableReference) EntityTraversablePoint {
         return self.entity.ptr.?.getTraversable(self.index);
+    }
+
+    pub fn equals(self: TraversableReference, other: TraversableReference) bool {
+        return self.entity.equals(other.entity) and self.index == other.index;
     }
 };
 

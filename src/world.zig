@@ -46,10 +46,6 @@ pub const WorldChunk = extern struct {
     first_block: ?*WorldEntityBlock,
 
     next_in_hash: ?*WorldChunk = null,
-
-    pub fn centeredPoint(self: *const WorldChunk) WorldPosition {
-        return centeredChunkPoint(self.x, self.y, self.z);
-    }
 };
 
 pub const WorldEntityBlock = extern struct {
@@ -177,7 +173,6 @@ fn packEntityIntoChunk(
 
     var dest_e: *Entity = @ptrFromInt(dest);
     dest_e.* = source.*;
-
     packEntityReference(&dest_e.head);
     packTraversableReference(&dest_e.standing_on);
     packTraversableReference(&dest_e.moving_to);
@@ -318,13 +313,4 @@ pub fn subtractPositions(world: *World, a: *const WorldPosition, b: *const World
     );
 
     return tile_diff.hadamardProduct(world.chunk_dimension_in_meters).plus(a.offset.minus(b.offset));
-}
-
-pub fn centeredChunkPoint(chunk_x: i32, chunk_y: i32, chunk_z: i32) WorldPosition {
-    return WorldPosition{
-        .chunk_x = chunk_x,
-        .chunk_y = chunk_y,
-        .chunk_z = chunk_z,
-        .offset = Vector3.zero(),
-    };
 }

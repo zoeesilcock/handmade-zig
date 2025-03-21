@@ -200,6 +200,10 @@ pub fn beginSimulation(
         sim_region.bounds.getMaxCorner(),
     );
 
+    DebugInterface.debugBeginDataBlock(@src(), "Simulation/Origin");
+    DebugInterface.debugStruct(@src(), &sim_region.origin);
+    DebugInterface.debugEndDataBlock(@src());
+
     var chunk_z = min_chunk_position.chunk_z;
     while (chunk_z <= max_chunk_position.chunk_z) : (chunk_z += 1) {
         var chunk_y = min_chunk_position.chunk_y;
@@ -209,6 +213,9 @@ pub fn beginSimulation(
                 const opt_chunk = world.removeWorldChunk(sim_region.world, chunk_x, chunk_y, chunk_z);
 
                 if (opt_chunk) |chunk| {
+                    std.debug.assert(chunk.x == chunk_x);
+                    std.debug.assert(chunk.y == chunk_y);
+                    std.debug.assert(chunk.z == chunk_z);
                     const chunk_position: world.WorldPosition = .{
                         .chunk_x = chunk_x,
                         .chunk_y = chunk_y,
@@ -574,8 +581,7 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
             var chunk_position: world.WorldPosition = entity_position;
             chunk_position.offset = .zero();
 
-            const chunk_delta: Vector3 =
-                world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin).negated();
+            const chunk_delta: Vector3 = entity_position.offset.minus(entity.position);
 
             // Update camera position.
             if (entity.id.value == world_mode.camera_following_entity_index.value) {
@@ -645,8 +651,14 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
                 world_mode.camera_position = new_camera_position;
             }
 
+            // const old_entity_position: Vector3 = entity.position;
             entity.position = entity.position.plus(chunk_delta);
             world.packEntityIntoWorld(world_mode.world, entity, entity_position);
+
+            // const reverse_chunk_delta: Vector3 =
+            //     world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);
+            // const test_position: Vector3 = entity.position.plus(reverse_chunk_delta);
+            // std.debug.assert(old_entity_position.z() == test_position.z());
         }
     }
 }
@@ -661,11 +673,11 @@ pub fn getClosestTraversable(sim_region: *SimRegion, from_position: Vector3, res
         var point_index: u32 = 0;
         while (point_index < volume_group.traversable_count) : (point_index += 1) {
             const point: EntityTraversablePoint = test_entity.getTraversable(point_index);
-            var head_to_point: Vector3 = point.position.minus(from_position);
+            var to_point: Vector3 = point.position.minus(from_position);
 
-            _ = head_to_point.setZ(math.clampAboveZero(intrinsics.absoluteValue(head_to_point.z() - 1.5)));
+            // _ = to_point.setZ(math.clampAboveZero(intrinsics.absoluteValue(to_point.z() - 1.5)));
 
-            const test_distance_squared = head_to_point.lengthSquared();
+            const test_distance_squared = to_point.lengthSquared();
             if (closest_distance_squared > test_distance_squared) {
                 result.entity.ptr = test_entity;
                 result.index = point_index;

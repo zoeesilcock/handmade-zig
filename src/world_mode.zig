@@ -578,12 +578,18 @@ pub fn updateAndRenderWorld(
             // Pre-physics entity work.
             switch (entity.type) {
                 .HeroHead => {
+                    DebugInterface.debugValue(@src(), &entity.position, "HeadPosition");
+
                     for (&state.controlled_heroes) |*controlled_hero| {
                         if (controlled_hero.entity_index == entity.id) {
                             controlled_hero.recenter_timer =
                                 math.clampAboveZero(controlled_hero.recenter_timer - delta_time);
+
+                            const head: *Entity = entity;
+                            const opt_body: ?*Entity = head.head.ptr;
+
                             if (controlled_hero.vertical_direction != 0) {
-                                _ = entity.velocity.setZ(controlled_hero.vertical_direction);
+                                _ = head.velocity.setZ(controlled_hero.vertical_direction);
                             }
 
                             move_spec = sim.MoveSpec{
@@ -596,14 +602,24 @@ pub fn updateAndRenderWorld(
                             if (controlled_hero.sword_direction.x() == 0 and controlled_hero.sword_direction.y() == 0) {
                                 // Keep existing facing direction when velocity is zero.
                             } else {
-                                entity.facing_direction =
+                                head.facing_direction =
                                     intrinsics.atan2(controlled_hero.sword_direction.y(), controlled_hero.sword_direction.x());
                             }
 
-                            var closest_position: Vector3 = entity.position;
                             var traversable: TraversableReference = undefined;
-                            if (sim.getClosestTraversable(screen_sim_region, entity.position, &traversable)) {
-                                closest_position = traversable.getTraversable().position;
+                            if (sim.getClosestTraversable(screen_sim_region, head.position, &traversable)) {
+                                if (opt_body) |body| {
+                                    if (body.movement_mode == .Planted) {
+                                        if (!traversable.equals(body.standing_on)) {
+                                            body.movement_time = 0;
+                                            body.moving_to = traversable;
+                                            body.movement_mode = .Hopping;
+                                        }
+                                    }
+                                } else {
+                                }
+
+                                const closest_position: Vector3 = traversable.getTraversable().position;
                                 const timer_is_up: bool = controlled_hero.recenter_timer == 0;
                                 const no_push: bool = acceleration.lengthSquared() < 0.1;
                                 const spring_coefficient: f32 = if (no_push) 300 else 25;
@@ -611,102 +627,94 @@ pub fn updateAndRenderWorld(
                                 for (0..3) |e| {
                                     if (no_push or (timer_is_up and math.square(acceleration.values[e]) < 0.1)) {
                                         acceleration2.values[e] =
-                                            spring_coefficient * (closest_position.values[e] - entity.position.values[e]) -
-                                            30 * entity.velocity.values[e];
+                                            spring_coefficient * (closest_position.values[e] - head.position.values[e]) -
+                                            30 * head.velocity.values[e];
                                     }
                                 }
 
-                                entity.velocity = entity.velocity.plus(acceleration2.scaledTo(delta_time));
+                                head.velocity = head.velocity.plus(acceleration2.scaledTo(delta_time));
+                            }
+
+                            if (opt_body) |body| {
+                                body.facing_direction = head.facing_direction;
                             }
 
                             if (controlled_hero.exited) {
                                 controlled_hero.exited = false;
-                                sim.deleteEntity(screen_sim_region, entity);
+                                sim.deleteEntity(screen_sim_region, head);
                                 controlled_hero.entity_index = .{};
                             }
                         }
                     }
                 },
                 .HeroBody => {
-                    if (entity.head.ptr) |head| {
-                        if (entity.movement_mode == .Planted) {
-                            entity.position = entity.standing_on.getTraversable().position;
-                        }
+                    DebugInterface.debugValue(@src(), &entity.position, "BodyPosition");
 
-                        var closest_position: Vector3 = entity.position;
-                        var traversable: TraversableReference = undefined;
-                        const found: bool = sim.getClosestTraversable(screen_sim_region, head.position, &traversable);
-                        if (found) {
-                            closest_position = traversable.getTraversable().position;
-                        }
-                        const body_delta: Vector3 = closest_position.minus(entity.position);
-                        const body_distance: f32 = body_delta.lengthSquared();
+                    const opt_head: ?*Entity = entity.head.ptr;
+                    const body: *Entity = entity;
 
-                        entity.facing_direction = head.facing_direction;
-                        var bob_acceleration: f32 = 0;
+                    entity.velocity = Vector3.zero();
 
-                        entity.velocity = Vector3.zero();
-
-                        const head_delta: Vector3 = head.position.minus(entity.position);
-                        const head_distance: f32 = head_delta.length();
-                        const max_head_distance: f32 = 0.5;
-                        const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
-
-                        entity.floor_displace = head_delta.xy().scaledTo(0.25);
-                        switch (entity.movement_mode) {
-                            .Planted => {
-                                if (found and body_distance > math.square(0.01)) {
-                                    entity.movement_time = 0;
-                                    entity.moving_to = traversable;
-                                    entity.movement_mode = .Hopping;
-                                }
-
-                                bob_acceleration = -20 * t_head_distance;
-                            },
-                            .Hopping => {
-                                const moving_to: Vector3 = entity.moving_to.getTraversable().position;
-                                const standing_on: Vector3 = entity.standing_on.getTraversable().position;
-                                const t_jump: f32 = 0.1;
-                                const t_thrust: f32 = 0.2;
-                                const t_land: f32 = 0.9;
-
-                                if (entity.movement_time < t_thrust) {
-                                    bob_acceleration = 30;
-                                }
-
-                                if (entity.movement_time < t_land) {
-                                    const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
-                                    const a: Vector3 = Vector3.new(0, -2, 0);
-                                    const b: Vector3 = moving_to.minus(standing_on).minus(a);
-                                    entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(standing_on);
-                                }
-
-                                if (entity.movement_time >= 1) {
-                                    entity.position = moving_to;
-                                    entity.standing_on = entity.moving_to;
-                                    entity.movement_mode = .Planted;
-                                    entity.bob_delta_time = -2;
-                                }
-
-                                entity.movement_time += 4 * delta_time;
-                                if (entity.movement_time > 1) {
-                                    entity.movement_time = 1;
-                                }
-                            },
-                        }
-
-                        const position_coefficient = 100;
-                        const velocity_coefficient = 10;
-                        bob_acceleration +=
-                            position_coefficient * (0 - entity.bob_time) +
-                            velocity_coefficient * (0 - entity.bob_delta_time);
-                        entity.bob_time +=
-                            bob_acceleration * delta_time * delta_time +
-                            entity.bob_delta_time * delta_time;
-                        entity.bob_delta_time += bob_acceleration * delta_time;
-
-                        entity.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(0.5));
+                    if (entity.movement_mode == .Planted) {
+                        entity.position = entity.standing_on.getTraversable().position;
                     }
+
+                    var head_delta: Vector3 = .zero();
+                    if (opt_head) |head| {
+                        head_delta = head.position.minus(body.position);
+                    }
+                    body.floor_displace = head_delta.xy().scaledTo(0.25);
+                    body.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(0.5));
+
+                    var bob_acceleration: f32 = 0;
+                    switch (entity.movement_mode) {
+                        .Planted => {
+                            const head_distance: f32 = head_delta.length();
+                            const max_head_distance: f32 = 0.5;
+                            const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
+                            bob_acceleration = -20 * t_head_distance;
+                        },
+                        .Hopping => {
+                            const moving_to: Vector3 = entity.moving_to.getTraversable().position;
+                            const standing_on: Vector3 = entity.standing_on.getTraversable().position;
+                            const t_jump: f32 = 0.1;
+                            const t_thrust: f32 = 0.2;
+                            const t_land: f32 = 0.9;
+
+                            if (entity.movement_time < t_thrust) {
+                                bob_acceleration = 30;
+                            }
+
+                            if (entity.movement_time < t_land) {
+                                const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
+                                const a: Vector3 = Vector3.new(0, -2, 0);
+                                const b: Vector3 = moving_to.minus(standing_on).minus(a);
+                                entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(standing_on);
+                            }
+
+                            if (entity.movement_time >= 1) {
+                                entity.position = moving_to;
+                                entity.standing_on = entity.moving_to;
+                                entity.movement_mode = .Planted;
+                                entity.bob_delta_time = -2;
+                            }
+
+                            entity.movement_time += 4 * delta_time;
+                            if (entity.movement_time > 1) {
+                                entity.movement_time = 1;
+                            }
+                        },
+                    }
+
+                    const position_coefficient = 100;
+                    const velocity_coefficient = 10;
+                    bob_acceleration +=
+                        position_coefficient * (0 - entity.bob_time) +
+                        velocity_coefficient * (0 - entity.bob_delta_time);
+                    entity.bob_time +=
+                        bob_acceleration * delta_time * delta_time +
+                        entity.bob_delta_time * delta_time;
+                    entity.bob_delta_time += bob_acceleration * delta_time;
                 },
                 .Familiar => {
                     var closest_hero: ?*Entity = null;
@@ -744,11 +752,11 @@ pub fn updateAndRenderWorld(
                 .Wall => {},
                 .Stairwell => {},
                 .Monster => {
-                    DebugInterface.debugValue(@src(), &camera_relative_ground_position, "CameraGroundPosition");
+                    DebugInterface.debugValue(@src(), &camera_relative_ground_position, "MonsterGroundPosition");
                 },
                 .Floor => {},
                 .FloatyThing => {
-                    _ = entity.position.setZ(2 * intrinsics.sin(entity.bob_time));
+                    _ = entity.position.setZ(entity.position.z() + 0.05 * intrinsics.cos(entity.bob_time));
                     entity.bob_time += delta_time;
                 },
                 else => {
