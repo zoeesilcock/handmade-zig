@@ -155,8 +155,13 @@ fn connectEntityPointers(sim_region: *SimRegion) void {
     while (entity_index < sim_region.entity_count) : (entity_index += 1) {
         const entity: *Entity = &sim_region.entities[entity_index];
         loadEntityReference(sim_region, &entity.head);
-        loadTraversableReference(sim_region, &entity.standing_on);
-        loadTraversableReference(sim_region, &entity.moving_to);
+
+        loadTraversableReference(sim_region, &entity.occupying);
+        if (entity.occupying.entity.ptr) |occupying_entity| {
+            occupying_entity.traversables[entity.occupying.index].occupier = entity;
+        }
+
+        loadTraversableReference(sim_region, &entity.came_from);
     }
 }
 
@@ -361,6 +366,23 @@ pub fn handleCollision(world_mode: *GameModeWorld, entity: *Entity, hit_entity: 
     }
 
     return stops_on_collision;
+}
+
+pub fn transactionalOccupy(entity: *Entity, dest_ref: *TraversableReference, desired_ref: TraversableReference) bool {
+    var result = false;
+
+    if (desired_ref.getTraversable()) |desired| {
+        if (desired.occupier == null) {
+            if (dest_ref.getTraversable()) |dest| {
+                dest.occupier = null;
+            }
+            dest_ref.* = desired_ref;
+            desired.occupier = entity;
+            result = true;
+        }
+    }
+
+    return result;
 }
 
 pub fn moveEntity(
@@ -663,26 +685,32 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
     }
 }
 
-pub fn getClosestTraversable(sim_region: *SimRegion, from_position: Vector3, result: *TraversableReference) bool {
+pub const TraversableSearchFlag = enum(u8) {
+    Unoccupied = 0x1,
+};
+
+pub fn getClosestTraversable(sim_region: *SimRegion, from_position: Vector3, result: *TraversableReference, flags: u32) bool {
     var found: bool = false;
     var closest_distance_squared: f32 = math.square(1000);
     var hero_entity_index: u32 = 0;
     while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
         const test_entity = &sim_region.entities[hero_entity_index];
-        const volume_group: *EntityCollisionVolumeGroup = test_entity.collision;
         var point_index: u32 = 0;
-        while (point_index < volume_group.traversable_count) : (point_index += 1) {
-            const point: EntityTraversablePoint = test_entity.getTraversable(point_index);
-            var to_point: Vector3 = point.position.minus(from_position);
+        while (point_index < test_entity.traversable_count) : (point_index += 1) {
+            const point: EntityTraversablePoint = test_entity.getSimSpaceTraversable(point_index);
 
-            // _ = to_point.setZ(math.clampAboveZero(intrinsics.absoluteValue(to_point.z() - 1.5)));
+            if ((flags & @intFromEnum(TraversableSearchFlag.Unoccupied) == 0) or point.occupier == null) {
+                var to_point: Vector3 = point.position.minus(from_position);
 
-            const test_distance_squared = to_point.lengthSquared();
-            if (closest_distance_squared > test_distance_squared) {
-                result.entity.ptr = test_entity;
-                result.index = point_index;
-                closest_distance_squared = test_distance_squared;
-                found = true;
+                // _ = to_point.setZ(math.clampAboveZero(intrinsics.absoluteValue(to_point.z() - 1.5)));
+
+                const test_distance_squared = to_point.lengthSquared();
+                if (closest_distance_squared > test_distance_squared) {
+                    result.entity.ptr = test_entity;
+                    result.index = point_index;
+                    closest_distance_squared = test_distance_squared;
+                    found = true;
+                }
             }
         }
     }

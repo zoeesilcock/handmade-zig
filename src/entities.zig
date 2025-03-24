@@ -72,13 +72,16 @@ pub const Entity = extern struct {
 
     movement_mode: EntityMovementMode,
     movement_time: f32,
-    standing_on: TraversableReference,
-    moving_to: TraversableReference,
+    occupying: TraversableReference,
+    came_from: TraversableReference,
 
     x_axis: Vector2,
     y_axis: Vector2,
 
     floor_displace: Vector2,
+
+    traversable_count: u32,
+    traversables: [16]EntityTraversablePoint,
 
     pub fn isSet(self: *const Entity, flag: u32) bool {
         return (self.flags & flag) != 0;
@@ -109,11 +112,25 @@ pub const Entity = extern struct {
         return self.position.z() + barycentric.y() * self.walkable_height;
     }
 
-    pub fn getTraversable(self: *const Entity, index: u32) EntityTraversablePoint {
-        std.debug.assert(index < self.collision.traversable_count);
+    pub fn getTraversable(opt_self: ?*const Entity, index: u32) ?*EntityTraversablePoint {
+        var result: ?*EntityTraversablePoint = null;
+        if (opt_self) |self| {
+            std.debug.assert(index < self.traversable_count);
+            result = @ptrFromInt(@intFromPtr(&self.traversables) + index);
+        }
+        return result;
+    }
 
-        var result = self.collision.traversables[index];
-        result.position = result.position.plus(self.position);
+    pub fn getSimSpaceTraversable(self: *const Entity, index: u32) EntityTraversablePoint {
+        var result: EntityTraversablePoint = .{
+            .position = self.position,
+            .occupier = null,
+        };
+
+        if (self.getTraversable(index)) |point| {
+            result.position = result.position.plus(point.position);
+            result.occupier = point.occupier;
+        }
 
         return result;
     }
@@ -137,8 +154,25 @@ pub const TraversableReference = extern struct {
         .index = 0,
     };
 
-    pub fn getTraversable(self: TraversableReference) EntityTraversablePoint {
-        return self.entity.ptr.?.getTraversable(self.index);
+    pub fn getTraversable(self: TraversableReference) ?*EntityTraversablePoint {
+        var result: ?*EntityTraversablePoint = null;
+        if (self.entity.ptr) |entity_ptr| {
+            result = entity_ptr.getTraversable(self.index);
+        }
+        return result;
+    }
+
+    pub fn getSimSpaceTraversable(self: TraversableReference) EntityTraversablePoint {
+        var result: EntityTraversablePoint = .{
+            .position = .zero(),
+            .occupier = null,
+        };
+
+        if (self.entity.ptr) |entity_ptr| {
+            result = entity_ptr.getSimSpaceTraversable(self.index);
+        }
+
+        return result;
     }
 
     pub fn equals(self: TraversableReference, other: TraversableReference) bool {
@@ -158,6 +192,7 @@ pub const EntityCollisionVolume = extern struct {
 
 pub const EntityTraversablePoint = extern struct {
     position: Vector3,
+    occupier: ?*Entity,
 };
 
 pub const EntityCollisionVolumeGroup = extern struct {
@@ -165,9 +200,6 @@ pub const EntityCollisionVolumeGroup = extern struct {
 
     volume_count: u32,
     volumes: [*]EntityCollisionVolume,
-
-    traversable_count: u32,
-    traversables: [*]EntityTraversablePoint,
 
     pub fn getSpaceVolume(self: *const EntityCollisionVolumeGroup, index: u32) EntityCollisionVolume {
         return self.volumes[index];

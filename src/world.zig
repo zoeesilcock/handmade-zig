@@ -174,8 +174,8 @@ fn packEntityIntoChunk(
     var dest_e: *Entity = @ptrFromInt(dest);
     dest_e.* = source.*;
     packEntityReference(&dest_e.head);
-    packTraversableReference(&dest_e.standing_on);
-    packTraversableReference(&dest_e.moving_to);
+    packTraversableReference(&dest_e.occupying);
+    packTraversableReference(&dest_e.came_from);
 }
 
 pub fn packEntityIntoWorld(

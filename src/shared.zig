@@ -836,6 +836,7 @@ pub const ControlledHero = struct {
     sword_direction: Vector2 = Vector2.zero(),
     recenter_timer: f32 = 0,
     exited: bool = false,
+    debug_spawn: bool = false,
 };
 
 pub const LowEntityChunkReference = struct {
