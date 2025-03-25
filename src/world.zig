@@ -19,6 +19,7 @@ const BitmapId = file_formats.BitmapId;
 const PlayingSound = audio.PlayingSound;
 const Entity = entities.Entity;
 const EntityReference = entities.EntityReference;
+const StoredEntityReference = entities.StoredEntityReference;
 const TraversableReference = entities.TraversableReference;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
@@ -129,14 +130,30 @@ pub fn areInSameChunk(world: *World, a: *const WorldPosition, b: *const WorldPos
         a.chunk_z == b.chunk_z;
 }
 
-fn packEntityReference(reference: *EntityReference) void {
-    if (reference.ptr) |ptr| {
-        reference.* = EntityReference{ .index = ptr.id };
+fn packEntityReferenceArray(count: u32, in_source: [*]EntityReference, in_dest: [*]StoredEntityReference) void {
+    var dest = in_dest;
+    var source = in_source;
+
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        dest[0].index.value = 0;
+        dest[0].relationship = .None;
+
+        if (source[0].ptr) |source_ptr| {
+            dest[0].index = source_ptr.id;
+            dest[0].relationship = source[0].stored.relationship;
+        } else {
+            // TODO: Need the hash table to check if we should keep this.
+        }
+
+        dest += 1;
+        source += 1;
     }
 }
 
 fn packTraversableReference(reference: *TraversableReference) void {
-    packEntityReference(&reference.entity);
+    _ = reference;
+    // packEntityReference(&reference.entity);
 }
 
 fn packEntityIntoChunk(
@@ -144,7 +161,7 @@ fn packEntityIntoChunk(
     source: *Entity,
     chunk: *WorldChunk,
 ) void {
-    const pack_size: u32 = @sizeOf(Entity);
+    const pack_size: u32 = @sizeOf(Entity) + source.paired_entity_count * @sizeOf(StoredEntityReference);
 
     if (chunk.first_block == null or !chunk.first_block.?.hasRoomFor(pack_size)) {
         if (world.first_free_block == null) {
@@ -173,7 +190,7 @@ fn packEntityIntoChunk(
 
     var dest_e: *Entity = @ptrFromInt(dest);
     dest_e.* = source.*;
-    packEntityReference(&dest_e.head);
+    packEntityReferenceArray(source.paired_entity_count, source.paired_entities, @ptrFromInt(dest_address + @sizeOf(Entity)));
     packTraversableReference(&dest_e.occupying);
     packTraversableReference(&dest_e.came_from);
 }

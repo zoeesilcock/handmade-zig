@@ -46,6 +46,13 @@ pub const Entity = extern struct {
     id: EntityId = .{},
     updatable: bool = false,
 
+    paired_entity_count: u32,
+    paired_entities: [*]EntityReference = undefined,
+
+    //
+    // Everything below here is not worked out yet.
+    //
+
     type: EntityType = .Null,
     flags: u32 = 0,
 
@@ -64,8 +71,6 @@ pub const Entity = extern struct {
 
     hit_point_max: u32,
     hit_points: [16]HitPoint,
-
-    head: EntityReference = undefined,
 
     walkable_dimension: Vector2,
     walkable_height: f32 = 0,
@@ -136,12 +141,29 @@ pub const Entity = extern struct {
     }
 };
 
-pub const EntityReference = packed union {
-    ptr: ?*Entity,
-    index: EntityId,
+const EntityRelationship = enum(u8) {
+    None,
+    Paired,
+};
 
-    pub fn equals(self: EntityReference, other: EntityReference) bool {
-        return self.ptr == other.ptr and self.index.value == other.index.value;
+pub const StoredEntityReference = extern struct {
+    index: EntityId = .{},
+    relationship: EntityRelationship = .None,
+};
+
+pub const EntityReference = extern struct {
+    ptr: ?*Entity = null,
+    stored: StoredEntityReference = .{},
+
+    pub fn equals(self: *EntityReference, other: EntityReference) bool {
+        return
+            self.ptr == other.ptr and
+            self.stored.index.value == other.stored.index.value and
+            self.stored.relationship == other.stored.relationship;
+    }
+
+    pub fn referenceIsValid(self: *EntityReference) bool {
+        return self.stored.index.value != 0;
     }
 };
 

@@ -99,8 +99,13 @@ pub const GameModeWorld = struct {
 
         body.occupying = standing_on;
 
-        body.head = EntityReference{ .ptr = head };
-        head.head = EntityReference{ .ptr = body };
+        var body_refs: [1]EntityReference = .{ .{ .ptr = head } };
+        body.paired_entity_count = body_refs.len;
+        body.paired_entities = &body_refs;
+
+        var head_refs: [1]EntityReference = .{ .{ .ptr = body } };
+        head.paired_entity_count = head_refs.len;
+        head.paired_entities = &head_refs;
 
         if (self.camera_following_entity_index.value == 0) {
             self.camera_following_entity_index = head.id;
@@ -620,7 +625,7 @@ pub fn updateAndRenderWorld(
                         math.clampAboveZero(controlled_hero.recenter_timer - delta_time);
 
                     const head: *Entity = entity;
-                    const opt_body: ?*Entity = head.head.ptr;
+                    const opt_body: ?*Entity = null; //head.head.ptr;
 
                     if (controlled_hero.vertical_direction != 0) {
                         _ = head.velocity.setZ(controlled_hero.vertical_direction);
@@ -683,7 +688,7 @@ pub fn updateAndRenderWorld(
                 .HeroBody => {
                     DebugInterface.debugValue(@src(), &entity.position, "BodyPosition");
 
-                    const opt_head: ?*Entity = entity.head.ptr;
+                    const opt_head: ?*Entity = null; //entity.head.ptr;
                     const body: *Entity = entity;
 
                     entity.velocity = Vector3.zero();
@@ -698,56 +703,10 @@ pub fn updateAndRenderWorld(
                     }
                     body.floor_displace = head_delta.xy().scaledTo(0.25);
                     body.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(0.5));
-
-                    var bob_acceleration: f32 = 0;
-                    switch (entity.movement_mode) {
-                        .Planted => {
-                            const head_distance: f32 = head_delta.length();
-                            const max_head_distance: f32 = 0.5;
-                            const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
-                            bob_acceleration = -20 * t_head_distance;
-                        },
-                        .Hopping => {
-                            const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable().position;
-                            const movement_from: Vector3 = entity.came_from.getSimSpaceTraversable().position;
-                            const t_jump: f32 = 0.1;
-                            const t_thrust: f32 = 0.2;
-                            const t_land: f32 = 0.9;
-
-                            if (entity.movement_time < t_thrust) {
-                                bob_acceleration = 30;
-                            }
-
-                            if (entity.movement_time < t_land) {
-                                const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
-                                const a: Vector3 = Vector3.new(0, -2, 0);
-                                const b: Vector3 = movement_to.minus(movement_from).minus(a);
-                                entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(movement_from);
-                            }
-
-                            if (entity.movement_time >= 1) {
-                                entity.position = movement_to;
-                                entity.came_from = entity.occupying;
-                                entity.movement_mode = .Planted;
-                                entity.bob_delta_time = -2;
-                            }
-
-                            entity.movement_time += 4 * delta_time;
-                            if (entity.movement_time > 1) {
-                                entity.movement_time = 1;
-                            }
-                        },
-                    }
-
-                    const position_coefficient = 100;
-                    const velocity_coefficient = 10;
-                    bob_acceleration +=
-                        position_coefficient * (0 - entity.bob_time) +
-                        velocity_coefficient * (0 - entity.bob_delta_time);
-                    entity.bob_time +=
-                        bob_acceleration * delta_time * delta_time +
-                        entity.bob_delta_time * delta_time;
-                    entity.bob_delta_time += bob_acceleration * delta_time;
+                },
+                .FloatyThing => {
+                    // _ = entity.position.setZ(entity.position.z() + 0.05 * intrinsics.cos(entity.bob_time));
+                    // entity.bob_time += delta_time;
                 },
                 .Familiar => {
                     var closest_hero: ?*Entity = null;
@@ -788,14 +747,70 @@ pub fn updateAndRenderWorld(
                     DebugInterface.debugValue(@src(), &camera_relative_ground_position, "MonsterGroundPosition");
                 },
                 .Floor => {},
-                .FloatyThing => {
-                    _ = entity.position.setZ(entity.position.z() + 0.05 * intrinsics.cos(entity.bob_time));
-                    entity.bob_time += delta_time;
-                },
                 else => {
                     unreachable;
                 },
             }
+
+            // Handle the entity's movement mode.
+            var bob_acceleration: f32 = 0;
+            switch (entity.movement_mode) {
+                .Planted => {
+                    var head_distance: f32 = 0;
+                    var paired_entity_index: u32 = 0;
+                    while (paired_entity_index < entity.paired_entity_count) : (paired_entity_index += 1) {
+                        if (entity.paired_entities[paired_entity_index].ptr) |pair| {
+                            var delta: Vector3 = pair.position.minus(entity.position);
+                            head_distance += delta.lengthSquared();
+                        }
+                    }
+                    head_distance = intrinsics.squareRoot(head_distance);
+
+                    const max_head_distance: f32 = 0.5;
+                    const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
+                    bob_acceleration = -20 * t_head_distance;
+                },
+                .Hopping => {
+                    const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable().position;
+                    const movement_from: Vector3 = entity.came_from.getSimSpaceTraversable().position;
+                    const t_jump: f32 = 0.1;
+                    const t_thrust: f32 = 0.2;
+                    const t_land: f32 = 0.9;
+
+                    if (entity.movement_time < t_thrust) {
+                        bob_acceleration = 30;
+                    }
+
+                    if (entity.movement_time < t_land) {
+                        const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
+                        const a: Vector3 = Vector3.new(0, -2, 0);
+                        const b: Vector3 = movement_to.minus(movement_from).minus(a);
+                        entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(movement_from);
+                    }
+
+                    if (entity.movement_time >= 1) {
+                        entity.position = movement_to;
+                        entity.came_from = entity.occupying;
+                        entity.movement_mode = .Planted;
+                        entity.bob_delta_time = -2;
+                    }
+
+                    entity.movement_time += 4 * delta_time;
+                    if (entity.movement_time > 1) {
+                        entity.movement_time = 1;
+                    }
+                },
+            }
+
+            const position_coefficient = 100;
+            const velocity_coefficient = 10;
+            bob_acceleration +=
+                position_coefficient * (0 - entity.bob_time) +
+                velocity_coefficient * (0 - entity.bob_delta_time);
+            entity.bob_time +=
+                bob_acceleration * delta_time * delta_time +
+                entity.bob_delta_time * delta_time;
+            entity.bob_delta_time += bob_acceleration * delta_time;
 
             if (entity.isSet(EntityFlags.Movable.toInt())) {
                 sim.moveEntity(

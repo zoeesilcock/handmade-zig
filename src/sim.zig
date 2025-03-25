@@ -95,10 +95,13 @@ pub fn getEntityByStorageIndex(sim_region: *SimRegion, id: EntityId) ?*Entity {
 }
 
 pub fn loadEntityReference(sim_region: *SimRegion, reference: *EntityReference) void {
-    if (reference.index.value != 0) {
-        const entry = getHashFromId(sim_region, reference.index);
-        reference.* = EntityReference{ .ptr = if (entry != null) entry.?.ptr else null };
-    }
+    _ = sim_region;
+    _ = reference;
+
+    // if (reference.index.value != 0) {
+    //     const entry = getHashFromId(sim_region, reference.index);
+    //     reference.* = EntityReference{ .ptr = if (entry != null) entry.?.ptr else null };
+    // }
 }
 
 pub fn loadTraversableReference(sim_region: *SimRegion, reference: *TraversableReference) void {
@@ -151,18 +154,19 @@ pub fn deleteEntity(sim_region: *SimRegion, entity: *Entity) void {
 }
 
 fn connectEntityPointers(sim_region: *SimRegion) void {
-    var entity_index: u32 = 0;
-    while (entity_index < sim_region.entity_count) : (entity_index += 1) {
-        const entity: *Entity = &sim_region.entities[entity_index];
-        loadEntityReference(sim_region, &entity.head);
-
-        loadTraversableReference(sim_region, &entity.occupying);
-        if (entity.occupying.entity.ptr) |occupying_entity| {
-            occupying_entity.traversables[entity.occupying.index].occupier = entity;
-        }
-
-        loadTraversableReference(sim_region, &entity.came_from);
-    }
+    _ = sim_region;
+    // var entity_index: u32 = 0;
+    // while (entity_index < sim_region.entity_count) : (entity_index += 1) {
+    //     const entity: *Entity = &sim_region.entities[entity_index];
+    //     loadEntityReference(sim_region, &entity.head);
+    //
+    //     loadTraversableReference(sim_region, &entity.occupying);
+    //     if (entity.occupying.entity.ptr) |occupying_entity| {
+    //         occupying_entity.traversables[entity.occupying.index].occupier = entity;
+    //     }
+    //
+    //     loadTraversableReference(sim_region, &entity.came_from);
+    // }
 }
 
 pub fn beginSimulation(
