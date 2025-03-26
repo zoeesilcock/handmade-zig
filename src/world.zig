@@ -21,6 +21,7 @@ const Entity = entities.Entity;
 const EntityReference = entities.EntityReference;
 const StoredEntityReference = entities.StoredEntityReference;
 const TraversableReference = entities.TraversableReference;
+const SimRegion = sim.SimRegion;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
@@ -130,38 +131,31 @@ pub fn areInSameChunk(world: *World, a: *const WorldPosition, b: *const WorldPos
         a.chunk_z == b.chunk_z;
 }
 
-fn packEntityReferenceArray(count: u32, in_source: [*]EntityReference, in_dest: [*]StoredEntityReference) void {
-    var dest = in_dest;
-    var source = in_source;
-
-    var index: u32 = 0;
-    while (index < count) : (index += 1) {
-        dest[0].index.value = 0;
-        dest[0].relationship = .None;
-
-        if (source[0].ptr) |source_ptr| {
-            dest[0].index = source_ptr.id;
-            dest[0].relationship = source[0].stored.relationship;
+fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *EntityReference) void {
+    if (reference.ptr) |ptr| {
+        if (ptr.isDeleted()) {
+            reference.index.value = 0;
         } else {
-            // TODO: Need the hash table to check if we should keep this.
+            reference.index = ptr.id;
         }
-
-        dest += 1;
-        source += 1;
+    } else if (reference.index.value != 0) {
+        if (opt_sim_region == null or sim.getHashFromId(opt_sim_region.?, reference.index) != null) {
+            reference.index.value = 0;
+        }
     }
 }
 
-fn packTraversableReference(reference: *TraversableReference) void {
-    _ = reference;
-    // packEntityReference(&reference.entity);
+fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *TraversableReference) void {
+    packEntityReference(opt_sim_region, &reference.entity);
 }
 
 fn packEntityIntoChunk(
     world: *World,
+    opt_sim_region: ?*SimRegion,
     source: *Entity,
     chunk: *WorldChunk,
 ) void {
-    const pack_size: u32 = @sizeOf(Entity) + source.paired_entity_count * @sizeOf(StoredEntityReference);
+    const pack_size: u32 = @sizeOf(Entity);
 
     if (chunk.first_block == null or !chunk.first_block.?.hasRoomFor(pack_size)) {
         if (world.first_free_block == null) {
@@ -190,19 +184,19 @@ fn packEntityIntoChunk(
 
     var dest_e: *Entity = @ptrFromInt(dest);
     dest_e.* = source.*;
-    packEntityReferenceArray(source.paired_entity_count, source.paired_entities, @ptrFromInt(dest_address + @sizeOf(Entity)));
-    packTraversableReference(&dest_e.occupying);
-    packTraversableReference(&dest_e.came_from);
+    packTraversableReference(opt_sim_region, &dest_e.occupying);
+    packTraversableReference(opt_sim_region, &dest_e.came_from);
 }
 
 pub fn packEntityIntoWorld(
     world: *World,
+    opt_sim_region: ?*SimRegion,
     source: *Entity,
     at: WorldPosition,
 ) void {
     const chunk: ?*WorldChunk = getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, &world.arena);
     std.debug.assert(chunk != null);
-    packEntityIntoChunk(world, source, chunk.?);
+    packEntityIntoChunk(world, opt_sim_region, source, chunk.?);
 }
 
 pub fn addChunkToFreeList(

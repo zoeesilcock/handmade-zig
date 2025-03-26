@@ -37,6 +37,20 @@ pub const EntityFlags = enum(u32) {
     }
 };
 
+pub const BrainType = enum(u32) {
+    None,
+    Hero,
+    Snake,
+};
+
+const BrainSlot = extern struct {
+    index: u32 = 0,
+};
+
+pub const BrainId = extern struct {
+    value: u32 = 0,
+};
+
 pub const EntityMovementMode = enum(u32) {
     Planted,
     Hopping,
@@ -46,12 +60,13 @@ pub const Entity = extern struct {
     id: EntityId = .{},
     updatable: bool = false,
 
-    paired_entity_count: u32,
-    paired_entities: [*]EntityReference = undefined,
-
     //
     // Everything below here is not worked out yet.
     //
+
+    brain_type: BrainType = .None,
+    brain_slot: BrainSlot = .{},
+    brain_id: BrainId = .{},
 
     type: EntityType = .Null,
     flags: u32 = 0,
@@ -87,6 +102,10 @@ pub const Entity = extern struct {
 
     traversable_count: u32,
     traversables: [16]EntityTraversablePoint,
+
+    pub fn isDeleted(self: *const Entity) bool {
+        return self.isSet(EntityFlags.Deleted.toInt());
+    }
 
     pub fn isSet(self: *const Entity, flag: u32) bool {
         return (self.flags & flag) != 0;
@@ -141,29 +160,14 @@ pub const Entity = extern struct {
     }
 };
 
-const EntityRelationship = enum(u8) {
-    None,
-    Paired,
-};
-
-pub const StoredEntityReference = extern struct {
-    index: EntityId = .{},
-    relationship: EntityRelationship = .None,
-};
-
 pub const EntityReference = extern struct {
     ptr: ?*Entity = null,
-    stored: StoredEntityReference = .{},
+    index: EntityId = .{},
 
     pub fn equals(self: *EntityReference, other: EntityReference) bool {
         return
             self.ptr == other.ptr and
-            self.stored.index.value == other.stored.index.value and
-            self.stored.relationship == other.stored.relationship;
-    }
-
-    pub fn referenceIsValid(self: *EntityReference) bool {
-        return self.stored.index.value != 0;
+            self.index.value == other.index.value;
     }
 };
 

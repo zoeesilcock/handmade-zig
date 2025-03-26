@@ -19,6 +19,8 @@ const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
 const World = world.World;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
+const BrainId = entities.BrainId;
+const BrainType = entities.BrainType;
 const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const EntityCollisionVolume = entities.EntityCollisionVolume;
@@ -42,12 +44,27 @@ pub const SimRegion = extern struct {
     entity_count: u32 = 0,
     entities: [*]Entity,
 
+    max_brain_count: u32,
+    brain_count: u32 = 0,
+    brains: [*]Brain,
+
     sim_entity_hash: [4096]EntityHash = [1]EntityHash{undefined} ** 4096,
+    brain_hash: [128]BrainHash = [1]BrainHash{undefined} ** 128,
 };
 
 pub const EntityHash = extern struct {
     ptr: ?*Entity = null,
     index: EntityId = .{},
+};
+
+pub const Brain = extern struct {
+    id: BrainId,
+    type: BrainType,
+};
+
+pub const BrainHash = extern struct {
+    ptr: *Brain,
+    id: BrainId,
 };
 
 pub const MoveSpec = struct {
@@ -91,17 +108,14 @@ pub fn getHashFromId(sim_region: *SimRegion, id: EntityId) ?*EntityHash {
 
 pub fn getEntityByStorageIndex(sim_region: *SimRegion, id: EntityId) ?*Entity {
     const entry = getHashFromId(sim_region, id);
-    return entry.ptr;
+    const result: ?*Entity = if (entry != null) entry.?.ptr else null;
+    return result;
 }
 
 pub fn loadEntityReference(sim_region: *SimRegion, reference: *EntityReference) void {
-    _ = sim_region;
-    _ = reference;
-
-    // if (reference.index.value != 0) {
-    //     const entry = getHashFromId(sim_region, reference.index);
-    //     reference.* = EntityReference{ .ptr = if (entry != null) entry.?.ptr else null };
-    // }
+    if (reference.index.value != 0) {
+        reference.* = EntityReference{ .ptr = getEntityByStorageIndex(sim_region, reference.index), };
+    }
 }
 
 pub fn loadTraversableReference(sim_region: *SimRegion, reference: *TraversableReference) void {
@@ -148,9 +162,11 @@ fn addEntity(
     }
 }
 
-pub fn deleteEntity(sim_region: *SimRegion, entity: *Entity) void {
+pub fn deleteEntity(sim_region: *SimRegion, opt_entity: ?*Entity) void {
     _ = sim_region;
-    entity.addFlags(EntityFlags.Deleted.toInt());
+    if (opt_entity) |entity| {
+        entity.addFlags(EntityFlags.Deleted.toInt());
+    }
 }
 
 fn connectEntityPointers(sim_region: *SimRegion) void {
@@ -679,7 +695,7 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
 
             // const old_entity_position: Vector3 = entity.position;
             entity.position = entity.position.plus(chunk_delta);
-            world.packEntityIntoWorld(world_mode.world, entity, entity_position);
+            world.packEntityIntoWorld(world_mode.world, sim_region, entity, entity_position);
 
             // const reverse_chunk_delta: Vector3 =
             //     world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);

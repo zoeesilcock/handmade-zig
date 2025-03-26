@@ -39,6 +39,7 @@ const FontId = file_formats.FontId;
 const PlayingSound = audio.PlayingSound;
 const DebugTable = debug_interface.DebugTable;
 const EntityId = entities.EntityId;
+const BrainId = entities.BrainId;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -830,7 +831,7 @@ pub const GroundBuffer = extern struct {
 };
 
 pub const ControlledHero = struct {
-    entity_index: EntityId = .{},
+    brain_id: BrainId = .{},
     movement_direction: Vector2 = Vector2.zero(),
     vertical_direction: f32 = 0,
     sword_direction: Vector2 = Vector2.zero(),
