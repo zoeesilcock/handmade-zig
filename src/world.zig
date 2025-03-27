@@ -139,7 +139,7 @@ fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *EntityReference)
             reference.index = ptr.id;
         }
     } else if (reference.index.value != 0) {
-        if (opt_sim_region == null or sim.getHashFromId(opt_sim_region.?, reference.index) != null) {
+        if (opt_sim_region == null or sim.getEntityHashFromId(opt_sim_region.?, reference.index) != null) {
             reference.index.value = 0;
         }
     }

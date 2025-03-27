@@ -440,6 +440,11 @@ pub const GameInput = extern struct {
     shift_down: bool = false,
     alt_down: bool = false,
     control_down: bool = false,
+
+    pub fn getController(self: *GameInput, controller_index: u32) *ControllerInput {
+        std.debug.assert(controller_index < self.controllers.len);
+        return &self.controllers[controller_index];
+    }
 };
 
 pub const ControllerInput = extern struct {
@@ -831,13 +836,8 @@ pub const GroundBuffer = extern struct {
 };
 
 pub const ControlledHero = struct {
-    brain_id: BrainId = .{},
-    movement_direction: Vector2 = Vector2.zero(),
-    vertical_direction: f32 = 0,
-    sword_direction: Vector2 = Vector2.zero(),
+    brain_id: BrainId = undefined,
     recenter_timer: f32 = 0,
-    exited: bool = false,
-    debug_spawn: bool = false,
 };
 
 pub const LowEntityChunkReference = struct {

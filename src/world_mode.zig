@@ -48,8 +48,11 @@ const EntityFlags = entities.EntityFlags;
 const EntityCollisionVolume = entities.EntityCollisionVolume;
 const EntityCollisionVolumeGroup = entities.EntityCollisionVolumeGroup;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
-const Brain = sim.Brain;
+const Brain = entities.Brain;
 const BrainId = entities.BrainId;
+const BrainSlot = entities.BrainSlot;
+const BrainHeroParts = entities.BrainHeroParts;
+const ReservedBrainId = entities.ReservedBrainId;
 
 pub const GameModeWorld = struct {
     world: *world.World = undefined,
@@ -85,7 +88,7 @@ pub const GameModeWorld = struct {
     creation_buffer: [4]Entity,
     last_used_entity_storage_index: u32,
 
-    pub fn addPlayer(self: *GameModeWorld, sim_region: *sim.SimRegion, standing_on: TraversableReference) BrainId {
+    pub fn addPlayer(self: *GameModeWorld, sim_region: *sim.SimRegion, standing_on: TraversableReference, brain_id: BrainId) void {
         const position: WorldPosition = world.mapIntoChunkSpace(
             sim_region.world,
             sim_region.origin,
@@ -99,15 +102,14 @@ pub const GameModeWorld = struct {
 
         initHitPoints(body, 3);
 
-        body.occupying = standing_on;
-
-        const brain_id: BrainId = self.addBrain();
-        body.brain_type = .Hero;
-        body.brain_slot.index = 0;
-        body.brain_id = brain_id;
         head.brain_type = .Hero;
-        head.brain_slot.index = 1;
+        head.brain_slot = BrainSlot.forField(BrainHeroParts, "head");
         head.brain_id = brain_id;
+
+        body.brain_type = .Hero;
+        body.brain_slot = BrainSlot.forField(BrainHeroParts, "body");
+        body.brain_id = brain_id;
+        body.occupying = standing_on;
 
         if (self.camera_following_entity_index.value == 0) {
             self.camera_following_entity_index = head.id;
@@ -115,8 +117,6 @@ pub const GameModeWorld = struct {
 
         endEntity(self, head, position);
         endEntity(self, body, position);
-
-        return brain_id;
     }
 
     fn addBrain(self: *GameModeWorld) BrainId {
@@ -204,6 +204,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         GameModeWorld,
         ArenaPushParams.aligned(@alignOf(GameModeWorld), true),
     );
+    world_mode.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
     world_mode.typical_floor_height = 3;
 
     // TODO: Replace this with a value received from the renderer.
@@ -470,58 +471,146 @@ pub fn updateAndRenderWorld(
     var quit_requested = false;
     const delta_time = input.frame_delta_time;
 
+    // Check if any players are trying to join.
+    for (&input.controllers, 0..) |*controller, controller_index| {
+        const controlled_hero = &state.controlled_heroes[controller_index];
+        if (controlled_hero.brain_id.value == 0) {
+            if (controller.back_button.wasPressed()) {
+                quit_requested = true;
+            } else if (controller.start_button.wasPressed()) {
+                controlled_hero.* = shared.ControlledHero{};
+
+                var traversable: TraversableReference = undefined;
+                if (sim.getClosestTraversable(screen_sim_region, camera_position, &traversable, 0)) {
+                    heroes_exist = true;
+                    controlled_hero.brain_id = .{
+                        .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero)
+                    };
+                    state.mode.world.addPlayer(screen_sim_region, traversable, controlled_hero.brain_id);
+                }
+            }
+        }
+    }
+
+    // Run all brains.
     var brain_index: u32 = 0;
     while (brain_index < screen_sim_region.brain_count) : (brain_index += 1) {
         const brain: *Brain = &screen_sim_region.brains[brain_index];
         switch (brain.type) {
             .Hero => {
-                const opt_head: ?*Entity = null;
-                const opt_body: ?*Entity = null;
+                const parts: *BrainHeroParts = &brain.parts.hero;
+                const opt_head: ?*Entity = parts.head;
+                const opt_body: ?*Entity = parts.body;
 
-                var controlled_hero_: ControlledHero = .{ .movement_direction = .new(1, 0) };
-                var controlled_hero: *ControlledHero = &controlled_hero_;
+                heroes_exist = true;
 
-                var control_index: u32 = 0;
-                while (control_index < state.controlled_heroes.len) : (control_index += 1) {
-                    const test_hero: *ControlledHero = &state.controlled_heroes[control_index];
+                var sword_direction: Vector2 = Vector2.zero();
+                var acceleration: Vector2 = Vector2.zero();
+                var exited: bool = false;
+                var debug_spawn: bool = false;
 
-                    if (brain.id.value == test_hero.brain_id.value) {
-                        controlled_hero = test_hero;
+                const controller_index: u32 = brain.id.value - @intFromEnum(ReservedBrainId.FirstHero);
+                const controller: *shared.ControllerInput = input.getController(controller_index);
+                const controlled_hero = &state.controlled_heroes[controller_index];
+                if (controller.is_analog) {
+                    acceleration = Vector2.new(controller.stick_average_x, controller.stick_average_y);
+                } else {
+                    const recenter: f32 = 0.5;
+                    if (controller.move_up.wasPressed()) {
+                        _ = acceleration.setX(0);
+                        _ = acceleration.setY(1);
+                        controlled_hero.recenter_timer = recenter;
+                    }
+                    if (controller.move_down.wasPressed()) {
+                        _ = acceleration.setX(0);
+                        _ = acceleration.setY(-1);
+                        controlled_hero.recenter_timer = recenter;
+                    }
+                    if (controller.move_left.wasPressed()) {
+                        _ = acceleration.setX(-1);
+                        _ = acceleration.setY(0);
+                        controlled_hero.recenter_timer = recenter;
+                    }
+                    if (controller.move_right.wasPressed()) {
+                        _ = acceleration.setX(1);
+                        _ = acceleration.setY(0);
+                        controlled_hero.recenter_timer = recenter;
                     }
 
-                    if (opt_head) |head| {
-                        if (controlled_hero.debug_spawn) {
-                            var traversable: TraversableReference = undefined;
-                            if (sim.getClosestTraversable(
-                                    screen_sim_region,
-                                    head.position,
-                                    &traversable,
-                                    @intFromEnum(sim.TraversableSearchFlag.Unoccupied),
-                            )) {
-                                _ = state.mode.world.addPlayer(screen_sim_region, traversable);
-                            }
+                    if (!controller.move_left.isDown() and !controller.move_right.isDown()) {
+                        _ = acceleration.setX(0);
 
-                            controlled_hero.debug_spawn = false;
+                        if (controller.move_up.isDown()) {
+                            _ = acceleration.setY(1);
+                        } else if (controller.move_down.isDown()) {
+                            _ = acceleration.setY(-1);
                         }
                     }
+
+                    if (!controller.move_up.isDown() and !controller.move_down.isDown()) {
+                        _ = acceleration.setY(0);
+
+                        if (controller.move_left.isDown()) {
+                            _ = acceleration.setX(-1);
+                        } else if (controller.move_right.isDown()) {
+                            _ = acceleration.setX(1);
+                        }
+                    }
+                }
+
+                if (controller.action_up.ended_down) {
+                    sword_direction = sword_direction.plus(Vector2.new(0, 1));
+                    state.audio_state.changeVolume(state.music, 10, Vector2.one());
+                }
+                if (controller.action_down.ended_down) {
+                    sword_direction = sword_direction.plus(Vector2.new(0, -1));
+                    state.audio_state.changeVolume(state.music, 10, Vector2.zero());
+                }
+                if (controller.action_left.ended_down) {
+                    sword_direction = sword_direction.plus(Vector2.new(-1, 0));
+                    state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
+                }
+                if (controller.action_right.ended_down) {
+                    sword_direction = sword_direction.plus(Vector2.new(1, 0));
+                    state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
+                }
+
+                if (controller.start_button.wasPressed()) {
+                    debug_spawn = true;
+                }
+
+                if (controller.back_button.wasPressed()) {
+                    exited = true;
+                }
+
+                if (false) {
+                if (opt_head) |head| {
+                    if (debug_spawn) {
+                        var traversable: TraversableReference = undefined;
+                        if (sim.getClosestTraversable(
+                                screen_sim_region,
+                                head.position,
+                                &traversable,
+                                @intFromEnum(sim.TraversableSearchFlag.Unoccupied),
+                        )) {
+                            _ = state.mode.world.addPlayer(screen_sim_region, traversable);
+                        }
+
+                        debug_spawn = false;
+                    }
+                }
                 }
 
                 controlled_hero.recenter_timer =
                     math.clampAboveZero(controlled_hero.recenter_timer - delta_time);
 
                 if (opt_head) |head| {
-                    if (controlled_hero.vertical_direction != 0) {
-                        _ = head.velocity.setZ(controlled_hero.vertical_direction);
-                    }
-
-                    if (controlled_hero.sword_direction.x() == 0 and controlled_hero.sword_direction.y() == 0) {
+                    if (sword_direction.x() == 0 and sword_direction.y() == 0) {
                         // Keep existing facing direction when velocity is zero.
                     } else {
                         head.facing_direction =
-                            intrinsics.atan2(controlled_hero.sword_direction.y(), controlled_hero.sword_direction.x());
+                            intrinsics.atan2(sword_direction.y(), sword_direction.x());
                     }
-
-                    const acceleration = controlled_hero.movement_direction.toVector3(0);
 
                     var traversable: TraversableReference = undefined;
                     if (sim.getClosestTraversable(screen_sim_region, head.position, &traversable, 0)) {
@@ -573,8 +662,7 @@ pub fn updateAndRenderWorld(
                     body.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(0.5));
                 }
 
-                if (controlled_hero.exited) {
-                    controlled_hero.exited = false;
+                if (exited) {
                     sim.deleteEntity(screen_sim_region, opt_head);
                     sim.deleteEntity(screen_sim_region, opt_body);
                     controlled_hero.brain_id = .{};
@@ -584,100 +672,6 @@ pub fn updateAndRenderWorld(
             },
             else => {
                 unreachable;
-            }
-        }
-    }
-
-    for (&input.controllers, 0..) |*controller, controller_index| {
-        const controlled_hero = &state.controlled_heroes[controller_index];
-        controlled_hero.vertical_direction = 0;
-        controlled_hero.sword_direction = Vector2.zero();
-
-        if (controlled_hero.brain_id.value == 0) {
-            if (controller.back_button.wasPressed()) {
-                quit_requested = true;
-            } else if (controller.start_button.wasPressed()) {
-                controlled_hero.* = shared.ControlledHero{};
-
-                var traversable: TraversableReference = undefined;
-                if (sim.getClosestTraversable(screen_sim_region, camera_position, &traversable, 0)) {
-                    heroes_exist = true;
-                    controlled_hero.brain_id = state.mode.world.addPlayer(screen_sim_region, traversable);
-                }
-            }
-        } else {
-            // if (controlled_hero.entity_index.value != 0) {
-            heroes_exist = true;
-
-            if (controller.is_analog) {
-                controlled_hero.movement_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
-            } else {
-                const recenter: f32 = 0.5;
-                if (controller.move_up.wasPressed()) {
-                    _ = controlled_hero.movement_direction.setX(0);
-                    _ = controlled_hero.movement_direction.setY(1);
-                    controlled_hero.recenter_timer = recenter;
-                }
-                if (controller.move_down.wasPressed()) {
-                    _ = controlled_hero.movement_direction.setX(0);
-                    _ = controlled_hero.movement_direction.setY(-1);
-                    controlled_hero.recenter_timer = recenter;
-                }
-                if (controller.move_left.wasPressed()) {
-                    _ = controlled_hero.movement_direction.setX(-1);
-                    _ = controlled_hero.movement_direction.setY(0);
-                    controlled_hero.recenter_timer = recenter;
-                }
-                if (controller.move_right.wasPressed()) {
-                    _ = controlled_hero.movement_direction.setX(1);
-                    _ = controlled_hero.movement_direction.setY(0);
-                    controlled_hero.recenter_timer = recenter;
-                }
-
-                if (!controller.move_left.isDown() and !controller.move_right.isDown()) {
-                    _ = controlled_hero.movement_direction.setX(0);
-
-                    if (controller.move_up.isDown()) {
-                        _ = controlled_hero.movement_direction.setY(1);
-                    } else if (controller.move_down.isDown()) {
-                        _ = controlled_hero.movement_direction.setY(-1);
-                    }
-                }
-
-                if (!controller.move_up.isDown() and !controller.move_down.isDown()) {
-                    _ = controlled_hero.movement_direction.setY(0);
-
-                    if (controller.move_left.isDown()) {
-                        _ = controlled_hero.movement_direction.setX(-1);
-                    } else if (controller.move_right.isDown()) {
-                        _ = controlled_hero.movement_direction.setX(1);
-                    }
-                }
-            }
-
-            if (controller.action_up.ended_down) {
-                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, 1));
-                state.audio_state.changeVolume(state.music, 10, Vector2.one());
-            }
-            if (controller.action_down.ended_down) {
-                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(0, -1));
-                state.audio_state.changeVolume(state.music, 10, Vector2.zero());
-            }
-            if (controller.action_left.ended_down) {
-                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(-1, 0));
-                state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
-            }
-            if (controller.action_right.ended_down) {
-                controlled_hero.sword_direction = controlled_hero.sword_direction.plus(Vector2.new(1, 0));
-                state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
-            }
-
-            if (controller.start_button.wasPressed()) {
-                controlled_hero.debug_spawn = true;
-            }
-
-            if (controller.back_button.wasPressed()) {
-                controlled_hero.exited = true;
             }
         }
     }
@@ -774,64 +768,66 @@ pub fn updateAndRenderWorld(
             }
 
             // Handle the entity's movement mode.
-            // var bob_acceleration: f32 = 0;
-            // switch (entity.movement_mode) {
-            //     .Planted => {
-            //         var head_distance: f32 = 0;
-            //         var paired_entity_index: u32 = 0;
-            //         while (paired_entity_index < entity.paired_entity_count) : (paired_entity_index += 1) {
-            //             if (entity.paired_entities[paired_entity_index].ptr) |pair| {
-            //                 var delta: Vector3 = pair.position.minus(entity.position);
-            //                 head_distance += delta.lengthSquared();
-            //             }
-            //         }
-            //         head_distance = intrinsics.squareRoot(head_distance);
-            //
-            //         const max_head_distance: f32 = 0.5;
-            //         const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
-            //         bob_acceleration = -20 * t_head_distance;
-            //     },
-            //     .Hopping => {
-            //         const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable().position;
-            //         const movement_from: Vector3 = entity.came_from.getSimSpaceTraversable().position;
-            //         const t_jump: f32 = 0.1;
-            //         const t_thrust: f32 = 0.2;
-            //         const t_land: f32 = 0.9;
-            //
-            //         if (entity.movement_time < t_thrust) {
-            //             bob_acceleration = 30;
-            //         }
-            //
-            //         if (entity.movement_time < t_land) {
-            //             const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
-            //             const a: Vector3 = Vector3.new(0, -2, 0);
-            //             const b: Vector3 = movement_to.minus(movement_from).minus(a);
-            //             entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(movement_from);
-            //         }
-            //
-            //         if (entity.movement_time >= 1) {
-            //             entity.position = movement_to;
-            //             entity.came_from = entity.occupying;
-            //             entity.movement_mode = .Planted;
-            //             entity.bob_delta_time = -2;
-            //         }
-            //
-            //         entity.movement_time += 4 * delta_time;
-            //         if (entity.movement_time > 1) {
-            //             entity.movement_time = 1;
-            //         }
-            //     },
-            // }
-            //
-            // const position_coefficient = 100;
-            // const velocity_coefficient = 10;
-            // bob_acceleration +=
-            //     position_coefficient * (0 - entity.bob_time) +
-            //     velocity_coefficient * (0 - entity.bob_delta_time);
-            // entity.bob_time +=
-            //     bob_acceleration * delta_time * delta_time +
-            //     entity.bob_delta_time * delta_time;
-            // entity.bob_delta_time += bob_acceleration * delta_time;
+            var bob_acceleration: f32 = 0;
+            switch (entity.movement_mode) {
+                .Planted => {
+                    if (false) {
+                    var head_distance: f32 = 0;
+                    var paired_entity_index: u32 = 0;
+                    while (paired_entity_index < entity.paired_entity_count) : (paired_entity_index += 1) {
+                        if (entity.paired_entities[paired_entity_index].ptr) |pair| {
+                            var delta: Vector3 = pair.position.minus(entity.position);
+                            head_distance += delta.lengthSquared();
+                        }
+                    }
+                    head_distance = intrinsics.squareRoot(head_distance);
+
+                    const max_head_distance: f32 = 0.5;
+                    const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
+                    bob_acceleration = -20 * t_head_distance;
+                    }
+                },
+                .Hopping => {
+                    const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable().position;
+                    const movement_from: Vector3 = entity.came_from.getSimSpaceTraversable().position;
+                    const t_jump: f32 = 0.1;
+                    const t_thrust: f32 = 0.2;
+                    const t_land: f32 = 0.9;
+
+                    if (entity.movement_time < t_thrust) {
+                        bob_acceleration = 30;
+                    }
+
+                    if (entity.movement_time < t_land) {
+                        const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
+                        const a: Vector3 = Vector3.new(0, -2, 0);
+                        const b: Vector3 = movement_to.minus(movement_from).minus(a);
+                        entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(movement_from);
+                    }
+
+                    if (entity.movement_time >= 1) {
+                        entity.position = movement_to;
+                        entity.came_from = entity.occupying;
+                        entity.movement_mode = .Planted;
+                        entity.bob_delta_time = -2;
+                    }
+
+                    entity.movement_time += 4 * delta_time;
+                    if (entity.movement_time > 1) {
+                        entity.movement_time = 1;
+                    }
+                },
+            }
+
+            const position_coefficient = 100;
+            const velocity_coefficient = 10;
+            bob_acceleration +=
+                position_coefficient * (0 - entity.bob_time) +
+                velocity_coefficient * (0 - entity.bob_delta_time);
+            entity.bob_time +=
+                bob_acceleration * delta_time * delta_time +
+                entity.bob_delta_time * delta_time;
+            entity.bob_delta_time += bob_acceleration * delta_time;
 
             if (entity.isSet(EntityFlags.Movable.toInt())) {
                 sim.moveEntity(

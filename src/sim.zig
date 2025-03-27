@@ -19,6 +19,7 @@ const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
 const World = world.World;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
+const Brain = entities.Brain;
 const BrainId = entities.BrainId;
 const BrainType = entities.BrainType;
 const EntityReference = entities.EntityReference;
@@ -48,18 +49,13 @@ pub const SimRegion = extern struct {
     brain_count: u32 = 0,
     brains: [*]Brain,
 
-    sim_entity_hash: [4096]EntityHash = [1]EntityHash{undefined} ** 4096,
+    entity_hash: [4096]EntityHash = [1]EntityHash{undefined} ** 4096,
     brain_hash: [128]BrainHash = [1]BrainHash{undefined} ** 128,
 };
 
 pub const EntityHash = extern struct {
     ptr: ?*Entity = null,
     index: EntityId = .{},
-};
-
-pub const Brain = extern struct {
-    id: BrainId,
-    type: BrainType,
 };
 
 pub const BrainHash = extern struct {
@@ -84,7 +80,7 @@ const WallTestData = struct {
     normal: Vector3,
 };
 
-pub fn getHashFromId(sim_region: *SimRegion, id: EntityId) ?*EntityHash {
+pub fn getEntityHashFromId(sim_region: *SimRegion, id: EntityId) ?*EntityHash {
     std.debug.assert(id.value != 0);
 
     var result: ?*EntityHash = null;
@@ -92,10 +88,10 @@ pub fn getHashFromId(sim_region: *SimRegion, id: EntityId) ?*EntityHash {
     const hash_value = id.value;
     var offset: u32 = 0;
 
-    while (offset < sim_region.sim_entity_hash.len) : (offset += 1) {
-        const hash_mask = sim_region.sim_entity_hash.len - 1;
+    while (offset < sim_region.entity_hash.len) : (offset += 1) {
+        const hash_mask = sim_region.entity_hash.len - 1;
         const hash_index = (hash_value + offset) & hash_mask;
-        const entry = &sim_region.sim_entity_hash[hash_index];
+        const entry: *EntityHash = &sim_region.entity_hash[hash_index];
 
         if (entry.index.value == 0 or entry.index.value == id.value) {
             result = entry;
@@ -106,8 +102,30 @@ pub fn getHashFromId(sim_region: *SimRegion, id: EntityId) ?*EntityHash {
     return result;
 }
 
+pub fn getBrainHashFromId(sim_region: *SimRegion, id: BrainId) ?*BrainHash {
+    std.debug.assert(id.value != 0);
+
+    var result: ?*BrainHash = null;
+
+    const hash_value = id.value;
+    var offset: u32 = 0;
+
+    while (offset < sim_region.brain_hash.len) : (offset += 1) {
+        const hash_mask = sim_region.brain_hash.len - 1;
+        const hash_index = (hash_value + offset) & hash_mask;
+        const entry: *BrainHash = &sim_region.brain_hash[hash_index];
+
+        if (entry.id.value == 0 or entry.id.value == id.value) {
+            result = entry;
+            break;
+        }
+    }
+
+    return result;
+}
+
 pub fn getEntityByStorageIndex(sim_region: *SimRegion, id: EntityId) ?*Entity {
-    const entry = getHashFromId(sim_region, id);
+    const entry = getEntityHashFromId(sim_region, id);
     const result: ?*Entity = if (entry != null) entry.?.ptr else null;
     return result;
 }
@@ -127,39 +145,24 @@ pub fn entityOverlapsRectangle(position: Vector3, volume: EntityCollisionVolume,
     return position.plus(volume.offset_position).isInRectangle(grown);
 }
 
-fn addEntity(
-    sim_region: *SimRegion,
-    opt_source: ?*Entity,
-    chunk_delta: Vector3,
-) void {
-    const id: EntityId = opt_source.?.id;
+fn getOrAddBrain(sim_region: *SimRegion, brain_id: BrainId, brain_type: BrainType) *Brain {
+    var result: ?*Brain = null;
 
-    if (getHashFromId(sim_region, id)) |entry| {
-        std.debug.assert(entry.ptr == null);
+    const opt_hash: ?*BrainHash = getBrainHashFromId(sim_region, brain_id);
+    result = opt_hash.?.ptr;
 
-        if (sim_region.entity_count < sim_region.max_entity_count) {
-            const dest: *Entity = &sim_region.entities[sim_region.entity_count];
-            sim_region.entity_count += 1;
+    if (result == null) {
+        std.debug.assert(sim_region.brain_count < sim_region.max_brain_count);
 
-            entry.index = id;
-            entry.ptr = dest;
+        result = &sim_region.brains[sim_region.brain_count];
+        sim_region.brain_count += 1;
+        result.?.id = brain_id;
+        result.?.type = brain_type;
 
-            if (opt_source) |source| {
-                dest.* = source.*;
-            }
-
-            dest.id = id;
-            dest.position = dest.position.plus(chunk_delta);
-
-            dest.updatable = entityOverlapsRectangle(
-                dest.position,
-                dest.collision.total_volume,
-                sim_region.updatable_bounds,
-            );
-        } else {
-            unreachable;
-        }
+        opt_hash.?.ptr = result.?;
     }
+
+    return result.?;
 }
 
 pub fn deleteEntity(sim_region: *SimRegion, opt_entity: ?*Entity) void {
@@ -170,19 +173,17 @@ pub fn deleteEntity(sim_region: *SimRegion, opt_entity: ?*Entity) void {
 }
 
 fn connectEntityPointers(sim_region: *SimRegion) void {
-    _ = sim_region;
-    // var entity_index: u32 = 0;
-    // while (entity_index < sim_region.entity_count) : (entity_index += 1) {
-    //     const entity: *Entity = &sim_region.entities[entity_index];
-    //     loadEntityReference(sim_region, &entity.head);
-    //
-    //     loadTraversableReference(sim_region, &entity.occupying);
-    //     if (entity.occupying.entity.ptr) |occupying_entity| {
-    //         occupying_entity.traversables[entity.occupying.index].occupier = entity;
-    //     }
-    //
-    //     loadTraversableReference(sim_region, &entity.came_from);
-    // }
+    var entity_index: u32 = 0;
+    while (entity_index < sim_region.entity_count) : (entity_index += 1) {
+        const entity: *Entity = &sim_region.entities[entity_index];
+
+        loadTraversableReference(sim_region, &entity.occupying);
+        if (entity.occupying.entity.ptr) |occupying_entity| {
+            occupying_entity.traversables[entity.occupying.index].occupier = entity;
+        }
+
+        loadTraversableReference(sim_region, &entity.came_from);
+    }
 }
 
 pub fn beginSimulation(
@@ -213,6 +214,10 @@ pub fn beginSimulation(
     sim_region.max_entity_count = 4096;
     sim_region.entity_count = 0;
     sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, Entity, null);
+
+    sim_region.max_brain_count = 256;
+    sim_region.brain_count = 0;
+    sim_region.brains = sim_arena.pushArray(sim_region.max_brain_count, Brain, null);
 
     const min_chunk_position = world.mapIntoChunkSpace(
         sim_region.world,
@@ -254,21 +259,48 @@ pub fn beginSimulation(
                         var entity_index: u32 = 0;
                         while (entity_index < block.entity_count) : (entity_index += 1) {
                             const source_address = @intFromPtr(&block.entity_data);
-                            const source: usize = std.mem.alignForward(usize, source_address, @alignOf(Entity));
-                            const entities_ptr: [*]Entity = @ptrFromInt(source);
-                            const entity = &entities_ptr[entity_index];
-                            const sim_space_position = entity.position.plus(chunk_delta);
+                            const source_address_aligned: usize = std.mem.alignForward(usize, source_address, @alignOf(Entity));
+                            const entities_ptr: [*]Entity = @ptrFromInt(source_address_aligned);
+                            const source = &entities_ptr[entity_index];
+                            const sim_space_position = source.position.plus(chunk_delta);
 
                             if (entityOverlapsRectangle(
                                 sim_space_position,
-                                entity.collision.total_volume,
+                                source.collision.total_volume,
                                 sim_region.bounds,
                             )) {
-                                _ = addEntity(
-                                    sim_region,
-                                    entity,
-                                    chunk_delta,
-                                );
+                                const id: EntityId = source.id;
+
+                                if (getEntityHashFromId(sim_region, id)) |entry| {
+                                    std.debug.assert(entry.ptr == null);
+
+                                    if (sim_region.entity_count < sim_region.max_entity_count) {
+                                        const dest: *Entity = &sim_region.entities[sim_region.entity_count];
+                                        sim_region.entity_count += 1;
+
+                                        entry.index = id;
+                                        entry.ptr = dest;
+
+                                        dest.* = source.*;
+
+                                        dest.id = id;
+                                        dest.position = dest.position.plus(chunk_delta);
+
+                                        dest.updatable = entityOverlapsRectangle(
+                                            dest.position,
+                                            dest.collision.total_volume,
+                                            sim_region.updatable_bounds,
+                                        );
+
+                                        if (dest.brain_id.value != 0) {
+                                            const brain: *Brain = getOrAddBrain(sim_region, dest.brain_id, dest.brain_type);
+                                            std.debug.assert(dest.brain_slot.index < brain.parts.array.len);
+                                            brain.parts.array[dest.brain_slot.index] = dest;
+                                        }
+                                    } else {
+                                        unreachable;
+                                    }
+                                }
                             }
                         }
 

@@ -10,6 +10,8 @@ const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const MoveSpec = sim.MoveSpec;
 
+const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
+
 pub const EntityId = packed struct {
     value: u32 = 0,
 };
@@ -37,18 +39,44 @@ pub const EntityFlags = enum(u32) {
     }
 };
 
+pub const BrainHeroParts = extern struct {
+    head: ?*Entity,
+    body: ?*Entity,
+};
+
+pub const Brain = extern struct {
+    id: BrainId,
+    type: BrainType,
+
+    parts: extern union {
+        hero: BrainHeroParts,
+        array: [16]?*Entity,
+    }
+};
+
 pub const BrainType = enum(u32) {
     None,
     Hero,
     Snake,
 };
 
-const BrainSlot = extern struct {
+pub const BrainSlot = extern struct {
     index: u32 = 0,
+
+    pub fn forField(comptime slot_type: type, comptime field_name: []const u8) BrainSlot {
+        const pack_value = @offsetOf(slot_type, field_name) / @sizeOf(*Entity);
+        return BrainSlot{ .index = pack_value };
+    }
 };
 
 pub const BrainId = extern struct {
     value: u32 = 0,
+};
+
+pub const ReservedBrainId = enum(u32) {
+    FirstHero = 1,
+    LastHero = 1 + MAX_CONTROLLER_COUNT - 1,
+    FirstFree,
 };
 
 pub const EntityMovementMode = enum(u32) {
@@ -73,6 +101,7 @@ pub const Entity = extern struct {
 
     position: Vector3 = Vector3.zero(),
     velocity: Vector3 = Vector3.zero(),
+    acceleration: Vector3 = Vector3.zero(),
 
     collision: *EntityCollisionVolumeGroup,
 
@@ -164,7 +193,7 @@ pub const EntityReference = extern struct {
     ptr: ?*Entity = null,
     index: EntityId = .{},
 
-    pub fn equals(self: *EntityReference, other: EntityReference) bool {
+    pub fn equals(self: *const EntityReference, other: EntityReference) bool {
         return
             self.ptr == other.ptr and
             self.index.value == other.index.value;
