@@ -186,6 +186,10 @@ fn packEntityIntoChunk(
     dest_e.* = source.*;
     packTraversableReference(opt_sim_region, &dest_e.occupying);
     packTraversableReference(opt_sim_region, &dest_e.came_from);
+
+    dest_e.move_spec = .{};
+    dest_e.acceleration = .zero();
+    dest_e.bob_acceleration = 0;
 }
 
 pub fn packEntityIntoWorld(

@@ -3,6 +3,7 @@ const math = @import("math.zig");
 const world = @import("world.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
+const brains = @import("brains.zig");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const rendergroup = @import("rendergroup.zig");
@@ -48,11 +49,12 @@ const EntityFlags = entities.EntityFlags;
 const EntityCollisionVolume = entities.EntityCollisionVolume;
 const EntityCollisionVolumeGroup = entities.EntityCollisionVolumeGroup;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
-const Brain = entities.Brain;
-const BrainId = entities.BrainId;
-const BrainSlot = entities.BrainSlot;
-const BrainHeroParts = entities.BrainHeroParts;
-const ReservedBrainId = entities.ReservedBrainId;
+const EntityVisiblePiece = entities.EntityVisiblePiece;
+const Brain = brains.Brain;
+const BrainId = brains.BrainId;
+const BrainSlot = brains.BrainSlot;
+const BrainHeroParts = brains.BrainHeroParts;
+const ReservedBrainId = brains.ReservedBrainId;
 
 pub const GameModeWorld = struct {
     world: *world.World = undefined,
@@ -121,7 +123,7 @@ pub const GameModeWorld = struct {
 
     fn addBrain(self: *GameModeWorld) BrainId {
         self.last_used_entity_storage_index += 1;
-        const brain_id: BrainId = .{ .value = self.last_used_entity_storage_index};
+        const brain_id: BrainId = .{ .value = self.last_used_entity_storage_index };
         return brain_id;
     }
 
@@ -424,7 +426,7 @@ pub fn updateAndRenderWorld(
     const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
     const sim_memory = transient_state.arena.beginTemporaryMemory();
     const sim_center_position = world_mode.camera_position;
-    const screen_sim_region = sim.beginSimulation(
+    const sim_region = sim.beginSimulation(
         &transient_state.arena,
         world_mode.world,
         sim_center_position,
@@ -461,32 +463,25 @@ pub fn updateAndRenderWorld(
     );
     render_group.pushRectangleOutline(
         world_transform,
-        screen_sim_region.bounds.getDimension().xy(),
+        sim_region.bounds.getDimension().xy(),
         Vector3.zero(),
         Color.new(1, 0, 1, 1),
         0.1,
     );
 
-    var heroes_exist = false;
-    var quit_requested = false;
     const delta_time = input.frame_delta_time;
 
     // Check if any players are trying to join.
     for (&input.controllers, 0..) |*controller, controller_index| {
         const controlled_hero = &state.controlled_heroes[controller_index];
         if (controlled_hero.brain_id.value == 0) {
-            if (controller.back_button.wasPressed()) {
-                quit_requested = true;
-            } else if (controller.start_button.wasPressed()) {
+            if (controller.start_button.wasPressed()) {
                 controlled_hero.* = shared.ControlledHero{};
 
                 var traversable: TraversableReference = undefined;
-                if (sim.getClosestTraversable(screen_sim_region, camera_position, &traversable, 0)) {
-                    heroes_exist = true;
-                    controlled_hero.brain_id = .{
-                        .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero)
-                    };
-                    state.mode.world.addPlayer(screen_sim_region, traversable, controlled_hero.brain_id);
+                if (sim.getClosestTraversable(sim_region, camera_position, &traversable, 0)) {
+                    controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
+                    state.mode.world.addPlayer(sim_region, traversable, controlled_hero.brain_id);
                 }
             }
         }
@@ -494,193 +489,17 @@ pub fn updateAndRenderWorld(
 
     // Run all brains.
     var brain_index: u32 = 0;
-    while (brain_index < screen_sim_region.brain_count) : (brain_index += 1) {
-        const brain: *Brain = &screen_sim_region.brains[brain_index];
-        switch (brain.type) {
-            .Hero => {
-                const parts: *BrainHeroParts = &brain.parts.hero;
-                const opt_head: ?*Entity = parts.head;
-                const opt_body: ?*Entity = parts.body;
-
-                heroes_exist = true;
-
-                var sword_direction: Vector2 = Vector2.zero();
-                var acceleration: Vector2 = Vector2.zero();
-                var exited: bool = false;
-                var debug_spawn: bool = false;
-
-                const controller_index: u32 = brain.id.value - @intFromEnum(ReservedBrainId.FirstHero);
-                const controller: *shared.ControllerInput = input.getController(controller_index);
-                const controlled_hero = &state.controlled_heroes[controller_index];
-                if (controller.is_analog) {
-                    acceleration = Vector2.new(controller.stick_average_x, controller.stick_average_y);
-                } else {
-                    const recenter: f32 = 0.5;
-                    if (controller.move_up.wasPressed()) {
-                        _ = acceleration.setX(0);
-                        _ = acceleration.setY(1);
-                        controlled_hero.recenter_timer = recenter;
-                    }
-                    if (controller.move_down.wasPressed()) {
-                        _ = acceleration.setX(0);
-                        _ = acceleration.setY(-1);
-                        controlled_hero.recenter_timer = recenter;
-                    }
-                    if (controller.move_left.wasPressed()) {
-                        _ = acceleration.setX(-1);
-                        _ = acceleration.setY(0);
-                        controlled_hero.recenter_timer = recenter;
-                    }
-                    if (controller.move_right.wasPressed()) {
-                        _ = acceleration.setX(1);
-                        _ = acceleration.setY(0);
-                        controlled_hero.recenter_timer = recenter;
-                    }
-
-                    if (!controller.move_left.isDown() and !controller.move_right.isDown()) {
-                        _ = acceleration.setX(0);
-
-                        if (controller.move_up.isDown()) {
-                            _ = acceleration.setY(1);
-                        } else if (controller.move_down.isDown()) {
-                            _ = acceleration.setY(-1);
-                        }
-                    }
-
-                    if (!controller.move_up.isDown() and !controller.move_down.isDown()) {
-                        _ = acceleration.setY(0);
-
-                        if (controller.move_left.isDown()) {
-                            _ = acceleration.setX(-1);
-                        } else if (controller.move_right.isDown()) {
-                            _ = acceleration.setX(1);
-                        }
-                    }
-                }
-
-                if (controller.action_up.ended_down) {
-                    sword_direction = sword_direction.plus(Vector2.new(0, 1));
-                    state.audio_state.changeVolume(state.music, 10, Vector2.one());
-                }
-                if (controller.action_down.ended_down) {
-                    sword_direction = sword_direction.plus(Vector2.new(0, -1));
-                    state.audio_state.changeVolume(state.music, 10, Vector2.zero());
-                }
-                if (controller.action_left.ended_down) {
-                    sword_direction = sword_direction.plus(Vector2.new(-1, 0));
-                    state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
-                }
-                if (controller.action_right.ended_down) {
-                    sword_direction = sword_direction.plus(Vector2.new(1, 0));
-                    state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
-                }
-
-                if (controller.start_button.wasPressed()) {
-                    debug_spawn = true;
-                }
-
-                if (controller.back_button.wasPressed()) {
-                    exited = true;
-                }
-
-                if (false) {
-                if (opt_head) |head| {
-                    if (debug_spawn) {
-                        var traversable: TraversableReference = undefined;
-                        if (sim.getClosestTraversable(
-                                screen_sim_region,
-                                head.position,
-                                &traversable,
-                                @intFromEnum(sim.TraversableSearchFlag.Unoccupied),
-                        )) {
-                            _ = state.mode.world.addPlayer(screen_sim_region, traversable);
-                        }
-
-                        debug_spawn = false;
-                    }
-                }
-                }
-
-                controlled_hero.recenter_timer =
-                    math.clampAboveZero(controlled_hero.recenter_timer - delta_time);
-
-                if (opt_head) |head| {
-                    if (sword_direction.x() == 0 and sword_direction.y() == 0) {
-                        // Keep existing facing direction when velocity is zero.
-                    } else {
-                        head.facing_direction =
-                            intrinsics.atan2(sword_direction.y(), sword_direction.x());
-                    }
-
-                    var traversable: TraversableReference = undefined;
-                    if (sim.getClosestTraversable(screen_sim_region, head.position, &traversable, 0)) {
-                        if (opt_body) |body| {
-                            if (body.movement_mode == .Planted) {
-                                if (!traversable.equals(body.occupying)) {
-                                    body.came_from = body.occupying;
-                                    if (sim.transactionalOccupy(body, &body.occupying, traversable)) {
-                                        body.movement_time = 0;
-                                        body.movement_mode = .Hopping;
-                                    }
-                                }
-                            }
-                        }
-
-                        const closest_position: Vector3 = traversable.getSimSpaceTraversable().position;
-                        const timer_is_up: bool = controlled_hero.recenter_timer == 0;
-                        const no_push: bool = acceleration.lengthSquared() < 0.1;
-                        const spring_coefficient: f32 = if (no_push) 300 else 25;
-                        var acceleration2: Vector3 = Vector3.new(0, 0, 0);
-                        for (0..3) |e| {
-                            if (no_push or (timer_is_up and math.square(acceleration.values[e]) < 0.1)) {
-                                acceleration2.values[e] =
-                                    spring_coefficient * (closest_position.values[e] - head.position.values[e]) -
-                                    30 * head.velocity.values[e];
-                            }
-                        }
-
-                        head.velocity = head.velocity.plus(acceleration2.scaledTo(delta_time));
-                    }
-                }
-
-                if (opt_body) |body| {
-                    if (opt_head) |head| {
-                        body.facing_direction = head.facing_direction;
-                    }
-
-                    body.velocity = Vector3.zero();
-
-                    if (body.movement_mode == .Planted) {
-                        body.position = body.occupying.getSimSpaceTraversable().position;
-                    }
-
-                    var head_delta: Vector3 = .zero();
-                    if (opt_head) |head| {
-                        head_delta = head.position.minus(body.position);
-                    }
-                    body.floor_displace = head_delta.xy().scaledTo(0.25);
-                    body.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(0.5));
-                }
-
-                if (exited) {
-                    sim.deleteEntity(screen_sim_region, opt_head);
-                    sim.deleteEntity(screen_sim_region, opt_body);
-                    controlled_hero.brain_id = .{};
-                }
-            },
-            .Snake => {
-            },
-            else => {
-                unreachable;
-            }
-        }
+    while (brain_index < sim_region.brain_count) : (brain_index += 1) {
+        const brain: *Brain = &sim_region.brains[brain_index];
+        brains.executeBrain(state, sim_region, input, brain, delta_time);
     }
 
+    // Simulate all entities.
     TimedBlock.beginBlock(@src(), .EntityRender);
     var hot_entity_count: u32 = 0;
     var entity_index: u32 = 0;
-    while (entity_index < screen_sim_region.entity_count) : (entity_index += 1) {
-        const entity = &screen_sim_region.entities[entity_index];
+    while (entity_index < sim_region.entity_count) : (entity_index += 1) {
+        const entity = &sim_region.entities[entity_index];
         entity.x_axis = .new(1, 0);
         entity.y_axis = .new(0, 1);
         const entity_debug_id = debug_interface.DebugId.fromPointer(&entity.id.value);
@@ -690,9 +509,6 @@ pub fn updateAndRenderWorld(
 
         if (entity.updatable) {
             const shadow_color = Color.new(1, 1, 1, math.clampf01(1 - 0.5 * entity.position.z()));
-            var move_spec = sim.MoveSpec{};
-            var acceleration = Vector3.zero();
-
             var camera_relative_ground_position = entity.getGroundPoint().minus(camera_position);
             render_group.global_alpha = 1;
 
@@ -710,82 +526,9 @@ pub fn updateAndRenderWorld(
                 );
             }
 
-            // Pre-physics entity work.
-            switch (entity.type) {
-                .HeroBody => {
-                    move_spec = sim.MoveSpec{
-                        .speed = 30,
-                        .drag = 8,
-                        .unit_max_acceleration = true,
-                    };
-                },
-                .FloatyThing => {
-                    // _ = entity.position.setZ(entity.position.z() + 0.05 * intrinsics.cos(entity.bob_time));
-                    // entity.bob_time += delta_time;
-                },
-                .Familiar => {
-                    var closest_hero: ?*Entity = null;
-                    var closest_hero_squared: f32 = math.square(10.0);
-
-                    var hero_entity_index: u32 = 0;
-                    while (hero_entity_index < screen_sim_region.entity_count) : (hero_entity_index += 1) {
-                        var test_entity = &screen_sim_region.entities[hero_entity_index];
-                        if (test_entity.type == .HeroBody) {
-                            const distance = test_entity.position.minus(entity.position).lengthSquared();
-
-                            if (distance < closest_hero_squared) {
-                                closest_hero = test_entity;
-                                closest_hero_squared = distance;
-                            }
-                        }
-                    }
-
-                    if (global_config.AI_Familiar_FollowsHero) {
-                        if (closest_hero) |hero| {
-                            if (closest_hero_squared > math.square(3.0)) {
-                                const speed: f32 = 1.0;
-                                const one_over_length = speed / @sqrt(closest_hero_squared);
-                                acceleration = hero.position.minus(entity.position).scaledTo(one_over_length);
-                            }
-                        }
-                    }
-
-                    move_spec = sim.MoveSpec{
-                        .speed = 25,
-                        .drag = 8,
-                        .unit_max_acceleration = true,
-                    };
-                },
-                .Wall => {},
-                .Stairwell => {},
-                .Monster => {
-                    DebugInterface.debugValue(@src(), &camera_relative_ground_position, "MonsterGroundPosition");
-                },
-                .Floor => {},
-                else => {
-                    // unreachable;
-                },
-            }
-
             // Handle the entity's movement mode.
-            var bob_acceleration: f32 = 0;
             switch (entity.movement_mode) {
                 .Planted => {
-                    if (false) {
-                    var head_distance: f32 = 0;
-                    var paired_entity_index: u32 = 0;
-                    while (paired_entity_index < entity.paired_entity_count) : (paired_entity_index += 1) {
-                        if (entity.paired_entities[paired_entity_index].ptr) |pair| {
-                            var delta: Vector3 = pair.position.minus(entity.position);
-                            head_distance += delta.lengthSquared();
-                        }
-                    }
-                    head_distance = intrinsics.squareRoot(head_distance);
-
-                    const max_head_distance: f32 = 0.5;
-                    const t_head_distance: f32 = math.clamp01MapToRange(0, max_head_distance, head_distance);
-                    bob_acceleration = -20 * t_head_distance;
-                    }
                 },
                 .Hopping => {
                     const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable().position;
@@ -795,7 +538,7 @@ pub fn updateAndRenderWorld(
                     const t_land: f32 = 0.9;
 
                     if (entity.movement_time < t_thrust) {
-                        bob_acceleration = 30;
+                        entity.bob_acceleration = 30;
                     }
 
                     if (entity.movement_time < t_land) {
@@ -821,25 +564,26 @@ pub fn updateAndRenderWorld(
 
             const position_coefficient = 100;
             const velocity_coefficient = 10;
-            bob_acceleration +=
+            entity.bob_acceleration +=
                 position_coefficient * (0 - entity.bob_time) +
                 velocity_coefficient * (0 - entity.bob_delta_time);
             entity.bob_time +=
-                bob_acceleration * delta_time * delta_time +
+                entity.bob_acceleration * delta_time * delta_time +
                 entity.bob_delta_time * delta_time;
-            entity.bob_delta_time += bob_acceleration * delta_time;
+            entity.bob_delta_time += entity.bob_acceleration * delta_time;
 
             if (entity.isSet(EntityFlags.Movable.toInt())) {
                 sim.moveEntity(
                     world_mode,
-                    screen_sim_region,
+                    sim_region,
                     entity,
                     delta_time,
-                    acceleration,
-                    &move_spec,
+                    entity.acceleration,
+                    &entity.move_spec,
                 );
             }
 
+            // Rendering.
             var entity_transform = ObjectTransform.defaultUpright();
             entity_transform.offset_position = entity.getGroundPoint().minus(camera_position);
 
@@ -854,7 +598,6 @@ pub fn updateAndRenderWorld(
                 .torso = transient_state.assets.getBestMatchBitmap(.Torso, &match_vector, &weight_vector),
             };
 
-            // Post-physics entity work.
             const hero_scale = 3;
             switch (entity.type) {
                 .HeroBody => {
@@ -907,40 +650,7 @@ pub fn updateAndRenderWorld(
                         null,
                     );
                 },
-                .Wall => {
-                    var opt_bitmap_id = transient_state.assets.getFirstBitmap(.Tree);
-                    if (opt_bitmap_id) |bitmap_id| {
-                        if (debug_interface.requested(entity_debug_id)) {
-                            DebugInterface.debugNamedValue(@src(), &opt_bitmap_id.?, "bitmap_id");
-                        }
-                        render_group.pushBitmapId(
-                            entity_transform,
-                            bitmap_id,
-                            2.5,
-                            Vector3.zero(),
-                            Color.white(),
-                            null,
-                            null,
-                            null,
-                        );
-                    }
-                },
-                .Stairwell => {
-                    const stairwell_color1 = Color.new(1, 0.5, 0, 1);
-                    const stairwell_color2 = Color.new(1, 1, 0, 1);
-                    render_group.pushRectangle(
-                        entity_transform,
-                        entity.walkable_dimension,
-                        Vector3.zero(),
-                        stairwell_color1,
-                    );
-                    render_group.pushRectangle(
-                        entity_transform,
-                        entity.walkable_dimension,
-                        Vector3.new(0, 0, entity.walkable_height),
-                        stairwell_color2,
-                    );
-                },
+                .Wall => { },
                 .Monster => {
                     render_group.pushBitmapId(
                         entity_transform,
@@ -962,8 +672,6 @@ pub fn updateAndRenderWorld(
                         null,
                         null,
                     );
-
-                    drawHitPoints(entity, render_group, entity_transform);
                 },
                 .Familiar => {
                     // Update head bob.
@@ -976,10 +684,7 @@ pub fn updateAndRenderWorld(
                     const head_z = 0.25 * head_bob_sine;
                     const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
 
-                    var bitmap_id = hero_bitmaps.head;
-                    if (debug_interface.requested(entity_debug_id)) {
-                        DebugInterface.debugNamedValue(@src(), &bitmap_id.?, "bitmap_id");
-                    }
+                    const bitmap_id = hero_bitmaps.head;
 
                     render_group.pushBitmapId(
                         entity_transform,
@@ -1002,33 +707,52 @@ pub fn updateAndRenderWorld(
                         null,
                     );
                 },
-                .Floor, .FloatyThing => {
-                    var volume_index: u32 = 0;
-                    while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                        const volume = entity.collision.volumes[volume_index];
-                        render_group.pushRectangleOutline(
-                            entity_transform,
-                            volume.dimension.xy(),
-                            volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                            Color.new(0, 0.5, 1, 1),
-                            0.1,
-                        );
-                    }
+                else => {},
+            }
 
-                    var traversable_index: u32 = 0;
-                    while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
-                        const traversable = entity.traversables[traversable_index];
-                        render_group.pushRectangle(
-                            entity_transform,
-                            Vector2.new(0.1, 0.1),
-                            traversable.position,
-                            if (traversable.occupier != null) Color.new(0, 0.5, 1, 1) else Color.new(1, 0.5, 0, 1),
-                        );
-                    }
-                },
-                else => {
-                    unreachable;
-                },
+            var piece_index: u32 = 0;
+            while (piece_index < entity.piece_count) : (piece_index += 1) {
+                const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
+                const bitmap_id: ?BitmapId =
+                    transient_state.assets.getBestMatchBitmap(piece.asset_type, &match_vector, &weight_vector);
+
+                render_group.pushBitmapId(
+                    entity_transform,
+                    bitmap_id,
+                    piece.height,
+                    Vector3.zero(),
+                    piece.color,
+                    null,
+                    null,
+                    null,
+                );
+            }
+
+            drawHitPoints(entity, render_group, entity_transform);
+
+            {
+                var volume_index: u32 = 0;
+                while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+                    const volume = entity.collision.volumes[volume_index];
+                    render_group.pushRectangleOutline(
+                        entity_transform,
+                        volume.dimension.xy(),
+                        volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                        Color.new(0, 0.5, 1, 1),
+                        0.1,
+                    );
+                }
+
+                var traversable_index: u32 = 0;
+                while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
+                    const traversable = entity.traversables[traversable_index];
+                    render_group.pushRectangle(
+                        entity_transform,
+                        Vector2.new(0.1, 0.1),
+                        traversable.position,
+                        if (traversable.occupier != null) Color.new(0, 0.5, 1, 1) else Color.new(1, 0.5, 0, 1),
+                    );
+                }
             }
 
             if (debug_interface.DEBUG_UI_ENABLED) {
@@ -1079,122 +803,6 @@ pub fn updateAndRenderWorld(
     TimedBlock.endBlock(@src(), .EntityRender);
 
     render_group.global_alpha = 1;
-
-    if (false) {
-        const map_colors: [3]Color = .{
-            Color.new(1, 0, 0, 1),
-            Color.new(0, 1, 0, 1),
-            Color.new(0, 0, 1, 1),
-        };
-
-        const checker_width = 16;
-        const checker_height = 16;
-        const checker_dimension = Vector2.new(checker_width, checker_height);
-        for (&transient_state.env_maps, 0..) |*map, map_index| {
-            const lod: *LoadedBitmap = &map.lod[0];
-            const clip_rect: Rectangle2i = Rectangle2i.new(0, 0, lod.width, lod.height);
-
-            var row_checker_on = false;
-            var y: u32 = 0;
-            while (y < lod.height) : (y += checker_height) {
-                var checker_on = row_checker_on;
-                var x: u32 = 0;
-                while (x < lod.width) : (x += checker_width) {
-                    const min_position = Vector2.newU(x, y);
-                    const max_position = min_position.plus(checker_dimension);
-                    const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
-                    rendergroup.drawRectangle(lod, min_position, max_position, color, clip_rect, true);
-                    rendergroup.drawRectangle(lod, min_position, max_position, color, clip_rect, false);
-                    checker_on = !checker_on;
-                }
-
-                row_checker_on = !row_checker_on;
-            }
-        }
-        transient_state.env_maps[0].z_position = -1.5;
-        transient_state.env_maps[1].z_position = 0;
-        transient_state.env_maps[2].z_position = 1.5;
-
-        world_mode.time += input.frame_delta_time;
-        const angle = 0.1 * world_mode.time;
-        // const angle: f32 = 0;
-
-        const screen_center = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
-            0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
-        );
-        const origin = screen_center;
-        const scale = 100.0;
-
-        var x_axis = Vector2.zero();
-        var y_axis = Vector2.zero();
-
-        // const displacement = Vector2.zero();
-        const displacement = Vector2.new(
-            100.0 * intrinsics.cos(5.0 * angle),
-            100.0 * intrinsics.sin(3.0 * angle),
-        );
-
-        if (true) {
-            x_axis = Vector2.new(intrinsics.cos(10 * angle), intrinsics.sin(10 * angle)).scaledTo(scale);
-            y_axis = x_axis.perp();
-        } else if (false) {
-            x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
-            y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
-        } else {
-            x_axis = Vector2.new(scale, 0);
-            y_axis = Vector2.new(0, scale);
-        }
-
-        const color = Color.new(1, 1, 1, 1);
-        // const color_angle = 5.0 * angle;
-        // const color =
-        //     Color.new(
-        //     0.5 + 0.5 * intrinsics.sin(color_angle),
-        //     0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
-        //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
-        //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
-        // );
-
-        _ = render_group.pushCoordinateSystem(
-            origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(displacement),
-            x_axis,
-            y_axis,
-            color,
-            &world_mode.test_diffuse,
-            &world_mode.test_normal,
-            &transient_state.env_maps[2],
-            &transient_state.env_maps[1],
-            &transient_state.env_maps[0],
-        );
-
-        var map_position = Vector2.zero();
-        for (&transient_state.env_maps) |*map| {
-            const lod: *LoadedBitmap = &map.lod[0];
-
-            x_axis = Vector2.newI(lod.width, 0).scaledTo(0.5);
-            y_axis = Vector2.newI(0, lod.height).scaledTo(0.5);
-
-            _ = render_group.pushCoordinateSystem(
-                map_position,
-                x_axis,
-                y_axis,
-                Color.new(1, 1, 1, 1),
-                lod,
-                null,
-                undefined,
-                undefined,
-                undefined,
-            );
-
-            map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
-        }
-
-        if (false) {
-            render_group.pushSaturation(0.5 + 0.5 * intrinsics.sin(10.0 * world_mode.time));
-        }
-    }
-
     render_group.orthographicMode(draw_buffer.width, draw_buffer.height, 1);
     render_group.pushRectangleOutline(
         ObjectTransform.defaultFlat(),
@@ -1204,14 +812,19 @@ pub fn updateAndRenderWorld(
         0.2,
     );
 
-    // render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer);
-    //
-    // render_group.endRender();
-
-    sim.endSimulation(world_mode, screen_sim_region);
+    sim.endSimulation(world_mode, sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
 
-    if (!heroes_exist) {
+    var heores_exist: bool = false;
+    var controlled_hero_index: u32 = 0;
+    while (controlled_hero_index < state.controlled_heroes.len) : (controlled_hero_index += 1) {
+        if (state.controlled_heroes[controlled_hero_index].brain_id.value != 0) {
+            heores_exist = true;
+            break;
+        }
+    }
+
+    if (!heores_exist) {
         cutscene.playTitleScreen(state, transient_state);
     }
 
@@ -1295,6 +908,7 @@ fn addWall(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_til
     const entity = beginGroundedEntity(world_mode, .Wall, world_mode.wall_collision);
 
     entity.addFlags(EntityFlags.Collides.toInt());
+    entity.addPiece(.Tree, 2.5, Color.white());
 
     endEntity(world_mode, entity, world_position);
 }
@@ -1474,6 +1088,130 @@ pub fn chunkPositionFromTilePosition(
     std.debug.assert(world.isVector3Canonical(game_world, result.offset));
 
     return result;
+}
+
+fn renderTest(
+    world_mode: *GameModeWorld,
+    transient_state: TransientState,
+    input: *shared.GameInput,
+    render_group: *RenderGroup,
+    draw_buffer: *asset.LoadedBitmap,
+) void {
+    const map_colors: [3]Color = .{
+        Color.new(1, 0, 0, 1),
+        Color.new(0, 1, 0, 1),
+        Color.new(0, 0, 1, 1),
+    };
+
+    const checker_width = 16;
+    const checker_height = 16;
+    const checker_dimension = Vector2.new(checker_width, checker_height);
+    for (&transient_state.env_maps, 0..) |*map, map_index| {
+        const lod: *LoadedBitmap = &map.lod[0];
+        const clip_rect: Rectangle2i = Rectangle2i.new(0, 0, lod.width, lod.height);
+
+        var row_checker_on = false;
+        var y: u32 = 0;
+        while (y < lod.height) : (y += checker_height) {
+            var checker_on = row_checker_on;
+            var x: u32 = 0;
+            while (x < lod.width) : (x += checker_width) {
+                const min_position = Vector2.newU(x, y);
+                const max_position = min_position.plus(checker_dimension);
+                const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
+                rendergroup.drawRectangle(lod, min_position, max_position, color, clip_rect, true);
+                rendergroup.drawRectangle(lod, min_position, max_position, color, clip_rect, false);
+                checker_on = !checker_on;
+            }
+
+            row_checker_on = !row_checker_on;
+        }
+    }
+    transient_state.env_maps[0].z_position = -1.5;
+    transient_state.env_maps[1].z_position = 0;
+    transient_state.env_maps[2].z_position = 1.5;
+
+    world_mode.time += input.frame_delta_time;
+    const angle = 0.1 * world_mode.time;
+    // const angle: f32 = 0;
+
+    const screen_center = Vector2.new(
+        0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
+        0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
+    );
+    const origin = screen_center;
+    const scale = 100.0;
+
+    var x_axis = Vector2.zero();
+    var y_axis = Vector2.zero();
+
+    // const displacement = Vector2.zero();
+    const displacement = Vector2.new(
+        100.0 * intrinsics.cos(5.0 * angle),
+        100.0 * intrinsics.sin(3.0 * angle),
+    );
+
+    if (true) {
+        x_axis = Vector2.new(intrinsics.cos(10 * angle), intrinsics.sin(10 * angle)).scaledTo(scale);
+        y_axis = x_axis.perp();
+    } else if (false) {
+        x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
+        y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
+    } else {
+        x_axis = Vector2.new(scale, 0);
+        y_axis = Vector2.new(0, scale);
+    }
+
+    const color = Color.new(1, 1, 1, 1);
+    // const color_angle = 5.0 * angle;
+    // const color =
+    //     Color.new(
+    //     0.5 + 0.5 * intrinsics.sin(color_angle),
+    //     0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
+    //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
+    //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
+    // );
+
+    _ = render_group.pushCoordinateSystem(
+        origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(displacement),
+        x_axis,
+        y_axis,
+        color,
+        &world_mode.test_diffuse,
+        &world_mode.test_normal,
+        &transient_state.env_maps[2],
+        &transient_state.env_maps[1],
+        &transient_state.env_maps[0],
+    );
+
+    var map_position = Vector2.zero();
+    for (&transient_state.env_maps) |*map| {
+        const lod: *LoadedBitmap = &map.lod[0];
+
+        x_axis = Vector2.newI(lod.width, 0).scaledTo(0.5);
+        y_axis = Vector2.newI(0, lod.height).scaledTo(0.5);
+
+        _ = render_group.pushCoordinateSystem(
+            map_position,
+            x_axis,
+            y_axis,
+            Color.new(1, 1, 1, 1),
+            lod,
+            null,
+            undefined,
+            undefined,
+            undefined,
+        );
+
+        map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
+    }
+
+    if (false) {
+        render_group.pushSaturation(0.5 + 0.5 * intrinsics.sin(10.0 * world_mode.time));
+    }
+
+    render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer);
+    render_group.endRender();
 }
 
 fn particleTest(

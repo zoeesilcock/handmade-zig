@@ -222,7 +222,6 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
                             const max_x_min_y: Vector2 = min_position.plus(x_axis);
                             const max_x_max_y: Vector2 = min_position.plus(x_axis).plus(y_axis);
 
-
                             // Lower triangle.
                             gl.glTexCoord2f(min_uv.x(), min_uv.y());
                             gl.glVertex2fv(min_x_min_y.toGL());

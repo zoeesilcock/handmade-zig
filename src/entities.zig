@@ -1,14 +1,21 @@
 const shared = @import("shared.zig");
 const world = @import("world.zig");
+const brains = @import("brains.zig");
+const assets = @import("asset.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
 const std = @import("std");
 
 // Types.
+const Color = math.Color;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const MoveSpec = sim.MoveSpec;
+const BrainId = brains.BrainId;
+const BrainType = brains.BrainType;
+const BrainSlot = brains.BrainSlot;
+const AssetTypeId = assets.AssetTypeId;
 
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
 
@@ -39,49 +46,15 @@ pub const EntityFlags = enum(u32) {
     }
 };
 
-pub const BrainHeroParts = extern struct {
-    head: ?*Entity,
-    body: ?*Entity,
-};
-
-pub const Brain = extern struct {
-    id: BrainId,
-    type: BrainType,
-
-    parts: extern union {
-        hero: BrainHeroParts,
-        array: [16]?*Entity,
-    }
-};
-
-pub const BrainType = enum(u32) {
-    None,
-    Hero,
-    Snake,
-};
-
-pub const BrainSlot = extern struct {
-    index: u32 = 0,
-
-    pub fn forField(comptime slot_type: type, comptime field_name: []const u8) BrainSlot {
-        const pack_value = @offsetOf(slot_type, field_name) / @sizeOf(*Entity);
-        return BrainSlot{ .index = pack_value };
-    }
-};
-
-pub const BrainId = extern struct {
-    value: u32 = 0,
-};
-
-pub const ReservedBrainId = enum(u32) {
-    FirstHero = 1,
-    LastHero = 1 + MAX_CONTROLLER_COUNT - 1,
-    FirstFree,
-};
-
 pub const EntityMovementMode = enum(u32) {
     Planted,
     Hopping,
+};
+
+pub const EntityVisiblePiece = extern struct {
+    asset_type: AssetTypeId,
+    color: Color,
+    height: f32,
 };
 
 pub const Entity = extern struct {
@@ -92,7 +65,7 @@ pub const Entity = extern struct {
     // Everything below here is not worked out yet.
     //
 
-    brain_type: BrainType = .None,
+    brain_type: BrainType,
     brain_slot: BrainSlot = .{},
     brain_id: BrainId = .{},
 
@@ -101,7 +74,7 @@ pub const Entity = extern struct {
 
     position: Vector3 = Vector3.zero(),
     velocity: Vector3 = Vector3.zero(),
-    acceleration: Vector3 = Vector3.zero(),
+    acceleration: Vector3 = Vector3.zero(), // Do not pack this.
 
     collision: *EntityCollisionVolumeGroup,
 
@@ -110,6 +83,7 @@ pub const Entity = extern struct {
     facing_direction: f32 = 0,
     bob_time: f32 = 0,
     bob_delta_time: f32 = 0,
+    bob_acceleration: f32 = 0, // Do not pack this.
 
     abs_tile_z_delta: i32 = 0,
 
@@ -120,6 +94,7 @@ pub const Entity = extern struct {
     walkable_height: f32 = 0,
 
     movement_mode: EntityMovementMode,
+    move_spec: MoveSpec, // Do not pack this.
     movement_time: f32,
     occupying: TraversableReference,
     came_from: TraversableReference,
@@ -131,6 +106,20 @@ pub const Entity = extern struct {
 
     traversable_count: u32,
     traversables: [16]EntityTraversablePoint,
+
+    piece_count: u32,
+    pieces: [4]EntityVisiblePiece,
+
+    pub fn addPiece(self: *Entity, asset_type: AssetTypeId, height: f32, color: Color) void {
+        std.debug.assert(self.piece_count < self.pieces.len);
+
+        var piece: *EntityVisiblePiece = &self.pieces[self.piece_count];
+        self.piece_count += 1;
+
+        piece.asset_type = asset_type;
+        piece.height = height;
+        piece.color = color;
+    }
 
     pub fn isDeleted(self: *const Entity) bool {
         return self.isSet(EntityFlags.Deleted.toInt());

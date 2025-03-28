@@ -3,6 +3,7 @@ const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const world = @import("world.zig");
 const entities = @import("entities.zig");
+const brains = @import("brains.zig");
 const config = @import("config.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
@@ -19,15 +20,15 @@ const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
 const World = world.World;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
-const Brain = entities.Brain;
-const BrainId = entities.BrainId;
-const BrainType = entities.BrainType;
 const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const EntityCollisionVolume = entities.EntityCollisionVolume;
 const EntityCollisionVolumeGroup = entities.EntityCollisionVolumeGroup;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityFlags = entities.EntityFlags;
+const Brain = brains.Brain;
+const BrainId = brains.BrainId;
+const BrainType = brains.BrainType;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const ArenaPushParams = shared.ArenaPushParams;
@@ -63,7 +64,7 @@ pub const BrainHash = extern struct {
     id: BrainId,
 };
 
-pub const MoveSpec = struct {
+pub const MoveSpec = extern struct {
     speed: f32 = 1.0,
     drag: f32 = 0.0,
     unit_max_acceleration: bool = false,

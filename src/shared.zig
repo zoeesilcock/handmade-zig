@@ -13,6 +13,7 @@ const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
+const brains = @import("brains.zig");
 const rendergroup = @import("rendergroup.zig");
 const render = @import("render.zig");
 const file_formats = @import("file_formats");
@@ -39,7 +40,7 @@ const FontId = file_formats.FontId;
 const PlayingSound = audio.PlayingSound;
 const DebugTable = debug_interface.DebugTable;
 const EntityId = entities.EntityId;
-const BrainId = entities.BrainId;
+const BrainId = brains.BrainId;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -838,6 +839,7 @@ pub const GroundBuffer = extern struct {
 pub const ControlledHero = struct {
     brain_id: BrainId = undefined,
     recenter_timer: f32 = 0,
+    controller_direction: Vector2 = .zero(),
 };
 
 pub const LowEntityChunkReference = struct {
