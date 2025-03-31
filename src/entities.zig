@@ -23,19 +23,6 @@ pub const EntityId = packed struct {
     value: u32 = 0,
 };
 
-pub const EntityType = enum(u8) {
-    Null,
-
-    HeroBody,
-    HeroHead,
-    Wall,
-    Floor,
-    FloatyThing,
-    Familiar,
-    Monster,
-    Stairwell,
-};
-
 pub const EntityFlags = enum(u32) {
     Collides = (1 << 0),
     Movable = (1 << 1),
@@ -51,25 +38,31 @@ pub const EntityMovementMode = enum(u32) {
     Hopping,
 };
 
+pub const EntityVisiblePieceFlag = enum(u32) {
+    AxesDeform = 0x1,
+    BobOffset = 0x2,
+};
+
 pub const EntityVisiblePiece = extern struct {
-    asset_type: AssetTypeId,
+    offset: Vector3,
     color: Color,
+    asset_type: AssetTypeId,
     height: f32,
+    flags: u32,
 };
 
 pub const Entity = extern struct {
     id: EntityId = .{},
-    updatable: bool = false,
-
-    //
-    // Everything below here is not worked out yet.
-    //
 
     brain_type: BrainType,
     brain_slot: BrainSlot = .{},
     brain_id: BrainId = .{},
 
-    type: EntityType = .Null,
+    //
+    // Everything below here is not worked out yet.
+    //
+
+    updatable: bool = false,
     flags: u32 = 0,
 
     position: Vector3 = Vector3.zero(),
@@ -110,7 +103,14 @@ pub const Entity = extern struct {
     piece_count: u32,
     pieces: [4]EntityVisiblePiece,
 
-    pub fn addPiece(self: *Entity, asset_type: AssetTypeId, height: f32, color: Color) void {
+    pub fn addPiece(
+        self: *Entity,
+        asset_type: AssetTypeId,
+        height: f32,
+        offset: Vector3,
+        color: Color,
+        opt_movement_flags: ?u32,
+    ) void {
         std.debug.assert(self.piece_count < self.pieces.len);
 
         var piece: *EntityVisiblePiece = &self.pieces[self.piece_count];
@@ -118,7 +118,9 @@ pub const Entity = extern struct {
 
         piece.asset_type = asset_type;
         piece.height = height;
+        piece.offset = offset;
         piece.color = color;
+        piece.flags = opt_movement_flags orelse 0;
     }
 
     pub fn isDeleted(self: *const Entity) bool {
@@ -147,8 +149,6 @@ pub const Entity = extern struct {
     }
 
     pub fn getStairGround(self: *const Entity, at_ground_point: Vector3) f32 {
-        std.debug.assert(self.type == .Stairwell);
-
         const region_rectangle = Rectangle2.fromCenterDimension(self.position.xy(), self.walkable_dimension);
         const barycentric = region_rectangle.getBarycentricPosition(at_ground_point.xy()).clamp01();
         return self.position.z() + barycentric.y() * self.walkable_height;
@@ -183,8 +183,7 @@ pub const EntityReference = extern struct {
     index: EntityId = .{},
 
     pub fn equals(self: *const EntityReference, other: EntityReference) bool {
-        return
-            self.ptr == other.ptr and
+        return self.ptr == other.ptr and
             self.index.value == other.index.value;
     }
 };

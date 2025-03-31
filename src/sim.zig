@@ -133,7 +133,9 @@ pub fn getEntityByStorageIndex(sim_region: *SimRegion, id: EntityId) ?*Entity {
 
 pub fn loadEntityReference(sim_region: *SimRegion, reference: *EntityReference) void {
     if (reference.index.value != 0) {
-        reference.* = EntityReference{ .ptr = getEntityByStorageIndex(sim_region, reference.index), };
+        reference.* = EntityReference{
+            .ptr = getEntityByStorageIndex(sim_region, reference.index),
+        };
     }
 }
 
@@ -263,44 +265,40 @@ pub fn beginSimulation(
                             const source_address_aligned: usize = std.mem.alignForward(usize, source_address, @alignOf(Entity));
                             const entities_ptr: [*]Entity = @ptrFromInt(source_address_aligned);
                             const source = &entities_ptr[entity_index];
-                            const sim_space_position = source.position.plus(chunk_delta);
+                            const id: EntityId = source.id;
 
-                            if (entityOverlapsRectangle(
-                                sim_space_position,
-                                source.collision.total_volume,
-                                sim_region.bounds,
-                            )) {
-                                const id: EntityId = source.id;
+                            if (getEntityHashFromId(sim_region, id)) |entry| {
+                                std.debug.assert(entry.ptr == null);
 
-                                if (getEntityHashFromId(sim_region, id)) |entry| {
-                                    std.debug.assert(entry.ptr == null);
+                                if (sim_region.entity_count < sim_region.max_entity_count) {
+                                    const dest: *Entity = &sim_region.entities[sim_region.entity_count];
+                                    sim_region.entity_count += 1;
 
-                                    if (sim_region.entity_count < sim_region.max_entity_count) {
-                                        const dest: *Entity = &sim_region.entities[sim_region.entity_count];
-                                        sim_region.entity_count += 1;
+                                    entry.index = id;
+                                    entry.ptr = dest;
 
-                                        entry.index = id;
-                                        entry.ptr = dest;
+                                    dest.* = source.*;
 
-                                        dest.* = source.*;
+                                    dest.id = id;
+                                    dest.position = dest.position.plus(chunk_delta);
 
-                                        dest.id = id;
-                                        dest.position = dest.position.plus(chunk_delta);
+                                    dest.updatable = entityOverlapsRectangle(
+                                        dest.position,
+                                        dest.collision.total_volume,
+                                        sim_region.updatable_bounds,
+                                    );
 
-                                        dest.updatable = entityOverlapsRectangle(
-                                            dest.position,
-                                            dest.collision.total_volume,
-                                            sim_region.updatable_bounds,
+                                    if (dest.brain_id.value != 0) {
+                                        const brain: *Brain = getOrAddBrain(
+                                            sim_region,
+                                            dest.brain_id,
+                                            @enumFromInt(dest.brain_slot.type),
                                         );
-
-                                        if (dest.brain_id.value != 0) {
-                                            const brain: *Brain = getOrAddBrain(sim_region, dest.brain_id, dest.brain_type);
-                                            std.debug.assert(dest.brain_slot.index < brain.parts.array.len);
-                                            brain.parts.array[dest.brain_slot.index] = dest;
-                                        }
-                                    } else {
-                                        unreachable;
+                                        std.debug.assert(dest.brain_slot.index < brain.parts.array.len);
+                                        brain.parts.array[dest.brain_slot.index] = dest;
                                     }
+                                } else {
+                                    unreachable;
                                 }
                             }
                         }
@@ -325,14 +323,17 @@ fn speculativeCollide(mover: *Entity, region: *Entity, test_position: Vector3) b
     TimedBlock.beginFunction(@src(), .SpeculativeCollide);
     defer TimedBlock.endFunction(@src(), .SpeculativeCollide);
 
-    var result = true;
+    const result = true;
 
-    if (region.type == .Stairwell) {
-        const step_height = 0.1;
-        const mover_ground_point = mover.getGroundPointFor(test_position);
-        const ground = region.getStairGround(mover_ground_point);
-        result = ((intrinsics.absoluteValue(mover_ground_point.z() - ground) > step_height));
-    }
+    _ = mover;
+    _ = region;
+    _ = test_position;
+    // if (region.type == .Stairwell) {
+    //     const step_height = 0.1;
+    //     const mover_ground_point = mover.getGroundPointFor(test_position);
+    //     const ground = region.getStairGround(mover_ground_point);
+    //     result = ((intrinsics.absoluteValue(mover_ground_point.z() - ground) > step_height));
+    // }
 
     return result;
 }
@@ -408,15 +409,18 @@ pub fn handleCollision(world_mode: *GameModeWorld, entity: *Entity, hit_entity: 
     _ = world_mode;
 
     const stops_on_collision = true;
-    var a = entity;
-    var b = hit_entity;
 
-    // Sort entities based on type.
-    if (@intFromEnum(a.type) > @intFromEnum(b.type)) {
-        const temp = a;
-        a = b;
-        b = temp;
-    }
+    _ = entity;
+    _ = hit_entity;
+    // var a = entity;
+    // var b = hit_entity;
+    //
+    // // Sort entities based on type.
+    // if (@intFromEnum(a.type) > @intFromEnum(b.type)) {
+    //     const temp = a;
+    //     a = b;
+    //     b = temp;
+    // }
 
     return stops_on_collision;
 }

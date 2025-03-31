@@ -50,10 +50,13 @@ const EntityCollisionVolume = entities.EntityCollisionVolume;
 const EntityCollisionVolumeGroup = entities.EntityCollisionVolumeGroup;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityVisiblePiece = entities.EntityVisiblePiece;
+const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
 const Brain = brains.Brain;
 const BrainId = brains.BrainId;
 const BrainSlot = brains.BrainSlot;
-const BrainHeroParts = brains.BrainHeroParts;
+const BrainHero = brains.BrainHero;
+const BrainMonster = brains.BrainMonster;
+const BrainFamiliar = brains.BrainFamiliar;
 const ReservedBrainId = brains.ReservedBrainId;
 
 pub const GameModeWorld = struct {
@@ -89,87 +92,6 @@ pub const GameModeWorld = struct {
     creation_buffer_index: u32,
     creation_buffer: [4]Entity,
     last_used_entity_storage_index: u32,
-
-    pub fn addPlayer(self: *GameModeWorld, sim_region: *sim.SimRegion, standing_on: TraversableReference, brain_id: BrainId) void {
-        const position: WorldPosition = world.mapIntoChunkSpace(
-            sim_region.world,
-            sim_region.origin,
-            standing_on.getSimSpaceTraversable().position,
-        );
-        var body = beginGroundedEntity(self, .HeroBody, self.hero_body_collision);
-        body.addFlags(EntityFlags.Collides.toInt() | EntityFlags.Movable.toInt());
-
-        const head = beginGroundedEntity(self, .HeroHead, self.hero_head_collision);
-        head.addFlags(EntityFlags.Collides.toInt() | EntityFlags.Movable.toInt());
-
-        initHitPoints(body, 3);
-
-        head.brain_type = .Hero;
-        head.brain_slot = BrainSlot.forField(BrainHeroParts, "head");
-        head.brain_id = brain_id;
-
-        body.brain_type = .Hero;
-        body.brain_slot = BrainSlot.forField(BrainHeroParts, "body");
-        body.brain_id = brain_id;
-        body.occupying = standing_on;
-
-        if (self.camera_following_entity_index.value == 0) {
-            self.camera_following_entity_index = head.id;
-        }
-
-        endEntity(self, head, position);
-        endEntity(self, body, position);
-    }
-
-    fn addBrain(self: *GameModeWorld) BrainId {
-        self.last_used_entity_storage_index += 1;
-        const brain_id: BrainId = .{ .value = self.last_used_entity_storage_index };
-        return brain_id;
-    }
-
-    pub fn addCollisionRule(self: *GameModeWorld, in_id_a: u32, in_id_b: u32, can_collide: bool) void {
-        var id_a = in_id_a;
-        var id_b = in_id_b;
-
-        // Sort entities based on storage index.
-        if (id_a > id_b) {
-            const temp = id_a;
-            id_a = id_b;
-            id_b = temp;
-        }
-
-        // Look for an existing rule in the hash.
-        const hash_bucket = id_a & ((self.collision_rule_hash.len) - 1);
-        var found_rule: ?*PairwiseCollisionRule = null;
-        var opt_rule: ?*PairwiseCollisionRule = self.collision_rule_hash[hash_bucket];
-        while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
-            if (rule.id_a == id_a and rule.id_b == id_b) {
-                found_rule = rule;
-                break;
-            }
-        }
-
-        // Create a new rule if it didn't exist.
-        if (found_rule == null) {
-            found_rule = self.first_free_collision_rule;
-
-            if (found_rule) |rule| {
-                self.first_free_collision_rule = rule.next_in_hash;
-            } else {
-                found_rule = self.world.arena.pushStruct(PairwiseCollisionRule, null);
-            }
-
-            found_rule.?.next_in_hash = self.collision_rule_hash[hash_bucket];
-            self.collision_rule_hash[hash_bucket] = found_rule.?;
-        }
-
-        // Apply the rule settings.
-        if (found_rule) |found| {
-            found.id_a = id_a;
-            found.id_b = id_b;
-            found.can_collide = can_collide;
-        }
-    }
 };
 
 pub const ParticleCel = struct {
@@ -244,10 +166,10 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         tile_depth_in_meters * 1.1,
         0,
     );
-    world_mode.hero_body_collision = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
-    world_mode.hero_head_collision = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
-    world_mode.monster_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
-    world_mode.familiar_collsion = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
+    world_mode.hero_body_collision = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
+    world_mode.hero_head_collision = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
+    world_mode.monster_collsion = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
+    world_mode.familiar_collsion = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
 
     var series = random.Series.seed(3);
     const screen_base_x: i32 = 0;
@@ -481,7 +403,7 @@ pub fn updateAndRenderWorld(
                 var traversable: TraversableReference = undefined;
                 if (sim.getClosestTraversable(sim_region, camera_position, &traversable, 0)) {
                     controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
-                    state.mode.world.addPlayer(sim_region, traversable, controlled_hero.brain_id);
+                    addPlayer(state.mode.world, sim_region, traversable, controlled_hero.brain_id);
                 }
             }
         }
@@ -500,15 +422,12 @@ pub fn updateAndRenderWorld(
     var entity_index: u32 = 0;
     while (entity_index < sim_region.entity_count) : (entity_index += 1) {
         const entity = &sim_region.entities[entity_index];
-        entity.x_axis = .new(1, 0);
-        entity.y_axis = .new(0, 1);
         const entity_debug_id = debug_interface.DebugId.fromPointer(&entity.id.value);
         if (debug_interface.requested(entity_debug_id)) {
             DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
         }
 
         if (entity.updatable) {
-            const shadow_color = Color.new(1, 1, 1, math.clampf01(1 - 0.5 * entity.position.z()));
             var camera_relative_ground_position = entity.getGroundPoint().minus(camera_position);
             render_group.global_alpha = 1;
 
@@ -526,10 +445,9 @@ pub fn updateAndRenderWorld(
                 );
             }
 
-            // Handle the entity's movement mode.
+            // Physics.
             switch (entity.movement_mode) {
-                .Planted => {
-                },
+                .Planted => {},
                 .Hopping => {
                     const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable().position;
                     const movement_from: Vector3 = entity.came_from.getSimSpaceTraversable().position;
@@ -592,139 +510,36 @@ pub fn updateAndRenderWorld(
             var weight_vector = asset.AssetVector{};
             weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
 
-            const hero_bitmaps = shared.HeroBitmapIds{
-                .head = transient_state.assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector),
-                .cape = transient_state.assets.getBestMatchBitmap(.Cape, &match_vector, &weight_vector),
-                .torso = transient_state.assets.getBestMatchBitmap(.Torso, &match_vector, &weight_vector),
-            };
-
-            const hero_scale = 3;
-            switch (entity.type) {
-                .HeroBody => {
-                    const color: Color = .white();
-                    const x_axis: Vector2 = entity.x_axis;
-                    const y_axis: Vector2 = entity.y_axis;
-                    const offset: Vector3 = entity.floor_displace.toVector3(0);
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        transient_state.assets.getFirstBitmap(.Shadow),
-                        hero_scale * 1.0,
-                        Vector3.zero(),
-                        shadow_color,
-                        null,
-                        null,
-                        null,
-                    );
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        hero_bitmaps.cape,
-                        hero_scale * 1.2,
-                        offset.plus(Vector3.new(0, entity.bob_time - 0.1, -0.001)),
-                        color,
-                        null,
-                        x_axis,
-                        y_axis,
-                    );
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        hero_bitmaps.torso,
-                        hero_scale * 1.2,
-                        Vector3.new(0, 0, -0.002),
-                        color,
-                        null,
-                        x_axis,
-                        y_axis,
-                    );
-
-                    drawHitPoints(entity, render_group, entity_transform);
-                },
-                .HeroHead => {
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        hero_bitmaps.head,
-                        hero_scale * 1.2,
-                        Vector3.new(0, -0.6, 0),
-                        Color.white(),
-                        null,
-                        null,
-                        null,
-                    );
-                },
-                .Wall => { },
-                .Monster => {
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        transient_state.assets.getFirstBitmap(.Shadow),
-                        4.5,
-                        Vector3.zero(),
-                        shadow_color,
-                        null,
-                        null,
-                        null,
-                    );
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        hero_bitmaps.torso,
-                        4.5,
-                        Vector3.zero(),
-                        Color.white(),
-                        null,
-                        null,
-                        null,
-                    );
-                },
-                .Familiar => {
-                    // Update head bob.
-                    entity.bob_time += delta_time * 2;
-                    if (entity.bob_time > shared.TAU32) {
-                        entity.bob_time = -shared.TAU32;
-                    }
-
-                    const head_bob_sine = @sin(2 * entity.bob_time);
-                    const head_z = 0.25 * head_bob_sine;
-                    const head_shadow_color = Color.new(1, 1, 1, (0.5 * shadow_color.a()) + (0.2 * head_bob_sine));
-
-                    const bitmap_id = hero_bitmaps.head;
-
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        transient_state.assets.getFirstBitmap(.Shadow),
-                        2.5,
-                        Vector3.zero(),
-                        head_shadow_color,
-                        null,
-                        null,
-                        null,
-                    );
-                    render_group.pushBitmapId(
-                        entity_transform,
-                        bitmap_id,
-                        2.5,
-                        Vector3.new(0, 0, head_z),
-                        Color.white(),
-                        null,
-                        null,
-                        null,
-                    );
-                },
-                else => {},
-            }
-
             var piece_index: u32 = 0;
             while (piece_index < entity.piece_count) : (piece_index += 1) {
                 const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
                 const bitmap_id: ?BitmapId =
                     transient_state.assets.getBestMatchBitmap(piece.asset_type, &match_vector, &weight_vector);
 
+                var x_axis: Vector2 = .new(1, 0);
+                var y_axis: Vector2 = .new(0, 1);
+                if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.AxesDeform) != 0) {
+                    x_axis = entity.x_axis;
+                    y_axis = entity.y_axis;
+                }
+
+                var bob_time: f32 = 0;
+                var offset: Vector3 = .zero();
+                if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.BobOffset) != 0) {
+                    bob_time = entity.bob_time;
+                    offset = entity.floor_displace.toVector3(0);
+                    _ = offset.setY(offset.y() + bob_time);
+                }
+
                 render_group.pushBitmapId(
                     entity_transform,
                     bitmap_id,
                     piece.height,
-                    Vector3.zero(),
+                    piece.offset.plus(offset),
                     piece.color,
                     null,
-                    null,
-                    null,
+                    x_axis,
+                    y_axis,
                 );
             }
 
@@ -831,7 +646,7 @@ pub fn updateAndRenderWorld(
     return result;
 }
 
-fn beginEntity(world_mode: *GameModeWorld, entity_type: EntityType) *Entity {
+fn beginEntity(world_mode: *GameModeWorld) *Entity {
     std.debug.assert(world_mode.creation_buffer_index < world_mode.creation_buffer.len);
 
     var entity: *Entity = &world_mode.creation_buffer[world_mode.creation_buffer_index];
@@ -839,9 +654,11 @@ fn beginEntity(world_mode: *GameModeWorld, entity_type: EntityType) *Entity {
 
     shared.zeroStruct(Entity, entity);
 
+    entity.x_axis = .new(1, 0);
+    entity.y_axis = .new(0, 1);
+
     world_mode.last_used_entity_storage_index += 1;
     entity.id = .{ .value = world_mode.last_used_entity_storage_index };
-    entity.type = entity_type;
     entity.collision = world_mode.null_collision;
 
     return entity;
@@ -858,10 +675,9 @@ fn endEntity(world_mode: *GameModeWorld, entity: *Entity, chunk_position: WorldP
 
 fn beginGroundedEntity(
     world_mode: *GameModeWorld,
-    entity_type: EntityType,
     collision: *EntityCollisionVolumeGroup,
 ) *Entity {
-    const entity = beginEntity(world_mode, entity_type);
+    const entity = beginEntity(world_mode);
     entity.collision = collision;
     return entity;
 }
@@ -887,13 +703,13 @@ fn addStandardRoom(
             // _ = world_position.offset.setZ(0.25 * @as(f32, @floatFromInt(offset_x + offset_y)));
 
             if (offset_x == 2 and offset_y == 2) {
-                const entity: *Entity = beginGroundedEntity(world_mode, .FloatyThing, world_mode.floor_collision);
+                const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
                 entity.traversable_count = 1;
                 entity.traversables[0].position = Vector3.zero();
                 entity.traversables[0].occupier = null;
                 endEntity(world_mode, entity, world_position);
             } else {
-                const entity: *Entity = beginGroundedEntity(world_mode, .Floor, world_mode.floor_collision);
+                const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
                 entity.traversable_count = 1;
                 entity.traversables[0].position = Vector3.zero();
                 entity.traversables[0].occupier = null;
@@ -903,19 +719,75 @@ fn addStandardRoom(
     }
 }
 
+fn addBrain(world_mode: *GameModeWorld) BrainId {
+    world_mode.last_used_entity_storage_index += 1;
+    const brain_id: BrainId = .{ .value = world_mode.last_used_entity_storage_index };
+    return brain_id;
+}
+
+pub fn addPlayer(world_mode: *GameModeWorld, sim_region: *sim.SimRegion, standing_on: TraversableReference, brain_id: BrainId) void {
+    const position: WorldPosition = world.mapIntoChunkSpace(
+        sim_region.world,
+        sim_region.origin,
+        standing_on.getSimSpaceTraversable().position,
+    );
+    var body = beginGroundedEntity(world_mode, world_mode.hero_body_collision);
+    body.addFlags(EntityFlags.Collides.toInt() | EntityFlags.Movable.toInt());
+
+    const head = beginGroundedEntity(world_mode, world_mode.hero_head_collision);
+    head.addFlags(EntityFlags.Collides.toInt() | EntityFlags.Movable.toInt());
+
+    initHitPoints(body, 3);
+
+    head.brain_slot = BrainSlot.forField(BrainHero, "head");
+    head.brain_id = brain_id;
+
+    body.brain_slot = BrainSlot.forField(BrainHero, "body");
+    body.brain_id = brain_id;
+    body.occupying = standing_on;
+
+    if (world_mode.camera_following_entity_index.value == 0) {
+        world_mode.camera_following_entity_index = head.id;
+    }
+
+    const hero_scale = 3;
+    const shadow_alpha = 0.5;
+    const color: Color = .white();
+    body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
+    body.addPiece(
+        .Torso,
+        hero_scale * 1.2,
+        .new(0, 0, -0.002),
+        color,
+        @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
+    );
+    body.addPiece(
+        .Cape,
+        hero_scale * 1.2,
+        .new(0, -0.1, -0.001),
+        color,
+        @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
+    );
+
+    head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
+
+    endEntity(world_mode, head, position);
+    endEntity(world_mode, body, position);
+}
+
 fn addWall(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode, .Wall, world_mode.wall_collision);
+    const entity = beginGroundedEntity(world_mode, world_mode.wall_collision);
 
     entity.addFlags(EntityFlags.Collides.toInt());
-    entity.addPiece(.Tree, 2.5, Color.white());
+    entity.addPiece(.Tree, 2.5, .zero(), .white(), null);
 
     endEntity(world_mode, entity, world_position);
 }
 
 fn addStairs(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode, .Stairwell, world_mode.stair_collsion);
+    const entity = beginGroundedEntity(world_mode, world_mode.stair_collsion);
 
     entity.walkable_dimension = entity.collision.total_volume.dimension.xy();
     entity.walkable_height = world_mode.typical_floor_height;
@@ -926,10 +798,15 @@ fn addStairs(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_t
 
 fn addMonster(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    var entity = beginGroundedEntity(world_mode, .Monster, world_mode.monster_collsion);
+    var entity = beginGroundedEntity(world_mode, world_mode.monster_collsion);
 
     entity.collision = world_mode.monster_collsion;
     entity.addFlags(EntityFlags.Collides.toInt() | EntityFlags.Movable.toInt());
+    entity.addPiece(.Shadow, 4.5, .zero(), .new(1, 1, 1, 0.5), null);
+    entity.addPiece(.Torso, 4.5, .zero(), .white(), null);
+
+    entity.brain_slot = BrainSlot.forField(BrainMonster, "body");
+    entity.brain_id = addBrain(world_mode);
 
     initHitPoints(entity, 3);
 
@@ -938,11 +815,62 @@ fn addMonster(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_
 
 fn addFamiliar(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode, .Familiar, world_mode.familiar_collsion);
+    const entity = beginGroundedEntity(world_mode, world_mode.familiar_collsion);
 
     entity.addFlags(EntityFlags.Collides.toInt() | EntityFlags.Movable.toInt());
 
+    entity.brain_slot = BrainSlot.forField(BrainFamiliar, "head");
+    entity.brain_id = addBrain(world_mode);
+
+    const shadow_alpha = 0.5;
+    entity.addPiece(.Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
+    entity.addPiece(.Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
+
     endEntity(world_mode, entity, world_position);
+}
+
+pub fn addCollisionRule(world_mode: *GameModeWorld, in_id_a: u32, in_id_b: u32, can_collide: bool) void {
+    var id_a = in_id_a;
+    var id_b = in_id_b;
+
+    // Sort entities based on storage index.
+    if (id_a > id_b) {
+        const temp = id_a;
+        id_a = id_b;
+        id_b = temp;
+    }
+
+    // Look for an existing rule in the hash.
+    const hash_bucket = id_a & ((world_mode.collision_rule_hash.len) - 1);
+    var found_rule: ?*PairwiseCollisionRule = null;
+    var opt_rule: ?*PairwiseCollisionRule = world_mode.collision_rule_hash[hash_bucket];
+    while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
+        if (rule.id_a == id_a and rule.id_b == id_b) {
+            found_rule = rule;
+            break;
+        }
+    }
+
+    // Create a new rule if it didn't exist.
+    if (found_rule == null) {
+        found_rule = world_mode.first_free_collision_rule;
+
+        if (found_rule) |rule| {
+            world_mode.first_free_collision_rule = rule.next_in_hash;
+        } else {
+            found_rule = world_mode.world.arena.pushStruct(PairwiseCollisionRule, null);
+        }
+
+        found_rule.?.next_in_hash = world_mode.collision_rule_hash[hash_bucket];
+        world_mode.collision_rule_hash[hash_bucket] = found_rule.?;
+    }
+
+    // Apply the rule settings.
+    if (found_rule) |found| {
+        found.id_a = id_a;
+        found.id_b = id_b;
+        found.can_collide = can_collide;
+    }
 }
 
 pub fn clearCollisionRulesFor(world_mode: *GameModeWorld, id: u32) void {

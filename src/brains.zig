@@ -3,6 +3,9 @@ const entities = @import("entities.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
+const world_mode = @import("world_mode.zig");
+
+var global_config = &@import("config.zig").global_config;
 
 const Entity = entities.Entity;
 const TraversableReference = entities.TraversableReference;
@@ -10,28 +13,50 @@ const SimRegion = sim.SimRegion;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 
-pub const Brain = extern struct { id: BrainId, type: BrainType, parts: extern union {
-    hero: BrainHeroParts,
-    array: [16]?*Entity,
-} };
-
-pub const BrainId = extern struct {
-    value: u32 = 0,
-};
-
-pub const BrainHeroParts = extern struct {
+//
+// Brain types
+//
+pub const BrainHero = extern struct {
     head: ?*Entity,
     body: ?*Entity,
 };
 
-pub const BrainType = enum(u32) {
-    Hero,
+pub const BrainMonster = extern struct {
+    body: ?*Entity,
+};
+
+pub const BrainFamiliar = extern struct {
+    head: ?*Entity,
+};
+
+//
+// Brain
+//
+pub const Brain = extern struct {
+    id: BrainId,
+    type: BrainType,
+    parts: extern union {
+        hero: BrainHero,
+        monster: BrainMonster,
+        familiar: BrainFamiliar,
+        array: [16]?*Entity,
+    },
+};
+
+pub const BrainId = extern struct {
+    value: u32 = 0,
+
+    pub const no_brain: BrainId = .{};
+};
+
+pub const BrainType = enum(u16) {
+    BrainHero,
 
     // Test brains.
-    Snake,
-    Familiar,
-    FloatyThing,
-    Monster,
+    BrainSnake,
+    BrainFamiliar,
+    BrainFloatyThing,
+    BrainMonster,
 };
 
 pub const ReservedBrainId = enum(u32) {
@@ -41,11 +66,23 @@ pub const ReservedBrainId = enum(u32) {
 };
 
 pub const BrainSlot = extern struct {
-    index: u32 = 0,
+    type: u16 = 0,
+    index: u16 = 0,
 
     pub fn forField(comptime slot_type: type, comptime field_name: []const u8) BrainSlot {
-        const pack_value = @offsetOf(slot_type, field_name) / @sizeOf(*Entity);
-        return BrainSlot{ .index = pack_value };
+        const full_brain_type_name = @typeName(slot_type);
+
+        comptime var last_dot: usize = 0;
+        comptime for (full_brain_type_name, 0..) |c, i| {
+            if (c == '.') {
+                last_dot = i + 1;
+            }
+        };
+
+        const brain_type_name: []const u8 = full_brain_type_name[last_dot..];
+        const brain_type: u16 = @intFromEnum(@field(BrainType, brain_type_name));
+        const pack_value: u16 = @offsetOf(slot_type, field_name) / @sizeOf(*Entity);
+        return BrainSlot{ .type = brain_type, .index = pack_value };
     }
 };
 
@@ -57,8 +94,8 @@ pub fn executeBrain(
     delta_time: f32,
 ) void {
     switch (brain.type) {
-        .Hero => {
-            const parts: *BrainHeroParts = &brain.parts.hero;
+        .BrainHero => {
+            const parts: *BrainHero = &brain.parts.hero;
             const opt_head: ?*Entity = parts.head;
             const opt_body: ?*Entity = parts.body;
 
@@ -115,6 +152,35 @@ pub fn executeBrain(
                 }
             }
 
+            if (controller.start_button.wasPressed()) {
+                if (opt_head) |head| {
+                    var opt_closest_hero: ?*Entity = null;
+                    var closest_hero_squared: f32 = math.square(10.0);
+
+                    var hero_entity_index: u32 = 0;
+                    while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
+                        var test_entity = &sim_region.entities[hero_entity_index];
+                        if (test_entity.brain_id.value != 0 and test_entity.brain_id.value != brain.id.value) {
+                            const distance = test_entity.position.minus(head.position).lengthSquared();
+
+                            if (distance < closest_hero_squared) {
+                                opt_closest_hero = test_entity;
+                                closest_hero_squared = distance;
+                            }
+                        }
+                    }
+
+                    if (opt_closest_hero) |closest_hero| {
+                        const old_brain_id = head.brain_id;
+                        const old_brain_slot = head.brain_slot;
+                        head.brain_id = closest_hero.brain_id;
+                        head.brain_slot = closest_hero.brain_slot;
+                        closest_hero.brain_id = old_brain_id;
+                        closest_hero.brain_slot = old_brain_slot;
+                    }
+                }
+            }
+
             if (controller.action_up.ended_down) {
                 sword_direction = sword_direction.plus(Vector2.new(0, 1));
                 state.audio_state.changeVolume(state.music, 10, Vector2.one());
@@ -150,7 +216,7 @@ pub fn executeBrain(
                             &traversable,
                             @intFromEnum(sim.TraversableSearchFlag.Unoccupied),
                         )) {
-                            _ = state.mode.world.addPlayer(sim_region, traversable);
+                            world_mode.addPlayer(state.mode.world, sim_region, traversable);
                         }
 
                         debug_spawn = false;
@@ -190,7 +256,7 @@ pub fn executeBrain(
                     const controller_direction = controlled_hero.controller_direction.toVector3(0);
                     var acceleration2: Vector3 = controller_direction;
                     for (0..3) |e| {
-                        if (no_push or (timer_is_up and math.square(controller_direction.values[e]) < 0.1)) {
+                        if (no_push or (timer_is_up and math.square(acceleration2.values[e]) < 0.1)) {
                             acceleration2.values[e] =
                                 spring_coefficient * (closest_position.values[e] - head.position.values[e]) -
                                 30 * head.velocity.values[e];
@@ -237,44 +303,47 @@ pub fn executeBrain(
                 controlled_hero.brain_id = .{};
             }
         },
-        .Familiar => {
-            // var closest_hero: ?*Entity = null;
-            // var closest_hero_squared: f32 = math.square(10.0);
-            //
-            // var hero_entity_index: u32 = 0;
-            // while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
-            //     var test_entity = &sim_region.entities[hero_entity_index];
-            //     if (test_entity.type == .HeroBody) {
-            //         const distance = test_entity.position.minus(entity.position).lengthSquared();
-            //
-            //         if (distance < closest_hero_squared) {
-            //             closest_hero = test_entity;
-            //             closest_hero_squared = distance;
-            //         }
-            //     }
-            // }
-            //
-            // if (global_config.AI_Familiar_FollowsHero) {
-            //     if (closest_hero) |hero| {
-            //         if (closest_hero_squared > math.square(3.0)) {
-            //             const speed: f32 = 1.0;
-            //             const one_over_length = speed / @sqrt(closest_hero_squared);
-            //             entity.acceleration = hero.position.minus(entity.position).scaledTo(one_over_length);
-            //         }
-            //     }
-            // }
-            //
-            // move_spec = sim.MoveSpec{
-            //     .speed = 25,
-            //     .drag = 8,
-            //     .unit_max_acceleration = true,
-            // };
+        .BrainFamiliar => {
+            const parts: *BrainFamiliar = &brain.parts.familiar;
+            const opt_head: ?*Entity = parts.head;
+
+            if (opt_head) |head| {
+                var closest_hero: ?*Entity = null;
+                var closest_hero_squared: f32 = math.square(10.0);
+
+                var hero_entity_index: u32 = 0;
+                while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
+                    var test_entity = &sim_region.entities[hero_entity_index];
+                    if (test_entity.brain_slot.type == @intFromEnum(BrainType.BrainHero)) {
+                        const distance = test_entity.position.minus(head.position).lengthSquared();
+
+                        if (distance < closest_hero_squared) {
+                            closest_hero = test_entity;
+                            closest_hero_squared = distance;
+                        }
+                    }
+                }
+
+                if (global_config.AI_Familiar_FollowsHero) {
+                    if (closest_hero) |hero| {
+                        if (closest_hero_squared > math.square(3.0)) {
+                            const speed: f32 = 1.0;
+                            const one_over_length = speed / @sqrt(closest_hero_squared);
+                            head.acceleration = hero.position.minus(head.position).scaledTo(one_over_length);
+                        }
+                    }
+                }
+
+                head.move_spec.speed = 25;
+                head.move_spec.drag = 8;
+                head.move_spec.unit_max_acceleration = true;
+            }
         },
-        .FloatyThing => {
+        .BrainFloatyThing => {
             // _ = entity.position.setZ(entity.position.z() + 0.05 * intrinsics.cos(entity.bob_time));
             // entity.bob_time += delta_time;
         },
-        .Monster => {},
-        .Snake => {},
+        .BrainMonster => {},
+        .BrainSnake => {},
     }
 }
