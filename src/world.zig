@@ -139,7 +139,7 @@ fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *EntityReference)
             reference.index = ptr.id;
         }
     } else if (reference.index.value != 0) {
-        if (opt_sim_region == null or sim.getEntityHashFromId(opt_sim_region.?, reference.index) != null) {
+        if (opt_sim_region != null and sim.getEntityHashFromId(opt_sim_region.?, reference.index) != null) {
             reference.index.value = 0;
         }
     }
@@ -187,7 +187,6 @@ fn packEntityIntoChunk(
     packTraversableReference(opt_sim_region, &dest_e.occupying);
     packTraversableReference(opt_sim_region, &dest_e.came_from);
 
-    dest_e.move_spec = .{};
     dest_e.acceleration = .zero();
     dest_e.bob_acceleration = 0;
 }

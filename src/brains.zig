@@ -3,15 +3,17 @@ const entities = @import("entities.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
-const world_mode = @import("world_mode.zig");
+const debug_interface = @import("debug_interface.zig");
 
 var global_config = &@import("config.zig").global_config;
 
+const GameWorldMode = @import("world_mode.zig").GameModeWorld;
 const Entity = entities.Entity;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
+const DebugInterface = debug_interface.DebugInterface;
 
 //
 // Brain types
@@ -88,6 +90,7 @@ pub const BrainSlot = extern struct {
 
 pub fn executeBrain(
     state: *shared.State,
+    world_mode: *GameWorldMode,
     sim_region: *SimRegion,
     input: *shared.GameInput,
     brain: *Brain,
@@ -101,7 +104,6 @@ pub fn executeBrain(
 
             var sword_direction: Vector2 = Vector2.zero();
             var exited: bool = false;
-            var debug_spawn: bool = false;
 
             const controller_index: u32 = brain.id.value - @intFromEnum(ReservedBrainId.FirstHero);
             const controller: *shared.ControllerInput = input.getController(controller_index);
@@ -183,49 +185,20 @@ pub fn executeBrain(
 
             if (controller.action_up.ended_down) {
                 sword_direction = sword_direction.plus(Vector2.new(0, 1));
-                state.audio_state.changeVolume(state.music, 10, Vector2.one());
             }
             if (controller.action_down.ended_down) {
                 sword_direction = sword_direction.plus(Vector2.new(0, -1));
-                state.audio_state.changeVolume(state.music, 10, Vector2.zero());
             }
             if (controller.action_left.ended_down) {
                 sword_direction = sword_direction.plus(Vector2.new(-1, 0));
-                state.audio_state.changeVolume(state.music, 5, Vector2.new(1, 0));
             }
             if (controller.action_right.ended_down) {
                 sword_direction = sword_direction.plus(Vector2.new(1, 0));
-                state.audio_state.changeVolume(state.music, 5, Vector2.new(0, 1));
-            }
-
-            if (controller.start_button.wasPressed()) {
-                debug_spawn = true;
             }
 
             if (controller.back_button.wasPressed()) {
                 exited = true;
             }
-
-            if (false) {
-                if (opt_head) |head| {
-                    if (debug_spawn) {
-                        var traversable: TraversableReference = undefined;
-                        if (sim.getClosestTraversable(
-                            sim_region,
-                            head.position,
-                            &traversable,
-                            @intFromEnum(sim.TraversableSearchFlag.Unoccupied),
-                        )) {
-                            world_mode.addPlayer(state.mode.world, sim_region, traversable);
-                        }
-
-                        debug_spawn = false;
-                    }
-                }
-            }
-
-            controlled_hero.recenter_timer =
-                math.clampAboveZero(controlled_hero.recenter_timer - delta_time);
 
             if (opt_head) |head| {
                 if (sword_direction.x() == 0 and sword_direction.y() == 0) {
@@ -250,23 +223,38 @@ pub fn executeBrain(
                     }
 
                     const closest_position: Vector3 = traversable.getSimSpaceTraversable().position;
+
+                    const controller_direction = controlled_hero.controller_direction.toVector3(0);
+                    var acceleration: Vector3 = controller_direction;
+
+                    // Limit the input to unit length.
+                    const direction_length = acceleration.lengthSquared();
+                    if (direction_length > 1.0) {
+                        acceleration = acceleration.scaledTo(1.0 / intrinsics.squareRoot(direction_length));
+                    }
+
+                    // Apply movement speed.
+                    const movement_speed: f32 = 30;
+                    const drag: f32 = 8;
+                    acceleration = acceleration.scaledTo(movement_speed);
+
+                    // Recenter.
                     const timer_is_up: bool = controlled_hero.recenter_timer == 0;
                     const no_push: bool = controlled_hero.controller_direction.lengthSquared() < 0.1;
                     const spring_coefficient: f32 = if (no_push) 300 else 25;
-                    const controller_direction = controlled_hero.controller_direction.toVector3(0);
-                    var acceleration2: Vector3 = controller_direction;
                     for (0..3) |e| {
-                        if (no_push or (timer_is_up and math.square(acceleration2.values[e]) < 0.1)) {
-                            acceleration2.values[e] =
+                        if (no_push or (timer_is_up and math.square(acceleration.values[e]) < 0.1)) {
+                            acceleration.values[e] =
                                 spring_coefficient * (closest_position.values[e] - head.position.values[e]) -
                                 30 * head.velocity.values[e];
+                        } else {
+                            acceleration.values[e] += -drag * head.velocity.values[e];
                         }
                     }
+                    controlled_hero.recenter_timer = math.clampAboveZero(controlled_hero.recenter_timer - delta_time);
 
-                    head.move_spec.speed = 30;
-                    head.move_spec.drag = 8;
-                    head.move_spec.unit_max_acceleration = true;
-                    head.acceleration = acceleration2;
+                    // Apply the calculated acceleration to entity.
+                    head.acceleration = acceleration;
                 }
             }
 
@@ -333,17 +321,36 @@ pub fn executeBrain(
                         }
                     }
                 }
-
-                head.move_spec.speed = 25;
-                head.move_spec.drag = 8;
-                head.move_spec.unit_max_acceleration = true;
             }
         },
         .BrainFloatyThing => {
             // _ = entity.position.setZ(entity.position.z() + 0.05 * intrinsics.cos(entity.bob_time));
             // entity.bob_time += delta_time;
         },
-        .BrainMonster => {},
+        .BrainMonster => {
+            const parts: *BrainMonster = &brain.parts.monster;
+            const opt_body: ?*Entity = parts.body;
+
+            if (opt_body) |body| {
+                const delta: Vector3 = .new(
+                    world_mode.game_entropy.randomBilateral(),
+                    world_mode.game_entropy.randomBilateral(),
+                    0,
+                );
+                var traversable: TraversableReference = undefined;
+                if (sim.getClosestTraversable(sim_region, body.position.plus(delta), &traversable, 0)) {
+                    if (body.movement_mode == .Planted) {
+                        if (!traversable.equals(body.occupying)) {
+                            body.came_from = body.occupying;
+                            if (sim.transactionalOccupy(body, &body.occupying, traversable)) {
+                                body.movement_time = 0;
+                                body.movement_mode = .Hopping;
+                            }
+                        }
+                    }
+                }
+            }
+        },
         .BrainSnake => {},
     }
 }

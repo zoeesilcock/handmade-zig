@@ -447,28 +447,10 @@ pub fn moveEntity(
     sim_region: *SimRegion,
     entity: *Entity,
     delta_time: f32,
-    in_acceleration: Vector3,
-    move_spec: *const MoveSpec,
+    acceleration: Vector3,
 ) void {
     TimedBlock.beginFunction(@src(), .MoveEntity);
     defer TimedBlock.endFunction(@src(), .MoveEntity);
-
-    var acceleration = in_acceleration;
-
-    // Correct speed when multiple axes are contributing to the direction.
-    if (move_spec.unit_max_acceleration) {
-        const direction_length = acceleration.lengthSquared();
-        if (direction_length > 1.0) {
-            acceleration = acceleration.scaledTo(1.0 / intrinsics.squareRoot(direction_length));
-        }
-    }
-
-    // Calculate acceleration.
-    acceleration = acceleration.scaledTo(move_spec.speed);
-
-    // Add drag to acceleration.
-    acceleration = acceleration.plus(entity.velocity.scaledTo(move_spec.drag).negated());
-    _ = acceleration.setZ(0);
 
     // Calculate movement delta.
     var entity_delta = acceleration.scaledTo(0.5 * math.square(delta_time))

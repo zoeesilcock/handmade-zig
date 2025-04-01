@@ -11,7 +11,6 @@ const Color = math.Color;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
-const MoveSpec = sim.MoveSpec;
 const BrainId = brains.BrainId;
 const BrainType = brains.BrainType;
 const BrainSlot = brains.BrainSlot;
@@ -25,8 +24,7 @@ pub const EntityId = packed struct {
 
 pub const EntityFlags = enum(u32) {
     Collides = (1 << 0),
-    Movable = (1 << 1),
-    Deleted = (1 << 2),
+    Deleted = (1 << 1),
 
     pub fn toInt(self: EntityFlags) u32 {
         return @intFromEnum(self);
@@ -87,7 +85,6 @@ pub const Entity = extern struct {
     walkable_height: f32 = 0,
 
     movement_mode: EntityMovementMode,
-    move_spec: MoveSpec, // Do not pack this.
     movement_time: f32,
     occupying: TraversableReference,
     came_from: TraversableReference,
@@ -189,8 +186,8 @@ pub const EntityReference = extern struct {
 };
 
 pub const TraversableReference = extern struct {
-    entity: EntityReference,
-    index: u32,
+    entity: EntityReference = .{},
+    index: u32 = 0,
 
     pub const init: TraversableReference = .{
         .entity = .{ .ptr = null },
