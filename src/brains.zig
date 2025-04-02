@@ -1,3 +1,4 @@
+const std = @import("std");
 const shared = @import("shared.zig");
 const entities = @import("entities.zig");
 const sim = @import("sim.zig");
@@ -31,6 +32,10 @@ pub const BrainFamiliar = extern struct {
     head: ?*Entity,
 };
 
+pub const BrainSnake = extern struct {
+    segments: [16]?*Entity,
+};
+
 //
 // Brain
 //
@@ -38,10 +43,11 @@ pub const Brain = extern struct {
     id: BrainId,
     type: BrainType,
     parts: extern union {
+        array: [*]Entity,
         hero: BrainHero,
         monster: BrainMonster,
         familiar: BrainFamiliar,
-        array: [16]?*Entity,
+        snake: BrainSnake,
     },
 };
 
@@ -85,6 +91,16 @@ pub const BrainSlot = extern struct {
         const brain_type: u16 = @intFromEnum(@field(BrainType, brain_type_name));
         const pack_value: u16 = @offsetOf(slot_type, field_name) / @sizeOf(*Entity);
         return BrainSlot{ .type = brain_type, .index = pack_value };
+    }
+
+    pub fn forIndexedField(comptime slot_type: type, comptime field_name: []const u8, index: u32) BrainSlot {
+        var slot: BrainSlot = BrainSlot.forField(slot_type, field_name);
+        slot.index += @as(u16, @intCast(index));
+        return slot;
+    }
+
+    pub fn isType(self: BrainSlot, brain_type: BrainType) bool {
+        return self.index != 0 and self.type == @intFromEnum(brain_type);
     }
 };
 
@@ -302,7 +318,7 @@ pub fn executeBrain(
                 var hero_entity_index: u32 = 0;
                 while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
                     var test_entity = &sim_region.entities[hero_entity_index];
-                    if (test_entity.brain_slot.type == @intFromEnum(BrainType.BrainHero)) {
+                    if (test_entity.brain_slot.isType(.BrainHero)) {
                         const distance = test_entity.position.minus(head.position).lengthSquared();
 
                         if (distance < closest_hero_squared) {
@@ -315,8 +331,8 @@ pub fn executeBrain(
                 if (global_config.AI_Familiar_FollowsHero) {
                     if (closest_hero) |hero| {
                         if (closest_hero_squared > math.square(3.0)) {
-                            const speed: f32 = 1.0;
-                            const one_over_length = speed / @sqrt(closest_hero_squared);
+                            const acceleration: f32 = 1;
+                            const one_over_length = acceleration / @sqrt(closest_hero_squared);
                             head.acceleration = hero.position.minus(head.position).scaledTo(one_over_length);
                         }
                     }
@@ -351,6 +367,42 @@ pub fn executeBrain(
                 }
             }
         },
-        .BrainSnake => {},
+        .BrainSnake => {
+            const parts: *BrainSnake = &brain.parts.snake;
+            const opt_head: ?*Entity = parts.segments[0];
+
+            if (opt_head) |head| {
+                const delta: Vector3 = .new(
+                    world_mode.game_entropy.randomBilateral(),
+                    world_mode.game_entropy.randomBilateral(),
+                    0,
+                );
+                var traversable: TraversableReference = undefined;
+                if (sim.getClosestTraversable(sim_region, head.position.plus(delta), &traversable, 0)) {
+                    if (head.movement_mode == .Planted) {
+                        if (!traversable.equals(head.occupying)) {
+                            var last_occupying: TraversableReference = head.occupying;
+                            head.came_from = head.occupying;
+                            if (sim.transactionalOccupy(head, &head.occupying, traversable)) {
+                                head.movement_time = 0;
+                                head.movement_mode = .Hopping;
+
+                                var segment_index: u32 = 1;
+                                while (segment_index < parts.segments.len) : (segment_index += 1) {
+                                    if (parts.segments[segment_index]) |segment| {
+                                        segment.came_from = segment.occupying;
+                                        _ = sim.transactionalOccupy(segment, &segment.occupying, last_occupying);
+                                        last_occupying = segment.came_from;
+
+                                        segment.movement_time = 0;
+                                        segment.movement_mode = .Hopping;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
     }
 }

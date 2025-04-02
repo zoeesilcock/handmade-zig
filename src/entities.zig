@@ -34,6 +34,7 @@ pub const EntityFlags = enum(u32) {
 pub const EntityMovementMode = enum(u32) {
     Planted,
     Hopping,
+    Floating,
 };
 
 pub const EntityVisiblePieceFlag = enum(u32) {

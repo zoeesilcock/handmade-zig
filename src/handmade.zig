@@ -21,6 +21,10 @@ const std = @import("std");
 ///     * Diagramming.
 ///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
 ///
+/// * Entity system.
+///     * What to do about geographically disperate entities that might only partially get streamed in to a sim region,
+///     but which need to move together as a unit?
+///
 /// * Audio.
 ///     * Fix clicking bug at end of samples.
 ///
@@ -50,7 +54,6 @@ const std = @import("std");
 ///     * How it this rendered.
 ///     * Z fudge!
 /// * Collision detection?
-///     * Fix sword collisions!
 ///     * Clean up predicate proliferation! Can we make a nice clean set of flag rules so that it's easy to understnad
 ///     how things work in terms of special handling? This may involve making the iteration handle everything
 ///     instead of handling overlap outside and so on.
@@ -67,15 +70,12 @@ const std = @import("std");
 ///     * Sim region merging? For multiple players?
 ///     * Simple zoomed-out view for testing?
 /// * AI.
-///     * Rudimentary monster behaviour example.
 ///     * Pathfinding.
 ///     * AI storage.
 ///
 /// Production:
 ///
 /// * Game.
-///     * Entity system.
-///     * World generation.
 ///     * Rudimentary world generation to understand which elements will be needed.
 ///         * Placement of background things.
 ///         * Connectivity?

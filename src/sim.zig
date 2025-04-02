@@ -294,8 +294,10 @@ pub fn beginSimulation(
                                             dest.brain_id,
                                             @enumFromInt(dest.brain_slot.type),
                                         );
-                                        std.debug.assert(dest.brain_slot.index < brain.parts.array.len);
-                                        brain.parts.array[dest.brain_slot.index] = dest;
+                                        var ptr = @intFromPtr(&brain.parts.array);
+                                        ptr += @sizeOf(*Entity) * dest.brain_slot.index;
+                                        std.debug.assert(ptr <= @intFromPtr(brain) + @sizeOf(Brain) - @sizeOf(*Entity));
+                                        @as(**Entity, @ptrFromInt(ptr)).* = dest;
                                     }
                                 } else {
                                     unreachable;

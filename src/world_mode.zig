@@ -55,6 +55,7 @@ const Brain = brains.Brain;
 const BrainId = brains.BrainId;
 const BrainSlot = brains.BrainSlot;
 const BrainHero = brains.BrainHero;
+const BrainSnake = brains.BrainSnake;
 const BrainMonster = brains.BrainMonster;
 const BrainFamiliar = brains.BrainFamiliar;
 const ReservedBrainId = brains.ReservedBrainId;
@@ -188,7 +189,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..1) |_| {
+    for (0..6) |_| {
         // const door_direction = 3;
         // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
         const door_direction = series.randomChoice(2);
@@ -216,6 +217,13 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         _ = addMonster(world_mode, room.position[3][4], room.ground[3][4]);
         _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
+        const snake_brain_id = addBrain(world_mode);
+        var segment_index: u32 = 0;
+        while (segment_index < 12) : (segment_index += 1) {
+            const x: u32 = 2 + segment_index;
+            _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
+        }
+
         for (0..room.position[0].len) |tile_y| {
             for (0..room.position.len) |tile_x| {
                 const position: WorldPosition = room.position[tile_x][tile_y];
@@ -233,10 +241,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
                 }
                 if ((tile_y == (tiles_per_height - 1)) and (!door_top or (tile_x != (tiles_per_width / 2)))) {
                     should_be_door = false;
-                }
-
-                if (tile_x == 14) {
-                    _ = addWall(world_mode, position, ground);
                 }
 
                 if (!should_be_door) {
@@ -474,6 +478,7 @@ pub fn updateAndRenderWorld(
                         entity.movement_time = 1;
                     }
                 },
+                .Floating => {},
             }
 
             const position_coefficient = 100;
@@ -486,8 +491,8 @@ pub fn updateAndRenderWorld(
                 entity.bob_delta_time * delta_time;
             entity.bob_delta_time += entity.bob_acceleration * delta_time;
 
-            if (entity.acceleration.lengthSquared() > 0) {
-                sim.moveEntity( world_mode, sim_region, entity, delta_time, entity.acceleration);
+            if (entity.velocity.lengthSquared() > 0 or entity.acceleration.lengthSquared() > 0) {
+                sim.moveEntity(world_mode, sim_region, entity, delta_time, entity.acceleration);
             }
 
             // Rendering.
@@ -809,6 +814,7 @@ fn addMonster(world_mode: *GameModeWorld, world_position: WorldPosition, standin
 
     entity.collision = world_mode.monster_collsion;
     entity.addFlags(EntityFlags.Collides.toInt());
+
     entity.brain_slot = BrainSlot.forField(BrainMonster, "body");
     entity.brain_id = addBrain(world_mode);
     entity.occupying = standing_on;
@@ -817,6 +823,30 @@ fn addMonster(world_mode: *GameModeWorld, world_position: WorldPosition, standin
 
     entity.addPiece(.Shadow, 4.5, .zero(), .new(1, 1, 1, 0.5), null);
     entity.addPiece(.Torso, 4.5, .zero(), .white(), null);
+
+    endEntity(world_mode, entity, world_position);
+}
+
+fn addSnakeSegment(
+    world_mode: *GameModeWorld,
+    world_position: WorldPosition,
+    standing_on: TraversableReference,
+    brain_id: BrainId,
+    segment_index: u32,
+) void {
+    var entity = beginGroundedEntity(world_mode, world_mode.monster_collsion);
+
+    entity.collision = world_mode.monster_collsion;
+    entity.addFlags(EntityFlags.Collides.toInt());
+
+    entity.brain_slot = BrainSlot.forIndexedField(BrainSnake, "segments", segment_index);
+    entity.brain_id = brain_id;
+    entity.occupying = standing_on;
+
+    initHitPoints(entity, 3);
+
+    entity.addPiece(.Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
+    entity.addPiece(if (segment_index != 0) .Torso else .Head, 1.5, .zero(), .white(), null);
 
     endEntity(world_mode, entity, world_position);
 }
