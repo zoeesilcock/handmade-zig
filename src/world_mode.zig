@@ -692,7 +692,7 @@ fn addStandardRoom(
     while (offset_x <= 8) : (offset_x += 1) {
         var offset_y: i32 = -4;
         while (offset_y <= 4) : (offset_y += 1) {
-            const world_position = chunkPositionFromTilePosition(
+            var world_position = chunkPositionFromTilePosition(
                 world_mode.world,
                 abs_tile_x + offset_x,
                 abs_tile_y + offset_y,
@@ -700,6 +700,8 @@ fn addStandardRoom(
                 null,
             );
 
+            _ = world_position.offset.setX(world_position.offset.x() + 0.25 * world_mode.game_entropy.randomBilateral());
+            _ = world_position.offset.setY(world_position.offset.y() + 0.25 * world_mode.game_entropy.randomBilateral());
             // _ = world_position.offset.setZ(0.25 * @as(f32, @floatFromInt(offset_x + offset_y)));
 
             var standing_on: TraversableReference = .{};

@@ -136,6 +136,11 @@ pub fn loadEntityReference(sim_region: *SimRegion, reference: *EntityReference) 
         reference.* = EntityReference{
             .ptr = getEntityByStorageIndex(sim_region, reference.index),
         };
+
+        // TODO: Why is this needed in our version, but not in Casey's?
+        if (reference.ptr) |entity| {
+            reference.index = entity.id;
+        }
     }
 }
 
@@ -317,6 +322,8 @@ pub fn beginSimulation(
     }
 
     connectEntityPointers(sim_region);
+
+    DebugInterface.debugValue(@src(), &sim_region.entity_count, "EntityCount");
 
     return sim_region;
 }
@@ -730,7 +737,15 @@ pub const TraversableSearchFlag = enum(u8) {
     Unoccupied = 0x1,
 };
 
-pub fn getClosestTraversable(sim_region: *SimRegion, from_position: Vector3, result: *TraversableReference, flags: u32) bool {
+pub fn getClosestTraversable(
+    sim_region: *SimRegion,
+    from_position: Vector3,
+    result: *TraversableReference,
+    flags: u32,
+) bool {
+    TimedBlock.beginFunction(@src(), .GetClosestTraversable);
+    defer TimedBlock.endFunction(@src(), .GetClosestTraversable);
+
     var found: bool = false;
     var closest_distance_squared: f32 = math.square(1000);
     var hero_entity_index: u32 = 0;
@@ -748,6 +763,7 @@ pub fn getClosestTraversable(sim_region: *SimRegion, from_position: Vector3, res
                 const test_distance_squared = to_point.lengthSquared();
                 if (closest_distance_squared > test_distance_squared) {
                     result.entity.ptr = test_entity;
+                    result.entity.index = test_entity.id;
                     result.index = point_index;
                     closest_distance_squared = test_distance_squared;
                     found = true;
@@ -761,4 +777,66 @@ pub fn getClosestTraversable(sim_region: *SimRegion, from_position: Vector3, res
     }
 
     return found;
+}
+
+pub fn getClosestTraversableAlongRay(
+    sim_region: *SimRegion,
+    from_position: Vector3,
+    direction: Vector3,
+    skip: TraversableReference,
+    result: *TraversableReference,
+    flags: u32,
+) bool {
+    TimedBlock.beginFunction(@src(), .GetClosestTraversableAlongRay);
+    defer TimedBlock.endFunction(@src(), .GetClosestTraversableAlongRay);
+
+    var found: bool = false;
+
+    var probe_index: u32 = 0;
+    while (probe_index < 5) : (probe_index += 1) {
+        const sample_position: Vector3 =
+            from_position.plus(direction.scaledTo(0.5 * @as(f32, @floatFromInt(probe_index))));
+
+        if (getClosestTraversable(sim_region, sample_position, result, flags)) {
+            if (!skip.equals(result.*)) {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    return found;
+}
+
+pub const ClosestEntity = struct {
+    entity: ?*Entity = null,
+    delta: Vector3 = .zero(),
+    distance_squared: f32 = 0,
+};
+
+pub fn getClosestEntityWithBrain(
+    sim_region: *SimRegion,
+    position: Vector3,
+    brain_type: BrainType,
+    opt_max_radius: ?f32,
+) ClosestEntity {
+    var result: ClosestEntity = .{};
+    result.distance_squared = math.square(opt_max_radius orelse 20);
+
+    var test_entity_index: u32 = 0;
+    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
+        var test_entity = &sim_region.entities[test_entity_index];
+        if (test_entity.brain_slot.isType(brain_type)) {
+            const test_delta = test_entity.position.minus(position);
+            const test_distance = test_delta.lengthSquared();
+
+            if (result.distance_squared > test_distance) {
+                result.entity = test_entity;
+                result.distance_squared = test_distance;
+                result.delta = test_delta;
+            }
+        }
+    }
+
+    return result;
 }

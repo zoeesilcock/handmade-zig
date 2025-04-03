@@ -142,12 +142,6 @@ pub export fn updateAndRender(
         }
         DebugInterface.debugEndDataBlock(@src());
 
-        DebugInterface.debugBeginDataBlock(@src(), "AI/Familiar");
-        {
-            DebugInterface.debugValue(@src(), &global_config.AI_Familiar_FollowsHero, "AI_Familiar_FollowsHero");
-        }
-        DebugInterface.debugEndDataBlock(@src());
-
         DebugInterface.debugBeginDataBlock(@src(), "Particles");
         {
             DebugInterface.debugValue(@src(), &global_config.Particles_Test, "Particles_Test");

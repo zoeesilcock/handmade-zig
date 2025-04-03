@@ -100,7 +100,7 @@ fn Vector2Type(comptime ScalarType: type) type {
         pub const invalidPosition = Shared.invalidPosition;
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
-        pub const normalizeToZero = Shared.normalizeToZero;
+        pub const normalizeOrZero = Shared.normalizeOrZero;
         pub const toGL = Shared.toGL;
     };
 }
@@ -205,7 +205,7 @@ fn Vector3Type(comptime ScalarType: type) type {
         pub const invalidPosition = Shared.invalidPosition;
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
-        pub const normalizeToZero = Shared.normalizeToZero;
+        pub const normalizeOrZero = Shared.normalizeOrZero;
         pub const toGL = Shared.toGL;
     };
 }
@@ -336,7 +336,7 @@ fn Vector4Type(comptime ScalarType: type) type {
         pub const invalidPosition = Shared.invalidPosition;
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
-        pub const normalizeToZero = Shared.normalizeToZero;
+        pub const normalizeOrZero = Shared.normalizeOrZero;
         pub const toGL = Shared.toGL;
     };
 }
@@ -420,7 +420,7 @@ fn Color3Type(comptime ScalarType: type) type {
         pub const invalidPosition = Shared.invalidPosition;
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
-        pub const normalizeToZero = Shared.normalizeToZero;
+        pub const normalizeOrZero = Shared.normalizeOrZero;
     };
 }
 
@@ -552,7 +552,7 @@ fn Color4Type(comptime ScalarType: type) type {
         pub const invalidPosition = Shared.invalidPosition;
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
-        pub const normalizeToZero = Shared.normalizeToZero;
+        pub const normalizeOrZero = Shared.normalizeOrZero;
         pub const toGL = Shared.toGL;
     };
 }
@@ -633,7 +633,7 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
             return self.scaledTo(1.0 / self.length());
         }
 
-        pub inline fn normalizeToZero(self: Self) Self {
+        pub inline fn normalizeOrZero(self: Self) Self {
             var result: Self = Self.zero();
             const length_squared: f32 = self.lengthSquared();
             if (length_squared > square(0.0001)) {

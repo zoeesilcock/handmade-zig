@@ -219,6 +219,16 @@ pub const TraversableReference = extern struct {
     pub fn equals(self: TraversableReference, other: TraversableReference) bool {
         return self.entity.equals(other.entity) and self.index == other.index;
     }
+
+    pub fn isOccupied(self: TraversableReference) bool {
+        var result: bool = true;
+
+        if (self.getTraversable()) |traversable| {
+            result = traversable.occupier != null;
+        }
+
+        return result;
+    }
 };
 
 pub const HitPoint = extern struct {

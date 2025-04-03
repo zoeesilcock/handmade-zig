@@ -12,6 +12,7 @@ const GameWorldMode = @import("world_mode.zig").GameModeWorld;
 const Entity = entities.Entity;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
+const ClosestEntity = sim.ClosestEntity;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const DebugInterface = debug_interface.DebugInterface;
@@ -312,31 +313,44 @@ pub fn executeBrain(
             const opt_head: ?*Entity = parts.head;
 
             if (opt_head) |head| {
-                var closest_hero: ?*Entity = null;
-                var closest_hero_squared: f32 = math.square(10.0);
+                var blocked: bool = true;
 
-                var hero_entity_index: u32 = 0;
-                while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
-                    var test_entity = &sim_region.entities[hero_entity_index];
-                    if (test_entity.brain_slot.isType(.BrainHero)) {
-                        const distance = test_entity.position.minus(head.position).lengthSquared();
-
-                        if (distance < closest_hero_squared) {
-                            closest_hero = test_entity;
-                            closest_hero_squared = distance;
+                var traversable: TraversableReference = undefined;
+                if (sim.getClosestTraversable(sim_region, head.position, &traversable, 0)) {
+                    if (traversable.equals(head.occupying)) {
+                        blocked = false;
+                    } else {
+                        if (sim.transactionalOccupy(head, &head.occupying, traversable)) {
+                            blocked = false;
                         }
                     }
                 }
 
-                if (global_config.AI_Familiar_FollowsHero) {
-                    if (closest_hero) |hero| {
-                        if (closest_hero_squared > math.square(3.0)) {
-                            const acceleration: f32 = 1;
-                            const one_over_length = acceleration / @sqrt(closest_hero_squared);
-                            head.acceleration = hero.position.minus(head.position).scaledTo(one_over_length);
+                var target_position: Vector3 = head.occupying.getSimSpaceTraversable().position;
+                if (!blocked) {
+                    const closest: ClosestEntity =
+                        sim.getClosestEntityWithBrain(sim_region, head.position, .BrainHero, null);
+
+                    if (closest.entity) |hero| {
+                        // if (closest_hero_squared > math.square(3.0)) {
+                        var target_traversable: TraversableReference = undefined;
+                        if (sim.getClosestTraversableAlongRay(
+                            sim_region,
+                            head.position,
+                            closest.delta.normalizeOrZero(),
+                            head.occupying,
+                            &target_traversable,
+                            0,
+                        )) {
+                            if (!target_traversable.isOccupied()) {
+                                target_position = hero.position;
+                            }
                         }
+                        // }
                     }
                 }
+
+                head.acceleration = target_position.minus(head.position).scaledTo(10).minus(head.velocity.scaledTo(8));
             }
         },
         .BrainFloatyThing => {
