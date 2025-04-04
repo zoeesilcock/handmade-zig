@@ -77,6 +77,7 @@ pub const GameModeWorld = struct {
     stair_collsion: *EntityCollisionVolumeGroup = undefined,
     hero_body_collision: *EntityCollisionVolumeGroup = undefined,
     hero_head_collision: *EntityCollisionVolumeGroup = undefined,
+    hero_glove_collision: *EntityCollisionVolumeGroup = undefined,
     familiar_collsion: *EntityCollisionVolumeGroup = undefined,
     monster_collsion: *EntityCollisionVolumeGroup = undefined,
 
@@ -172,6 +173,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     );
     world_mode.hero_body_collision = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
     world_mode.hero_head_collision = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
+    world_mode.hero_glove_collision = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
     world_mode.monster_collsion = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
     world_mode.familiar_collsion = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
 
@@ -219,7 +221,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
         const snake_brain_id = addBrain(world_mode);
         var segment_index: u32 = 0;
-        while (segment_index < 12) : (segment_index += 1) {
+        while (segment_index < 5) : (segment_index += 1) {
             const x: u32 = 2 + segment_index;
             _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
         }
@@ -478,7 +480,39 @@ pub fn updateAndRenderWorld(
                         entity.movement_time = 1;
                     }
                 },
+                .AngleAttackSwipe => {
+                    if (entity.movement_time < 1) {
+                        entity.angle_current = math.lerpf(
+                            entity.angle_start,
+                            entity.angle_target,
+                            entity.movement_time,
+                        );
+
+                        entity.angle_current_distance = math.lerpf(
+                            entity.angle_base_distance,
+                            entity.angle_swipe_distance,
+                            math.triangle01(entity.movement_time),
+                        );
+                    } else {
+                        entity.movement_mode = .AngleOffset;
+                        entity.angle_current = entity.angle_target;
+                        entity.angle_current_distance = entity.angle_base_distance;
+                    }
+
+                    entity.movement_time += 10 * delta_time;
+                    if (entity.movement_time > 1) {
+                        entity.movement_time = 1;
+                    }
+                },
+                .AngleOffset => {},
                 .Floating => {},
+            }
+
+            if (entity.movement_mode == .AngleAttackSwipe or entity.movement_mode == .AngleOffset) {
+                const arm: Vector2 =
+                    Vector2.arm2(entity.angle_current + entity.facing_direction)
+                    .scaledTo(entity.angle_current_distance);
+                entity.position = entity.angle_base.plus(.new(arm.x(), arm.y() + 0.5, 0));
             }
 
             const position_coefficient = 100;
@@ -752,6 +786,14 @@ pub fn addPlayer(
     const head = beginGroundedEntity(world_mode, world_mode.hero_head_collision);
     head.addFlags(EntityFlags.Collides.toInt());
 
+    const glove = beginGroundedEntity(world_mode, world_mode.hero_glove_collision);
+    glove.addFlags(EntityFlags.Collides.toInt());
+    glove.movement_mode = .AngleOffset;
+    glove.angle_current = -0.25 * math.TAU32;
+    glove.angle_base_distance = 0.3;
+    glove.angle_swipe_distance = 1;
+    glove.angle_current_distance = 0.3;
+
     initHitPoints(body, 3);
 
     head.brain_slot = BrainSlot.forField(BrainHero, "head");
@@ -760,6 +802,9 @@ pub fn addPlayer(
     body.brain_slot = BrainSlot.forField(BrainHero, "body");
     body.brain_id = brain_id;
     body.occupying = standing_on;
+
+    glove.brain_slot = BrainSlot.forField(BrainHero, "glove");
+    glove.brain_id = brain_id;
 
     if (world_mode.camera_following_entity_index.value == 0) {
         world_mode.camera_following_entity_index = head.id;
@@ -786,6 +831,9 @@ pub fn addPlayer(
 
     head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
 
+    glove.addPiece(.Sword, hero_scale * 0.25, .new(0, 0, 0), color, null);
+
+    endEntity(world_mode, glove, position);
     endEntity(world_mode, head, position);
     endEntity(world_mode, body, position);
 }

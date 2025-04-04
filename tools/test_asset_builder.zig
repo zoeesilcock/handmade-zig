@@ -1057,9 +1057,9 @@ fn writeHero(allocator: std.mem.Allocator) void {
     var result = Assets.init();
 
     const angle_right: f32 = 0;
-    const angle_back: f32 = 0.25 * shared.TAU32;
-    const angle_left: f32 = 0.5 * shared.TAU32;
-    const angle_front: f32 = 0.75 * shared.TAU32;
+    const angle_back: f32 = 0.25 * math.TAU32;
+    const angle_left: f32 = 0.5 * math.TAU32;
+    const angle_front: f32 = 0.75 * math.TAU32;
     const hero_align_x = 0.5;
     const hero_align_y = 0.156682029;
 

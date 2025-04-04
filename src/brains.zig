@@ -23,6 +23,7 @@ const DebugInterface = debug_interface.DebugInterface;
 pub const BrainHero = extern struct {
     head: ?*Entity,
     body: ?*Entity,
+    glove: ?*Entity,
 };
 
 pub const BrainMonster = extern struct {
@@ -118,6 +119,7 @@ pub fn executeBrain(
             const parts: *BrainHero = &brain.parts.hero;
             const opt_head: ?*Entity = parts.head;
             const opt_body: ?*Entity = parts.body;
+            const opt_glove: ?*Entity = parts.glove;
 
             var sword_direction: Vector2 = Vector2.zero();
             var exited: bool = false;
@@ -200,29 +202,47 @@ pub fn executeBrain(
                 }
             }
 
+            var attacked: bool = false;
             if (controller.action_up.ended_down) {
+                attacked = true;
                 sword_direction = sword_direction.plus(Vector2.new(0, 1));
             }
             if (controller.action_down.ended_down) {
+                attacked = true;
                 sword_direction = sword_direction.plus(Vector2.new(0, -1));
             }
             if (controller.action_left.ended_down) {
+                attacked = true;
                 sword_direction = sword_direction.plus(Vector2.new(-1, 0));
             }
             if (controller.action_right.ended_down) {
+                attacked = true;
                 sword_direction = sword_direction.plus(Vector2.new(1, 0));
+            }
+
+            if (opt_glove) |glove| {
+                if (glove.movement_mode != .AngleOffset) {
+                    attacked = false;
+                }
             }
 
             if (controller.back_button.wasPressed()) {
                 exited = true;
             }
 
+            if (opt_glove) |glove| {
+                if (attacked) {
+                    glove.movement_time = 0;
+                    glove.movement_mode = .AngleAttackSwipe;
+                    glove.angle_start = glove.angle_current;
+                    glove.angle_target = if (glove.angle_current > 0) -0.25 * math.TAU32 else 0.25 * math.TAU32;
+                    glove.angle_swipe_distance = 2;
+                }
+            }
+
             if (opt_head) |head| {
-                if (sword_direction.x() == 0 and sword_direction.y() == 0) {
-                    // Keep existing facing direction when velocity is zero.
-                } else {
-                    head.facing_direction =
-                        intrinsics.atan2(sword_direction.y(), sword_direction.x());
+                if (attacked) {
+                    head.facing_direction = intrinsics.atan2(sword_direction.y(), sword_direction.x());
                 }
 
                 var traversable: TraversableReference = undefined;
@@ -300,6 +320,11 @@ pub fn executeBrain(
                 }
                 body.floor_displace = head_delta.xy().scaledTo(0.25);
                 body.y_axis = Vector2.new(0, 1).plus(head_delta.xy().scaledTo(0.5));
+
+                if (opt_glove) |glove| {
+                    glove.angle_base = body.position;
+                    glove.facing_direction = body.facing_direction;
+                }
             }
 
             if (exited) {

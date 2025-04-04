@@ -35,6 +35,8 @@ pub const EntityMovementMode = enum(u32) {
     Planted,
     Hopping,
     Floating,
+    AngleOffset,
+    AngleAttackSwipe,
 };
 
 pub const EntityVisiblePieceFlag = enum(u32) {
@@ -89,6 +91,14 @@ pub const Entity = extern struct {
     movement_time: f32,
     occupying: TraversableReference,
     came_from: TraversableReference,
+
+    angle_base: Vector3,
+    angle_current: f32,
+    angle_start: f32,
+    angle_target: f32,
+    angle_current_distance: f32,
+    angle_base_distance: f32,
+    angle_swipe_distance: f32,
 
     x_axis: Vector2,
     y_axis: Vector2,

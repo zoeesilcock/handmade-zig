@@ -1,6 +1,9 @@
 const intrinsics = @import("intrinsics.zig");
 const std = @import("std");
 
+pub const PI32: f32 = 3.14159265359;
+pub const TAU32: f32 = 6.28318530717958647692;
+
 pub const Vector2 = Vector2Type(f32);
 pub const Vector2i = Vector2Type(i32);
 pub const Vector3 = Vector3Type(f32);
@@ -625,8 +628,8 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
             return Self{ .values = @splat(100000) };
         }
 
-        pub inline fn lerp(min: Self, max: Self, distance: ScalarType) Self {
-            return Self{ .values = min.values + @as(@TypeOf(min.values), @splat(distance)) * (max.values - min.values) };
+        pub inline fn lerp(min: Self, max: Self, time: ScalarType) Self {
+            return Self{ .values = min.values + @as(@TypeOf(min.values), @splat(time)) * (max.values - min.values) };
         }
 
         pub inline fn normalized(self: Self) Self {
@@ -936,8 +939,20 @@ pub inline fn square_v4(vector: @Vector(4, f32)) @Vector(4, f32) {
     return vector * vector;
 }
 
-pub inline fn lerpf(min: f32, max: f32, distance: f32) f32 {
-    return (1.0 - distance) * min + distance * max;
+pub inline fn lerpf(min: f32, max: f32, time: f32) f32 {
+    return (1.0 - time) * min + time * max;
+}
+
+pub inline fn sin01(time: f32) f32 {
+    return @sin(PI32 * time);
+}
+
+pub inline fn triangle01(time: f32) f32 {
+    var result: f32 = 2 * time;
+    if (result > 1) {
+        result = 2 - result;
+    }
+    return result;
 }
 
 pub inline fn clampf(min: f32, value: f32, max: f32) f32 {

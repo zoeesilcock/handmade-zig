@@ -1973,7 +1973,7 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
     // var best_distance_sq: f32 = std.math.floatMax(f32);
     //
     // const menu_radius: f32 = 400;
-    // const angle_step: f32 = shared.TAU32 / @as(f32, @floatFromInt(debug_variable_list.len));
+    // const angle_step: f32 = math.TAU32 / @as(f32, @floatFromInt(debug_variable_list.len));
     // for (debug_variable_list, 0..) |variable, index| {
     //     const text = variable.name;
     //

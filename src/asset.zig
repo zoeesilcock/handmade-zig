@@ -180,7 +180,7 @@ pub const Assets = struct {
         assets.loaded_asset_sentinel.next = &assets.loaded_asset_sentinel;
         assets.loaded_asset_sentinel.previous = &assets.loaded_asset_sentinel;
 
-        assets.tag_range[@intFromEnum(AssetTagId.FacingDirection)] = shared.TAU32;
+        assets.tag_range[@intFromEnum(AssetTagId.FacingDirection)] = math.TAU32;
 
         assets.tag_count = 1;
         assets.asset_count = 1;

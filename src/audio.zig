@@ -379,9 +379,9 @@ pub fn outputSineWave(sound_buffer: *SoundOutputBuffer, tone_hz: u32, state: *St
         sample_out += 1;
         sample_out[0] = sample_value;
 
-        state.t_sine += shared.TAU32 / @as(f32, @floatFromInt(wave_period));
-        if (state.t_sine > shared.TAU32) {
-            state.t_sine -= shared.TAU32;
+        state.t_sine += math.TAU32 / @as(f32, @floatFromInt(wave_period));
+        if (state.t_sine > math.TAU32) {
+            state.t_sine -= math.TAU32;
         }
     }
 }

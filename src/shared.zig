@@ -1,6 +1,4 @@
 // Constants.
-pub const PI32: f32 = 3.14159265359;
-pub const TAU32: f32 = 6.28318530717958647692;
 pub const MIDDLE_C: u32 = 261;
 pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
