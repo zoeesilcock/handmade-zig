@@ -206,12 +206,13 @@ pub fn beginSimulation(
 
     var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, ArenaPushParams.aligned(@alignOf(SimRegion), true));
 
+    sim_region.world = game_world;
+
     sim_region.max_entity_radius = 5;
     sim_region.max_entity_velocity = 30;
     const update_safety_margin = sim_region.max_entity_radius + sim_region.max_entity_velocity * delta_time;
     const update_safety_margin_z = 1;
 
-    sim_region.world = game_world;
     sim_region.origin = origin;
     sim_region.updatable_bounds = bounds.addRadius(
         Vector3.new(sim_region.max_entity_radius, sim_region.max_entity_radius, 0),
@@ -221,11 +222,11 @@ pub fn beginSimulation(
     );
     sim_region.max_entity_count = 4096;
     sim_region.entity_count = 0;
-    sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, Entity, null);
+    sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, Entity, ArenaPushParams.noClear());
 
     sim_region.max_brain_count = 256;
     sim_region.brain_count = 0;
-    sim_region.brains = sim_arena.pushArray(sim_region.max_brain_count, Brain, null);
+    sim_region.brains = sim_arena.pushArray(sim_region.max_brain_count, Brain, ArenaPushParams.noClear());
 
     const min_chunk_position = world.mapIntoChunkSpace(
         sim_region.world,
@@ -446,6 +447,8 @@ pub fn transactionalOccupy(entity: *Entity, dest_ref: *TraversableReference, des
             desired.occupier = entity;
             result = true;
         }
+    } else {
+        std.log.warn("Failed to get the desired traversable.", .{});
     }
 
     return result;

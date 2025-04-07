@@ -1417,9 +1417,13 @@ fn displayBufferInWindow(
     // }
 
     if (rendering_type == .RenderOpenGLDisplayOpenGL) {
+        TimedBlock.beginBlock(@src(), .OpenGLRenderCommands);
         opengl.renderCommands(commands, window_width, window_height);
+        TimedBlock.endBlock(@src(), .OpenGLRenderCommands);
 
+        TimedBlock.beginBlock(@src(), .SwapBuffers);
         _ = win32.SwapBuffers(device_context.?);
+        TimedBlock.endBlock(@src(), .SwapBuffers);
     } else {
         var output_target: asset.LoadedBitmap = .{
             .memory = @ptrCast(back_buffer.memory.?),

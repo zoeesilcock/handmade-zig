@@ -192,9 +192,11 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
 
     for (0..6) |_| {
+        const door_direction = 2;
+        _ = series.randomChoice(2);
         // const door_direction = 3;
         // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
-        const door_direction = series.randomChoice(2);
+        // const door_direction = series.randomChoice(2);
 
         var created_z_door = false;
         if (door_direction == 3) {
@@ -216,7 +218,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             abs_tile_z,
         );
 
-        _ = addMonster(world_mode, room.position[3][4], room.ground[3][4]);
+        _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
         _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
         const snake_brain_id = addBrain(world_mode);
@@ -343,8 +345,8 @@ pub fn updateAndRenderWorld(
     _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
     const fade_top_end_z: f32 = 0.75 * world_mode.typical_floor_height;
     const fade_top_start_z: f32 = 0.5 * world_mode.typical_floor_height;
-    const fade_bottom_start_z: f32 = -2 * world_mode.typical_floor_height;
-    const fade_bottom_end_z: f32 = -2.25 * world_mode.typical_floor_height;
+    const fade_bottom_start_z: f32 = -1 * world_mode.typical_floor_height;
+    const fade_bottom_end_z: f32 = -4 * world_mode.typical_floor_height;
 
     const sim_bounds_expansion = Vector3.new(15, 15, 15);
     const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
@@ -412,14 +414,16 @@ pub fn updateAndRenderWorld(
     }
 
     // Run all brains.
+    TimedBlock.beginBlock(@src(), .ExecuteBrains);
     var brain_index: u32 = 0;
     while (brain_index < sim_region.brain_count) : (brain_index += 1) {
         const brain: *Brain = &sim_region.brains[brain_index];
         brains.executeBrain(state, world_mode, sim_region, input, brain, delta_time);
     }
+    TimedBlock.endBlock(@src(), .ExecuteBrains);
 
     // Simulate all entities.
-    TimedBlock.beginBlock(@src(), .EntityRender);
+    TimedBlock.beginBlock(@src(), .SimulateEntities);
     var hot_entity_count: u32 = 0;
     var entity_index: u32 = 0;
     while (entity_index < sim_region.entity_count) : (entity_index += 1) {
@@ -591,9 +595,17 @@ pub fn updateAndRenderWorld(
                     const traversable = entity.traversables[traversable_index];
                     render_group.pushRectangle(
                         entity_transform,
-                        Vector2.new(0.1, 0.1),
+                        Vector2.new(1.2, 1.2),
                         traversable.position,
-                        if (traversable.occupier != null) Color.new(0, 0.5, 1, 1) else Color.new(1, 0.5, 0, 1),
+                        if (traversable.occupier != null) .new(1, 0.5, 0, 1) else .new(0.05, 0.25, 0.05, 1),
+                    );
+
+                    render_group.pushRectangleOutline(
+                        entity_transform,
+                        Vector2.new(1.2, 1.2),
+                        traversable.position,
+                        Color.new(0, 0, 0, 1),
+                        0.1,
                     );
                 }
             }
@@ -643,7 +655,7 @@ pub fn updateAndRenderWorld(
             }
         }
     }
-    TimedBlock.endBlock(@src(), .EntityRender);
+    TimedBlock.endBlock(@src(), .SimulateEntities);
 
     render_group.global_alpha = 1;
     render_group.orthographicMode(draw_buffer.width, draw_buffer.height, 1);
@@ -726,6 +738,7 @@ fn addStandardRoom(
     while (offset_x <= 8) : (offset_x += 1) {
         var offset_y: i32 = -4;
         while (offset_y <= 4) : (offset_y += 1) {
+            var standing_on: TraversableReference = .{};
             var world_position = chunkPositionFromTilePosition(
                 world_mode.world,
                 abs_tile_x + offset_x,
@@ -734,25 +747,35 @@ fn addStandardRoom(
                 null,
             );
 
-            _ = world_position.offset.setX(world_position.offset.x() + 0.25 * world_mode.game_entropy.randomBilateral());
-            _ = world_position.offset.setY(world_position.offset.y() + 0.25 * world_mode.game_entropy.randomBilateral());
-            // _ = world_position.offset.setZ(0.25 * @as(f32, @floatFromInt(offset_x + offset_y)));
+            if (false) {
+                _ = world_position.offset.setX(world_position.offset.x() + 0.25 * world_mode.game_entropy.randomBilateral());
+                _ = world_position.offset.setY(world_position.offset.y() + 0.25 * world_mode.game_entropy.randomBilateral());
+            }
 
-            var standing_on: TraversableReference = .{};
-            if (offset_x == 2 and offset_y == 2) {
-                const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
-                standing_on.entity.index = entity.id;
-                entity.traversable_count = 1;
-                entity.traversables[0].position = Vector3.zero();
-                entity.traversables[0].occupier = null;
-                endEntity(world_mode, entity, world_position);
+            if (offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
+                // Hole down to the floor below.
             } else {
-                const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
-                standing_on.entity.index = entity.id;
-                entity.traversable_count = 1;
-                entity.traversables[0].position = Vector3.zero();
-                entity.traversables[0].occupier = null;
-                endEntity(world_mode, entity, world_position);
+                if (offset_x == 3 and offset_y >= -2 and offset_y <= 2) {
+                    _ = world_position.offset.setZ(world_position.offset.z() + 0.5 * @as(f32, @floatFromInt(offset_y + 2)));
+                }
+
+                // _ = world_position.offset.setZ(0.25 * @as(f32, @floatFromInt(offset_x + offset_y)));
+
+                if (offset_x == 2 and offset_y == 2) {
+                    const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                    standing_on.entity.index = entity.id;
+                    entity.traversable_count = 1;
+                    entity.traversables[0].position = Vector3.zero();
+                    entity.traversables[0].occupier = null;
+                    endEntity(world_mode, entity, world_position);
+                } else {
+                    const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                    standing_on.entity.index = entity.id;
+                    entity.traversable_count = 1;
+                    entity.traversables[0].position = Vector3.zero();
+                    entity.traversables[0].occupier = null;
+                    endEntity(world_mode, entity, world_position);
+                }
             }
 
             result.position[@intCast(offset_x + 8)][@intCast(offset_y + 4)] = world_position;

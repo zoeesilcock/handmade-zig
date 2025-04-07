@@ -147,6 +147,7 @@ pub const DebugState = struct {
     shadow_transform: ObjectTransform,
     ui_transform: ObjectTransform,
     text_transform: ObjectTransform,
+    tooltip_transform: ObjectTransform,
 
     menu_position: Vector2,
     menu_active: bool,
@@ -1478,7 +1479,6 @@ fn drawTopClocksList(
     root_element: *DebugElement,
 ) void {
     _ = graph_id;
-    _ = mouse_position;
     _ = root_element;
 
     const temp = debug_state.debug_arena.beginTemporaryMemory();
@@ -1531,6 +1531,8 @@ fn drawTopClocksList(
         percent_coefficient = 100 / total_time;
     }
 
+    var running_sum: f64 = 0;
+
     var at: Vector2 = Vector2.new(profile_rect.min.x(), profile_rect.max.y() - debug_state.getBaseline());
     index = 0;
     while (index < link_count) : (index += 1) {
@@ -1538,7 +1540,9 @@ fn drawTopClocksList(
         const stats: *DebugStatistic = &entry.stats;
         const element: *DebugElement = entry.element;
 
-        var buffer: [128]u8 = undefined;
+        running_sum += stats.sum;
+
+        var buffer: [256]u8 = undefined;
         const slice = std.fmt.bufPrintZ(&buffer, "{d:10}cy {d:5.02}% {d:4} {s}", .{
             stats.sum,
             percent_coefficient * stats.sum,
@@ -1552,6 +1556,16 @@ fn drawTopClocksList(
             Color.white(),
             null,
         );
+
+        const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, slice, at);
+        if (mouse_position.isInRectangle(text_rect)) {
+            const text = std.fmt.bufPrintZ(
+                &buffer,
+                "Cumulative to this point: {d:5.02}%",
+                .{percent_coefficient * running_sum},
+            ) catch "";
+            debug_ui.addTooltip(debug_state, text);
+        }
 
         if (at.y() < profile_rect.min.y()) {
             break;
@@ -1670,8 +1684,7 @@ fn drawDebugElement(
                 );
             }
         },
-        .MemoryArena,
-        .ArenaOccupancy => {
+        .MemoryArena, .ArenaOccupancy => {
             if (view.view_type != .ArenaGraph) {
                 view.view_type = .ArenaGraph;
                 view.data = .{ .arena_graph = .{ .block = view.data.inline_block } };
@@ -2299,10 +2312,12 @@ fn debugStart(
         debug_state.shadow_transform = ObjectTransform.defaultFlat();
         debug_state.ui_transform = ObjectTransform.defaultFlat();
         debug_state.text_transform = ObjectTransform.defaultFlat();
+        debug_state.tooltip_transform = ObjectTransform.defaultFlat();
         debug_state.backing_transform.sort_bias = 100000;
         debug_state.shadow_transform.sort_bias = 200000;
         debug_state.ui_transform.sort_bias = 300000;
         debug_state.text_transform.sort_bias = 400000;
+        debug_state.tooltip_transform.sort_bias = 500000;
 
         debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
 

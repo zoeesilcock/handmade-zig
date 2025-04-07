@@ -518,7 +518,7 @@ pub const RenderGroup = extern struct {
             if (self.pushRenderElement(RenderEntryRectangle, basis.sort_key)) |entry| {
                 entry.position = basis.position;
                 entry.dimension = dimension.scaledTo(basis.scale);
-                entry.color = color;
+                entry.color = color.scaledTo(self.global_alpha);
             }
         }
     }

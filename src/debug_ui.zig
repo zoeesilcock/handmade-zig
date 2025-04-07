@@ -416,6 +416,10 @@ pub fn getTextSize(debug_state: *DebugState, text: [:0]const u8) Rectangle2 {
     return textOp(debug_state, .SizeText, text, Vector2.zero(), Color.white(), null);
 }
 
+pub fn getTextSizeAt(debug_state: *DebugState, text: [:0]const u8, at: Vector2) Rectangle2 {
+    return textOp(debug_state, .SizeText, text, at, Color.white(), null);
+}
+
 pub fn addTooltip(debug_state: *DebugState, text: [:0]const u8) void {
     var layout: *Layout = &debug_state.mouse_text_layout;
 
@@ -431,11 +435,18 @@ pub fn addTooltip(debug_state: *DebugState, text: [:0]const u8) void {
         var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
         layout_element.end();
 
+        layout.debug_state.render_group.pushRectangle2(
+            layout.debug_state.tooltip_transform,
+            layout_element.bounds.addRadius(.new(4, 4)),
+            0,
+            .new(0, 0, 0, 0.75),
+        );
+
         const text_position: Vector2 = Vector2.new(
             layout_element.bounds.min.x(),
             layout_element.bounds.max.y() - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
         );
-        textOutAt(layout.debug_state, text, text_position, Color.white(), 10000);
+        textOutAt(layout.debug_state, text, text_position, Color.white(), 110000);
     }
 }
 

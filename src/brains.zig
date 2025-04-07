@@ -352,7 +352,7 @@ pub fn executeBrain(
                 }
 
                 var target_position: Vector3 = head.occupying.getSimSpaceTraversable().position;
-                if (!blocked) {
+                if (!blocked and global_config.AI_Familiar_FollowsHero) {
                     const closest: ClosestEntity =
                         sim.getClosestEntityWithBrain(sim_region, head.position, .BrainHero, null);
 
