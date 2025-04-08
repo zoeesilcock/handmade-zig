@@ -334,7 +334,8 @@ pub fn updateAndRenderWorld(
     );
 
     // Clear background.
-    render_group.pushClear(Color.new(0.25, 0.25, 0.25, 0));
+    const background_color: Color = .new(0.15, 0.15, 0.15, 1);
+    render_group.pushClear(background_color);
 
     const screen_bounds = render_group.getCameraRectangleAtTarget();
     var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
@@ -435,20 +436,24 @@ pub fn updateAndRenderWorld(
 
         if (entity.updatable) {
             var camera_relative_ground_position = entity.getGroundPoint().minus(camera_position);
-            render_group.global_alpha = 1;
-
             if (camera_relative_ground_position.z() > fade_top_start_z) {
-                render_group.global_alpha = math.clamp01MapToRange(
-                    fade_top_end_z,
+                const time: f32 = math.clamp01MapToRange(
                     fade_top_start_z,
+                    fade_top_end_z,
                     camera_relative_ground_position.z(),
                 );
+                render_group.global_color_time = .new(0, 0, 0, time);
+                render_group.global_color = .zero();
             } else if (camera_relative_ground_position.z() < fade_bottom_start_z) {
-                render_group.global_alpha = math.clamp01MapToRange(
-                    fade_bottom_end_z,
+                const time: f32 = math.clamp01MapToRange(
                     fade_bottom_start_z,
+                    fade_bottom_end_z,
                     camera_relative_ground_position.z(),
                 );
+                render_group.global_color_time = .new(time, time, time, 0);
+                render_group.global_color = background_color;
+            } else {
+                render_group.global_color_time = .zero();
             }
 
             // Physics.
@@ -577,6 +582,7 @@ pub fn updateAndRenderWorld(
 
             drawHitPoints(entity, render_group, entity_transform);
 
+            entity_transform.upright = false;
             {
                 var volume_index: u32 = 0;
                 while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
@@ -657,7 +663,7 @@ pub fn updateAndRenderWorld(
     }
     TimedBlock.endBlock(@src(), .SimulateEntities);
 
-    render_group.global_alpha = 1;
+    render_group.global_color_time = .zero();
     render_group.orthographicMode(draw_buffer.width, draw_buffer.height, 1);
     render_group.pushRectangleOutline(
         ObjectTransform.defaultFlat(),

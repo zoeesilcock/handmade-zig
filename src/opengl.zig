@@ -193,7 +193,12 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
         switch (header.type) {
             .RenderEntryClear => {
                 const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
-                gl.glClearColor(entry.color.r(), entry.color.g(), entry.color.b(), entry.color.a());
+                gl.glClearColor(
+                    entry.premultiplied_color.r(),
+                    entry.premultiplied_color.g(),
+                    entry.premultiplied_color.b(),
+                    entry.premultiplied_color.a(),
+                );
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT);
             },
             .RenderEntryBitmap => {
@@ -215,7 +220,8 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
 
                         gl.glBegin(gl.GL_TRIANGLES);
                         {
-                            gl.glColor4fv(entry.color.toGL());
+                            // This value is not gamma corrected by OpenGL.
+                            gl.glColor4fv(entry.premultiplied_color.toGL());
 
                             const min_x_min_y: Vector2 = min_position;
                             const min_x_max_y: Vector2 = min_position.plus(y_axis);
@@ -247,7 +253,7 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
             .RenderEntryRectangle => {
                 const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                 gl.glDisable(gl.GL_TEXTURE_2D);
-                drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.color, null, null);
+                drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
                 gl.glEnable(gl.GL_TEXTURE_2D);
             },
             .RenderEntrySaturation => {
@@ -308,7 +314,7 @@ fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) u32 {
 fn drawRectangle(
     min_position: Vector2,
     max_position: Vector2,
-    color: Color,
+    premultiplied_color: Color,
     opt_min_uv: ?Vector2,
     opt_max_uv: ?Vector2,
 ) void {
@@ -317,7 +323,13 @@ fn drawRectangle(
 
     gl.glBegin(gl.GL_TRIANGLES);
     {
-        gl.glColor4f(color.r(), color.g(), color.b(), color.a());
+        // This value is not gamma corrected by OpenGL.
+        gl.glColor4f(
+            premultiplied_color.r(),
+            premultiplied_color.g(),
+            premultiplied_color.b(),
+            premultiplied_color.a(),
+        );
 
         // Lower triangle.
         gl.glTexCoord2f(min_uv.x(), min_uv.y());

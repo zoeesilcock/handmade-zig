@@ -86,7 +86,7 @@ pub const RenderEntryHeader = extern struct {
 };
 
 pub const RenderEntryClear = extern struct {
-    color: Color,
+    premultiplied_color: Color,
 };
 
 pub const RenderEntryClipRect = extern struct {
@@ -100,7 +100,7 @@ pub const RenderEntrySaturation = extern struct {
 
 pub const RenderEntryBitmap = extern struct {
     bitmap: ?*LoadedBitmap,
-    color: Color,
+    premultiplied_color: Color,
     position: Vector2,
     // These are already scaled by the half dimension.
     x_axis: Vector2,
@@ -108,7 +108,7 @@ pub const RenderEntryBitmap = extern struct {
 };
 
 pub const RenderEntryRectangle = extern struct {
-    color: Color,
+    premultiplied_color: Color,
     position: Vector2,
     dimension: Vector2 = Vector2.zero(),
 };
@@ -204,8 +204,8 @@ fn getRenderEntityBasisPosition(
     result.sort_key =
         object_transform.sort_bias +
         4096 * (2 * position.z() +
-        original_position.z() +
-        1 * @as(f32, @floatFromInt(@intFromBool(object_transform.upright)))) -
+            original_position.z() +
+            1 * @as(f32, @floatFromInt(@intFromBool(object_transform.upright)))) -
         position.y();
 
     return result;
@@ -213,7 +213,9 @@ fn getRenderEntityBasisPosition(
 
 pub const RenderGroup = extern struct {
     assets: *asset.Assets,
-    global_alpha: f32,
+
+    global_color_time: Color = .zero(),
+    global_color: Color = .zero(),
 
     monitor_half_dim_in_meters: Vector2,
 
@@ -236,7 +238,6 @@ pub const RenderGroup = extern struct {
         return .{
             .assets = assets,
             .renders_in_background = renders_in_background,
-            .global_alpha = 1,
             .missing_resource_count = 0,
             .generation_id = generation_id,
             .commands = commands,
@@ -366,8 +367,8 @@ pub const RenderGroup = extern struct {
                 pixels_xy.minus(camera_transform.screen_center).scaledTo(1.0 / camera_transform.meters_to_pixels);
             unprojected_xy =
                 a.scaledTo(
-                (camera_transform.distance_above_target - object_transform.offset_position.z()) / camera_transform.focal_length,
-            );
+                    (camera_transform.distance_above_target - object_transform.offset_position.z()) / camera_transform.focal_length,
+                );
         }
 
         var result: Vector3 = unprojected_xy.toVector3(object_transform.offset_position.z());
@@ -391,7 +392,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
         if (self.pushRenderElement(RenderEntryClear, -std.math.floatMax(f32))) |entry| {
-            entry.color = color;
+            entry.premultiplied_color = self.storeColor(color);
         }
     }
 
@@ -426,6 +427,19 @@ pub const RenderGroup = extern struct {
         return dim;
     }
 
+    fn storeColor(self: RenderGroup, source: Color) Color {
+        var dest: Color = undefined;
+        const time: Color = self.global_color_time;
+        const color: Color = self.global_color;
+
+        _ = dest.setA(math.lerpf(source.a(), color.a(), time.a()));
+        _ = dest.setR(dest.a() * math.lerpf(source.r(), color.r(), time.r()));
+        _ = dest.setG(dest.a() * math.lerpf(source.g(), color.g(), time.g()));
+        _ = dest.setB(dest.a() * math.lerpf(source.b(), color.b(), time.b()));
+
+        return dest;
+    }
+
     pub fn pushBitmap(
         self: *RenderGroup,
         object_transform: ObjectTransform,
@@ -445,7 +459,7 @@ pub const RenderGroup = extern struct {
             if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key)) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
-                entry.color = color.scaledTo(self.global_alpha);
+                entry.premultiplied_color = self.storeColor(color);
                 const size: Vector2 = dim.size.scaledTo(dim.basis.scale);
                 entry.x_axis = size.times(x_axis);
                 entry.y_axis = size.times(y_axis);
@@ -518,7 +532,7 @@ pub const RenderGroup = extern struct {
             if (self.pushRenderElement(RenderEntryRectangle, basis.sort_key)) |entry| {
                 entry.position = basis.position;
                 entry.dimension = dimension.scaledTo(basis.scale);
-                entry.color = color.scaledTo(self.global_alpha);
+                entry.premultiplied_color = self.storeColor(color);
             }
         }
     }

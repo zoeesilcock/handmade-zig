@@ -202,7 +202,7 @@ pub fn renderCommandsToBitmap(
             .RenderEntryClear => {
                 const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
                 const dimension = Vector2.newI(output_target.width, output_target.height);
-                drawRectangle(output_target, Vector2.zero(), dimension, entry.color.rgb().toColor(1), clip_rect);
+                drawRectangle(output_target, Vector2.zero(), dimension, entry.premultiplied_color.rgb().toColor(1), clip_rect);
             },
             .RenderEntrySaturation => {
                 const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
@@ -232,7 +232,7 @@ pub fn renderCommandsToBitmap(
                             entry.position,
                             entry.x_axis,
                             entry.y_axis,
-                            entry.color,
+                            entry.premultiplied_color,
                             @constCast(bitmap),
                             null_pixels_to_meters,
                             clip_rect,
@@ -247,7 +247,7 @@ pub fn renderCommandsToBitmap(
                     output_target,
                     entry.position,
                     entry.position.plus(entry.dimension),
-                    entry.color,
+                    entry.premultiplied_color,
                     clip_rect,
                 );
             },
@@ -365,8 +365,8 @@ pub fn drawRectangle(
         }
     } else {
         var color = color_in;
-        _ = color.setRGB(color.rgb().scaledTo(color.a()));
         color = color.scaledTo(255);
+        _ = color.setRGB(color.rgb().scaledTo(255));
 
         const mask_ffffffff: Vec4u = @splat(0xFFFFFFFF);
         const one: Vec4f = @splat(1);
@@ -449,9 +449,9 @@ pub fn drawRectangle(
                     const dest_a: Vec4f = @floatFromInt((original_dest >> shift_24) & mask_ff);
 
                     // Modulate by incoming color.
-                    var texelr = color_r * color_r;
-                    var texelg = color_g * color_g;
-                    var texelb = color_b * color_b;
+                    var texelr = color_r;
+                    var texelg = color_g;
+                    var texelb = color_b;
                     var texela = color_a;
 
                     // Clamp colors to valid range.
@@ -551,7 +551,6 @@ pub fn drawRectangleQuickly(
     // defer TimedBlock.endFunction(@src(), .DrawRectangleQuickly);
 
     var color = color_in;
-    _ = color.setRGB(color.rgb().scaledTo(color.a()));
 
     const mask_ffffffff: Vec4u = @splat(0xFFFFFFFF);
     const one: Vec4f = @splat(1);
@@ -853,7 +852,7 @@ pub fn drawRectangleSlowly(
     origin: Vector2,
     x_axis: Vector2,
     y_axis: Vector2,
-    color_in: Color,
+    color: Color,
     texture: *LoadedBitmap,
     opt_normal_map: ?*LoadedBitmap,
     top: *EnvironmentMap,
@@ -863,9 +862,6 @@ pub fn drawRectangleSlowly(
 ) void {
     // TimedBlock.beginFunction(@src(), .DrawRectangleSlowly);
     // defer TimedBlock.endFunction(@src(), .DrawRectangleSlowly);
-
-    var color = color_in;
-    _ = color.setRGB(color.rgb().scaledTo(color.a()));
 
     const y_axis_length = y_axis.length();
     const x_axis_length = x_axis.length();
