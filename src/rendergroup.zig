@@ -92,6 +92,38 @@ pub const RenderEntryClear = extern struct {
 pub const RenderEntryClipRect = extern struct {
     next: ?*RenderEntryClipRect,
     rect: Rectangle2i,
+    fx: ClipRectFX,
+};
+
+pub const ClipRectFX = extern struct {
+    color: Color = .zero(),
+    color_time: Color = .zero(),
+};
+
+pub const TransientClipRect = extern struct {
+    render_group: *RenderGroup,
+    old_clip_rect: u32,
+
+    pub fn init(render_group: *RenderGroup) TransientClipRect {
+        const result: TransientClipRect = .{
+            .render_group = render_group,
+            .old_clip_rect = render_group.current_clip_rect_index,
+        };
+        return result;
+    }
+
+    pub fn initWith(render_group: *RenderGroup, new_clip_rect_index: u32) TransientClipRect {
+        const result: TransientClipRect = .{
+            .render_group = render_group,
+            .old_clip_rect = render_group.current_clip_rect_index,
+        };
+        result.render_group.current_clip_rect_index = new_clip_rect_index;
+        return result;
+    }
+
+    pub fn restore(self: *const TransientClipRect) void {
+        self.render_group.current_clip_rect_index = self.old_clip_rect;
+    }
 };
 
 pub const RenderEntrySaturation = extern struct {
@@ -281,7 +313,7 @@ pub const RenderGroup = extern struct {
         );
         self.camera_transform.orthographic = false;
 
-        self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height));
+        self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), null);
     }
 
     pub fn orthographicMode(
@@ -305,7 +337,7 @@ pub const RenderGroup = extern struct {
         );
         self.camera_transform.orthographic = true;
 
-        self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height));
+        self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), null);
     }
 
     fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: f32) ?*T {
@@ -661,6 +693,7 @@ pub const RenderGroup = extern struct {
                 intrinsics.roundReal32ToInt32(basis.position.y()),
                 intrinsics.roundReal32ToInt32(basis_dimension.x()),
                 intrinsics.roundReal32ToInt32(basis_dimension.y()),
+                null,
             );
         }
 
@@ -680,7 +713,8 @@ pub const RenderGroup = extern struct {
         );
     }
 
-    pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32) u32 {
+    pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32, opt_fx: ?ClipRectFX) u32 {
+        _ = opt_fx;
         var result: u32 = 0;
         const size = @sizeOf(RenderEntryClipRect);
         const commands: *RenderCommands = self.commands;

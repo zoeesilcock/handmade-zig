@@ -294,27 +294,23 @@ pub fn getWorldChunkInternal(
     return opt_chunk;
 }
 
-pub fn recannonicalizeCoordinate(chunk_dimension: f32, tile_abs: *i32, tile_rel: *const f32) f32 {
+pub fn recannonicalizeCoordinate(chunk_dimension: f32, tile_abs: *i32, tile_rel: *f32) void {
     const epsilon = 0.0001;
     const offset = intrinsics.roundReal32ToInt32((tile_rel.* + epsilon) / chunk_dimension);
 
     tile_abs.* +%= offset;
-    const result = tile_rel.* - @as(f32, @floatFromInt(offset)) * chunk_dimension;
+    tile_rel.* -= @as(f32, @floatFromInt(offset)) * chunk_dimension;
 
-    std.debug.assert(isCanonical(chunk_dimension, result));
-
-    return result;
+    std.debug.assert(isCanonical(chunk_dimension, tile_rel.*));
 }
 
 pub fn mapIntoChunkSpace(world: *World, base_position: WorldPosition, offset: Vector3) WorldPosition {
     var result = base_position;
 
     result.offset = result.offset.plus(offset);
-    result.offset = Vector3.new(
-        recannonicalizeCoordinate(world.chunk_dimension_in_meters.x(), &result.chunk_x, &result.offset.x()),
-        recannonicalizeCoordinate(world.chunk_dimension_in_meters.y(), &result.chunk_y, &result.offset.y()),
-        recannonicalizeCoordinate(world.chunk_dimension_in_meters.z(), &result.chunk_z, &result.offset.z()),
-    );
+    recannonicalizeCoordinate(world.chunk_dimension_in_meters.x(), &result.chunk_x, &result.offset.values[0]);
+    recannonicalizeCoordinate(world.chunk_dimension_in_meters.y(), &result.chunk_y, &result.offset.values[1]);
+    recannonicalizeCoordinate(world.chunk_dimension_in_meters.z(), &result.chunk_z, &result.offset.values[2]);
 
     return result;
 }

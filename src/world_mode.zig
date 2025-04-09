@@ -35,6 +35,7 @@ const PlayingSound = audio.PlayingSound;
 const BitmapId = file_formats.BitmapId;
 const RenderGroup = rendergroup.RenderGroup;
 const ObjectTransform = rendergroup.ObjectTransform;
+const TransientClipRect = rendergroup.TransientClipRect;
 const TransientState = shared.TransientState;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
@@ -344,10 +345,6 @@ pub fn updateAndRenderWorld(
     );
     _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
     _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
-    const fade_top_end_z: f32 = 0.75 * world_mode.typical_floor_height;
-    const fade_top_start_z: f32 = 0.5 * world_mode.typical_floor_height;
-    const fade_bottom_start_z: f32 = -1 * world_mode.typical_floor_height;
-    const fade_bottom_end_z: f32 = -4 * world_mode.typical_floor_height;
 
     const sim_bounds_expansion = Vector3.new(15, 15, 15);
     const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
@@ -361,7 +358,7 @@ pub fn updateAndRenderWorld(
         input.frame_delta_time,
     );
 
-    const camera_position =
+    const camera_position: Vector3 =
         world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
             .plus(world_mode.camera_offset);
 
@@ -423,245 +420,17 @@ pub fn updateAndRenderWorld(
     }
     TimedBlock.endBlock(@src(), .ExecuteBrains);
 
-    // Simulate all entities.
-    TimedBlock.beginBlock(@src(), .SimulateEntities);
-    var hot_entity_count: u32 = 0;
-    var entity_index: u32 = 0;
-    while (entity_index < sim_region.entity_count) : (entity_index += 1) {
-        const entity = &sim_region.entities[entity_index];
-        const entity_debug_id = debug_interface.DebugId.fromPointer(&entity.id.value);
-        if (debug_interface.requested(entity_debug_id)) {
-            DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
-        }
-
-        if (entity.updatable) {
-            var camera_relative_ground_position = entity.getGroundPoint().minus(camera_position);
-            if (camera_relative_ground_position.z() > fade_top_start_z) {
-                const time: f32 = math.clamp01MapToRange(
-                    fade_top_start_z,
-                    fade_top_end_z,
-                    camera_relative_ground_position.z(),
-                );
-                render_group.global_color_time = .new(0, 0, 0, time);
-                render_group.global_color = .zero();
-            } else if (camera_relative_ground_position.z() < fade_bottom_start_z) {
-                const time: f32 = math.clamp01MapToRange(
-                    fade_bottom_start_z,
-                    fade_bottom_end_z,
-                    camera_relative_ground_position.z(),
-                );
-                render_group.global_color_time = .new(time, time, time, 0);
-                render_group.global_color = background_color;
-            } else {
-                render_group.global_color_time = .zero();
-            }
-
-            // Physics.
-            switch (entity.movement_mode) {
-                .Planted => {},
-                .Hopping => {
-                    const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable().position;
-                    const movement_from: Vector3 = entity.came_from.getSimSpaceTraversable().position;
-                    const t_jump: f32 = 0.1;
-                    const t_thrust: f32 = 0.2;
-                    const t_land: f32 = 0.9;
-
-                    if (entity.movement_time < t_thrust) {
-                        entity.bob_acceleration = 30;
-                    }
-
-                    if (entity.movement_time < t_land) {
-                        const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
-                        const a: Vector3 = Vector3.new(0, -2, 0);
-                        const b: Vector3 = movement_to.minus(movement_from).minus(a);
-                        entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(movement_from);
-                    }
-
-                    if (entity.movement_time >= 1) {
-                        entity.position = movement_to;
-                        entity.came_from = entity.occupying;
-                        entity.movement_mode = .Planted;
-                        entity.bob_delta_time = -2;
-                    }
-
-                    entity.movement_time += 4 * delta_time;
-                    if (entity.movement_time > 1) {
-                        entity.movement_time = 1;
-                    }
-                },
-                .AngleAttackSwipe => {
-                    if (entity.movement_time < 1) {
-                        entity.angle_current = math.lerpf(
-                            entity.angle_start,
-                            entity.angle_target,
-                            entity.movement_time,
-                        );
-
-                        entity.angle_current_distance = math.lerpf(
-                            entity.angle_base_distance,
-                            entity.angle_swipe_distance,
-                            math.triangle01(entity.movement_time),
-                        );
-                    } else {
-                        entity.movement_mode = .AngleOffset;
-                        entity.angle_current = entity.angle_target;
-                        entity.angle_current_distance = entity.angle_base_distance;
-                    }
-
-                    entity.movement_time += 10 * delta_time;
-                    if (entity.movement_time > 1) {
-                        entity.movement_time = 1;
-                    }
-                },
-                .AngleOffset => {},
-                .Floating => {},
-            }
-
-            if (entity.movement_mode == .AngleAttackSwipe or entity.movement_mode == .AngleOffset) {
-                const arm: Vector2 =
-                    Vector2.arm2(entity.angle_current + entity.facing_direction)
-                    .scaledTo(entity.angle_current_distance);
-                entity.position = entity.angle_base.plus(.new(arm.x(), arm.y() + 0.5, 0));
-            }
-
-            const position_coefficient = 100;
-            const velocity_coefficient = 10;
-            entity.bob_acceleration +=
-                position_coefficient * (0 - entity.bob_time) +
-                velocity_coefficient * (0 - entity.bob_delta_time);
-            entity.bob_time +=
-                entity.bob_acceleration * delta_time * delta_time +
-                entity.bob_delta_time * delta_time;
-            entity.bob_delta_time += entity.bob_acceleration * delta_time;
-
-            if (entity.velocity.lengthSquared() > 0 or entity.acceleration.lengthSquared() > 0) {
-                sim.moveEntity(world_mode, sim_region, entity, delta_time, entity.acceleration);
-            }
-
-            // Rendering.
-            var entity_transform = ObjectTransform.defaultUpright();
-            entity_transform.offset_position = entity.getGroundPoint().minus(camera_position);
-
-            var match_vector = asset.AssetVector{};
-            match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
-            var weight_vector = asset.AssetVector{};
-            weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
-
-            var piece_index: u32 = 0;
-            while (piece_index < entity.piece_count) : (piece_index += 1) {
-                const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
-                const bitmap_id: ?BitmapId =
-                    transient_state.assets.getBestMatchBitmap(piece.asset_type, &match_vector, &weight_vector);
-
-                var x_axis: Vector2 = .new(1, 0);
-                var y_axis: Vector2 = .new(0, 1);
-                if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.AxesDeform) != 0) {
-                    x_axis = entity.x_axis;
-                    y_axis = entity.y_axis;
-                }
-
-                var bob_time: f32 = 0;
-                var offset: Vector3 = .zero();
-                if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.BobOffset) != 0) {
-                    bob_time = entity.bob_time;
-                    offset = entity.floor_displace.toVector3(0);
-                    _ = offset.setY(offset.y() + bob_time);
-                }
-
-                render_group.pushBitmapId(
-                    entity_transform,
-                    bitmap_id,
-                    piece.height,
-                    piece.offset.plus(offset),
-                    piece.color,
-                    null,
-                    x_axis,
-                    y_axis,
-                );
-            }
-
-            drawHitPoints(entity, render_group, entity_transform);
-
-            entity_transform.upright = false;
-            {
-                var volume_index: u32 = 0;
-                while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                    const volume = entity.collision.volumes[volume_index];
-                    render_group.pushRectangleOutline(
-                        entity_transform,
-                        volume.dimension.xy(),
-                        volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                        Color.new(0, 0.5, 1, 1),
-                        0.1,
-                    );
-                }
-
-                var traversable_index: u32 = 0;
-                while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
-                    const traversable = entity.traversables[traversable_index];
-                    render_group.pushRectangle(
-                        entity_transform,
-                        Vector2.new(1.2, 1.2),
-                        traversable.position,
-                        if (traversable.occupier != null) .new(1, 0.5, 0, 1) else .new(0.05, 0.25, 0.05, 1),
-                    );
-
-                    render_group.pushRectangleOutline(
-                        entity_transform,
-                        Vector2.new(1.2, 1.2),
-                        traversable.position,
-                        Color.new(0, 0, 0, 1),
-                        0.1,
-                    );
-                }
-            }
-
-            if (debug_interface.DEBUG_UI_ENABLED) {
-                var volume_index: u32 = 0;
-                while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                    const volume = entity.collision.volumes[volume_index];
-                    const local_mouse_position = render_group.unproject(
-                        entity_transform,
-                        mouse_position,
-                    );
-
-                    if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
-                        local_mouse_position.x() < 0.5 * volume.dimension.x() and
-                        local_mouse_position.y() > -0.5 * volume.dimension.y() and
-                        local_mouse_position.y() < 0.5 * volume.dimension.y())
-                    {
-                        debug_interface.hit(entity_debug_id, local_mouse_position.z());
-                    }
-
-                    var outline_color: Color = undefined;
-                    if (debug_interface.highlighted(entity_debug_id, &outline_color)) {
-                        render_group.pushRectangleOutline(
-                            entity_transform,
-                            volume.dimension.xy(),
-                            volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                            outline_color,
-                            0.05,
-                        );
-                    }
-                }
-            }
-        }
-
-        if (debug_interface.DEBUG_UI_ENABLED) {
-            if (debug_interface.requested(entity_debug_id)) {
-                DebugInterface.debugStruct(@src(), entity);
-                // DebugInterface.debugBeginArray(entity.hit_points);
-                // var hit_point_index: u32 = 0;
-                // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-                //     DebugInterface.debugValue(@src(), entity.hit_points[hit_point_index]);
-                // }
-                // DebugInterface.debugEndArray();
-                hot_entity_count += 1;
-                DebugInterface.debugEndDataBlock(@src());
-            }
-        }
-    }
-    TimedBlock.endBlock(@src(), .SimulateEntities);
+    entities.updateAndRenderEntities(
+        world_mode,
+        transient_state,
+        render_group,
+        sim_region,
+        camera_position,
+        draw_buffer,
+        background_color,
+        delta_time,
+        mouse_position,
+    );
 
     render_group.global_color_time = .zero();
     render_group.orthographicMode(draw_buffer.width, draw_buffer.height, 1);
@@ -1023,32 +792,6 @@ fn initHitPoints(entity: *Entity, count: u32) void {
     }
 }
 
-fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, object_transform: ObjectTransform) void {
-    if (entity.hit_point_max >= 1) {
-        const hit_point_dimension = Vector2.new(0.2, 0.2);
-        const hit_point_spacing_x = hit_point_dimension.x() * 2;
-
-        var hit_position =
-            Vector2.new(-0.5 * @as(f32, @floatFromInt(entity.hit_point_max - 1)) * hit_point_spacing_x, -0.25);
-        const hit_position_delta = Vector2.new(hit_point_spacing_x, 0);
-        for (0..@intCast(entity.hit_point_max)) |hit_point_index| {
-            const hit_point = entity.hit_points[hit_point_index];
-            var hit_point_color = Color.new(1, 0, 0, 1);
-
-            if (hit_point.filled_amount == 0) {
-                hit_point_color = Color.new(0.2, 0.2, 0.2, 1);
-            }
-
-            render_group.pushRectangle(
-                object_transform,
-                hit_point_dimension,
-                hit_position.toVector3(0),
-                hit_point_color,
-            );
-            hit_position = hit_position.plus(hit_position_delta);
-        }
-    }
-}
 fn makeSimpleGroundedCollision(
     world_mode: *GameModeWorld,
     x_dimension: f32,
