@@ -446,6 +446,22 @@ pub fn updateAndRenderEntities(
                 var weight_vector = asset.AssetVector{};
                 weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
 
+                // TODO:
+                // * This is where articulated figures will be happening, so we need to have this code look correct in
+                // terms if how we want rendering submitted.
+                // * It should begin by creating a sort key for the entire armature, and then it should be able to
+                // guarantee that each piece will be renndered in the order it was submitted after being sorted into
+                // the scene at large by the key.
+                //
+                // * This should eliminate the need for RenderGroup-side sort bias as well, since now the user is in
+                // control of setting the sort value specifically.
+                //
+                // * This also means we should be able to call a sort key transform routine that does the entity
+                // basis transform and then reports the sort key to us.
+                //
+                // * And probably, we will want the sort keys to be u32's now, so we'll convert from float at this
+                // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
+
                 var piece_index: u32 = 0;
                 while (piece_index < entity.piece_count) : (piece_index += 1) {
                     const piece: *EntityVisiblePiece = &entity.pieces[piece_index];

@@ -195,17 +195,31 @@ const CameraTransform = extern struct {
     distance_above_target: f32,
 };
 
+fn computeSortKey(
+    camera_transform: CameraTransform,
+    object_transform: ObjectTransform,
+    original_position: Vector4,
+) f32 {
+    _ = camera_transform;
+    _ = object_transform;
+    _ = original_position;
+
+    const result: f32 = 0;
+    // ???
+    return result;
+}
+
 fn getRenderEntityBasisPosition(
     camera_transform: CameraTransform,
     object_transform: ObjectTransform,
     original_position: Vector3,
 ) RenderEntityBasisResult {
-    // TimedBlock.beginFunction(@src(), .GetRenderEntityBasisPosition);
-    // defer TimedBlock.endFunction(@src(), .GetRenderEntityBasisPosition);
-
     var result = RenderEntityBasisResult{};
 
-    const position = original_position.xy().toVector3(0).plus(object_transform.offset_position);
+    const position: Vector3 = original_position.xy().toVector3(0).plus(object_transform.offset_position);
+    const position_w: f32 = 0;
+    // const position: Vector3 = original_position.xyz().plus(object_transform.offset_position.xyz());
+    // const position_w: f32 = original_position.w() + object_transform.offset_position.w();
 
     if (camera_transform.orthographic) {
         result.position = camera_transform.screen_center.plus(position.xy().scaledTo(camera_transform.meters_to_pixels));
@@ -233,12 +247,14 @@ fn getRenderEntityBasisPosition(
         }
     }
 
-    result.sort_key =
-        object_transform.sort_bias +
-        4096 * (2 * position.z() +
-            original_position.z() +
-            1 * @as(f32, @floatFromInt(@intFromBool(object_transform.upright)))) -
-        position.y();
+    const perspective_z: f32 = result.scale;
+    const displacement_z: f32 = result.scale * position_w;
+
+    const perspective_sort_term: f32 = 4096 * perspective_z;
+    const y_sort_term: f32 = -1024 * position.y();
+    const z_sort_term: f32 = displacement_z;
+
+    result.sort_key = (perspective_sort_term + y_sort_term + z_sort_term) + object_transform.sort_bias;
 
     return result;
 }
