@@ -144,3 +144,89 @@ pub fn radixSort(count: u32, first: [*]SortEntry, temp: [*]SortEntry) void {
     }
 }
 
+const SortSpriteBound = struct {
+    y_min: f32,
+    y_max: f32,
+    z_max: f32,
+    index: u32,
+};
+
+fn isInFrontOf(a: *SortSpriteBound, b: *SortSpriteBound) bool {
+    const both_z_sprites: bool = a.y_min != a.y_max and b.y_min != b.y_max;
+    const a_includes_b: bool = b.y_min >= a.y_min and b.y_min < a.y_max;
+    const b_includes_a: bool = a.y_min >= b.y_min and a.y_min < b.y_max;
+
+    const sort_by_z: bool = both_z_sprites or a_includes_b or b_includes_a;
+
+    const result: bool = if (sort_by_z)
+        a.z_max > b.z_max
+    else
+        a.y_min < b.y_min;
+
+    return result;
+}
+
+fn swap2(a: [*]SortSpriteBound, b: [*]SortSpriteBound) void {
+    const store: SortSpriteBound = b[0];
+    b[0] = a[0];
+    a[0] = store;
+}
+
+pub fn mergeSort2(count: u32, first: [*]SortSpriteBound, temp: [*]SortSpriteBound) void {
+    if (count <= 1) {
+        // Nothing to do.
+    } else if (count == 2) {
+        const entry_a: [*]SortSpriteBound = first;
+        const entry_b: [*]SortSpriteBound = entry_a + 1;
+        if (isInFrontOf(entry_b[0], entry_a[0])) {
+            swap2(entry_a, entry_b);
+        }
+    } else {
+        const half0: u32 = @divFloor(count, 2);
+        const half1: u32 = count - half0;
+
+        std.debug.assert(half0 >= 1);
+        std.debug.assert(half1 >= 1);
+
+        const in_half0: [*]SortSpriteBound = first;
+        const in_half1: [*]SortSpriteBound = first + half0;
+        const end: [*]SortSpriteBound = first + count;
+
+        mergeSort(half0, in_half0, temp);
+        mergeSort(half1, in_half1, temp);
+
+        var read_half0: [*]SortSpriteBound = in_half0;
+        var read_half1: [*]SortSpriteBound = in_half1;
+
+        var out: [*]SortSpriteBound = temp;
+        var index: u32 = 0;
+        while (index < count) : (index += 1) {
+            if (read_half0 == in_half1) {
+                out[0] = read_half1[0];
+                read_half1 += 1;
+                out += 1;
+            } else if (read_half1 == end) {
+                out[0] = read_half0[0];
+                read_half0 += 1;
+                out += 1;
+            } else if (isInFrontOf(read_half0[0], read_half1[0])) {
+                out[0] = read_half0[0];
+                read_half0 += 1;
+                out += 1;
+            } else {
+                out[0] = read_half1[0];
+                read_half1 += 1;
+                out += 1;
+            }
+        }
+
+        std.debug.assert(out == (temp + count));
+        std.debug.assert(read_half0 == in_half1);
+        std.debug.assert(read_half1 == end);
+
+        index = 0;
+        while (index < count) : (index += 1) {
+            first[index] = temp[index];
+        }
+    }
+}
