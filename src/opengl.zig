@@ -53,7 +53,7 @@ const Vector2 = math.Vector2;
 const Color = math.Color;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
-const SortEntry = sort.SortEntry;
+const SortSpriteBound = sort.SortSpriteBound;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
 
@@ -151,10 +151,10 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
     setScreenSpace(commands.width, commands.height);
 
     const sort_entry_count: u32 = commands.push_buffer_element_count;
-    const sort_entries: [*]SortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+    const sort_entries: [*]SortSpriteBound = sort.getSortEntries(commands);
 
     var clip_rect_index: u32 = 0xffffffff;
-    var sort_entry: [*]SortEntry = sort_entries;
+    var sort_entry: [*]SortSpriteBound = sort_entries;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;

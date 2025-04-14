@@ -2600,16 +2600,14 @@ pub export fn wWinMain(
 
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
-                    const needed_sort_memory_size: u64 =
-                        render_commands.push_buffer_element_count * @sizeOf(sort.SortEntry);
+                    const needed_sort_memory_size: u64 = sort.getSortTempMemorySize(&render_commands);
                     if (current_sort_memory_size < needed_sort_memory_size) {
                         deallocateMemory(sort_memory);
                         current_sort_memory_size = needed_sort_memory_size;
                         sort_memory = allocateMemory(current_sort_memory_size);
                     }
 
-                    const needed_clip_rect_memory_size: u64 =
-                        render_commands.push_buffer_element_count * @sizeOf(sort.SortEntry);
+                    const needed_clip_rect_memory_size: u64 = sort.getSortTempMemorySize(&render_commands);
                     if (current_clip_rect_memory_size < needed_clip_rect_memory_size) {
                         deallocateMemory(clip_memory);
                         current_clip_rect_memory_size = needed_clip_rect_memory_size;

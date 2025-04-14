@@ -1,4 +1,5 @@
 const std = @import("std");
+const shared = @import("shared.zig");
 
 pub const SortEntry = struct {
     sort_key: f32,
@@ -144,14 +145,26 @@ pub fn radixSort(count: u32, first: [*]SortEntry, temp: [*]SortEntry) void {
     }
 }
 
-const SortSpriteBound = struct {
+pub const SpriteBound = struct {
     y_min: f32,
     y_max: f32,
     z_max: f32,
+};
+
+pub const SortSpriteBound = struct {
+    sort_key: SpriteBound,
     index: u32,
 };
 
-fn isInFrontOf(a: *SortSpriteBound, b: *SortSpriteBound) bool {
+pub fn getSortEntries(commands: *shared.RenderCommands) [*]SortSpriteBound {
+    return @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+}
+
+pub fn getSortTempMemorySize(commands: *shared.RenderCommands) u64 {
+    return commands.push_buffer_element_count * @sizeOf(SortSpriteBound);
+}
+
+pub fn isInFrontOf(a: SpriteBound, b: SpriteBound) bool {
     const both_z_sprites: bool = a.y_min != a.y_max and b.y_min != b.y_max;
     const a_includes_b: bool = b.y_min >= a.y_min and b.y_min < a.y_max;
     const b_includes_a: bool = a.y_min >= b.y_min and a.y_min < b.y_max;
@@ -166,20 +179,20 @@ fn isInFrontOf(a: *SortSpriteBound, b: *SortSpriteBound) bool {
     return result;
 }
 
-fn swap2(a: [*]SortSpriteBound, b: [*]SortSpriteBound) void {
+fn swapSpriteBound(a: [*]SortSpriteBound, b: [*]SortSpriteBound) void {
     const store: SortSpriteBound = b[0];
     b[0] = a[0];
     a[0] = store;
 }
 
-pub fn mergeSort2(count: u32, first: [*]SortSpriteBound, temp: [*]SortSpriteBound) void {
+pub fn mergeSortSpriteBound(count: u32, first: [*]SortSpriteBound, temp: [*]SortSpriteBound) void {
     if (count <= 1) {
         // Nothing to do.
     } else if (count == 2) {
         const entry_a: [*]SortSpriteBound = first;
         const entry_b: [*]SortSpriteBound = entry_a + 1;
-        if (isInFrontOf(entry_b[0], entry_a[0])) {
-            swap2(entry_a, entry_b);
+        if (isInFrontOf(entry_a[0].sort_key, entry_b[0].sort_key)) {
+            swapSpriteBound(entry_a, entry_b);
         }
     } else {
         const half0: u32 = @divFloor(count, 2);
@@ -192,8 +205,8 @@ pub fn mergeSort2(count: u32, first: [*]SortSpriteBound, temp: [*]SortSpriteBoun
         const in_half1: [*]SortSpriteBound = first + half0;
         const end: [*]SortSpriteBound = first + count;
 
-        mergeSort(half0, in_half0, temp);
-        mergeSort(half1, in_half1, temp);
+        mergeSortSpriteBound(half0, in_half0, temp);
+        mergeSortSpriteBound(half1, in_half1, temp);
 
         var read_half0: [*]SortSpriteBound = in_half0;
         var read_half1: [*]SortSpriteBound = in_half1;
@@ -209,7 +222,7 @@ pub fn mergeSort2(count: u32, first: [*]SortSpriteBound, temp: [*]SortSpriteBoun
                 out[0] = read_half0[0];
                 read_half0 += 1;
                 out += 1;
-            } else if (isInFrontOf(read_half0[0], read_half1[0])) {
+            } else if (isInFrontOf(read_half1[0].sort_key, read_half0[0].sort_key)) {
                 out[0] = read_half0[0];
                 read_half0 += 1;
                 out += 1;

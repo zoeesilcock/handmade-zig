@@ -46,7 +46,8 @@ const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const RenderCommands = shared.RenderCommands;
 const ArenaPushParams = shared.ArenaPushParams;
-const SortEntry = sort.SortEntry;
+const SpriteBound = sort.SpriteBound;
+const SortSpriteBound = sort.SortSpriteBound;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
@@ -68,7 +69,6 @@ pub const RenderEntityBasisResult = extern struct {
     position: Vector2 = Vector2.zero(),
     scale: f32 = 0,
     valid: bool = false,
-    sort_key: f32 = 0,
 };
 
 pub const RenderEntryType = enum(u16) {
@@ -195,20 +195,6 @@ const CameraTransform = extern struct {
     distance_above_target: f32,
 };
 
-fn computeSortKey(
-    camera_transform: CameraTransform,
-    object_transform: ObjectTransform,
-    original_position: Vector4,
-) f32 {
-    _ = camera_transform;
-    _ = object_transform;
-    _ = original_position;
-
-    const result: f32 = 0;
-    // ???
-    return result;
-}
-
 fn getRenderEntityBasisPosition(
     camera_transform: CameraTransform,
     object_transform: ObjectTransform,
@@ -217,9 +203,6 @@ fn getRenderEntityBasisPosition(
     var result = RenderEntityBasisResult{};
 
     const position: Vector3 = original_position.xy().toVector3(0).plus(object_transform.offset_position);
-    const position_w: f32 = 0;
-    // const position: Vector3 = original_position.xyz().plus(object_transform.offset_position.xyz());
-    // const position_w: f32 = original_position.w() + object_transform.offset_position.w();
 
     if (camera_transform.orthographic) {
         result.position = camera_transform.screen_center.plus(position.xy().scaledTo(camera_transform.meters_to_pixels));
@@ -246,15 +229,6 @@ fn getRenderEntityBasisPosition(
             result.valid = true;
         }
     }
-
-    const perspective_z: f32 = result.scale;
-    const displacement_z: f32 = result.scale * position_w;
-
-    const perspective_sort_term: f32 = 4096 * perspective_z;
-    const y_sort_term: f32 = -1024 * position.y();
-    const z_sort_term: f32 = displacement_z;
-
-    result.sort_key = (perspective_sort_term + y_sort_term + z_sort_term) + object_transform.sort_bias;
 
     return result;
 }
@@ -356,7 +330,7 @@ pub const RenderGroup = extern struct {
         self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), null);
     }
 
-    fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: f32) ?*T {
+    fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: SpriteBound) ?*T {
         // TimedBlock.beginFunction(@src(), .PushRenderElement);
         // defer TimedBlock.endFunction(@src(), .PushRenderElement);
 
@@ -369,14 +343,14 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         in_size: u32,
         entry_type: RenderEntryType,
-        sort_key: f32,
+        sort_key: SpriteBound,
         comptime alignment: u32,
     ) ?*anyopaque {
         var result: ?*anyopaque = null;
         const size = in_size + @sizeOf(RenderEntryHeader);
         const commands: *RenderCommands = self.commands;
 
-        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortEntry)) {
+        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortSpriteBound)) {
             const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + commands.push_buffer_size));
             header.type = entry_type;
             header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
@@ -388,8 +362,8 @@ pub const RenderGroup = extern struct {
 
             result = @ptrFromInt(aligned_address);
 
-            commands.sort_entry_at -= @sizeOf(SortEntry);
-            var sort_entry: *SortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+            commands.sort_entry_at -= @sizeOf(SortSpriteBound);
+            var sort_entry: *SortSpriteBound = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
             sort_entry.sort_key = sort_key;
             sort_entry.index = commands.push_buffer_size;
 
@@ -439,7 +413,12 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
-        if (self.pushRenderElement(RenderEntryClear, -std.math.floatMax(f32))) |entry| {
+        const sort_key: SpriteBound = .{
+            .y_min = std.math.floatMin(f32),
+            .y_max = std.math.floatMax(f32),
+            .z_max = std.math.floatMin(f32),
+        };
+        if (self.pushRenderElement(RenderEntryClear, sort_key)) |entry| {
             entry.premultiplied_color = self.storeColor(color);
         }
     }
@@ -488,6 +467,27 @@ pub const RenderGroup = extern struct {
         return dest;
     }
 
+    fn getBoundFor(
+        object_transform: ObjectTransform,
+        height: f32,
+        offset: Vector3,
+    ) SpriteBound {
+        var sprite_bound: SpriteBound = .{
+            .y_min = object_transform.offset_position.y() + offset.y(),
+            .y_max = object_transform.offset_position.y() + offset.y(),
+            .z_max = object_transform.offset_position.z() + offset.z(),
+        };
+
+        if (object_transform.upright) {
+            sprite_bound.z_max += 0.5 * height;
+        } else {
+            sprite_bound.y_min = -0.5 * height;
+            sprite_bound.y_max = 0.5 * height;
+        }
+
+        return sprite_bound;
+    }
+
     pub fn pushBitmap(
         self: *RenderGroup,
         object_transform: ObjectTransform,
@@ -504,7 +504,8 @@ pub const RenderGroup = extern struct {
         const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient, x_axis, y_axis);
 
         if (dim.basis.valid) {
-            if (self.pushRenderElement(RenderEntryBitmap, dim.basis.sort_key)) |entry| {
+            const sort_key: SpriteBound = getBoundFor(object_transform, height, offset);
+            if (self.pushRenderElement(RenderEntryBitmap, sort_key)) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
                 entry.premultiplied_color = self.storeColor(color);
@@ -577,7 +578,8 @@ pub const RenderGroup = extern struct {
 
         const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
         if (basis.valid) {
-            if (self.pushRenderElement(RenderEntryRectangle, basis.sort_key)) |entry| {
+            const sort_key: SpriteBound = getBoundFor(object_transform, dimension.y(), offset);
+            if (self.pushRenderElement(RenderEntryRectangle, sort_key)) |entry| {
                 entry.position = basis.position;
                 entry.dimension = dimension.scaledTo(basis.scale);
                 entry.premultiplied_color = self.storeColor(color);
@@ -735,7 +737,7 @@ pub const RenderGroup = extern struct {
         const size = @sizeOf(RenderEntryClipRect);
         const commands: *RenderCommands = self.commands;
 
-        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortEntry)) {
+        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortSpriteBound)) {
             const rect: *RenderEntryClipRect = @ptrCast(@alignCast(commands.push_buffer_base + commands.push_buffer_size));
             commands.push_buffer_size += @intCast(size);
 

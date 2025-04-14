@@ -34,7 +34,7 @@ const RenderEntryCoordinateSystem = rendergroup.RenderEntryCoordinateSystem;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
 const EnvironmentMap = rendergroup.EnvironmentMap;
 const LoadedBitmap = asset.LoadedBitmap;
-const SortEntry = sort.SortEntry;
+const SortSpriteBound = sort.SortSpriteBound;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 
@@ -165,9 +165,9 @@ pub fn renderCommandsToBitmap(
     var clip_rect: Rectangle2i = base_clip_rect;
 
     const sort_entry_count: u32 = commands.push_buffer_element_count;
-    const sort_entries: [*]SortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+    const sort_entries: [*]SortSpriteBound = sort.getSortEntries(commands);
 
-    var sort_entry: [*]SortEntry = sort_entries;
+    var sort_entry: [*]SortSpriteBound = sort_entries;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
@@ -290,12 +290,13 @@ pub fn renderCommandsToBitmap(
 }
 
 pub fn sortEntries(commands: *RenderCommands, sort_memory: *anyopaque) void {
-    const count: u32 = commands.push_buffer_element_count;
-    const entries: [*]SortEntry = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+    TimedBlock.beginFunction(@src(), .SortEntries);
+    defer TimedBlock.endFunction(@src(), .SortEntries);
 
-    // sort.bubbleSort(count, entries, @ptrCast(@alignCast(sort_memory)));
-    // sort.mergeSort(count, entries, @ptrCast(@alignCast(sort_memory)));
-    sort.radixSort(count, entries, @ptrCast(@alignCast(sort_memory)));
+    const count: u32 = commands.push_buffer_element_count;
+    const entries: [*]SortSpriteBound = sort.getSortEntries(commands);
+
+    sort.mergeSortSpriteBound(count, entries, @ptrCast(@alignCast(sort_memory)));
 
     if (INTERNAL) {
         if (count > 0) {
@@ -303,10 +304,16 @@ pub fn sortEntries(commands: *RenderCommands, sort_memory: *anyopaque) void {
 
             var index: u32 = 0;
             while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
-                const entry_a: [*]SortEntry = entries + index;
-                const entry_b: [*]SortEntry = entry_a + 1;
+                const entry_a: [*]SortSpriteBound = entries + index;
+                const entry_b: [*]SortSpriteBound = entry_a + 1;
 
-                std.debug.assert(entry_a[0].sort_key <= entry_b[0].sort_key);
+                if (sort.isInFrontOf(entry_a[0].sort_key, entry_b[0].sort_key)) {
+                    std.debug.assert(
+                        entry_a[0].sort_key.y_min == entry_b[0].sort_key.y_min and
+                        entry_a[0].sort_key.y_max == entry_b[0].sort_key.y_max and
+                        entry_a[0].sort_key.z_max == entry_b[0].sort_key.z_max
+                    );
+                }
             }
         }
     }

@@ -435,7 +435,9 @@ pub fn updateAndRenderEntities(
 
             var entity_transform = ObjectTransform.defaultUpright();
             entity_transform.offset_position = entity.getGroundPoint().minus(camera_position);
-            const relative_layer: i32 = convertToLayerRelative(world_mode, &entity_transform.offset_position.values[2]);
+            var temp_z = entity_transform.offset_position.z();
+            // const relative_layer: i32 = convertToLayerRelative(world_mode, &entity_transform.offset_position.values[2]);
+            const relative_layer: i32 = convertToLayerRelative(world_mode, &temp_z);
 
             if (relative_layer >= minimum_level_index and relative_layer <= maximum_level_index) {
                 const layer_index: usize = @intCast(relative_layer - minimum_level_index);
