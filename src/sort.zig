@@ -1,5 +1,8 @@
 const std = @import("std");
 const shared = @import("shared.zig");
+const math = @import("math.zig");
+
+const Rectangle2 = math.Rectangle2;
 
 pub const SortEntry = struct {
     sort_key: f32,
@@ -240,6 +243,56 @@ pub fn mergeSortSpriteBound(count: u32, first: [*]SortSpriteBound, temp: [*]Sort
         index = 0;
         while (index < count) : (index += 1) {
             first[index] = temp[index];
+        }
+    }
+}
+
+const SpriteNode = struct {
+    screen_area: Rectangle2,
+    z_max: f32,
+};
+
+const SpriteEdge = struct {
+    front: u32,
+    behind: u32,
+};
+
+fn addEdge(a: SpriteEdge, b: SpriteEdge) void {
+    _ = a;
+    _ = b;
+}
+
+fn buildSpriteGraph() void {
+    const input_node_count: u32 = 0;
+    const input_nodes: [*]SpriteNode = undefined;
+
+    if (input_node_count > 0) {
+        var node_index_a: u32 = 0;
+        while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
+            var node_index_b: u32 = node_index_a;
+            while (node_index_b < input_node_count) : (node_index_b += 1) {
+                const a: *SpriteNode = input_nodes + node_index_a;
+                const b: *SpriteNode = input_nodes + node_index_b;
+
+                if (a.screen_area.intersects(b.screen_area)) {
+                    const bound_a: SpriteBound = .{
+                        .y_min = a.screen_area.min.y(),
+                        .y_max = a.screen_area.max.y(),
+                        .z_max = a.z_max,
+                    };
+                    const bound_b: SpriteBound = .{
+                        .y_min = b.screen_area.min.y(),
+                        .y_max = b.screen_area.max.y(),
+                        .z_max = b.z_max,
+                    };
+
+                    if (isInFrontOf(bound_a, bound_b)) {
+                        addEdge(a, b);
+                    } else {
+                        addEdge(b, a);
+                    }
+                }
+            }
         }
     }
 }

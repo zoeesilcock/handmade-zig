@@ -481,8 +481,8 @@ pub const RenderGroup = extern struct {
         if (object_transform.upright) {
             sprite_bound.z_max += 0.5 * height;
         } else {
-            sprite_bound.y_min = -0.5 * height;
-            sprite_bound.y_max = 0.5 * height;
+            sprite_bound.y_min -= 0.5 * height;
+            sprite_bound.y_max += 0.5 * height;
         }
 
         return sprite_bound;

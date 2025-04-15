@@ -301,18 +301,28 @@ pub fn sortEntries(commands: *RenderCommands, sort_memory: *anyopaque) void {
     if (INTERNAL) {
         if (count > 0) {
             // Validate the sort result.
-
             var index: u32 = 0;
             while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
-                const entry_a: [*]SortSpriteBound = entries + index;
-                const entry_b: [*]SortSpriteBound = entry_a + 1;
+                var index_b: u32 = index + 1;
+                // Partial ordering check, 0(n), only neighbors are verified.
+                var count_b: u32 = 1;
 
-                if (sort.isInFrontOf(entry_a[0].sort_key, entry_b[0].sort_key)) {
-                    std.debug.assert(
-                        entry_a[0].sort_key.y_min == entry_b[0].sort_key.y_min and
-                        entry_a[0].sort_key.y_max == entry_b[0].sort_key.y_max and
-                        entry_a[0].sort_key.z_max == entry_b[0].sort_key.z_max
-                    );
+                if (false) {
+                    // Total ordering check, 0(n^2), all pairs verified.
+                    count_b = count;
+                }
+
+                while (index_b < count_b) : (index_b += 1) {
+                    const entry_a: [*]SortSpriteBound = entries + index;
+                    const entry_b: [*]SortSpriteBound = entries + index_b;
+
+                    if (sort.isInFrontOf(entry_a[0].sort_key, entry_b[0].sort_key)) {
+                        std.debug.assert(
+                            entry_a[0].sort_key.y_min == entry_b[0].sort_key.y_min and
+                            entry_a[0].sort_key.y_max == entry_b[0].sort_key.y_max and
+                            entry_a[0].sort_key.z_max == entry_b[0].sort_key.z_max
+                        );
+                    }
                 }
             }
         }
