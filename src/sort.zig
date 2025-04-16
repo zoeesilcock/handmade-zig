@@ -2,6 +2,8 @@ const std = @import("std");
 const shared = @import("shared.zig");
 const math = @import("math.zig");
 
+const INTERNAL = shared.INTERNAL;
+
 const Rectangle2 = math.Rectangle2;
 
 pub const SortEntry = struct {
@@ -183,9 +185,9 @@ pub fn isInFrontOf(a: SpriteBound, b: SpriteBound) bool {
 }
 
 fn swapSpriteBound(a: [*]SortSpriteBound, b: [*]SortSpriteBound) void {
-    const store: SortSpriteBound = b[0];
+    const temp: SortSpriteBound = b[0];
     b[0] = a[0];
-    a[0] = store;
+    a[0] = temp;
 }
 
 pub fn mergeSortSpriteBound(count: u32, first: [*]SortSpriteBound, temp: [*]SortSpriteBound) void {
@@ -193,7 +195,7 @@ pub fn mergeSortSpriteBound(count: u32, first: [*]SortSpriteBound, temp: [*]Sort
         // Nothing to do.
     } else if (count == 2) {
         const entry_a: [*]SortSpriteBound = first;
-        const entry_b: [*]SortSpriteBound = entry_a + 1;
+        const entry_b: [*]SortSpriteBound = first + 1;
         if (isInFrontOf(entry_a[0].sort_key, entry_b[0].sort_key)) {
             swapSpriteBound(entry_a, entry_b);
         }
@@ -245,6 +247,92 @@ pub fn mergeSortSpriteBound(count: u32, first: [*]SortSpriteBound, temp: [*]Sort
             first[index] = temp[index];
         }
     }
+}
+
+fn isZSprite(bound: SpriteBound) bool {
+    return bound.y_min != bound.y_max;
+}
+
+fn verifyBuffer(count: u32, buffer: [*]SortSpriteBound, z_sprite: bool) void {
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        std.debug.assert(isZSprite(buffer[index].sort_key) == z_sprite);
+        if (index > 0) {
+            std.debug.assert(isInFrontOf(buffer[index].sort_key, buffer[index - 1].sort_key));
+        }
+    }
+}
+
+pub fn separatedSort(count: u32, first: [*]SortSpriteBound, temp: [*]SortSpriteBound) void {
+    var y_count: u32 = 0;
+    var z_count: u32 = 0;
+    {
+        var index: u32 = 0;
+        while (index < count) : (index += 1) {
+            const this: [*]SortSpriteBound = first + index;
+            if (isZSprite(this[0].sort_key)) {
+                temp[z_count] = this[0];
+                z_count += 1;
+            } else {
+                first[y_count] = this[0];
+                y_count += 1;
+            }
+        }
+    }
+
+    if (INTERNAL) {
+        verifyBuffer(y_count, first, false);
+        verifyBuffer(z_count, temp, true);
+    }
+
+    mergeSortSpriteBound(y_count, first, temp + z_count);
+    mergeSortSpriteBound(z_count, temp, first + y_count);
+
+    if (y_count == 1) {
+        temp[z_count] = first[0];
+    } else if (y_count == 2) {
+        temp[y_count] = first[0];
+        temp[y_count + 1] = first[1];
+    }
+
+    const in_half0: [*]SortSpriteBound = temp;
+    const in_half1: [*]SortSpriteBound = temp + z_count;
+
+    if (INTERNAL) {
+        verifyBuffer(y_count, in_half1, false);
+        verifyBuffer(z_count, in_half0, true);
+    }
+
+    const end: [*]SortSpriteBound = in_half1 + y_count;
+    var read_half0: [*]SortSpriteBound = in_half0;
+    var read_half1: [*]SortSpriteBound = in_half1;
+
+    var out: [*]SortSpriteBound = first;
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        if (read_half0 == in_half1) {
+            out[0] = read_half1[0];
+            read_half1 += 1;
+            out += 1;
+        } else if (read_half1 == end) {
+            out[0] = read_half0[0];
+            read_half0 += 1;
+            out += 1;
+        // TODO: This merge comparison can be simpler now since we know which sprite is a Z sprite and which is a Y sprite.
+        } else if (isInFrontOf(read_half1[0].sort_key, read_half0[0].sort_key)) {
+            out[0] = read_half0[0];
+            read_half0 += 1;
+            out += 1;
+        } else {
+            out[0] = read_half1[0];
+            read_half1 += 1;
+            out += 1;
+        }
+    }
+
+    std.debug.assert(out == (first + count));
+    std.debug.assert(read_half0 == in_half1);
+    std.debug.assert(read_half1 == end);
 }
 
 const SpriteNode = struct {

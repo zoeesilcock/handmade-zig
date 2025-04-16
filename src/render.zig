@@ -296,7 +296,7 @@ pub fn sortEntries(commands: *RenderCommands, sort_memory: *anyopaque) void {
     const count: u32 = commands.push_buffer_element_count;
     const entries: [*]SortSpriteBound = sort.getSortEntries(commands);
 
-    sort.mergeSortSpriteBound(count, entries, @ptrCast(@alignCast(sort_memory)));
+    sort.separatedSort(count, entries, @ptrCast(@alignCast(sort_memory)));
 
     if (INTERNAL) {
         if (count > 0) {
@@ -307,7 +307,7 @@ pub fn sortEntries(commands: *RenderCommands, sort_memory: *anyopaque) void {
                 // Partial ordering check, 0(n), only neighbors are verified.
                 var count_b: u32 = 1;
 
-                if (false) {
+                if (true) {
                     // Total ordering check, 0(n^2), all pairs verified.
                     count_b = count;
                 }
