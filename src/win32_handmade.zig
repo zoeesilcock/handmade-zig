@@ -1408,7 +1408,7 @@ fn displayBufferInWindow(
     commands.offset_x = dim.offset_x;
     commands.offset_y = dim.offset_y;
 
-    render.sortEntries(commands, sort_memory);
+    //sort.sortEntries(commands, sort_memory);
     render.linearizeClipRects(commands, clip_memory);
 
     // TODO: Do we want to check for resources like before?

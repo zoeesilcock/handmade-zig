@@ -81,7 +81,8 @@ pub fn softwareRenderCommands(
     TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
     defer TimedBlock.endFunction(@src(), .TiledRenderToOutput);
 
-    sortEntries(commands, sort_memory);
+    _ = sort_memory;
+    // sort.sortEntries(commands, sort_memory);
 
     // TODO
     // * Make sure that tiles are all cache-aligned.
@@ -285,46 +286,6 @@ pub fn renderCommandsToBitmap(
             else => {
                 unreachable;
             },
-        }
-    }
-}
-
-pub fn sortEntries(commands: *RenderCommands, sort_memory: *anyopaque) void {
-    TimedBlock.beginFunction(@src(), .SortEntries);
-    defer TimedBlock.endFunction(@src(), .SortEntries);
-
-    const count: u32 = commands.push_buffer_element_count;
-    const entries: [*]SortSpriteBound = sort.getSortEntries(commands);
-
-    sort.separatedSort(count, entries, @ptrCast(@alignCast(sort_memory)));
-
-    if (INTERNAL) {
-        if (count > 0) {
-            // Validate the sort result.
-            var index: u32 = 0;
-            while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
-                var index_b: u32 = index + 1;
-                // Partial ordering check, 0(n), only neighbors are verified.
-                var count_b: u32 = 1;
-
-                if (true) {
-                    // Total ordering check, 0(n^2), all pairs verified.
-                    count_b = count;
-                }
-
-                while (index_b < count_b) : (index_b += 1) {
-                    const entry_a: [*]SortSpriteBound = entries + index;
-                    const entry_b: [*]SortSpriteBound = entries + index_b;
-
-                    if (sort.isInFrontOf(entry_a[0].sort_key, entry_b[0].sort_key)) {
-                        std.debug.assert(
-                            entry_a[0].sort_key.y_min == entry_b[0].sort_key.y_min and
-                            entry_a[0].sort_key.y_max == entry_b[0].sort_key.y_max and
-                            entry_a[0].sort_key.z_max == entry_b[0].sort_key.z_max
-                        );
-                    }
-                }
-            }
         }
     }
 }

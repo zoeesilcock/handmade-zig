@@ -1,10 +1,14 @@
 const std = @import("std");
 const shared = @import("shared.zig");
 const math = @import("math.zig");
+const debug_interface = @import("debug_interface.zig");
 
 const INTERNAL = shared.INTERNAL;
 
 const Rectangle2 = math.Rectangle2;
+const RenderCommands = shared.RenderCommands;
+const TimedBlock = debug_interface.TimedBlock;
+const MemoryArena = shared.MemoryArena;
 
 pub const SortEntry = struct {
     sort_key: f32,
@@ -150,15 +154,29 @@ pub fn radixSort(count: u32, first: [*]SortEntry, temp: [*]SortEntry) void {
     }
 }
 
+const SpriteFlag = enum(u32) {
+    Visited = 0x1,
+    Drawn = 0x2,
+};
+
+pub const SortSpriteBound = struct {
+    first_edge_with_me_as_front: ?*SpriteEdge,
+    screen_area: Rectangle2,
+    sort_key: SpriteBound,
+    index: u32,
+    flags: u32,
+};
+
 pub const SpriteBound = struct {
     y_min: f32,
     y_max: f32,
     z_max: f32,
 };
 
-pub const SortSpriteBound = struct {
-    sort_key: SpriteBound,
-    index: u32,
+const SpriteEdge = struct {
+    next_edge_with_same_front: ?*SpriteEdge,
+    front: u32,
+    behind: u32,
 };
 
 pub fn getSortEntries(commands: *shared.RenderCommands) [*]SortSpriteBound {
@@ -167,6 +185,118 @@ pub fn getSortEntries(commands: *shared.RenderCommands) [*]SortSpriteBound {
 
 pub fn getSortTempMemorySize(commands: *shared.RenderCommands) u64 {
     return commands.push_buffer_element_count * @sizeOf(SortSpriteBound);
+}
+
+fn addEdge(a: SpriteEdge, b: SpriteEdge) void {
+    _ = a;
+    _ = b;
+}
+
+fn buildSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, arena: ?*MemoryArena) void {
+    if (input_node_count > 0) {
+        var node_index_a: u32 = 0;
+        while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
+            const a: *SortSpriteBound = @ptrCast(input_nodes + node_index_a);
+            std.debug.assert(a.flags == 0);
+
+            var node_index_b: u32 = node_index_a;
+            while (node_index_b < input_node_count) : (node_index_b += 1) {
+                const b: *SortSpriteBound = @ptrCast(input_nodes + node_index_b);
+
+                if (a.screen_area.intersects(b.screen_area)) {
+                    var front_index: u32 = node_index_a;
+                    var back_index: u32 = node_index_b;
+                    if (isInFrontOf(b.sort_key, a.sort_key)) {
+                        const temp: u32 = front_index;
+                        front_index = back_index;
+                        back_index = temp;
+                    }
+
+                    _ = arena;
+                    var edge: ?*SpriteEdge = null; // arena.pushStruct(SpriteEdge);
+                    const front: *SortSpriteBound = @ptrCast(input_nodes + front_index);
+                    edge.front = front_index;
+                    edge.behind = back_index;
+
+                    edge.next_edge_with_same_front = front.first_edge_with_me_as_front;
+                    front.first_edge_with_me_as_front = edge;
+                }
+            }
+        }
+    }
+}
+
+const SpriteGraphWalk = struct {
+    input_nodes: [*]SortSpriteBound,
+    out_index: [*]u32,
+};
+
+fn recursiveFrontToBack(walk: *SpriteGraphWalk, at_index: u32) void {
+    const at: *SortSpriteBound = @ptrCast(walk.input_nodes + at_index);
+    if ((at.flags & @intFromEnum(SpriteFlag.Visited)) == 0) {
+        at.flags |= @intFromEnum(SpriteFlag.Visited);
+
+        var opt_edge: ?*SpriteEdge = at[0].first_edge_with_me_as_front;
+        while (opt_edge) |edge| : (opt_edge = edge.next_edge_with_same_front) {
+            std.debug.assert(edge.front == at_index);
+            recursiveFrontToBack(walk, edge.behind);
+        }
+
+        walk.*.out_index = at_index;
+        walk.*.out_index += 1;
+    }
+}
+
+fn walkSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, out_index_array: [*]u32) void {
+    var walk: SpriteGraphWalk = .{
+        .input_nodes = input_nodes,
+        .out_index = out_index_array,
+    };
+    var node_index_a: u32 = 0;
+    while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
+        recursiveFrontToBack(&walk, node_index_a);
+    }
+}
+
+pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena, out_index_array: [*]u32) void {
+    TimedBlock.beginFunction(@src(), .SortEntries);
+    defer TimedBlock.endFunction(@src(), .SortEntries);
+
+    const count: u32 = commands.push_buffer_element_count;
+    const entries: [*]SortSpriteBound = getSortEntries(commands);
+
+    buildSpriteGraph(count, entries, temp_arena);
+    walkSpriteGraph(count, entries, out_index_array);
+
+    if (INTERNAL) {
+        if (count > 0) {
+            // Validate the sort result.
+            var index: u32 = 0;
+            while (index < @as(i32, @intCast(count)) - 1) : (index += 1) {
+                var index_b: u32 = index + 1;
+                // Partial ordering check, 0(n), only neighbors are verified.
+                var count_b: u32 = 1;
+
+                if (true) {
+                    // Total ordering check, 0(n^2), all pairs verified.
+                    count_b = count;
+                }
+
+                while (index_b < count_b) : (index_b += 1) {
+                    const entry_a: [*]SortSpriteBound = entries + index;
+                    const entry_b: [*]SortSpriteBound = entries + index_b;
+
+                    if (isInFrontOf(entry_a[0].sort_key, entry_b[0].sort_key)) {
+                        std.debug.assert(
+                            entry_a[0].sort_key.y_min == entry_b[0].sort_key.y_min and
+                            entry_a[0].sort_key.y_max == entry_b[0].sort_key.y_max and
+                            entry_a[0].sort_key.z_max == entry_b[0].sort_key.z_max
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub fn isInFrontOf(a: SpriteBound, b: SpriteBound) bool {
@@ -333,54 +463,4 @@ pub fn separatedSort(count: u32, first: [*]SortSpriteBound, temp: [*]SortSpriteB
     std.debug.assert(out == (first + count));
     std.debug.assert(read_half0 == in_half1);
     std.debug.assert(read_half1 == end);
-}
-
-const SpriteNode = struct {
-    screen_area: Rectangle2,
-    z_max: f32,
-};
-
-const SpriteEdge = struct {
-    front: u32,
-    behind: u32,
-};
-
-fn addEdge(a: SpriteEdge, b: SpriteEdge) void {
-    _ = a;
-    _ = b;
-}
-
-fn buildSpriteGraph() void {
-    const input_node_count: u32 = 0;
-    const input_nodes: [*]SpriteNode = undefined;
-
-    if (input_node_count > 0) {
-        var node_index_a: u32 = 0;
-        while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
-            var node_index_b: u32 = node_index_a;
-            while (node_index_b < input_node_count) : (node_index_b += 1) {
-                const a: *SpriteNode = input_nodes + node_index_a;
-                const b: *SpriteNode = input_nodes + node_index_b;
-
-                if (a.screen_area.intersects(b.screen_area)) {
-                    const bound_a: SpriteBound = .{
-                        .y_min = a.screen_area.min.y(),
-                        .y_max = a.screen_area.max.y(),
-                        .z_max = a.z_max,
-                    };
-                    const bound_b: SpriteBound = .{
-                        .y_min = b.screen_area.min.y(),
-                        .y_max = b.screen_area.max.y(),
-                        .z_max = b.z_max,
-                    };
-
-                    if (isInFrontOf(bound_a, bound_b)) {
-                        addEdge(a, b);
-                    } else {
-                        addEdge(b, a);
-                    }
-                }
-            }
-        }
-    }
 }
