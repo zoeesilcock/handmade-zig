@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const sim = @import("sim.zig");
@@ -13,6 +14,8 @@ const std = @import("std");
 // Types.
 const Vector3 = math.Vector3;
 const Color = math.Color;
+const MemoryArena = memory.MemoryArena;
+const ArenaPushParams = memory.ArenaPushParams;
 const TimedBlock = debug_interface.TimedBlock;
 const LoadedBitmap = asset.LoadedBitmap;
 const BitmapId = file_formats.BitmapId;
@@ -34,7 +37,7 @@ pub const World = extern struct {
 
     chunk_hash: [4096]?*WorldChunk,
 
-    arena: shared.MemoryArena,
+    arena: MemoryArena,
 
     first_free_chunk: ?*WorldChunk,
     first_free_block: ?*WorldEntityBlock,
@@ -100,12 +103,12 @@ pub const WorldPosition = extern struct {
     }
 };
 
-pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *shared.MemoryArena) *World {
+pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryArena) *World {
     var world: *World = parent_arena.pushStruct(World, null);
 
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
     world.first_free = null;
-    parent_arena.makeSubArena(&world.arena, parent_arena.getRemainingSize(null), shared.ArenaPushParams.noClear());
+    parent_arena.makeSubArena(&world.arena, parent_arena.getRemainingSize(null), ArenaPushParams.noClear());
 
     return world;
 }
@@ -239,14 +242,14 @@ pub fn getWorldChunk(
     chunk_x: i32,
     chunk_y: i32,
     chunk_z: i32,
-    opt_memory_arena: ?*shared.MemoryArena,
+    opt_memory_arena: ?*MemoryArena,
 ) ?*WorldChunk {
     const chunk_ptr: *?*WorldChunk = getWorldChunkInternal(world, chunk_x, chunk_y, chunk_z);
     var result: ?*WorldChunk = chunk_ptr.*;
 
     if (result == null) {
         if (opt_memory_arena) |memory_arena| {
-            result = memory_arena.pushStruct(WorldChunk, shared.ArenaPushParams.noClear());
+            result = memory_arena.pushStruct(WorldChunk, ArenaPushParams.noClear());
 
             result.?.first_block = null;
             result.?.x = chunk_x;

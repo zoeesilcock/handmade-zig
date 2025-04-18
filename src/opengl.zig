@@ -40,6 +40,8 @@ pub const WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB = 0x20A9;
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
+const RenderCommands = shared.RenderCommands;
+const GameRenderPrep = shared.GameRenderPrep;
 const RenderGroup = rendergroup.RenderGroup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryClear = rendergroup.RenderEntryClear;
@@ -63,7 +65,6 @@ pub const gl = struct {
 };
 
 pub var default_internal_texture_format: i32 = 0;
-var texture_bind_count: u32 = 0;
 
 pub const Info = struct {
     is_modern_context: bool,
@@ -131,7 +132,12 @@ pub fn init(is_modern_context: bool, framebuffer_supports_sRGB: bool) void {
     }
 }
 
-pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, window_height: i32) callconv(.C) void {
+pub fn renderCommands(
+    commands: *RenderCommands,
+    prep: *GameRenderPrep,
+    window_width: i32,
+    window_height: i32,
+) callconv(.C) void {
     _ = window_width;
     _ = window_height;
 
@@ -151,15 +157,14 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
     setScreenSpace(commands.width, commands.height);
 
     const sort_entry_count: u32 = commands.push_buffer_element_count;
-    const sort_entries: [*]SortSpriteBound = sort.getSortEntries(commands);
 
     var clip_rect_index: u32 = 0xffffffff;
-    var sort_entry: [*]SortSpriteBound = sort_entries;
+    var sort_entry: [*]u32 = prep.sorted_indices;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
-        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0].index));
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
         const alignment: usize = switch (header.type) {
             .RenderEntryClear => @alignOf(RenderEntryClear),
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
@@ -181,7 +186,7 @@ pub fn renderCommands(commands: *shared.RenderCommands, window_width: i32, windo
 
             std.debug.assert(clip_rect_index < commands.clip_rect_count);
 
-            const clip: RenderEntryClipRect = commands.clip_rects[clip_rect_index];
+            const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
             gl.glScissor(
                 clip.rect.min.x() + commands.offset_x,
                 clip.rect.min.y() + commands.offset_y,

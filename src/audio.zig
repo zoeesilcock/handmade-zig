@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
@@ -8,7 +9,8 @@ const std = @import("std");
 
 // Types.
 const State = shared.State;
-const MemoryArena = shared.MemoryArena;
+const MemoryArena = memory.MemoryArena;
+const ArenaPushParams = memory.ArenaPushParams;
 const SoundId = file_formats.SoundId;
 const SoundOutputBuffer = shared.SoundOutputBuffer;
 const Assets = asset.Assets;
@@ -16,7 +18,6 @@ const Vector2 = math.Vector2;
 const Vec4f = math.Vec4f;
 const Vec4i = math.Vec4i;
 const TimedBlock = debug_interface.TimedBlock;
-const ArenaPushParams = shared.ArenaPushParams;
 
 pub const PlayingSound = struct {
     id: SoundId,

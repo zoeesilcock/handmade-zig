@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const math = @import("math.zig");
 const world = @import("world.zig");
 const sim = @import("sim.zig");
@@ -40,7 +41,7 @@ const TransientState = shared.TransientState;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
-const ArenaPushParams = shared.ArenaPushParams;
+const ArenaPushParams = memory.ArenaPushParams;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
 const EntityType = entities.EntityType;
@@ -467,7 +468,7 @@ fn beginEntity(world_mode: *GameModeWorld) *Entity {
     var entity: *Entity = &world_mode.creation_buffer[world_mode.creation_buffer_index];
     world_mode.creation_buffer_index += 1;
 
-    shared.zeroStruct(Entity, entity);
+    memory.zeroStruct(Entity, entity);
 
     entity.x_axis = .new(1, 0);
     entity.y_axis = .new(0, 1);

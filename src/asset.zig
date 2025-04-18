@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
 const render = @import("render.zig");
@@ -14,8 +15,9 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
 const TransientState = shared.TransientState;
-const MemoryArena = shared.MemoryArena;
-const MemoryIndex = shared.MemoryIndex;
+const MemoryArena = memory.MemoryArena;
+const MemoryIndex = memory.MemoryIndex;
+const ArenaPushParams = memory.ArenaPushParams;
 const Platform = shared.Platform;
 const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
@@ -29,7 +31,6 @@ const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const PlatformFileHandle = shared.PlatformFileHandle;
-const ArenaPushParams = shared.ArenaPushParams;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
 
@@ -253,7 +254,7 @@ pub const Assets = struct {
         assets.assets = arena.pushArray(assets.asset_count, Asset, ArenaPushParams.aligned(@alignOf(Asset), true));
         assets.tags = arena.pushArray(assets.tag_count, HHATag, null);
 
-        shared.zeroStruct(HHATag, @ptrCast(assets.tags));
+        memory.zeroStruct(HHATag, @ptrCast(assets.tags));
 
         // Load tags.
         {
@@ -274,7 +275,7 @@ pub const Assets = struct {
         }
 
         var asset_count: u32 = 0;
-        shared.zeroStruct(Asset, @ptrCast(assets.assets + asset_count));
+        memory.zeroStruct(Asset, @ptrCast(assets.assets + asset_count));
         asset_count += 1;
 
         // Load assets.
@@ -385,9 +386,9 @@ pub const Assets = struct {
         return result;
     }
 
-    fn insertBlock(_: *Assets, previous: *AssetMemoryBlock, size: u64, memory: *anyopaque) *AssetMemoryBlock {
+    fn insertBlock(_: *Assets, previous: *AssetMemoryBlock, size: u64, block_memory: *anyopaque) *AssetMemoryBlock {
         std.debug.assert(size > @sizeOf(AssetMemoryBlock));
-        var block: *AssetMemoryBlock = @ptrCast(@alignCast(memory));
+        var block: *AssetMemoryBlock = @ptrCast(@alignCast(block_memory));
         block.flags = 0;
         block.size = size - @sizeOf(AssetMemoryBlock);
         block.previous = previous;
@@ -843,8 +844,8 @@ pub const Assets = struct {
                     sound.channel_count = info.channel_count;
                     const channel_size = size.section;
 
-                    const memory: *anyopaque = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
-                    var sound_at: [*]i16 = @ptrCast(@alignCast(memory));
+                    const sound_memory: *anyopaque = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
+                    var sound_at: [*]i16 = @ptrCast(@alignCast(sound_memory));
                     var channel_index: u32 = 0;
                     while (channel_index < sound.channel_count) : (channel_index += 1) {
                         sound.samples[channel_index] = sound_at;
@@ -857,7 +858,7 @@ pub const Assets = struct {
                     work.handle = self.getFileHandleFor(asset.file_index);
                     work.offset = asset.hha.data_offset;
                     work.size = size.data;
-                    work.destination = memory;
+                    work.destination = sound_memory;
                     work.finalize_operation = .None;
                     work.final_state = AssetState.Loaded.toInt();
                     work.texture_op_queue = null;
@@ -976,7 +977,7 @@ pub const Assets = struct {
                         font.unicode_map =
                             @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.horizontal_advance)) + horizontal_advance_size));
 
-                        shared.zeroSize(unicode_map_size, @ptrCast(font.unicode_map));
+                        memory.zeroSize(unicode_map_size, @ptrCast(font.unicode_map));
 
                         var work = LoadAssetWork{
                             .task = undefined,
@@ -1213,7 +1214,7 @@ fn doLoadAssetWorkDirectly(
     }
 
     if (!shared.platform.noFileErrors(work.handle)) {
-        shared.zeroSize(work.size, @ptrCast(work.destination));
+        memory.zeroSize(work.size, @ptrCast(work.destination));
     }
 
     work.asset.state = work.final_state;

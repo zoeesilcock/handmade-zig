@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
 const sim = @import("sim.zig");
@@ -100,6 +101,8 @@ const Rectangle3 = math.Rectangle3;
 const Rectangle2i = math.Rectangle2i;
 const Color = math.Color;
 const Color3 = math.Color3;
+const MemoryArena = memory.MemoryArena;
+const ArenaPushParams = memory.ArenaPushParams;
 const State = shared.State;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
@@ -115,19 +118,18 @@ const Particle = shared.Particle;
 const ParticleCel = shared.ParticleCel;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
-const ArenaPushParams = shared.ArenaPushParams;
 
 pub export fn updateAndRender(
     platform: shared.Platform,
-    memory: *shared.Memory,
+    game_memory: *shared.Memory,
     input: *shared.GameInput,
     render_commands: *shared.RenderCommands,
 ) void {
     shared.platform = platform;
 
     if (INTERNAL) {
-        shared.debug_global_memory = memory;
-        shared.global_debug_table = memory.debug_table;
+        shared.debug_global_memory = game_memory;
+        shared.global_debug_table = game_memory.debug_table;
 
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
@@ -176,23 +178,23 @@ pub export fn updateAndRender(
 
     input.frame_delta_time *= (config.global_config.Simulation_TimestepPercentage / 100);
 
-    std.debug.assert(@sizeOf(State) <= memory.permanent_storage_size);
-    const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
+    std.debug.assert(@sizeOf(State) <= game_memory.permanent_storage_size);
+    const state: *State = @ptrCast(@alignCast(game_memory.permanent_storage));
     if (!state.is_initialized) {
         state.* = State{
             .test_diffuse = undefined,
             .test_normal = undefined,
         };
 
-        var total_arena: shared.MemoryArena = shared.MemoryArena{
+        var total_arena: MemoryArena = MemoryArena{
             .size = undefined,
             .base = undefined,
             .used = undefined,
             .temp_count = undefined,
         };
         total_arena.initialize(
-            memory.permanent_storage_size - @sizeOf(State),
-            memory.permanent_storage.? + @sizeOf(State),
+            game_memory.permanent_storage_size - @sizeOf(State),
+            game_memory.permanent_storage.? + @sizeOf(State),
         );
         total_arena.makeSubArena(&state.audio_arena, shared.megabytes(1), null);
         total_arena.makeSubArena(&state.mode_arena, total_arena.getRemainingSize(null), null);
@@ -203,16 +205,16 @@ pub export fn updateAndRender(
     }
 
     // Transient initialization.
-    std.debug.assert(@sizeOf(TransientState) <= memory.transient_storage_size);
-    var transient_state: *TransientState = @ptrCast(@alignCast(memory.transient_storage));
+    std.debug.assert(@sizeOf(TransientState) <= game_memory.transient_storage_size);
+    var transient_state: *TransientState = @ptrCast(@alignCast(game_memory.transient_storage));
     if (!transient_state.is_initialized) {
         transient_state.arena.initialize(
-            memory.transient_storage_size - @sizeOf(TransientState),
-            memory.transient_storage.? + @sizeOf(TransientState),
+            game_memory.transient_storage_size - @sizeOf(TransientState),
+            game_memory.transient_storage.? + @sizeOf(TransientState),
         );
 
-        transient_state.high_priority_queue = memory.high_priority_queue;
-        transient_state.low_priority_queue = memory.low_priority_queue;
+        transient_state.high_priority_queue = game_memory.high_priority_queue;
+        transient_state.low_priority_queue = game_memory.low_priority_queue;
 
         var task_index: u32 = 0;
         while (task_index < transient_state.tasks.len) : (task_index += 1) {
@@ -226,7 +228,7 @@ pub export fn updateAndRender(
             &transient_state.arena,
             shared.megabytes(256),
             transient_state,
-            &memory.texture_op_queue,
+            &game_memory.texture_op_queue,
         );
 
         // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
@@ -369,16 +371,16 @@ pub export fn updateAndRender(
     transient_state.arena.checkArena();
 }
 
-pub export fn debugFrameEnd( memory: *shared.Memory, input: shared.GameInput, commands: *shared.RenderCommands) void {
-    shared.debugFrameEnd(memory, input, commands);
+pub export fn debugFrameEnd(game_memory: *shared.Memory, input: shared.GameInput, commands: *shared.RenderCommands) void {
+    shared.debugFrameEnd(game_memory, input, commands);
 }
 
 pub export fn getSoundSamples(
-    memory: *shared.Memory,
+    game_memory: *shared.Memory,
     sound_buffer: *shared.SoundOutputBuffer,
 ) void {
-    const state: *State = @ptrCast(@alignCast(memory.permanent_storage));
-    const transient_state: *TransientState = @ptrCast(@alignCast(memory.transient_storage));
+    const state: *State = @ptrCast(@alignCast(game_memory.permanent_storage));
+    const transient_state: *TransientState = @ptrCast(@alignCast(game_memory.transient_storage));
 
     state.audio_state.outputPlayingSounds(sound_buffer, transient_state.assets, &transient_state.arena);
     // audio.outputSineWave(sound_buffer, shared.MIDDLE_C, state);
@@ -411,13 +413,13 @@ pub fn endTaskWithMemory(task: *shared.TaskWithMemory) void {
 }
 
 fn clearBitmap(bitmap: *LoadedBitmap) void {
-    if (bitmap.memory) |*memory| {
+    if (bitmap.memory) |*bitmap_memory| {
         const total_bitmap_size: u32 = @intCast(bitmap.*.width * bitmap.*.height * shared.BITMAP_BYTES_PER_PIXEL);
-        shared.zeroSize(total_bitmap_size, memory.*);
+        memory.zeroSize(total_bitmap_size, bitmap_memory.*);
     }
 }
 
-fn makeEmptyBitmap(arena: *shared.MemoryArena, width: i32, height: i32, clear_to_zero: bool) LoadedBitmap {
+fn makeEmptyBitmap(arena: *MemoryArena, width: i32, height: i32, clear_to_zero: bool) LoadedBitmap {
     const result = arena.pushStruct(LoadedBitmap, null);
 
     result.alignment_percentage = Vector2.splat(0.5);

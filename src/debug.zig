@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const asset = @import("asset.zig");
 const rendergroup = @import("rendergroup.zig");
 const math = @import("math.zig");
@@ -25,8 +26,9 @@ const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
-const MemoryArena = shared.MemoryArena;
-const ArenaPushParams = shared.ArenaPushParams;
+const MemoryArena = memory.MemoryArena;
+const MemoryIndex = memory.MemoryIndex;
+const ArenaPushParams = memory.ArenaPushParams;
 const SortEntry = sort.SortEntry;
 const ObjectTransform = rendergroup.ObjectTransform;
 const RenderGroup = rendergroup.RenderGroup;
@@ -202,8 +204,8 @@ pub const DebugState = struct {
     pub fn get() ?*DebugState {
         var result: ?*DebugState = null;
 
-        if (shared.debug_global_memory) |memory| {
-            result = @ptrCast(@alignCast(memory.debug_storage));
+        if (shared.debug_global_memory) |debug_memory| {
+            result = @ptrCast(@alignCast(debug_memory.debug_storage));
 
             if (!result.?.initialized) {
                 result = null;
@@ -237,14 +239,14 @@ pub const DebugState = struct {
                     self.first_free_stored_event = free_event;
                     freed_event_count += 1;
                 }
-                shared.zeroStruct(DebugElementFrame, element_frame);
+                memory.zeroStruct(DebugElementFrame, element_frame);
             }
         }
 
         const frame: *DebugFrame = &self.frames[frame_ordinal];
         std.debug.assert(frame.stored_event_count == freed_event_count);
 
-        shared.zeroStruct(DebugFrame, frame);
+        memory.zeroStruct(DebugFrame, frame);
     }
 
     fn incrementFrameOrdinal(ordinal: *u32) void {
@@ -2202,7 +2204,7 @@ fn debugStart(
     TimedBlock.beginFunction(@src(), .DebugStart);
     defer TimedBlock.endFunction(@src(), .DebugStart);
 
-    if (shared.debug_global_memory) |memory| {
+    if (shared.debug_global_memory) |debug_memory| {
         if (!debug_state.initialized) {
             debug_state.frame_bar_lane_count = 0;
             debug_state.first_thread = null;
@@ -2218,10 +2220,10 @@ fn debugStart(
             debug_state.tree_sentinel.prev = &debug_state.tree_sentinel;
             debug_state.tree_sentinel.group = null;
 
-            const total_memory_size: shared.MemoryIndex = memory.debug_storage_size - @sizeOf(DebugState);
+            const total_memory_size: MemoryIndex = debug_memory.debug_storage_size - @sizeOf(DebugState);
             debug_state.debug_arena.initialize(
                 total_memory_size,
-                memory.debug_storage.? + @sizeOf(DebugState),
+                debug_memory.debug_storage.? + @sizeOf(DebugState),
             );
             debug_state.debug_arena.makeSubArena(
                 &debug_state.per_frame_arena,
@@ -2355,12 +2357,12 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
     group.end();
 
-    shared.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
+    memory.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
 }
 
-fn getGameAssets(memory: *shared.Memory) ?*asset.Assets {
+fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {
     var assets: ?*asset.Assets = null;
-    const transient_state: *shared.TransientState = @ptrCast(@alignCast(memory.transient_storage));
+    const transient_state: *shared.TransientState = @ptrCast(@alignCast(game_memory.transient_storage));
 
     if (transient_state.is_initialized) {
         assets = transient_state.assets;
@@ -2369,9 +2371,9 @@ fn getGameAssets(memory: *shared.Memory) ?*asset.Assets {
     return assets;
 }
 
-fn getMainGenerationID(memory: *shared.Memory) u32 {
+fn getMainGenerationID(game_memory: *shared.Memory) u32 {
     var result: u32 = 0;
-    const transient_state: *shared.TransientState = @ptrCast(@alignCast(memory.transient_storage));
+    const transient_state: *shared.TransientState = @ptrCast(@alignCast(game_memory.transient_storage));
 
     if (transient_state.is_initialized) {
         result = transient_state.main_generation_id;
@@ -2381,11 +2383,11 @@ fn getMainGenerationID(memory: *shared.Memory) u32 {
 }
 
 pub fn frameEnd(
-    memory: *shared.Memory,
+    game_memory: *shared.Memory,
     input: shared.GameInput,
     commands: *shared.RenderCommands,
 ) callconv(.C) void {
-    shared.zeroStruct(DebugEvent, &shared.global_debug_table.edit_event);
+    memory.zeroStruct(DebugEvent, &shared.global_debug_table.edit_event);
 
     shared.global_debug_table.current_event_array_index = if (shared.global_debug_table.current_event_array_index == 0) 1 else 0;
 
@@ -2398,15 +2400,15 @@ pub fn frameEnd(
 
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
 
-    if (memory.debug_storage) |debug_storage| {
+    if (game_memory.debug_storage) |debug_storage| {
         const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
 
-        if (getGameAssets(memory)) |assets| {
+        if (getGameAssets(game_memory)) |assets| {
             debugStart(
                 debug_state,
                 commands,
                 assets,
-                getMainGenerationID(memory),
+                getMainGenerationID(game_memory),
                 @intCast(commands.width),
                 @intCast(commands.height),
             );

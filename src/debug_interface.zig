@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const math = @import("math.zig");
 const asset = @import("asset.zig");
 const debug = @import("debug.zig");
@@ -12,7 +13,7 @@ const Vector4 = math.Vector4;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
-const MemoryArena = shared.MemoryArena;
+const MemoryArena = memory.MemoryArena;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedSound = asset.LoadedSound;
 const Assets = asset.Assets;
@@ -124,7 +125,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         SoundId: SoundId,
         FontId: FontId,
         Enum: u32,
-        MemoryArena: *shared.MemoryArena,
+        MemoryArena: *MemoryArena,
     } = undefined,
 
     pub fn debugName(

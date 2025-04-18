@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const world = @import("world.zig");
@@ -15,6 +16,8 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
+const MemoryArena = memory.MemoryArena;
+const ArenaPushParams = memory.ArenaPushParams;
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
 const World = world.World;
@@ -31,7 +34,6 @@ const BrainId = brains.BrainId;
 const BrainType = brains.BrainType;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
-const ArenaPushParams = shared.ArenaPushParams;
 
 pub const SimRegion = extern struct {
     world: *World,
@@ -195,7 +197,7 @@ fn connectEntityPointers(sim_region: *SimRegion) void {
 }
 
 pub fn beginSimulation(
-    sim_arena: *shared.MemoryArena,
+    sim_arena: *MemoryArena,
     game_world: *World,
     origin: world.WorldPosition,
     bounds: Rectangle3,

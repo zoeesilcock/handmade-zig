@@ -18,6 +18,7 @@
 
 const shared = @import("shared.zig");
 const math = @import("math.zig");
+const render = @import("render.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
 const config = @import("config.zig");
@@ -46,8 +47,8 @@ const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const RenderCommands = shared.RenderCommands;
 const ArenaPushParams = shared.ArenaPushParams;
-const SpriteBound = sort.SpriteBound;
-const SortSpriteBound = sort.SortSpriteBound;
+const SpriteBound = render.SpriteBound;
+const SortSpriteBound = render.SortSpriteBound;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
@@ -364,8 +365,10 @@ pub const RenderGroup = extern struct {
 
             commands.sort_entry_at -= @sizeOf(SortSpriteBound);
             var sort_entry: *SortSpriteBound = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+            sort_entry.first_edge_with_me_as_front = null;
             sort_entry.sort_key = sort_key;
-            sort_entry.index = commands.push_buffer_size;
+            sort_entry.offset = commands.push_buffer_size;
+            sort_entry.flags = 0;
 
             commands.push_buffer_size += @intCast(aligned_size);
             commands.push_buffer_element_count += 1;

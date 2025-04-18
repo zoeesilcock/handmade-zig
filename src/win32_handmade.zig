@@ -39,6 +39,7 @@ const INTERNAL = shared.INTERNAL;
 const DEBUG = shared.DEBUG;
 
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const render = @import("render.zig");
 const rendergroup = @import("rendergroup.zig");
 const asset = @import("asset.zig");
@@ -50,6 +51,9 @@ const debug_interface = @import("debug_interface.zig");
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const DebugId = debug_interface.DebugId;
+const MemoryArena = memory.MemoryArena;
+const MemoryIndex = memory.MemoryIndex;
+const GameRenderPrep = shared.GameRenderPrep;
 const WINAPI = @import("std").os.windows.WINAPI;
 
 const std = @import("std");
@@ -351,7 +355,7 @@ fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) ca
     file_handle.no_errors = false;
 }
 
-fn allocateMemory(size: shared.MemoryIndex) callconv(.C) ?*anyopaque {
+fn allocateMemory(size: MemoryIndex) callconv(.C) ?*anyopaque {
     return win32.VirtualAlloc(
         null,
         size,
@@ -361,8 +365,8 @@ fn allocateMemory(size: shared.MemoryIndex) callconv(.C) ?*anyopaque {
 }
 
 fn deallocateMemory(opt_memory: ?*anyopaque) callconv(.C) void {
-    if (opt_memory) |memory| {
-        _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
+    if (opt_memory) |mem| {
+        _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
     }
 }
 
@@ -417,7 +421,7 @@ const DebugFunctions = if (INTERNAL) struct {
         return result;
     }
 
-    pub fn debugWriteEntireFile(file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool {
+    pub fn debugWriteEntireFile(file_name: [*:0]const u8, content_size: u32, contents: *anyopaque) callconv(.C) bool {
         var result: bool = false;
 
         const file_handle: win32.HANDLE = win32.CreateFileA(
@@ -433,9 +437,9 @@ const DebugFunctions = if (INTERNAL) struct {
         if (file_handle != win32.INVALID_HANDLE_VALUE) {
             var bytes_written: u32 = undefined;
 
-            if (win32.WriteFile(file_handle, memory, memory_size, &bytes_written, null) != 0) {
+            if (win32.WriteFile(file_handle, contents, content_size, &bytes_written, null) != 0) {
                 // File written successfully.
-                result = bytes_written == memory_size;
+                result = bytes_written == content_size;
             }
 
             _ = win32.CloseHandle(file_handle);
@@ -523,8 +527,8 @@ const DebugFunctions = if (INTERNAL) struct {
         return result;
     }
 
-    pub fn debugFreeFileMemory(memory: *anyopaque) callconv(.C) void {
-        _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
+    pub fn debugFreeFileMemory(mem: *anyopaque) callconv(.C) void {
+        _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
     }
 } else struct {
     pub fn debugFreeFileMemory(_: *anyopaque) callconv(.C) void {}
@@ -1326,8 +1330,8 @@ fn getWindowDimension(window: win32.HWND) WindowDimension {
 }
 
 fn resizeDIBSection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
-    if (buffer.memory) |memory| {
-        _ = win32.VirtualFree(memory, 0, win32.MEM_RELEASE);
+    if (buffer.memory) |mem| {
+        _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
     }
 
     buffer.width = width;
@@ -1401,15 +1405,16 @@ fn displayBufferInWindow(
     window: win32.HWND,
     window_width: i32,
     window_height: i32,
-    sort_memory: *anyopaque,
-    clip_memory: *anyopaque,
+    temp_arena: *MemoryArena,
 ) void {
     const dim = calculateGameOffset(window);
     commands.offset_x = dim.offset_x;
     commands.offset_y = dim.offset_y;
 
-    //sort.sortEntries(commands, sort_memory);
-    render.linearizeClipRects(commands, clip_memory);
+    const temporary_memory = temp_arena.beginTemporaryMemory();
+    defer temp_arena.endTemporaryMemory(temporary_memory);
+
+    var prep: GameRenderPrep = render.prepForRender(commands, temp_arena);
 
     // TODO: Do we want to check for resources like before?
     // if (render_group.allResourcesPresent()) {
@@ -1418,7 +1423,7 @@ fn displayBufferInWindow(
 
     if (rendering_type == .RenderOpenGLDisplayOpenGL) {
         TimedBlock.beginBlock(@src(), .OpenGLRenderCommands);
-        opengl.renderCommands(commands, window_width, window_height);
+        opengl.renderCommands(commands, &prep, window_width, window_height);
         TimedBlock.endBlock(@src(), .OpenGLRenderCommands);
 
         TimedBlock.beginBlock(@src(), .SwapBuffers);
@@ -1431,7 +1436,7 @@ fn displayBufferInWindow(
             .height = @intCast(back_buffer.height),
             .pitch = @intCast(back_buffer.pitch),
         };
-        render.softwareRenderCommands(render_queue, commands, &output_target, sort_memory);
+        render.softwareRenderCommands(render_queue, commands, &prep, &output_target);
 
         if (rendering_type == .RenderSoftwareDisplayOpenGL) {
             opengl.displayBitmap(
@@ -2264,11 +2269,14 @@ pub export fn wWinMain(
 
                 running = true;
 
-                var current_sort_memory_size: u64 = shared.megabytes(1);
-                var sort_memory = allocateMemory(current_sort_memory_size);
-
-                var current_clip_rect_memory_size: u64 = shared.megabytes(1);
-                var clip_memory = allocateMemory(current_clip_rect_memory_size);
+                const frame_temp_memory_size = shared.megabytes(64);
+                var frame_temp_arena: MemoryArena = MemoryArena{
+                    .size = undefined,
+                    .base = undefined,
+                    .used = undefined,
+                    .temp_count = undefined,
+                };
+                frame_temp_arena.initialize(frame_temp_memory_size, @ptrCast(allocateMemory(frame_temp_memory_size)));
 
                 const push_buffer_size: u32 = shared.megabytes(64);
                 const push_buffer = allocateMemory(push_buffer_size);
@@ -2600,19 +2608,6 @@ pub export fn wWinMain(
 
                     // Output game to screen.
                     const window_dimension = getWindowDimension(window_handle);
-                    const needed_sort_memory_size: u64 = sort.getSortTempMemorySize(&render_commands);
-                    if (current_sort_memory_size < needed_sort_memory_size) {
-                        deallocateMemory(sort_memory);
-                        current_sort_memory_size = needed_sort_memory_size;
-                        sort_memory = allocateMemory(current_sort_memory_size);
-                    }
-
-                    const needed_clip_rect_memory_size: u64 = sort.getSortTempMemorySize(&render_commands);
-                    if (current_clip_rect_memory_size < needed_clip_rect_memory_size) {
-                        deallocateMemory(clip_memory);
-                        current_clip_rect_memory_size = needed_clip_rect_memory_size;
-                        clip_memory = allocateMemory(current_clip_rect_memory_size);
-                    }
 
                     texture_op_queue.mutex.begin();
                     const first_texture_op: ?*render.TextureOp = texture_op_queue.first;
@@ -2639,8 +2634,7 @@ pub export fn wWinMain(
                         window_handle,
                         window_dimension.width,
                         window_dimension.height,
-                        sort_memory.?,
-                        clip_memory.?,
+                        &frame_temp_arena,
                     );
 
                     flip_wall_clock = getWallClock();
