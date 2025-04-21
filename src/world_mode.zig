@@ -193,7 +193,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..6) |_| {
+    for (0..1) |_| {
         const door_direction = 2;
         _ = series.randomChoice(2);
         // const door_direction = 3;
@@ -220,14 +220,16 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             abs_tile_z,
         );
 
-        _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
-        _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
+        if (false) {
+            _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
+            _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
-        const snake_brain_id = addBrain(world_mode);
-        var segment_index: u32 = 0;
-        while (segment_index < 5) : (segment_index += 1) {
-            const x: u32 = 2 + segment_index;
-            _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
+            const snake_brain_id = addBrain(world_mode);
+            var segment_index: u32 = 0;
+            while (segment_index < 5) : (segment_index += 1) {
+                const x: u32 = 2 + segment_index;
+                _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
+            }
         }
 
         for (0..room.position[0].len) |tile_y| {
@@ -328,8 +330,6 @@ pub fn updateAndRenderWorld(
     const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
 
     render_group.perspectiveMode(
-        draw_buffer.width,
-        draw_buffer.height,
         meters_to_pixels,
         focal_length,
         distance_above_ground,
@@ -434,7 +434,7 @@ pub fn updateAndRenderWorld(
     );
 
     render_group.global_color_time = .zero();
-    render_group.orthographicMode(draw_buffer.width, draw_buffer.height, 1);
+    render_group.orthographicMode(1);
     render_group.pushRectangleOutline(
         ObjectTransform.defaultFlat(),
         Vector2.new(5, 5),
@@ -544,13 +544,13 @@ fn addStandardRoom(
                     entity.traversables[0].position = Vector3.zero();
                     entity.traversables[0].occupier = null;
                     endEntity(world_mode, entity, world_position);
-                } else {
-                    const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
-                    standing_on.entity.index = entity.id;
-                    entity.traversable_count = 1;
-                    entity.traversables[0].position = Vector3.zero();
-                    entity.traversables[0].occupier = null;
-                    endEntity(world_mode, entity, world_position);
+                // } else {
+                //     const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                //     standing_on.entity.index = entity.id;
+                //     entity.traversable_count = 1;
+                //     entity.traversables[0].position = Vector3.zero();
+                //     entity.traversables[0].occupier = null;
+                //     endEntity(world_mode, entity, world_position);
                 }
             }
 

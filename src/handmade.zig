@@ -313,6 +313,8 @@ pub export fn updateAndRender(
         render_commands,
         transient_state.main_generation_id,
         false,
+        @intCast(render_commands.width),
+        @intCast(render_commands.height),
     );
     var render_group = &render_group_;
 

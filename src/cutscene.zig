@@ -370,8 +370,6 @@ fn renderLayeredScene(
 
     if (opt_render_group) |render_group| {
         render_group.perspectiveMode(
-            draw_buffer.width,
-            draw_buffer.height,
             meters_to_pixels,
             focal_length,
             0,
@@ -426,6 +424,7 @@ fn renderLayeredScene(
                 }
 
                 _ = transform.offset_position.setZ(position.z() - camera_offset.z());
+                render_group.debug_tag = layer_index;
                 render_group.pushBitmapId(transform, layer_image, layer.height, Vector3.zero(), color, null, null, null);
             } else {
                 assets.prefetchBitmap(layer_image);

@@ -726,6 +726,7 @@ fn Rectangle2Type(comptime ScalarType: type) type {
         pub const addRadius = Shared.addRadius;
         pub const offsetBy = Shared.offsetBy;
         pub const intersects = Shared.intersects;
+        pub const getArea = Shared.getArea;
         pub const hasArea = Shared.hasArea;
     };
 }
@@ -773,6 +774,7 @@ fn Rectangle3Type(comptime ScalarType: type) type {
         pub const addRadius = Shared.addRadius;
         pub const offsetBy = Shared.offsetBy;
         pub const intersects = Shared.intersects;
+        pub const getArea = Shared.getArea;
         pub const hasArea = Shared.hasArea;
     };
 }
@@ -882,6 +884,11 @@ fn RectangleShared(
             }
 
             return result;
+        }
+
+        pub inline fn getArea(self: *const Self) ScalarType {
+            const dimension: VectorType = self.getDimension();
+            return dimension.x() * dimension.y();
         }
 
         pub inline fn hasArea(self: *const Self) bool {

@@ -84,6 +84,7 @@ pub const RenderEntryType = enum(u16) {
 pub const RenderEntryHeader = extern struct {
     type: RenderEntryType,
     clip_rect_index: u16,
+    debug_tag: u32,
 };
 
 pub const RenderEntryClear = extern struct {
@@ -218,7 +219,7 @@ fn getRenderEntityBasisPosition(
         }
 
         const distance_to_position_z = distance_above_target - position.z();
-        const near_clip_plane = 0.2;
+        const near_clip_plane = 0.1;
 
         const raw_xy = position.xy().toVector3(1);
 
@@ -236,6 +237,9 @@ fn getRenderEntityBasisPosition(
 
 pub const RenderGroup = extern struct {
     assets: *asset.Assets,
+
+    screen_area: Rectangle2,
+    debug_tag: u32,
 
     global_color_time: Color = .zero(),
     global_color: Color = .zero(),
@@ -257,17 +261,25 @@ pub const RenderGroup = extern struct {
         commands: *RenderCommands,
         generation_id: u32,
         renders_in_background: bool,
+        pixel_width: i32,
+        pixel_height: i32,
     ) RenderGroup {
-        return .{
+        var result: RenderGroup = .{
             .assets = assets,
             .renders_in_background = renders_in_background,
             .missing_resource_count = 0,
             .generation_id = generation_id,
             .commands = commands,
             .monitor_half_dim_in_meters = undefined,
+            .screen_area = .fromMinDimension(.zero(), .newI(pixel_width, pixel_height)),
+            .debug_tag = undefined,
             .camera_transform = undefined,
             .current_clip_rect_index = 0,
         };
+
+        result.current_clip_rect_index = result.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), null);
+
+        return result;
     }
 
     pub fn end(self: *RenderGroup) void {
@@ -283,61 +295,61 @@ pub const RenderGroup = extern struct {
 
     pub fn perspectiveMode(
         self: *RenderGroup,
-        pixel_width: i32,
-        pixel_height: i32,
         meters_to_pixels: f32,
         focal_length: f32,
         distance_above_target: f32,
     ) void {
+        const screen_dimension: Vector2 = self.screen_area.getDimension();
+        const pixel_width: f32 = screen_dimension.x();
+        const pixel_height: f32 = screen_dimension.y();
+
         const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
         self.monitor_half_dim_in_meters = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(pixel_width)) * pixels_to_meters,
-            0.5 * @as(f32, @floatFromInt(pixel_height)) * pixels_to_meters,
+            0.5 * pixel_width * pixels_to_meters,
+            0.5 * pixel_height * pixels_to_meters,
         );
 
         self.camera_transform.meters_to_pixels = meters_to_pixels;
         self.camera_transform.focal_length = focal_length;
         self.camera_transform.distance_above_target = distance_above_target;
         self.camera_transform.screen_center = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(pixel_width)),
-            0.5 * @as(f32, @floatFromInt(pixel_height)),
+            0.5 * pixel_width,
+            0.5 * pixel_height,
         );
         self.camera_transform.orthographic = false;
-
-        self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), null);
     }
 
     pub fn orthographicMode(
         self: *RenderGroup,
-        pixel_width: i32,
-        pixel_height: i32,
         meters_to_pixels: f32,
     ) void {
+        const screen_dimension: Vector2 = self.screen_area.getDimension();
+        const pixel_width: f32 = screen_dimension.x();
+        const pixel_height: f32 = screen_dimension.y();
+
         const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
         self.monitor_half_dim_in_meters = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(pixel_width)) * pixels_to_meters,
-            0.5 * @as(f32, @floatFromInt(pixel_height)) * pixels_to_meters,
+            0.5 * pixel_width * pixels_to_meters,
+            0.5 * pixel_height * pixels_to_meters,
         );
 
         self.camera_transform.meters_to_pixels = meters_to_pixels;
         self.camera_transform.focal_length = 1;
         self.camera_transform.distance_above_target = 1;
         self.camera_transform.screen_center = Vector2.new(
-            0.5 * @as(f32, @floatFromInt(pixel_width)),
-            0.5 * @as(f32, @floatFromInt(pixel_height)),
+            0.5 * pixel_width,
+            0.5 * pixel_height
         );
         self.camera_transform.orthographic = true;
-
-        self.current_clip_rect_index = self.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), null);
     }
 
-    fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: SpriteBound) ?*T {
+    fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: SpriteBound, screen_area: Rectangle2) ?*T {
         // TimedBlock.beginFunction(@src(), .PushRenderElement);
         // defer TimedBlock.endFunction(@src(), .PushRenderElement);
 
         // This depends on the name of this file, if the file name changes the magic number may need to be adjusted.
         const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[12..]);
-        return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, sort_key, @alignOf(T))));
+        return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, sort_key, screen_area, @alignOf(T))));
     }
 
     fn pushRenderElement_(
@@ -345,6 +357,7 @@ pub const RenderGroup = extern struct {
         in_size: u32,
         entry_type: RenderEntryType,
         sort_key: SpriteBound,
+        screen_area: Rectangle2,
         comptime alignment: u32,
     ) ?*anyopaque {
         var result: ?*anyopaque = null;
@@ -368,10 +381,18 @@ pub const RenderGroup = extern struct {
             sort_entry.first_edge_with_me_as_front = null;
             sort_entry.sort_key = sort_key;
             sort_entry.offset = commands.push_buffer_size;
+            sort_entry.screen_area = screen_area;
             sort_entry.flags = 0;
+
+            if (INTERNAL) {
+                sort_entry.debug_tag = self.debug_tag;
+                header.debug_tag = self.debug_tag;
+            }
 
             commands.push_buffer_size += @intCast(aligned_size);
             commands.push_buffer_element_count += 1;
+
+            // std.debug.assert(screen_area.getArea() < (2000 * 2000));
         } else {
             unreachable;
         }
@@ -421,7 +442,7 @@ pub const RenderGroup = extern struct {
             .y_max = std.math.floatMax(f32),
             .z_max = std.math.floatMin(f32),
         };
-        if (self.pushRenderElement(RenderEntryClear, sort_key)) |entry| {
+        if (self.pushRenderElement(RenderEntryClear, sort_key, self.screen_area)) |entry| {
             entry.premultiplied_color = self.storeColor(color);
         }
     }
@@ -508,11 +529,12 @@ pub const RenderGroup = extern struct {
 
         if (dim.basis.valid) {
             const sort_key: SpriteBound = getBoundFor(object_transform, height, offset);
-            if (self.pushRenderElement(RenderEntryBitmap, sort_key)) |entry| {
+            const size: Vector2 = dim.size.scaledTo(dim.basis.scale);
+            const screen_area: Rectangle2 = .fromMinDimension(dim.basis.position, size);
+            if (self.pushRenderElement(RenderEntryBitmap, sort_key, screen_area)) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
                 entry.premultiplied_color = self.storeColor(color);
-                const size: Vector2 = dim.size.scaledTo(dim.basis.scale);
                 entry.x_axis = size.times(x_axis);
                 entry.y_axis = size.times(y_axis);
             }
@@ -582,7 +604,9 @@ pub const RenderGroup = extern struct {
         const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
         if (basis.valid) {
             const sort_key: SpriteBound = getBoundFor(object_transform, dimension.y(), offset);
-            if (self.pushRenderElement(RenderEntryRectangle, sort_key)) |entry| {
+            const scale_dim = dimension.scaledTo(basis.scale);
+            const screen_area: Rectangle2 = .fromMinDimension(basis.position, scale_dim);
+            if (self.pushRenderElement(RenderEntryRectangle, sort_key, screen_area)) |entry| {
                 entry.position = basis.position;
                 entry.dimension = dimension.scaledTo(basis.scale);
                 entry.premultiplied_color = self.storeColor(color);

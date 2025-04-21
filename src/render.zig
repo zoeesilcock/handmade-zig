@@ -26,6 +26,7 @@ const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2i = math.Rectangle2i;
 const MemoryArena = memory.MemoryArena;
+const ArenaPushParams = memory.ArenaPushParams;
 const RenderCommands = shared.RenderCommands;
 const GameRenderPrep = shared.GameRenderPrep;
 const RenderGroup = rendergroup.RenderGroup;
@@ -87,6 +88,7 @@ pub const SortSpriteBound = struct {
     sort_key: SpriteBound,
     offset: u32,
     flags: u32,
+    debug_tag: u32,
 };
 
 pub const SpriteBound = struct {
@@ -1407,13 +1409,16 @@ fn addEdge(a: SpriteEdge, b: SpriteEdge) void {
 }
 
 fn buildSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, arena: *MemoryArena) void {
+    TimedBlock.beginFunction(@src(), .BuildSpriteGraph);
+    defer TimedBlock.endFunction(@src(), .BuildSpriteGraph);
+
     if (input_node_count > 0) {
         var node_index_a: u32 = 0;
         while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
             const a: *SortSpriteBound = @ptrCast(input_nodes + node_index_a);
             std.debug.assert(a.flags == 0);
 
-            var node_index_b: u32 = node_index_a;
+            var node_index_b: u32 = node_index_a + 1;
             while (node_index_b < input_node_count) : (node_index_b += 1) {
                 const b: *SortSpriteBound = @ptrCast(input_nodes + node_index_b);
 
@@ -1426,7 +1431,10 @@ fn buildSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, aren
                         back_index = temp;
                     }
 
-                    var edge: *SpriteEdge = arena.pushStruct(SpriteEdge, null);
+                    var edge: *SpriteEdge = arena.pushStruct(
+                        SpriteEdge,
+                        ArenaPushParams.aligned(@alignOf(SpriteEdge), true),
+                    );
                     const front: *SortSpriteBound = @ptrCast(input_nodes + front_index);
                     edge.front = front_index;
                     edge.behind = back_index;
@@ -1461,6 +1469,9 @@ fn recursiveFrontToBack(walk: *SpriteGraphWalk, at_index: u32) void {
 }
 
 fn walkSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, out_index_array: [*]u32) void {
+    TimedBlock.beginFunction(@src(), .WalkSpriteGraph);
+    defer TimedBlock.endFunction(@src(), .WalkSpriteGraph);
+
     var walk: SpriteGraphWalk = .{
         .input_nodes = input_nodes,
         .out_index = out_index_array,
