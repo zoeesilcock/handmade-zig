@@ -77,9 +77,12 @@ pub const TextureOp = struct {
     },
 };
 
-const SpriteFlag = enum(u32) {
+pub const SpriteFlag = enum(u32) {
     Visited = 0x1,
     Drawn = 0x2,
+
+    DebugBox = 0x4,
+    Cycle = 0x10,
 };
 
 pub const SortSpriteBound = struct {
@@ -97,7 +100,7 @@ pub const SpriteBound = struct {
     z_max: f32,
 };
 
-const SpriteEdge = struct {
+pub const SpriteEdge = struct {
     next_edge_with_same_front: ?*SpriteEdge,
     front: u32,
     behind: u32,
@@ -197,6 +200,15 @@ pub fn renderCommandsToBitmap(
 
     const sort_entry_count: u32 = commands.push_buffer_element_count;
 
+    // Clear.
+    drawRectangle(
+        output_target,
+        .zero(),
+        .newU(output_target.width, output_target.height),
+        commands.clear_color.rgb().toColor(0),
+        clip_rect,
+    );
+
     var sort_entry: [*]u32 = prep.sorted_indices;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
@@ -204,7 +216,6 @@ pub fn renderCommandsToBitmap(
 
         const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
         const alignment: usize = switch (header.type) {
-            .RenderEntryClear => @alignOf(RenderEntryClear),
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
             .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
@@ -229,11 +240,6 @@ pub fn renderCommandsToBitmap(
         }
 
         switch (header.type) {
-            .RenderEntryClear => {
-                const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
-                const dimension = Vector2.newI(output_target.width, output_target.height);
-                drawRectangle(output_target, Vector2.zero(), dimension, entry.premultiplied_color.rgb().toColor(1), clip_rect);
-            },
             .RenderEntrySaturation => {
                 const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
 
@@ -1399,15 +1405,6 @@ pub fn linearizeClipRects(commands: *RenderCommands, temp_arena: *MemoryArena) [
     return result;
 }
 
-pub fn getSortTempMemorySize(commands: *shared.RenderCommands) u64 {
-    return commands.push_buffer_element_count * @sizeOf(SortSpriteBound);
-}
-
-fn addEdge(a: SpriteEdge, b: SpriteEdge) void {
-    _ = a;
-    _ = b;
-}
-
 fn buildSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, arena: *MemoryArena) void {
     TimedBlock.beginFunction(@src(), .BuildSpriteGraph);
     defer TimedBlock.endFunction(@src(), .BuildSpriteGraph);
@@ -1450,17 +1447,25 @@ fn buildSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, aren
 const SpriteGraphWalk = struct {
     input_nodes: [*]SortSpriteBound,
     out_index: [*]u32,
+    hit_cycle: bool,
 };
 
 fn recursiveFrontToBack(walk: *SpriteGraphWalk, at_index: u32) void {
     const at: *SortSpriteBound = @ptrCast(walk.input_nodes + at_index);
     if ((at.flags & @intFromEnum(SpriteFlag.Visited)) == 0) {
+        walk.hit_cycle = walk.hit_cycle or (at.flags & @intFromEnum(SpriteFlag.Cycle)) != 0;
+
         at.flags |= @intFromEnum(SpriteFlag.Visited);
+        at.flags |= @intFromEnum(SpriteFlag.Cycle);
 
         var opt_edge: ?*SpriteEdge = at.first_edge_with_me_as_front;
         while (opt_edge) |edge| : (opt_edge = edge.next_edge_with_same_front) {
             std.debug.assert(edge.front == at_index);
             recursiveFrontToBack(walk, edge.behind);
+        }
+
+        if (!walk.hit_cycle) {
+            at.flags &= ~@intFromEnum(SpriteFlag.Cycle);
         }
 
         walk.out_index[0] = at.offset;
@@ -1475,9 +1480,11 @@ fn walkSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, out_i
     var walk: SpriteGraphWalk = .{
         .input_nodes = input_nodes,
         .out_index = out_index_array,
+        .hit_cycle = false,
     };
     var node_index_a: u32 = 0;
     while (node_index_a < input_node_count) : (node_index_a += 1) {
+        walk.hit_cycle = false;
         recursiveFrontToBack(&walk, node_index_a);
     }
     std.debug.assert((walk.out_index - out_index_array) == input_node_count);
@@ -1493,8 +1500,11 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena) [*]u32 {
 
     const count: u32 = commands.push_buffer_element_count;
     const entries: [*]SortSpriteBound = getSortEntries(commands);
-    const result: [*]u32 = temp_arena.pushArray(count, u32, .aligned(@alignOf(u32), true),
-);
+    const result: [*]u32 = temp_arena.pushArray(
+        count,
+        u32,
+        .aligned(@alignOf(u32), true),
+    );
 
     if (true) {
         buildSpriteGraph(count, entries, temp_arena);

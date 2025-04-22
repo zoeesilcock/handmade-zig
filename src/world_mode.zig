@@ -193,7 +193,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..1) |_| {
+    for (0..2) |_| {
         const door_direction = 2;
         _ = series.randomChoice(2);
         // const door_direction = 3;
@@ -544,13 +544,13 @@ fn addStandardRoom(
                     entity.traversables[0].position = Vector3.zero();
                     entity.traversables[0].occupier = null;
                     endEntity(world_mode, entity, world_position);
-                // } else {
-                //     const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
-                //     standing_on.entity.index = entity.id;
-                //     entity.traversable_count = 1;
-                //     entity.traversables[0].position = Vector3.zero();
-                //     entity.traversables[0].occupier = null;
-                //     endEntity(world_mode, entity, world_position);
+                } else {
+                    const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                    standing_on.entity.index = entity.id;
+                    entity.traversable_count = 1;
+                    entity.traversables[0].position = Vector3.zero();
+                    entity.traversables[0].occupier = null;
+                    endEntity(world_mode, entity, world_position);
                 }
             }
 

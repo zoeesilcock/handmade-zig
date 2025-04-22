@@ -73,7 +73,6 @@ pub const RenderEntityBasisResult = extern struct {
 };
 
 pub const RenderEntryType = enum(u16) {
-    RenderEntryClear,
     RenderEntryClipRect,
     RenderEntryBitmap,
     RenderEntryRectangle,
@@ -85,10 +84,6 @@ pub const RenderEntryHeader = extern struct {
     type: RenderEntryType,
     clip_rect_index: u16,
     debug_tag: u32,
-};
-
-pub const RenderEntryClear = extern struct {
-    premultiplied_color: Color,
 };
 
 pub const RenderEntryClipRect = extern struct {
@@ -437,14 +432,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
-        const sort_key: SpriteBound = .{
-            .y_min = std.math.floatMin(f32),
-            .y_max = std.math.floatMax(f32),
-            .z_max = std.math.floatMin(f32),
-        };
-        if (self.pushRenderElement(RenderEntryClear, sort_key, self.screen_area)) |entry| {
-            entry.premultiplied_color = self.storeColor(color);
-        }
+        self.commands.clear_color = self.storeColor(color);
     }
 
     pub fn pushSaturation(self: *RenderGroup, level: f32) void {

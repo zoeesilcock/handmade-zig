@@ -55,9 +55,14 @@ const Vector2 = math.Vector2;
 const Color = math.Color;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
-const SortSpriteBound = sort.SortSpriteBound;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
+const SortSpriteBound = render.SortSpriteBound;
+const SpriteFlag = render.SpriteFlag;
+const SpriteEdge = render.SpriteEdge;
+
+const debug_color_table = shared.debug_color_table;
+var global_config = &@import("config.zig").global_config;
 
 pub const gl = struct {
     // TODO: How do we import OpenGL on other platforms here?
@@ -144,6 +149,10 @@ pub fn renderCommands(
     // TimedBlock.beginFunction(@src(), .RenderCommandsToOpenGL);
     // defer TimedBlock.endFunction(@src(), .RenderCommandsToOpenGL);
 
+    gl.glDisable(gl.GL_SCISSOR_TEST);
+    gl.glClearColor(commands.clear_color.r(), commands.clear_color.g(), commands.clear_color.b(), commands.clear_color.a());
+    gl.glClear(gl.GL_COLOR_BUFFER_BIT);
+
     gl.glViewport(commands.offset_x, commands.offset_y, @intCast(commands.width), @intCast(commands.height));
 
     gl.glEnable(gl.GL_TEXTURE_2D);
@@ -166,7 +175,6 @@ pub fn renderCommands(
 
         const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
         const alignment: usize = switch (header.type) {
-            .RenderEntryClear => @alignOf(RenderEntryClear),
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
             .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
@@ -196,16 +204,6 @@ pub fn renderCommands(
         }
 
         switch (header.type) {
-            .RenderEntryClear => {
-                const entry: *RenderEntryClear = @ptrCast(@alignCast(data));
-                gl.glClearColor(
-                    entry.premultiplied_color.r(),
-                    entry.premultiplied_color.g(),
-                    entry.premultiplied_color.b(),
-                    entry.premultiplied_color.a(),
-                );
-                gl.glClear(gl.GL_COLOR_BUFFER_BIT);
-            },
             .RenderEntryBitmap => {
                 var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                 if (entry.bitmap) |bitmap| {
@@ -272,6 +270,57 @@ pub fn renderCommands(
             },
         }
     }
+
+    gl.glDisable(gl.GL_TEXTURE_2D);
+    if (global_config.ShowSortGroups) {
+        const bound_count: u32 = commands.push_buffer_element_count;
+        const bounds: [*]SortSpriteBound = render.getSortEntries(commands);
+        var group_index: u32 = 0;
+        var bound_index: u32 = 0;
+        while (bound_index < bound_count) : (bound_index += 1) {
+            const bound: *SortSpriteBound = @ptrCast(bounds + bound_index);
+            if ((bound.flags & @intFromEnum(SpriteFlag.Cycle)) != 0) {
+                if ((bound.flags & @intFromEnum(SpriteFlag.DebugBox)) == 0) {
+                    const color: Color = debug_color_table[group_index % debug_color_table.len].toColor(1);
+                    group_index += 1;
+
+                    gl.glColor4f(
+                        color.r(),
+                        color.g(),
+                        color.b(),
+                        color.a(),
+                    );
+                    gl.glBegin(gl.GL_LINES);
+                    drawBoundsRecursive(bounds, bound_index);
+                    gl.glEnd();
+
+                    group_index += 1;
+                }
+            }
+        }
+    }
+}
+
+fn drawBoundsRecursive(bounds: [*]SortSpriteBound, bound_index: u32) void {
+    const bound: *SortSpriteBound = @ptrCast(bounds + bound_index);
+    if ((bound.flags & @intFromEnum(SpriteFlag.DebugBox)) == 0) {
+        const center: Vector2 = bound.screen_area.getCenter();
+        bound.flags |= @intFromEnum(SpriteFlag.DebugBox);
+
+        var opt_edge: ?*SpriteEdge = bound.first_edge_with_me_as_front;
+        while (opt_edge) |edge| : (opt_edge = edge.next_edge_with_same_front) {
+            const behind: *SortSpriteBound = @ptrCast(bounds + edge.behind);
+            const behind_center: Vector2 = behind.screen_area.getCenter();
+            gl.glVertex2fv(@ptrCast(&center.values));
+            gl.glVertex2fv(@ptrCast(&behind_center.values));
+
+            drawBoundsRecursive(bounds, edge.behind);
+        }
+
+        const screen_min = bound.screen_area.getMinCorner();
+        const screen_max = bound.screen_area.getMaxCorner();
+        drawLineVertices(screen_min, screen_max);
+    }
 }
 
 pub fn manageTextures(first_op: ?*TextureOp) void {
@@ -314,6 +363,23 @@ fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) u32 {
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 
     return handle;
+}
+
+fn drawLineVertices(
+    min_position: Vector2,
+    max_position: Vector2,
+) void {
+    gl.glVertex2f(min_position.x(), min_position.y());
+    gl.glVertex2f(max_position.x(), min_position.y());
+
+    gl.glVertex2f(max_position.x(), min_position.y());
+    gl.glVertex2f(max_position.x(), max_position.y());
+
+    gl.glVertex2f(max_position.x(), max_position.y());
+    gl.glVertex2f(min_position.x(), max_position.y());
+
+    gl.glVertex2f(min_position.x(), max_position.y());
+    gl.glVertex2f(min_position.x(), min_position.y());
 }
 
 fn drawRectangle(
@@ -411,7 +477,7 @@ pub fn displayBitmap(
 
     gl.glEnable(gl.GL_TEXTURE_2D);
 
-    gl.glClearColor(0, 0, 0, 0);
+    gl.glClearColor(1, 0, 1, 0);
     gl.glClear(gl.GL_COLOR_BUFFER_BIT);
 
     // Reset all transforms.

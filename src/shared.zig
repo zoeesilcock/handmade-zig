@@ -30,6 +30,7 @@ const Vector4 = math.Vector4;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
+const Color3 = math.Color3;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedSound = asset.LoadedSound;
 const Assets = asset.Assets;
@@ -362,6 +363,19 @@ pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *RenderCommands) callconv(
 pub var global_debug_table: *DebugTable = undefined;
 pub var debug_global_memory: ?*Memory = null;
 pub var debugFrameEnd: *const @TypeOf(debugFrameEndStub) = if (INTERNAL) @import("debug.zig").frameEnd else debugFrameEndStub;
+pub const debug_color_table: [11]Color3 = .{
+    Color3.new(1, 0, 0),
+    Color3.new(0, 1, 0),
+    Color3.new(0, 0, 1),
+    Color3.new(1, 1, 0),
+    Color3.new(0, 1, 1),
+    Color3.new(1, 0, 1),
+    Color3.new(1, 0.5, 0),
+    Color3.new(1, 0, 0.5),
+    Color3.new(0.5, 1, 0),
+    Color3.new(0, 1, 0.5),
+    Color3.new(0.5, 0, 1),
+};
 
 pub const RenderCommands = extern struct {
     width: u32 = 0,
@@ -372,6 +386,8 @@ pub const RenderCommands = extern struct {
     max_push_buffer_size: u32,
     push_buffer_size: u32,
     push_buffer_base: [*]u8,
+
+    clear_color: Color,
 
     push_buffer_element_count: u32,
     sort_entry_at: usize,
@@ -399,6 +415,8 @@ pub fn initializeRenderCommands(
         .push_buffer_base = @ptrCast(push_buffer),
         .max_push_buffer_size = max_push_buffer_size,
         .push_buffer_size = 0,
+
+        .clear_color = .black(),
 
         .push_buffer_element_count = 0,
         .sort_entry_at = max_push_buffer_size,

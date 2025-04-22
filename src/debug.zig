@@ -35,6 +35,7 @@ const RenderGroup = rendergroup.RenderGroup;
 
 const textOutAt = debug_ui.textOutAt;
 const basicTextElement = debug_ui.basicTextElement;
+const debug_color_table = shared.debug_color_table;
 
 const MAX_FRAME_COUNT = 256;
 pub const MAX_VARIABLE_STACK_DEPTH = 64;
@@ -1158,20 +1159,6 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, element: *DebugElemen
     return len;
 }
 
-const color_table: [11]Color3 = .{
-    Color3.new(1, 0, 0),
-    Color3.new(0, 1, 0),
-    Color3.new(0, 0, 1),
-    Color3.new(1, 1, 0),
-    Color3.new(0, 1, 1),
-    Color3.new(1, 0, 1),
-    Color3.new(1, 0.5, 0),
-    Color3.new(1, 0, 0.5),
-    Color3.new(0.5, 1, 0),
-    Color3.new(0, 1, 0.5),
-    Color3.new(0.5, 0, 1),
-};
-
 fn getTotalClocks(frame: *DebugElementFrame) u64 {
     var result: u64 = 0;
     var opt_event = frame.oldest_event;
@@ -1312,7 +1299,7 @@ fn drawProfileBars(
         std.debug.assert(node.element != null);
         const element: *DebugElement = node.element.?;
 
-        const color = color_table[@intFromPtr(element.guid) % color_table.len];
+        const color = debug_color_table[@intFromPtr(element.guid) % debug_color_table.len];
         const this_min_x: f32 =
             profile_rect.min.x() + scale * @as(f32, @floatFromInt(node.parent_relative_clock));
         const this_max_x: f32 =
@@ -1387,7 +1374,7 @@ fn drawFrameBars(
                 std.debug.assert(node.element != null);
                 const element: *DebugElement = node.element.?;
 
-                const color = color_table[@intFromPtr(element.guid) % color_table.len];
+                const color = debug_color_table[@intFromPtr(element.guid) % debug_color_table.len];
                 const this_min_y: f32 =
                     profile_rect.min.y() + scale * @as(f32, @floatFromInt(node.parent_relative_clock));
                 const this_max_y: f32 =

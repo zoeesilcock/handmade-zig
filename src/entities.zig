@@ -501,17 +501,17 @@ pub fn updateAndRenderEntities(
 
                 entity_transform.upright = false;
                 {
-                    var volume_index: u32 = 0;
-                    while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                        const volume = entity.collision.volumes[volume_index];
-                        render_group.pushRectangleOutline(
-                            entity_transform,
-                            volume.dimension.xy(),
-                            volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                            Color.new(0, 0.5, 1, 1),
-                            0.1,
-                        );
-                    }
+                    // var volume_index: u32 = 0;
+                    // while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+                    //     const volume = entity.collision.volumes[volume_index];
+                    //     render_group.pushRectangleOutline(
+                    //         entity_transform,
+                    //         volume.dimension.xy(),
+                    //         volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                    //         Color.new(0, 0.5, 1, 1),
+                    //         0.1,
+                    //     );
+                    // }
 
                     var traversable_index: u32 = 0;
                     while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
@@ -523,13 +523,13 @@ pub fn updateAndRenderEntities(
                             if (traversable.occupier != null) .new(1, 0.5, 0, 1) else .new(0.05, 0.25, 0.05, 1),
                         );
 
-                        render_group.pushRectangleOutline(
-                            entity_transform,
-                            Vector2.new(1.2, 1.2),
-                            traversable.position,
-                            Color.new(0, 0, 0, 1),
-                            0.1,
-                        );
+                        // render_group.pushRectangleOutline(
+                        //     entity_transform,
+                        //     Vector2.new(1.2, 1.2),
+                        //     traversable.position,
+                        //     Color.new(0, 0, 0, 1),
+                        //     0.1,
+                        // );
                     }
                 }
 
