@@ -257,6 +257,12 @@ pub fn renderCommands(
                 const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                 gl.glDisable(gl.GL_TEXTURE_2D);
                 drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
+
+                gl.glBegin(gl.GL_LINES);
+                gl.glColor4f(0, 0, 0, 1);
+                drawLineVertices(entry.position, entry.position.plus(entry.dimension));
+                gl.glEnd();
+
                 gl.glEnable(gl.GL_TEXTURE_2D);
             },
             .RenderEntrySaturation => {
@@ -279,23 +285,26 @@ pub fn renderCommands(
         var bound_index: u32 = 0;
         while (bound_index < bound_count) : (bound_index += 1) {
             const bound: *SortSpriteBound = @ptrCast(bounds + bound_index);
-            if ((bound.flags & @intFromEnum(SpriteFlag.Cycle)) != 0) {
-                if ((bound.flags & @intFromEnum(SpriteFlag.DebugBox)) == 0) {
-                    const color: Color = debug_color_table[group_index % debug_color_table.len].toColor(1);
-                    group_index += 1;
+            if ((bound.flags & @intFromEnum(SpriteFlag.DebugBox)) == 0) {
+                var color: Color = debug_color_table[group_index % debug_color_table.len].toColor(0.2);
+                group_index += 1;
 
-                    gl.glColor4f(
-                        color.r(),
-                        color.g(),
-                        color.b(),
-                        color.a(),
-                    );
-                    gl.glBegin(gl.GL_LINES);
-                    drawBoundsRecursive(bounds, bound_index);
-                    gl.glEnd();
-
-                    group_index += 1;
+                if ((bound.flags & @intFromEnum(SpriteFlag.Cycle)) != 0) {
+                    _ = color.setA(1);
                 }
+                _ = color.setRGB(color.rgb().scaledTo(color.a()));
+
+                gl.glBegin(gl.GL_LINES);
+                gl.glColor4f(
+                    color.r(),
+                    color.g(),
+                    color.b(),
+                    color.a(),
+                );
+                drawBoundsRecursive(bounds, bound_index);
+                gl.glEnd();
+
+                group_index += 1;
             }
         }
     }

@@ -1452,9 +1452,8 @@ const SpriteGraphWalk = struct {
 
 fn recursiveFrontToBack(walk: *SpriteGraphWalk, at_index: u32) void {
     const at: *SortSpriteBound = @ptrCast(walk.input_nodes + at_index);
+    walk.hit_cycle = walk.hit_cycle or (at.flags & @intFromEnum(SpriteFlag.Cycle)) != 0;
     if ((at.flags & @intFromEnum(SpriteFlag.Visited)) == 0) {
-        walk.hit_cycle = walk.hit_cycle or (at.flags & @intFromEnum(SpriteFlag.Cycle)) != 0;
-
         at.flags |= @intFromEnum(SpriteFlag.Visited);
         at.flags |= @intFromEnum(SpriteFlag.Cycle);
 

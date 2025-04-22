@@ -487,7 +487,7 @@ pub const RenderGroup = extern struct {
         var sprite_bound: SpriteBound = .{
             .y_min = object_transform.offset_position.y() + offset.y(),
             .y_max = object_transform.offset_position.y() + offset.y(),
-            .z_max = object_transform.offset_position.z() + offset.z(),
+            .z_max = object_transform.offset_position.z() + offset.z() + object_transform.sort_bias,
         };
 
         if (object_transform.upright) {
@@ -644,26 +644,26 @@ pub const RenderGroup = extern struct {
     ) void {
         self.pushRectangle(
             object_transform,
-            Vector2.new(dimension.x(), thickness),
+            Vector2.new(dimension.x() - thickness - 0.01, thickness),
             offset.minus(Vector3.new(0, 0.5 * dimension.y(), 0)),
             color,
         );
         self.pushRectangle(
             object_transform,
-            Vector2.new(dimension.x(), thickness),
+            Vector2.new(dimension.x() - thickness - 0.01, thickness),
             offset.plus(Vector3.new(0, 0.5 * dimension.y(), 0)),
             color,
         );
 
         self.pushRectangle(
             object_transform,
-            Vector2.new(thickness, dimension.y()),
+            Vector2.new(thickness, dimension.y() + thickness),
             offset.minus(Vector3.new(0.5 * dimension.x(), 0, 0)),
             color,
         );
         self.pushRectangle(
             object_transform,
-            Vector2.new(thickness, dimension.y()),
+            Vector2.new(thickness, dimension.y() + thickness),
             offset.plus(Vector3.new(0.5 * dimension.x(), 0, 0)),
             color,
         );

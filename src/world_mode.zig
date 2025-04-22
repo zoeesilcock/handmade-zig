@@ -193,7 +193,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..2) |_| {
+    for (0..1) |_| {
         const door_direction = 2;
         _ = series.randomChoice(2);
         // const door_direction = 3;
@@ -220,7 +220,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             abs_tile_z,
         );
 
-        if (false) {
+        if (true) {
             _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
             _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
