@@ -13,8 +13,8 @@ const platform = @import("win32_handmade.zig");
 var show_lighting_samples: bool = false;
 
 const INTERNAL = shared.INTERNAL;
-const SORT_GRID_WIDTH: u32 = 16;
-const SORT_GRID_HEIGHT: u32 = 9;
+const SORT_GRID_WIDTH: u32 = 64;
+const SORT_GRID_HEIGHT: u32 = 36;
 
 const Vector2 = math.Vector2;
 const Vector2i = math.Vector2i;
@@ -80,11 +80,11 @@ pub const TextureOp = struct {
 };
 
 pub const SpriteFlag = enum(u32) {
-    Visited = 0x1,
-    Drawn = 0x2,
-
-    DebugBox = 0x4,
-    Cycle = 0x10,
+    Visited = 0x10000000,
+    Drawn = 0x20000000,
+    DebugBox = 0x40000000,
+    Cycle = 0x80000000,
+    IndexMask = 0x0FFFFFFF,
 };
 
 pub const SortSpriteBound = struct {
@@ -221,113 +221,118 @@ pub fn renderCommandsToBitmap(
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
-        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
-        const alignment: usize = switch (header.type) {
-            .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
-            .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
-            .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
-            .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
-            else => {
-                unreachable;
-            },
-        };
+        var header_offset: u32 = sort_entry[0];
+        while (header_offset > 0) {
+            const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + header_offset));
+            const alignment: usize = switch (header.type) {
+                .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
+                .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
+                .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
+                .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
+                else => {
+                    unreachable;
+                },
+            };
 
-        const header_address = @intFromPtr(header);
-        const data_address = header_address + @sizeOf(RenderEntryHeader);
-        const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-        const data: *anyopaque = @ptrFromInt(aligned_address);
+            const header_address = @intFromPtr(header);
+            const data_address = header_address + @sizeOf(RenderEntryHeader);
+            const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+            const data: *anyopaque = @ptrFromInt(aligned_address);
 
-        if (clip_rect_index != header.clip_rect_index) {
-            clip_rect_index = header.clip_rect_index;
+            if (clip_rect_index != header.clip_rect_index) {
+                clip_rect_index = header.clip_rect_index;
 
-            std.debug.assert(clip_rect_index < commands.clip_rect_count);
+                std.debug.assert(clip_rect_index < commands.clip_rect_count);
 
-            const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
-            clip_rect = base_clip_rect.getIntersectionWith(clip.rect);
-        }
+                const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
+                clip_rect = base_clip_rect.getIntersectionWith(clip.rect);
+            }
 
-        switch (header.type) {
-            .RenderEntrySaturation => {
-                const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
+            header_offset = header.next_offset;
 
-                changeSaturation(output_target, entry.level);
-            },
-            .RenderEntryBitmap => {
-                const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                if (entry.bitmap) |bitmap| {
-                    if (false) {
-                        drawRectangleSlowly(
-                            output_target,
-                            entry.position,
-                            entry.x_axis,
-                            entry.y_axis,
-                            entry.color,
-                            @constCast(bitmap),
-                            null,
-                            undefined,
-                            undefined,
-                            undefined,
-                            null_pixels_to_meters,
-                        );
-                    } else {
-                        drawRectangleQuickly(
-                            output_target,
-                            entry.position,
-                            entry.x_axis,
-                            entry.y_axis,
-                            entry.premultiplied_color,
-                            @constCast(bitmap),
-                            null_pixels_to_meters,
-                            clip_rect,
-                        );
+            switch (header.type) {
+                .RenderEntrySaturation => {
+                    const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
+
+                    changeSaturation(output_target, entry.level);
+                },
+                .RenderEntryBitmap => {
+                    const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+                    if (entry.bitmap) |bitmap| {
+                        if (false) {
+                            drawRectangleSlowly(
+                                output_target,
+                                entry.position,
+                                entry.x_axis,
+                                entry.y_axis,
+                                entry.color,
+                                @constCast(bitmap),
+                                null,
+                                undefined,
+                                undefined,
+                                undefined,
+                                null_pixels_to_meters,
+                            );
+                        } else {
+                            drawRectangleQuickly(
+                                output_target,
+                                entry.position,
+                                entry.x_axis,
+                                entry.y_axis,
+                                entry.premultiplied_color,
+                                @constCast(bitmap),
+                                null_pixels_to_meters,
+                                clip_rect,
+                            );
+                        }
                     }
-                }
-            },
-            .RenderEntryRectangle => {
-                const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
+                },
+                .RenderEntryRectangle => {
+                    const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
 
-                drawRectangle(
-                    output_target,
-                    entry.position,
-                    entry.position.plus(entry.dimension),
-                    entry.premultiplied_color,
-                    clip_rect,
-                );
-            },
-            .RenderEntryCoordinateSystem => {
-                // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
-                // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
-                // drawRectangleSlowly(
-                //     output_target,
-                //     entry.origin,
-                //     entry.x_axis,
-                //     entry.y_axis,
-                //     entry.color,
-                //     entry.texture,
-                //     entry.normal_map,
-                //     entry.top,
-                //     entry.middle,
-                //     entry.bottom,
-                //     null_pixels_to_meters,
-                // );
-                //
-                // const color = Color.new(1, 1, 0, 1);
-                // const dimension = Vector2.new(2, 2);
-                // var position = entry.origin;
-                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                //
-                // position = entry.origin.plus(entry.x_axis);
-                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                //
-                // position = entry.origin.plus(entry.y_axis);
-                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                //
-                // position = max;
-                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-            },
-            else => {
-                unreachable;
-            },
+                    drawRectangle(
+                        output_target,
+                        entry.position,
+                        entry.position.plus(entry.dimension),
+                        entry.premultiplied_color,
+                        clip_rect,
+                    );
+                },
+                .RenderEntryCoordinateSystem => {
+                    // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
+                    // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
+                    // drawRectangleSlowly(
+                    //     output_target,
+                    //     entry.origin,
+                    //     entry.x_axis,
+                    //     entry.y_axis,
+                    //     entry.color,
+                    //     entry.texture,
+                    //     entry.normal_map,
+                    //     entry.top,
+                    //     entry.middle,
+                    //     entry.bottom,
+                    //     null_pixels_to_meters,
+                    // );
+                    //
+                    // const color = Color.new(1, 1, 0, 1);
+                    // const dimension = Vector2.new(2, 2);
+                    // var position = entry.origin;
+                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                    //
+                    // position = entry.origin.plus(entry.x_axis);
+                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                    //
+                    // position = entry.origin.plus(entry.y_axis);
+                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                    //
+                    // position = max;
+                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                },
+                else => {
+                    unreachable;
+                },
+            }
         }
     }
 }
@@ -1397,7 +1402,7 @@ pub fn prepForRender(commands: *RenderCommands, temp_arena: *MemoryArena) GameRe
 
 pub fn linearizeClipRects(commands: *RenderCommands, temp_arena: *MemoryArena) [*]RenderEntryClipRect {
     const result: [*]RenderEntryClipRect = temp_arena.pushArray(
-        commands.push_buffer_element_count,
+        commands.clip_rect_count,
         RenderEntryClipRect,
         .aligned(@alignOf(RenderEntryClipRect), true),
     );
@@ -1432,14 +1437,15 @@ fn getGridSpan(total_screen: Rectangle2, inv_cell_dim: Vector2, source: Rectangl
         if (dest.max.x() < 0) {
             _ = dest.max.setX(-1);
         }
-        if (dest.max.x() >= SORT_GRID_HEIGHT) {
-            _ = dest.max.setX(SORT_GRID_HEIGHT - 1);
+        if (dest.max.x() >= SORT_GRID_WIDTH) {
+            _ = dest.max.setX(SORT_GRID_WIDTH - 1);
         }
+
         if (dest.min.y() < 0) {
             _ = dest.min.setY(0);
         }
-        if (dest.min.y() >= SORT_GRID_WIDTH) {
-            _ = dest.min.setY(SORT_GRID_WIDTH - 1);
+        if (dest.min.y() >= SORT_GRID_HEIGHT) {
+            _ = dest.min.setY(SORT_GRID_HEIGHT - 1);
         }
         if (dest.max.y() < 0) {
             _ = dest.max.setY(-1);
@@ -1474,9 +1480,9 @@ fn buildSpriteGraph(
         [1]?*SortGridEntry{null} ** SORT_GRID_HEIGHT,
     } ** SORT_GRID_WIDTH;
 
-    var node_index: u32 = 0;
-    while (node_index < input_node_count - 1) : (node_index += 1) {
-        const a: *SortSpriteBound = @ptrCast(input_nodes + node_index);
+    var node_index_a: u32 = 0;
+    while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
+        const a: *SortSpriteBound = @ptrCast(input_nodes + node_index_a);
         std.debug.assert(a.flags == 0);
 
         var grid_span: Rectangle2i = undefined;
@@ -1487,45 +1493,44 @@ fn buildSpriteGraph(
                 while (grid_y <= grid_span.max.y()) : (grid_y += 1) {
                     var entry: *SortGridEntry = arena.pushStruct(
                         SortGridEntry,
-                        ArenaPushParams.aligned(@alignOf(SortGridEntry), true),
+                        ArenaPushParams.aligned(@alignOf(SortGridEntry), false),
                     );
                     entry.next = grid[grid_x][grid_y];
-                    entry.occupant_index = node_index;
+                    entry.occupant_index = node_index_a;
 
-                    grid[grid_x][grid_y] = entry.next;
-                }
-            }
-        }
-    }
+                    var opt_entry_b: ?*SortGridEntry = grid[grid_x][grid_y];
+                    while (opt_entry_b) |entry_b| : (opt_entry_b = entry_b.next) {
+                        const node_index_b: u32 = entry_b.occupant_index;
+                        const b: *SortSpriteBound = @ptrCast(input_nodes + node_index_b);
+                        if (b.flags != node_index_a and
+                            a.screen_area.intersects(&b.screen_area))
+                        {
+                            std.debug.assert((node_index_a & @intFromEnum(SpriteFlag.IndexMask)) == node_index_a);
+                            std.debug.assert((b.flags & ~@intFromEnum(SpriteFlag.IndexMask)) == 0);
+                            b.flags = node_index_a;
 
-    if (input_node_count > 0) {
-        var node_index_a: u32 = 0;
-        while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
-            const a: *SortSpriteBound = @ptrCast(input_nodes + node_index_a);
+                            var front_index: u32 = node_index_a;
+                            var back_index: u32 = node_index_b;
+                            if (isInFrontOf(b.sort_key, a.sort_key)) {
+                                const temp: u32 = front_index;
+                                front_index = back_index;
+                                back_index = temp;
+                            }
 
-            var node_index_b: u32 = node_index_a + 1;
-            while (node_index_b < input_node_count) : (node_index_b += 1) {
-                const b: *SortSpriteBound = @ptrCast(input_nodes + node_index_b);
+                            var edge: *SpriteEdge = arena.pushStruct(
+                                SpriteEdge,
+                                ArenaPushParams.aligned(@alignOf(SpriteEdge), false),
+                            );
+                            const front: *SortSpriteBound = @ptrCast(input_nodes + front_index);
+                            edge.front = front_index;
+                            edge.behind = back_index;
 
-                if (a.screen_area.intersects(&b.screen_area)) {
-                    var front_index: u32 = node_index_a;
-                    var back_index: u32 = node_index_b;
-                    if (isInFrontOf(b.sort_key, a.sort_key)) {
-                        const temp: u32 = front_index;
-                        front_index = back_index;
-                        back_index = temp;
+                            edge.next_edge_with_same_front = front.first_edge_with_me_as_front;
+                            front.first_edge_with_me_as_front = edge;
+                        }
                     }
 
-                    var edge: *SpriteEdge = arena.pushStruct(
-                        SpriteEdge,
-                        ArenaPushParams.aligned(@alignOf(SpriteEdge), true),
-                    );
-                    const front: *SortSpriteBound = @ptrCast(input_nodes + front_index);
-                    edge.front = front_index;
-                    edge.behind = back_index;
-
-                    edge.next_edge_with_same_front = front.first_edge_with_me_as_front;
-                    front.first_edge_with_me_as_front = edge;
+                    grid[grid_x][grid_y] = entry;
                 }
             }
         }

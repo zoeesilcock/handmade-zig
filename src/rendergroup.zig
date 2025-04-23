@@ -81,6 +81,7 @@ pub const RenderEntryType = enum(u16) {
 };
 
 pub const RenderEntryHeader = extern struct {
+    next_offset: u32, // If non-zero, then jump here and continue rendering entries.
     type: RenderEntryType,
     clip_rect_index: u16,
     debug_tag: u32,
@@ -361,8 +362,13 @@ pub const RenderGroup = extern struct {
 
         if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortSpriteBound)) {
             const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + commands.push_buffer_size));
+            header.next_offset = 0;
             header.type = entry_type;
             header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
+
+            if (INTERNAL) {
+                header.debug_tag = self.debug_tag;
+            }
 
             const data_address = @intFromPtr(header) + @sizeOf(RenderEntryHeader);
             const aligned_address = std.mem.alignForward(usize, data_address, alignment);
@@ -371,21 +377,33 @@ pub const RenderGroup = extern struct {
 
             result = @ptrFromInt(aligned_address);
 
-            commands.sort_entry_at -= @sizeOf(SortSpriteBound);
-            var sort_entry: *SortSpriteBound = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
-            sort_entry.first_edge_with_me_as_front = null;
-            sort_entry.sort_key = sort_key;
-            sort_entry.offset = commands.push_buffer_size;
-            sort_entry.screen_area = screen_area;
-            sort_entry.flags = 0;
+            const new_element: bool = true;
+            if (new_element) {
+                commands.sort_entry_at -= @sizeOf(SortSpriteBound);
+                var sort_entry: *SortSpriteBound = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+                sort_entry.first_edge_with_me_as_front = null;
+                sort_entry.sort_key = sort_key;
+                sort_entry.offset = commands.push_buffer_size;
+                sort_entry.screen_area = screen_area;
+                sort_entry.flags = 0;
 
-            if (INTERNAL) {
-                sort_entry.debug_tag = self.debug_tag;
-                header.debug_tag = self.debug_tag;
+                if (INTERNAL) {
+                    sort_entry.debug_tag = self.debug_tag;
+                }
+
+                std.debug.assert(sort_entry.offset != 0);
+
+                commands.push_buffer_element_count += 1;
+            } else {
+                // existing.next_offset = commands.push_buffer_size;
+                // existing.bound.y_min = @min(existing.bound.y_min, sort_key.y_min);
+                // existing.bound.y_max = @min(existing.bound.y_max, sort_key.y_max);
+                // existing.bound.z_max = @min(existing.bound.z_max, sort_key.z_max);
+                // existing.screen_area = existing.screen_area.getUnionWith(screen_area);
+                // existing = us;
             }
 
             commands.push_buffer_size += @intCast(aligned_size);
-            commands.push_buffer_element_count += 1;
 
             // std.debug.assert(screen_area.getArea() < (2000 * 2000));
         } else {
