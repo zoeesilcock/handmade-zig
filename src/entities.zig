@@ -32,6 +32,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const GameWorldMode = @import("world_mode.zig").GameModeWorld;
 
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
+var global_config = &@import("config.zig").global_config;
 
 pub const EntityId = packed struct {
     value: u32 = 0,
@@ -533,7 +534,7 @@ pub fn updateAndRenderEntities(
                     }
                 }
 
-                if (debug_interface.DEBUG_UI_ENABLED) {
+                if (global_config.Simulation_VisualizeCollisionVolumes) {
                     var volume_index: u32 = 0;
                     while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
                         const volume = entity.collision.volumes[volume_index];
@@ -565,7 +566,7 @@ pub fn updateAndRenderEntities(
             }
         }
 
-        if (debug_interface.DEBUG_UI_ENABLED) {
+        if (global_config.Simulation_InspectSelectedEntity) {
             if (debug_interface.requested(entity_debug_id)) {
                 DebugInterface.debugStruct(@src(), entity);
                 // DebugInterface.debugBeginArray(entity.hit_points);

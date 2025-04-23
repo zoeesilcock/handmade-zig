@@ -134,6 +134,7 @@ pub export fn updateAndRender(
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
             DebugInterface.debugValue(@src(), &global_config.Renderer_TestWeirdDrawBufferSize, "Renderer_TestWeirdDrawBufferSize");
+            DebugInterface.debugValue(@src(), &global_config.Renderer_ShowSortGroups, "Renderer_ShowSortGroups");
             DebugInterface.debugBeginDataBlock(@src(), "Camera");
             {
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_UseDebug, "Renderer_Camera_UseDebug");
@@ -160,6 +161,8 @@ pub export fn updateAndRender(
         DebugInterface.debugBeginDataBlock(@src(), "Simulation");
         {
             DebugInterface.debugValue(@src(), &global_config.Simulation_TimestepPercentage, "TimestepPercentage");
+            DebugInterface.debugValue(@src(), &global_config.Simulation_VisualizeCollisionVolumes, "VisualizeCollisionVolumes");
+            DebugInterface.debugValue(@src(), &global_config.Simulation_InspectSelectedEntity, "InspectSelectedEntity");
         }
         DebugInterface.debugEndDataBlock(@src());
 

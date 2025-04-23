@@ -13,18 +13,20 @@ const platform = @import("win32_handmade.zig");
 var show_lighting_samples: bool = false;
 
 const INTERNAL = shared.INTERNAL;
+const SORT_GRID_WIDTH: u32 = 16;
+const SORT_GRID_HEIGHT: u32 = 9;
 
 const Vector2 = math.Vector2;
 const Vector2i = math.Vector2i;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Rectangle2 = math.Rectangle2;
+const Rectangle2i = math.Rectangle2i;
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
 const Vec4i = math.Vec4i;
 const Color = math.Color;
 const Color3 = math.Color3;
-const Rectangle2i = math.Rectangle2i;
 const MemoryArena = memory.MemoryArena;
 const ArenaPushParams = memory.ArenaPushParams;
 const RenderCommands = shared.RenderCommands;
@@ -98,6 +100,11 @@ pub const SpriteBound = struct {
     y_min: f32,
     y_max: f32,
     z_max: f32,
+};
+
+const SortGridEntry = struct {
+    next: ?*SortGridEntry = null,
+    occupant_index: u32 = 0,
 };
 
 pub const SpriteEdge = struct {
@@ -1405,15 +1412,96 @@ pub fn linearizeClipRects(commands: *RenderCommands, temp_arena: *MemoryArena) [
     return result;
 }
 
-fn buildSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, arena: *MemoryArena) void {
+fn getGridSpan(total_screen: Rectangle2, inv_cell_dim: Vector2, source: Rectangle2, dest: *Rectangle2i) bool {
+    const min_float: Vector2 = inv_cell_dim.hadamardProduct(source.getMinCorner());
+    const max_float: Vector2 = inv_cell_dim.hadamardProduct(source.getMaxCorner());
+
+    _ = dest.min.setX(@intFromFloat(min_float.x()));
+    _ = dest.min.setY(@intFromFloat(min_float.y()));
+    _ = dest.max.setX(@intFromFloat(max_float.x()));
+    _ = dest.max.setY(@intFromFloat(max_float.y()));
+
+    const inside: bool = total_screen.intersects(&source);
+    if (inside) {
+        if (dest.min.x() < 0) {
+            _ = dest.min.setX(0);
+        }
+        if (dest.min.x() >= SORT_GRID_WIDTH) {
+            _ = dest.min.setX(SORT_GRID_WIDTH - 1);
+        }
+        if (dest.max.x() < 0) {
+            _ = dest.max.setX(-1);
+        }
+        if (dest.max.x() >= SORT_GRID_HEIGHT) {
+            _ = dest.max.setX(SORT_GRID_HEIGHT - 1);
+        }
+        if (dest.min.y() < 0) {
+            _ = dest.min.setY(0);
+        }
+        if (dest.min.y() >= SORT_GRID_WIDTH) {
+            _ = dest.min.setY(SORT_GRID_WIDTH - 1);
+        }
+        if (dest.max.y() < 0) {
+            _ = dest.max.setY(-1);
+        }
+        if (dest.max.y() >= SORT_GRID_HEIGHT) {
+            _ = dest.max.setY(SORT_GRID_HEIGHT - 1);
+        }
+    }
+
+    return inside;
+}
+
+fn buildSpriteGraph(
+    input_node_count: u32,
+    input_nodes: [*]SortSpriteBound,
+    arena: *MemoryArena,
+    screen_width: u32,
+    screen_height: u32,
+) void {
     TimedBlock.beginFunction(@src(), .BuildSpriteGraph);
     defer TimedBlock.endFunction(@src(), .BuildSpriteGraph);
+
+    const total_screen: Rectangle2 = .fromMinMax(
+        .zero(),
+        .new(@floatFromInt(screen_width), @floatFromInt(screen_height)),
+    );
+    const inv_cell_dim: Vector2 = .new(
+        @as(f32, @floatFromInt(SORT_GRID_WIDTH)) / @as(f32, @floatFromInt(screen_width)),
+        @as(f32, @floatFromInt(SORT_GRID_HEIGHT)) / @as(f32, @floatFromInt(screen_height)),
+    );
+    var grid: [SORT_GRID_WIDTH][SORT_GRID_HEIGHT]?*SortGridEntry = [1][SORT_GRID_HEIGHT]?*SortGridEntry{
+        [1]?*SortGridEntry{null} ** SORT_GRID_HEIGHT,
+    } ** SORT_GRID_WIDTH;
+
+    var node_index: u32 = 0;
+    while (node_index < input_node_count - 1) : (node_index += 1) {
+        const a: *SortSpriteBound = @ptrCast(input_nodes + node_index);
+        std.debug.assert(a.flags == 0);
+
+        var grid_span: Rectangle2i = undefined;
+        if (getGridSpan(total_screen, inv_cell_dim, a.screen_area, &grid_span)) {
+            var grid_x: u32 = @intCast(grid_span.min.x());
+            while (grid_x <= grid_span.max.x()) : (grid_x += 1) {
+                var grid_y: u32 = @intCast(grid_span.min.y());
+                while (grid_y <= grid_span.max.y()) : (grid_y += 1) {
+                    var entry: *SortGridEntry = arena.pushStruct(
+                        SortGridEntry,
+                        ArenaPushParams.aligned(@alignOf(SortGridEntry), true),
+                    );
+                    entry.next = grid[grid_x][grid_y];
+                    entry.occupant_index = node_index;
+
+                    grid[grid_x][grid_y] = entry.next;
+                }
+            }
+        }
+    }
 
     if (input_node_count > 0) {
         var node_index_a: u32 = 0;
         while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
             const a: *SortSpriteBound = @ptrCast(input_nodes + node_index_a);
-            std.debug.assert(a.flags == 0);
 
             var node_index_b: u32 = node_index_a + 1;
             while (node_index_b < input_node_count) : (node_index_b += 1) {
@@ -1506,7 +1594,7 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena) [*]u32 {
     );
 
     if (true) {
-        buildSpriteGraph(count, entries, temp_arena);
+        buildSpriteGraph(count, entries, temp_arena, commands.width, commands.height);
         walkSpriteGraph(count, entries, result);
     } else {
         var node_index_a: u32 = 0;

@@ -31,7 +31,6 @@ pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
 
 pub const MAX_DEBUG_REGIONS_PER_FRAME = 2 * 4096;
-pub const DEBUG_UI_ENABLED = true;
 
 pub const DebugTable = extern struct {
     edit_event: DebugEvent = DebugEvent{},

@@ -5,10 +5,12 @@ pub const Config = struct {
     Renderer_Camera_DebugDistance: f32 = 25,
     Renderer_Camera_RoomBased: bool = true,
     Renderer_TestWeirdDrawBufferSize: bool = false,
+    Renderer_ShowSortGroups: bool = false,
     AI_Familiar_FollowsHero: bool = true,
     Particles_Test: bool = false,
     Particles_ShowGrid: bool = false,
     Game_SkipIntro: bool = true,
     Simulation_TimestepPercentage: f32 = 100,
-    ShowSortGroups: bool = true,
+    Simulation_VisualizeCollisionVolumes: bool = false,
+    Simulation_InspectSelectedEntity: bool = false,
 };
