@@ -612,21 +612,21 @@ pub fn addPlayer(
     const hero_scale = 3;
     const shadow_alpha = 0.5;
     const color: Color = .white();
-    body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
-    body.addPiece(
-        .Torso,
-        hero_scale * 1.2,
-        .new(0, 0, -0.002),
-        color,
-        @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
-    );
     body.addPiece(
         .Cape,
         hero_scale * 1.2,
-        .new(0, -0.1, -0.001),
+        .new(0, -0.1, 0),
         color,
         @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
     );
+    body.addPiece(
+        .Torso,
+        hero_scale * 1.2,
+        .new(0, 0, 0),
+        color,
+        @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
+    );
+    body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
 
     head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
 

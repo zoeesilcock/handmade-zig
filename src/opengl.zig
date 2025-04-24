@@ -173,112 +173,107 @@ pub fn renderCommands(
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
-        var header_offset: u32 = sort_entry[0];
-        while (header_offset > 0) {
-            const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + header_offset));
-            const alignment: usize = switch (header.type) {
-                .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
-                .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
-                .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
-                .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
-                else => {
-                    unreachable;
-                },
-            };
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
+        const alignment: usize = switch (header.type) {
+            .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
+            .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
+            .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
+            .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
+            else => {
+                unreachable;
+            },
+        };
 
-            const header_address = @intFromPtr(header);
-            const data_address = header_address + @sizeOf(RenderEntryHeader);
-            const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-            const data: *anyopaque = @ptrFromInt(aligned_address);
+        const header_address = @intFromPtr(header);
+        const data_address = header_address + @sizeOf(RenderEntryHeader);
+        const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+        const data: *anyopaque = @ptrFromInt(aligned_address);
 
-            if (clip_rect_index != header.clip_rect_index) {
-                clip_rect_index = header.clip_rect_index;
+        if (clip_rect_index != header.clip_rect_index) {
+            clip_rect_index = header.clip_rect_index;
 
-                std.debug.assert(clip_rect_index < commands.clip_rect_count);
+            std.debug.assert(clip_rect_index < commands.clip_rect_count);
 
-                const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
-                gl.glScissor(
-                    clip.rect.min.x() + commands.offset_x,
-                    clip.rect.min.y() + commands.offset_y,
-                    clip.rect.max.x() - clip.rect.min.x(),
-                    clip.rect.max.y() - clip.rect.min.y(),
-                );
-            }
+            const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
+            gl.glScissor(
+                clip.rect.min.x() + commands.offset_x,
+                clip.rect.min.y() + commands.offset_y,
+                clip.rect.max.x() - clip.rect.min.x(),
+                clip.rect.max.y() - clip.rect.min.y(),
+            );
+        }
 
-            header_offset = header.next_offset;
+        switch (header.type) {
+            .RenderEntryBitmap => {
+                var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+                if (entry.bitmap) |bitmap| {
+                    if (bitmap.width > 0 and bitmap.height > 0) {
+                        const x_axis: Vector2 = entry.x_axis;
+                        const y_axis: Vector2 = entry.y_axis;
+                        const min_position: Vector2 = entry.position;
 
-            switch (header.type) {
-                .RenderEntryBitmap => {
-                    var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                    if (entry.bitmap) |bitmap| {
-                        if (bitmap.width > 0 and bitmap.height > 0) {
-                            const x_axis: Vector2 = entry.x_axis;
-                            const y_axis: Vector2 = entry.y_axis;
-                            const min_position: Vector2 = entry.position;
-
-                            if (bitmap.texture_handle > 0) {
-                                gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
-                            }
-
-                            const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
-                            const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
-                            const min_uv = Vector2.new(one_texel_u, one_texel_v);
-                            const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
-
-                            gl.glBegin(gl.GL_TRIANGLES);
-                            {
-                                // This value is not gamma corrected by OpenGL.
-                                gl.glColor4fv(entry.premultiplied_color.toGL());
-
-                                const min_x_min_y: Vector2 = min_position;
-                                const min_x_max_y: Vector2 = min_position.plus(y_axis);
-                                const max_x_min_y: Vector2 = min_position.plus(x_axis);
-                                const max_x_max_y: Vector2 = min_position.plus(x_axis).plus(y_axis);
-
-                                // Lower triangle.
-                                gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                                gl.glVertex2fv(min_x_min_y.toGL());
-                                gl.glTexCoord2f(max_uv.x(), min_uv.y());
-                                gl.glVertex2fv(max_x_min_y.toGL());
-                                gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                                gl.glVertex2fv(max_x_max_y.toGL());
-
-                                // Upper triangle
-                                gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                                gl.glVertex2fv(min_x_min_y.toGL());
-                                gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                                gl.glVertex2fv(max_x_max_y.toGL());
-                                gl.glTexCoord2f(min_uv.x(), max_uv.y());
-                                gl.glVertex2fv(min_x_max_y.toGL());
-                            }
-                            gl.glEnd();
-
-                            gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+                        if (bitmap.texture_handle > 0) {
+                            gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
                         }
+
+                        const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
+                        const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
+                        const min_uv = Vector2.new(one_texel_u, one_texel_v);
+                        const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
+
+                        gl.glBegin(gl.GL_TRIANGLES);
+                        {
+                            // This value is not gamma corrected by OpenGL.
+                            gl.glColor4fv(entry.premultiplied_color.toGL());
+
+                            const min_x_min_y: Vector2 = min_position;
+                            const min_x_max_y: Vector2 = min_position.plus(y_axis);
+                            const max_x_min_y: Vector2 = min_position.plus(x_axis);
+                            const max_x_max_y: Vector2 = min_position.plus(x_axis).plus(y_axis);
+
+                            // Lower triangle.
+                            gl.glTexCoord2f(min_uv.x(), min_uv.y());
+                            gl.glVertex2fv(min_x_min_y.toGL());
+                            gl.glTexCoord2f(max_uv.x(), min_uv.y());
+                            gl.glVertex2fv(max_x_min_y.toGL());
+                            gl.glTexCoord2f(max_uv.x(), max_uv.y());
+                            gl.glVertex2fv(max_x_max_y.toGL());
+
+                            // Upper triangle
+                            gl.glTexCoord2f(min_uv.x(), min_uv.y());
+                            gl.glVertex2fv(min_x_min_y.toGL());
+                            gl.glTexCoord2f(max_uv.x(), max_uv.y());
+                            gl.glVertex2fv(max_x_max_y.toGL());
+                            gl.glTexCoord2f(min_uv.x(), max_uv.y());
+                            gl.glVertex2fv(min_x_max_y.toGL());
+                        }
+                        gl.glEnd();
+
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
                     }
-                },
-                .RenderEntryRectangle => {
-                    const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
-                    gl.glDisable(gl.GL_TEXTURE_2D);
-                    drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
+                }
+            },
+            .RenderEntryRectangle => {
+                const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
+                gl.glDisable(gl.GL_TEXTURE_2D);
+                drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
 
-                    gl.glBegin(gl.GL_LINES);
-                    gl.glColor4f(0, 0, 0, 1);
-                    drawLineVertices(entry.position, entry.position.plus(entry.dimension));
-                    gl.glEnd();
+                gl.glBegin(gl.GL_LINES);
+                gl.glColor4f(0, 0, 0, 1);
+                drawLineVertices(entry.position, entry.position.plus(entry.dimension));
+                gl.glEnd();
 
-                    gl.glEnable(gl.GL_TEXTURE_2D);
-                },
-                .RenderEntrySaturation => {
-                    // const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
-                },
-                .RenderEntryCoordinateSystem => {
-                    // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
-                },
-                else => {
-                    unreachable;
-                },
-            }
+                gl.glEnable(gl.GL_TEXTURE_2D);
+            },
+            .RenderEntrySaturation => {
+                // const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
+            },
+            .RenderEntryCoordinateSystem => {
+                // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
+            },
+            else => {
+                unreachable;
+            },
         }
     }
 

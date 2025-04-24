@@ -33,7 +33,6 @@ const RenderCommands = shared.RenderCommands;
 const GameRenderPrep = shared.GameRenderPrep;
 const RenderGroup = rendergroup.RenderGroup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
-const RenderEntryClear = rendergroup.RenderEntryClear;
 const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
@@ -96,7 +95,7 @@ pub const SortSpriteBound = struct {
     debug_tag: u32,
 };
 
-pub const SpriteBound = struct {
+pub const SpriteBound = extern struct {
     y_min: f32,
     y_max: f32,
     z_max: f32,
@@ -221,118 +220,113 @@ pub fn renderCommandsToBitmap(
     while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
-        var header_offset: u32 = sort_entry[0];
-        while (header_offset > 0) {
-            const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + header_offset));
-            const alignment: usize = switch (header.type) {
-                .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
-                .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
-                .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
-                .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
-                else => {
-                    unreachable;
-                },
-            };
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
+        const alignment: usize = switch (header.type) {
+            .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
+            .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
+            .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
+            .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
+            else => {
+                unreachable;
+            },
+        };
 
-            const header_address = @intFromPtr(header);
-            const data_address = header_address + @sizeOf(RenderEntryHeader);
-            const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-            const data: *anyopaque = @ptrFromInt(aligned_address);
+        const header_address = @intFromPtr(header);
+        const data_address = header_address + @sizeOf(RenderEntryHeader);
+        const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+        const data: *anyopaque = @ptrFromInt(aligned_address);
 
-            if (clip_rect_index != header.clip_rect_index) {
-                clip_rect_index = header.clip_rect_index;
+        if (clip_rect_index != header.clip_rect_index) {
+            clip_rect_index = header.clip_rect_index;
 
-                std.debug.assert(clip_rect_index < commands.clip_rect_count);
+            std.debug.assert(clip_rect_index < commands.clip_rect_count);
 
-                const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
-                clip_rect = base_clip_rect.getIntersectionWith(clip.rect);
-            }
+            const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
+            clip_rect = base_clip_rect.getIntersectionWith(clip.rect);
+        }
 
-            header_offset = header.next_offset;
+        switch (header.type) {
+            .RenderEntrySaturation => {
+                const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
 
-            switch (header.type) {
-                .RenderEntrySaturation => {
-                    const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
-
-                    changeSaturation(output_target, entry.level);
-                },
-                .RenderEntryBitmap => {
-                    const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                    if (entry.bitmap) |bitmap| {
-                        if (false) {
-                            drawRectangleSlowly(
-                                output_target,
-                                entry.position,
-                                entry.x_axis,
-                                entry.y_axis,
-                                entry.color,
-                                @constCast(bitmap),
-                                null,
-                                undefined,
-                                undefined,
-                                undefined,
-                                null_pixels_to_meters,
-                            );
-                        } else {
-                            drawRectangleQuickly(
-                                output_target,
-                                entry.position,
-                                entry.x_axis,
-                                entry.y_axis,
-                                entry.premultiplied_color,
-                                @constCast(bitmap),
-                                null_pixels_to_meters,
-                                clip_rect,
-                            );
-                        }
+                changeSaturation(output_target, entry.level);
+            },
+            .RenderEntryBitmap => {
+                const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+                if (entry.bitmap) |bitmap| {
+                    if (false) {
+                        drawRectangleSlowly(
+                            output_target,
+                            entry.position,
+                            entry.x_axis,
+                            entry.y_axis,
+                            entry.color,
+                            @constCast(bitmap),
+                            null,
+                            undefined,
+                            undefined,
+                            undefined,
+                            null_pixels_to_meters,
+                        );
+                    } else {
+                        drawRectangleQuickly(
+                            output_target,
+                            entry.position,
+                            entry.x_axis,
+                            entry.y_axis,
+                            entry.premultiplied_color,
+                            @constCast(bitmap),
+                            null_pixels_to_meters,
+                            clip_rect,
+                        );
                     }
-                },
-                .RenderEntryRectangle => {
-                    const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
+                }
+            },
+            .RenderEntryRectangle => {
+                const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
 
-                    drawRectangle(
-                        output_target,
-                        entry.position,
-                        entry.position.plus(entry.dimension),
-                        entry.premultiplied_color,
-                        clip_rect,
-                    );
-                },
-                .RenderEntryCoordinateSystem => {
-                    // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
-                    // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
-                    // drawRectangleSlowly(
-                    //     output_target,
-                    //     entry.origin,
-                    //     entry.x_axis,
-                    //     entry.y_axis,
-                    //     entry.color,
-                    //     entry.texture,
-                    //     entry.normal_map,
-                    //     entry.top,
-                    //     entry.middle,
-                    //     entry.bottom,
-                    //     null_pixels_to_meters,
-                    // );
-                    //
-                    // const color = Color.new(1, 1, 0, 1);
-                    // const dimension = Vector2.new(2, 2);
-                    // var position = entry.origin;
-                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                    //
-                    // position = entry.origin.plus(entry.x_axis);
-                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                    //
-                    // position = entry.origin.plus(entry.y_axis);
-                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                    //
-                    // position = max;
-                    // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                },
-                else => {
-                    unreachable;
-                },
-            }
+                drawRectangle(
+                    output_target,
+                    entry.position,
+                    entry.position.plus(entry.dimension),
+                    entry.premultiplied_color,
+                    clip_rect,
+                );
+            },
+            .RenderEntryCoordinateSystem => {
+                // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
+                // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
+                // drawRectangleSlowly(
+                //     output_target,
+                //     entry.origin,
+                //     entry.x_axis,
+                //     entry.y_axis,
+                //     entry.color,
+                //     entry.texture,
+                //     entry.normal_map,
+                //     entry.top,
+                //     entry.middle,
+                //     entry.bottom,
+                //     null_pixels_to_meters,
+                // );
+                //
+                // const color = Color.new(1, 1, 0, 1);
+                // const dimension = Vector2.new(2, 2);
+                // var position = entry.origin;
+                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                //
+                // position = entry.origin.plus(entry.x_axis);
+                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                //
+                // position = entry.origin.plus(entry.y_axis);
+                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+                //
+                // position = max;
+                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
+            },
+            else => {
+                unreachable;
+            },
         }
     }
 }
@@ -1640,7 +1634,7 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena) [*]u32 {
 }
 
 pub fn isInFrontOf(a: SpriteBound, b: SpriteBound) bool {
-    const both_z_sprites: bool = a.y_min != a.y_max and b.y_min != b.y_max;
+    const both_z_sprites: bool = isZSprite(a) and isZSprite(b);
     const a_includes_b: bool = b.y_min >= a.y_min and b.y_min < a.y_max;
     const b_includes_a: bool = a.y_min >= b.y_min and a.y_min < b.y_max;
 
@@ -1719,7 +1713,7 @@ pub fn mergeSortSpriteBound(count: u32, first: [*]SortSpriteBound, temp: [*]Sort
     }
 }
 
-fn isZSprite(bound: SpriteBound) bool {
+pub fn isZSprite(bound: SpriteBound) bool {
     return bound.y_min != bound.y_max;
 }
 

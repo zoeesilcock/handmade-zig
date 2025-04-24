@@ -465,6 +465,7 @@ pub fn updateAndRenderEntities(
                 // * And probably, we will want the sort keys to be u32's now, so we'll convert from float at this
                 // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
 
+                render_group.beginAggregateSortKey();
                 var piece_index: u32 = 0;
                 while (piece_index < entity.piece_count) : (piece_index += 1) {
                     const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
@@ -497,6 +498,7 @@ pub fn updateAndRenderEntities(
                         y_axis,
                     );
                 }
+                render_group.endAggregateSortKey();
 
                 drawHitPoints(entity, render_group, entity_transform);
 
