@@ -278,7 +278,7 @@ pub fn renderCommands(
     }
 
     gl.glDisable(gl.GL_TEXTURE_2D);
-    if (global_config.Renderer_ShowSortGroups) {
+    if (global_config.Platform_ShowSortGroups) {
         const bound_count: u32 = commands.push_buffer_element_count;
         const bounds: [*]SortSpriteBound = render.getSortEntries(commands);
         var group_index: u32 = 0;

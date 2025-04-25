@@ -125,6 +125,7 @@ pub var platform: shared.Platform = undefined;
 pub var running: bool = false;
 pub var paused: bool = false;
 pub var rendering_type: RenderingType = .RenderOpenGLDisplayOpenGL;
+var global_config = &@import("config.zig").global_config;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
@@ -2288,6 +2289,7 @@ pub export fn wWinMain(
                     {
                         DebugInterface.debugValue(@src(), &paused, "paused");
                         DebugInterface.debugValue(@src(), &rendering_type, "rendering_type");
+                        DebugInterface.debugValue(@src(), &global_config.Platform_ShowSortGroups, "show_sort_groups");
                     }
                     DebugInterface.debugEndDataBlock(@src());
 

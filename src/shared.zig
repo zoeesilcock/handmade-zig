@@ -392,6 +392,8 @@ pub const RenderCommands = extern struct {
     push_buffer_element_count: u32,
     sort_entry_at: usize,
 
+    last_used_manual_sort_key: u32 = 0,
+
     clip_rect_count: u32 = 0,
     first_clip_rect: ?*rendergroup.RenderEntryClipRect = null,
     last_clip_rect: ?*rendergroup.RenderEntryClipRect = null,

@@ -134,7 +134,6 @@ pub export fn updateAndRender(
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
             DebugInterface.debugValue(@src(), &global_config.Renderer_TestWeirdDrawBufferSize, "Renderer_TestWeirdDrawBufferSize");
-            DebugInterface.debugValue(@src(), &global_config.Renderer_ShowSortGroups, "Renderer_ShowSortGroups");
             DebugInterface.debugBeginDataBlock(@src(), "Camera");
             {
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_UseDebug, "Renderer_Camera_UseDebug");

@@ -417,7 +417,7 @@ pub fn updateAndRenderWorld(
     var brain_index: u32 = 0;
     while (brain_index < sim_region.brain_count) : (brain_index += 1) {
         const brain: *Brain = &sim_region.brains[brain_index];
-        brains.executeBrain(state, world_mode, sim_region, input, brain, delta_time);
+        brains.executeBrain(state, world_mode, sim_region, input, render_group, brain, delta_time);
     }
     TimedBlock.endBlock(@src(), .ExecuteBrains);
 

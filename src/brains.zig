@@ -5,6 +5,7 @@ const sim = @import("sim.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const debug_interface = @import("debug_interface.zig");
+const rendergroup = @import("rendergroup.zig");
 
 var global_config = &@import("config.zig").global_config;
 
@@ -15,6 +16,7 @@ const SimRegion = sim.SimRegion;
 const ClosestEntity = sim.ClosestEntity;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
+const RenderGroup = rendergroup.RenderGroup;
 const DebugInterface = debug_interface.DebugInterface;
 
 //
@@ -111,6 +113,7 @@ pub fn executeBrain(
     world_mode: *GameWorldMode,
     sim_region: *SimRegion,
     input: *shared.GameInput,
+    render_group: *RenderGroup,
     brain: *Brain,
     delta_time: f32,
 ) void {
@@ -243,6 +246,12 @@ pub fn executeBrain(
             if (opt_head) |head| {
                 if (attacked) {
                     head.facing_direction = intrinsics.atan2(sword_direction.y(), sword_direction.x());
+                }
+
+                if (opt_body) |body| {
+                    const key: u16 = render_group.reserveSortKey();
+                    head.manual_sort.always_in_front_of = key;
+                    body.manual_sort.always_behind = key;
                 }
 
                 var traversable: TraversableReference = undefined;

@@ -4,6 +4,7 @@ const brains = @import("brains.zig");
 const asset = @import("asset.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
+const render = @import("render.zig");
 const rendergroup = @import("rendergroup.zig");
 const file_formats = @import("file_formats");
 const debug_interface = @import("debug_interface.zig");
@@ -21,6 +22,7 @@ const AssetTypeId = asset.AssetTypeId;
 const TransientState = shared.TransientState;
 const SimRegion = sim.SimRegion;
 const WorldPosition = world.WorldPosition;
+const ManualSortKey = render.ManualSortKey;
 const RenderGroup = rendergroup.RenderGroup;
 const TransientClipRect = rendergroup.TransientClipRect;
 const ObjectTransform = rendergroup.ObjectTransform;
@@ -76,6 +78,12 @@ pub const Entity = extern struct {
     brain_id: BrainId = .{},
 
     //
+    // Transient
+    //
+    //
+    manual_sort: ManualSortKey,
+
+    //
     // Everything below here is not worked out yet.
     //
 
@@ -125,7 +133,7 @@ pub const Entity = extern struct {
     traversables: [16]EntityTraversablePoint,
 
     piece_count: u32,
-    pieces: [4]EntityVisiblePiece,
+    pieces: [4]EntityVisiblePiece, // 0 is the "on top" piece.
 
     pub fn addPiece(
         self: *Entity,
@@ -440,6 +448,8 @@ pub fn updateAndRenderEntities(
             // const relative_layer: i32 = convertToLayerRelative(world_mode, &entity_transform.offset_position.values[2]);
             const relative_layer: i32 = convertToLayerRelative(world_mode, &temp_z);
 
+            entity_transform.manual_sort = entity.manual_sort;
+
             if (relative_layer >= minimum_level_index and relative_layer <= maximum_level_index) {
                 const layer_index: usize = @intCast(relative_layer - minimum_level_index);
                 render_group.current_clip_rect_index = clip_rect_index[layer_index];
@@ -465,7 +475,10 @@ pub fn updateAndRenderEntities(
                 // * And probably, we will want the sort keys to be u32's now, so we'll convert from float at this
                 // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
 
-                render_group.beginAggregateSortKey();
+                if (entity.piece_count > 1) {
+                    render_group.beginAggregateSortKey();
+                }
+
                 var piece_index: u32 = 0;
                 while (piece_index < entity.piece_count) : (piece_index += 1) {
                     const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
@@ -498,7 +511,10 @@ pub fn updateAndRenderEntities(
                         y_axis,
                     );
                 }
-                render_group.endAggregateSortKey();
+
+                if (entity.piece_count > 1) {
+                    render_group.endAggregateSortKey();
+                }
 
                 drawHitPoints(entity, render_group, entity_transform);
 

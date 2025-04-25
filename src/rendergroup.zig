@@ -49,6 +49,7 @@ const RenderCommands = shared.RenderCommands;
 const ArenaPushParams = shared.ArenaPushParams;
 const SpriteBound = render.SpriteBound;
 const SortSpriteBound = render.SortSpriteBound;
+const ManualSortKey = render.ManualSortKey;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
@@ -164,6 +165,7 @@ pub const ObjectTransform = extern struct {
     offset_position: Vector3,
     scale: f32,
     sort_bias: f32 = 0,
+    manual_sort: ManualSortKey = .{},
 
     pub fn defaultUpright() ObjectTransform {
         return ObjectTransform{
@@ -539,6 +541,7 @@ pub const RenderGroup = extern struct {
             .y_min = object_transform.offset_position.y() + offset.y(),
             .y_max = object_transform.offset_position.y() + offset.y(),
             .z_max = object_transform.offset_position.z() + offset.z() + object_transform.sort_bias,
+            .manual_sort = object_transform.manual_sort,
         };
 
         if (object_transform.upright) {
@@ -549,6 +552,13 @@ pub const RenderGroup = extern struct {
         }
 
         return sprite_bound;
+    }
+
+    pub fn reserveSortKey(self: *RenderGroup) u16 {
+        std.debug.assert(self.commands.last_used_manual_sort_key < std.math.maxInt(u16));
+        self.commands.last_used_manual_sort_key += 1;
+        const result: u16 = @intCast(self.commands.last_used_manual_sort_key);
+        return result;
     }
 
     pub fn pushBitmap(

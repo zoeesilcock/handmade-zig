@@ -86,6 +86,11 @@ pub const SpriteFlag = enum(u32) {
     IndexMask = 0x0FFFFFFF,
 };
 
+pub const ManualSortKey = extern struct {
+    always_in_front_of: u32 = 0,
+    always_behind: u32 = 0,
+};
+
 pub const SortSpriteBound = struct {
     first_edge_with_me_as_front: ?*SpriteEdge,
     screen_area: Rectangle2,
@@ -99,6 +104,7 @@ pub const SpriteBound = extern struct {
     y_min: f32,
     y_max: f32,
     z_max: f32,
+    manual_sort: ManualSortKey = .{},
 };
 
 const SortGridEntry = struct {
@@ -1634,16 +1640,24 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena) [*]u32 {
 }
 
 pub fn isInFrontOf(a: SpriteBound, b: SpriteBound) bool {
-    const both_z_sprites: bool = isZSprite(a) and isZSprite(b);
-    const a_includes_b: bool = b.y_min >= a.y_min and b.y_min < a.y_max;
-    const b_includes_a: bool = a.y_min >= b.y_min and a.y_min < b.y_max;
+    var result: bool = false;
 
-    const sort_by_z: bool = both_z_sprites or a_includes_b or b_includes_a;
+    if (a.manual_sort.always_in_front_of != 0 and a.manual_sort.always_in_front_of == b.manual_sort.always_behind) {
+        result = true;
+    } else if (a.manual_sort.always_behind != 0 and a.manual_sort.always_behind == b.manual_sort.always_in_front_of) {
+        result = false;
+    } else {
+        const both_z_sprites: bool = isZSprite(a) and isZSprite(b);
+        const a_includes_b: bool = b.y_min >= a.y_min and b.y_min < a.y_max;
+        const b_includes_a: bool = a.y_min >= b.y_min and a.y_min < b.y_max;
 
-    const result: bool = if (sort_by_z)
-        a.z_max > b.z_max
-    else
-        a.y_min < b.y_min;
+        const sort_by_z: bool = both_z_sprites or a_includes_b or b_includes_a;
+
+        result = if (sort_by_z)
+            a.z_max > b.z_max
+        else
+            a.y_min < b.y_min;
+    }
 
     return result;
 }

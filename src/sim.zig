@@ -287,6 +287,8 @@ pub fn beginSimulation(
 
                                     dest.* = source.*;
 
+                                    dest.manual_sort = .{};
+
                                     dest.id = id;
                                     dest.position = dest.position.plus(chunk_delta);
 
