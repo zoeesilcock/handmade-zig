@@ -309,8 +309,9 @@ pub fn updateAndRenderEntities(
     const maximum_level_index: i32 = 1;
     const total_level_index = maximum_level_index - minimum_level_index + 1;
     var clip_rect_index: [total_level_index]u32 = undefined;
+    var test_alpha: [clip_rect_index.len]f32 = undefined;
 
-    const fade_top_end_z: f32 = 0.75 * world_mode.typical_floor_height;
+    const fade_top_end_z: f32 = 1 * world_mode.typical_floor_height;
     const fade_top_start_z: f32 = 0.5 * world_mode.typical_floor_height;
     const fade_bottom_start_z: f32 = -1 * world_mode.typical_floor_height;
     const fade_bottom_end_z: f32 = -4 * world_mode.typical_floor_height;
@@ -318,8 +319,8 @@ pub fn updateAndRenderEntities(
     var level_index: u32 = 0;
     while (level_index < clip_rect_index.len) : (level_index += 1) {
         const relative_layer_index: i32 = minimum_level_index + @as(i32, @intCast(level_index));
-        const camera_relative_ground_z: f32 = sim_region.origin.offset.z() +
-            @as(f32, @floatFromInt(relative_layer_index)) * world_mode.typical_floor_height;
+        const camera_relative_ground_z: f32 =
+            @as(f32, @floatFromInt(relative_layer_index)) * world_mode.typical_floor_height - world_mode.camera_offset.z();
 
         var fx: ClipRectFX = .{};
         if (camera_relative_ground_z > fade_top_start_z) {
@@ -346,6 +347,7 @@ pub fn updateAndRenderEntities(
         }
 
         clip_rect_index[level_index] = render_group.pushClipRect(0, 0, draw_buffer.width, draw_buffer.height, fx);
+        test_alpha[level_index] = 1 - fx.color_time.a();
     }
 
     const transient_clip_rect: TransientClipRect = .init(render_group);
@@ -448,9 +450,12 @@ pub fn updateAndRenderEntities(
             // const relative_layer: i32 = convertToLayerRelative(world_mode, &entity_transform.offset_position.values[2]);
             const relative_layer: i32 = convertToLayerRelative(world_mode, &temp_z);
 
+            //(entity.world_position.chunk_z - sim_region.origin.chunk_z)
+
             entity_transform.manual_sort = entity.manual_sort;
 
             if (relative_layer >= minimum_level_index and relative_layer <= maximum_level_index) {
+                const alpha: f32 = test_alpha[@intCast(relative_layer - minimum_level_index)];
                 const layer_index: usize = @intCast(relative_layer - minimum_level_index);
                 render_group.current_clip_rect_index = clip_rect_index[layer_index];
 
@@ -500,12 +505,14 @@ pub fn updateAndRenderEntities(
                         _ = offset.setY(offset.y() + bob_time);
                     }
 
+                    var piece_color: Color = piece.color;
+                    _ = piece_color.setA(alpha * piece_color.a());
                     render_group.pushBitmapId(
                         entity_transform,
                         bitmap_id,
                         piece.height,
                         piece.offset.plus(offset),
-                        piece.color,
+                        piece_color,
                         null,
                         x_axis,
                         y_axis,
@@ -527,7 +534,7 @@ pub fn updateAndRenderEntities(
                     //         entity_transform,
                     //         volume.dimension.xy(),
                     //         volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                    //         Color.new(0, 0.5, 1, 1),
+                    //         Color.new(0, 0.5, 1, alpha),
                     //         0.1,
                     //     );
                     // }
@@ -539,7 +546,7 @@ pub fn updateAndRenderEntities(
                             entity_transform,
                             Vector2.new(1.2, 1.2),
                             traversable.position,
-                            if (traversable.occupier != null) .new(1, 0.5, 0, 1) else .new(0.05, 0.25, 0.05, 1),
+                            if (traversable.occupier != null) .new(1, 0.5, 0, alpha) else .new(0.05, 0.25, 0.05, alpha),
                         );
 
                         // render_group.pushRectangleOutline(

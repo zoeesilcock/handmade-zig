@@ -259,7 +259,7 @@ pub fn renderCommands(
                 drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
 
                 gl.glBegin(gl.GL_LINES);
-                gl.glColor4f(0, 0, 0, 1);
+                gl.glColor4f(0, 0, 0, entry.premultiplied_color.a());
                 drawLineVertices(entry.position, entry.position.plus(entry.dimension));
                 gl.glEnd();
 

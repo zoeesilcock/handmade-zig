@@ -193,7 +193,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..1) |_| {
+    for (0..2) |_| {
         const door_direction = 2;
         _ = series.randomChoice(2);
         // const door_direction = 3;
@@ -854,7 +854,7 @@ pub fn chunkPositionFromTilePosition(
     opt_additional_offset: ?Vector3,
 ) WorldPosition {
     const tile_side_in_meters = 1.4;
-    const tile_depth_in_meters = 3.0;
+    const tile_depth_in_meters = game_world.chunk_dimension_in_meters.z();
 
     const base_position = WorldPosition.zero();
     const tile_dimension = Vector3.new(
@@ -867,6 +867,7 @@ pub fn chunkPositionFromTilePosition(
         @floatFromInt(abs_tile_y),
         @floatFromInt(abs_tile_z),
     ).hadamardProduct(tile_dimension);
+    _ = offset.setZ(offset.z() - 0.4 * tile_depth_in_meters);
 
     if (opt_additional_offset) |additional_offset| {
         offset = offset.plus(additional_offset);
