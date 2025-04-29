@@ -1177,7 +1177,7 @@ fn drawFrameSlider(
 ) void {
     const frame_count: u32 = root_element.frames.len;
     if (frame_count > 0) {
-        debug_state.render_group.pushRectangle2(debug_state.backing_transform, total_rect, 0, Color.new(0, 0, 0, 0.25));
+        debug_state.render_group.pushRectangle2(&debug_state.backing_transform, total_rect, 0, Color.new(0, 0, 0, 0.25));
 
         const bar_width: f32 = total_rect.getDimension().x() / @as(f32, @floatFromInt(frame_count));
         var at_x: f32 = total_rect.min.x();
@@ -1209,10 +1209,10 @@ fn drawFrameSlider(
             }
 
             if (highlight) {
-                debug_state.render_group.pushRectangle2(debug_state.ui_transform, region_rect, 0, highlight_color);
+                debug_state.render_group.pushRectangle2(&debug_state.ui_transform, region_rect, 0, highlight_color);
             }
 
-            debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, region_rect, 1, color, 2);
+            debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, region_rect, 1, color, 2);
 
             if (mouse_position.isInRectangle(region_rect)) {
                 var buffer: [128]u8 = undefined;
@@ -1310,8 +1310,8 @@ fn drawProfileBars(
         const lane_y: f32 = profile_rect.max.y() - lane_stride * lane;
 
         const region_rect = math.Rectangle2.new(this_min_x, lane_y - lane_height, this_max_x, lane_y);
-        debug_state.render_group.pushRectangle2(debug_state.ui_transform, region_rect, base_z, color.toColor(1));
-        debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, region_rect, base_z + 1, Color.black(), 2);
+        debug_state.render_group.pushRectangle2(&debug_state.ui_transform, region_rect, base_z, color.toColor(1));
+        debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, region_rect, base_z + 1, Color.black(), 2);
 
         if (mouse_position.isInRectangle(region_rect)) {
             var buffer: [128]u8 = undefined;
@@ -1382,13 +1382,13 @@ fn drawFrameBars(
 
                 const region_rect = math.Rectangle2.new(at_x, this_min_y, at_x + bar_width, this_max_y);
                 debug_state.render_group.pushRectangle2(
-                    debug_state.ui_transform,
+                    &debug_state.ui_transform,
                     region_rect,
                     0,
                     color.toColor(1).scaledTo(highlight_dim),
                 );
                 debug_state.render_group.pushRectangle2Outline(
-                    debug_state.ui_transform,
+                    &debug_state.ui_transform,
                     region_rect,
                     0,
                     Color.black(),
@@ -1447,11 +1447,11 @@ fn drawArenaOccupancy(
             frame_rect.max.x(),
             frame_rect.max.y(),
         );
-        debug_state.render_group.pushRectangle2(debug_state.ui_transform, used_rect, 0, Color.new(1, 0.5, 0, 1));
-        debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, used_rect, 0, Color.black(), 2);
+        debug_state.render_group.pushRectangle2(&debug_state.ui_transform, used_rect, 0, Color.new(1, 0.5, 0, 1));
+        debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, used_rect, 0, Color.black(), 2);
 
-        debug_state.render_group.pushRectangle2(debug_state.ui_transform, unused_rect, 0, Color.new(0, 1, 0, 1));
-        debug_state.render_group.pushRectangle2Outline(debug_state.ui_transform, unused_rect, 0, Color.black(), 2);
+        debug_state.render_group.pushRectangle2(&debug_state.ui_transform, unused_rect, 0, Color.new(0, 1, 0, 1));
+        debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, unused_rect, 0, Color.black(), 2);
     }
 }
 
@@ -1647,7 +1647,7 @@ fn drawDebugElement(
             const opt_event: ?*DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else null;
             if (opt_event) |event| {
                 if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
-                    var dim = render_group.getBitmapDim(no_transform, bitmap, bitmap_scale, Vector3.zero(), 0, null, null);
+                    var dim = render_group.getBitmapDim(&no_transform, bitmap, bitmap_scale, Vector3.zero(), 0, null, null);
                     _ = view.data.inline_block.dimension.setX(dim.size.x());
                     opt_bitmap = bitmap;
                 }
@@ -1658,11 +1658,11 @@ fn drawDebugElement(
             layout_element.defaultInteraction(item_interaction);
             layout_element.end();
 
-            render_group.pushRectangle2(debug_state.backing_transform, layout_element.bounds, 0, Color.black());
+            render_group.pushRectangle2(&debug_state.backing_transform, layout_element.bounds, 0, Color.black());
 
             if (opt_bitmap) |bitmap| {
                 render_group.pushBitmap(
-                    debug_state.backing_transform,
+                    &debug_state.backing_transform,
                     bitmap,
                     bitmap_scale,
                     layout_element.bounds.min.toVector3(1),
@@ -1698,7 +1698,7 @@ fn drawDebugElement(
             layout_element.end();
 
             render_group.pushRectangle2(
-                debug_state.backing_transform,
+                &debug_state.backing_transform,
                 layout_element.bounds,
                 0,
                 Color.new(0, 0, 0, 0.75),
@@ -1708,7 +1708,7 @@ fn drawDebugElement(
             defer render_group.current_clip_rect_index = old_clip_rect;
 
             render_group.current_clip_rect_index = render_group.pushClipRectByRectangle(
-                debug_state.backing_transform,
+                &debug_state.backing_transform,
                 layout_element.bounds,
                 0,
             );
@@ -1761,7 +1761,7 @@ fn drawDebugElement(
             layout_element.end();
 
             render_group.pushRectangle2(
-                debug_state.backing_transform,
+                &debug_state.backing_transform,
                 layout_element.bounds,
                 0,
                 Color.new(0, 0, 0, 0.75),
@@ -1771,7 +1771,7 @@ fn drawDebugElement(
             defer render_group.current_clip_rect_index = old_clip_rect;
 
             render_group.current_clip_rect_index = render_group.pushClipRectByRectangle(
-                debug_state.backing_transform,
+                &debug_state.backing_transform,
                 layout_element.bounds,
                 0,
             );
@@ -1962,7 +1962,7 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
             tree.ui_position.minus(Vector2.new(4, 4)),
             Vector2.new(4, 4),
         );
-        render_group.pushRectangle2(ObjectTransform.defaultFlat(), move_box, 0, move_box_color);
+        render_group.pushRectangle2(&ObjectTransform.defaultFlat(), move_box, 0, move_box_color);
 
         if (mouse_position.isInRectangle(move_box)) {
             debug_state.next_hot_interaction = move_interaction;
@@ -2302,11 +2302,11 @@ fn debugStart(
         debug_state.ui_transform = ObjectTransform.defaultFlat();
         debug_state.text_transform = ObjectTransform.defaultFlat();
         debug_state.tooltip_transform = ObjectTransform.defaultFlat();
-        debug_state.backing_transform.sort_bias = 100000;
-        debug_state.shadow_transform.sort_bias = 200000;
-        debug_state.ui_transform.sort_bias = 300000;
-        debug_state.text_transform.sort_bias = 400000;
-        debug_state.tooltip_transform.sort_bias = 500000;
+        debug_state.backing_transform.chunk_z = 100000;
+        debug_state.shadow_transform.chunk_z = 200000;
+        debug_state.ui_transform.chunk_z = 300000;
+        debug_state.text_transform.chunk_z = 400000;
+        debug_state.tooltip_transform.chunk_z = 500000;
 
         debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
 
@@ -2332,7 +2332,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
     const mouse_position: Vector2 = group.unproject(
-        ObjectTransform.defaultFlat(),
+        &ObjectTransform.defaultFlat(),
         Vector2.new(input.mouse_x, input.mouse_y),
     ).xy();
 

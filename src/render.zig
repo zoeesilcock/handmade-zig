@@ -91,6 +91,8 @@ pub const ManualSortKey = extern struct {
     always_behind: u32 = 0,
 };
 
+pub const SPRITE_BARRIER_OFFSET_VALUE = 0xFFFFFFFF;
+
 pub const SortSpriteBound = struct {
     first_edge_with_me_as_front: ?*SpriteEdge,
     screen_area: Rectangle2,
@@ -101,6 +103,7 @@ pub const SortSpriteBound = struct {
 };
 
 pub const SpriteBound = extern struct {
+    chunk_z: i32,
     y_min: f32,
     y_max: f32,
     z_max: f32,
@@ -1459,12 +1462,13 @@ fn getGridSpan(total_screen: Rectangle2, inv_cell_dim: Vector2, source: Rectangl
 }
 
 fn buildSpriteGraph(
+    start_at_index: u32,
     input_node_count: u32,
     input_nodes: [*]SortSpriteBound,
     arena: *MemoryArena,
     screen_width: u32,
     screen_height: u32,
-) void {
+) u32 {
     TimedBlock.beginFunction(@src(), .BuildSpriteGraph);
     defer TimedBlock.endFunction(@src(), .BuildSpriteGraph);
 
@@ -1480,10 +1484,14 @@ fn buildSpriteGraph(
         [1]?*SortGridEntry{null} ** SORT_GRID_HEIGHT,
     } ** SORT_GRID_WIDTH;
 
-    var node_index_a: u32 = 0;
-    while (node_index_a < input_node_count - 1) : (node_index_a += 1) {
+    var node_index_a: u32 = start_at_index;
+    while (node_index_a < input_node_count) : (node_index_a += 1) {
         const a: *SortSpriteBound = @ptrCast(input_nodes + node_index_a);
         std.debug.assert(a.flags == 0);
+
+        if (a.offset == SPRITE_BARRIER_OFFSET_VALUE) {
+            break;
+        }
 
         var grid_span: Rectangle2i = undefined;
         if (getGridSpan(total_screen, inv_cell_dim, a.screen_area, &grid_span)) {
@@ -1501,9 +1509,10 @@ fn buildSpriteGraph(
                     var opt_entry_b: ?*SortGridEntry = grid[grid_x][grid_y];
                     while (opt_entry_b) |entry_b| : (opt_entry_b = entry_b.next) {
                         const node_index_b: u32 = entry_b.occupant_index;
+                        const shrink: Vector2 = .new(-4, -4);
                         const b: *SortSpriteBound = @ptrCast(input_nodes + node_index_b);
                         if (b.flags != node_index_a and
-                            a.screen_area.intersects(&b.screen_area))
+                            a.screen_area.addRadius(shrink).intersects(&b.screen_area.addRadius(shrink)))
                         {
                             std.debug.assert((node_index_a & @intFromEnum(SpriteFlag.IndexMask)) == node_index_a);
                             std.debug.assert((b.flags & ~@intFromEnum(SpriteFlag.IndexMask)) == 0);
@@ -1535,6 +1544,8 @@ fn buildSpriteGraph(
             }
         }
     }
+
+    return node_index_a;
 }
 
 const SpriteGraphWalk = struct {
@@ -1599,8 +1610,11 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena) [*]u32 {
     );
 
     if (true) {
-        buildSpriteGraph(count, entries, temp_arena, commands.width, commands.height);
-        walkSpriteGraph(count, entries, result);
+        var first_index: u32 = 0;
+        while (first_index < count) {
+            first_index = buildSpriteGraph(first_index, count, entries, temp_arena, commands.width, commands.height);
+            walkSpriteGraph(count, entries, result);
+        }
     } else {
         var node_index_a: u32 = 0;
         while (node_index_a < count - 1) : (node_index_a += 1) {
@@ -1642,7 +1656,9 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena) [*]u32 {
 pub fn isInFrontOf(a: SpriteBound, b: SpriteBound) bool {
     var result: bool = false;
 
-    if (a.manual_sort.always_in_front_of != 0 and a.manual_sort.always_in_front_of == b.manual_sort.always_behind) {
+    if (a.chunk_z != b.chunk_z) {
+        result = a.chunk_z > b.chunk_z;
+    } else if (a.manual_sort.always_in_front_of != 0 and a.manual_sort.always_in_front_of == b.manual_sort.always_behind) {
         result = true;
     } else if (a.manual_sort.always_behind != 0 and a.manual_sort.always_behind == b.manual_sort.always_in_front_of) {
         result = false;

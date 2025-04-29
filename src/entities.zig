@@ -305,11 +305,12 @@ pub fn updateAndRenderEntities(
     TimedBlock.beginFunction(@src(), .UpdateAndRenderEntities);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderEntities);
 
+    _ = draw_buffer;
+
     const minimum_level_index: i32 = -4;
     const maximum_level_index: i32 = 1;
-    const total_level_index = maximum_level_index - minimum_level_index + 1;
-    var clip_rect_index: [total_level_index]u32 = undefined;
-    var test_alpha: [clip_rect_index.len]f32 = undefined;
+    var fog_amount: [maximum_level_index - minimum_level_index + 1]f32 = undefined;
+    var test_alpha: [fog_amount.len]f32 = undefined;
 
     const fade_top_end_z: f32 = 1 * world_mode.typical_floor_height;
     const fade_top_start_z: f32 = 0.5 * world_mode.typical_floor_height;
@@ -317,37 +318,21 @@ pub fn updateAndRenderEntities(
     const fade_bottom_end_z: f32 = -4 * world_mode.typical_floor_height;
 
     var level_index: u32 = 0;
-    while (level_index < clip_rect_index.len) : (level_index += 1) {
+    while (level_index < fog_amount.len) : (level_index += 1) {
         const relative_layer_index: i32 = minimum_level_index + @as(i32, @intCast(level_index));
         const camera_relative_ground_z: f32 =
             @as(f32, @floatFromInt(relative_layer_index)) * world_mode.typical_floor_height - world_mode.camera_offset.z();
 
-        var fx: ClipRectFX = .{};
-        if (camera_relative_ground_z > fade_top_start_z) {
-            render_group.current_clip_rect_index = clip_rect_index[0];
-
-            const time: f32 = math.clamp01MapToRange(
-                fade_top_start_z,
-                fade_top_end_z,
-                camera_relative_ground_z,
-            );
-            fx.color_time = .new(0, 0, 0, time);
-        } else if (camera_relative_ground_z < fade_bottom_start_z) {
-            render_group.current_clip_rect_index = clip_rect_index[1];
-
-            const time: f32 = math.clamp01MapToRange(
-                fade_bottom_start_z,
-                fade_bottom_end_z,
-                camera_relative_ground_z,
-            );
-            fx.color_time = .new(time, time, time, 0);
-            fx.color = background_color;
-        } else {
-            render_group.current_clip_rect_index = clip_rect_index[2];
-        }
-
-        clip_rect_index[level_index] = render_group.pushClipRect(0, 0, draw_buffer.width, draw_buffer.height, fx);
-        test_alpha[level_index] = 1 - fx.color_time.a();
+        test_alpha[level_index] = math.clamp01MapToRange(
+            fade_top_start_z,
+            fade_top_end_z,
+            camera_relative_ground_z,
+        );
+        fog_amount[level_index] = math.clamp01MapToRange(
+            fade_bottom_start_z,
+            fade_bottom_end_z,
+            camera_relative_ground_z,
+        );
     }
 
     const transient_clip_rect: TransientClipRect = .init(render_group);
@@ -446,18 +431,22 @@ pub fn updateAndRenderEntities(
 
             var entity_transform = ObjectTransform.defaultUpright();
             entity_transform.offset_position = entity.getGroundPoint().minus(camera_position);
-            var temp_z = entity_transform.offset_position.z();
-            // const relative_layer: i32 = convertToLayerRelative(world_mode, &entity_transform.offset_position.values[2]);
-            const relative_layer: i32 = convertToLayerRelative(world_mode, &temp_z);
 
-            //(entity.world_position.chunk_z - sim_region.origin.chunk_z)
+            const world_position: WorldPosition =
+                world.mapIntoChunkSpace(world_mode.world, sim_region.origin, entity.position);
+            const relative_layer: i32 = world_position.chunk_z - sim_region.origin.chunk_z;
 
             entity_transform.manual_sort = entity.manual_sort;
+            entity_transform.chunk_z = world_position.chunk_z;
 
             if (relative_layer >= minimum_level_index and relative_layer <= maximum_level_index) {
-                const alpha: f32 = test_alpha[@intCast(relative_layer - minimum_level_index)];
-                const layer_index: usize = @intCast(relative_layer - minimum_level_index);
-                render_group.current_clip_rect_index = clip_rect_index[layer_index];
+                const layer_index: u32 = @intCast(relative_layer - minimum_level_index);
+                if (relative_layer == maximum_level_index) {
+                    entity_transform.color_time = .new(0, 0, 0, test_alpha[layer_index]);
+                } else {
+                    entity_transform.color = background_color;
+                    entity_transform.color_time = Color.new(1, 1, 1, 0).scaledTo(fog_amount[layer_index]);
+                }
 
                 var match_vector = asset.AssetVector{};
                 match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
@@ -505,14 +494,12 @@ pub fn updateAndRenderEntities(
                         _ = offset.setY(offset.y() + bob_time);
                     }
 
-                    var piece_color: Color = piece.color;
-                    _ = piece_color.setA(alpha * piece_color.a());
                     render_group.pushBitmapId(
-                        entity_transform,
+                        &entity_transform,
                         bitmap_id,
                         piece.height,
                         piece.offset.plus(offset),
-                        piece_color,
+                        piece.color,
                         null,
                         x_axis,
                         y_axis,
@@ -523,7 +510,7 @@ pub fn updateAndRenderEntities(
                     render_group.endAggregateSortKey();
                 }
 
-                drawHitPoints(entity, render_group, entity_transform);
+                drawHitPoints(entity, render_group, &entity_transform);
 
                 entity_transform.upright = false;
                 {
@@ -534,7 +521,7 @@ pub fn updateAndRenderEntities(
                     //         entity_transform,
                     //         volume.dimension.xy(),
                     //         volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                    //         Color.new(0, 0.5, 1, alpha),
+                    //         Color.new(0, 0.5, 1, 1),
                     //         0.1,
                     //     );
                     // }
@@ -543,10 +530,10 @@ pub fn updateAndRenderEntities(
                     while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
                         const traversable = entity.traversables[traversable_index];
                         render_group.pushRectangle(
-                            entity_transform,
-                            Vector2.new(1.2, 1.2),
+                            &entity_transform,
+                            Vector2.new(1.4, 1.4),
                             traversable.position,
-                            if (traversable.occupier != null) .new(1, 0.5, 0, alpha) else .new(0.05, 0.25, 0.05, alpha),
+                            if (traversable.occupier != null) .new(1, 0.5, 0, 1) else .new(0.05, 0.25, 0.05, 1),
                         );
 
                         // render_group.pushRectangleOutline(
@@ -564,7 +551,7 @@ pub fn updateAndRenderEntities(
                     while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
                         const volume = entity.collision.volumes[volume_index];
                         const local_mouse_position = render_group.unproject(
-                            entity_transform,
+                            &entity_transform,
                             mouse_position,
                         );
 
@@ -579,7 +566,7 @@ pub fn updateAndRenderEntities(
                         var outline_color: Color = undefined;
                         if (debug_interface.highlighted(entity_debug_id, &outline_color)) {
                             render_group.pushRectangleOutline(
-                                entity_transform,
+                                &entity_transform,
                                 volume.dimension.xy(),
                                 volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
                                 outline_color,
@@ -607,7 +594,7 @@ pub fn updateAndRenderEntities(
     }
 }
 
-fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, object_transform: ObjectTransform) void {
+fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, object_transform: *ObjectTransform) void {
     if (entity.hit_point_max >= 1) {
         const hit_point_dimension = Vector2.new(0.2, 0.2);
         const hit_point_spacing_x = hit_point_dimension.x() * 2;
@@ -632,10 +619,4 @@ fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, object_transform: 
             hit_position = hit_position.plus(hit_position_delta);
         }
     }
-}
-
-fn convertToLayerRelative(world_mode: *GameWorldMode, z: *f32) i32 {
-    var relative_index: i32 = 0;
-    world.recannonicalizeCoordinate(world_mode.typical_floor_height, &relative_index, z);
-    return relative_index;
 }

@@ -193,7 +193,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..2) |_| {
+    for (0..6) |_| {
         const door_direction = 2;
         _ = series.randomChoice(2);
         // const door_direction = 3;
@@ -367,7 +367,7 @@ pub fn updateAndRenderWorld(
     world_transform.offset_position = world_transform.offset_position.minus(camera_position);
 
     render_group.pushRectangleOutline(
-        world_transform,
+        &world_transform,
         screen_bounds.getDimension(),
         Vector3.zero(),
         Color.new(1, 1, 0, 1),
@@ -380,14 +380,14 @@ pub fn updateAndRenderWorld(
     //     Color.new(1, 1, 1, 1),
     // );
     render_group.pushRectangleOutline(
-        world_transform,
+        &world_transform,
         sim_bounds.getDimension().xy(),
         Vector3.zero(),
         Color.new(0, 1, 1, 1),
         0.1,
     );
     render_group.pushRectangleOutline(
-        world_transform,
+        &world_transform,
         sim_region.bounds.getDimension().xy(),
         Vector3.zero(),
         Color.new(1, 0, 1, 1),
@@ -433,10 +433,9 @@ pub fn updateAndRenderWorld(
         mouse_position,
     );
 
-    render_group.global_color_time = .zero();
     render_group.orthographicMode(1);
     render_group.pushRectangleOutline(
-        ObjectTransform.defaultFlat(),
+        &ObjectTransform.defaultFlat(),
         Vector2.new(5, 5),
         mouse_position.toVector3(0),
         Color.new(1, 1, 1, 1),

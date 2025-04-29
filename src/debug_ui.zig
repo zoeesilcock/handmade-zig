@@ -308,7 +308,7 @@ pub const LayoutElement = struct {
 
         if (self.size) |size| {
             render_group.pushRectangle2(
-                no_transform,
+                &no_transform,
                 Rectangle2.fromMinMax(
                     Vector2.new(total_min_corner.x(), interior_min_corner.y()),
                     Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
@@ -317,7 +317,7 @@ pub const LayoutElement = struct {
                 Color.black(),
             );
             render_group.pushRectangle2(
-                no_transform,
+                &no_transform,
                 Rectangle2.fromMinMax(
                     Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
                     Vector2.new(total_max_corner.x(), total_max_corner.y()),
@@ -326,7 +326,7 @@ pub const LayoutElement = struct {
                 Color.black(),
             );
             render_group.pushRectangle2(
-                no_transform,
+                &no_transform,
                 Rectangle2.fromMinMax(
                     Vector2.new(interior_min_corner.x(), total_min_corner.y()),
                     Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
@@ -335,7 +335,7 @@ pub const LayoutElement = struct {
                 Color.black(),
             );
             render_group.pushRectangle2(
-                no_transform,
+                &no_transform,
                 Rectangle2.fromMinMax(
                     Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
                     Vector2.new(interior_max_corner.x(), total_max_corner.y()),
@@ -355,7 +355,7 @@ pub const LayoutElement = struct {
             ).addRadius(Vector2.splat(4));
             const size_box_color: Color =
                 if (size_interaction.isHot(debug_state)) Color.new(1, 1, 0, 1) else Color.white();
-            render_group.pushRectangle2(no_transform, size_box, 0, size_box_color);
+            render_group.pushRectangle2(&no_transform, size_box, 0, size_box_color);
 
             if (layout.mouse_position.isInRectangle(size_box)) {
                 debug_state.next_hot_interaction = size_interaction;
@@ -398,7 +398,7 @@ pub fn basicTextElement(
 
         if (opt_backdrop_color) |backdrop_color| {
             layout.debug_state.render_group.pushRectangle2(
-                layout.debug_state.backing_transform,
+                &layout.debug_state.backing_transform,
                 layout_element.bounds,
                 0,
                 backdrop_color,
@@ -436,7 +436,7 @@ pub fn addTooltip(debug_state: *DebugState, text: [:0]const u8) void {
         layout_element.end();
 
         layout.debug_state.render_group.pushRectangle2(
-            layout.debug_state.tooltip_transform,
+            &layout.debug_state.tooltip_transform,
             layout_element.bounds.addRadius(.new(4, 4)),
             0,
             .new(0, 0, 0, 0.75),
@@ -544,7 +544,7 @@ pub fn textOp(
 
                             if (op == .DrawText) {
                                 render_group.pushBitmapId(
-                                    debug_state.text_transform,
+                                    &debug_state.text_transform,
                                     bitmap_id,
                                     bitmap_scale,
                                     bitamp_offset,
@@ -554,7 +554,7 @@ pub fn textOp(
                                     null,
                                 );
                                 render_group.pushBitmapId(
-                                    debug_state.shadow_transform,
+                                    &debug_state.shadow_transform,
                                     bitmap_id,
                                     bitmap_scale,
                                     bitamp_offset.plus(Vector3.new(2, -2, 0)),
@@ -568,7 +568,7 @@ pub fn textOp(
 
                                 if (render_group.assets.getBitmap(bitmap_id, render_group.generation_id)) |bitmap| {
                                     const dim = render_group.getBitmapDim(
-                                        ObjectTransform.defaultFlat(),
+                                        &ObjectTransform.defaultFlat(),
                                         bitmap,
                                         bitmap_scale,
                                         bitamp_offset,

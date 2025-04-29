@@ -90,12 +90,6 @@ pub const RenderEntryHeader = extern struct {
 pub const RenderEntryClipRect = extern struct {
     next: ?*RenderEntryClipRect,
     rect: Rectangle2i,
-    fx: ClipRectFX,
-};
-
-pub const ClipRectFX = extern struct {
-    color: Color = .zero(),
-    color_time: Color = .zero(),
 };
 
 pub const TransientClipRect = extern struct {
@@ -164,8 +158,10 @@ pub const ObjectTransform = extern struct {
     upright: bool,
     offset_position: Vector3,
     scale: f32,
-    sort_bias: f32 = 0,
+    chunk_z: i32 = 0,
     manual_sort: ManualSortKey = .{},
+    color_time: Color = .zero(),
+    color: Color = .zero(),
 
     pub fn defaultUpright() ObjectTransform {
         return ObjectTransform{
@@ -196,7 +192,7 @@ const CameraTransform = extern struct {
 
 fn getRenderEntityBasisPosition(
     camera_transform: CameraTransform,
-    object_transform: ObjectTransform,
+    object_transform: *const ObjectTransform,
     original_position: Vector3,
 ) RenderEntityBasisResult {
     var result = RenderEntityBasisResult{};
@@ -237,9 +233,6 @@ pub const RenderGroup = extern struct {
 
     screen_area: Rectangle2,
     debug_tag: u32,
-
-    global_color_time: Color = .zero(),
-    global_color: Color = .zero(),
 
     monitor_half_dim_in_meters: Vector2,
 
@@ -283,7 +276,7 @@ pub const RenderGroup = extern struct {
             .first_aggregate_at = 0,
         };
 
-        result.current_clip_rect_index = result.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), null);
+        result.current_clip_rect_index = result.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height));
 
         return result;
     }
@@ -449,7 +442,7 @@ pub const RenderGroup = extern struct {
     }
 
     // Renderer API.
-    pub fn unproject(self: *RenderGroup, object_transform: ObjectTransform, pixels_xy: Vector2) Vector3 {
+    pub fn unproject(self: *RenderGroup, object_transform: *const ObjectTransform, pixels_xy: Vector2) Vector3 {
         var unprojected_xy: Vector2 = undefined;
         const camera_transform = self.camera_transform;
 
@@ -485,7 +478,7 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
-        self.commands.clear_color = self.storeColor(color);
+        self.commands.clear_color = color;
     }
 
     pub fn pushSaturation(self: *RenderGroup, level: f32) void {
@@ -496,7 +489,7 @@ pub const RenderGroup = extern struct {
 
     pub fn getBitmapDim(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *const ObjectTransform,
         bitmap: *const LoadedBitmap,
         height: f32,
         offset: Vector3,
@@ -519,10 +512,10 @@ pub const RenderGroup = extern struct {
         return dim;
     }
 
-    fn storeColor(self: RenderGroup, source: Color) Color {
+    fn storeColor(transform: *const ObjectTransform, source: Color) Color {
         var dest: Color = undefined;
-        const time: Color = self.global_color_time;
-        const color: Color = self.global_color;
+        const time: Color = transform.color_time;
+        const color: Color = transform.color;
 
         _ = dest.setA(math.lerpf(source.a(), color.a(), time.a()));
         _ = dest.setR(dest.a() * math.lerpf(source.r(), color.r(), time.r()));
@@ -533,14 +526,15 @@ pub const RenderGroup = extern struct {
     }
 
     fn getBoundFor(
-        object_transform: ObjectTransform,
+        object_transform: *const ObjectTransform,
         height: f32,
         offset: Vector3,
     ) SpriteBound {
         var sprite_bound: SpriteBound = .{
+            .chunk_z = object_transform.chunk_z,
             .y_min = object_transform.offset_position.y() + offset.y(),
             .y_max = object_transform.offset_position.y() + offset.y(),
-            .z_max = object_transform.offset_position.z() + offset.z() + object_transform.sort_bias,
+            .z_max = object_transform.offset_position.z() + offset.z(),
             .manual_sort = object_transform.manual_sort,
         };
 
@@ -563,7 +557,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushBitmap(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *ObjectTransform,
         bitmap: *LoadedBitmap,
         height: f32,
         offset: Vector3,
@@ -583,7 +577,7 @@ pub const RenderGroup = extern struct {
             if (self.pushRenderElement(RenderEntryBitmap, sort_key, screen_area)) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
-                entry.premultiplied_color = self.storeColor(color);
+                entry.premultiplied_color = storeColor(object_transform, color);
                 entry.x_axis = size.times(x_axis);
                 entry.y_axis = size.times(y_axis);
             }
@@ -592,7 +586,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushBitmapId(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *ObjectTransform,
         opt_id: ?file_formats.BitmapId,
         height: f32,
         offset: Vector3,
@@ -643,7 +637,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushRectangle(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *const ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
         color: Color,
@@ -658,14 +652,14 @@ pub const RenderGroup = extern struct {
             if (self.pushRenderElement(RenderEntryRectangle, sort_key, screen_area)) |entry| {
                 entry.position = basis.position;
                 entry.dimension = dimension.scaledTo(basis.scale);
-                entry.premultiplied_color = self.storeColor(color);
+                entry.premultiplied_color = storeColor(object_transform, color);
             }
         }
     }
 
     pub fn pushRectangle2(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *const ObjectTransform,
         rectangle: Rectangle2,
         z: f32,
         color: Color,
@@ -680,7 +674,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushRectangle2Outline(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *const ObjectTransform,
         rectangle: Rectangle2,
         z: f32,
         color: Color,
@@ -697,7 +691,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushRectangleOutline(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *const ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
         color: Color,
@@ -771,7 +765,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushClipRectByTransform(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
     ) u32 {
@@ -787,7 +781,6 @@ pub const RenderGroup = extern struct {
                 intrinsics.roundReal32ToInt32(basis.position.y()),
                 intrinsics.roundReal32ToInt32(basis_dimension.x()),
                 intrinsics.roundReal32ToInt32(basis_dimension.y()),
-                null,
             );
         }
 
@@ -796,7 +789,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushClipRectByRectangle(
         self: *RenderGroup,
-        object_transform: ObjectTransform,
+        object_transform: *ObjectTransform,
         rectangle: Rectangle2,
         z: f32,
     ) u32 {
@@ -807,8 +800,7 @@ pub const RenderGroup = extern struct {
         );
     }
 
-    pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32, opt_fx: ?ClipRectFX) u32 {
-        _ = opt_fx;
+    pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32) u32 {
         var result: u32 = 0;
         const size = @sizeOf(RenderEntryClipRect);
         const commands: *RenderCommands = self.commands;
