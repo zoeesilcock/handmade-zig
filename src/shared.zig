@@ -384,13 +384,11 @@ pub const RenderCommands = extern struct {
     offset_y: i32 = 0,
 
     max_push_buffer_size: u32,
-    push_buffer_size: u32,
+    sort_entry_count: u32,
     push_buffer_base: [*]u8,
+    push_buffer_data_at: [*]u8,
 
     clear_color: Color,
-
-    push_buffer_element_count: u32,
-    sort_entry_at: usize,
 
     last_used_manual_sort_key: u32 = 0,
 
@@ -401,6 +399,7 @@ pub const RenderCommands = extern struct {
 
 pub const GameRenderPrep = extern struct {
     clip_rects: [*]rendergroup.RenderEntryClipRect = undefined,
+    sorted_index_count: u32 = 0,
     sorted_indices: [*]u32 = undefined,
 };
 
@@ -414,14 +413,12 @@ pub fn initializeRenderCommands(
         .width = width,
         .height = height,
 
-        .push_buffer_base = @ptrCast(push_buffer),
         .max_push_buffer_size = max_push_buffer_size,
-        .push_buffer_size = 0,
+        .sort_entry_count = 0,
+        .push_buffer_base = @ptrCast(push_buffer),
+        .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer) + max_push_buffer_size),
 
         .clear_color = .black(),
-
-        .push_buffer_element_count = 0,
-        .sort_entry_at = max_push_buffer_size,
     };
 }
 

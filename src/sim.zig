@@ -287,6 +287,8 @@ pub fn beginSimulation(
 
                                     dest.* = source.*;
 
+                                    dest.z_layer = chunk_z;
+
                                     dest.manual_sort = .{};
 
                                     dest.id = id;

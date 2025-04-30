@@ -190,6 +190,11 @@ const CameraTransform = extern struct {
     distance_above_target: f32,
 };
 
+const PushBufferResult = extern struct {
+    sort_entry: ?*SortSpriteBound = null,
+    header: ?*RenderEntryHeader = null,
+};
+
 fn getRenderEntityBasisPosition(
     camera_transform: CameraTransform,
     object_transform: *const ObjectTransform,
@@ -247,7 +252,6 @@ pub const RenderGroup = extern struct {
     current_clip_rect_index: u32,
 
     is_aggregating: bool,
-    aggregate_count: u32,
     aggregate_bound: SpriteBound,
     first_aggregate_at: usize,
 
@@ -271,7 +275,6 @@ pub const RenderGroup = extern struct {
             .camera_transform = undefined,
             .current_clip_rect_index = 0,
             .is_aggregating = false,
-            .aggregate_count = 0,
             .aggregate_bound = undefined,
             .first_aggregate_at = 0,
         };
@@ -342,6 +345,34 @@ pub const RenderGroup = extern struct {
         self.camera_transform.orthographic = true;
     }
 
+    fn pushBuffer(self: *RenderGroup, sort_entry_count: u32, data_size: u32) PushBufferResult {
+        var result: PushBufferResult = .{};
+        const commands: *RenderCommands = self.commands;
+        const sprite_bounds: [*]SortSpriteBound = render.getSortEntries(commands);
+
+        if ((@intFromPtr(sprite_bounds) + commands.sort_entry_count + sort_entry_count) <=
+            @intFromPtr(commands.push_buffer_data_at - data_size))
+        {
+            commands.push_buffer_data_at -= data_size;
+            result.header = @ptrCast(@alignCast(commands.push_buffer_data_at));
+
+            result.sort_entry = @ptrCast(sprite_bounds + commands.sort_entry_count);
+            commands.sort_entry_count += sort_entry_count;
+        } else {
+            unreachable;
+        }
+
+        return result;
+    }
+
+    pub fn pushSortBarrier(self: *RenderGroup) void {
+        const push: PushBufferResult = self.pushBuffer(1, 0);
+
+        if (push.sort_entry) |sort_entry| {
+            sort_entry.offset = render.SPRITE_BARRIER_OFFSET_VALUE;
+        }
+    }
+
     fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: SpriteBound, screen_area: Rectangle2) ?*T {
         // TimedBlock.beginFunction(@src(), .PushRenderElement);
         // defer TimedBlock.endFunction(@src(), .PushRenderElement);
@@ -362,53 +393,52 @@ pub const RenderGroup = extern struct {
         var result: ?*anyopaque = null;
         const size = in_size + @sizeOf(RenderEntryHeader);
         const commands: *RenderCommands = self.commands;
+        const push: PushBufferResult = self.pushBuffer(1, size);
 
-        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortSpriteBound)) {
-            const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + commands.push_buffer_size));
-            header.type = entry_type;
-            header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
+        if (push.sort_entry) |sort_entry| {
+            if (push.header) |header| {
+                header.type = entry_type;
+                header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
 
-            if (INTERNAL) {
-                header.debug_tag = self.debug_tag;
-            }
-
-            const data_address = @intFromPtr(header) + @sizeOf(RenderEntryHeader);
-            const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-            const aligned_offset = aligned_address - data_address;
-            const aligned_size = size + aligned_offset;
-
-            result = @ptrFromInt(aligned_address);
-
-            commands.sort_entry_at -= @sizeOf(SortSpriteBound);
-            var sort_entry: *SortSpriteBound = @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
-            sort_entry.first_edge_with_me_as_front = null;
-            sort_entry.sort_key = sort_key;
-            sort_entry.offset = commands.push_buffer_size;
-            sort_entry.screen_area = screen_area;
-            sort_entry.flags = 0;
-
-            if (INTERNAL) {
-                sort_entry.debug_tag = self.debug_tag;
-            }
-
-            std.debug.assert(sort_entry.offset != 0);
-
-            commands.push_buffer_element_count += 1;
-            commands.push_buffer_size += @intCast(aligned_size);
-
-            if (self.is_aggregating) {
-                if (self.aggregate_count == 0) {
-                    self.aggregate_bound = sort_key;
-                } else if (render.isZSprite(self.aggregate_bound)) {
-                    std.debug.assert(render.isZSprite(sort_key));
-                    self.aggregate_bound.y_min = @min(self.aggregate_bound.y_min, sort_key.y_min);
-                    self.aggregate_bound.y_max = @max(self.aggregate_bound.y_max, sort_key.y_max);
-                    self.aggregate_bound.z_max = @max(self.aggregate_bound.z_max, sort_key.z_max);
-                } else {
-                    std.debug.assert(!render.isZSprite(sort_key));
-                    self.aggregate_bound.z_max = @max(self.aggregate_bound.z_max, sort_key.z_max);
+                if (INTERNAL) {
+                    header.debug_tag = self.debug_tag;
                 }
-                self.aggregate_count += 1;
+
+                const data_address = @intFromPtr(header) + @sizeOf(RenderEntryHeader);
+                const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+                const aligned_offset = aligned_address - data_address;
+                // const aligned_size = size + aligned_offset;
+                commands.push_buffer_data_at -= (aligned_offset);
+
+                result = @ptrFromInt(aligned_address);
+
+                sort_entry.first_edge_with_me_as_front = null;
+                sort_entry.sort_key = sort_key;
+                sort_entry.offset = @intCast(commands.max_push_buffer_size - (commands.push_buffer_data_at - commands.push_buffer_base));
+                sort_entry.screen_area = screen_area;
+                sort_entry.flags = 0;
+
+                if (INTERNAL) {
+                    sort_entry.debug_tag = self.debug_tag;
+                }
+
+                std.debug.assert(sort_entry.offset != 0);
+
+                if (self.is_aggregating) {
+                    if (self.first_aggregate_at == (commands.sort_entry_count - 1)) {
+                        self.aggregate_bound = sort_key;
+                    } else if (render.isZSprite(self.aggregate_bound)) {
+                        std.debug.assert(render.isZSprite(sort_key));
+                        self.aggregate_bound.y_min = @min(self.aggregate_bound.y_min, sort_key.y_min);
+                        self.aggregate_bound.y_max = @max(self.aggregate_bound.y_max, sort_key.y_max);
+                        self.aggregate_bound.z_max = @max(self.aggregate_bound.z_max, sort_key.z_max);
+                    } else {
+                        std.debug.assert(!render.isZSprite(sort_key));
+                        self.aggregate_bound.z_max = @max(self.aggregate_bound.z_max, sort_key.z_max);
+                    }
+                }
+            } else {
+                unreachable;
             }
         } else {
             unreachable;
@@ -421,20 +451,20 @@ pub const RenderGroup = extern struct {
         std.debug.assert(!self.is_aggregating);
         self.is_aggregating = true;
 
-        self.first_aggregate_at = self.commands.sort_entry_at - @sizeOf(SortSpriteBound);
+        self.first_aggregate_at = self.commands.sort_entry_count;
         self.aggregate_bound.y_min = std.math.floatMax(f32);
         self.aggregate_bound.y_max = std.math.floatMin(f32);
         self.aggregate_bound.z_max = std.math.floatMin(f32);
-        self.aggregate_count = 0;
     }
 
     pub fn endAggregateSortKey(self: *RenderGroup) void {
         std.debug.assert(self.is_aggregating);
         self.is_aggregating = false;
 
+        const aggregate_count: u32 = @intCast(self.commands.sort_entry_count - self.first_aggregate_at);
         var index: u32 = 0;
-        var entry: [*]SortSpriteBound = @ptrFromInt(@intFromPtr(self.commands.push_buffer_base) + self.first_aggregate_at);
-        while (index < self.aggregate_count) : (index += 1) {
+        var entry: [*]SortSpriteBound = render.getSortEntries(self.commands) + self.first_aggregate_at;
+        while (index < aggregate_count) : (index += 1) {
             defer entry -= 1;
 
             entry[0].sort_key = self.aggregate_bound;
@@ -803,11 +833,10 @@ pub const RenderGroup = extern struct {
     pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32) u32 {
         var result: u32 = 0;
         const size = @sizeOf(RenderEntryClipRect);
-        const commands: *RenderCommands = self.commands;
+        const push: PushBufferResult = self.pushBuffer(0, size);
 
-        if ((commands.push_buffer_size + size) < commands.sort_entry_at - @sizeOf(SortSpriteBound)) {
-            const rect: *RenderEntryClipRect = @ptrCast(@alignCast(commands.push_buffer_base + commands.push_buffer_size));
-            commands.push_buffer_size += @intCast(size);
+        if (push.header) |header| {
+            const rect: *RenderEntryClipRect = @ptrCast(@alignCast(header));
 
             result = self.commands.clip_rect_count;
             self.commands.clip_rect_count += 1;

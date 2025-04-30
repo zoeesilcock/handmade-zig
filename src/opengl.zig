@@ -165,12 +165,10 @@ pub fn renderCommands(
 
     setScreenSpace(commands.width, commands.height);
 
-    const sort_entry_count: u32 = commands.push_buffer_element_count;
-
     var clip_rect_index: u32 = 0xffffffff;
     var sort_entry: [*]u32 = prep.sorted_indices;
     var sort_entry_index: u32 = 0;
-    while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
+    while (sort_entry_index < prep.sorted_index_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
         const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
@@ -279,13 +277,15 @@ pub fn renderCommands(
 
     gl.glDisable(gl.GL_TEXTURE_2D);
     if (global_config.Platform_ShowSortGroups) {
-        const bound_count: u32 = commands.push_buffer_element_count;
+        const bound_count: u32 = commands.sort_entry_count;
         const bounds: [*]SortSpriteBound = render.getSortEntries(commands);
         var group_index: u32 = 0;
         var bound_index: u32 = 0;
         while (bound_index < bound_count) : (bound_index += 1) {
             const bound: *SortSpriteBound = @ptrCast(bounds + bound_index);
-            if ((bound.flags & @intFromEnum(SpriteFlag.DebugBox)) == 0) {
+            if (bound.offset != render.SPRITE_BARRIER_OFFSET_VALUE and
+                (bound.flags & @intFromEnum(SpriteFlag.DebugBox)) == -1)
+            {
                 var color: Color = debug_color_table[group_index % debug_color_table.len].toColor(0.2);
                 group_index += 1;
 

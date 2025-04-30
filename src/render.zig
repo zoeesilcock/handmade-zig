@@ -213,8 +213,6 @@ pub fn renderCommandsToBitmap(
     var clip_rect_index: u32 = 0xffffffff;
     var clip_rect: Rectangle2i = base_clip_rect;
 
-    const sort_entry_count: u32 = commands.push_buffer_element_count;
-
     // Clear.
     drawRectangle(
         output_target,
@@ -226,7 +224,7 @@ pub fn renderCommandsToBitmap(
 
     var sort_entry: [*]u32 = prep.sorted_indices;
     var sort_entry_index: u32 = 0;
-    while (sort_entry_index < sort_entry_count) : (sort_entry_index += 1) {
+    while (sort_entry_index < prep.sorted_index_count) : (sort_entry_index += 1) {
         defer sort_entry += 1;
 
         const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
@@ -1397,7 +1395,7 @@ inline fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample 
 pub fn prepForRender(commands: *RenderCommands, temp_arena: *MemoryArena) GameRenderPrep {
     var prep: GameRenderPrep = .{};
 
-    prep.sorted_indices = sortEntries(commands, temp_arena);
+    prep.sorted_indices = sortEntries(commands, temp_arena, &prep);
     prep.clip_rects = linearizeClipRects(commands, temp_arena);
 
     return prep;
@@ -1462,7 +1460,6 @@ fn getGridSpan(total_screen: Rectangle2, inv_cell_dim: Vector2, source: Rectangl
 }
 
 fn buildSpriteGraph(
-    start_at_index: u32,
     input_node_count: u32,
     input_nodes: [*]SortSpriteBound,
     arena: *MemoryArena,
@@ -1484,15 +1481,15 @@ fn buildSpriteGraph(
         [1]?*SortGridEntry{null} ** SORT_GRID_HEIGHT,
     } ** SORT_GRID_WIDTH;
 
-    var node_index_a: u32 = start_at_index;
+    var node_index_a: u32 = 0;
     while (node_index_a < input_node_count) : (node_index_a += 1) {
         const a: *SortSpriteBound = @ptrCast(input_nodes + node_index_a);
-        std.debug.assert(a.flags == 0);
 
         if (a.offset == SPRITE_BARRIER_OFFSET_VALUE) {
             break;
         }
 
+        std.debug.assert(a.flags == 0);
         var grid_span: Rectangle2i = undefined;
         if (getGridSpan(total_screen, inv_cell_dim, a.screen_area, &grid_span)) {
             var grid_x: u32 = @intCast(grid_span.min.x());
@@ -1576,32 +1573,16 @@ fn recursiveFrontToBack(walk: *SpriteGraphWalk, at_index: u32) void {
     }
 }
 
-fn walkSpriteGraph(input_node_count: u32, input_nodes: [*]SortSpriteBound, out_index_array: [*]u32) void {
-    TimedBlock.beginFunction(@src(), .WalkSpriteGraph);
-    defer TimedBlock.endFunction(@src(), .WalkSpriteGraph);
-
-    var walk: SpriteGraphWalk = .{
-        .input_nodes = input_nodes,
-        .out_index = out_index_array,
-        .hit_cycle = false,
-    };
-    var node_index_a: u32 = 0;
-    while (node_index_a < input_node_count) : (node_index_a += 1) {
-        walk.hit_cycle = false;
-        recursiveFrontToBack(&walk, node_index_a);
-    }
-    std.debug.assert((walk.out_index - out_index_array) == input_node_count);
-}
 
 pub fn getSortEntries(commands: *shared.RenderCommands) [*]SortSpriteBound {
-    return @ptrFromInt(@intFromPtr(commands.push_buffer_base) + commands.sort_entry_at);
+    return @ptrCast(@alignCast(commands.push_buffer_base));
 }
 
-pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena) [*]u32 {
+pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena, prep: *GameRenderPrep) [*]u32 {
     TimedBlock.beginFunction(@src(), .SortEntries);
     defer TimedBlock.endFunction(@src(), .SortEntries);
 
-    const count: u32 = commands.push_buffer_element_count;
+    const count: u32 = commands.sort_entry_count;
     const entries: [*]SortSpriteBound = getSortEntries(commands);
     const result: [*]u32 = temp_arena.pushArray(
         count,
@@ -1610,11 +1591,35 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena) [*]u32 {
     );
 
     if (true) {
+        var walk: SpriteGraphWalk = .{
+            .input_nodes = undefined,
+            .out_index = result,
+            .hit_cycle = false,
+        };
+
         var first_index: u32 = 0;
         while (first_index < count) {
-            first_index = buildSpriteGraph(first_index, count, entries, temp_arena, commands.width, commands.height);
-            walkSpriteGraph(count, entries, result);
+            const sub_entries: [*]SortSpriteBound = entries + first_index;
+            const sub_count: u32 = buildSpriteGraph(
+                count - first_index,
+                sub_entries,
+                temp_arena,
+                commands.width,
+                commands.height,
+            );
+            walk.input_nodes = sub_entries;
+
+            var node_index_a: u32 = 0;
+            while (node_index_a < sub_count) : (node_index_a += 1) {
+                walk.hit_cycle = false;
+                recursiveFrontToBack(&walk, node_index_a);
+            }
+
+            first_index += sub_count + 1;
         }
+
+        prep.sorted_indices = result;
+        prep.sorted_index_count = @intCast(walk.out_index - result);
     } else {
         var node_index_a: u32 = 0;
         while (node_index_a < count - 1) : (node_index_a += 1) {

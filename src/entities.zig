@@ -77,6 +77,8 @@ pub const Entity = extern struct {
     brain_slot: BrainSlot = .{},
     brain_id: BrainId = .{},
 
+    z_layer: i32,
+
     //
     // Transient
     //
@@ -335,6 +337,8 @@ pub fn updateAndRenderEntities(
         );
     }
 
+    var current_absolute_z_layer: i32 = if (sim_region.entity_count > 0) sim_region.entities[0].z_layer else 0;
+
     const transient_clip_rect: TransientClipRect = .init(render_group);
     defer transient_clip_rect.restore();
 
@@ -432,14 +436,18 @@ pub fn updateAndRenderEntities(
             var entity_transform = ObjectTransform.defaultUpright();
             entity_transform.offset_position = entity.getGroundPoint().minus(camera_position);
 
-            const world_position: WorldPosition =
-                world.mapIntoChunkSpace(world_mode.world, sim_region.origin, entity.position);
-            const relative_layer: i32 = world_position.chunk_z - sim_region.origin.chunk_z;
+            const relative_layer: i32 = entity.z_layer - sim_region.origin.chunk_z;
 
             entity_transform.manual_sort = entity.manual_sort;
-            entity_transform.chunk_z = world_position.chunk_z;
+            entity_transform.chunk_z = entity.z_layer;
 
             if (relative_layer >= minimum_level_index and relative_layer <= maximum_level_index) {
+                if (current_absolute_z_layer != entity.z_layer) {
+                    std.debug.assert(current_absolute_z_layer < entity.z_layer);
+                    current_absolute_z_layer = entity.z_layer;
+                    render_group.pushSortBarrier();
+                }
+
                 const layer_index: u32 = @intCast(relative_layer - minimum_level_index);
                 if (relative_layer == maximum_level_index) {
                     entity_transform.color_time = .new(0, 0, 0, test_alpha[layer_index]);
