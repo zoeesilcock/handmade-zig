@@ -193,7 +193,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..6) |_| {
+    for (0..4) |_| {
         const door_direction = 2;
         _ = series.randomChoice(2);
         // const door_direction = 3;
@@ -611,13 +611,7 @@ pub fn addPlayer(
     const hero_scale = 3;
     const shadow_alpha = 0.5;
     const color: Color = .white();
-    body.addPiece(
-        .Cape,
-        hero_scale * 1.2,
-        .new(0, -0.1, 0),
-        color,
-        @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
-    );
+    body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
     body.addPiece(
         .Torso,
         hero_scale * 1.2,
@@ -625,7 +619,13 @@ pub fn addPlayer(
         color,
         @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
     );
-    body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
+    body.addPiece(
+        .Cape,
+        hero_scale * 1.2,
+        .new(0, -0.1, 0),
+        color,
+        @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
+    );
 
     head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
 

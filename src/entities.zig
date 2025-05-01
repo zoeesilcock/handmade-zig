@@ -539,7 +539,7 @@ pub fn updateAndRenderEntities(
                         const traversable = entity.traversables[traversable_index];
                         render_group.pushRectangle(
                             &entity_transform,
-                            Vector2.new(1.4, 1.4),
+                            Vector2.new(0.5, 1.4),
                             traversable.position,
                             if (traversable.occupier != null) .new(1, 0.5, 0, 1) else .new(0.05, 0.25, 0.05, 1),
                         );

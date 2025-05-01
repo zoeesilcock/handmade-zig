@@ -53,7 +53,7 @@ const BilinearSample = struct {
 pub const TileRenderWork = struct {
     commands: *RenderCommands,
     prep: *GameRenderPrep,
-    output_target: *LoadedBitmap,
+    render_targets: [*]LoadedBitmap,
     clip_rect: Rectangle2i,
 };
 
@@ -125,7 +125,8 @@ pub fn softwareRenderCommands(
     render_queue: *shared.PlatformWorkQueue,
     commands: *RenderCommands,
     prep: *GameRenderPrep,
-    output_target: *LoadedBitmap,
+    final_output_target: *LoadedBitmap,
+    temp_arena: *MemoryArena,
 ) void {
     TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
     defer TimedBlock.endFunction(@src(), .TiledRenderToOutput);
@@ -137,20 +138,40 @@ pub fn softwareRenderCommands(
     // * Actually ballpark the memory bandwith for drawRectangleQuickly.
     // * Re-test some of our instruction choices.
 
+    const render_target_count: u32 = commands.max_render_target_index + 1;
+    const render_targets: [*]LoadedBitmap = temp_arena.pushArray(
+        render_target_count,
+        LoadedBitmap,
+        .alignedNoClear(@alignOf(LoadedBitmap)),
+    );
+    render_targets[0] = final_output_target.*;
+
+    std.debug.assert(final_output_target.pitch > 0);
+
+    var target_index: u32 = 1;
+    while (target_index < render_target_count) : (target_index += 1) {
+        const target: *LoadedBitmap = @ptrCast(render_targets + target_index);
+        target.* = final_output_target.*;
+        const buffer_size: memory.MemoryIndex =
+            @as(memory.MemoryIndex, @intCast(target.pitch)) *
+            @as(memory.MemoryIndex, @intCast(target.height));
+        target.memory = temp_arena.pushSize(buffer_size, .alignedNoClear(16));
+    }
+
     const tile_count_x = 4;
     const tile_count_y = 4;
     const work_count = tile_count_x * tile_count_y;
     var work_array: [work_count]TileRenderWork = [1]TileRenderWork{TileRenderWork{
         .commands = commands,
         .prep = prep,
-        .output_target = output_target,
+        .render_targets = render_targets,
         .clip_rect = undefined,
     }} ** work_count;
 
-    std.debug.assert((@intFromPtr(output_target.memory) & 15) == 0);
+    std.debug.assert((@intFromPtr(final_output_target.memory) & 15) == 0);
 
-    var tile_width = @divFloor(output_target.width, tile_count_x);
-    const tile_height = @divFloor(output_target.height, tile_count_y);
+    var tile_width = @divFloor(final_output_target.width, tile_count_x);
+    const tile_height = @divFloor(final_output_target.height, tile_count_y);
 
     tile_width = @divFloor(tile_width + 3, 4) * 4;
 
@@ -169,10 +190,10 @@ pub fn softwareRenderCommands(
             _ = clip_rect.max.setY(clip_rect.min.y() + tile_height);
 
             if (tile_x == (tile_count_x - 1)) {
-                _ = clip_rect.max.setX(output_target.width);
+                _ = clip_rect.max.setX(final_output_target.width);
             }
             if (tile_y == (tile_count_y - 1)) {
-                _ = clip_rect.max.setY(output_target.height);
+                _ = clip_rect.max.setY(final_output_target.height);
             }
 
             work.clip_rect = clip_rect;
@@ -196,13 +217,13 @@ pub fn doTileRenderWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) ca
 
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
 
-    renderCommandsToBitmap(work.commands, work.prep, work.output_target, work.clip_rect);
+    renderCommandsToBitmap(work.commands, work.prep, work.render_targets, work.clip_rect);
 }
 
 pub fn renderCommandsToBitmap(
     commands: *RenderCommands,
     prep: *GameRenderPrep,
-    output_target: *LoadedBitmap,
+    render_targets: [*]LoadedBitmap,
     base_clip_rect: Rectangle2i,
 ) void {
     // TimedBlock.beginFunction(@src(), .RenderCommandsToBitmap);
@@ -212,13 +233,14 @@ pub fn renderCommandsToBitmap(
 
     var clip_rect_index: u32 = 0xffffffff;
     var clip_rect: Rectangle2i = base_clip_rect;
+    var output_target: *LoadedBitmap = @ptrCast(render_targets);
 
     // Clear.
     drawRectangle(
         output_target,
         .zero(),
         .newU(output_target.width, output_target.height),
-        commands.clear_color.rgb().toColor(0),
+        commands.clear_color.rgb().toColor(1),
         clip_rect,
     );
 
@@ -250,6 +272,8 @@ pub fn renderCommandsToBitmap(
 
             const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
             clip_rect = base_clip_rect.getIntersectionWith(clip.rect);
+
+            output_target = @ptrCast(render_targets + clip.render_target_index);
         }
 
         switch (header.type) {
@@ -1572,7 +1596,6 @@ fn recursiveFrontToBack(walk: *SpriteGraphWalk, at_index: u32) void {
         walk.out_index += 1;
     }
 }
-
 
 pub fn getSortEntries(commands: *shared.RenderCommands) [*]SortSpriteBound {
     return @ptrCast(@alignCast(commands.push_buffer_base));

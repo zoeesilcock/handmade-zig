@@ -124,7 +124,7 @@ var opengl_supports_srgb_frame_buffer: bool = false;
 pub var platform: shared.Platform = undefined;
 pub var running: bool = false;
 pub var paused: bool = false;
-pub var rendering_type: RenderingType = .RenderOpenGLDisplayOpenGL;
+pub var rendering_type: RenderingType = .RenderSoftwareDisplayOpenGL;
 var global_config = &@import("config.zig").global_config;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
@@ -1437,7 +1437,7 @@ fn displayBufferInWindow(
             .height = @intCast(back_buffer.height),
             .pitch = @intCast(back_buffer.pitch),
         };
-        render.softwareRenderCommands(render_queue, commands, &prep, &output_target);
+        render.softwareRenderCommands(render_queue, commands, &prep, &output_target, temp_arena);
 
         if (rendering_type == .RenderSoftwareDisplayOpenGL) {
             opengl.displayBitmap(

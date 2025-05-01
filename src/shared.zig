@@ -391,6 +391,7 @@ pub const RenderCommands = extern struct {
     clear_color: Color,
 
     last_used_manual_sort_key: u32 = 0,
+    max_render_target_index: u32 = 0,
 
     clip_rect_count: u32 = 0,
     first_clip_rect: ?*rendergroup.RenderEntryClipRect = null,

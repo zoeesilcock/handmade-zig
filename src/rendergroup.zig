@@ -90,6 +90,7 @@ pub const RenderEntryHeader = extern struct {
 pub const RenderEntryClipRect = extern struct {
     next: ?*RenderEntryClipRect,
     rect: Rectangle2i,
+    render_target_index: u32,
 };
 
 pub const TransientClipRect = extern struct {
@@ -251,9 +252,8 @@ pub const RenderGroup = extern struct {
 
     current_clip_rect_index: u32,
 
-    is_aggregating: bool,
     aggregate_bound: SpriteBound,
-    first_aggregate_at: usize,
+    first_aggregate: ?*SortSpriteBound,
 
     pub fn begin(
         assets: *asset.Assets,
@@ -274,12 +274,11 @@ pub const RenderGroup = extern struct {
             .debug_tag = undefined,
             .camera_transform = undefined,
             .current_clip_rect_index = 0,
-            .is_aggregating = false,
             .aggregate_bound = undefined,
-            .first_aggregate_at = 0,
+            .first_aggregate = null,
         };
 
-        result.current_clip_rect_index = result.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height));
+        result.current_clip_rect_index = result.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), 0);
 
         return result;
     }
@@ -398,6 +397,7 @@ pub const RenderGroup = extern struct {
         if (push.sort_entry) |sort_entry| {
             if (push.header) |header| {
                 header.type = entry_type;
+                std.debug.assert(header.type != RenderEntryType.RenderEntryClipRect);
                 header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
 
                 if (INTERNAL) {
@@ -414,7 +414,7 @@ pub const RenderGroup = extern struct {
 
                 sort_entry.first_edge_with_me_as_front = null;
                 sort_entry.sort_key = sort_key;
-                sort_entry.offset = @intCast(commands.max_push_buffer_size - (commands.push_buffer_data_at - commands.push_buffer_base));
+                sort_entry.offset = @intCast(@intFromPtr(header) - @intFromPtr(commands.push_buffer_base));
                 sort_entry.screen_area = screen_area;
                 sort_entry.flags = 0;
 
@@ -424,8 +424,8 @@ pub const RenderGroup = extern struct {
 
                 std.debug.assert(sort_entry.offset != 0);
 
-                if (self.is_aggregating) {
-                    if (self.first_aggregate_at == (commands.sort_entry_count - 1)) {
+                if (self.first_aggregate) |first_aggregate| {
+                    if (first_aggregate == push.sort_entry) {
                         self.aggregate_bound = sort_key;
                     } else if (render.isZSprite(self.aggregate_bound)) {
                         std.debug.assert(render.isZSprite(sort_key));
@@ -448,27 +448,27 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn beginAggregateSortKey(self: *RenderGroup) void {
-        std.debug.assert(!self.is_aggregating);
-        self.is_aggregating = true;
+        std.debug.assert(self.first_aggregate == null);
 
-        self.first_aggregate_at = self.commands.sort_entry_count;
+        const commands: *RenderCommands = self.commands;
+        self.first_aggregate = @ptrCast(render.getSortEntries(commands) + commands.sort_entry_count);
         self.aggregate_bound.y_min = std.math.floatMax(f32);
         self.aggregate_bound.y_max = std.math.floatMin(f32);
         self.aggregate_bound.z_max = std.math.floatMin(f32);
     }
 
     pub fn endAggregateSortKey(self: *RenderGroup) void {
-        std.debug.assert(self.is_aggregating);
-        self.is_aggregating = false;
+        std.debug.assert(self.first_aggregate != null);
 
-        const aggregate_count: u32 = @intCast(self.commands.sort_entry_count - self.first_aggregate_at);
-        var index: u32 = 0;
-        var entry: [*]SortSpriteBound = render.getSortEntries(self.commands) + self.first_aggregate_at;
-        while (index < aggregate_count) : (index += 1) {
-            defer entry -= 1;
+        const commands: *RenderCommands = self.commands;
+        const one_past_last_entry: [*]SortSpriteBound = render.getSortEntries(commands) + commands.sort_entry_count;
 
+        var entry: [*]SortSpriteBound = @ptrCast(self.first_aggregate.?);
+        while (entry != one_past_last_entry) : (entry += 1) {
             entry[0].sort_key = self.aggregate_bound;
         }
+
+        self.first_aggregate = null;
     }
 
     // Renderer API.
@@ -798,6 +798,7 @@ pub const RenderGroup = extern struct {
         object_transform: *ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
+        render_target_index: u32,
     ) u32 {
         var result: u32 = 0;
         const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
@@ -811,6 +812,7 @@ pub const RenderGroup = extern struct {
                 intrinsics.roundReal32ToInt32(basis.position.y()),
                 intrinsics.roundReal32ToInt32(basis_dimension.x()),
                 intrinsics.roundReal32ToInt32(basis_dimension.y()),
+                render_target_index,
             );
         }
 
@@ -822,21 +824,28 @@ pub const RenderGroup = extern struct {
         object_transform: *ObjectTransform,
         rectangle: Rectangle2,
         z: f32,
+        render_target_index: u32,
     ) u32 {
         return self.pushClipRectByTransform(
             object_transform,
             rectangle.getDimension(),
             rectangle.getCenter().toVector3(z),
+            render_target_index,
         );
     }
 
-    pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32) u32 {
+    pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32, render_target_index: u32) u32 {
         var result: u32 = 0;
         const size = @sizeOf(RenderEntryClipRect);
         const push: PushBufferResult = self.pushBuffer(0, size);
 
         if (push.header) |header| {
             const rect: *RenderEntryClipRect = @ptrCast(@alignCast(header));
+
+            // This is here to fix alignment, it isn't clear to me exactly why this is needed.
+            // It started when we added the `render_target_index` field to the struct.
+            // It can also be resolved by adding a u64 as padding to the end of the struct.
+            self.commands.push_buffer_data_at -= @sizeOf(u64);
 
             result = self.commands.clip_rect_count;
             self.commands.clip_rect_count += 1;
@@ -851,6 +860,11 @@ pub const RenderGroup = extern struct {
             rect.next = null;
 
             rect.rect = Rectangle2i.new(x, y, x + w, y + h);
+
+            rect.render_target_index = render_target_index;
+            if (self.commands.max_render_target_index < render_target_index) {
+                self.commands.max_render_target_index = render_target_index;
+            }
         }
 
         return result;

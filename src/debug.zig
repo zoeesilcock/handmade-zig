@@ -199,6 +199,8 @@ pub const DebugState = struct {
     // Per-frame storage management.
     first_free_stored_event: ?*DebugStoredEvent,
 
+    render_target: u32 = 0,
+
     root_info_size: u32,
     root_info: [*:0]u8,
 
@@ -1711,6 +1713,7 @@ fn drawDebugElement(
                 &debug_state.backing_transform,
                 layout_element.bounds,
                 0,
+                debug_state.render_target,
             );
 
             switch (element.type) {
@@ -1774,6 +1777,7 @@ fn drawDebugElement(
                 &debug_state.backing_transform,
                 layout_element.bounds,
                 0,
+                debug_state.render_target,
             );
 
             var opt_viewing_element: ?*DebugElement =
@@ -2309,6 +2313,7 @@ fn debugStart(
         debug_state.tooltip_transform.chunk_z = 500000;
 
         debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
+        debug_state.render_target = 1;
 
         if (!debug_state.paused) {
             debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
