@@ -79,6 +79,7 @@ pub const RenderEntryType = enum(u16) {
     RenderEntryRectangle,
     RenderEntryCoordinateSystem,
     RenderEntrySaturation,
+    RenderEntryBlendRenderTarget,
 };
 
 pub const RenderEntryHeader = extern struct {
@@ -136,6 +137,11 @@ pub const RenderEntryRectangle = extern struct {
     premultiplied_color: Color,
     position: Vector2,
     dimension: Vector2 = Vector2.zero(),
+};
+
+pub const RenderEntryBlendRenderTarget = extern struct {
+    source_target_index: u32,
+    alpha: f32,
 };
 
 /// This is only for testing.
@@ -390,9 +396,14 @@ pub const RenderGroup = extern struct {
         comptime alignment: u32,
     ) ?*anyopaque {
         var result: ?*anyopaque = null;
-        const size = in_size + @sizeOf(RenderEntryHeader);
         const commands: *RenderCommands = self.commands;
-        const push: PushBufferResult = self.pushBuffer(1, size);
+
+        const size = in_size + @sizeOf(RenderEntryHeader);
+        const data_address = @intFromPtr(self.commands.push_buffer_data_at) + @sizeOf(RenderEntryHeader);
+        const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+        const aligned_offset = aligned_address - data_address;
+        const aligned_size: u32 = @intCast(size + aligned_offset);
+        const push: PushBufferResult = self.pushBuffer(1, aligned_size);
 
         if (push.sort_entry) |sort_entry| {
             if (push.header) |header| {
@@ -404,13 +415,7 @@ pub const RenderGroup = extern struct {
                     header.debug_tag = self.debug_tag;
                 }
 
-                const data_address = @intFromPtr(header) + @sizeOf(RenderEntryHeader);
-                const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-                const aligned_offset = aligned_address - data_address;
-                // const aligned_size = size + aligned_offset;
-                commands.push_buffer_data_at -= (aligned_offset);
-
-                result = @ptrFromInt(aligned_address);
+                result = @ptrFromInt(@intFromPtr(header) + @sizeOf(RenderEntryHeader) + aligned_offset);
 
                 sort_entry.first_edge_with_me_as_front = null;
                 sort_entry.sort_key = sort_key;
@@ -842,11 +847,6 @@ pub const RenderGroup = extern struct {
         if (push.header) |header| {
             const rect: *RenderEntryClipRect = @ptrCast(@alignCast(header));
 
-            // This is here to fix alignment, it isn't clear to me exactly why this is needed.
-            // It started when we added the `render_target_index` field to the struct.
-            // It can also be resolved by adding a u64 as padding to the end of the struct.
-            self.commands.push_buffer_data_at -= @sizeOf(u64);
-
             result = self.commands.clip_rect_count;
             self.commands.clip_rect_count += 1;
 
@@ -868,5 +868,14 @@ pub const RenderGroup = extern struct {
         }
 
         return result;
+    }
+
+    pub fn pushBlendRenderTarget(self: *RenderGroup, alpha: f32, source_render_target_index: u32) void {
+        self.pushSortBarrier();
+        if (self.pushRenderElement(RenderEntryBlendRenderTarget, .{}, .{ .min = .zero(), .max = .zero() })) |blend| {
+            blend.alpha = alpha;
+            blend.source_target_index = source_render_target_index;
+        }
+        self.pushSortBarrier();
     }
 };

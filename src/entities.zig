@@ -307,12 +307,10 @@ pub fn updateAndRenderEntities(
     TimedBlock.beginFunction(@src(), .UpdateAndRenderEntities);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderEntities);
 
-    _ = draw_buffer;
-
     const minimum_level_index: i32 = -4;
     const maximum_level_index: i32 = 1;
     var fog_amount: [maximum_level_index - minimum_level_index + 1]f32 = undefined;
-    var test_alpha: [fog_amount.len]f32 = undefined;
+    var test_alpha: f32 = 0;
 
     const fade_top_end_z: f32 = 1 * world_mode.typical_floor_height;
     const fade_top_start_z: f32 = 0.5 * world_mode.typical_floor_height;
@@ -325,9 +323,9 @@ pub fn updateAndRenderEntities(
         const camera_relative_ground_z: f32 =
             @as(f32, @floatFromInt(relative_layer_index)) * world_mode.typical_floor_height - world_mode.camera_offset.z();
 
-        test_alpha[level_index] = math.clamp01MapToRange(
-            fade_top_start_z,
+        test_alpha = math.clamp01MapToRange(
             fade_top_end_z,
+            fade_top_start_z,
             camera_relative_ground_z,
         );
         fog_amount[level_index] = math.clamp01MapToRange(
@@ -337,10 +335,17 @@ pub fn updateAndRenderEntities(
         );
     }
 
-    var current_absolute_z_layer: i32 = if (sim_region.entity_count > 0) sim_region.entities[0].z_layer else 0;
+    var stop_level_index: u32 = maximum_level_index - 1;
+    const alpha_floor_render_target: u32 = 1;
+    const normal_floor_clip_rect: u32 = render_group.current_clip_rect_index;
+    var alpha_floor_clip_rect: u32 = render_group.current_clip_rect_index;
+    if (test_alpha > 0) {
+        stop_level_index = maximum_level_index;
+        alpha_floor_clip_rect =
+            render_group.pushClipRect(0, 0, draw_buffer.width, draw_buffer.height, alpha_floor_render_target);
+    }
 
-    const transient_clip_rect: TransientClipRect = .init(render_group);
-    defer transient_clip_rect.restore();
+    var current_absolute_z_layer: i32 = if (sim_region.entity_count > 0) sim_region.entities[0].z_layer else 0;
 
     var hot_entity_count: u32 = 0;
     var entity_index: u32 = 0;
@@ -441,7 +446,7 @@ pub fn updateAndRenderEntities(
             entity_transform.manual_sort = entity.manual_sort;
             entity_transform.chunk_z = entity.z_layer;
 
-            if (relative_layer >= minimum_level_index and relative_layer <= maximum_level_index) {
+            if (relative_layer >= minimum_level_index and relative_layer <= stop_level_index) {
                 if (current_absolute_z_layer != entity.z_layer) {
                     std.debug.assert(current_absolute_z_layer < entity.z_layer);
                     current_absolute_z_layer = entity.z_layer;
@@ -450,8 +455,10 @@ pub fn updateAndRenderEntities(
 
                 const layer_index: u32 = @intCast(relative_layer - minimum_level_index);
                 if (relative_layer == maximum_level_index) {
-                    entity_transform.color_time = .new(0, 0, 0, test_alpha[layer_index]);
+                    render_group.current_clip_rect_index = alpha_floor_clip_rect;
+                    entity_transform.color_time = .new(0, 0, 0, 0);
                 } else {
+                    render_group.current_clip_rect_index = normal_floor_clip_rect;
                     entity_transform.color = background_color;
                     entity_transform.color_time = Color.new(1, 1, 1, 0).scaledTo(fog_amount[layer_index]);
                 }
@@ -599,6 +606,11 @@ pub fn updateAndRenderEntities(
                 DebugInterface.debugEndDataBlock(@src());
             }
         }
+    }
+
+    render_group.current_clip_rect_index = normal_floor_clip_rect;
+    if (test_alpha > 0) {
+        render_group.pushBlendRenderTarget(test_alpha, alpha_floor_render_target);
     }
 }
 
