@@ -336,7 +336,7 @@ pub fn updateAndRenderWorld(
     );
 
     // Clear background.
-    const background_color: Color = .new(0.15, 0.15, 0.15, 1);
+    const background_color: Color = .new(0.15, 0.15, 0.15, 0);
     render_group.pushClear(background_color);
 
     const screen_bounds = render_group.getCameraRectangleAtTarget();

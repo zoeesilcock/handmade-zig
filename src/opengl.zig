@@ -50,6 +50,7 @@ const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
 const RenderEntryCoordinateSystem = rendergroup.RenderEntryCoordinateSystem;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
+const RenderEntryBlendRenderTarget = rendergroup.RenderEntryBlendRenderTarget;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Color = math.Color;
@@ -177,6 +178,7 @@ pub fn renderCommands(
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
             .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
             .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
+            .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
             else => {
                 unreachable;
             },
@@ -269,6 +271,7 @@ pub fn renderCommands(
             .RenderEntryCoordinateSystem => {
                 // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
             },
+            .RenderEntryBlendRenderTarget => {},
             else => {
                 unreachable;
             },
@@ -463,6 +466,7 @@ pub fn displayBitmap(
     std.debug.assert(pitch == width * 4);
 
     gl.glDisable(gl.GL_SCISSOR_TEST);
+    gl.glDisable(gl.GL_BLEND);
     gl.glViewport(offset_x, offset_y, width, height);
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, blit_texture);
@@ -502,4 +506,5 @@ pub fn displayBitmap(
     drawRectangle(min_position, max_position, color, null, null);
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+    gl.glEnable(gl.GL_BLEND);
 }

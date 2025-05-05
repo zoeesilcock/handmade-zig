@@ -1,6 +1,6 @@
 //! Software renderer.
 //!
-//! 1: Everywhere outside the renderer, Y always goeas upward, X to the right.
+//! 1: Everywhere outside the renderer, Y always goes upward, X to the right.
 //!
 //! 2: All bitmaps including the render target are assumed to be bottom-up (meaning that the first row pointer points
 //! to the bottom-most row when viewed on the screen).

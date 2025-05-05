@@ -239,13 +239,17 @@ pub fn renderCommandsToBitmap(
     // Clear.
     var target_index: u32 = 0;
     while (target_index <= commands.max_render_target_index) : (target_index += 1) {
-        drawRectangle(
-            @ptrCast(render_targets + target_index),
-            .zero(),
-            .newU(output_target.width, output_target.height),
-            commands.clear_color.rgb().toColor(1),
-            clip_rect,
-        );
+        if (false) {
+            drawRectangle(
+                @ptrCast(render_targets + target_index),
+                .zero(),
+                .newU(output_target.width, output_target.height),
+                commands.clear_color.rgb().toColor(1),
+                clip_rect,
+            );
+        } else {
+            clearRectangle(clip_rect, output_target, commands.clear_color);
+        }
     }
 
     var sort_entry: [*]u32 = prep.sorted_indices;
@@ -372,13 +376,117 @@ pub fn renderCommandsToBitmap(
     }
 }
 
+fn clearRectangle(
+    rect_in: Rectangle2i,
+    dest_target: *LoadedBitmap,
+    color: Color,
+) void {
+    var rect: Rectangle2i = rect_in;
+
+    const mask_ffffffff: Vec4u = @splat(0xFFFFFFFF);
+    const one: Vec4f = @splat(1);
+    const two: Vec4f = @splat(2);
+    const three: Vec4f = @splat(3);
+    const four: Vec4f = @splat(4);
+
+    if (rect.hasArea()) {
+        var start_clip_mask = mask_ffffffff;
+        var end_clip_mask = mask_ffffffff;
+
+        const start_clip_masks: [4]Vec4u = .{
+            start_clip_mask,
+            start_clip_mask << one * four,
+            start_clip_mask << two * four,
+            start_clip_mask << three * four,
+        };
+
+        const end_clip_masks: [4]Vec4u = .{
+            end_clip_mask,
+            end_clip_mask >> three * four,
+            end_clip_mask >> two * four,
+            end_clip_mask >> one * four,
+        };
+
+        if (rect.min.x() & 3 != 0) {
+            start_clip_mask = start_clip_masks[@intCast(rect.min.x() & 3)];
+            _ = rect.min.setX(rect.min.x() & ~@as(i32, @intCast(3)));
+        }
+
+        if (rect.max.x() & 3 != 0) {
+            end_clip_mask = end_clip_masks[@intCast(rect.max.x() & 3)];
+            _ = rect.max.setX((rect.max.x() & ~@as(i32, @intCast(3))) + 4);
+        }
+
+        const min_x = rect.min.x();
+        const min_y = rect.min.y();
+        const max_x = rect.max.x();
+        const max_y = rect.max.y();
+
+        const shift_24: Vec4u = @splat(24);
+        const shift_16: Vec4u = @splat(16);
+        const shift_8: Vec4u = @splat(8);
+
+        const color_r: Vec4f = @splat(255 * 255 * color.r());
+        const color_g: Vec4f = @splat(255 * 255 * color.g());
+        const color_b: Vec4f = @splat(255 * 255 * color.b());
+        const color_a: Vec4f = @splat(255 * 255 * color.a());
+
+        const blended_r: Vec4f = color_r * (one / @sqrt(color_r));
+        const blended_g: Vec4f = color_g * (one / @sqrt(color_g));
+        const blended_b: Vec4f = color_b * (one / @sqrt(color_b));
+        const blended_a: Vec4f = color_a;
+
+        const int_r: Vec4u = @intFromFloat(blended_r);
+        const int_g: Vec4u = @intFromFloat(blended_g);
+        const int_b: Vec4u = @intFromFloat(blended_b);
+        const int_a: Vec4u = @intFromFloat(blended_a);
+        const out: Vec4u = int_r << shift_16 | int_g << shift_8 | int_b | int_a << shift_24;
+
+        var dest_row: [*]u8 = @ptrCast(dest_target.memory);
+        dest_row += @as(
+            u32,
+            @intCast((rect.min.x() * shared.BITMAP_BYTES_PER_PIXEL) +
+                (rect.min.y() * @as(i32, @intCast(dest_target.pitch)))),
+        );
+        const dest_row_advance: usize = @intCast(dest_target.pitch);
+
+        var y: i32 = min_y;
+        while (y < max_y) : (y += 1) {
+            var dest_pixel = @as([*]u32, @ptrCast(@alignCast(dest_row)));
+            var clip_mask: Vec4u = start_clip_mask;
+
+            var xi: i32 = min_x;
+            while (xi < max_x) : (xi += 4) {
+                const write_mask: Vec4u = clip_mask;
+
+                const original_dest: Vec4u = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(dest_pixel))).*;
+                const masked_out: Vec4u = (write_mask & out) | (~write_mask & original_dest);
+                const pixels = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(dest_pixel)));
+                pixels.* = masked_out;
+
+                dest_pixel += 4;
+
+                if ((xi + 8) < max_x) {
+                    clip_mask = mask_ffffffff;
+                } else {
+                    clip_mask = end_clip_mask;
+                }
+            }
+
+            dest_row += dest_row_advance;
+        }
+    }
+}
+
 fn blendRenderTarget(
-    rect: Rectangle2i,
+    rect_in: Rectangle2i,
     dest_target: *LoadedBitmap,
     alpha: f32,
     source_target: *LoadedBitmap,
 ) void {
-    if (true) {
+    var rect: Rectangle2i = rect_in;
+
+    if (false) {
         // Set the pointer to the top left corner of the rectangle.
         var dest_row: [*]u8 = @ptrCast(dest_target.memory);
         dest_row += @as(
@@ -402,7 +510,8 @@ fn blendRenderTarget(
             while (x < rect.max.x()) : (x += 1) {
                 var dest_color: Color = math.sRGB255ToLinear1(Color.unpackColor(dest_pixel[0]));
                 var source_color: Color = math.sRGB255ToLinear1(Color.unpackColor(source_pixel[0]));
-                const result = dest_color.scaledTo(1 - alpha).plus(source_color.scaledTo(alpha));
+                const pixel_alpha: f32 = alpha * source_color.a();
+                const result = dest_color.scaledTo(1 - pixel_alpha).plus(source_color.scaledTo(pixel_alpha));
 
                 dest_pixel[0] = math.linear1ToSRGB255(result).packColor1();
 
@@ -414,10 +523,6 @@ fn blendRenderTarget(
             source_row += @as(usize, @intCast(source_target.pitch));
         }
     } else {
-        var color: Color = .white();
-        color = color.scaledTo(255);
-        _ = color.setRGB(color.rgb().scaledTo(255));
-
         const mask_ffffffff: Vec4u = @splat(0xFFFFFFFF);
         const one: Vec4f = @splat(1);
         const two: Vec4f = @splat(2);
@@ -457,39 +562,44 @@ fn blendRenderTarget(
             const max_x = rect.max.x();
             const max_y = rect.max.y();
 
+            const alpha_4x: Vec4f = @splat(alpha);
             const inv_255: Vec4f = @splat(1.0 / 255.0);
-            const max_color_value: Vec4f = @splat(255.0 * 255.0);
-            const color_r: Vec4f = @splat(color.r());
-            const color_g: Vec4f = @splat(color.g());
-            const color_b: Vec4f = @splat(color.b());
-            const color_a: Vec4f = @splat(color.a());
-            const one_255: Vec4f = @splat(255.0);
-            const zero: Vec4f = @splat(0);
-            // const half: Vec4f = @splat(0.5);
-            // const zero_to_three: Vec4f = .{ 0, 1, 2, 3 };
             const shift_24: Vec4u = @splat(24);
             const shift_16: Vec4u = @splat(16);
             const shift_8: Vec4u = @splat(8);
-            // const shift_2: Vec4u = @splat(2);
             const mask_ff: Vec4u = @splat(0xFF);
 
-            const row_advance: usize = @intCast(dest_target.pitch);
-            var row: [*]u8 = @ptrCast(dest_target.memory);
-            row += @as(u32, @intCast((min_x * shared.BITMAP_BYTES_PER_PIXEL) + (min_y * dest_target.pitch)));
+            var dest_row: [*]u8 = @ptrCast(dest_target.memory);
+            dest_row += @as(
+                u32,
+                @intCast((rect.min.x() * shared.BITMAP_BYTES_PER_PIXEL) +
+                    (rect.min.y() * @as(i32, @intCast(dest_target.pitch)))),
+            );
+            var source_row: [*]u8 = @ptrCast(source_target.memory);
+            source_row += @as(
+                u32,
+                @intCast((rect.min.x() * shared.BITMAP_BYTES_PER_PIXEL) +
+                    (rect.min.y() * @as(i32, @intCast(source_target.pitch)))),
+            );
+
+            const dest_row_advance: usize = @intCast(dest_target.pitch);
+            const source_row_advance: usize = @intCast(source_target.pitch);
 
             // TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast(@divFloor(rect.getClampedArea(), 2)));
             // defer TimedBlock.endBlock(@src(), .ProcessPixel);
 
             var y: i32 = min_y;
             while (y < max_y) : (y += 1) {
-                var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+                var dest_pixel = @as([*]u32, @ptrCast(@alignCast(dest_row)));
+                var source_pixel = @as([*]u32, @ptrCast(@alignCast(source_row)));
                 var clip_mask: Vec4u = start_clip_mask;
 
                 var xi: i32 = min_x;
                 while (xi < max_x) : (xi += 4) {
                     asm volatile ("# LLVM-MCA-BEGIN ProcessPixel");
 
-                    const original_dest: Vec4u = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(pixel))).*;
+                    const original_dest: Vec4u = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(dest_pixel))).*;
+                    const original_source: Vec4u = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(source_pixel))).*;
                     const write_mask: Vec4u = clip_mask;
 
                     // Load destination.
@@ -498,33 +608,28 @@ fn blendRenderTarget(
                     var dest_b: Vec4f = @floatFromInt((original_dest) & mask_ff);
                     const dest_a: Vec4f = @floatFromInt((original_dest >> shift_24) & mask_ff);
 
-                    // Modulate by incoming color.
-                    var texelr = color_r;
-                    var texelg = color_g;
-                    var texelb = color_b;
-                    var texela = color_a;
-
-                    // Clamp colors to valid range.
-                    texelr = @max(zero, texelr);
-                    texelr = @min(max_color_value, texelr);
-                    texelg = @max(zero, texelg);
-                    texelg = @min(max_color_value, texelg);
-                    texelb = @max(zero, texelb);
-                    texelb = @min(max_color_value, texelb);
-                    texela = @max(zero, texela);
-                    texela = @min(one_255, texela);
+                    // Load source.
+                    var source_r: Vec4f = @floatFromInt((original_source >> shift_16) & mask_ff);
+                    var source_g: Vec4f = @floatFromInt((original_source >> shift_8) & mask_ff);
+                    var source_b: Vec4f = @floatFromInt((original_source) & mask_ff);
+                    const source_a: Vec4f = @floatFromInt((original_source >> shift_24) & mask_ff);
 
                     // Go from sRGB to linear brightness space.
                     dest_r = math.square_v4(dest_r);
                     dest_g = math.square_v4(dest_g);
                     dest_b = math.square_v4(dest_b);
+                    source_r = math.square_v4(source_r);
+                    source_g = math.square_v4(source_g);
+                    source_b = math.square_v4(source_b);
 
                     // Destination blend.
-                    const inv_texel_a = one - (inv_255 * texela);
-                    var blended_r: Vec4f = dest_r * inv_texel_a + texelr;
-                    var blended_g: Vec4f = dest_g * inv_texel_a + texelg;
-                    var blended_b: Vec4f = dest_b * inv_texel_a + texelb;
-                    const blended_a: Vec4f = dest_a * inv_texel_a + texela;
+                    const pixel_alpha_4x: Vec4f = alpha_4x * (source_a * inv_255);
+                    const inv_pixel_alpha_4x: Vec4f = one - pixel_alpha_4x;
+
+                    var blended_r: Vec4f = dest_r * inv_pixel_alpha_4x + pixel_alpha_4x * source_r;
+                    var blended_g: Vec4f = dest_g * inv_pixel_alpha_4x + pixel_alpha_4x * source_g;
+                    var blended_b: Vec4f = dest_b * inv_pixel_alpha_4x + pixel_alpha_4x * source_b;
+                    const blended_a: Vec4f = dest_a * inv_pixel_alpha_4x + pixel_alpha_4x * source_a;
 
                     // Go from linear brightness space to sRGB.
                     blended_r = @sqrt(blended_r);
@@ -539,10 +644,11 @@ fn blendRenderTarget(
                     const out: Vec4u = int_r << shift_16 | int_g << shift_8 | int_b | int_a << shift_24;
                     const masked_out: Vec4u = (write_mask & out) | (~write_mask & original_dest);
 
-                    const pixels = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(pixel)));
+                    const pixels = @as(*align(@alignOf(u32)) Vec4u, @ptrCast(@alignCast(dest_pixel)));
                     pixels.* = masked_out;
 
-                    pixel += 4;
+                    source_pixel += 4;
+                    dest_pixel += 4;
 
                     if ((xi + 8) < max_x) {
                         clip_mask = mask_ffffffff;
@@ -553,7 +659,8 @@ fn blendRenderTarget(
                     asm volatile ("# LLVM-MCA-END ProcessPixel");
                 }
 
-                row += row_advance;
+                source_row += source_row_advance;
+                dest_row += dest_row_advance;
             }
         }
     }
@@ -792,8 +899,6 @@ pub fn drawRectangleQuickly(
     const two: Vec4f = @splat(2);
     const three: Vec4f = @splat(3);
     const four: Vec4f = @splat(4);
-    const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
-    const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
     const points: [4]Vector2 = .{
         origin,
         origin.plus(x_axis),
@@ -880,6 +985,8 @@ pub fn drawRectangleQuickly(
         const width_m2: Vec4f = @splat(@floatFromInt(texture.width - 2));
         const height_m2: Vec4f = @splat(@floatFromInt(texture.height - 2));
 
+        const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
+        const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
         const n_x_axis = x_axis.scaledTo(inv_x_axis_length_squared);
         const n_y_axis = y_axis.scaledTo(inv_y_axis_length_squared);
         const n_x_axis_x: Vec4f = @splat(n_x_axis.x());
