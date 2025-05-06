@@ -985,10 +985,14 @@ pub fn drawRectangleQuickly(
         const width_m2: Vec4f = @splat(@floatFromInt(texture.width - 2));
         const height_m2: Vec4f = @splat(@floatFromInt(texture.height - 2));
 
-        const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
-        const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
-        const n_x_axis = x_axis.scaledTo(inv_x_axis_length_squared);
-        const n_y_axis = y_axis.scaledTo(inv_y_axis_length_squared);
+        var determinant: f32 = x_axis.x() * y_axis.y() - x_axis.y() * y_axis.x();
+        if (determinant == 0) {
+            determinant = 1;
+        }
+
+        const n_x_axis: Vector2 = .new(y_axis.y() / determinant, -y_axis.x() / determinant);
+        const n_y_axis: Vector2 = .new(-x_axis.y() / determinant, x_axis.x() / determinant);
+
         const n_x_axis_x: Vec4f = @splat(n_x_axis.x());
         const n_x_axis_y: Vec4f = @splat(n_x_axis.y());
         const n_y_axis_x: Vec4f = @splat(n_y_axis.x());
