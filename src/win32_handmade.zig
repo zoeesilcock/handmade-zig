@@ -120,11 +120,20 @@ const WglGetExtensionsStringEXT: type = fn (hdc: win32.HDC) callconv(WINAPI) ?*u
 var optWglGetExtensionsStringEXT: ?*const WglGetExtensionsStringEXT = null;
 var opengl_supports_srgb_frame_buffer: bool = false;
 
+const GlBindFramebufferEXT: type = fn (target: u32, framebuffer: u32) callconv(WINAPI) void;
+pub var optGlBindFramebufferEXT: ?*const GlBindFramebufferEXT = null;
+const GlGenFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(WINAPI) void;
+pub var optGlGenFramebuffersEXT: ?*const GlGenFramebuffersEXT = null;
+const GlFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textarget: u32, texture: u32, level: i32) callconv(WINAPI) void;
+pub var optGlFrameBufferTexture2DEXT: ?*const GlFrameBufferTexture2DEXT = null;
+const GlCheckFramebufferStatusEXT: type = fn (target: u32) callconv(WINAPI) u32;
+pub var optGlCheckFramebufferStatusEXT: ?*const GlCheckFramebufferStatusEXT = null;
+
 // Globals.
 pub var platform: shared.Platform = undefined;
 pub var running: bool = false;
 pub var paused: bool = false;
-pub var rendering_type: RenderingType = .RenderSoftwareDisplayOpenGL;
+pub var rendering_type: RenderingType = .RenderOpenGLDisplayOpenGL;
 var global_config = &@import("config.zig").global_config;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
@@ -1306,7 +1315,20 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
         }
 
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
-            opengl.init(is_modern_context, opengl_supports_srgb_frame_buffer);
+            const info = opengl.init(is_modern_context, opengl_supports_srgb_frame_buffer);
+
+            if (info.gl_arb_framebuffer_object) {
+                optGlBindFramebufferEXT = @ptrCast(win32.wglGetProcAddress("glBindFramebufferEXT"));
+                optGlGenFramebuffersEXT = @ptrCast(win32.wglGetProcAddress("glGenFramebuffersEXT"));
+                optGlFrameBufferTexture2DEXT = @ptrCast(win32.wglGetProcAddress("glFramebufferTexture2D"));
+                optGlCheckFramebufferStatusEXT = @ptrCast(win32.wglGetProcAddress("glCheckFramebufferStatusEXT"));
+
+                std.debug.assert(optGlBindFramebufferEXT != null);
+                std.debug.assert(optGlGenFramebuffersEXT != null);
+                std.debug.assert(optGlFrameBufferTexture2DEXT != null);
+                std.debug.assert(optGlCheckFramebufferStatusEXT != null);
+            }
+
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
                 _ = wglSwapIntervalEXT(1);
             }

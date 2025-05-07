@@ -239,17 +239,7 @@ pub fn renderCommandsToBitmap(
     // Clear.
     var target_index: u32 = 0;
     while (target_index <= commands.max_render_target_index) : (target_index += 1) {
-        if (false) {
-            drawRectangle(
-                @ptrCast(render_targets + target_index),
-                .zero(),
-                .newU(output_target.width, output_target.height),
-                commands.clear_color.rgb().toColor(1),
-                clip_rect,
-            );
-        } else {
-            clearRectangle(clip_rect, output_target, commands.clear_color);
-        }
+        clearRectangle(clip_rect, output_target, commands.clear_color);
     }
 
     var sort_entry: [*]u32 = prep.sorted_indices;

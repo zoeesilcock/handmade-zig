@@ -11,6 +11,9 @@ const std = @import("std");
 pub const GL_FRAMEBUFFER_SRGB = 0x8DB9;
 pub const GL_SRGB8_ALPHA8 = 0x8C43;
 pub const GL_SHADING_LANGUAGE_VERSION = 0x8B8C;
+pub const GL_FRAMEBUFFER = 0x8D40;
+pub const GL_COLOR_ATTACHMENT0 = 0x8CE0;
+pub const GL_FRAME_BUFFER_COMPLETE = 0x8CD5;
 
 // Windows specific.
 pub const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
@@ -71,6 +74,9 @@ pub const gl = struct {
 };
 
 pub var default_internal_texture_format: i32 = 0;
+var frame_buffer_count: u32 = 1;
+var frame_buffer_handles: [256]c_uint = [1]c_uint{0} ** 256;
+var frame_buffer_textures: [256]c_uint = [1]c_uint{0} ** 256;
 
 pub const Info = struct {
     is_modern_context: bool,
@@ -82,6 +88,7 @@ pub const Info = struct {
 
     gl_ext_texture_srgb: bool = false,
     gl_ext_framebuffer_srgb: bool = false,
+    gl_arb_framebuffer_object: bool = false,
 
     pub fn get(is_modern_context: bool) Info {
         var result: Info = .{
@@ -117,6 +124,8 @@ pub const Info = struct {
                     result.gl_ext_framebuffer_srgb = true;
                 } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_sRGB")) {
                     result.gl_ext_framebuffer_srgb = true;
+                } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_object")) {
+                    result.gl_arb_framebuffer_object = true;
                 }
 
                 at = end;
@@ -127,7 +136,7 @@ pub const Info = struct {
     }
 };
 
-pub fn init(is_modern_context: bool, framebuffer_supports_sRGB: bool) void {
+pub fn init(is_modern_context: bool, framebuffer_supports_sRGB: bool) Info {
     const info = Info.get(is_modern_context);
 
     default_internal_texture_format = gl.GL_RGBA8;
@@ -136,6 +145,8 @@ pub fn init(is_modern_context: bool, framebuffer_supports_sRGB: bool) void {
         default_internal_texture_format = GL_SRGB8_ALPHA8;
         gl.glEnable(GL_FRAMEBUFFER_SRGB);
     }
+
+    return info;
 }
 
 pub fn renderCommands(
@@ -150,9 +161,59 @@ pub fn renderCommands(
     // TimedBlock.beginFunction(@src(), .RenderCommandsToOpenGL);
     // defer TimedBlock.endFunction(@src(), .RenderCommandsToOpenGL);
 
-    gl.glDisable(gl.GL_SCISSOR_TEST);
-    gl.glClearColor(commands.clear_color.r(), commands.clear_color.g(), commands.clear_color.b(), commands.clear_color.a());
-    gl.glClear(gl.GL_COLOR_BUFFER_BIT);
+    std.debug.assert(commands.max_render_target_index < frame_buffer_handles.len);
+
+    const use_render_targets: bool = platform.optGlBindFramebufferEXT != null;
+    const max_render_target_index: u32 = if (use_render_targets) commands.max_render_target_index else 1;
+    if (max_render_target_index >= frame_buffer_count) {
+        const new_frame_buffer_count: u32 = max_render_target_index + 1;
+        std.debug.assert(new_frame_buffer_count < frame_buffer_handles.len);
+
+        const new_count: u32 = new_frame_buffer_count - frame_buffer_count;
+        if (platform.optGlGenFramebuffersEXT) |glGenFrameBuffers| {
+            glGenFrameBuffers(new_count, @ptrCast(&frame_buffer_handles[frame_buffer_count]));
+        }
+
+        if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
+            if (platform.optGlFrameBufferTexture2DEXT) |glBindFrameBufferTexture2D| {
+                var target_index: u32 = 0;
+                while (target_index <= new_frame_buffer_count) : (target_index += 1) {
+                    const texture_handle: u32 = allocateTexture(@intCast(commands.width), @intCast(commands.height), null);
+                    frame_buffer_textures[target_index] = texture_handle;
+
+                    glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
+                    glBindFrameBufferTexture2D(
+                        GL_FRAMEBUFFER,
+                        GL_COLOR_ATTACHMENT0,
+                        gl.GL_TEXTURE_2D,
+                        texture_handle,
+                        0,
+                    );
+
+                    if (platform.optGlCheckFramebufferStatusEXT) |checkFramebufferStatus| {
+                        const status: u32 = checkFramebufferStatus(GL_FRAMEBUFFER);
+                        std.debug.assert(status == GL_FRAME_BUFFER_COMPLETE);
+                    }
+                }
+            }
+        }
+
+        frame_buffer_count = new_frame_buffer_count;
+    }
+
+    var target_index: u32 = 0;
+    while (target_index <= max_render_target_index) : (target_index += 1) {
+        if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
+            glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
+        }
+        gl.glClearColor(commands.clear_color.r(), commands.clear_color.g(), commands.clear_color.b(), commands.clear_color.a());
+        gl.glDisable(gl.GL_SCISSOR_TEST);
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT);
+    }
+    var current_frame_buffer: c_uint = 0;
+    if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
+        glBindFramebuffer(GL_FRAMEBUFFER, current_frame_buffer);
+    }
 
     gl.glViewport(commands.offset_x, commands.offset_y, @intCast(commands.width), @intCast(commands.height));
 
@@ -201,6 +262,15 @@ pub fn renderCommands(
                 clip.rect.max.x() - clip.rect.min.x(),
                 clip.rect.max.y() - clip.rect.min.y(),
             );
+
+            if (current_frame_buffer != clip.render_target_index and
+                clip.render_target_index <= max_render_target_index)
+            {
+                current_frame_buffer = clip.render_target_index;
+                if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
+                    glBindFramebuffer(GL_FRAMEBUFFER, current_frame_buffer);
+                }
+            }
         }
 
         switch (header.type) {
@@ -248,8 +318,6 @@ pub fn renderCommands(
                             gl.glVertex2fv(min_x_max_y.toGL());
                         }
                         gl.glEnd();
-
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
                     }
                 }
             },
@@ -271,14 +339,33 @@ pub fn renderCommands(
             .RenderEntryCoordinateSystem => {
                 // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
             },
-            .RenderEntryBlendRenderTarget => {},
+            .RenderEntryBlendRenderTarget => {
+                const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
+                if (use_render_targets) {
+                    gl.glBindTexture(gl.GL_TEXTURE_2D, frame_buffer_textures[entry.source_target_index]);
+                    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA);
+                    drawRectangle(
+                        .zero(),
+                        .new(@floatFromInt(commands.width), @floatFromInt(commands.height)),
+                        .new(1, 1, 1, entry.alpha),
+                        null,
+                        null,
+                    );
+                    gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
+                }
+            },
             else => {
                 unreachable;
             },
         }
     }
 
+    if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
     gl.glDisable(gl.GL_TEXTURE_2D);
+
     if (global_config.Platform_ShowSortGroups) {
         const bound_count: u32 = commands.sort_entry_count;
         const bounds: [*]SortSpriteBound = render.getSortEntries(commands);
@@ -350,7 +437,7 @@ pub fn manageTextures(first_op: ?*TextureOp) void {
     }
 }
 
-fn allocateTexture(width: i32, height: i32, data: *anyopaque) callconv(.C) u32 {
+fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.C) u32 {
     var handle: u32 = 0;
 
     gl.glGenTextures(1, &handle);
