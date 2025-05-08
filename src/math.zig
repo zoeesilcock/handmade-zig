@@ -722,6 +722,8 @@ fn Rectangle2Type(comptime ScalarType: type) type {
         pub const getMaxCorner = Shared.getMaxCorner;
         pub const getCenter = Shared.getCenter;
         pub const getDimension = Shared.getDimension;
+        pub const getWidth = Shared.getWidth;
+        pub const getHeight = Shared.getHeight;
         pub const getBarycentricPosition = Shared.getBarycentricPosition;
         pub const addRadius = Shared.addRadius;
         pub const offsetBy = Shared.offsetBy;
@@ -770,6 +772,8 @@ fn Rectangle3Type(comptime ScalarType: type) type {
         pub const getMaxCorner = Shared.getMaxCorner;
         pub const getCenter = Shared.getCenter;
         pub const getDimension = Shared.getDimension;
+        pub const getWidth = Shared.getWidth;
+        pub const getHeight = Shared.getHeight;
         pub const getBarycentricPosition = Shared.getBarycentricPosition;
         pub const addRadius = Shared.addRadius;
         pub const offsetBy = Shared.offsetBy;
@@ -842,6 +846,14 @@ fn RectangleShared(
 
         pub inline fn getDimension(self: *const Self) VectorType {
             return self.max.minus(self.min);
+        }
+
+        pub inline fn getWidth(self: *const Self) ScalarType {
+            return self.max.x() - self.min.x();
+        }
+
+        pub inline fn getHeight(self: *const Self) ScalarType {
+            return self.max.y() - self.min.y();
         }
 
         pub inline fn getBarycentricPosition(self: *const Self, position: VectorType) VectorType {

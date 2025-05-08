@@ -54,6 +54,7 @@ const DebugId = debug_interface.DebugId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const GameRenderPrep = shared.GameRenderPrep;
+const Rectangle2i = math.Rectangle2i;
 const WINAPI = @import("std").os.windows.WINAPI;
 
 const std = @import("std");
@@ -133,7 +134,7 @@ pub var optGlCheckFramebufferStatusEXT: ?*const GlCheckFramebufferStatusEXT = nu
 pub var platform: shared.Platform = undefined;
 pub var running: bool = false;
 pub var paused: bool = false;
-pub var rendering_type: RenderingType = .RenderOpenGLDisplayOpenGL;
+pub var software_rendering: bool = false;
 var global_config = &@import("config.zig").global_config;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
@@ -143,12 +144,6 @@ var window_placement: win32.WINDOWPLACEMENT = undefined;
 var global_debug_table_: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
 var global_debug_table = &global_debug_table_;
 var reserved_blit_texture: u32 = 0;
-
-const RenderingType = enum(u8) {
-    RenderOpenGLDisplayOpenGL,
-    RenderSoftwareDisplayOpenGL,
-    RenderSoftwareDisplayGDI,
-};
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -576,7 +571,7 @@ inline fn getLastWriteTime(file_name: [*:0]const u8) win32.FILETIME {
     return last_write_time;
 }
 
-fn timeIsValid (time: win32.FILETIME) bool {
+fn timeIsValid(time: win32.FILETIME) bool {
     return time.dwLowDateTime != 0 or time.dwHighDateTime != 0;
 }
 
@@ -646,7 +641,14 @@ fn loadXInput() void {
     }
 }
 
-fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput, window: win32.HWND) void {
+fn processMouseInput(
+    old_input: *shared.GameInput,
+    new_input: *shared.GameInput,
+    window: win32.HWND,
+    render_commands: *shared.RenderCommands,
+    draw_region: Rectangle2i,
+    window_dimension: WindowDimension,
+) void {
     TimedBlock.beginBlock(@src(), .ProcessMouseInput);
     defer TimedBlock.endBlock(@src(), .ProcessMouseInput);
 
@@ -654,11 +656,24 @@ fn processMouseInput(old_input: *shared.GameInput, new_input: *shared.GameInput,
     if (win32.GetCursorPos(&mouse_point) == win32.TRUE) {
         _ = win32.ScreenToClient(window, &mouse_point);
 
-        const dim = calculateGameOffset(window);
-        const window_dimension = getWindowDimension(window);
-        new_input.mouse_x = @as(f32, @floatFromInt(mouse_point.x)) - @as(f32, @floatFromInt(dim.offset_x));
-        new_input.mouse_y = @as(f32, @floatFromInt((window_dimension.height - 1) - mouse_point.y)) - @as(f32, @floatFromInt(dim.offset_y));
+        const mouse_x: f32 = @as(f32, @floatFromInt(mouse_point.x));
+        const mouse_y: f32 = @as(f32, @floatFromInt((window_dimension.height - 1) - mouse_point.y));
+        const mouse_u: f32 = math.clamp01MapToRange(
+            @as(f32, @floatFromInt(draw_region.min.x())),
+            @as(f32, @floatFromInt(draw_region.max.x())),
+            mouse_x,
+        );
+        const mouse_v: f32 = math.clamp01MapToRange(
+            @as(f32, @floatFromInt(draw_region.min.y())),
+            @as(f32, @floatFromInt(draw_region.max.y())),
+            mouse_y,
+        );
+
+        new_input.mouse_x = @as(f32, @floatFromInt(render_commands.width)) * mouse_u;
+        new_input.mouse_y = @as(f32, @floatFromInt(render_commands.height)) * mouse_v;
+
         new_input.mouse_z = 0; // TODO: Add mouse wheel support.
+
         new_input.shift_down = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
         new_input.alt_down = win32.GetKeyState(@intFromEnum(win32.VK_MENU)) & (1 << 7) != 0;
         new_input.control_down = win32.GetKeyState(@intFromEnum(win32.VK_CONTROL)) & (1 << 7) != 0;
@@ -1396,44 +1411,13 @@ fn getGameBuffer() shared.OffscreenBuffer {
     };
 }
 
-const GameBufferDimensions = struct {
-    blit_height: i32,
-    blit_width: i32,
-    offset_x: i32,
-    offset_y: i32,
-};
-
-fn calculateGameOffset(window: win32.HWND) GameBufferDimensions {
-    const win_dim = getWindowDimension(window);
-    const window_width = win_dim.width;
-    const window_height = win_dim.height;
-
-    // Double size if we have space for it.
-    const should_double_size = window_width >= back_buffer.width * 2 and window_height >= back_buffer.height * 2;
-    const blit_width = if (should_double_size) back_buffer.width * 2 else back_buffer.width;
-    const blit_height = if (should_double_size) back_buffer.height * 2 else back_buffer.height;
-
-    return GameBufferDimensions{
-        .blit_width = blit_width,
-        .blit_height = blit_height,
-        .offset_x = @divFloor((window_width - blit_width), 2),
-        .offset_y = @divFloor((window_height - blit_height), 2),
-    };
-}
-
 fn displayBufferInWindow(
     render_queue: *shared.PlatformWorkQueue,
     commands: *shared.RenderCommands,
     device_context: ?win32.HDC,
-    window: win32.HWND,
-    window_width: i32,
-    window_height: i32,
+    draw_region: Rectangle2i,
     temp_arena: *MemoryArena,
 ) void {
-    const dim = calculateGameOffset(window);
-    commands.offset_x = dim.offset_x;
-    commands.offset_y = dim.offset_y;
-
     const temporary_memory = temp_arena.beginTemporaryMemory();
     defer temp_arena.endTemporaryMemory(temporary_memory);
 
@@ -1444,15 +1428,7 @@ fn displayBufferInWindow(
     //     render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
     // }
 
-    if (rendering_type == .RenderOpenGLDisplayOpenGL) {
-        TimedBlock.beginBlock(@src(), .OpenGLRenderCommands);
-        opengl.renderCommands(commands, &prep, window_width, window_height);
-        TimedBlock.endBlock(@src(), .OpenGLRenderCommands);
-
-        TimedBlock.beginBlock(@src(), .SwapBuffers);
-        _ = win32.SwapBuffers(device_context.?);
-        TimedBlock.endBlock(@src(), .SwapBuffers);
-    } else {
+    if (software_rendering) {
         var output_target: asset.LoadedBitmap = .{
             .memory = @ptrCast(back_buffer.memory.?),
             .width = @intCast(back_buffer.width),
@@ -1461,44 +1437,24 @@ fn displayBufferInWindow(
         };
         render.softwareRenderCommands(render_queue, commands, &prep, &output_target, temp_arena);
 
-        if (rendering_type == .RenderSoftwareDisplayOpenGL) {
-            opengl.displayBitmap(
-                dim.blit_width,
-                dim.blit_height,
-                dim.offset_x,
-                dim.offset_y,
-                window_width,
-                window_height,
-                output_target.pitch,
-                back_buffer.memory,
-                reserved_blit_texture,
-            );
-            _ = win32.SwapBuffers(device_context.?);
-        } else {
-            std.debug.assert(rendering_type == .RenderSoftwareDisplayGDI);
+        opengl.displayBitmap(
+            back_buffer.width,
+            back_buffer.height,
+            draw_region,
+            output_target.pitch,
+            back_buffer.memory,
+            commands.clear_color,
+            reserved_blit_texture,
+        );
+        _ = win32.SwapBuffers(device_context.?);
+    } else {
+        TimedBlock.beginBlock(@src(), .OpenGLRenderCommands);
+        opengl.renderCommands(commands, &prep, draw_region);
+        TimedBlock.endBlock(@src(), .OpenGLRenderCommands);
 
-            // Clear areas outside of our drawing area.
-            _ = win32.PatBlt(device_context, 0, 0, window_width, dim.offset_y, win32.BLACKNESS);
-            _ = win32.PatBlt(device_context, 0, dim.offset_y + dim.blit_height, window_width, window_height, win32.BLACKNESS);
-            _ = win32.PatBlt(device_context, 0, 0, dim.offset_x, window_height, win32.BLACKNESS);
-            _ = win32.PatBlt(device_context, dim.offset_x + dim.blit_width, 0, window_width, window_height, win32.BLACKNESS);
-
-            _ = win32.StretchDIBits(
-                device_context,
-                dim.offset_x,
-                dim.offset_y,
-                dim.blit_width,
-                dim.blit_height,
-                0,
-                0,
-                back_buffer.width,
-                back_buffer.height,
-                back_buffer.memory,
-                &back_buffer.info,
-                win32.DIB_RGB_COLORS,
-                win32.SRCCOPY,
-            );
-        }
+        TimedBlock.beginBlock(@src(), .SwapBuffers);
+        _ = win32.SwapBuffers(device_context.?);
+        TimedBlock.endBlock(@src(), .SwapBuffers);
     }
 }
 
@@ -1513,6 +1469,41 @@ fn windowProcedure(
     switch (message) {
         win32.WM_QUIT, win32.WM_CLOSE, win32.WM_DESTROY => {
             running = false;
+        },
+        win32.WM_WINDOWPOSCHANGING => {
+            var mutable_l_param: win32.LPARAM = l_param;
+
+            if (win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0) {
+                var new_pos: *win32.WINDOWPOS = @ptrCast(&mutable_l_param);
+                var window_rect: win32.RECT = undefined;
+                var client_rect: win32.RECT = undefined;
+                if (win32.GetWindowRect(window, &window_rect) == 1) {
+                    if (win32.GetClientRect(window, &client_rect) == 1) {
+                        const client_width = (client_rect.right - client_rect.left);
+                        const client_height = (client_rect.bottom - client_rect.top);
+                        const width_add = (window_rect.right - window_rect.left) - client_width;
+                        const height_add = (window_rect.bottom - window_rect.top) - client_height;
+                        const render_width = back_buffer.width;
+                        const render_height = back_buffer.height;
+                        const new_cx = @divFloor((render_width * (new_pos.cy - height_add)), render_height);
+                        const new_cy = @divFloor((render_height * (new_pos.cx - width_add)), render_width);
+
+                        if (@abs(new_pos.cx - new_cx) > @abs(new_pos.cy - new_cy)) {
+                            new_pos.cx = new_cx + width_add;
+                        } else {
+                            new_pos.cy = new_cy + height_add;
+                        }
+
+                        mutable_l_param = @as(*win32.LPARAM, @ptrCast(new_pos)).*;
+                    }
+                }
+            }
+
+            if (l_param != mutable_l_param) {
+                std.log.info("l_param changed", .{});
+            }
+
+            result = win32.DefWindowProc(window, message, w_param, mutable_l_param);
         },
         win32.WM_SETCURSOR => {
             if (show_debug_cursor) {
@@ -1996,16 +1987,16 @@ fn fullRestart(source_exe: [*:0]const u8, dest_exe: [*:0]const u8, delete_exe: [
             };
 
             if (win32.CreateProcessA(
-                    dest_exe,
-                    win32.GetCommandLineA(),
-                    null,
-                    null,
-                    win32.FALSE,
-                    win32.PROCESS_CREATION_FLAGS{},
-                    null,
-                    "C:\\", // TODO: Specify the full path to the data directory here.
-                    &startup_info,
-                    &process_info,
+                dest_exe,
+                win32.GetCommandLineA(),
+                null,
+                null,
+                win32.FALSE,
+                win32.PROCESS_CREATION_FLAGS{},
+                null,
+                "C:\\", // TODO: Specify the full path to the data directory here.
+                &startup_info,
+                &process_info,
             ) != 0) {
                 if (process_info.hProcess) |process_handle| {
                     _ = win32.CloseHandle(process_handle);
@@ -2310,7 +2301,7 @@ pub export fn wWinMain(
                     DebugInterface.debugBeginDataBlock(@src(), "Platform/Controls");
                     {
                         DebugInterface.debugValue(@src(), &paused, "paused");
-                        DebugInterface.debugValue(@src(), &rendering_type, "rendering_type");
+                        DebugInterface.debugValue(@src(), &software_rendering, "software_rendering");
                         DebugInterface.debugValue(@src(), &global_config.Platform_ShowSortGroups, "show_sort_groups");
                     }
                     DebugInterface.debugEndDataBlock(@src());
@@ -2326,6 +2317,19 @@ pub export fn wWinMain(
                     //
 
                     // TimedBlock.beginBlock(@src(), .InputProcessing);
+                    var render_commands: shared.RenderCommands = shared.initializeRenderCommands(
+                        push_buffer_size,
+                        push_buffer.?,
+                        @intCast(back_buffer.width),
+                        @intCast(back_buffer.height),
+                    );
+                    const window_dimension = getWindowDimension(window_handle);
+                    const draw_region = render.aspectRatioFit(
+                        @intCast(render_commands.width),
+                        @intCast(render_commands.height),
+                        @intCast(window_dimension.width),
+                        @intCast(window_dimension.height),
+                    );
 
                     TimedBlock.beginBlock(@src(), .ControllerClearing);
                     const old_keyboard_controller = &old_input.controllers[0];
@@ -2364,7 +2368,14 @@ pub export fn wWinMain(
 
                     if (!paused) {
                         // Prepare input to game.
-                        processMouseInput(old_input, new_input, window_handle);
+                        processMouseInput(
+                            old_input,
+                            new_input,
+                            window_handle,
+                            &render_commands,
+                            draw_region,
+                            window_dimension,
+                        );
                         processXInput(&xbox_controller_present, old_input, new_input);
                     }
 
@@ -2375,13 +2386,6 @@ pub export fn wWinMain(
                     //
 
                     TimedBlock.beginBlock(@src(), .GameUpdate);
-
-                    var render_commands: shared.RenderCommands = shared.initializeRenderCommands(
-                        push_buffer_size,
-                        push_buffer.?,
-                        @intCast(back_buffer.width),
-                        @intCast(back_buffer.height),
-                    );
 
                     if (!paused) {
                         if (state.input_recording_index > 0) {
@@ -2506,7 +2510,7 @@ pub export fn wWinMain(
                                     const audio_latency_bytes: std.os.windows.DWORD = unwrapped_write_cursor - play_cursor;
                                     const audio_latency_seconds: f32 =
                                         (@as(f32, @floatFromInt(audio_latency_bytes)) /
-                                        @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
+                                            @as(f32, @floatFromInt(sound_output.bytes_per_sample))) /
                                         @as(f32, @floatFromInt(sound_output.samples_per_second));
                                     var buffer: [128]u8 = undefined;
                                     const slice = std.fmt.bufPrintZ(&buffer, "Audio: BTL:{d} TC:{d} BTW:{d} - PC:{d} WC:{d} DELTA:{d} Latency:{d:>3.4}\n", .{
@@ -2631,8 +2635,6 @@ pub export fn wWinMain(
                     }
 
                     // Output game to screen.
-                    const window_dimension = getWindowDimension(window_handle);
-
                     texture_op_queue.mutex.begin();
                     const first_texture_op: ?*render.TextureOp = texture_op_queue.first;
                     const last_texture_op: ?*render.TextureOp = texture_op_queue.last;
@@ -2655,9 +2657,7 @@ pub export fn wWinMain(
                         &high_priority_queue,
                         &render_commands,
                         device_context,
-                        window_handle,
-                        window_dimension.width,
-                        window_dimension.height,
+                        draw_region,
                         &frame_temp_arena,
                     );
 

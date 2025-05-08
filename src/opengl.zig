@@ -149,17 +149,39 @@ pub fn init(is_modern_context: bool, framebuffer_supports_sRGB: bool) Info {
     return info;
 }
 
+fn bindFrameBuffer(target_index: u32, draw_region: Rectangle2i) void {
+    if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
+        const window_width: i32 = draw_region.getWidth();
+        const window_height: i32 = draw_region.getHeight();
+
+        glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
+
+        if (target_index > 0) {
+            gl.glViewport(0, 0, window_width, window_height);
+        } else {
+            gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
+        }
+    }
+}
+
 pub fn renderCommands(
     commands: *RenderCommands,
     prep: *GameRenderPrep,
-    window_width: i32,
-    window_height: i32,
+    draw_region: Rectangle2i,
 ) callconv(.C) void {
-    _ = window_width;
-    _ = window_height;
-
     // TimedBlock.beginFunction(@src(), .RenderCommandsToOpenGL);
     // defer TimedBlock.endFunction(@src(), .RenderCommandsToOpenGL);
+
+    const window_width: i32 = draw_region.getWidth();
+    const window_height: i32 = draw_region.getHeight();
+
+    gl.glEnable(gl.GL_TEXTURE_2D);
+    gl.glEnable(gl.GL_SCISSOR_TEST);
+    gl.glEnable(gl.GL_BLEND);
+    gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
+
+    gl.glMatrixMode(gl.GL_TEXTURE);
+    gl.glLoadIdentity();
 
     std.debug.assert(commands.max_render_target_index < frame_buffer_handles.len);
 
@@ -178,7 +200,7 @@ pub fn renderCommands(
             if (platform.optGlFrameBufferTexture2DEXT) |glBindFrameBufferTexture2D| {
                 var target_index: u32 = 0;
                 while (target_index <= new_frame_buffer_count) : (target_index += 1) {
-                    const texture_handle: u32 = allocateTexture(@intCast(commands.width), @intCast(commands.height), null);
+                    const texture_handle: u32 = allocateTexture(window_width, window_height, null);
                     frame_buffer_textures[target_index] = texture_handle;
 
                     glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
@@ -203,9 +225,7 @@ pub fn renderCommands(
 
     var target_index: u32 = 0;
     while (target_index <= max_render_target_index) : (target_index += 1) {
-        if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
-            glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
-        }
+        bindFrameBuffer(target_index, draw_region);
         gl.glClearColor(commands.clear_color.r(), commands.clear_color.g(), commands.clear_color.b(), commands.clear_color.a());
         gl.glDisable(gl.GL_SCISSOR_TEST);
         gl.glClear(gl.GL_COLOR_BUFFER_BIT);
@@ -214,16 +234,6 @@ pub fn renderCommands(
     if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
         glBindFramebuffer(GL_FRAMEBUFFER, current_frame_buffer);
     }
-
-    gl.glViewport(commands.offset_x, commands.offset_y, @intCast(commands.width), @intCast(commands.height));
-
-    gl.glEnable(gl.GL_TEXTURE_2D);
-    gl.glEnable(gl.GL_SCISSOR_TEST);
-    gl.glEnable(gl.GL_BLEND);
-    gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
-
-    gl.glMatrixMode(gl.GL_TEXTURE);
-    gl.glLoadIdentity();
 
     setScreenSpace(commands.width, commands.height);
 
@@ -257,8 +267,8 @@ pub fn renderCommands(
 
             const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
             gl.glScissor(
-                clip.rect.min.x() + commands.offset_x,
-                clip.rect.min.y() + commands.offset_y,
+                clip.rect.min.x() + draw_region.min.x(),
+                clip.rect.min.y() + draw_region.min.y(),
                 clip.rect.max.x() - clip.rect.min.x(),
                 clip.rect.max.y() - clip.rect.min.y(),
             );
@@ -267,9 +277,7 @@ pub fn renderCommands(
                 clip.render_target_index <= max_render_target_index)
             {
                 current_frame_buffer = clip.render_target_index;
-                if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
-                    glBindFramebuffer(GL_FRAMEBUFFER, current_frame_buffer);
-                }
+                bindFrameBuffer(current_frame_buffer, draw_region);
             }
         }
 
@@ -326,10 +334,12 @@ pub fn renderCommands(
                 gl.glDisable(gl.GL_TEXTURE_2D);
                 drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
 
-                gl.glBegin(gl.GL_LINES);
-                gl.glColor4f(0, 0, 0, entry.premultiplied_color.a());
-                drawLineVertices(entry.position, entry.position.plus(entry.dimension));
-                gl.glEnd();
+                if (false) {
+                    gl.glBegin(gl.GL_LINES);
+                    gl.glColor4f(0, 0, 0, entry.premultiplied_color.a());
+                    drawLineVertices(entry.position, entry.position.plus(entry.dimension));
+                    gl.glEnd();
+                }
 
                 gl.glEnable(gl.GL_TEXTURE_2D);
             },
@@ -539,22 +549,18 @@ fn setScreenSpace(width: u32, height: u32) void {
 pub fn displayBitmap(
     width: i32,
     height: i32,
-    offset_x: i32,
-    offset_y: i32,
-    window_width: i32,
-    window_height: i32,
+    draw_region: Rectangle2i,
     pitch: usize,
     memory: ?*const anyopaque,
+    clear_color: Color,
     blit_texture: u32,
 ) void {
-    _ = window_width;
-    _ = window_height;
-
     std.debug.assert(pitch == width * 4);
+
+    bindFrameBuffer(0, draw_region);
 
     gl.glDisable(gl.GL_SCISSOR_TEST);
     gl.glDisable(gl.GL_BLEND);
-    gl.glViewport(offset_x, offset_y, width, height);
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, blit_texture);
     gl.glTexImage2D(
@@ -577,7 +583,8 @@ pub fn displayBitmap(
 
     gl.glEnable(gl.GL_TEXTURE_2D);
 
-    gl.glClearColor(1, 0, 1, 0);
+    gl.glClearColor(0, 0, 0, 0);
+    gl.glClearColor(clear_color.r(), clear_color.g(), clear_color.b(), clear_color.a());
     gl.glClear(gl.GL_COLOR_BUFFER_BIT);
 
     // Reset all transforms.

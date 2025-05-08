@@ -380,8 +380,6 @@ pub const debug_color_table: [11]Color3 = .{
 pub const RenderCommands = extern struct {
     width: u32 = 0,
     height: u32 = 0,
-    offset_x: i32 = 0,
-    offset_y: i32 = 0,
 
     max_push_buffer_size: u32,
     sort_entry_count: u32,
