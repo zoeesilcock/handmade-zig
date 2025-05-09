@@ -18,17 +18,16 @@ const TREBLE_C: u32 = 523;
 // const HEIGHT = 540;
 // const WIDTH = 960 / 2;
 // const HEIGHT = 540 / 2;
-const WIDTH = 1920;
-const HEIGHT = 1080;
+const WIDTH = 2560;
+const HEIGHT = 1440;
 const WINDOW_DECORATION_WIDTH = 16;
 const WINDOW_DECORATION_HEIGHT = 39;
 const BYTES_PER_PIXEL = 4;
 
 const DEBUG_WINDOW_POS_X = -7 + 210; // + 2560;
 const DEBUG_WINDOW_POS_Y = 0 + 30;
-const DEBUG_WINDOW_SKIRT = 20;
-const DEBUG_WINDOW_WIDTH = WIDTH + WINDOW_DECORATION_WIDTH + DEBUG_WINDOW_SKIRT;
-const DEBUG_WINDOW_HEIGHT = HEIGHT + WINDOW_DECORATION_HEIGHT + DEBUG_WINDOW_SKIRT;
+const DEBUG_WINDOW_WIDTH = WIDTH + WINDOW_DECORATION_WIDTH;
+const DEBUG_WINDOW_HEIGHT = HEIGHT + WINDOW_DECORATION_HEIGHT;
 const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
@@ -1287,7 +1286,9 @@ fn loadWglExtensions() void {
 
                             const count = @intFromPtr(end) - @intFromPtr(at);
 
-                            if (shared.stringsWithOneLengthAreEqual(at, count, "WGL_EXT_framebuffer_sRGB")) {
+                            if (shared.stringsWithOneLengthAreEqual(at, count, "WGL_EXT_framebuffer_sRGB") or
+                                shared.stringsWithOneLengthAreEqual(at, count, "WGL_ARB_framebuffer_sRGB"))
+                            {
                                 opengl_supports_srgb_frame_buffer = true;
                             }
 
@@ -1313,10 +1314,11 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
     loadWglExtensions();
 
     if (opt_window_dc) |window_dc| {
+        setPixelFormat(window_dc);
+
         var is_modern_context: bool = true;
 
         if (optWglCreateContextAttribsARB) |wglCreateContextAttribsARB| {
-            setPixelFormat(window_dc);
             opengl_rc = wglCreateContextAttribsARB(window_dc, null, &opengl_attribs);
 
             if (opengl_rc == null) {
@@ -1417,6 +1419,8 @@ fn displayBufferInWindow(
     device_context: ?win32.HDC,
     draw_region: Rectangle2i,
     temp_arena: *MemoryArena,
+    window_width: i32,
+    window_height: i32,
 ) void {
     const temporary_memory = temp_arena.beginTemporaryMemory();
     defer temp_arena.endTemporaryMemory(temporary_memory);
@@ -1449,7 +1453,7 @@ fn displayBufferInWindow(
         _ = win32.SwapBuffers(device_context.?);
     } else {
         TimedBlock.beginBlock(@src(), .OpenGLRenderCommands);
-        opengl.renderCommands(commands, &prep, draw_region);
+        opengl.renderCommands(commands, &prep, draw_region, window_width, window_height);
         TimedBlock.endBlock(@src(), .OpenGLRenderCommands);
 
         TimedBlock.beginBlock(@src(), .SwapBuffers);
@@ -2659,6 +2663,8 @@ pub export fn wWinMain(
                         device_context,
                         draw_region,
                         &frame_temp_arena,
+                        window_dimension.width,
+                        window_dimension.height,
                     );
 
                     flip_wall_clock = getWallClock();

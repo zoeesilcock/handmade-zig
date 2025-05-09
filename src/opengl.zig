@@ -132,6 +132,41 @@ pub const Info = struct {
             }
         }
 
+        const opt_major_at: ?[*]const u8 = @ptrCast(result.version);
+        var opt_minor_at: ?[*]const u8 = null;
+        var at: [*]const u8 = @ptrCast(result.version);
+        while (at[0] != 0) : (at += 1) {
+            if (at[0] == '.') {
+                opt_minor_at = at + 1;
+                break;
+            }
+        }
+
+        var major: i32 = 1;
+        var minor: i32 = 0;
+        if (opt_major_at) |major_at| {
+            if (opt_minor_at) |minor_at| {
+                major = parseNumber(major_at);
+                minor = parseNumber(minor_at);
+            }
+        }
+
+        if (major > 2 or (major == 2 and minor >= 1)) {
+            result.gl_ext_texture_srgb = true;
+        }
+
+        return result;
+    }
+
+    fn parseNumber(input: [*]const u8) i32 {
+        var result: i32 = 0;
+
+        var at: [*]const u8 = input;
+        while (at[0] >= '0' and at[0] <= '9') : (at += 1) {
+            result *= 10;
+            result += at[0] - '0';
+        }
+
         return result;
     }
 };
@@ -168,12 +203,11 @@ pub fn renderCommands(
     commands: *RenderCommands,
     prep: *GameRenderPrep,
     draw_region: Rectangle2i,
+    window_width: i32,
+    window_height: i32,
 ) callconv(.C) void {
     // TimedBlock.beginFunction(@src(), .RenderCommandsToOpenGL);
     // defer TimedBlock.endFunction(@src(), .RenderCommandsToOpenGL);
-
-    const window_width: i32 = draw_region.getWidth();
-    const window_height: i32 = draw_region.getHeight();
 
     gl.glEnable(gl.GL_TEXTURE_2D);
     gl.glEnable(gl.GL_SCISSOR_TEST);
@@ -186,7 +220,7 @@ pub fn renderCommands(
     std.debug.assert(commands.max_render_target_index < frame_buffer_handles.len);
 
     const use_render_targets: bool = platform.optGlBindFramebufferEXT != null;
-    const max_render_target_index: u32 = if (use_render_targets) commands.max_render_target_index else 1;
+    const max_render_target_index: u32 = if (use_render_targets) commands.max_render_target_index else 0;
     if (max_render_target_index >= frame_buffer_count) {
         const new_frame_buffer_count: u32 = max_render_target_index + 1;
         std.debug.assert(new_frame_buffer_count < frame_buffer_handles.len);
@@ -198,9 +232,9 @@ pub fn renderCommands(
 
         if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
             if (platform.optGlFrameBufferTexture2DEXT) |glBindFrameBufferTexture2D| {
-                var target_index: u32 = 0;
+                var target_index: u32 = frame_buffer_count;
                 while (target_index <= new_frame_buffer_count) : (target_index += 1) {
-                    const texture_handle: u32 = allocateTexture(window_width, window_height, null);
+                    const texture_handle: u32 = allocateTexture(draw_region.getWidth(), draw_region.getHeight(), null);
                     frame_buffer_textures[target_index] = texture_handle;
 
                     glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
@@ -225,19 +259,30 @@ pub fn renderCommands(
 
     var target_index: u32 = 0;
     while (target_index <= max_render_target_index) : (target_index += 1) {
-        bindFrameBuffer(target_index, draw_region);
-        gl.glClearColor(commands.clear_color.r(), commands.clear_color.g(), commands.clear_color.b(), commands.clear_color.a());
-        gl.glDisable(gl.GL_SCISSOR_TEST);
+        if (use_render_targets) {
+            bindFrameBuffer(target_index, draw_region);
+        }
+
+        if (target_index == 0) {
+            gl.glScissor(0, 0, window_width, window_height);
+        } else {
+            gl.glScissor(0, 0, draw_region.getWidth(), draw_region.getHeight());
+        }
+
+        gl.glClearColor(
+            commands.clear_color.r(),
+            commands.clear_color.g(),
+            commands.clear_color.b(),
+            commands.clear_color.a(),
+        );
+
         gl.glClear(gl.GL_COLOR_BUFFER_BIT);
-    }
-    var current_frame_buffer: c_uint = 0;
-    if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
-        glBindFramebuffer(GL_FRAMEBUFFER, current_frame_buffer);
     }
 
     setScreenSpace(commands.width, commands.height);
 
     var clip_rect_index: u32 = 0xffffffff;
+    var current_render_target_index: u32 = 0xffffffff;
     var sort_entry: [*]u32 = prep.sorted_indices;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < prep.sorted_index_count) : (sort_entry_index += 1) {
@@ -260,119 +305,133 @@ pub fn renderCommands(
         const aligned_address = std.mem.alignForward(usize, data_address, alignment);
         const data: *anyopaque = @ptrFromInt(aligned_address);
 
-        if (clip_rect_index != header.clip_rect_index) {
-            clip_rect_index = header.clip_rect_index;
+        if (use_render_targets or
+            prep.clip_rects[header.clip_rect_index].render_target_index <= max_render_target_index)
+        {
+            if (clip_rect_index != header.clip_rect_index) {
+                clip_rect_index = header.clip_rect_index;
 
-            std.debug.assert(clip_rect_index < commands.clip_rect_count);
+                std.debug.assert(clip_rect_index < commands.clip_rect_count);
 
-            const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
-            gl.glScissor(
-                clip.rect.min.x() + draw_region.min.x(),
-                clip.rect.min.y() + draw_region.min.y(),
-                clip.rect.max.x() - clip.rect.min.x(),
-                clip.rect.max.y() - clip.rect.min.y(),
-            );
+                const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
+                var clip_rect: Rectangle2i = clip.rect;
 
-            if (current_frame_buffer != clip.render_target_index and
-                clip.render_target_index <= max_render_target_index)
-            {
-                current_frame_buffer = clip.render_target_index;
-                bindFrameBuffer(current_frame_buffer, draw_region);
-            }
-        }
-
-        switch (header.type) {
-            .RenderEntryBitmap => {
-                var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                if (entry.bitmap) |bitmap| {
-                    if (bitmap.width > 0 and bitmap.height > 0) {
-                        const x_axis: Vector2 = entry.x_axis;
-                        const y_axis: Vector2 = entry.y_axis;
-                        const min_position: Vector2 = entry.position;
-
-                        if (bitmap.texture_handle > 0) {
-                            gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
-                        }
-
-                        const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
-                        const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
-                        const min_uv = Vector2.new(one_texel_u, one_texel_v);
-                        const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
-
-                        gl.glBegin(gl.GL_TRIANGLES);
-                        {
-                            // This value is not gamma corrected by OpenGL.
-                            gl.glColor4fv(entry.premultiplied_color.toGL());
-
-                            const min_x_min_y: Vector2 = min_position;
-                            const min_x_max_y: Vector2 = min_position.plus(y_axis);
-                            const max_x_min_y: Vector2 = min_position.plus(x_axis);
-                            const max_x_max_y: Vector2 = min_position.plus(x_axis).plus(y_axis);
-
-                            // Lower triangle.
-                            gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                            gl.glVertex2fv(min_x_min_y.toGL());
-                            gl.glTexCoord2f(max_uv.x(), min_uv.y());
-                            gl.glVertex2fv(max_x_min_y.toGL());
-                            gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                            gl.glVertex2fv(max_x_max_y.toGL());
-
-                            // Upper triangle
-                            gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                            gl.glVertex2fv(min_x_min_y.toGL());
-                            gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                            gl.glVertex2fv(max_x_max_y.toGL());
-                            gl.glTexCoord2f(min_uv.x(), max_uv.y());
-                            gl.glVertex2fv(min_x_max_y.toGL());
-                        }
-                        gl.glEnd();
+                if (current_render_target_index != clip.render_target_index) {
+                    current_render_target_index = clip.render_target_index;
+                    std.debug.assert(current_render_target_index <= max_render_target_index);
+                    if (use_render_targets) {
+                        bindFrameBuffer(current_render_target_index, draw_region);
                     }
                 }
-            },
-            .RenderEntryRectangle => {
-                const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
-                gl.glDisable(gl.GL_TEXTURE_2D);
-                drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
 
-                if (false) {
-                    gl.glBegin(gl.GL_LINES);
-                    gl.glColor4f(0, 0, 0, entry.premultiplied_color.a());
-                    drawLineVertices(entry.position, entry.position.plus(entry.dimension));
-                    gl.glEnd();
+                if (!use_render_targets or clip.render_target_index == 0) {
+                    clip_rect = clip_rect.offsetBy(draw_region.min);
                 }
 
-                gl.glEnable(gl.GL_TEXTURE_2D);
-            },
-            .RenderEntrySaturation => {
-                // const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
-            },
-            .RenderEntryCoordinateSystem => {
-                // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
-            },
-            .RenderEntryBlendRenderTarget => {
-                const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
-                if (use_render_targets) {
-                    gl.glBindTexture(gl.GL_TEXTURE_2D, frame_buffer_textures[entry.source_target_index]);
-                    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA);
-                    drawRectangle(
-                        .zero(),
-                        .new(@floatFromInt(commands.width), @floatFromInt(commands.height)),
-                        .new(1, 1, 1, entry.alpha),
-                        null,
-                        null,
-                    );
-                    gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
-                }
-            },
-            else => {
-                unreachable;
-            },
+                gl.glScissor(
+                    clip_rect.min.x(),
+                    clip_rect.min.y(),
+                    clip_rect.max.x() - clip_rect.min.x(),
+                    clip_rect.max.y() - clip_rect.min.y(),
+                );
+            }
+
+            switch (header.type) {
+                .RenderEntryBitmap => {
+                    var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+                    if (entry.bitmap) |bitmap| {
+                        if (bitmap.width > 0 and bitmap.height > 0) {
+                            const x_axis: Vector2 = entry.x_axis;
+                            const y_axis: Vector2 = entry.y_axis;
+                            const min_position: Vector2 = entry.position;
+
+                            if (bitmap.texture_handle > 0) {
+                                gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
+                            }
+
+                            const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
+                            const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
+                            const min_uv = Vector2.new(one_texel_u, one_texel_v);
+                            const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
+
+                            gl.glBegin(gl.GL_TRIANGLES);
+                            {
+                                // This value is not gamma corrected by OpenGL.
+                                gl.glColor4fv(entry.premultiplied_color.toGL());
+
+                                const min_x_min_y: Vector2 = min_position;
+                                const min_x_max_y: Vector2 = min_position.plus(y_axis);
+                                const max_x_min_y: Vector2 = min_position.plus(x_axis);
+                                const max_x_max_y: Vector2 = min_position.plus(x_axis).plus(y_axis);
+
+                                // Lower triangle.
+                                gl.glTexCoord2f(min_uv.x(), min_uv.y());
+                                gl.glVertex2fv(min_x_min_y.toGL());
+                                gl.glTexCoord2f(max_uv.x(), min_uv.y());
+                                gl.glVertex2fv(max_x_min_y.toGL());
+                                gl.glTexCoord2f(max_uv.x(), max_uv.y());
+                                gl.glVertex2fv(max_x_max_y.toGL());
+
+                                // Upper triangle
+                                gl.glTexCoord2f(min_uv.x(), min_uv.y());
+                                gl.glVertex2fv(min_x_min_y.toGL());
+                                gl.glTexCoord2f(max_uv.x(), max_uv.y());
+                                gl.glVertex2fv(max_x_max_y.toGL());
+                                gl.glTexCoord2f(min_uv.x(), max_uv.y());
+                                gl.glVertex2fv(min_x_max_y.toGL());
+                            }
+                            gl.glEnd();
+                        }
+                    }
+                },
+                .RenderEntryRectangle => {
+                    const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
+                    gl.glDisable(gl.GL_TEXTURE_2D);
+                    drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
+
+                    if (false) {
+                        gl.glBegin(gl.GL_LINES);
+                        gl.glColor4f(0, 0, 0, entry.premultiplied_color.a());
+                        drawLineVertices(entry.position, entry.position.plus(entry.dimension));
+                        gl.glEnd();
+                    }
+
+                    gl.glEnable(gl.GL_TEXTURE_2D);
+                },
+                .RenderEntrySaturation => {
+                    // const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
+                },
+                .RenderEntryCoordinateSystem => {
+                    // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
+                },
+                .RenderEntryBlendRenderTarget => {
+                    const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
+                    if (use_render_targets) {
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, frame_buffer_textures[entry.source_target_index]);
+                        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA);
+                        drawRectangle(
+                            .zero(),
+                            .new(@floatFromInt(commands.width), @floatFromInt(commands.height)),
+                            .new(1, 1, 1, entry.alpha),
+                            null,
+                            null,
+                        );
+                        gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
+                    }
+                },
+                else => {
+                    unreachable;
+                },
+            }
         }
     }
 
-    if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (use_render_targets) {
+        if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
     }
+
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
     gl.glDisable(gl.GL_TEXTURE_2D);
 

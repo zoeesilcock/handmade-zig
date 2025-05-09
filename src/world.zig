@@ -166,8 +166,11 @@ fn packEntityIntoChunk(
             world.first_free_block.?.next = null;
         }
 
-        chunk.first_block = world.first_free_block;
-        world.first_free_block = chunk.first_block.?.next;
+        const new_block: ?*WorldEntityBlock = world.first_free_block;
+        world.first_free_block = new_block.?.next;
+
+        new_block.?.next = chunk.first_block;
+        chunk.first_block = new_block;
 
         chunk.first_block.?.clear();
     }
