@@ -169,10 +169,10 @@ fn packEntityIntoChunk(
         const new_block: ?*WorldEntityBlock = world.first_free_block;
         world.first_free_block = new_block.?.next;
 
+        new_block.?.clear();
+
         new_block.?.next = chunk.first_block;
         chunk.first_block = new_block;
-
-        chunk.first_block.?.clear();
     }
 
     const block: *WorldEntityBlock = chunk.first_block.?;

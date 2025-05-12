@@ -324,9 +324,9 @@ pub fn updateAndRenderWorld(
     const result = false;
 
     const width_of_monitor_in_meters = 0.635;
-    const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
-    const focal_length: f32 = 0.6;
-    const distance_above_ground: f32 = 9;
+    const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) / width_of_monitor_in_meters;
+    const focal_length: f32 = 0.3;
+    const distance_above_ground: f32 = 11;
     const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
 
     render_group.perspectiveMode(
