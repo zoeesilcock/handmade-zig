@@ -146,25 +146,13 @@ pub const Info = struct {
         var minor: i32 = 0;
         if (opt_major_at) |major_at| {
             if (opt_minor_at) |minor_at| {
-                major = parseNumber(major_at);
-                minor = parseNumber(minor_at);
+                major = shared.i32FromZ(major_at);
+                minor = shared.i32FromZ(minor_at);
             }
         }
 
         if (major > 2 or (major == 2 and minor >= 1)) {
             result.gl_ext_texture_srgb = true;
-        }
-
-        return result;
-    }
-
-    fn parseNumber(input: [*]const u8) i32 {
-        var result: i32 = 0;
-
-        var at: [*]const u8 = input;
-        while (at[0] >= '0' and at[0] <= '9') : (at += 1) {
-            result *= 10;
-            result += at[0] - '0';
         }
 
         return result;

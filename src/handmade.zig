@@ -21,6 +21,8 @@ const std = @import("std");
 /// * Debug code.
 ///     * Diagramming.
 ///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
+///     * Frame view not showing bad frames?
+///     * Disable sorting!
 ///
 /// * Entity system.
 ///     * What to do about geographically disperate entities that might only partially get streamed in to a sim region,
@@ -42,6 +44,7 @@ const std = @import("std");
 ///     * Hardware Rendering
 ///         * Shaders?
 ///         * Render-to-texture?
+///     * Pixel buffer objects for texture downloads?
 ///
 /// ----
 ///

@@ -500,7 +500,7 @@ pub const DebugState = struct {
             if (scan[0] == '|') {
                 if (pipe_count == 0) {
                     result.file_name_count = @intCast(@intFromPtr(scan) - @intFromPtr(guid));
-                    result.line_number = std.mem.bytesToValue(u32, scan + 1);
+                    result.line_number = @intCast(shared.i32FromZ(scan + 1));
                 } else if (pipe_count == 2) {
                     result.name_starts_at = @intCast(@intFromPtr(scan) - @intFromPtr(guid) + 1);
                 }
@@ -1008,12 +1008,11 @@ pub const DebugVariableLink = struct {
     }
 };
 
-fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, element: *DebugElement, event: *DebugEvent, flags: u32) u32 {
-    var len: u32 = start_index;
+fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *DebugEvent, flags: u32) usize {
+    var at: [*]u8 = buffer;
 
     if (flags & DebugVariableToTextFlag.Declaration.toInt() != 0) {
-        const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{event.prefixString()}) catch "";
-        len += @intCast(slice.len);
+        at += shared.formatString(end - at, at, "%s", .{event.prefixString()});
     }
 
     if (flags & DebugVariableToTextFlag.Name.toInt() != 0) {
@@ -1028,25 +1027,21 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, element: *DebugElemen
             }
         }
 
-        const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{name}) catch "";
-        len += @intCast(slice.len);
+        at += shared.formatString(end - at, at, "%s", .{name});
     }
 
     if (flags & DebugVariableToTextFlag.Colon.toInt() != 0) {
-        const slice = std.fmt.bufPrintZ(buffer[len..], ": ", .{}) catch "";
-        len += @intCast(slice.len);
+        at += shared.formatString(end - at, at, ": ", .{});
     }
 
     if (event.event_type != .OpenDataBlock and flags & DebugVariableToTextFlag.Type.toInt() != 0) {
-        const slice = std.fmt.bufPrintZ(buffer[len..], ": {s} = ", .{event.typeString()}) catch "";
-        len += @intCast(slice.len);
+        at += shared.formatString(end - at, at, ": %s = ", .{event.typeString()});
     }
 
     if (flags & DebugVariableToTextFlag.Declaration.toInt() != 0) {
         switch (event.event_type) {
             .Vector2, .Vector3, .Vector4 => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "{s}.new", .{event.typeString()}) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "%s.new", .{event.typeString()});
             },
             else => {},
         }
@@ -1055,110 +1050,76 @@ fn debugEventToText(buffer: *[4096:0]u8, start_index: u32, element: *DebugElemen
     if (flags & DebugVariableToTextFlag.Value.toInt() != 0) {
         switch (event.event_type) {
             .bool => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "{s}", .{if (event.data.bool) "true" else "false"}) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "%s", .{if (event.data.bool) "true" else "false"});
             },
             .i32 => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.i32}) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "%d", .{event.data.i32});
             },
             .u32 => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.u32}) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "%d", .{event.data.u32});
             },
             .f32 => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.f32}) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "%f", .{event.data.f32});
             },
             .Vector2 => {
-                const slice = std.fmt.bufPrintZ(
-                    buffer[len..],
-                    "({d}, {d})",
-                    .{ event.data.Vector2.x(), event.data.Vector2.y() },
-                ) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "(%d, %d)", .{ event.data.Vector2.x(), event.data.Vector2.y() });
             },
             .Vector3 => {
-                const slice = std.fmt.bufPrintZ(
-                    buffer[len..],
-                    "({d}, {d}, {d})",
-                    .{
-                        event.data.Vector3.x(),
-                        event.data.Vector3.y(),
-                        event.data.Vector3.z(),
-                    },
-                ) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "(%d, %d, %d)", .{
+                    event.data.Vector3.x(),
+                    event.data.Vector3.y(),
+                    event.data.Vector3.z(),
+                });
             },
             .Vector4 => {
-                const slice = std.fmt.bufPrintZ(
-                    buffer[len..],
-                    "({d}, {d}, {d}, {d})",
-                    .{
-                        event.data.Vector4.x(),
-                        event.data.Vector4.y(),
-                        event.data.Vector4.z(),
-                        event.data.Vector4.w(),
-                    },
-                ) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "(%d, %d, %d, %d)", .{
+                    event.data.Vector4.x(),
+                    event.data.Vector4.y(),
+                    event.data.Vector4.z(),
+                    event.data.Vector4.w(),
+                });
             },
             .Rectangle2 => {
-                const slice = std.fmt.bufPrintZ(
-                    buffer[len..],
-                    "({d}, {d}, {d}, {d})",
-                    .{
-                        event.data.Rectangle2.min.x(),
-                        event.data.Rectangle2.min.y(),
-                        event.data.Rectangle2.max.x(),
-                        event.data.Rectangle2.max.y(),
-                    },
-                ) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "(%d, %d, %d, %d)", .{
+                    event.data.Rectangle2.min.x(),
+                    event.data.Rectangle2.min.y(),
+                    event.data.Rectangle2.max.x(),
+                    event.data.Rectangle2.max.y(),
+                });
             },
             .Rectangle3 => {
-                const slice = std.fmt.bufPrintZ(
-                    buffer[len..],
-                    "({d}, {d}, {d}, {d}, {d}, {d})",
-                    .{
-                        event.data.Rectangle3.min.x(),
-                        event.data.Rectangle3.min.y(),
-                        event.data.Rectangle3.min.z(),
-                        event.data.Rectangle3.max.x(),
-                        event.data.Rectangle3.max.y(),
-                        event.data.Rectangle3.max.z(),
-                    },
-                ) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "(%d, %d, %d, %d, %d, %d)", .{
+                    event.data.Rectangle3.min.x(),
+                    event.data.Rectangle3.min.y(),
+                    event.data.Rectangle3.min.z(),
+                    event.data.Rectangle3.max.x(),
+                    event.data.Rectangle3.max.y(),
+                    event.data.Rectangle3.max.z(),
+                });
             },
             .BitmapId => {},
             .Enum => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "{d}", .{event.data.Enum}) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "%d", .{event.data.Enum});
             },
             else => {
-                const slice = std.fmt.bufPrintZ(buffer[len..], "UNHANDLED: {s}", .{event.guid}) catch "";
-                len += @intCast(slice.len);
+                at += shared.formatString(end - at, at, "UNHANDLED: %s", .{event.guid});
             },
         }
     }
 
     if (event.event_type != .OpenDataBlock and flags & DebugVariableToTextFlag.SemiColonEnd.toInt() != 0) {
-        const slice = std.fmt.bufPrintZ(buffer[len..], ";", .{}) catch "";
-        len += @intCast(slice.len);
+        at += shared.formatString(end - at, at, ";", .{});
     }
 
     if (flags & DebugVariableToTextFlag.LineFeedEnd.toInt() != 0) {
-        const slice = std.fmt.bufPrintZ(buffer[len..], "\n", .{}) catch "";
-        len += @intCast(slice.len);
+        at += shared.formatString(end - at, at, "\n", .{});
     }
 
     if (flags & DebugVariableToTextFlag.NullTerminator.toInt() != 0) {
-        buffer[len] = 0;
-        len += 1;
+        at[0] = 0;
     }
 
-    return len;
+    return at - buffer;
 }
 
 fn getTotalClocks(frame: *DebugElementFrame) u64 {
@@ -1218,8 +1179,8 @@ fn drawFrameSlider(
 
             if (mouse_position.isInRectangle(region_rect)) {
                 var buffer: [128]u8 = undefined;
-                const text = std.fmt.bufPrintZ(&buffer, "{d}", .{frame_index}) catch "";
-                debug_ui.addTooltip(debug_state, text);
+                _ = shared.formatString(buffer.len, &buffer, "%d", .{frame_index});
+                debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
 
                 debug_state.next_hot_interaction = DebugInteraction.setUInt32(
                     slider_id,
@@ -1317,11 +1278,11 @@ fn drawProfileBars(
 
         if (mouse_position.isInRectangle(region_rect)) {
             var buffer: [128]u8 = undefined;
-            const text = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy", .{
+            _ = shared.formatString(buffer.len, &buffer, "%s: %10ucy", .{
                 element.guid,
                 node.duration,
-            }) catch "";
-            debug_ui.addTooltip(debug_state, text);
+            });
+            debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
 
             const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
             debug_state.next_hot_interaction = DebugInteraction.setPointer(
@@ -1399,11 +1360,11 @@ fn drawFrameBars(
 
                 if (mouse_position.isInRectangle(region_rect)) {
                     var buffer: [128]u8 = undefined;
-                    const text = std.fmt.bufPrintZ(&buffer, "{s}: {d:10}cy", .{
+                    _ = shared.formatString(buffer.len, &buffer, "%s: %10ucy", .{
                         element.guid,
                         node.duration,
-                    }) catch "";
-                    debug_ui.addTooltip(debug_state, text);
+                    });
+                    debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
 
                     const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
                     debug_state.next_hot_interaction = DebugInteraction.setPointer(
@@ -1534,28 +1495,26 @@ fn drawTopClocksList(
         running_sum += stats.sum;
 
         var buffer: [256]u8 = undefined;
-        const slice = std.fmt.bufPrintZ(&buffer, "{d:10}cy {d:5.02}% {d:4} {s}", .{
+        _ = shared.formatString(buffer.len, &buffer, "%10ucy %02.02f%% %4d %s", .{
             stats.sum,
             percent_coefficient * stats.sum,
             stats.count,
             element.getName(),
-        }) catch "";
+        });
         textOutAt(
             debug_state,
-            slice,
+            @ptrCast(&buffer),
             at,
             Color.white(),
             null,
         );
 
-        const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, slice, at);
+        const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, @ptrCast(&buffer), at);
         if (mouse_position.isInRectangle(text_rect)) {
-            const text = std.fmt.bufPrintZ(
-                &buffer,
-                "Cumulative to this point: {d:5.02}%",
-                .{percent_coefficient * running_sum},
-            ) catch "";
-            debug_ui.addTooltip(debug_state, text);
+            _ = shared.formatString(buffer.len, &buffer, "Cumulative to this point: %02.02f%%", .{
+                percent_coefficient * running_sum
+            });
+            debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
         }
 
         if (at.y() < profile_rect.min.y()) {
@@ -1866,19 +1825,19 @@ fn drawDebugElement(
         .LastFrameInfo => {
             const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
             var text: [128:0]u8 = undefined;
-            _ = std.fmt.bufPrintZ(&text, "Viewing frame time: {d:0.2}ms {d}e {d}p {d}d", .{
+            _ = shared.formatString(text.len, &text, "Viewing frame time: %.02fms %de %dp %dd", .{
                 most_recent_frame.wall_seconds_elapsed * 1000,
                 most_recent_frame.stored_event_count,
                 most_recent_frame.profile_block_count,
                 most_recent_frame.data_block_count,
-            }) catch "";
+            });
             _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         .DebugMemoryInfo => {
             var text: [128:0]u8 = undefined;
-            _ = std.fmt.bufPrintZ(&text, "Per-frame arena space remaining: {d}kb", .{
+            _ = shared.formatString(text.len, &text, "Per-frame arena space remaining: %ukb", .{
                 debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
-            }) catch "";
+            });
             _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         else => {
@@ -1887,9 +1846,8 @@ fn drawDebugElement(
                 .event_type = element.type,
             };
             const event: *DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else &null_event;
-            var text: [4096:0]u8 = undefined;
-            var len: u32 = 0;
-            len = debugEventToText(&text, len, element, event, DebugVariableToTextFlag.displayFlags());
+            var text: [256:0]u8 = undefined;
+            _ = debugEventToText(&text, @ptrFromInt(@intFromPtr(&text) + text.len), element, event, DebugVariableToTextFlag.displayFlags());
             _ = basicTextElement(&text, layout, item_interaction, item_color, null, null, null);
         },
     }
@@ -2313,7 +2271,7 @@ fn debugStart(
         debug_state.tooltip_transform.chunk_z = 500000;
 
         debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
-        debug_state.render_target = 1;
+        debug_state.render_target = 0;
 
         if (!debug_state.paused) {
             debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
@@ -2327,12 +2285,12 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
     // Set the text shown in the root node of the debug menu.
     const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
-    _ = std.fmt.bufPrintZ(debug_state.root_info[0..debug_state.root_info_size], "{d:0.2}ms {d}e {d}p {d}d", .{
+    _ = shared.formatString(debug_state.root_info_size, debug_state.root_info, "%.02fms %de %dp %dd", .{
         most_recent_frame.wall_seconds_elapsed * 1000,
         most_recent_frame.stored_event_count,
         most_recent_frame.profile_block_count,
         most_recent_frame.data_block_count,
-    }) catch "";
+    });
 
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;

@@ -224,6 +224,59 @@ pub fn isWhitespace(char: u32) bool {
     return char == ' ' or char == '\t' or isEndOfLine(char);
 }
 
+pub fn i32FromZ(input: [*]const u8) i32 {
+    var result: i32 = 0;
+
+    var at: [*]const u8 = input;
+    while (at[0] >= '0' and at[0] <= '9') : (at += 1) {
+        result *= 10;
+        result += at[0] - '0';
+    }
+
+    return result;
+}
+
+const FormatDest = struct {
+    size: usize,
+    at: [*]u8,
+};
+
+fn outChar(dest: *FormatDest, value: u8) void {
+    if (dest.size > 0) {
+        dest.at[0] = value;
+        dest.size -= 1;
+        dest.at += 1;
+    }
+}
+
+pub fn formatString(dest_size: usize, dest_init: [*]u8, format: [*]const u8, args: anytype) usize {
+    _ = args;
+
+    var dest: FormatDest = .{ .at = dest_init, .size = dest_size };
+
+    if (dest.size > 0) {
+        var at: [*]const u8 = format;
+        while (at[0] != 0) {
+            if (at[0] == '%') {
+                at += 1;
+            } else {
+                outChar(&dest, at[0]);
+                at += 1;
+            }
+        }
+
+        if (dest.size > 0) {
+            dest.at[0] = 0;
+        } else {
+            dest.at -= 1;
+            dest.at[0] = 0;
+            dest.at += 1;
+        }
+    }
+
+    return dest.at - dest_init;
+}
+
 test "stringsAreEqual" {
     try std.testing.expectEqual(true, stringsAreEqual("abc", "abc"));
     try std.testing.expectEqual(true, stringsAreEqual("", ""));
