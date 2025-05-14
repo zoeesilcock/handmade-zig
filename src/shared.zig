@@ -224,16 +224,23 @@ pub fn isWhitespace(char: u32) bool {
     return char == ' ' or char == '\t' or isEndOfLine(char);
 }
 
-pub fn i32FromZ(input: [*]const u8) i32 {
+pub fn i32FromZInternal(at_init: *[*]const u8) i32 {
     var result: i32 = 0;
 
-    var at: [*]const u8 = input;
+    var at: [*]const u8 = at_init.*;
     while (at[0] >= '0' and at[0] <= '9') : (at += 1) {
         result *= 10;
         result += at[0] - '0';
     }
 
+    at_init.* = at;
+
     return result;
+}
+
+pub fn i32FromZ(at_init: [*]const u8) i32 {
+    var at: [*]const u8 = at_init;
+    return i32FromZInternal(&at);
 }
 
 const FormatDest = struct {
@@ -249,8 +256,66 @@ fn outChar(dest: *FormatDest, value: u8) void {
     }
 }
 
-pub fn formatString(dest_size: usize, dest_init: [*]u8, format: [*]const u8, args: anytype) usize {
-    _ = args;
+fn readVarArgUnsignedInteger(args: anytype, index: *u32) u64 {
+    const ArgsType = @TypeOf(args);
+    const args_type_info = @typeInfo(ArgsType);
+    const fields_info = args_type_info.@"struct".fields;
+
+    var result: u64 = 0;
+    inline for (fields_info, 0..) |field, i| {
+        if (i == index.*) {
+            switch (field.type) {
+                u8, u16, u32, u64, usize => {
+                    index.* += 1;
+                    result = @field(args, field.name);
+                },
+                i8, i16, i32 => {
+                    index.* += 1;
+                    result = @intCast(@field(args, field.name));
+                },
+                else => |t| {
+                    @panic("Unexpected argument type, expected integer type. Got: " ++ @typeName(t));
+                },
+            }
+            break;
+        }
+    }
+    return result;
+}
+
+fn readVarArgSignedInteger(args: anytype, index: *u32) i64 {
+    const temp = readVarArgUnsignedInteger(args, index);
+    return @intCast(temp);
+}
+
+fn readVarArgFloat(args: anytype, index: *u32) f64 {
+    const ArgsType = @TypeOf(args);
+    const args_type_info = @typeInfo(ArgsType);
+    const fields_info = args_type_info.@"struct".fields;
+
+    var result: f64 = 0;
+    inline for (fields_info, 0..) |field, i| {
+        if (i == index.*) {
+            switch (field.type) {
+                f32, f64 => {
+                    index.* += 1;
+                    result = @field(args, field.name);
+                },
+                else => |t| {
+                    @panic("Unexpected argument type, expected float type. Got: " ++ @typeName(t));
+                },
+            }
+            break;
+        }
+    }
+    return result;
+}
+
+pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]const u8, args: anytype) usize {
+    const ArgsType = @TypeOf(args);
+    const args_type_info = @typeInfo(ArgsType);
+    const fields_info = args_type_info.@"struct".fields;
+    var arg_index: u32 = 0;
 
     var dest: FormatDest = .{ .at = dest_init, .size = dest_size };
 
@@ -259,6 +324,203 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, format: [*]const u8, arg
         while (at[0] != 0) {
             if (at[0] == '%') {
                 at += 1;
+
+                var force_sign: bool = false;
+                var pad_with_zeros: bool = false;
+                var left_justify: bool = false;
+                var positive_sign_is_blank: bool = false;
+                var annotate_if_not_zero: bool = false;
+
+                // Handle flags.
+                var parsing: bool = true;
+                while (parsing) {
+                    switch (at[0]) {
+                        '+' => force_sign = true,
+                        '0' => pad_with_zeros = true,
+                        '-' => left_justify = true,
+                        ' ' => positive_sign_is_blank = true,
+                        '#' => annotate_if_not_zero = true,
+                        else => parsing = false,
+                    }
+
+                    if (parsing) {
+                        at += 1;
+                    }
+                }
+
+                // Handle width.
+                var width_specified: bool = false;
+                var width: i32 = 0;
+                if (at[0] == '*') {
+                    if (fields_info.len > arg_index) {
+                        inline for (fields_info, 0..) |field, i| {
+                            if (i == arg_index and field.type == i32) {
+                                width = @field(args, field.name);
+                                width_specified = true;
+                                arg_index += 1;
+                            }
+                        }
+                    }
+                    at += 1;
+                } else if (at[0] >= '0' and at[0] <= '9') {
+                     width = i32FromZInternal(&at);
+                     width_specified = true;
+                }
+
+                // Handle precision.
+                var precision_specified: bool = false;
+                var precision: i32 = 0;
+                if (at[0] == '.') {
+                    at += 1;
+                    if (at[0] == '*') {
+                        if (fields_info.len > arg_index) {
+                            inline for (fields_info, 0..) |field, i| {
+                                if (i == arg_index and field.type == i32) {
+                                    precision = @field(args, field.name);
+                                    precision_specified = true;
+                                    arg_index += 1;
+                                }
+                            }
+                        }
+                        at += 1;
+                    } else if (at[0] >= '0' and at[0] <= '9') {
+                        precision = i32FromZInternal(&at);
+                        precision_specified = true;
+                    } else {
+                        @panic("Malformed precision specifier");
+                    }
+                }
+
+                // Handle length.
+                if (at[0] == 'h' and at[1] == 'h') {
+                    at += 2;
+                } else if (at[0] == 'l' and at[1] == 'l') {
+                    at += 2;
+                } else if (at[0] == 'h') {
+                    at += 1;
+                } else if (at[0] == 'l') {
+                    at += 1;
+                } else if (at[0] == 'j') {
+                    at += 1;
+                } else if (at[0] == 'z') {
+                    at += 1;
+                } else if (at[0] == 't') {
+                    at += 1;
+                } else if (at[0] == 'L') {
+                    at += 1;
+                }
+
+                switch (at[0]) {
+                    'd', 'i' => {
+                        const value: i64 = readVarArgSignedInteger(args, &arg_index);
+                        _ = value;
+                    },
+                    'u' => {
+                        const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
+                        _ = value;
+                    },
+                    'o' => {
+                        const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
+                        _ = value;
+                    },
+                    'x' => {
+                        const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
+                        _ = value;
+                    },
+                    'X' => {
+                        const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
+                        _ = value;
+                    },
+                    'f' => {
+                        const value: f64 = readVarArgFloat(args, &arg_index);
+                        _ = value;
+                    },
+                    'F' => {
+                        const value: f64 = readVarArgFloat(args, &arg_index);
+                        _ = value;
+                    },
+                    'e' => {
+                        const value: f64 = readVarArgFloat(args, &arg_index);
+                        _ = value;
+                    },
+                    'E' => {
+                        const value: f64 = readVarArgFloat(args, &arg_index);
+                        _ = value;
+                    },
+                    'g' => {
+                        const value: f64 = readVarArgFloat(args, &arg_index);
+                        _ = value;
+                    },
+                    'G' => {
+                        const value: f64 = readVarArgFloat(args, &arg_index);
+                        _ = value;
+                    },
+                    'a' => {
+                        const value: f64 = readVarArgFloat(args, &arg_index);
+                        _ = value;
+                    },
+                    'A' => {
+                        const value: f64 = readVarArgFloat(args, &arg_index);
+                        _ = value;
+                    },
+                    'c' => {
+                        if (fields_info.len > arg_index) {
+                            var value: u8 = 0;
+                            inline for (fields_info, 0..) |field, i| {
+                                if (i == arg_index and field.type == u8) {
+                                    value = @field(args, field.name);
+                                }
+                            }
+                            arg_index += 1;
+                        }
+                    },
+                    's' => {
+                        if (fields_info.len > arg_index) {
+                            var value: [*]const u8 = "";
+                            inline for (fields_info, 0..) |field, i| {
+                                if (i == arg_index and field.type == [*:0]const u8) {
+                                    value = @field(args, field.name);
+                                }
+                            }
+                            while (value[0] != 0) : (value += 1) {
+                                outChar(&dest, value[0]);
+                            }
+                            arg_index += 1;
+                        }
+                    },
+                    'p' => {
+                        if (fields_info.len > arg_index) {
+                            var value: usize = 0;
+                            inline for (fields_info, 0..) |field, i| {
+                                if (i == arg_index and field.type == @TypeOf(value)) {
+                                    value = @field(args, field.name);
+                                }
+                            }
+                            arg_index += 1;
+                        }
+                    },
+                    'n' => {
+                        if (fields_info.len > arg_index) {
+                            var value: *i32 = undefined;
+                            inline for (fields_info, 0..) |field, i| {
+                                if (i == arg_index and field.type == @TypeOf(value)) {
+                                    value = @field(args, field.name);
+                                }
+                            }
+                            arg_index += 1;
+                        }
+                    },
+                    '%' => {
+                        outChar(&dest, '%');
+                    },
+                    else => {
+                        @panic("Unrecognized format specifier");
+                    },
+                }
+
+                if (at[0] != 0) {
+                    at += 1;
+                }
             } else {
                 outChar(&dest, at[0]);
                 at += 1;

@@ -1827,18 +1827,6 @@ fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
     return 0;
 }
 
-fn doWorkerWork(queue: *shared.PlatformWorkQueue, data: *anyopaque) callconv(.C) void {
-    _ = queue;
-
-    var buffer: [256]u8 = undefined;
-    const slice = std.fmt.bufPrintZ(&buffer, "Thread {d}: {s}\n", .{
-        win32.GetCurrentThreadId(),
-        @as([*:0]const u8, @ptrCast(data)),
-    }) catch "";
-
-    win32.OutputDebugStringA(@ptrCast(slice.ptr));
-}
-
 fn outputLastError(title: []const u8) void {
     const last_error = win32.GetLastError();
 
@@ -1846,12 +1834,12 @@ fn outputLastError(title: []const u8) void {
         std.debug.print("{s}: {d}\n", .{ title, @intFromEnum(last_error) });
     } else {
         var buffer: [128]u8 = undefined;
-        const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}\n", .{
+        _ = shared.formatString(buffer.len, &buffer, "%s: %d\n", .{
             title,
             @intFromEnum(last_error),
-        }) catch "";
+        });
 
-        win32.OutputDebugStringA(@ptrCast(slice.ptr));
+        win32.OutputDebugStringA(buffer);
     }
 }
 
@@ -1862,8 +1850,8 @@ fn outputLastGLError(title: []const u8) void {
         std.debug.print("{s}: {d}\n", .{ title, last_error });
     } else {
         var buffer: [128]u8 = undefined;
-        const slice = std.fmt.bufPrintZ(&buffer, "{s}: {d}\n", .{ title, last_error }) catch "";
-        win32.OutputDebugStringA(@ptrCast(slice.ptr));
+        _ = shared.formatString(buffer.len, &buffer, "{s}: {d}\n", .{ title, last_error }) catch "";
+        win32.OutputDebugStringA(buffer);
     }
 }
 

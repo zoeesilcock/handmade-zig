@@ -1053,26 +1053,26 @@ fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *D
                 at += shared.formatString(end - at, at, "%s", .{if (event.data.bool) "true" else "false"});
             },
             .i32 => {
-                at += shared.formatString(end - at, at, "%d", .{event.data.i32});
+                at += shared.formatString(end - at, at, "%i", .{event.data.i32});
             },
             .u32 => {
-                at += shared.formatString(end - at, at, "%d", .{event.data.u32});
+                at += shared.formatString(end - at, at, "%u", .{event.data.u32});
             },
             .f32 => {
                 at += shared.formatString(end - at, at, "%f", .{event.data.f32});
             },
             .Vector2 => {
-                at += shared.formatString(end - at, at, "(%d, %d)", .{ event.data.Vector2.x(), event.data.Vector2.y() });
+                at += shared.formatString(end - at, at, "(%f, %f)", .{ event.data.Vector2.x(), event.data.Vector2.y() });
             },
             .Vector3 => {
-                at += shared.formatString(end - at, at, "(%d, %d, %d)", .{
+                at += shared.formatString(end - at, at, "(%f, %f, %f)", .{
                     event.data.Vector3.x(),
                     event.data.Vector3.y(),
                     event.data.Vector3.z(),
                 });
             },
             .Vector4 => {
-                at += shared.formatString(end - at, at, "(%d, %d, %d, %d)", .{
+                at += shared.formatString(end - at, at, "(%f, %f, %f, %f)", .{
                     event.data.Vector4.x(),
                     event.data.Vector4.y(),
                     event.data.Vector4.z(),
@@ -1080,7 +1080,7 @@ fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *D
                 });
             },
             .Rectangle2 => {
-                at += shared.formatString(end - at, at, "(%d, %d, %d, %d)", .{
+                at += shared.formatString(end - at, at, "(%f, %f, %f, %f)", .{
                     event.data.Rectangle2.min.x(),
                     event.data.Rectangle2.min.y(),
                     event.data.Rectangle2.max.x(),
@@ -1088,7 +1088,7 @@ fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *D
                 });
             },
             .Rectangle3 => {
-                at += shared.formatString(end - at, at, "(%d, %d, %d, %d, %d, %d)", .{
+                at += shared.formatString(end - at, at, "(%f, %f, %f, %f, %f, %f)", .{
                     event.data.Rectangle3.min.x(),
                     event.data.Rectangle3.min.y(),
                     event.data.Rectangle3.min.z(),
@@ -1099,7 +1099,7 @@ fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *D
             },
             .BitmapId => {},
             .Enum => {
-                at += shared.formatString(end - at, at, "%d", .{event.data.Enum});
+                at += shared.formatString(end - at, at, "%u", .{event.data.Enum});
             },
             else => {
                 at += shared.formatString(end - at, at, "UNHANDLED: %s", .{event.guid});
@@ -1179,7 +1179,7 @@ fn drawFrameSlider(
 
             if (mouse_position.isInRectangle(region_rect)) {
                 var buffer: [128]u8 = undefined;
-                _ = shared.formatString(buffer.len, &buffer, "%d", .{frame_index});
+                _ = shared.formatString(buffer.len, &buffer, "%u", .{frame_index});
                 debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
 
                 debug_state.next_hot_interaction = DebugInteraction.setUInt32(
@@ -1495,7 +1495,7 @@ fn drawTopClocksList(
         running_sum += stats.sum;
 
         var buffer: [256]u8 = undefined;
-        _ = shared.formatString(buffer.len, &buffer, "%10ucy %02.02f%% %4d %s", .{
+        _ = shared.formatString(buffer.len, &buffer, "%10fcy %02.02f%% %4d %s", .{
             stats.sum,
             percent_coefficient * stats.sum,
             stats.count,
@@ -1512,7 +1512,7 @@ fn drawTopClocksList(
         const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, @ptrCast(&buffer), at);
         if (mouse_position.isInRectangle(text_rect)) {
             _ = shared.formatString(buffer.len, &buffer, "Cumulative to this point: %02.02f%%", .{
-                percent_coefficient * running_sum
+                percent_coefficient * running_sum,
             });
             debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
         }
