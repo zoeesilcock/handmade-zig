@@ -1495,8 +1495,8 @@ fn drawTopClocksList(
         running_sum += stats.sum;
 
         var buffer: [256]u8 = undefined;
-        _ = shared.formatString(buffer.len, &buffer, "%10fcy %02.02f%% %4d %s", .{
-            stats.sum,
+        _ = shared.formatString(buffer.len, &buffer, "%10ucy %02.02f%% %4d %s", .{
+            @as(u32, @intFromFloat(stats.sum)),
             percent_coefficient * stats.sum,
             stats.count,
             element.getName(),

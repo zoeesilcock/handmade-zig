@@ -243,6 +243,22 @@ pub fn i32FromZ(at_init: [*]const u8) i32 {
     return i32FromZInternal(&at);
 }
 
+pub fn u64ToASCII(dest: *FormatDest, value_in: u64, base: u32, digits: []const u8) void {
+    std.debug.assert(base != 0);
+
+    var value: u64 = value_in;
+    var first: bool = true;
+    while (first or value != 0) {
+        first = false;
+
+        const digit_index: usize = @mod(value, base);
+        const digit = digits[digit_index];
+        outChar(dest, digit);
+
+        value = @divFloor(value, base);
+    }
+}
+
 const FormatDest = struct {
     size: usize,
     at: [*]u8,
@@ -253,6 +269,18 @@ fn outChar(dest: *FormatDest, value: u8) void {
         dest.at[0] = value;
         dest.size -= 1;
         dest.at += 1;
+    }
+}
+
+fn outChars(dest: *FormatDest, value_in: [*]const u8) void {
+    var value: [*]const u8 = value_in;
+    while (value[0] != 0) {
+        if (dest.size > 0) {
+            dest.at[0] = value[0];
+            value += 1;
+            dest.size -= 1;
+            dest.at += 1;
+        }
     }
 }
 
@@ -330,6 +358,7 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                 var left_justify: bool = false;
                 var positive_sign_is_blank: bool = false;
                 var annotate_if_not_zero: bool = false;
+                var reverse: bool = true;
 
                 // Handle flags.
                 var parsing: bool = true;
@@ -410,26 +439,60 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                     at += 1;
                 }
 
+                var temp_buffer: [64]u8 = undefined;
+                var temp: [*]u8 = &temp_buffer;
+                var temp_dest: FormatDest = .{ .at = temp, .size = temp_buffer.len };
+                var prefix: [*]const u8 = "";
+
+                const dec_chars: []const u8 = "0123456789";
+                const lower_hex_chars: []const u8 = "0123456789abcdef";
+                const upper_hex_chars: []const u8 = "0123456789ABCDEF";
+
                 switch (at[0]) {
                     'd', 'i' => {
-                        const value: i64 = readVarArgSignedInteger(args, &arg_index);
-                        _ = value;
+                        var value: i64 = readVarArgSignedInteger(args, &arg_index);
+                        const was_negative: bool = value < 0;
+                        if (was_negative) {
+                            value = -value;
+                        }
+
+                        u64ToASCII(&temp_dest, @intCast(value), 10, dec_chars);
+                        if (was_negative) {
+                            prefix = "-";
+                        } else if (force_sign) {
+                            std.debug.assert(!positive_sign_is_blank);
+                            prefix = "+";
+                        } else if (positive_sign_is_blank) {
+                            prefix = " ";
+                        }
                     },
                     'u' => {
                         const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
-                        _ = value;
+                        u64ToASCII(&temp_dest, @intCast(value), 10, dec_chars);
                     },
                     'o' => {
                         const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
-                        _ = value;
+                        u64ToASCII(&temp_dest, @intCast(value), 8, dec_chars);
+
+                        if (annotate_if_not_zero and value != 0) {
+                            prefix = "0";
+                        }
                     },
                     'x' => {
                         const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
-                        _ = value;
+                        u64ToASCII(&temp_dest, @intCast(value), 16, lower_hex_chars);
+
+                        if (annotate_if_not_zero and value != 0) {
+                            prefix = "0x";
+                        }
                     },
                     'X' => {
                         const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
-                        _ = value;
+                        u64ToASCII(&temp_dest, @intCast(value), 16, upper_hex_chars);
+
+                        if (annotate_if_not_zero and value != 0) {
+                            prefix = "0X";
+                        }
                     },
                     'f' => {
                         const value: f64 = readVarArgFloat(args, &arg_index);
@@ -469,9 +532,11 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                             inline for (fields_info, 0..) |field, i| {
                                 if (i == arg_index and field.type == u8) {
                                     value = @field(args, field.name);
+                                    outChar(&temp_dest, value);
+                                    arg_index += 1;
+                                    reverse = false;
                                 }
                             }
-                            arg_index += 1;
                         }
                     },
                     's' => {
@@ -480,12 +545,23 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                             inline for (fields_info, 0..) |field, i| {
                                 if (i == arg_index and field.type == [*:0]const u8) {
                                     value = @field(args, field.name);
+                                    temp = @constCast(value);
+
+                                    if (precision_specified) {
+                                        temp_dest.size = 0;
+                                        var scan: [*]const u8 = value;
+                                        while (scan[0] != 0 and temp_dest.size < precision) : (scan += 1) {
+                                            temp_dest.size += 1;
+                                        }
+                                    } else {
+                                        temp_dest.size = stringLength(@ptrCast(value));
+                                    }
+
+                                    temp_dest.at = @constCast(value + temp_dest.size);
+                                    arg_index += 1;
+                                    reverse = false;
                                 }
                             }
-                            while (value[0] != 0) : (value += 1) {
-                                outChar(&dest, value[0]);
-                            }
-                            arg_index += 1;
                         }
                     },
                     'p' => {
@@ -494,9 +570,10 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                             inline for (fields_info, 0..) |field, i| {
                                 if (i == arg_index and field.type == @TypeOf(value)) {
                                     value = @field(args, field.name);
+                                    u64ToASCII(&temp_dest, @intCast(value), 16, lower_hex_chars);
+                                    arg_index += 1;
                                 }
                             }
-                            arg_index += 1;
                         }
                     },
                     'n' => {
@@ -505,9 +582,10 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                             inline for (fields_info, 0..) |field, i| {
                                 if (i == arg_index and field.type == @TypeOf(value)) {
                                     value = @field(args, field.name);
+                                    value.* = dest.at - &dest_init;
+                                    arg_index += 1;
                                 }
                             }
-                            arg_index += 1;
                         }
                     },
                     '%' => {
@@ -516,6 +594,70 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                     else => {
                         @panic("Unrecognized format specifier");
                     },
+                }
+
+                if ((temp_dest.at - temp) > 0) {
+                    const prefix_length: i32 = @as(i32, @intCast(stringLength(@ptrCast(prefix))));
+                    var use_precision: i32 = precision;
+                    if (!precision_specified) {
+                        use_precision = @intCast(temp_dest.at - temp);
+                    }
+
+                    var use_width: i32 = width;
+                    if (!width_specified) {
+                        use_width = use_precision + prefix_length;
+                    }
+
+                    if (!left_justify) {
+                        while (use_width > (use_precision + prefix_length)) {
+                            outChar(&dest, if (pad_with_zeros) '0' else ' ');
+                            use_width -= 1;
+                        }
+                    }
+
+                    var pre: [*]const u8 = prefix;
+                    while (pre[0] != 0) : (pre += 1) {
+                        outChar(&dest, pre[0]);
+                        use_width -= 1;
+                    }
+
+                    if (use_precision > use_width) {
+                        use_precision = use_width;
+                    }
+
+                    while (use_precision > (temp_dest.at - temp)) {
+                        outChar(&dest, '0');
+                        use_precision -= 1;
+                        use_width -= 1;
+                    }
+
+                    if (reverse) {
+                        while (use_precision > 0 and temp_dest.at != temp) {
+                            temp_dest.at -= 1;
+                            outChar(&dest, temp_dest.at[0]);
+                            use_precision -= 1;
+                            use_width -= 1;
+                        }
+                    } else {
+                        while (use_precision > 0 and temp_dest.at != temp) {
+                            outChar(&dest, temp[0]);
+                            temp += 1;
+                            use_precision -= 1;
+                            use_width -= 1;
+                        }
+                    }
+
+                    if (pad_with_zeros) {
+                        std.debug.assert(!left_justify);
+                        left_justify = false;
+                    }
+
+                    if (left_justify) {
+                        while (use_width > 0) {
+                            outChar(&dest, ' ');
+                            use_width -= 1;
+                        }
+                    }
                 }
 
                 if (at[0] != 0) {
