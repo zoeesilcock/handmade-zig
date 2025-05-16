@@ -1495,7 +1495,7 @@ fn drawTopClocksList(
         running_sum += stats.sum;
 
         var buffer: [256]u8 = undefined;
-        _ = shared.formatString(buffer.len, &buffer, "%10ucy %02.02f%% %4d %s", .{
+        _ = shared.formatString(buffer.len, &buffer, "%10ucy %05.02f%% %4d %s", .{
             @as(u32, @intFromFloat(stats.sum)),
             percent_coefficient * stats.sum,
             stats.count,
@@ -1511,7 +1511,7 @@ fn drawTopClocksList(
 
         const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, @ptrCast(&buffer), at);
         if (mouse_position.isInRectangle(text_rect)) {
-            _ = shared.formatString(buffer.len, &buffer, "Cumulative to this point: %02.02f%%", .{
+            _ = shared.formatString(buffer.len, &buffer, "Cumulative to this point: %05.02f%%", .{
                 percent_coefficient * running_sum,
             });
             debug_ui.addTooltip(debug_state, @ptrCast(&buffer));

@@ -243,9 +243,14 @@ pub fn i32FromZ(at_init: [*]const u8) i32 {
     return i32FromZInternal(&at);
 }
 
+const dec_chars: []const u8 = "0123456789";
+const lower_hex_chars: []const u8 = "0123456789abcdef";
+const upper_hex_chars: []const u8 = "0123456789ABCDEF";
+
 pub fn u64ToASCII(dest: *FormatDest, value_in: u64, base: u32, digits: []const u8) void {
     std.debug.assert(base != 0);
 
+    var start: [*]u8 = dest.at;
     var value: u64 = value_in;
     var first: bool = true;
     while (first or value != 0) {
@@ -256,6 +261,36 @@ pub fn u64ToASCII(dest: *FormatDest, value_in: u64, base: u32, digits: []const u
         outChar(dest, digit);
 
         value = @divFloor(value, base);
+    }
+    var end: [*]u8 = dest.at;
+    while (@intFromPtr(start) < @intFromPtr(end)) {
+        end -= 1;
+        const temp: u8 = start[0];
+        end[0] = start[0];
+        start[0] = temp;
+        start += 1;
+    }
+}
+
+pub fn f64ToASCII(dest: *FormatDest, value_in: f64, precision: i32) void {
+    var value: f64 = value_in;
+    if (value < 0) {
+        value = -value;
+        outChar(dest, '-');
+    }
+
+    const integer_part: u64 = @intFromFloat(value);
+    value -= @as(f64, @floatFromInt(integer_part));
+    u64ToASCII(dest, integer_part, 10, dec_chars);
+
+    outChar(dest, '.');
+
+    var precision_index: u32 = 0;
+    while (precision_index < precision) : (precision_index += 1) {
+        value *= 10;
+        const integer: u32 = @intFromFloat(value);
+        value -= @as(f64, @floatFromInt(integer));
+        outChar(dest, dec_chars[integer]);
     }
 }
 
@@ -358,7 +393,6 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                 var left_justify: bool = false;
                 var positive_sign_is_blank: bool = false;
                 var annotate_if_not_zero: bool = false;
-                var reverse: bool = true;
 
                 // Handle flags.
                 var parsing: bool = true;
@@ -420,6 +454,11 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                     }
                 }
 
+                // Righ now our routine doesn't allow non-specified precisons.
+                if (!precision_specified) {
+                    precision = 6;
+                }
+
                 // Handle length.
                 if (at[0] == 'h' and at[1] == 'h') {
                     at += 2;
@@ -443,10 +482,7 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                 var temp: [*]u8 = &temp_buffer;
                 var temp_dest: FormatDest = .{ .at = temp, .size = temp_buffer.len };
                 var prefix: [*]const u8 = "";
-
-                const dec_chars: []const u8 = "0123456789";
-                const lower_hex_chars: []const u8 = "0123456789abcdef";
-                const upper_hex_chars: []const u8 = "0123456789ABCDEF";
+                var is_float: bool = false;
 
                 switch (at[0]) {
                     'd', 'i' => {
@@ -494,37 +530,10 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                             prefix = "0X";
                         }
                     },
-                    'f' => {
+                    'f', 'F', 'e', 'E', 'g', 'G', 'a', 'A' => {
                         const value: f64 = readVarArgFloat(args, &arg_index);
-                        _ = value;
-                    },
-                    'F' => {
-                        const value: f64 = readVarArgFloat(args, &arg_index);
-                        _ = value;
-                    },
-                    'e' => {
-                        const value: f64 = readVarArgFloat(args, &arg_index);
-                        _ = value;
-                    },
-                    'E' => {
-                        const value: f64 = readVarArgFloat(args, &arg_index);
-                        _ = value;
-                    },
-                    'g' => {
-                        const value: f64 = readVarArgFloat(args, &arg_index);
-                        _ = value;
-                    },
-                    'G' => {
-                        const value: f64 = readVarArgFloat(args, &arg_index);
-                        _ = value;
-                    },
-                    'a' => {
-                        const value: f64 = readVarArgFloat(args, &arg_index);
-                        _ = value;
-                    },
-                    'A' => {
-                        const value: f64 = readVarArgFloat(args, &arg_index);
-                        _ = value;
+                        f64ToASCII(&temp_dest, value, precision);
+                        is_float = true;
                     },
                     'c' => {
                         if (fields_info.len > arg_index) {
@@ -534,7 +543,6 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                                     value = @field(args, field.name);
                                     outChar(&temp_dest, value);
                                     arg_index += 1;
-                                    reverse = false;
                                 }
                             }
                         }
@@ -559,7 +567,6 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
 
                                     temp_dest.at = @constCast(value + temp_dest.size);
                                     arg_index += 1;
-                                    reverse = false;
                                 }
                             }
                         }
@@ -599,13 +606,14 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                 if ((temp_dest.at - temp) > 0) {
                     const prefix_length: i32 = @as(i32, @intCast(stringLength(@ptrCast(prefix))));
                     var use_precision: i32 = precision;
-                    if (!precision_specified) {
+                    if (is_float or !precision_specified) {
                         use_precision = @intCast(temp_dest.at - temp);
                     }
 
                     var use_width: i32 = width;
-                    if (!width_specified) {
-                        use_width = use_precision + prefix_length;
+                    const computed_width: i32 = use_precision + prefix_length;
+                    if (use_width < computed_width) {
+                        use_width = computed_width;
                     }
 
                     if (!left_justify) {
@@ -631,20 +639,11 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                         use_width -= 1;
                     }
 
-                    if (reverse) {
-                        while (use_precision > 0 and temp_dest.at != temp) {
-                            temp_dest.at -= 1;
-                            outChar(&dest, temp_dest.at[0]);
-                            use_precision -= 1;
-                            use_width -= 1;
-                        }
-                    } else {
-                        while (use_precision > 0 and temp_dest.at != temp) {
-                            outChar(&dest, temp[0]);
-                            temp += 1;
-                            use_precision -= 1;
-                            use_width -= 1;
-                        }
+                    while (use_precision > 0 and temp_dest.at != temp) {
+                        outChar(&dest, temp[0]);
+                        temp += 1;
+                        use_precision -= 1;
+                        use_width -= 1;
                     }
 
                     if (pad_with_zeros) {
