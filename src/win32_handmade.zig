@@ -596,12 +596,14 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
             result.debugFrameEnd = @as(@TypeOf(result.debugFrameEnd), @ptrCast(procedure));
         }
 
-        result.is_valid = result.updateAndRender != null and result.getSoundSamples != null;
+        result.is_valid =
+            result.updateAndRender != null and result.getSoundSamples != null and result.debugFrameEnd != null;
     }
 
     if (!result.is_valid) {
         result.updateAndRender = null;
         result.getSoundSamples = null;
+        result.debugFrameEnd = null;
     }
 
     return result;
@@ -2182,6 +2184,7 @@ pub export fn wWinMain(
 
                 // Load the game code.
                 var game = loadGameCode(&source_dll_path, &temp_dll_path);
+                global_debug_table.setEventRecording(game.is_valid);
 
                 running = true;
 

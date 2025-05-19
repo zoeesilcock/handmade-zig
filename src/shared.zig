@@ -101,7 +101,10 @@ pub const TicketMutex = extern struct {
 
     pub fn begin(self: *TicketMutex) void {
         const ticket = @atomicRmw(u64, &self.ticket, .Add, 1, .seq_cst);
-        while (ticket != self.serving) {}
+        while (ticket != self.serving) {
+            // TODO: This isn't implemented in Zig yet:
+            // mm_pause();
+        }
     }
 
     pub fn end(self: *TicketMutex) void {

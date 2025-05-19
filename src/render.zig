@@ -122,6 +122,22 @@ pub const SpriteEdge = struct {
     behind: u32,
 };
 
+pub const CameraParams = struct {
+    width_of_monitor: f32 = 0,
+    meters_to_pixels: f32 = 0,
+    focal_length: f32 = 0,
+
+    pub fn get(width_in_pixels: u32, focal_length: f32) CameraParams {
+        var result: CameraParams = .{};
+
+        result.width_of_monitor = 0.635;
+        result.meters_to_pixels = @as(f32, @floatFromInt(width_in_pixels)) / result.width_of_monitor;
+        result.focal_length = focal_length;
+
+        return result;
+    }
+};
+
 pub fn softwareRenderCommands(
     render_queue: *shared.PlatformWorkQueue,
     commands: *RenderCommands,

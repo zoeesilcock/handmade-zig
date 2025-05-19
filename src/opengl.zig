@@ -169,6 +169,8 @@ pub fn init(is_modern_context: bool, framebuffer_supports_sRGB: bool) Info {
         gl.glEnable(GL_FRAMEBUFFER_SRGB);
     }
 
+    gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
+
     return info;
 }
 
@@ -514,7 +516,6 @@ fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.C) u32 
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
-    gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 
@@ -626,7 +627,6 @@ pub fn displayBitmap(
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
-    gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
 
     gl.glEnable(gl.GL_TEXTURE_2D);
 

@@ -252,7 +252,13 @@ pub fn getWorldChunk(
 
     if (result == null) {
         if (opt_memory_arena) |memory_arena| {
-            result = memory_arena.pushStruct(WorldChunk, ArenaPushParams.noClear());
+            if (world.first_free_chunk == null) {
+                world.first_free_chunk = memory_arena.pushStruct(WorldChunk, ArenaPushParams.noClear());
+                world.first_free_chunk.?.next_in_hash = null;
+            }
+
+            result = world.first_free_chunk;
+            world.first_free_chunk = result.?.next_in_hash;
 
             result.?.first_block = null;
             result.?.x = chunk_x;

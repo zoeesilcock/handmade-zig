@@ -1,6 +1,7 @@
 const asset = @import("asset.zig");
 const math = @import("math.zig");
 const rendergroup = @import("rendergroup.zig");
+const render = @import("render.zig");
 const shared = @import("shared.zig");
 const world_mode = @import("world_mode.zig");
 const file_formats = @import("file_formats");
@@ -17,6 +18,7 @@ const Vector4 = math.Vector4;
 const Color = math.Color;
 const ObjectTransform = rendergroup.ObjectTransform;
 const RenderGroup = rendergroup.RenderGroup;
+const CameraParams = render.CameraParams;
 
 const SceneLayerFlags = enum(u32) {
     AtInfinity = 0x1,
@@ -357,9 +359,7 @@ fn renderLayeredScene(
     scene: *const LayeredScene,
     normal_time: f32,
 ) void {
-    const width_of_monitor_in_meters = 0.635;
-    const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) * width_of_monitor_in_meters;
-    const focal_length: f32 = 0.6;
+    const camera: CameraParams = .get(draw_buffer.width, 0.25);
     const camera_offset: Vector3 = scene.camera_start.lerp(scene.camera_end, normal_time);
     var scene_fade_value: f32 = 1;
 
@@ -370,8 +370,8 @@ fn renderLayeredScene(
 
     if (opt_render_group) |render_group| {
         render_group.perspectiveMode(
-            meters_to_pixels,
-            focal_length,
+            camera.meters_to_pixels,
+            camera.focal_length,
             0,
         );
 

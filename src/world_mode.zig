@@ -7,6 +7,7 @@ const entities = @import("entities.zig");
 const brains = @import("brains.zig");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
+const render = @import("render.zig");
 const rendergroup = @import("rendergroup.zig");
 const random = @import("random.zig");
 const intrinsics = @import("intrinsics.zig");
@@ -37,6 +38,7 @@ const BitmapId = file_formats.BitmapId;
 const RenderGroup = rendergroup.RenderGroup;
 const ObjectTransform = rendergroup.ObjectTransform;
 const TransientClipRect = rendergroup.TransientClipRect;
+const CameraParams = render.CameraParams;
 const TransientState = shared.TransientState;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
@@ -323,15 +325,13 @@ pub fn updateAndRenderWorld(
 
     const result = false;
 
-    const width_of_monitor_in_meters = 0.635;
-    const meters_to_pixels: f32 = @as(f32, @floatFromInt(draw_buffer.width)) / width_of_monitor_in_meters;
-    const focal_length: f32 = 0.3;
+    const camera: CameraParams = .get(draw_buffer.width, 0.3);
     const distance_above_ground: f32 = 11;
     const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
 
     render_group.perspectiveMode(
-        meters_to_pixels,
-        focal_length,
+        camera.meters_to_pixels,
+        camera.focal_length,
         distance_above_ground,
     );
 
