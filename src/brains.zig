@@ -11,6 +11,7 @@ var global_config = &@import("config.zig").global_config;
 
 const GameWorldMode = @import("world_mode.zig").GameModeWorld;
 const Entity = entities.Entity;
+const EntityFlags = entities.EntityFlags;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
 const ClosestEntity = sim.ClosestEntity;
@@ -53,7 +54,15 @@ pub const Brain = extern struct {
         familiar: BrainFamiliar,
         snake: BrainSnake,
     },
+
+    pub fn getEntityInSlot(self: *Brain, slot_index: u32) ?*Entity {
+        std.debug.assert(slot_index < MAX_BRAIN_SLOT_COUNT);
+        const result: ?*Entity = &self.parts.array[slot_index];
+        return result;
+    }
 };
+
+pub const MAX_BRAIN_SLOT_COUNT = (@sizeOf(Brain) - @offsetOf(Brain, "parts")) / @sizeOf(*Entity);
 
 pub const BrainId = extern struct {
     value: u32 = 0,
@@ -107,6 +116,27 @@ pub const BrainSlot = extern struct {
         return self.index != 0 and self.type == @intFromEnum(brain_type);
     }
 };
+
+pub fn markBrainActive(
+    brain: *Brain,
+) void {
+    var brain_flags: u32 = 0;
+    var slot_index: u32 = 0;
+    while (slot_index < MAX_BRAIN_SLOT_COUNT) : (slot_index += 1) {
+        if (brain.getEntityInSlot(slot_index)) |entity| {
+            brain_flags |= entity.flags;
+        }
+    }
+
+    if ((brain_flags & EntityFlags.Active.toInt()) != 0) {
+        slot_index = 0;
+        while (slot_index < MAX_BRAIN_SLOT_COUNT) : (slot_index += 1) {
+            if (brain.getEntityInSlot(slot_index)) |entity| {
+                entity.addFlags(EntityFlags.Active.toInt());
+            }
+        }
+    }
+}
 
 pub fn executeBrain(
     state: *shared.State,

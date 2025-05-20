@@ -268,7 +268,7 @@ pub fn u64ToASCII(dest: *FormatDest, value_in: u64, base: u32, digits: []const u
     var end: [*]u8 = dest.at;
     while (@intFromPtr(start) < @intFromPtr(end)) {
         end -= 1;
-        const temp: u8 = start[0];
+        const temp: u8 = end[0];
         end[0] = start[0];
         start[0] = temp;
         start += 1;

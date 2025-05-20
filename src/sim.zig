@@ -294,11 +294,13 @@ pub fn beginSimulation(
                                     dest.id = id;
                                     dest.position = dest.position.plus(chunk_delta);
 
-                                    dest.updatable = entityOverlapsRectangle(
+                                    if (entityOverlapsRectangle(
                                         dest.position,
                                         dest.collision.total_volume,
                                         sim_region.updatable_bounds,
-                                    );
+                                    )) {
+                                        dest.flags |= EntityFlags.Active.toInt();
+                                    }
 
                                     if (dest.brain_id.value != 0) {
                                         const brain: *Brain = getOrAddBrain(
@@ -399,8 +401,8 @@ fn canCollide(world_mode: *GameModeWorld, entity: *Entity, hit_entity: *Entity) 
         }
 
         // Basic rules.
-        if (a.isSet(EntityFlags.Collides.toInt()) and
-            b.isSet(EntityFlags.Collides.toInt()))
+        if (a.hasFlag(EntityFlags.Collides.toInt()) and
+            b.hasFlag(EntityFlags.Collides.toInt()))
         {
             result = true;
 
@@ -654,7 +656,7 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
         const entity = &sim_region.entities[sim_entity_index];
 
-        if (!entity.isSet(EntityFlags.Deleted.toInt())) {
+        if (!entity.hasFlag(EntityFlags.Deleted.toInt())) {
             const entity_position: world.WorldPosition =
                 world.mapIntoChunkSpace(world_mode.world, sim_region.origin, entity.position);
             var chunk_position: world.WorldPosition = entity_position;

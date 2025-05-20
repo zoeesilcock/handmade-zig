@@ -43,6 +43,7 @@ pub const EntityId = packed struct {
 pub const EntityFlags = enum(u32) {
     Collides = (1 << 0),
     Deleted = (1 << 1),
+    Active = (1 << 2),
 
     pub fn toInt(self: EntityFlags) u32 {
         return @intFromEnum(self);
@@ -88,8 +89,6 @@ pub const Entity = extern struct {
     //
     // Everything below here is not worked out yet.
     //
-
-    updatable: bool = false,
     flags: u32 = 0,
 
     position: Vector3 = Vector3.zero(),
@@ -158,10 +157,10 @@ pub const Entity = extern struct {
     }
 
     pub fn isDeleted(self: *const Entity) bool {
-        return self.isSet(EntityFlags.Deleted.toInt());
+        return self.hasFlag(EntityFlags.Deleted.toInt());
     }
 
-    pub fn isSet(self: *const Entity, flag: u32) bool {
+    pub fn hasFlag(self: *const Entity, flag: u32) bool {
         return (self.flags & flag) != 0;
     }
 
@@ -356,7 +355,7 @@ pub fn updateAndRenderEntities(
             DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
         }
 
-        if (entity.updatable) {
+        if (entity.hasFlag(EntityFlags.Active.toInt())) {
             switch (entity.movement_mode) {
                 .Planted => {},
                 .Hopping => {

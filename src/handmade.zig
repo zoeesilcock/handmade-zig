@@ -18,45 +18,22 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
-/// * Debug code.
-///     * Diagramming.
-///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
-///     * Frame view not showing bad frames?
-///     * Disable sorting!
+/// * Disable sorting for the debug view so it isn't slow.
 ///
-/// * Entity system.
-///     * What to do about geographically disperate entities that might only partially get streamed in to a sim region,
-///     but which need to move together as a unit?
-///
-/// * Audio.
-///     * Fix clicking bug at end of samples.
-///
-/// * Rendering.
-///     * What's the deal with 18,000 drawRectangle calls?
-///     * Real projections with solid concept of project/unproject.
+/// * Z-axis.
+///     * Make sure flying things can go over low walls.
 ///     * Straighten out all coordinate systems!
 ///         * Screen.
 ///         * World.
 ///         * Texture.
-///     * Particle systems.
-///     * Lighting.
-///     * Final optimization.
-///     * Hardware Rendering
-///         * Shaders?
-///         * Render-to-texture?
-///     * Pixel buffer objects for texture downloads?
 ///
-/// ----
+/// * Particle systems.
 ///
-/// Architecture exploration:
+/// * Transition to real artwork.
+///     * Clean up our notion of multi-part-entities and how they are animated.
 ///
-/// * Z-axis.
-///     * Need to make a solid concept of ground levels so thet camer can be freely placed in Z and have multiple
-///     ground levels in one sim region.
-///     * Concept of ground in the collision loop so it can handle collisions coming onto and off of stairwells.
-///     * Make sure flying things can go over low walls.
-///     * How it this rendered.
-///     * Z fudge!
+/// * Lighting.
+///
 /// * Collision detection?
 ///     * Clean up predicate proliferation! Can we make a nice clean set of flag rules so that it's easy to understnad
 ///     how things work in terms of special handling? This may involve making the iteration handle everything
@@ -67,15 +44,15 @@ const std = @import("std");
 ///     * Robustness/shape definition?
 ///     * Implement reprojection to handle interpenetration.
 ///     * Things pushing other things.
-/// * Animation.
-///     * Skeletal animation.
+///
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
 ///     * Simple zoomed-out view for testing?
+///
 /// * AI.
-///     * Pathfinding.
 ///     * AI storage.
+///
 ///
 /// Production:
 ///
@@ -83,6 +60,7 @@ const std = @import("std");
 ///     * Rudimentary world generation to understand which elements will be needed.
 ///         * Placement of background things.
 ///         * Connectivity?
+///             * Large-scale AI athfinding.
 ///         * None-overlapping?
 ///         * Map display.
 /// * Metagame/save game?
@@ -90,6 +68,28 @@ const std = @import("std");
 ///     * Persistent unlocks, etc.
 ///     * De we allo save games? Probably yes, just for "pausing".
 ///     * Continuous save for crash recovery?
+///
+///
+/// Clean up:
+///
+/// * Debug code.
+///     * Diagramming.
+///     * Draw tile chunks so we can verify things are aligned / in the chunks we want them to be in etc.
+///     * Frame view not showing bad frames?
+///
+/// * Hardware Rendering
+///     * Shaders?
+///
+///
+/// * Pixel buffer objects for texture downloads?
+///
+/// * Audio.
+///     * Fix clicking bug at end of samples.
+///
+///
+/// Extra credit.
+///
+/// * Serious optimization of the software renderer.
 ///
 
 // Build options.
