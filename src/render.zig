@@ -85,6 +85,7 @@ pub const SpriteFlag = enum(u32) {
     DebugBox = 0x40000000,
     Cycle = 0x80000000,
     IndexMask = 0x0FFFFFFF,
+    BarrierTurnsOffSorting = 0xFFFF0000,
 };
 
 pub const ManualSortKey = extern struct {
@@ -1883,6 +1884,31 @@ fn buildSpriteGraph(
     return node_index_a;
 }
 
+fn unsortedOutput(
+    walk: *SpriteGraphWalk,
+    input_node_count: u32,
+    input_nodes: [*]SortSpriteBound,
+) u32 {
+    TimedBlock.beginFunction(@src(), .UnsortedOutput);
+    defer TimedBlock.endFunction(@src(), .UnsortedOutput);
+
+    var node_index_a: u32 = 0;
+    while (node_index_a < input_node_count) : (node_index_a += 1) {
+        const a: *SortSpriteBound = @ptrCast(input_nodes + node_index_a);
+
+        if (a.offset == SPRITE_BARRIER_OFFSET_VALUE) {
+            break;
+        }
+
+        std.debug.assert(a.flags == 0);
+
+        walk.out_index[0] = a.offset;
+        walk.out_index += 1;
+    }
+
+    return node_index_a;
+}
+
 const SpriteGraphWalk = struct {
     input_nodes: [*]SortSpriteBound,
     out_index: [*]u32,
@@ -1926,6 +1952,7 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena, prep: *G
         u32,
         .aligned(@alignOf(u32), true),
     );
+    var should_sort: bool = true;
 
     if (true) {
         var walk: SpriteGraphWalk = .{
@@ -1937,22 +1964,31 @@ pub fn sortEntries(commands: *RenderCommands, temp_arena: *MemoryArena, prep: *G
         var first_index: u32 = 0;
         while (first_index < count) {
             const sub_entries: [*]SortSpriteBound = entries + first_index;
-            const sub_count: u32 = buildSpriteGraph(
-                count - first_index,
-                sub_entries,
-                temp_arena,
-                commands.width,
-                commands.height,
-            );
-            walk.input_nodes = sub_entries;
+            var sub_count: u32 = 0;
+            if (should_sort) {
+                sub_count = buildSpriteGraph(
+                    count - first_index,
+                    sub_entries,
+                    temp_arena,
+                    commands.width,
+                    commands.height,
+                );
+                walk.input_nodes = sub_entries;
 
-            var node_index_a: u32 = 0;
-            while (node_index_a < sub_count) : (node_index_a += 1) {
-                walk.hit_cycle = false;
-                recursiveFrontToBack(&walk, node_index_a);
+                var node_index_a: u32 = 0;
+                while (node_index_a < sub_count) : (node_index_a += 1) {
+                    walk.hit_cycle = false;
+                    recursiveFrontToBack(&walk, node_index_a);
+                }
+            } else {
+                sub_count = unsortedOutput(&walk, count - first_index, sub_entries);
             }
 
+            const terminator: *SortSpriteBound = &sub_entries[sub_count];
             first_index += sub_count + 1;
+            if (first_index < count) {
+                should_sort = (terminator.flags & @intFromEnum(SpriteFlag.BarrierTurnsOffSorting)) == 0;
+            }
         }
 
         prep.sorted_indices = result;

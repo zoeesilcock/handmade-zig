@@ -50,6 +50,7 @@ const ArenaPushParams = shared.ArenaPushParams;
 const SpriteBound = render.SpriteBound;
 const SortSpriteBound = render.SortSpriteBound;
 const ManualSortKey = render.ManualSortKey;
+const SpriteFlag = render.SpriteFlag;
 
 const Vec4f = math.Vec4f;
 const Vec4u = math.Vec4u;
@@ -370,11 +371,12 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-    pub fn pushSortBarrier(self: *RenderGroup) void {
+    pub fn pushSortBarrier(self: *RenderGroup, turn_off_sorting: bool) void {
         const push: PushBufferResult = self.pushBuffer(1, 0);
 
         if (push.sort_entry) |sort_entry| {
             sort_entry.offset = render.SPRITE_BARRIER_OFFSET_VALUE;
+            sort_entry.flags = if (turn_off_sorting) @intFromEnum(SpriteFlag.BarrierTurnsOffSorting) else 0;
         }
     }
 
@@ -871,11 +873,11 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushBlendRenderTarget(self: *RenderGroup, alpha: f32, source_render_target_index: u32) void {
-        self.pushSortBarrier();
+        self.pushSortBarrier(false);
         if (self.pushRenderElement(RenderEntryBlendRenderTarget, .{}, .{ .min = .zero(), .max = .zero() })) |blend| {
             blend.alpha = alpha;
             blend.source_target_index = source_render_target_index;
         }
-        self.pushSortBarrier();
+        self.pushSortBarrier(false);
     }
 };

@@ -449,7 +449,7 @@ pub fn updateAndRenderEntities(
                 if (current_absolute_z_layer != entity.z_layer) {
                     std.debug.assert(current_absolute_z_layer < entity.z_layer);
                     current_absolute_z_layer = entity.z_layer;
-                    render_group.pushSortBarrier();
+                    render_group.pushSortBarrier(false);
                 }
 
                 const layer_index: u32 = @intCast(relative_layer - minimum_level_index);

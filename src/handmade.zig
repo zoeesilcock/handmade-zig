@@ -18,8 +18,6 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
-/// * Disable sorting for the debug view so it isn't slow.
-///
 /// * Z-axis.
 ///     * Make sure flying things can go over low walls.
 ///     * Straighten out all coordinate systems!

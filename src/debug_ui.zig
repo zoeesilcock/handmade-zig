@@ -394,7 +394,6 @@ pub fn basicTextElement(
             layout_element.bounds.min.x() + border,
             layout_element.bounds.max.y() - border - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
         );
-        textOutAt(layout.debug_state, text, text_position, if (is_hot) hot_color else item_color, null);
 
         if (opt_backdrop_color) |backdrop_color| {
             layout.debug_state.render_group.pushRectangle2(
@@ -404,6 +403,7 @@ pub fn basicTextElement(
                 backdrop_color,
             );
         }
+        textOutAt(layout.debug_state, text, text_position, if (is_hot) hot_color else item_color, null);
     }
     return dim;
 }
@@ -420,7 +420,27 @@ pub fn getTextSizeAt(debug_state: *DebugState, text: [:0]const u8, at: Vector2) 
     return textOp(debug_state, .SizeText, text, at, Color.white(), null);
 }
 
-pub fn addTooltip(debug_state: *DebugState, text: [:0]const u8) void {
+pub const TooltipBuffer = struct {
+    size: usize = 0,
+    data: [*]u8 = undefined,
+};
+
+pub fn addTooltip(debug_state: *DebugState) TooltipBuffer {
+    var result: TooltipBuffer = .{
+        .size = debug_state.tooltip_text[0].len,
+    };
+
+    if (debug_state.tooltip_count < debug_state.tooltip_text.len) {
+        result.data = &debug_state.tooltip_text[debug_state.tooltip_count];
+        debug_state.tooltip_count += 1;
+    } else {
+        result.data = &debug_state.tooltip_text[debug_state.tooltip_count - 1];
+    }
+
+    return result;
+}
+
+pub fn drawTooltips(debug_state: *DebugState) void {
     var layout: *Layout = &debug_state.mouse_text_layout;
 
     if (layout.debug_state.debug_font_info) |font_info| {
@@ -429,24 +449,28 @@ pub fn addTooltip(debug_state: *DebugState, text: [:0]const u8) void {
         render_group.current_clip_rect_index = debug_state.default_clip_rect;
         defer render_group.current_clip_rect_index = old_clip_rect;
 
-        const text_bounds = getTextSize(layout.debug_state, text);
-        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+        var tooltip_index: u32 = 0;
+        while (tooltip_index < debug_state.tooltip_count) : (tooltip_index += 1) {
+            const text = debug_state.tooltip_text[tooltip_index];
+            const text_bounds = getTextSize(layout.debug_state, @ptrCast(&text));
+            var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
 
-        var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
-        layout_element.end();
+            var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
+            layout_element.end();
 
-        layout.debug_state.render_group.pushRectangle2(
-            &layout.debug_state.tooltip_transform,
-            layout_element.bounds.addRadius(.new(4, 4)),
-            0,
-            .new(0, 0, 0, 0.75),
-        );
+            layout.debug_state.render_group.pushRectangle2(
+                &layout.debug_state.tooltip_transform,
+                layout_element.bounds.addRadius(.new(4, 4)),
+                0,
+                .new(0, 0, 0, 0.75),
+            );
 
-        const text_position: Vector2 = Vector2.new(
-            layout_element.bounds.min.x(),
-            layout_element.bounds.max.y() - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
-        );
-        textOutAt(layout.debug_state, text, text_position, Color.white(), 110000);
+            const text_position: Vector2 = Vector2.new(
+                layout_element.bounds.min.x(),
+                layout_element.bounds.max.y() - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
+            );
+            textOutAt(layout.debug_state, @ptrCast(&text), text_position, Color.white(), 110000);
+        }
     }
 }
 
@@ -544,21 +568,21 @@ pub fn textOp(
 
                             if (op == .DrawText) {
                                 render_group.pushBitmapId(
-                                    &debug_state.text_transform,
-                                    bitmap_id,
-                                    bitmap_scale,
-                                    bitamp_offset,
-                                    color,
-                                    null,
-                                    null,
-                                    null,
-                                );
-                                render_group.pushBitmapId(
                                     &debug_state.shadow_transform,
                                     bitmap_id,
                                     bitmap_scale,
                                     bitamp_offset.plus(Vector3.new(2, -2, 0)),
                                     Color.black(),
+                                    null,
+                                    null,
+                                    null,
+                                );
+                                render_group.pushBitmapId(
+                                    &debug_state.text_transform,
+                                    bitmap_id,
+                                    bitmap_scale,
+                                    bitamp_offset,
+                                    color,
                                     null,
                                     null,
                                     null,

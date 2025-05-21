@@ -19,6 +19,7 @@ const DebugId = debug_interface.DebugId;
 const DebugInteraction = debug_ui.DebugInteraction;
 const Layout = debug_ui.Layout;
 const LayoutElement = debug_ui.LayoutElement;
+const TooltipBuffer = debug_ui.TooltipBuffer;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -203,6 +204,9 @@ pub const DebugState = struct {
 
     root_info_size: u32,
     root_info: [*:0]u8,
+
+    tooltip_count: u32,
+    tooltip_text: [16][256]u8,
 
     pub fn get() ?*DebugState {
         var result: ?*DebugState = null;
@@ -1178,9 +1182,8 @@ fn drawFrameSlider(
             debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, region_rect, 1, color, 2);
 
             if (mouse_position.isInRectangle(region_rect)) {
-                var buffer: [128]u8 = undefined;
-                _ = shared.formatString(buffer.len, &buffer, "%u", .{frame_index});
-                debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
+                const text_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+                _ = shared.formatString(text_buffer.size, text_buffer.data, "%u", .{frame_index});
 
                 debug_state.next_hot_interaction = DebugInteraction.setUInt32(
                     slider_id,
@@ -1277,12 +1280,11 @@ fn drawProfileBars(
         debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, region_rect, base_z + 1, Color.black(), 2);
 
         if (mouse_position.isInRectangle(region_rect)) {
-            var buffer: [128]u8 = undefined;
-            _ = shared.formatString(buffer.len, &buffer, "%s: %10ucy", .{
+            const text_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+            _ = shared.formatString(text_buffer.size, text_buffer.data, "%s: %10ucy", .{
                 element.guid,
                 node.duration,
             });
-            debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
 
             const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
             debug_state.next_hot_interaction = DebugInteraction.setPointer(
@@ -1359,12 +1361,11 @@ fn drawFrameBars(
                 );
 
                 if (mouse_position.isInRectangle(region_rect)) {
-                    var buffer: [128]u8 = undefined;
-                    _ = shared.formatString(buffer.len, &buffer, "%s: %10ucy", .{
+                    const text_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+                    _ = shared.formatString(text_buffer.size, text_buffer.data, "%s: %10ucy", .{
                         element.guid,
                         node.duration,
                     });
-                    debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
 
                     const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
                     debug_state.next_hot_interaction = DebugInteraction.setPointer(
@@ -1511,10 +1512,10 @@ fn drawTopClocksList(
 
         const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, @ptrCast(&buffer), at);
         if (mouse_position.isInRectangle(text_rect)) {
-            _ = shared.formatString(buffer.len, &buffer, "Cumulative to this point: %05.02f%%", .{
+            const text_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+            _ = shared.formatString(text_buffer.size, text_buffer.data, "Cumulative to this point: %05.02f%%", .{
                 percent_coefficient * running_sum,
             });
-            debug_ui.addTooltip(debug_state, @ptrCast(&buffer));
         }
 
         if (at.y() < profile_rect.min.y()) {
@@ -2272,6 +2273,7 @@ fn debugStart(
 
         debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
         debug_state.render_target = 0;
+        debug_state.tooltip_count = 0;
 
         if (!debug_state.paused) {
             debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
@@ -2282,6 +2284,8 @@ fn debugStart(
 fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     TimedBlock.beginFunction(@src(), .DebugEnd);
     defer TimedBlock.endFunction(@src(), .DebugEnd);
+
+    debug_state.render_group.pushSortBarrier(true);
 
     // Set the text shown in the root node of the debug menu.
     const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
@@ -2305,6 +2309,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
     interact(debug_state, input, mouse_position);
 
+    debug_ui.drawTooltips(debug_state);
     group.end();
 
     memory.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
