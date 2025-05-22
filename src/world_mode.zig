@@ -195,7 +195,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_up = false;
     var door_down = false;
 
-    for (0..4) |_| {
+    for (0..2) |screen_index| {
         const door_direction = 2;
         _ = series.randomChoice(2);
         // const door_direction = 3;
@@ -220,6 +220,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             screen_x * tiles_per_width + (tiles_per_width / 2),
             screen_y * tiles_per_height + (tiles_per_height / 2),
             abs_tile_z,
+            screen_index == 0,
         );
 
         if (true) {
@@ -513,6 +514,7 @@ fn addStandardRoom(
     abs_tile_x: i32,
     abs_tile_y: i32,
     abs_tile_z: i32,
+    add_stairs: bool,
 ) StandardRoom {
     var result: StandardRoom = .{};
     var offset_x: i32 = -8;
@@ -531,31 +533,39 @@ fn addStandardRoom(
             if (false) {
                 _ = world_position.offset.setX(world_position.offset.x() + 0.25 * world_mode.game_entropy.randomBilateral());
                 _ = world_position.offset.setY(world_position.offset.y() + 0.25 * world_mode.game_entropy.randomBilateral());
+                _ = world_position.offset.setZ(world_position.offset.z() + 0.1 * world_mode.game_entropy.randomBilateral());
             }
 
             if (offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
                 // Hole down to the floor below.
             } else {
-                if (offset_x == 3 and offset_y >= -2 and offset_y <= 2) {
+                var add: bool = true;
+                if ((offset_x == 3 or (!add_stairs and offset_x == 2)) and
+                    offset_y >= -2 and
+                    (offset_y <= 2 or (!add_stairs and offset_y <= 3)))
+                {
                     _ = world_position.offset.setZ(world_position.offset.z() + 0.5 * @as(f32, @floatFromInt(offset_y + 2)));
+                    if (!add_stairs) {
+                        add = false;
+                    }
                 }
 
-                // _ = world_position.offset.setZ(0.25 * @as(f32, @floatFromInt(offset_x + offset_y)));
-
-                if (offset_x == 2 and offset_y == 2) {
-                    const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
-                    standing_on.entity.index = entity.id;
-                    entity.traversable_count = 1;
-                    entity.traversables[0].position = Vector3.zero();
-                    entity.traversables[0].occupier = null;
-                    endEntity(world_mode, entity, world_position);
-                } else {
-                    const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
-                    standing_on.entity.index = entity.id;
-                    entity.traversable_count = 1;
-                    entity.traversables[0].position = Vector3.zero();
-                    entity.traversables[0].occupier = null;
-                    endEntity(world_mode, entity, world_position);
+                if (add) {
+                    if (offset_x == 2 and offset_y == 2) {
+                        const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                        standing_on.entity.index = entity.id;
+                        entity.traversable_count = 1;
+                        entity.traversables[0].position = Vector3.zero();
+                        entity.traversables[0].occupier = null;
+                        endEntity(world_mode, entity, world_position);
+                    } else {
+                        const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                        standing_on.entity.index = entity.id;
+                        entity.traversable_count = 1;
+                        entity.traversables[0].position = Vector3.zero();
+                        entity.traversables[0].occupier = null;
+                        endEntity(world_mode, entity, world_position);
+                    }
                 }
             }
 

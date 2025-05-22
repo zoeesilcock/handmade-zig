@@ -166,6 +166,8 @@ pub const ObjectTransform = extern struct {
     upright: bool,
     offset_position: Vector3,
     scale: f32,
+    floor_z: f32 = 0,
+    next_floor_z: f32 = 0,
     chunk_z: i32 = 0,
     manual_sort: ManualSortKey = .{},
     color_time: Color = .zero(),
@@ -217,23 +219,41 @@ fn getRenderEntityBasisPosition(
         result.scale = camera_transform.meters_to_pixels;
         result.valid = true;
     } else {
-        const offset_z: f32 = 0;
         var distance_above_target = camera_transform.distance_above_target;
 
         if (global_config.Renderer_Camera_UseDebug) {
             distance_above_target += global_config.Renderer_Camera_DebugDistance;
         }
 
-        const distance_to_position_z = distance_above_target - position.z();
+        var floor_z: f32 = 0;
+        if (false) {
+            const apron: f32 = 0.1;
+            const t_floor: f32 = math.clamp01MapToRange(
+                object_transform.next_floor_z - apron,
+                object_transform.next_floor_z,
+                position.z() - object_transform.floor_z,
+            );
+            floor_z = math.lerpf(
+                object_transform.floor_z,
+                object_transform.next_floor_z,
+                t_floor,
+            );
+        } else {
+            floor_z = object_transform.floor_z;
+        }
+
+        const distance_to_position_z: f32 = distance_above_target - floor_z;
         const near_clip_plane = 0.1;
 
-        const raw_xy = position.xy().toVector3(1);
-
         if (distance_to_position_z > near_clip_plane) {
+            const height_of_floor: f32 = position.z() - floor_z;
+            var raw_xy = position.xy().toVector3(1);
+            const ortho_y_from_z: f32 = 1;
+            _ = raw_xy.setY(raw_xy.y() + ortho_y_from_z * height_of_floor);
+
             const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * camera_transform.focal_length);
             result.scale = projected_xy.z() * camera_transform.meters_to_pixels;
-            result.position = camera_transform.screen_center.plus(projected_xy.xy().scaledTo(camera_transform.meters_to_pixels))
-                .plus(Vector2.new(0, result.scale * offset_z));
+            result.position = camera_transform.screen_center.plus(projected_xy.xy().scaledTo(camera_transform.meters_to_pixels));
             result.valid = true;
         }
     }
@@ -344,10 +364,7 @@ pub const RenderGroup = extern struct {
         self.camera_transform.meters_to_pixels = meters_to_pixels;
         self.camera_transform.focal_length = 1;
         self.camera_transform.distance_above_target = 1;
-        self.camera_transform.screen_center = Vector2.new(
-            0.5 * pixel_width,
-            0.5 * pixel_height
-        );
+        self.camera_transform.screen_center = Vector2.new(0.5 * pixel_width, 0.5 * pixel_height);
         self.camera_transform.orthographic = true;
     }
 

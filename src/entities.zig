@@ -315,12 +315,14 @@ pub fn updateAndRenderEntities(
     const fade_top_start_z: f32 = 0.5 * world_mode.typical_floor_height;
     const fade_bottom_start_z: f32 = -1 * world_mode.typical_floor_height;
     const fade_bottom_end_z: f32 = -4 * world_mode.typical_floor_height;
+    var cam_rel_ground_z: [fog_amount.len]f32 = undefined;
 
     var level_index: u32 = 0;
     while (level_index < fog_amount.len) : (level_index += 1) {
         const relative_layer_index: i32 = minimum_level_index + @as(i32, @intCast(level_index));
         const camera_relative_ground_z: f32 =
             @as(f32, @floatFromInt(relative_layer_index)) * world_mode.typical_floor_height - world_mode.camera_offset.z();
+        cam_rel_ground_z[level_index] = camera_relative_ground_z;
 
         test_alpha = math.clamp01MapToRange(
             fade_top_end_z,
@@ -461,6 +463,8 @@ pub fn updateAndRenderEntities(
                     entity_transform.color = background_color;
                     entity_transform.color_time = Color.new(1, 1, 1, 0).scaledTo(fog_amount[layer_index]);
                 }
+                entity_transform.floor_z = cam_rel_ground_z[layer_index];
+                entity_transform.next_floor_z = entity_transform.floor_z + world_mode.typical_floor_height;
 
                 var match_vector = asset.AssetVector{};
                 match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
