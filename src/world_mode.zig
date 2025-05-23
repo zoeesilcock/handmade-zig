@@ -188,14 +188,24 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var screen_x = screen_base_x;
     var screen_y = screen_base_y;
     var abs_tile_z: i32 = screen_base_z;
+
+    var last_screen_x: i32 = screen_x;
+    var last_screen_y: i32 = screen_y;
+    var last_screen_z: i32 = abs_tile_z;
+
     var door_left = false;
     var door_right = false;
     var door_top = false;
     var door_bottom = false;
     var door_up = false;
     var door_down = false;
+    var prev_room: StandardRoom = .{};
 
-    for (0..2) |screen_index| {
+    for (0..5) |screen_index| {
+        last_screen_x = screen_x;
+        last_screen_y = screen_y;
+        last_screen_z = abs_tile_z;
+
         const door_direction = 2;
         _ = series.randomChoice(2);
         // const door_direction = 3;
@@ -215,12 +225,27 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             door_top = true;
         }
 
+        var left_hole: bool = @mod(screen_index, 2) != 0;
+        var right_hole: bool = !left_hole;
+        if (screen_index == 0) {
+            left_hole = false;
+            right_hole = false;
+        }
+
+        var target_ref: TraversableReference = .{};
+        if (left_hole) {
+            target_ref = prev_room.ground[-3 + 8][1 + 4];
+        } else if (right_hole) {
+            target_ref = prev_room.ground[3 + 8][2 + 4];
+        }
         const room: StandardRoom = addStandardRoom(
             world_mode,
             screen_x * tiles_per_width + (tiles_per_width / 2),
             screen_y * tiles_per_height + (tiles_per_height / 2),
             abs_tile_z,
-            screen_index == 0,
+            left_hole,
+            right_hole,
+            target_ref,
         );
 
         if (true) {
@@ -289,6 +314,8 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         } else {
             screen_y += 1;
         }
+
+        prev_room = room;
     }
 
     if (false) {
@@ -299,9 +326,9 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         }
     }
 
-    const camera_tile_x = screen_base_x * tiles_per_width + (17 / 2);
-    const camera_tile_y = screen_base_y * tiles_per_height + (9 / 2);
-    const camera_tile_z = screen_base_z;
+    const camera_tile_x = last_screen_x * tiles_per_width + (17 / 2);
+    const camera_tile_y = last_screen_y * tiles_per_height + (9 / 2);
+    const camera_tile_z = last_screen_z;
     world_mode.camera_position = chunkPositionFromTilePosition(
         world_mode.world,
         camera_tile_x,
@@ -514,7 +541,9 @@ fn addStandardRoom(
     abs_tile_x: i32,
     abs_tile_y: i32,
     abs_tile_z: i32,
-    add_stairs: bool,
+    left_hole: bool,
+    right_hole: bool,
+    target_ref: TraversableReference,
 ) StandardRoom {
     var result: StandardRoom = .{};
     var offset_x: i32 = -8;
@@ -536,37 +565,22 @@ fn addStandardRoom(
                 _ = world_position.offset.setZ(world_position.offset.z() + 0.1 * world_mode.game_entropy.randomBilateral());
             }
 
-            if (offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
+            if (left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
+                // Hole down to the floor below.
+            } else if (right_hole and offset_x == 3 and offset_y >= -2 and offset_y <= 2) {
                 // Hole down to the floor below.
             } else {
-                var add: bool = true;
-                if ((offset_x == 3 or (!add_stairs and offset_x == 2)) and
-                    offset_y >= -2 and
-                    (offset_y <= 2 or (!add_stairs and offset_y <= 3)))
+                const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                standing_on.entity.index = entity.id;
+                entity.traversable_count = 1;
+                entity.traversables[0].position = Vector3.zero();
+                entity.traversables[0].occupier = null;
+                if ((left_hole and offset_x == -2 and offset_y == 1) or
+                    (right_hole and offset_x == 2 and offset_y == 2))
                 {
-                    _ = world_position.offset.setZ(world_position.offset.z() + 0.5 * @as(f32, @floatFromInt(offset_y + 2)));
-                    if (!add_stairs) {
-                        add = false;
-                    }
+                    entity.auto_boost_to = target_ref;
                 }
-
-                if (add) {
-                    if (offset_x == 2 and offset_y == 2) {
-                        const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
-                        standing_on.entity.index = entity.id;
-                        entity.traversable_count = 1;
-                        entity.traversables[0].position = Vector3.zero();
-                        entity.traversables[0].occupier = null;
-                        endEntity(world_mode, entity, world_position);
-                    } else {
-                        const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
-                        standing_on.entity.index = entity.id;
-                        entity.traversable_count = 1;
-                        entity.traversables[0].position = Vector3.zero();
-                        entity.traversables[0].occupier = null;
-                        endEntity(world_mode, entity, world_position);
-                    }
-                }
+                endEntity(world_mode, entity, world_position);
             }
 
             result.position[@intCast(offset_x + 8)][@intCast(offset_y + 4)] = world_position;

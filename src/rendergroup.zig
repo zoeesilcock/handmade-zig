@@ -167,7 +167,6 @@ pub const ObjectTransform = extern struct {
     offset_position: Vector3,
     scale: f32,
     floor_z: f32 = 0,
-    next_floor_z: f32 = 0,
     chunk_z: i32 = 0,
     manual_sort: ManualSortKey = .{},
     color_time: Color = .zero(),
@@ -225,23 +224,7 @@ fn getRenderEntityBasisPosition(
             distance_above_target += global_config.Renderer_Camera_DebugDistance;
         }
 
-        var floor_z: f32 = 0;
-        if (false) {
-            const apron: f32 = 0.1;
-            const t_floor: f32 = math.clamp01MapToRange(
-                object_transform.next_floor_z - apron,
-                object_transform.next_floor_z,
-                position.z() - object_transform.floor_z,
-            );
-            floor_z = math.lerpf(
-                object_transform.floor_z,
-                object_transform.next_floor_z,
-                t_floor,
-            );
-        } else {
-            floor_z = object_transform.floor_z;
-        }
-
+        const floor_z: f32 = object_transform.floor_z;
         const distance_to_position_z: f32 = distance_above_target - floor_z;
         const near_clip_plane = 0.1;
 

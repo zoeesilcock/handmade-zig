@@ -193,6 +193,7 @@ fn connectEntityPointers(sim_region: *SimRegion) void {
         }
 
         loadTraversableReference(sim_region, &entity.came_from);
+        loadTraversableReference(sim_region, &entity.auto_boost_to);
     }
 }
 

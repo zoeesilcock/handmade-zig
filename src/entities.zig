@@ -116,6 +116,7 @@ pub const Entity = extern struct {
     movement_time: f32,
     occupying: TraversableReference,
     came_from: TraversableReference,
+    auto_boost_to: TraversableReference,
 
     angle_base: Vector3,
     angle_current: f32,
@@ -464,7 +465,6 @@ pub fn updateAndRenderEntities(
                     entity_transform.color_time = Color.new(1, 1, 1, 0).scaledTo(fog_amount[layer_index]);
                 }
                 entity_transform.floor_z = cam_rel_ground_z[layer_index];
-                entity_transform.next_floor_z = entity_transform.floor_z + world_mode.typical_floor_height;
 
                 var match_vector = asset.AssetVector{};
                 match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
@@ -547,11 +547,19 @@ pub fn updateAndRenderEntities(
                     var traversable_index: u32 = 0;
                     while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
                         const traversable = entity.traversables[traversable_index];
+                        var color: Color = .new(0.05, 0.25, 0.05, 1);
+                        if (entity.auto_boost_to.getTraversable() != null) {
+                            color = .new(1, 0, 1, 1);
+                        }
+                        if (traversable.occupier != null) {
+                            color = .new(1, 0.5, 0, 1);
+                        }
+
                         render_group.pushRectangle(
                             &entity_transform,
                             Vector2.new(1.4, 1.4),
                             traversable.position,
-                            if (traversable.occupier != null) .new(1, 0.5, 0, 1) else .new(0.05, 0.25, 0.05, 1),
+                            color,
                         );
 
                         // render_group.pushRectangleOutline(
