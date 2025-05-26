@@ -18,19 +18,11 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
-/// * Z-axis.
-///     * Make sure flying things can go over low walls.
-///     * Straighten out all coordinate systems!
-///         * Screen.
-///         * World.
-///         * Texture.
-///
-/// * Particle systems.
-///
-/// * Transition to real artwork.
-///     * Clean up our notion of multi-part-entities and how they are animated.
-///
-/// * Lighting.
+/// * Graphics upgrade
+///     * Particle systems.
+///     * Transition to real artwork.
+///         * Clean up our notion of multi-part-entities and how they are animated.
+///     * Lighting.
 ///
 /// * Collision detection?
 ///     * Clean up predicate proliferation! Can we make a nice clean set of flag rules so that it's easy to understnad
@@ -42,12 +34,10 @@ const std = @import("std");
 ///     * Robustness/shape definition?
 ///     * Implement reprojection to handle interpenetration.
 ///     * Things pushing other things.
-///
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
 ///     * Simple zoomed-out view for testing?
-///
 /// * AI.
 ///     * AI storage.
 ///
@@ -61,6 +51,7 @@ const std = @import("std");
 ///             * Large-scale AI athfinding.
 ///         * None-overlapping?
 ///         * Map display.
+///     * Rigorous definition of how things move, when things trigger, etc.
 /// * Metagame/save game?
 ///     * How do you enter a save slot? Multiple profiles and potential "menu world".
 ///     * Persistent unlocks, etc.

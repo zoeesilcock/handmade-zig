@@ -359,6 +359,22 @@ pub fn updateAndRenderEntities(
         }
 
         if (entity.hasFlag(EntityFlags.Active.toInt())) {
+            if (entity.auto_boost_to.getTraversable() != null) {
+                var traversable_index: u32 = 0;
+                while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
+                    const traversable = entity.traversables[traversable_index];
+                    if (traversable.occupier) |occupier| {
+                        if (occupier.movement_mode == .Planted) {
+                            occupier.came_from = occupier.occupying;
+                            if (sim.transactionalOccupy(occupier, &occupier.occupying, entity.auto_boost_to)) {
+                                occupier.movement_time = 0;
+                                occupier.movement_mode = .Hopping;
+                            }
+                        }
+                    }
+                }
+            }
+
             switch (entity.movement_mode) {
                 .Planted => {},
                 .Hopping => {

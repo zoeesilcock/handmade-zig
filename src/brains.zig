@@ -298,8 +298,7 @@ pub fn executeBrain(
                         }
                     }
 
-                    const closest_position: Vector3 = traversable.getSimSpaceTraversable().position;
-
+                    const closest_position: Vector3 = opt_body.?.occupying.getSimSpaceTraversable().position;
                     const controller_direction = controlled_hero.controller_direction.toVector3(0);
                     var acceleration: Vector3 = controller_direction;
 

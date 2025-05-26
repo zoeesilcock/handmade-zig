@@ -201,7 +201,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
     var prev_room: StandardRoom = .{};
 
-    for (0..5) |screen_index| {
+    for (0..2) |screen_index| {
         last_screen_x = screen_x;
         last_screen_y = screen_y;
         last_screen_z = abs_tile_z;
