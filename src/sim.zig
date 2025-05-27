@@ -5,6 +5,7 @@ const intrinsics = @import("intrinsics.zig");
 const world = @import("world.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
+const particles = @import("particles.zig");
 const config = @import("config.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
@@ -34,6 +35,8 @@ const BrainId = brains.BrainId;
 const BrainType = brains.BrainType;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
+const ParticleSystem = particles.ParticleSystem;
+const ParticleCache = particles.ParticleCache;
 
 pub const SimRegion = extern struct {
     world: *World,
@@ -203,6 +206,7 @@ pub fn beginSimulation(
     origin: world.WorldPosition,
     bounds: Rectangle3,
     delta_time: f32,
+    opt_particle_cache: ?*ParticleCache,
 ) *SimRegion {
     TimedBlock.beginFunction(@src(), .BeginSimulation);
     defer TimedBlock.endFunction(@src(), .BeginSimulation);
@@ -301,6 +305,19 @@ pub fn beginSimulation(
                                         sim_region.updatable_bounds,
                                     )) {
                                         dest.flags |= EntityFlags.Active.toInt();
+
+                                        if (source.has_particle_system) {
+                                            if (opt_particle_cache) |particle_cache| {
+                                                if (particles.getOrCreateParticleSystem(
+                                                    particle_cache,
+                                                    id,
+                                                    &source.particle_spec,
+                                                    true,
+                                                )) |particle_system| {
+                                                    particles.touchParticleSystem(particle_cache, particle_system);
+                                                }
+                                            }
+                                        }
                                     }
 
                                     if (dest.brain_id.value != 0) {

@@ -5,6 +5,7 @@ const asset = @import("asset.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
 const render = @import("render.zig");
+const particles = @import("particles.zig");
 const rendergroup = @import("rendergroup.zig");
 const file_formats = @import("file_formats");
 const debug_interface = @import("debug_interface.zig");
@@ -23,6 +24,8 @@ const TransientState = shared.TransientState;
 const SimRegion = sim.SimRegion;
 const WorldPosition = world.WorldPosition;
 const ManualSortKey = render.ManualSortKey;
+const ParticleCache = particles.ParticleCache;
+const ParticleSpec = particles.ParticleSpec;
 const RenderGroup = rendergroup.RenderGroup;
 const TransientClipRect = rendergroup.TransientClipRect;
 const ObjectTransform = rendergroup.ObjectTransform;
@@ -38,6 +41,10 @@ var global_config = &@import("config.zig").global_config;
 
 pub const EntityId = packed struct {
     value: u32 = 0,
+
+    pub fn equals(self: EntityId, other: EntityId) bool {
+        return self.value == other.value;
+    }
 };
 
 pub const EntityFlags = enum(u32) {
@@ -136,6 +143,9 @@ pub const Entity = extern struct {
 
     piece_count: u32,
     pieces: [4]EntityVisiblePiece, // 0 is the "on top" piece.
+
+    has_particle_system: bool,
+    particle_spec: ParticleSpec,
 
     pub fn addPiece(
         self: *Entity,

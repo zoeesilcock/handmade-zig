@@ -18,6 +18,8 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
+/// * Arena upgrade!
+///
 /// * Graphics upgrade
 ///     * Particle systems.
 ///     * Transition to real artwork.

@@ -9,6 +9,7 @@ const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const render = @import("render.zig");
 const rendergroup = @import("rendergroup.zig");
+const particles = @import("particles.zig");
 const random = @import("random.zig");
 const intrinsics = @import("intrinsics.zig");
 const file_formats = @import("file_formats");
@@ -39,6 +40,7 @@ const RenderGroup = rendergroup.RenderGroup;
 const ObjectTransform = rendergroup.ObjectTransform;
 const TransientClipRect = rendergroup.TransientClipRect;
 const CameraParams = render.CameraParams;
+const ParticleCache = particles.ParticleCache;
 const TransientState = shared.TransientState;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
@@ -95,6 +97,7 @@ pub const GameModeWorld = struct {
     next_particle: u32 = 0,
     particles: [256]Particle = [1]Particle{Particle{}} ** 256,
     particle_cels: [PARTICLE_CEL_DIM][PARTICLE_CEL_DIM]ParticleCel = undefined,
+    particle_cache: *ParticleCache,
 
     creation_buffer_index: u32,
     creation_buffer: [4]Entity,
@@ -135,6 +138,11 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         GameModeWorld,
         ArenaPushParams.aligned(@alignOf(GameModeWorld), true),
     );
+
+    world_mode.particle_cache =
+        state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false));
+    particles.initParticleCache(world_mode.particle_cache);
+
     world_mode.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
     world_mode.game_entropy = .seed(3);
     world_mode.effects_entropy = .seed(3);
@@ -385,6 +393,7 @@ pub fn updateAndRenderWorld(
         sim_center_position,
         sim_bounds,
         input.frame_delta_time,
+        world_mode.particle_cache,
     );
 
     const camera_position: Vector3 =
@@ -466,6 +475,8 @@ pub fn updateAndRenderWorld(
         delta_time,
         mouse_position,
     );
+
+    particles.updateAndRenderParticleSystem(world_mode.particle_cache, delta_time, render_group);
 
     render_group.orthographicMode(1);
     render_group.pushRectangleOutline(
