@@ -34,7 +34,7 @@ const AssetTagId = file_formats.AssetTagId;
 const BitmapId = file_formats.BitmapId;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
-const GameWorldMode = @import("world_mode.zig").GameModeWorld;
+const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
 var global_config = &@import("config.zig").global_config;
@@ -304,7 +304,7 @@ pub const EntityCollisionVolumeGroup = extern struct {
 };
 
 pub fn updateAndRenderEntities(
-    world_mode: *GameWorldMode,
+    world_mode: *GameModeWorld,
     transient_state: *TransientState,
     render_group: *RenderGroup,
     sim_region: *SimRegion,

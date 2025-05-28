@@ -9,7 +9,7 @@ const rendergroup = @import("rendergroup.zig");
 
 var global_config = &@import("config.zig").global_config;
 
-const GameWorldMode = @import("world_mode.zig").GameModeWorld;
+const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const Entity = entities.Entity;
 const EntityFlags = entities.EntityFlags;
 const TraversableReference = entities.TraversableReference;
@@ -140,7 +140,7 @@ pub fn markBrainActive(
 
 pub fn executeBrain(
     state: *shared.State,
-    world_mode: *GameWorldMode,
+    world_mode: *GameModeWorld,
     sim_region: *SimRegion,
     input: *shared.GameInput,
     render_group: *RenderGroup,
