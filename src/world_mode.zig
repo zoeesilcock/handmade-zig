@@ -71,6 +71,7 @@ pub const GameModeWorld = struct {
 
     camera_following_entity_index: EntityId = .{},
     camera_position: WorldPosition,
+    last_camera_position: WorldPosition,
     camera_offset: Vector3,
 
     collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
@@ -140,7 +141,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
     world_mode.particle_cache =
         state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false));
-    particles.initParticleCache(world_mode.particle_cache);
+    particles.initParticleCache(world_mode.particle_cache, transient_state.assets);
 
     world_mode.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
     world_mode.game_entropy = .seed(3);
@@ -213,7 +214,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         last_screen_y = screen_y;
         last_screen_z = abs_tile_z;
 
-        const door_direction = 2;
+        const door_direction = 1;
         _ = series.randomChoice(2);
         // const door_direction = 3;
         // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
@@ -343,6 +344,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         camera_tile_z,
         null,
     );
+    world_mode.last_camera_position = world_mode.camera_position;
 
     state.mode = .{ .world = world_mode };
 }
@@ -385,7 +387,13 @@ pub fn updateAndRenderWorld(
     const sim_bounds_expansion = Vector3.new(15, 15, 15);
     const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
     const sim_memory = transient_state.arena.beginTemporaryMemory();
+
     const sim_center_position = world_mode.camera_position;
+    const frame_to_frame_camera_delta_position: Vector3 =
+        world.subtractPositions(world_mode.world, &world_mode.camera_position, &world_mode.last_camera_position);
+
+    world_mode.last_camera_position = world_mode.camera_position;
+
     const sim_region = sim.beginSimulation(
         &transient_state.arena,
         world_mode.world,
@@ -475,7 +483,13 @@ pub fn updateAndRenderWorld(
         mouse_position,
     );
 
-    particles.updateAndRenderParticleSystem(world_mode.particle_cache, delta_time, render_group);
+    particles.updateAndRenderParticleSystem(
+        world_mode.particle_cache,
+        delta_time,
+        render_group,
+        frame_to_frame_camera_delta_position.negated(),
+        &world_transform,
+    );
 
     render_group.orthographicMode(1);
     render_group.pushRectangleOutline(

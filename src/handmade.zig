@@ -22,6 +22,8 @@ const std = @import("std");
 ///
 /// * Graphics upgrade
 ///     * Particle systems.
+///         * Bug with sliding relative to the grid during camera offset?
+///         * How will floor Z's be handled?
 ///     * Transition to real artwork.
 ///         * Clean up our notion of multi-part-entities and how they are animated.
 ///     * Lighting.

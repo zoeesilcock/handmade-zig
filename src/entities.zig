@@ -25,7 +25,6 @@ const SimRegion = sim.SimRegion;
 const WorldPosition = world.WorldPosition;
 const ManualSortKey = render.ManualSortKey;
 const ParticleCache = particles.ParticleCache;
-const ParticleSpec = particles.ParticleSpec;
 const RenderGroup = rendergroup.RenderGroup;
 const TransientClipRect = rendergroup.TransientClipRect;
 const ObjectTransform = rendergroup.ObjectTransform;
@@ -143,9 +142,6 @@ pub const Entity = extern struct {
 
     piece_count: u32,
     pieces: [4]EntityVisiblePiece, // 0 is the "on top" piece.
-
-    has_particle_system: bool,
-    particle_spec: ParticleSpec,
 
     pub fn addPiece(
         self: *Entity,
@@ -410,6 +406,8 @@ pub fn updateAndRenderEntities(
                         entity.came_from = entity.occupying;
                         entity.movement_mode = .Planted;
                         entity.bob_delta_time = -2;
+
+                        particles.spawnFire(world_mode.particle_cache, entity.position);
                     }
 
                     entity.movement_time += 4 * delta_time;

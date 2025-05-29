@@ -208,6 +208,8 @@ pub fn beginSimulation(
     delta_time: f32,
     opt_particle_cache: ?*ParticleCache,
 ) *SimRegion {
+    _ = opt_particle_cache;
+
     TimedBlock.beginFunction(@src(), .BeginSimulation);
     defer TimedBlock.endFunction(@src(), .BeginSimulation);
 
@@ -305,19 +307,6 @@ pub fn beginSimulation(
                                         sim_region.updatable_bounds,
                                     )) {
                                         dest.flags |= EntityFlags.Active.toInt();
-
-                                        if (source.has_particle_system) {
-                                            if (opt_particle_cache) |particle_cache| {
-                                                if (particles.getOrCreateParticleSystem(
-                                                    particle_cache,
-                                                    id,
-                                                    &source.particle_spec,
-                                                    true,
-                                                )) |particle_system| {
-                                                    particles.touchParticleSystem(particle_cache, particle_system);
-                                                }
-                                            }
-                                        }
                                     }
 
                                     if (dest.brain_id.value != 0) {

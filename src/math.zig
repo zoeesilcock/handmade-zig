@@ -18,10 +18,6 @@ pub const Rectangle3 = Rectangle3Type(f32);
 pub const Matrix2x2 = MatrixType(2, 2);
 pub const Matrix3x3 = MatrixType(3, 3);
 
-pub const Vec4f = @Vector(4, f32);
-pub const Vec4u = @Vector(4, u32);
-pub const Vec4i = @Vector(4, i32);
-
 fn Vector2Type(comptime ScalarType: type) type {
     return extern struct {
         const Self = @This();
