@@ -44,12 +44,16 @@ pub const ParticleSystem = struct {
     bitmap_id: ?BitmapId,
 };
 
-const Particle4x = struct {
+const Particle4x = extern struct {
     p: V3_4x,
     dp: V3_4x,
     ddp: V3_4x,
     c: V4_4x,
     dc: V4_4x,
+
+    chunk_z: i32,
+    floor_z: f32,
+    pad: [2]u32,
 };
 
 pub fn initParticleCache(cache: *ParticleCache, assets: *Assets) void {
@@ -69,7 +73,7 @@ pub fn updateAndRenderParticleSystem(
     delta_time: f32,
     render_group: *RenderGroup,
     frame_displacement: Vector3,
-    transform: *ObjectTransform,
+    camera_position: Vector3,
 ) void {
     TimedBlock.beginFunction(@src(), .UpdateAndRenderParticleSystem);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderParticleSystem);
@@ -79,11 +83,11 @@ pub fn updateAndRenderParticleSystem(
         delta_time,
         frame_displacement,
         render_group,
-        transform,
+        camera_position,
     );
 }
 
-pub fn spawnFire(cache: *ParticleCache, at_position_in: Vector3) void {
+pub fn spawnFire(cache: *ParticleCache, at_position_in: Vector3, chunk_z: i32, floor_z: f32) void {
     const system: *ParticleSystem = &cache.fire_system;
     const entropy: *RandomSeries = &cache.particle_entropy;
     const at_position: V3_4x = .fromVector3(at_position_in);
@@ -119,6 +123,9 @@ pub fn spawnFire(cache: *ParticleCache, at_position_in: Vector3) void {
     a.dc.g = @splat(0);
     a.dc.b = @splat(0);
     a.dc.a = @splat(-1);
+
+    a.chunk_z = chunk_z;
+    a.floor_z = floor_z;
 }
 
 fn updateAndRenderFire(
@@ -126,9 +133,10 @@ fn updateAndRenderFire(
     delta_time: f32,
     frame_displacement_in: Vector3,
     render_group: *RenderGroup,
-    transform: *ObjectTransform,
+    camera_position: Vector3,
 ) void {
     const frame_displacement: V3_4x = .fromVector3(frame_displacement_in);
+    var transform: ObjectTransform = .defaultUpright();
 
     // const grid_scale: f32 = 0.25;
     // const inv_grid_scale: f32 = 1 / grid_scale;
@@ -258,12 +266,16 @@ fn updateAndRenderFire(
         // }
 
         // Render particle.
+        transform.chunk_z = a.chunk_z;
+        transform.floor_z = a.floor_z - camera_position.z();
+
         var sub_index: u32 = 0;
         while (sub_index < 4) : (sub_index += 1) {
             const p: Vector3 = .new(a.p.x[sub_index], a.p.y[sub_index], a.p.z[sub_index]);
             const c: Color = .new(a.c.r[sub_index], a.c.g[sub_index], a.c.b[sub_index], a.c.a[sub_index]);
+            transform.offset_position = camera_position.negated();
             if (c.a() > 0) {
-                render_group.pushBitmapId(transform, system.bitmap_id, 1, p, c, null, null, null);
+                render_group.pushBitmapId(&transform, system.bitmap_id, 1, p, c, null, null, null);
             }
         }
     }

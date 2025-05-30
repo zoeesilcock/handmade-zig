@@ -488,7 +488,7 @@ pub fn updateAndRenderWorld(
         delta_time,
         render_group,
         frame_to_frame_camera_delta_position.negated(),
-        &world_transform,
+        camera_position,
     );
 
     render_group.orthographicMode(1);

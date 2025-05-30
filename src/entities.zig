@@ -328,7 +328,7 @@ pub fn updateAndRenderEntities(
     while (level_index < fog_amount.len) : (level_index += 1) {
         const relative_layer_index: i32 = minimum_level_index + @as(i32, @intCast(level_index));
         const camera_relative_ground_z: f32 =
-            @as(f32, @floatFromInt(relative_layer_index)) * world_mode.typical_floor_height - world_mode.camera_offset.z();
+            @as(f32, @floatFromInt(relative_layer_index)) * world_mode.typical_floor_height - camera_position.z();
         cam_rel_ground_z[level_index] = camera_relative_ground_z;
 
         test_alpha = math.clamp01MapToRange(
@@ -407,7 +407,10 @@ pub fn updateAndRenderEntities(
                         entity.movement_mode = .Planted;
                         entity.bob_delta_time = -2;
 
-                        particles.spawnFire(world_mode.particle_cache, entity.position);
+                        const camera_relative_ground_z: f32 =
+                            @as(f32, @floatFromInt(entity.z_layer - sim_region.origin.chunk_z)) *
+                            world_mode.typical_floor_height - camera_position.z();
+                        particles.spawnFire(world_mode.particle_cache, entity.position, entity.z_layer, camera_relative_ground_z);
                     }
 
                     entity.movement_time += 4 * delta_time;
