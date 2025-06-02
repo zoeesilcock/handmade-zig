@@ -64,6 +64,7 @@ const BrainSnake = brains.BrainSnake;
 const BrainMonster = brains.BrainMonster;
 const BrainFamiliar = brains.BrainFamiliar;
 const ReservedBrainId = brains.ReservedBrainId;
+const SimRegion = sim.SimRegion;
 
 pub const GameModeWorld = struct {
     world: *world.World = undefined,
@@ -99,8 +100,7 @@ pub const GameModeWorld = struct {
     particle_cels: [particles.PARTICLE_CEL_DIM][particles.PARTICLE_CEL_DIM]ParticleCel = undefined,
     particle_cache: *ParticleCache,
 
-    creation_buffer_index: u32,
-    creation_buffer: [4]Entity,
+    creation_region: ?*SimRegion,
     last_used_entity_storage_index: u32,
 };
 
@@ -188,6 +188,18 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     world_mode.hero_glove_collision = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
     world_mode.monster_collsion = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
     world_mode.familiar_collsion = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
+
+    const sim_memory = transient_state.arena.beginTemporaryMemory();
+    const null_origin: WorldPosition = .zero();
+    const null_rect: Rectangle3 = .{ .min = .zero(), .max = .zero() };
+    world_mode.creation_region = sim.beginSimulation(
+        &transient_state.arena,
+        world_mode.world,
+        null_origin,
+        null_rect,
+        0,
+        null,
+    );
 
     var series = world_mode.game_entropy;
     const screen_base_x: i32 = 0;
@@ -345,6 +357,10 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         null,
     );
     world_mode.last_camera_position = world_mode.camera_position;
+
+    sim.endSimulation(world_mode, world_mode.creation_region.?);
+    world_mode.creation_region = null;
+    transient_state.arena.endTemporaryMemory(sim_memory);
 
     state.mode = .{ .world = world_mode };
 }
@@ -519,31 +535,25 @@ pub fn updateAndRenderWorld(
     return result;
 }
 
+fn allocateEntityId(world_mode: *GameModeWorld) EntityId {
+    world_mode.last_used_entity_storage_index += 1;
+    const result: EntityId = .{ .value = world_mode.last_used_entity_storage_index };
+    return result;
+}
+
 fn beginEntity(world_mode: *GameModeWorld) *Entity {
-    std.debug.assert(world_mode.creation_buffer_index < world_mode.creation_buffer.len);
-
-    var entity: *Entity = &world_mode.creation_buffer[world_mode.creation_buffer_index];
-    world_mode.creation_buffer_index += 1;
-
-    memory.zeroStruct(Entity, entity);
+    const entity: *Entity = sim.createEntity(world_mode.creation_region.?, allocateEntityId(world_mode));
 
     entity.x_axis = .new(1, 0);
     entity.y_axis = .new(0, 1);
 
-    world_mode.last_used_entity_storage_index += 1;
-    entity.id = .{ .value = world_mode.last_used_entity_storage_index };
     entity.collision = world_mode.null_collision;
 
     return entity;
 }
 
 fn endEntity(world_mode: *GameModeWorld, entity: *Entity, chunk_position: WorldPosition) void {
-    world_mode.creation_buffer_index -= 1;
-
-    std.debug.assert(@intFromPtr(entity) == @intFromPtr(&world_mode.creation_buffer[world_mode.creation_buffer_index]));
-
-    entity.position = chunk_position.offset;
-    world.packEntityIntoWorld(world_mode.world, null, entity, chunk_position);
+    entity.position = world.subtractPositions(world_mode.world, &chunk_position, &world_mode.creation_region.?.origin);
 }
 
 fn beginGroundedEntity(
@@ -623,10 +633,13 @@ fn addBrain(world_mode: *GameModeWorld) BrainId {
 
 pub fn addPlayer(
     world_mode: *GameModeWorld,
-    sim_region: *sim.SimRegion,
+    sim_region: *SimRegion,
     standing_on: TraversableReference,
     brain_id: BrainId,
 ) void {
+    world_mode.creation_region = sim_region;
+    defer world_mode.creation_region = null;
+
     const position: WorldPosition = world.mapIntoChunkSpace(
         sim_region.world,
         sim_region.origin,

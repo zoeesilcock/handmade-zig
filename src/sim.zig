@@ -56,7 +56,9 @@ pub const SimRegion = extern struct {
     brains: [*]Brain,
 
     entity_hash: [4096]EntityHash = [1]EntityHash{undefined} ** 4096,
-    brain_hash: [128]BrainHash = [1]BrainHash{undefined} ** 128,
+    brain_hash: [256]BrainHash = [1]BrainHash{undefined} ** 256,
+
+    null_entity: Entity,
 };
 
 pub const EntityHash = extern struct {
@@ -178,6 +180,24 @@ fn getOrAddBrain(sim_region: *SimRegion, brain_id: BrainId, brain_type: BrainTyp
     return result.?;
 }
 
+pub fn createEntity(sim_region: *SimRegion, id: EntityId) *Entity {
+    var result: *Entity = &sim_region.null_entity;
+
+    if (sim_region.entity_count < sim_region.max_entity_count) {
+        result = &sim_region.entities[sim_region.entity_count];
+        sim_region.entity_count += 1;
+    } else {
+        unreachable;
+    }
+
+    memory.zeroStruct(Entity, result);
+
+    result.id = id;
+    addEntityToHash(sim_region, result);
+
+    return result;
+}
+
 pub fn deleteEntity(sim_region: *SimRegion, opt_entity: ?*Entity) void {
     _ = sim_region;
     if (opt_entity) |entity| {
@@ -197,6 +217,32 @@ fn connectEntityPointers(sim_region: *SimRegion) void {
 
         loadTraversableReference(sim_region, &entity.came_from);
         loadTraversableReference(sim_region, &entity.auto_boost_to);
+    }
+}
+
+fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *EntityReference) void {
+    if (reference.ptr) |ptr| {
+        if (ptr.isDeleted()) {
+            reference.index.value = 0;
+        } else {
+            reference.index = ptr.id;
+        }
+    } else if (reference.index.value != 0) {
+        if (opt_sim_region != null and getEntityHashFromId(opt_sim_region.?, reference.index) != null) {
+            reference.index.value = 0;
+        }
+    }
+}
+
+fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *TraversableReference) void {
+    packEntityReference(opt_sim_region, &reference.entity);
+}
+
+fn addEntityToHash(sim_region: *SimRegion, entity: *Entity) void {
+    if (getEntityHashFromId(sim_region, entity.id)) |entry| {
+        std.debug.assert(entry.ptr == null);
+        entry.index = entity.id;
+        entry.ptr = entity;
     }
 }
 
@@ -276,53 +322,46 @@ pub fn beginSimulation(
                     while (opt_block) |block| {
                         var entity_index: u32 = 0;
                         while (entity_index < block.entity_count) : (entity_index += 1) {
-                            const source_address = @intFromPtr(&block.entity_data);
-                            const source_address_aligned: usize = std.mem.alignForward(usize, source_address, @alignOf(Entity));
-                            const entities_ptr: [*]Entity = @ptrFromInt(source_address_aligned);
-                            const source = &entities_ptr[entity_index];
-                            const id: EntityId = source.id;
+                            if (sim_region.entity_count < sim_region.max_entity_count) {
+                                const source_address = @intFromPtr(&block.entity_data);
+                                const source_address_aligned: usize = std.mem.alignForward(usize, source_address, @alignOf(Entity));
+                                const entities_ptr: [*]Entity = @ptrFromInt(source_address_aligned);
+                                const source = &entities_ptr[entity_index];
+                                const id: EntityId = source.id;
+                                const dest: *Entity = &sim_region.entities[sim_region.entity_count];
+                                sim_region.entity_count += 1;
 
-                            if (getEntityHashFromId(sim_region, id)) |entry| {
-                                std.debug.assert(entry.ptr == null);
+                                dest.* = source.*;
 
-                                if (sim_region.entity_count < sim_region.max_entity_count) {
-                                    const dest: *Entity = &sim_region.entities[sim_region.entity_count];
-                                    sim_region.entity_count += 1;
+                                dest.id = id;
+                                dest.z_layer = chunk_z;
 
-                                    entry.index = id;
-                                    entry.ptr = dest;
+                                dest.manual_sort = .{};
 
-                                    dest.* = source.*;
+                                addEntityToHash(sim_region, dest);
+                                dest.position = dest.position.plus(chunk_delta);
 
-                                    dest.z_layer = chunk_z;
-
-                                    dest.manual_sort = .{};
-
-                                    dest.id = id;
-                                    dest.position = dest.position.plus(chunk_delta);
-
-                                    if (entityOverlapsRectangle(
+                                if (entityOverlapsRectangle(
                                         dest.position,
                                         dest.collision.total_volume,
                                         sim_region.updatable_bounds,
-                                    )) {
-                                        dest.flags |= EntityFlags.Active.toInt();
-                                    }
-
-                                    if (dest.brain_id.value != 0) {
-                                        const brain: *Brain = getOrAddBrain(
-                                            sim_region,
-                                            dest.brain_id,
-                                            @enumFromInt(dest.brain_slot.type),
-                                        );
-                                        var ptr = @intFromPtr(&brain.parts.array);
-                                        ptr += @sizeOf(*Entity) * dest.brain_slot.index;
-                                        std.debug.assert(ptr <= @intFromPtr(brain) + @sizeOf(Brain) - @sizeOf(*Entity));
-                                        @as(**Entity, @ptrFromInt(ptr)).* = dest;
-                                    }
-                                } else {
-                                    unreachable;
+                                )) {
+                                    dest.flags |= EntityFlags.Active.toInt();
                                 }
+
+                                if (dest.brain_id.value != 0) {
+                                    const brain: *Brain = getOrAddBrain(
+                                        sim_region,
+                                        dest.brain_id,
+                                        @enumFromInt(dest.brain_slot.type),
+                                    );
+                                    var ptr = @intFromPtr(&brain.parts.array);
+                                    ptr += @sizeOf(*Entity) * dest.brain_slot.index;
+                                    std.debug.assert(ptr <= @intFromPtr(brain) + @sizeOf(Brain) - @sizeOf(*Entity));
+                                    @as(**Entity, @ptrFromInt(ptr)).* = dest;
+                                }
+                            } else {
+                                unreachable;
                             }
                         }
 
@@ -741,7 +780,15 @@ pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
 
             // const old_entity_position: Vector3 = entity.position;
             entity.position = entity.position.plus(chunk_delta);
-            world.packEntityIntoWorld(world_mode.world, sim_region, entity, entity_position);
+            var dest_e: *Entity = world.useChunkSpaceAt(world_mode.world, @sizeOf(Entity), chunk_position);
+
+            dest_e.* = entity.*;
+            packTraversableReference(sim_region, &dest_e.occupying);
+            packTraversableReference(sim_region, &dest_e.came_from);
+            packTraversableReference(sim_region, &dest_e.auto_boost_to);
+
+            dest_e.acceleration = .zero();
+            dest_e.bob_acceleration = 0;
 
             // const reverse_chunk_delta: Vector3 =
             //     world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);

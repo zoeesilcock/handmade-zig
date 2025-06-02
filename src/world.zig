@@ -134,33 +134,12 @@ pub fn areInSameChunk(world: *World, a: *const WorldPosition, b: *const WorldPos
         a.chunk_z == b.chunk_z;
 }
 
-fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *EntityReference) void {
-    if (reference.ptr) |ptr| {
-        if (ptr.isDeleted()) {
-            reference.index.value = 0;
-        } else {
-            reference.index = ptr.id;
-        }
-    } else if (reference.index.value != 0) {
-        if (opt_sim_region != null and sim.getEntityHashFromId(opt_sim_region.?, reference.index) != null) {
-            reference.index.value = 0;
-        }
-    }
-}
-
-fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *TraversableReference) void {
-    packEntityReference(opt_sim_region, &reference.entity);
-}
-
-fn packEntityIntoChunk(
+fn useChunkSpace(
     world: *World,
-    opt_sim_region: ?*SimRegion,
-    source: *Entity,
+    size: u32,
     chunk: *WorldChunk,
-) void {
-    const pack_size: u32 = @sizeOf(Entity);
-
-    if (chunk.first_block == null or !chunk.first_block.?.hasRoomFor(pack_size)) {
+) *Entity {
+    if (chunk.first_block == null or !chunk.first_block.?.hasRoomFor(size)) {
         if (world.first_free_block == null) {
             world.first_free_block = world.arena.pushStruct(WorldEntityBlock, null);
             world.first_free_block.?.next = null;
@@ -180,7 +159,7 @@ fn packEntityIntoChunk(
     const dest_address = @intFromPtr(&block.entity_data) + block.entity_data_size;
     const dest: usize = std.mem.alignForward(usize, dest_address, @alignOf(Entity));
     const aligned_offset = dest - dest_address;
-    const aligned_size = pack_size + aligned_offset;
+    const aligned_size = size + aligned_offset;
 
     // If we hit this assertion it means that there was space for the unaligned size, but not once it was aligned.
     std.debug.assert(block.hasRoomFor(@intCast(aligned_size)));
@@ -188,25 +167,17 @@ fn packEntityIntoChunk(
     block.entity_count += 1;
     block.entity_data_size += @intCast(aligned_size);
 
-    var dest_e: *Entity = @ptrFromInt(dest);
-    dest_e.* = source.*;
-    packTraversableReference(opt_sim_region, &dest_e.occupying);
-    packTraversableReference(opt_sim_region, &dest_e.came_from);
-    packTraversableReference(opt_sim_region, &dest_e.auto_boost_to);
-
-    dest_e.acceleration = .zero();
-    dest_e.bob_acceleration = 0;
+    return @ptrFromInt(dest);
 }
 
-pub fn packEntityIntoWorld(
+pub fn useChunkSpaceAt(
     world: *World,
-    opt_sim_region: ?*SimRegion,
-    source: *Entity,
+    size: u32,
     at: WorldPosition,
-) void {
+) *Entity {
     const chunk: ?*WorldChunk = getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, &world.arena);
     std.debug.assert(chunk != null);
-    packEntityIntoChunk(world, opt_sim_region, source, chunk.?);
+    return useChunkSpace(world, size, chunk.?);
 }
 
 pub fn addChunkToFreeList(

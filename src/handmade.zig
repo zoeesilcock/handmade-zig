@@ -18,6 +18,11 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
+/// * Bug in traversables where trees aren't occupying their spots?
+/// * Implement multiple sim regions per frame.
+///     * Per-entity clocking.
+///     * Sim region merging? For multiple players?
+///
 /// * Arena upgrade!
 ///
 /// * Graphics upgrade
@@ -38,10 +43,7 @@ const std = @import("std");
 ///     * Robustness/shape definition?
 ///     * Implement reprojection to handle interpenetration.
 ///     * Things pushing other things.
-/// * Implement multiple sim regions per frame.
-///     * Per-entity clocking.
-///     * Sim region merging? For multiple players?
-///     * Simple zoomed-out view for testing?
+///
 /// * AI.
 ///     * AI storage.
 ///
