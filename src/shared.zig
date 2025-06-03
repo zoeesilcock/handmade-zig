@@ -20,6 +20,7 @@ const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const cutscene = @import("cutscene.zig");
 const random = @import("random.zig");
+const debug = @import("debug.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
@@ -1010,9 +1011,8 @@ pub const Memory = struct {
     transient_storage_size: u64,
     transient_storage: ?[*]u8,
 
-    debug_storage_size: u64,
-    debug_storage: ?[*]u8,
     debug_table: *DebugTable,
+    debug_state: ?*debug.DebugState = null,
 
     high_priority_queue: *PlatformWorkQueue,
     low_priority_queue: *PlatformWorkQueue,

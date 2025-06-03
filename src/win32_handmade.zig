@@ -2078,11 +2078,10 @@ pub export fn wWinMain(
                 .permanent_storage = null,
                 .transient_storage_size = shared.gigabytes(1),
                 .transient_storage = null,
-                .debug_storage_size = shared.megabytes(256),
-                .debug_storage = null,
                 .debug_table = if (INTERNAL) global_debug_table else undefined,
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
+                .debug_state = null,
             };
 
             const texture_op_count: u32 = 1024;
@@ -2101,7 +2100,7 @@ pub export fn wWinMain(
                 op[0].next = @ptrCast(first_free + texture_op_index + 1);
             }
 
-            state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size + game_memory.debug_storage_size;
+            state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
             const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
             state.game_memory_block = win32.VirtualAlloc(
                 base_address,
@@ -2113,7 +2112,6 @@ pub export fn wWinMain(
             if (state.game_memory_block) |memory_block| {
                 game_memory.permanent_storage = @ptrCast(memory_block);
                 game_memory.transient_storage = @as([*]u8, @ptrCast(memory_block)) + game_memory.permanent_storage_size;
-                game_memory.debug_storage = game_memory.transient_storage.? + game_memory.transient_storage_size;
             }
 
             for (0..state.replay_buffers.len) |index| {

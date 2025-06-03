@@ -186,12 +186,7 @@ pub export fn updateAndRender(
             .test_normal = undefined,
         };
 
-        var total_arena: MemoryArena = MemoryArena{
-            .size = undefined,
-            .base = undefined,
-            .used = undefined,
-            .temp_count = undefined,
-        };
+        var total_arena: MemoryArena = MemoryArena{};
         total_arena.initialize(
             game_memory.permanent_storage_size - @sizeOf(State),
             game_memory.permanent_storage.? + @sizeOf(State),

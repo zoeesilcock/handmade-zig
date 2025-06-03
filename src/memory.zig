@@ -52,16 +52,26 @@ pub const ArenaPushParams = extern struct {
 };
 
 pub const MemoryArena = extern struct {
-    size: MemoryIndex,
-    base: [*]u8,
-    used: MemoryIndex,
-    temp_count: i32,
+    size: MemoryIndex = 0,
+    base: [*]u8 = undefined,
+    used: MemoryIndex = 0,
+    minimum_block_size: MemoryIndex = 0,
+    temp_count: i32 = 0,
 
     pub fn initialize(self: *MemoryArena, size: MemoryIndex, base: [*]u8) void {
         self.size = size;
         self.base = @ptrCast(base);
         self.used = 0;
         self.temp_count = 0;
+        self.minimum_block_size = 0;
+    }
+
+    pub fn initializeWithMinimumBlockSize(self: *MemoryArena, minimum_block_size: MemoryIndex) void {
+        self.size = 0;
+        self.base = undefined;
+        self.used = 0;
+        self.temp_count = 0;
+        self.minimum_block_size = minimum_block_size;
     }
 
     fn getAlignmentOffset(self: *MemoryArena, alignment: MemoryIndex) MemoryIndex {
@@ -102,13 +112,27 @@ pub const MemoryArena = extern struct {
 
     pub fn pushSize(self: *MemoryArena, size: MemoryIndex, in_params: ?ArenaPushParams) [*]u8 {
         const params = in_params orelse ArenaPushParams.default();
-        const aligned_size = self.getEffectiveSizeFor(size, params);
+        var aligned_size = self.getEffectiveSizeFor(size, params);
+
+        if ((self.used + aligned_size) > self.size) {
+            if (self.minimum_block_size == 0) {
+                self.minimum_block_size = 1024 * 1024;
+            }
+
+            aligned_size = size; // The base will automatically be aligned now.
+            const block_size: MemoryIndex = @max(aligned_size, self.minimum_block_size);
+            self.size = block_size;
+            self.base = @ptrCast(shared.platform.allocateMemory(block_size).?);
+            self.used = 0;
+        }
 
         std.debug.assert((self.used + aligned_size) <= self.size);
 
         const alignment_offset = self.getAlignmentOffset(params.alignment);
         const result: [*]u8 = @ptrCast(self.base + self.used + alignment_offset);
         self.used += aligned_size;
+
+        std.debug.assert(aligned_size >= size);
 
         if (params.flags & @intFromEnum(ArenaPushFlag.ClearToZero) != 0) {
             zeroSize(size, @ptrCast(result));

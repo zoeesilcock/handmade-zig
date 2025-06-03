@@ -137,8 +137,6 @@ const ElementAddOp = enum(u32) {
 };
 
 pub const DebugState = struct {
-    initialized: bool,
-
     debug_arena: MemoryArena,
     per_frame_arena: MemoryArena,
 
@@ -212,11 +210,7 @@ pub const DebugState = struct {
         var result: ?*DebugState = null;
 
         if (shared.debug_global_memory) |debug_memory| {
-            result = @ptrCast(@alignCast(debug_memory.debug_storage));
-
-            if (!result.?.initialized) {
-                result = null;
-            }
+            result = @ptrCast(@alignCast(debug_memory.debug_state));
         }
 
         return result;
@@ -281,14 +275,18 @@ pub const DebugState = struct {
             if (result != null) {
                 self.first_free_stored_event = result.?.next;
             } else {
-                if (self.per_frame_arena.hasRoomFor(@sizeOf(DebugStoredEvent), null)) {
-                    result = self.per_frame_arena.pushStruct(
-                        DebugStoredEvent,
-                        ArenaPushParams.aligned(@alignOf(DebugStoredEvent), true),
-                    );
-                } else {
-                    self.freeOldestFrame();
-                }
+                // if (self.per_frame_arena.hasRoomFor(@sizeOf(DebugStoredEvent), null)) {
+                //     result = self.per_frame_arena.pushStruct(
+                //         DebugStoredEvent,
+                //         ArenaPushParams.aligned(@alignOf(DebugStoredEvent), true),
+                //     );
+                // } else {
+                //     self.freeOldestFrame();
+                // }
+                result = self.per_frame_arena.pushStruct(
+                    DebugStoredEvent,
+                    ArenaPushParams.aligned(@alignOf(DebugStoredEvent), true),
+                );
             }
         }
 
@@ -2143,6 +2141,41 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     debug_state.interaction.data = .{ .tree = null };
 }
 
+fn debugInit(
+    width: i32,
+    height: i32,
+) *DebugState {
+    var bootstrap: MemoryArena = .{};
+    var debug_state: *DebugState = bootstrap.pushStruct(DebugState, ArenaPushParams.aligned(@alignOf(DebugState), true));
+    debug_state.debug_arena = bootstrap;
+
+    debug_state.collation_frame_ordinal = 1;
+
+    debug_state.tree_sentinel.next = &debug_state.tree_sentinel;
+    debug_state.tree_sentinel.prev = &debug_state.tree_sentinel;
+
+    memory.zeroStruct(MemoryArena, &debug_state.per_frame_arena);
+
+    debug_state.root_group = debug_state.createVariableLink(4, "Root");
+    debug_state.root_info_size = 256;
+    debug_state.root_info = @ptrCast(debug_state.debug_arena.pushSize(debug_state.root_info_size, null));
+    debug_state.root_group.name = debug_state.root_info;
+
+    debug_state.profile_group = debug_state.createVariableLink(7, "Profile");
+
+    var root_profile_event: DebugEvent = .{
+        .guid = DebugEvent.debugName(@src(), .RootProfile, "RootProfile"),
+    };
+    debug_state.root_profile_element = debug_state.getElementFromEvent(&root_profile_event, null, 0);
+
+    _ = debug_state.addTree(
+        debug_state.root_group,
+        Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
+    );
+
+    return debug_state;
+}
+
 fn debugStart(
     debug_state: *DebugState,
     commands: *shared.RenderCommands,
@@ -2154,130 +2187,46 @@ fn debugStart(
     TimedBlock.beginFunction(@src(), .DebugStart);
     defer TimedBlock.endFunction(@src(), .DebugStart);
 
-    if (shared.debug_global_memory) |debug_memory| {
-        if (!debug_state.initialized) {
-            debug_state.frame_bar_lane_count = 0;
-            debug_state.first_thread = null;
-            debug_state.first_free_thread = null;
-            debug_state.first_free_block = null;
+    debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id, false, width, height);
 
-            debug_state.total_frame_count = 0;
-            debug_state.most_recent_frame_ordinal = 0;
-            debug_state.collation_frame_ordinal = 1;
-            debug_state.oldest_frame_ordinal = 0;
+    if (debug_state.render_group.pushFont(debug_state.font_id)) |font| {
+        debug_state.debug_font = font;
+        debug_state.debug_font_info = debug_state.render_group.assets.getFontInfo(debug_state.font_id);
+    }
 
-            debug_state.tree_sentinel.next = &debug_state.tree_sentinel;
-            debug_state.tree_sentinel.prev = &debug_state.tree_sentinel;
-            debug_state.tree_sentinel.group = null;
+    debug_state.global_width = @floatFromInt(width);
+    debug_state.global_height = @floatFromInt(height);
 
-            const total_memory_size: MemoryIndex = debug_memory.debug_storage_size - @sizeOf(DebugState);
-            debug_state.debug_arena.initialize(
-                total_memory_size,
-                debug_memory.debug_storage.? + @sizeOf(DebugState),
-            );
-            debug_state.debug_arena.makeSubArena(
-                &debug_state.per_frame_arena,
-                total_memory_size / 2,
-                // 8 * 1024 * 1024,
-                null,
-            );
+    var match_vector = asset.AssetVector{};
+    var weight_vector = asset.AssetVector{};
+    match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
+    weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
+    if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
+        debug_state.font_id = id;
+    }
 
-            debug_state.root_group = debug_state.createVariableLink(4, "Root");
-            debug_state.root_info_size = 256;
-            debug_state.root_info = @ptrCast(debug_state.debug_arena.pushSize(debug_state.root_info_size, null));
-            debug_state.root_group.name = debug_state.root_info;
+    debug_state.font_scale = 1;
+    debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
+    debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
+    debug_state.render_group.orthographicMode(1);
 
-            debug_state.profile_group = debug_state.createVariableLink(7, "Profile");
+    debug_state.backing_transform = ObjectTransform.defaultFlat();
+    debug_state.shadow_transform = ObjectTransform.defaultFlat();
+    debug_state.ui_transform = ObjectTransform.defaultFlat();
+    debug_state.text_transform = ObjectTransform.defaultFlat();
+    debug_state.tooltip_transform = ObjectTransform.defaultFlat();
+    debug_state.backing_transform.chunk_z = 100000;
+    debug_state.shadow_transform.chunk_z = 200000;
+    debug_state.ui_transform.chunk_z = 300000;
+    debug_state.text_transform.chunk_z = 400000;
+    debug_state.tooltip_transform.chunk_z = 500000;
 
-            // var context: debug_variables.DebugVariableDefinitionContext = .{
-            //     .state = debug_state,
-            //     .arena = &debug_state.debug_arena,
-            // };
-            // debug_state.root_group = debug_variables.beginVariableGroup(&context, "Root");
-            // _ = debug_variables.beginVariableGroup(&context, "Debugging");
-            //
-            // debug_variables.createDebugVariables(&context);
-            //
-            // _ = debug_variables.beginVariableGroup(&context, "Profile");
-            // {
-            //     _ = debug_variables.beginVariableGroup(&context, "By Thread");
-            //     _ = debug_variables.addDebugVariableToContext(&context, .CounterThreadList, "");
-            //     debug_variables.endVariableGroup(&context);
-            //
-            //     _ = debug_variables.beginVariableGroup(&context, "By Function");
-            //     _ = debug_variables.addDebugVariableToContext(&context, .CounterThreadList, "");
-            //     debug_variables.endVariableGroup(&context);
-            // }
-            // debug_variables.endVariableGroup(&context);
-            //
-            // var match_vector = asset.AssetVector{};
-            // match_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 0;
-            // var weight_vector = asset.AssetVector{};
-            // weight_vector.e[file_formats.AssetTagId.FacingDirection.toInt()] = 1;
-            // if (assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector)) |id| {
-            //     _ = debug_variables.addDebugVariableBitmap(&context, "Test Bitmap", id);
-            // }
-            //
-            // debug_variables.endVariableGroup(&context);
-            // debug_variables.endVariableGroup(&context);
-            // std.debug.assert(context.group_depth == 0);
+    debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
+    debug_state.render_target = 0;
+    debug_state.tooltip_count = 0;
 
-            var root_profile_event: DebugEvent = .{
-                .guid = DebugEvent.debugName(@src(), .RootProfile, "RootProfile"),
-            };
-            debug_state.root_profile_element = debug_state.getElementFromEvent(&root_profile_event, null, 0);
-
-            debug_state.paused = false;
-
-            debug_state.initialized = true;
-
-            _ = debug_state.addTree(
-                debug_state.root_group,
-                Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
-            );
-        }
-
-        debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id, false, width, height);
-
-        if (debug_state.render_group.pushFont(debug_state.font_id)) |font| {
-            debug_state.debug_font = font;
-            debug_state.debug_font_info = debug_state.render_group.assets.getFontInfo(debug_state.font_id);
-        }
-
-        debug_state.global_width = @floatFromInt(width);
-        debug_state.global_height = @floatFromInt(height);
-
-        var match_vector = asset.AssetVector{};
-        var weight_vector = asset.AssetVector{};
-        match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
-        weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
-        if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
-            debug_state.font_id = id;
-        }
-
-        debug_state.font_scale = 1;
-        debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
-        debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-        debug_state.render_group.orthographicMode(1);
-
-        debug_state.backing_transform = ObjectTransform.defaultFlat();
-        debug_state.shadow_transform = ObjectTransform.defaultFlat();
-        debug_state.ui_transform = ObjectTransform.defaultFlat();
-        debug_state.text_transform = ObjectTransform.defaultFlat();
-        debug_state.tooltip_transform = ObjectTransform.defaultFlat();
-        debug_state.backing_transform.chunk_z = 100000;
-        debug_state.shadow_transform.chunk_z = 200000;
-        debug_state.ui_transform.chunk_z = 300000;
-        debug_state.text_transform.chunk_z = 400000;
-        debug_state.tooltip_transform.chunk_z = 500000;
-
-        debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
-        debug_state.render_target = 0;
-        debug_state.tooltip_count = 0;
-
-        if (!debug_state.paused) {
-            debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
-        }
+    if (!debug_state.paused) {
+        debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
     }
 }
 
@@ -2355,9 +2304,11 @@ pub fn frameEnd(
 
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
 
-    if (game_memory.debug_storage) |debug_storage| {
-        const debug_state: *DebugState = @ptrCast(@alignCast(debug_storage));
+    if (game_memory.debug_state == null) {
+        game_memory.debug_state = debugInit(@intCast(commands.width), @intCast(commands.height));
+    }
 
+    if (game_memory.debug_state) |debug_state| {
         if (getGameAssets(game_memory)) |assets| {
             debugStart(
                 debug_state,
