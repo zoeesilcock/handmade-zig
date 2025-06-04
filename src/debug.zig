@@ -2145,9 +2145,11 @@ fn debugInit(
     width: i32,
     height: i32,
 ) *DebugState {
-    var bootstrap: MemoryArena = .{};
-    var debug_state: *DebugState = bootstrap.pushStruct(DebugState, ArenaPushParams.aligned(@alignOf(DebugState), true));
-    debug_state.debug_arena = bootstrap;
+    var debug_state: *DebugState = memory.bootstrapPushStruct(
+        DebugState,
+        "debug_arena",
+        ArenaPushParams.aligned(@alignOf(DebugState), true),
+    );
 
     debug_state.collation_frame_ordinal = 1;
 
@@ -2266,9 +2268,8 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
 fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {
     var assets: ?*asset.Assets = null;
-    const transient_state: *shared.TransientState = @ptrCast(@alignCast(game_memory.transient_storage));
 
-    if (transient_state.is_initialized) {
+    if (game_memory.transient_state) |transient_state| {
         assets = transient_state.assets;
     }
 
@@ -2277,9 +2278,8 @@ fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {
 
 fn getMainGenerationID(game_memory: *shared.Memory) u32 {
     var result: u32 = 0;
-    const transient_state: *shared.TransientState = @ptrCast(@alignCast(game_memory.transient_storage));
 
-    if (transient_state.is_initialized) {
+    if (game_memory.transient_state) |transient_state| {
         result = transient_state.main_generation_id;
     }
 

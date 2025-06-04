@@ -1005,11 +1005,8 @@ pub const ControllerButtonState = extern struct {
 
 // Game state.
 pub const Memory = struct {
-    permanent_storage_size: u64,
-    permanent_storage: ?[*]u8,
-
-    transient_storage_size: u64,
-    transient_storage: ?[*]u8,
+    game_state: ?*State = null,
+    transient_state: ?*TransientState = null,
 
     debug_table: *DebugTable,
     debug_state: ?*debug.DebugState = null,
@@ -1022,7 +1019,7 @@ pub const Memory = struct {
 };
 
 pub const State = struct {
-    is_initialized: bool = false,
+    total_arena: MemoryArena = undefined,
     audio_arena: MemoryArena = undefined,
     mode_arena: MemoryArena = undefined,
 

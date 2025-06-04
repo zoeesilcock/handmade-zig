@@ -18,12 +18,17 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
+/// * Arena upgrade!
+///     * Looped live code editing support.
+///     * Show on profile?
+///     * Clean up where arenas are used and how.
+///
+/// * Cutscenes now malfunctioning?
 /// * Bug in traversables where trees aren't occupying their spots?
+///
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
-///
-/// * Arena upgrade!
 ///
 /// * Graphics upgrade
 ///     * Particle systems.
@@ -178,35 +183,27 @@ pub export fn updateAndRender(
 
     input.frame_delta_time *= (config.global_config.Simulation_TimestepPercentage / 100);
 
-    std.debug.assert(@sizeOf(State) <= game_memory.permanent_storage_size);
-    const state: *State = @ptrCast(@alignCast(game_memory.permanent_storage));
-    if (!state.is_initialized) {
-        state.* = State{
-            .test_diffuse = undefined,
-            .test_normal = undefined,
-        };
-
-        var total_arena: MemoryArena = MemoryArena{};
-        total_arena.initialize(
-            game_memory.permanent_storage_size - @sizeOf(State),
-            game_memory.permanent_storage.? + @sizeOf(State),
+    var state: *State = game_memory.game_state orelse undefined;
+    if (game_memory.game_state == null) {
+        state = memory.bootstrapPushStruct(
+            State,
+            "total_arena",
+            ArenaPushParams.aligned(@alignOf(State), true),
         );
-        total_arena.makeSubArena(&state.audio_arena, shared.megabytes(1), null);
-        total_arena.makeSubArena(&state.mode_arena, total_arena.getRemainingSize(null), null);
+        game_memory.game_state = state;
 
         state.audio_state.initialize(&state.audio_arena);
-
-        state.is_initialized = true;
     }
 
     // Transient initialization.
-    std.debug.assert(@sizeOf(TransientState) <= game_memory.transient_storage_size);
-    var transient_state: *TransientState = @ptrCast(@alignCast(game_memory.transient_storage));
-    if (!transient_state.is_initialized) {
-        transient_state.arena.initialize(
-            game_memory.transient_storage_size - @sizeOf(TransientState),
-            game_memory.transient_storage.? + @sizeOf(TransientState),
+    var transient_state: *TransientState = game_memory.transient_state orelse undefined;
+    if (game_memory.transient_state == null) {
+        transient_state = memory.bootstrapPushStruct(
+            TransientState,
+            "arena",
+            ArenaPushParams.aligned(@alignOf(TransientState), true),
         );
+        game_memory.transient_state = transient_state;
 
         transient_state.high_priority_queue = game_memory.high_priority_queue;
         transient_state.low_priority_queue = game_memory.low_priority_queue;
@@ -214,9 +211,7 @@ pub export fn updateAndRender(
         var task_index: u32 = 0;
         while (task_index < transient_state.tasks.len) : (task_index += 1) {
             var task: *shared.TaskWithMemory = &transient_state.tasks[task_index];
-
             task.being_used = false;
-            transient_state.arena.makeSubArena(&task.arena, shared.megabytes(1), null);
         }
 
         transient_state.assets = Assets.allocate(
@@ -261,8 +256,6 @@ pub export fn updateAndRender(
                 height >>= 1;
             }
         }
-
-        transient_state.is_initialized = true;
     }
 
     DebugInterface.debugBeginDataBlock(@src(), "Memory");
@@ -376,11 +369,12 @@ pub export fn getSoundSamples(
     game_memory: *shared.Memory,
     sound_buffer: *shared.SoundOutputBuffer,
 ) void {
-    const state: *State = @ptrCast(@alignCast(game_memory.permanent_storage));
-    const transient_state: *TransientState = @ptrCast(@alignCast(game_memory.transient_storage));
-
-    state.audio_state.outputPlayingSounds(sound_buffer, transient_state.assets, &transient_state.arena);
-    // audio.outputSineWave(sound_buffer, shared.MIDDLE_C, state);
+    if (game_memory.game_state) |state| {
+        if (game_memory.transient_state) |transient_state| {
+            state.audio_state.outputPlayingSounds(sound_buffer, transient_state.assets, &transient_state.arena);
+            // audio.outputSineWave(sound_buffer, shared.MIDDLE_C, state);
+        }
+    }
 }
 
 pub fn beginTaskWithMemory(transient_state: *TransientState, depends_on_game_mode: bool) ?*shared.TaskWithMemory {

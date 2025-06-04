@@ -360,12 +360,18 @@ fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) ca
 }
 
 fn allocateMemory(size: MemoryIndex) callconv(.C) ?*anyopaque {
-    return win32.VirtualAlloc(
+    const result = win32.VirtualAlloc(
         null,
         size,
         win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
         win32.PAGE_READWRITE,
     );
+
+    if (result == null) {
+        outputLastError("Failed to allocate memory");
+    }
+
+    return result;
 }
 
 fn deallocateMemory(opt_memory: ?*anyopaque) callconv(.C) void {
@@ -1968,6 +1974,7 @@ pub export fn wWinMain(
         .allocateMemory = allocateMemory,
         .deallocateMemory = deallocateMemory,
     };
+    shared.platform = platform;
 
     if (INTERNAL) {
         platform.debugFreeFileMemory = DebugFunctions.debugFreeFileMemory;
@@ -2074,10 +2081,6 @@ pub export fn wWinMain(
             }
 
             var game_memory: shared.Memory = shared.Memory{
-                .permanent_storage_size = shared.megabytes(256),
-                .permanent_storage = null,
-                .transient_storage_size = shared.gigabytes(1),
-                .transient_storage = null,
                 .debug_table = if (INTERNAL) global_debug_table else undefined,
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
@@ -2100,19 +2103,8 @@ pub export fn wWinMain(
                 op[0].next = @ptrCast(first_free + texture_op_index + 1);
             }
 
-            state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
-            const base_address = if (INTERNAL) @as(*u8, @ptrFromInt(shared.terabytes(2))) else null;
-            state.game_memory_block = win32.VirtualAlloc(
-                base_address,
-                state.total_size,
-                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-                win32.PAGE_READWRITE,
-            );
-
-            if (state.game_memory_block) |memory_block| {
-                game_memory.permanent_storage = @ptrCast(memory_block);
-                game_memory.transient_storage = @as([*]u8, @ptrCast(memory_block)) + game_memory.permanent_storage_size;
-            }
+            state.total_size = 0;
+            state.game_memory_block = null;
 
             for (0..state.replay_buffers.len) |index| {
                 var buffer = &state.replay_buffers[index];
@@ -2162,7 +2154,7 @@ pub export fn wWinMain(
                 }
             }
 
-            if (samples != null and game_memory.permanent_storage != null and game_memory.transient_storage != null) {
+            if (samples != null) {
                 // TODO: This currently doesn't support connecting controllers after the game has started.
                 var xbox_controller_present: [win32.XUSER_MAX_COUNT]bool = [1]bool{true} ** win32.XUSER_MAX_COUNT;
                 var game_input = [2]shared.GameInput{
@@ -2186,15 +2178,7 @@ pub export fn wWinMain(
 
                 running = true;
 
-                const frame_temp_memory_size = shared.megabytes(64);
-                var frame_temp_arena: MemoryArena = MemoryArena{
-                    .size = undefined,
-                    .base = undefined,
-                    .used = undefined,
-                    .temp_count = undefined,
-                };
-                frame_temp_arena.initialize(frame_temp_memory_size, @ptrCast(allocateMemory(frame_temp_memory_size)));
-
+                var frame_temp_arena: MemoryArena = .{};
                 const push_buffer_size: u32 = shared.megabytes(64);
                 const push_buffer = allocateMemory(push_buffer_size);
 

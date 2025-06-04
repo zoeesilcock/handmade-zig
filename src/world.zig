@@ -37,7 +37,7 @@ pub const World = extern struct {
 
     chunk_hash: [4096]?*WorldChunk,
 
-    arena: MemoryArena,
+    arena: *MemoryArena,
 
     first_free_chunk: ?*WorldChunk,
     first_free_block: ?*WorldEntityBlock,
@@ -108,7 +108,7 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
 
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
     world.first_free = null;
-    parent_arena.makeSubArena(&world.arena, parent_arena.getRemainingSize(null), ArenaPushParams.noClear());
+    world.arena = parent_arena;
 
     return world;
 }
@@ -175,7 +175,7 @@ pub fn useChunkSpaceAt(
     size: u32,
     at: WorldPosition,
 ) *Entity {
-    const chunk: ?*WorldChunk = getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, &world.arena);
+    const chunk: ?*WorldChunk = getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, world.arena);
     std.debug.assert(chunk != null);
     return useChunkSpace(world, size, chunk.?);
 }
