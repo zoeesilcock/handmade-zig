@@ -54,6 +54,7 @@ const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const GameRenderPrep = shared.GameRenderPrep;
 const Rectangle2i = math.Rectangle2i;
+const TicketMutex = shared.TicketMutex;
 const WINAPI = @import("std").os.windows.WINAPI;
 
 const std = @import("std");
@@ -134,6 +135,7 @@ pub var platform: shared.Platform = undefined;
 pub var running: bool = false;
 pub var paused: bool = false;
 pub var software_rendering: bool = false;
+var global_state: Win32State = .{};
 var global_config = &@import("config.zig").global_config;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
@@ -188,17 +190,10 @@ const RecordedInput = struct {
     input_stream: [*:0]shared.GameInput,
 };
 
-const ReplayBuffer = struct {
-    memory_map: win32.HANDLE = undefined,
-    file_handle: win32.HANDLE = undefined,
-    replay_file_name: [STATE_FILE_NAME_COUNT:0]u8 = undefined,
-    memory_block: ?*anyopaque = null,
-};
-
-const Win32State = struct {
-    total_size: usize = 0,
-    game_memory_block: ?*anyopaque = undefined,
-    replay_buffers: [4]ReplayBuffer = [1]ReplayBuffer{ReplayBuffer{}} ** 4,
+const Win32State = extern struct {
+    // To touch the memory ring, you must take the memory mutex.
+    memory_mutex: TicketMutex = undefined,
+    memory_sentinel: MemoryBlock = undefined,
 
     recording_handle: win32.HANDLE = undefined,
     input_recording_index: u32 = 0,
@@ -208,6 +203,22 @@ const Win32State = struct {
 
     exe_file_name: [STATE_FILE_NAME_COUNT:0]u8 = undefined,
     one_past_last_exe_file_name_slash: usize = 0,
+};
+
+const MemoryBlock = extern struct {
+    prev: *MemoryBlock,
+    next: *MemoryBlock,
+    size: u64,
+    pad: [5]u64 = undefined,
+
+    pub fn getBasePointer(self: *MemoryBlock) *anyopaque {
+        return @ptrFromInt(@intFromPtr(self) + @sizeOf(MemoryBlock));
+    }
+};
+
+const SavedMemoryBlock = extern struct {
+    base_pointer: u64 = 0,
+    size: u64 = 0,
 };
 
 const ThreadStartup = struct {
@@ -360,15 +371,32 @@ fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) ca
 }
 
 fn allocateMemory(size: MemoryIndex) callconv(.C) ?*anyopaque {
-    const result = win32.VirtualAlloc(
+    // We require memory block headers not to change the cache line alignment of an allocation.
+    std.debug.assert(@sizeOf(MemoryBlock) == 64);
+
+    var result: ?*anyopaque = null;
+    const opt_block: ?*MemoryBlock = @ptrCast(@alignCast(win32.VirtualAlloc(
         null,
-        size,
+        size + @sizeOf(MemoryBlock),
         win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
         win32.PAGE_READWRITE,
-    );
+    )));
 
-    if (result == null) {
+    if (opt_block) |block| {
+        result = block.getBasePointer();
+
+        const sentinel: *MemoryBlock = &global_state.memory_sentinel;
+        block.next = sentinel;
+        block.size = size;
+
+        global_state.memory_mutex.begin();
+        block.prev = sentinel.prev;
+        block.prev.next = block;
+        block.next.prev = block;
+        global_state.memory_mutex.end();
+    } else {
         outputLastError("Failed to allocate memory");
+        unreachable;
     }
 
     return result;
@@ -376,7 +404,15 @@ fn allocateMemory(size: MemoryIndex) callconv(.C) ?*anyopaque {
 
 fn deallocateMemory(opt_memory: ?*anyopaque) callconv(.C) void {
     if (opt_memory) |mem| {
-        _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
+        const block: *MemoryBlock = @ptrFromInt(@intFromPtr(mem) - @sizeOf(MemoryBlock));
+
+        global_state.memory_mutex.begin();
+        block.prev.next = block.next;
+        block.next.prev = block.prev;
+        global_state.memory_mutex.end();
+
+        const result = win32.VirtualFree(@ptrCast(block), 0, win32.MEM_RELEASE);
+        std.debug.assert(result != 0);
     }
 }
 
@@ -1647,33 +1683,57 @@ fn getInputFileLocation(state: *Win32State, is_input: bool, slot_index: u32, des
     buildExePathFileName(state, &temp, dest);
 }
 
-fn getReplayBuffer(state: *Win32State, index: u32) *ReplayBuffer {
-    std.debug.assert(index < state.replay_buffers.len);
-    return &state.replay_buffers[index];
-}
-
 fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
-    const replay_buffer = getReplayBuffer(state, input_recording_index);
-    if (replay_buffer.memory_block != null) {
-        var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-        getInputFileLocation(state, true, @intCast(input_recording_index), &file_path);
-        state.recording_handle = win32.CreateFileA(
-            &file_path,
-            win32.FILE_GENERIC_WRITE,
-            win32.FILE_SHARE_NONE,
-            null,
-            win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
-            win32.FILE_FLAGS_AND_ATTRIBUTES{},
-            null,
-        );
+    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    getInputFileLocation(state, true, @intCast(input_recording_index), &file_path);
+    state.recording_handle = win32.CreateFileA(
+        &file_path,
+        win32.FILE_GENERIC_WRITE,
+        win32.FILE_SHARE_NONE,
+        null,
+        win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
+
+    if (state.playback_handle != win32.INVALID_HANDLE_VALUE) {
         state.input_recording_index = input_recording_index;
 
-        const bytes_to_write: u32 = @intCast(state.total_size);
-        std.debug.assert(state.total_size == bytes_to_write);
+        var bytes_written: u32 = undefined;
+        const sentinel: *MemoryBlock = &global_state.memory_sentinel;
+        var source_block = sentinel.next;
+        while (source_block != sentinel) : (source_block = source_block.next) {
+            const base_pointer = source_block.getBasePointer();
+            var dest_block: SavedMemoryBlock = .{
+                .base_pointer = @intFromPtr(base_pointer),
+                .size = source_block.size,
+            };
+            _ = win32.WriteFile(
+                state.playback_handle,
+                &dest_block,
+                @sizeOf(SavedMemoryBlock),
+                &bytes_written,
+                null,
+            );
 
-        @memcpy(
-            @as([*]u8, @ptrCast(replay_buffer.memory_block))[0..state.total_size],
-            @as([*]u8, @ptrCast(state.game_memory_block))[0..state.total_size],
+            std.debug.assert(dest_block.size <= std.math.maxInt(u32));
+
+            _ = win32.WriteFile(
+                state.playback_handle,
+                base_pointer,
+                @intCast(dest_block.size),
+                &bytes_written,
+                null,
+            );
+        }
+
+        var dest_block: SavedMemoryBlock = .{};
+        _ = win32.WriteFile(
+            state.playback_handle,
+            &dest_block,
+            @sizeOf(SavedMemoryBlock),
+            &bytes_written,
+            null,
         );
     }
 }
@@ -1690,29 +1750,46 @@ fn endRecordingInput(state: *Win32State) void {
 }
 
 fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
-    const replay_buffer = getReplayBuffer(state, input_playing_index);
-    if (replay_buffer.memory_block != null) {
-        var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-        getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
-        state.playback_handle = win32.CreateFileA(
-            &file_path,
-            win32.FILE_GENERIC_READ,
-            win32.FILE_SHARE_NONE,
-            null,
-            win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
-            win32.FILE_FLAGS_AND_ATTRIBUTES{},
-            null,
-        );
+    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
+    state.playback_handle = win32.CreateFileA(
+        &file_path,
+        win32.FILE_GENERIC_READ,
+        win32.FILE_SHARE_NONE,
+        null,
+        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
 
+    if (state.playback_handle != win32.INVALID_HANDLE_VALUE) {
         state.input_playing_index = input_playing_index;
 
-        const bytes_to_read: u32 = @intCast(state.total_size);
-        std.debug.assert(state.total_size == bytes_to_read);
+        while (true) {
+            var block: SavedMemoryBlock = .{};
+            var bytes_read: u32 = undefined;
+            _ = win32.ReadFile(
+                state.playback_handle,
+                &block,
+                @sizeOf(SavedMemoryBlock),
+                &bytes_read,
+                null,
+            );
 
-        @memcpy(
-            @as([*]u8, @ptrCast(state.game_memory_block))[0..state.total_size],
-            @as([*]u8, @ptrCast(replay_buffer.memory_block))[0..state.total_size],
-        );
+            if (block.base_pointer != 0) {
+                std.debug.assert(block.size <= std.math.maxInt(u32));
+
+                _ = win32.ReadFile(
+                    state.playback_handle,
+                    @ptrFromInt(block.base_pointer),
+                    @intCast(block.size),
+                    &bytes_read,
+                    null,
+                );
+            } else {
+                break;
+            }
+        }
     }
 }
 
@@ -1931,24 +2008,27 @@ pub export fn wWinMain(
     _ = cmd_show;
 
     global_debug_table.setEventRecording(true);
-    var state = Win32State{};
-    getExeFileName(&state);
+    var state: *Win32State = &global_state;
+    state.memory_sentinel.prev = &state.memory_sentinel;
+    state.memory_sentinel.next = &state.memory_sentinel;
+
+    getExeFileName(state);
 
     if (INTERNAL) {
         shared.global_debug_table = global_debug_table;
     }
 
     var exe_full_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    buildExePathFileName(&state, "handmade-zig.exe", &exe_full_path);
+    buildExePathFileName(state, "handmade-zig.exe", &exe_full_path);
     var temp_exe_full_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    buildExePathFileName(&state, "handmade-zig-temp.exe", &temp_exe_full_path);
+    buildExePathFileName(state, "handmade-zig-temp.exe", &temp_exe_full_path);
     var delete_exe_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    buildExePathFileName(&state, "handmade-zig-old.exe", &delete_exe_path);
+    buildExePathFileName(state, "handmade-zig-old.exe", &delete_exe_path);
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    buildExePathFileName(&state, "handmade.dll", &source_dll_path);
+    buildExePathFileName(state, "handmade.dll", &source_dll_path);
     var temp_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    buildExePathFileName(&state, "handmade_temp.dll", &temp_dll_path);
+    buildExePathFileName(state, "handmade_temp.dll", &temp_dll_path);
 
     var performance_frequency: win32.LARGE_INTEGER = undefined;
     _ = win32.QueryPerformanceFrequency(&performance_frequency);
@@ -2103,57 +2183,6 @@ pub export fn wWinMain(
                 op[0].next = @ptrCast(first_free + texture_op_index + 1);
             }
 
-            state.total_size = 0;
-            state.game_memory_block = null;
-
-            for (0..state.replay_buffers.len) |index| {
-                var buffer = &state.replay_buffers[index];
-
-                getInputFileLocation(&state, false, @intCast(index + 1), &buffer.replay_file_name);
-                const generic_read_write = win32.FILE_ACCESS_FLAGS{
-                    .FILE_READ_DATA = 1,
-                    .FILE_READ_EA = 1,
-                    .FILE_READ_ATTRIBUTES = 1,
-                    .FILE_WRITE_DATA = 1,
-                    .FILE_APPEND_DATA = 1,
-                    .FILE_WRITE_EA = 1,
-                    .FILE_WRITE_ATTRIBUTES = 1,
-                    .READ_CONTROL = 1,
-                    .SYNCHRONIZE = 1,
-                };
-                buffer.file_handle = win32.CreateFileA(
-                    &buffer.replay_file_name,
-                    generic_read_write,
-                    win32.FILE_SHARE_NONE,
-                    null,
-                    win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
-                    win32.FILE_FLAGS_AND_ATTRIBUTES{},
-                    null,
-                );
-
-                const max_size_high: std.os.windows.DWORD = @intCast(state.total_size >> 32);
-                const max_size_low: std.os.windows.DWORD = @intCast(state.total_size & 0xFFFFFFFF);
-                const opt_memory_map = win32.CreateFileMappingA(
-                    buffer.file_handle,
-                    null,
-                    win32.PAGE_READWRITE,
-                    max_size_high,
-                    max_size_low,
-                    null,
-                );
-                if (opt_memory_map) |memory_map| {
-                    buffer.memory_map = memory_map;
-                    buffer.memory_block = win32.MapViewOfFileEx(
-                        buffer.memory_map,
-                        win32.FILE_MAP_ALL_ACCESS,
-                        0,
-                        0,
-                        state.total_size,
-                        null,
-                    );
-                }
-            }
-
             if (samples != null) {
                 // TODO: This currently doesn't support connecting controllers after the game has started.
                 var xbox_controller_present: [win32.XUSER_MAX_COUNT]bool = [1]bool{true} ** win32.XUSER_MAX_COUNT;
@@ -2243,7 +2272,7 @@ pub export fn wWinMain(
 
                         switch (message.message) {
                             win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
-                                processKeyboardInput(message, new_keyboard_controller, &state);
+                                processKeyboardInput(message, new_keyboard_controller, state);
                             },
                             else => {
                                 _ = win32.TranslateMessage(&message);
@@ -2276,11 +2305,11 @@ pub export fn wWinMain(
 
                     if (!paused) {
                         if (state.input_recording_index > 0) {
-                            recordInput(&state, new_input);
+                            recordInput(state, new_input);
                         } else if (state.input_playing_index > 0) {
                             const temp: shared.GameInput = new_input.*;
 
-                            playbackInput(&state, new_input);
+                            playbackInput(state, new_input);
 
                             new_input.mouse_buttons = temp.mouse_buttons;
                             new_input.mouse_x = temp.mouse_x;
