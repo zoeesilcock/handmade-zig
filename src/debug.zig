@@ -2148,6 +2148,7 @@ fn debugInit(
     var debug_state: *DebugState = memory.bootstrapPushStruct(
         DebugState,
         "debug_arena",
+        null,
         ArenaPushParams.aligned(@alignOf(DebugState), true),
     );
 

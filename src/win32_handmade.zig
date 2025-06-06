@@ -55,6 +55,7 @@ const MemoryIndex = memory.MemoryIndex;
 const GameRenderPrep = shared.GameRenderPrep;
 const Rectangle2i = math.Rectangle2i;
 const TicketMutex = shared.TicketMutex;
+const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const WINAPI = @import("std").os.windows.WINAPI;
 
 const std = @import("std");
@@ -205,11 +206,18 @@ const Win32State = extern struct {
     one_past_last_exe_file_name_slash: usize = 0,
 };
 
+const MemoryBlockLoopingFlag = enum(u64) {
+    AllocatedDuringLooping = 0x1,
+    FreedDuringLooping = 0x2,
+};
+
 const MemoryBlock = extern struct {
     prev: *MemoryBlock,
     next: *MemoryBlock,
     size: u64,
-    pad: [5]u64 = undefined,
+    flags: u64 = 0,
+    looping_flags: u64 = 0,
+    pad: [3]u64 = undefined,
 
     pub fn getBasePointer(self: *MemoryBlock) *anyopaque {
         return @ptrFromInt(@intFromPtr(self) + @sizeOf(MemoryBlock));
@@ -370,7 +378,12 @@ fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) ca
     file_handle.no_errors = false;
 }
 
-fn allocateMemory(size: MemoryIndex) callconv(.C) ?*anyopaque {
+fn isInLoop() bool {
+    const result: bool = global_state.input_recording_index != 0 or global_state.input_playing_index != 0;
+    return result;
+}
+
+fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*anyopaque {
     // We require memory block headers not to change the cache line alignment of an allocation.
     std.debug.assert(@sizeOf(MemoryBlock) == 64);
 
@@ -388,6 +401,9 @@ fn allocateMemory(size: MemoryIndex) callconv(.C) ?*anyopaque {
         const sentinel: *MemoryBlock = &global_state.memory_sentinel;
         block.next = sentinel;
         block.size = size;
+        block.flags = flags;
+
+        block.looping_flags = if (isInLoop()) @intFromEnum(MemoryBlockLoopingFlag.AllocatedDuringLooping) else 0;
 
         global_state.memory_mutex.begin();
         block.prev = sentinel.prev;
@@ -402,17 +418,25 @@ fn allocateMemory(size: MemoryIndex) callconv(.C) ?*anyopaque {
     return result;
 }
 
+fn freeMemoryBlock(block: *MemoryBlock) void {
+    global_state.memory_mutex.begin();
+    block.prev.next = block.next;
+    block.next.prev = block.prev;
+    global_state.memory_mutex.end();
+
+    const result = win32.VirtualFree(@ptrCast(block), 0, win32.MEM_RELEASE);
+    std.debug.assert(result != 0);
+}
+
 fn deallocateMemory(opt_memory: ?*anyopaque) callconv(.C) void {
     if (opt_memory) |mem| {
         const block: *MemoryBlock = @ptrFromInt(@intFromPtr(mem) - @sizeOf(MemoryBlock));
 
-        global_state.memory_mutex.begin();
-        block.prev.next = block.next;
-        block.next.prev = block.prev;
-        global_state.memory_mutex.end();
-
-        const result = win32.VirtualFree(@ptrCast(block), 0, win32.MEM_RELEASE);
-        std.debug.assert(result != 0);
+        if (isInLoop()) {
+            block.looping_flags = @intFromEnum(MemoryBlockLoopingFlag.FreedDuringLooping);
+        } else {
+            freeMemoryBlock(block);
+        }
     }
 }
 
@@ -1703,33 +1727,35 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
         const sentinel: *MemoryBlock = &global_state.memory_sentinel;
         var source_block = sentinel.next;
         while (source_block != sentinel) : (source_block = source_block.next) {
-            const base_pointer = source_block.getBasePointer();
-            var dest_block: SavedMemoryBlock = .{
-                .base_pointer = @intFromPtr(base_pointer),
-                .size = source_block.size,
-            };
-            _ = win32.WriteFile(
-                state.playback_handle,
-                &dest_block,
-                @sizeOf(SavedMemoryBlock),
-                &bytes_written,
-                null,
-            );
+            if ((source_block.flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
+                const base_pointer = source_block.getBasePointer();
+                var dest_block: SavedMemoryBlock = .{
+                    .base_pointer = @intFromPtr(base_pointer),
+                    .size = source_block.size,
+                };
+                _ = win32.WriteFile(
+                    state.recording_handle,
+                    &dest_block,
+                    @sizeOf(SavedMemoryBlock),
+                    &bytes_written,
+                    null,
+                );
 
-            std.debug.assert(dest_block.size <= std.math.maxInt(u32));
+                std.debug.assert(dest_block.size <= std.math.maxInt(u32));
 
-            _ = win32.WriteFile(
-                state.playback_handle,
-                base_pointer,
-                @intCast(dest_block.size),
-                &bytes_written,
-                null,
-            );
+                _ = win32.WriteFile(
+                    state.recording_handle,
+                    base_pointer,
+                    @intCast(dest_block.size),
+                    &bytes_written,
+                    null,
+                );
+            }
         }
 
         var dest_block: SavedMemoryBlock = .{};
         _ = win32.WriteFile(
-            state.playback_handle,
+            state.recording_handle,
             &dest_block,
             @sizeOf(SavedMemoryBlock),
             &bytes_written,
@@ -1749,7 +1775,23 @@ fn endRecordingInput(state: *Win32State) void {
     state.recording_handle = undefined;
 }
 
+fn clearBlocksByMask(state: *Win32State, mask: u64) void {
+    var block_iter: *MemoryBlock = state.memory_sentinel.next;
+    while (block_iter != &state.memory_sentinel) {
+        const block = block_iter;
+        block_iter = block_iter.next;
+
+        if ((block.looping_flags & mask) == mask) {
+            freeMemoryBlock(block);
+        } else {
+            block.looping_flags = 0;
+        }
+    }
+}
+
 fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
+    clearBlocksByMask(state, @intFromEnum(MemoryBlockLoopingFlag.AllocatedDuringLooping));
+
     var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
     getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
     state.playback_handle = win32.CreateFileA(
@@ -1805,6 +1847,8 @@ fn playbackInput(state: *Win32State, new_input: *shared.GameInput) void {
 }
 
 fn endInputPlayback(state: *Win32State) void {
+    clearBlocksByMask(state, @intFromEnum(MemoryBlockLoopingFlag.FreedDuringLooping));
+
     _ = win32.CloseHandle(state.playback_handle);
     state.input_playing_index = 0;
     state.playback_handle = undefined;
@@ -2209,7 +2253,7 @@ pub export fn wWinMain(
 
                 var frame_temp_arena: MemoryArena = .{};
                 const push_buffer_size: u32 = shared.megabytes(64);
-                const push_buffer = allocateMemory(push_buffer_size);
+                const push_buffer = allocateMemory(push_buffer_size, @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 

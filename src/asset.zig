@@ -18,6 +18,7 @@ const TransientState = shared.TransientState;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
+const ArenaBootstrapParams = memory.ArenaBootstrapParams;
 const Platform = shared.Platform;
 const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
@@ -118,9 +119,8 @@ const AssetMemoryBlock = extern struct {
 };
 
 pub const Assets = struct {
+    non_restored_memory: MemoryArena,
     texture_op_queue: *shared.PlatformTextureOpQueue,
-
-    next_generation_id: u32,
 
     transient_state: *TransientState,
 
@@ -141,13 +141,7 @@ pub const Assets = struct {
 
     asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
 
-    operation_lock: u32,
-
-    in_flight_generation_count: u32,
-    in_flight_generations: [16]u32,
-
     pub fn allocate(
-        arena: *MemoryArena,
         memory_size: MemoryIndex,
         transient_state: *shared.TransientState,
         texture_op_queue: *shared.PlatformTextureOpQueue,
@@ -155,13 +149,15 @@ pub const Assets = struct {
         TimedBlock.beginFunction(@src(), .AllocateGameAssets);
         defer TimedBlock.endFunction(@src(), .AllocateGameAssets);
 
-        var assets = arena.pushStruct(Assets, ArenaPushParams.aligned(@alignOf(Assets), true));
+        var assets = memory.bootstrapPushStruct(
+            Assets,
+            "non_restored_memory",
+            ArenaBootstrapParams.nonRestored(),
+            ArenaPushParams.aligned(@alignOf(Assets), true),
+        );
+        var arena: *MemoryArena = &assets.non_restored_memory;
 
         assets.texture_op_queue = texture_op_queue;
-
-        assets.next_generation_id = 0;
-        assets.in_flight_generation_count = 0;
-
         assets.transient_state = transient_state;
         assets.memory_sentinel = AssetMemoryBlock{
             .flags = 0,
@@ -348,13 +344,13 @@ pub const Assets = struct {
         self.beginAssetLock();
         defer self.endAssetLock();
 
-        std.debug.assert(self.in_flight_generation_count < self.in_flight_generations.len);
+        std.debug.assert(self.transient_state.in_flight_generation_count < self.transient_state.in_flight_generations.len);
 
-        const result = self.next_generation_id;
-        self.next_generation_id +%= 1;
+        const result = self.transient_state.next_generation_id;
+        self.transient_state.next_generation_id +%= 1;
 
-        self.in_flight_generations[self.in_flight_generation_count] = result;
-        self.in_flight_generation_count += 1;
+        self.transient_state.in_flight_generations[self.transient_state.in_flight_generation_count] = result;
+        self.transient_state.in_flight_generation_count += 1;
 
         return result;
     }
@@ -364,10 +360,10 @@ pub const Assets = struct {
         defer self.endAssetLock();
 
         var index: u32 = 0;
-        while (index < self.in_flight_generation_count) : (index += 1) {
-            if (self.in_flight_generations[index] == generation_id) {
-                self.in_flight_generation_count -= 1;
-                self.in_flight_generations[index] = self.in_flight_generations[self.in_flight_generation_count];
+        while (index < self.transient_state.in_flight_generation_count) : (index += 1) {
+            if (self.transient_state.in_flight_generations[index] == generation_id) {
+                self.transient_state.in_flight_generation_count -= 1;
+                self.transient_state.in_flight_generations[index] = self.transient_state.in_flight_generations[self.transient_state.in_flight_generation_count];
             }
         }
     }
@@ -376,8 +372,8 @@ pub const Assets = struct {
         var result = true;
 
         var index: u32 = 0;
-        while (index < self.in_flight_generation_count) : (index += 1) {
-            if (self.in_flight_generations[index] == check_id) {
+        while (index < self.transient_state.in_flight_generation_count) : (index += 1) {
+            if (self.transient_state.in_flight_generations[index] == check_id) {
                 result = false;
                 break;
             }
@@ -438,14 +434,14 @@ pub const Assets = struct {
 
     fn beginAssetLock(self: *Assets) void {
         while (true) {
-            if (@cmpxchgStrong(u32, &self.operation_lock, 0, 1, .seq_cst, .seq_cst) == null) {
+            if (@cmpxchgStrong(u32, &self.transient_state.operation_lock, 0, 1, .seq_cst, .seq_cst) == null) {
                 break;
             }
         }
     }
 
     fn endAssetLock(self: *Assets) void {
-        self.operation_lock = 0;
+        self.transient_state.operation_lock = 0;
     }
 
     fn acquireAssetMemory(self: *Assets, size: u32, asset_index: u32, asset_type: AssetHeaderType) ?*AssetMemoryHeader {

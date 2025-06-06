@@ -4,6 +4,7 @@ const debug_interface = @import("debug_interface.zig");
 
 // Types.
 const DebugTable = debug_interface.DebugTable;
+const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 
 pub const MemoryIndex = usize;
 
@@ -53,6 +54,26 @@ pub const ArenaPushParams = extern struct {
     }
 };
 
+pub const ArenaBootstrapParams = extern struct {
+    allocation_flags: u64,
+    minimum_block_size: MemoryIndex,
+
+    pub fn default() ArenaBootstrapParams {
+        return .{
+            .allocation_flags = 0,
+            .minimum_block_size = 0,
+        };
+    }
+
+    pub fn nonRestored() ArenaBootstrapParams {
+        var result: ArenaBootstrapParams = .default();
+
+        result.allocation_flags = @intFromEnum(PlatformMemoryBlockFlags.NotRestored);
+
+        return result;
+    }
+};
+
 const MemoryBlockFooter = extern struct {
     base: [*]u8 = undefined,
     size: MemoryIndex = 0,
@@ -64,6 +85,7 @@ pub const MemoryArena = extern struct {
     base: [*]u8 = undefined,
     used: MemoryIndex = 0,
     minimum_block_size: MemoryIndex = 0,
+    allocation_flags: u64 = 0,
     block_count: u32 = 0,
     temp_count: i32 = 0,
 
@@ -130,7 +152,7 @@ pub const MemoryArena = extern struct {
             aligned_size = size; // The base will automatically be aligned now.
             const block_size: MemoryIndex = @max(aligned_size + @sizeOf(MemoryBlockFooter), self.minimum_block_size);
             self.size = block_size - @sizeOf(MemoryBlockFooter);
-            self.base = @ptrCast(shared.platform.allocateMemory(block_size).?);
+            self.base = @ptrCast(shared.platform.allocateMemory(block_size, self.allocation_flags).?);
             self.used = 0;
             self.block_count += 1;
 
@@ -279,20 +301,30 @@ pub fn copy(size: MemoryIndex, source_init: *anyopaque, dest_init: *anyopaque) *
     return dest_init;
 }
 
-pub fn bootstrapPushStruct(comptime T: type, comptime arena_member: []const u8, params: ?ArenaPushParams) *T {
-    return @as(*T, @ptrCast(@alignCast(bootsrapPushSize(@sizeOf(T), @offsetOf(T, arena_member), null, params))));
+pub fn bootstrapPushStruct(
+    comptime T: type,
+    comptime arena_member: []const u8,
+    bootstrap_params: ?ArenaBootstrapParams,
+    params: ?ArenaPushParams,
+) *T {
+    return @as(*T, @ptrCast(@alignCast(bootsrapPushSize(@sizeOf(T), @offsetOf(T, arena_member), bootstrap_params, params))));
 }
 
 pub fn bootsrapPushSize(
     struct_size: MemoryIndex,
     offset_to_arena: MemoryIndex,
-    mimimum_block_size: ?MemoryIndex,
+    in_bootstrap_params: ?ArenaBootstrapParams,
     params: ?ArenaPushParams,
 ) *anyopaque {
+    const bootstrap_params = in_bootstrap_params orelse ArenaBootstrapParams.default();
+
     var bootstrap: MemoryArena = .{};
-    bootstrap.minimum_block_size = mimimum_block_size orelse 0;
+    bootstrap.allocation_flags = bootstrap_params.allocation_flags;
+    bootstrap.minimum_block_size = bootstrap_params.minimum_block_size;
+
     const struct_ptr: *anyopaque = bootstrap.pushSize(struct_size, params);
     const arena_ptr: *MemoryArena = @ptrFromInt(@intFromPtr(struct_ptr) + offset_to_arena);
     arena_ptr.* = bootstrap;
+
     return struct_ptr;
 }

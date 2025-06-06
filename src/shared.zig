@@ -738,6 +738,10 @@ pub const PlatformFileTypes = enum(u32) {
     SaveGameFile,
 };
 
+pub const PlatformMemoryBlockFlags = enum(u64) {
+    NotRestored = 0x1,
+};
+
 pub const DebugExecutingProcess = extern struct {
     os_handle: u64 = 0,
 };
@@ -758,7 +762,7 @@ const readDataFromFileType: type = fn (source: *PlatformFileHandle, offset: u64,
 const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.C) bool;
 const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
 
-const allocateMemoryType: type = fn (size: MemoryIndex) callconv(.C) ?*anyopaque;
+const allocateMemoryType: type = fn (size: MemoryIndex, flags: u64) callconv(.C) ?*anyopaque;
 const deallocateMemoryType: type = fn (memory: ?*anyopaque) callconv(.C) void;
 
 const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
@@ -1089,6 +1093,12 @@ pub const TransientState = struct {
     env_map_width: i32,
     env_map_height: i32,
     env_maps: [3]rendergroup.EnvironmentMap = [1]rendergroup.EnvironmentMap{undefined} ** 3,
+
+    // TODO: Potentially remove this, it is just for asset locking.
+    next_generation_id: u32,
+    operation_lock: u32,
+    in_flight_generation_count: u32,
+    in_flight_generations: [16]u32,
 };
 
 pub const GroundBuffer = extern struct {

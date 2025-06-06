@@ -188,6 +188,7 @@ pub export fn updateAndRender(
         state = memory.bootstrapPushStruct(
             State,
             "total_arena",
+            null,
             ArenaPushParams.aligned(@alignOf(State), true),
         );
         game_memory.game_state = state;
@@ -201,6 +202,7 @@ pub export fn updateAndRender(
         transient_state = memory.bootstrapPushStruct(
             TransientState,
             "arena",
+            null,
             ArenaPushParams.aligned(@alignOf(TransientState), true),
         );
         game_memory.transient_state = transient_state;
@@ -215,7 +217,6 @@ pub export fn updateAndRender(
         }
 
         transient_state.assets = Assets.allocate(
-            &transient_state.arena,
             shared.megabytes(256),
             transient_state,
             &game_memory.texture_op_queue,
