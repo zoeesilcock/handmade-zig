@@ -740,6 +740,8 @@ pub const PlatformFileTypes = enum(u32) {
 
 pub const PlatformMemoryBlockFlags = enum(u64) {
     NotRestored = 0x1,
+    OverflowCheck = 0x2,
+    UnderflowCheck = 0x4,
 };
 
 pub const DebugExecutingProcess = extern struct {
@@ -763,7 +765,7 @@ const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.C
 const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
 
 const allocateMemoryType: type = fn (size: MemoryIndex, flags: u64) callconv(.C) ?*anyopaque;
-const deallocateMemoryType: type = fn (memory: ?*anyopaque) callconv(.C) void;
+const deallocateMemoryType: type = fn (memory: ?*anyopaque, flags: u64) callconv(.C) void;
 
 const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
 const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;

@@ -19,6 +19,7 @@ const std = @import("std");
 /// TODO: An overview of upcoming tasks.
 ///
 /// * Arena upgrade!
+///     * Consolidate Win32 and platform-nonspecific memory headers.
 ///     * Looped live code editing support.
 ///     * Show on profile?
 ///     * Clean up where arenas are used and how.

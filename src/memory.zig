@@ -74,10 +74,11 @@ pub const ArenaBootstrapParams = extern struct {
     }
 };
 
-const MemoryBlockFooter = extern struct {
+const MemoryBlockChain = extern struct {
     base: [*]u8 = undefined,
     size: MemoryIndex = 0,
     used: MemoryIndex = 0,
+    pad: MemoryIndex = 0,
 };
 
 pub const MemoryArena = extern struct {
@@ -129,29 +130,38 @@ pub const MemoryArena = extern struct {
         return (self.used + effective_size) <= self.size;
     }
 
-    fn getFooter(self: *MemoryArena) *MemoryBlockFooter {
-        const result: *MemoryBlockFooter = @ptrFromInt(@intFromPtr(self.base) + self.size);
+    fn getFooter(self: *MemoryArena) *MemoryBlockChain {
+        const result: *MemoryBlockChain = @ptrFromInt(@intFromPtr(self.base) + self.size);
         return result;
     }
 
     pub fn pushSize(self: *MemoryArena, size: MemoryIndex, in_params: ?ArenaPushParams) [*]u8 {
+        var result: [*]u8 = undefined;
         const params = in_params orelse ArenaPushParams.default();
+
+        // self.allocation_flags |= @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck);
+
         var aligned_size = self.getEffectiveSizeFor(size, params);
 
         if ((self.used + aligned_size) > self.size) {
-            if (self.minimum_block_size == 0) {
+            if (self.allocation_flags &
+                (@intFromEnum(PlatformMemoryBlockFlags.OverflowCheck) |
+                 @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck)) != 0)
+            {
+                self.minimum_block_size = 0;
+            } else if (self.minimum_block_size == 0) {
                 self.minimum_block_size = 1024 * 1024;
             }
 
-            const save: MemoryBlockFooter = .{
+            const save: MemoryBlockChain = .{
                 .base = self.base,
                 .size = self.size,
                 .used = self.used,
             };
 
             aligned_size = size; // The base will automatically be aligned now.
-            const block_size: MemoryIndex = @max(aligned_size + @sizeOf(MemoryBlockFooter), self.minimum_block_size);
-            self.size = block_size - @sizeOf(MemoryBlockFooter);
+            const block_size: MemoryIndex = @max(aligned_size + @sizeOf(MemoryBlockChain), self.minimum_block_size);
+            self.size = block_size - @sizeOf(MemoryBlockChain);
             self.base = @ptrCast(shared.platform.allocateMemory(block_size, self.allocation_flags).?);
             self.used = 0;
             self.block_count += 1;
@@ -163,7 +173,7 @@ pub const MemoryArena = extern struct {
         std.debug.assert((self.used + aligned_size) <= self.size);
 
         const alignment_offset = self.getAlignmentOffset(params.alignment);
-        const result: [*]u8 = @ptrCast(self.base + self.used + alignment_offset);
+        result = @ptrCast(self.base + self.used + alignment_offset);
         self.used += aligned_size;
 
         std.debug.assert(aligned_size >= size);
@@ -234,13 +244,13 @@ pub const MemoryArena = extern struct {
 
     fn freeLastBlock(self: *MemoryArena) void {
         const free: [*]u8 = self.base;
-        const footer: *MemoryBlockFooter = self.getFooter();
+        const footer: *MemoryBlockChain = self.getFooter();
 
         self.base = footer.base;
         self.size = footer.size;
         self.used = footer.used;
 
-        shared.platform.deallocateMemory(free);
+        shared.platform.deallocateMemory(free, self.allocation_flags);
 
         self.block_count -= 1;
     }
