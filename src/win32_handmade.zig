@@ -13,7 +13,6 @@ pub const UNICODE = true;
 
 const MIDDLE_C: u32 = 261;
 const TREBLE_C: u32 = 523;
-const PAGE_SIZE: MemoryIndex = 4096;
 
 // const WIDTH = 960;
 // const HEIGHT = 540;
@@ -56,6 +55,7 @@ const MemoryIndex = memory.MemoryIndex;
 const GameRenderPrep = shared.GameRenderPrep;
 const Rectangle2i = math.Rectangle2i;
 const TicketMutex = shared.TicketMutex;
+const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const WINAPI = @import("std").os.windows.WINAPI;
 
@@ -213,13 +213,10 @@ const MemoryBlockLoopingFlag = enum(u64) {
 };
 
 const MemoryBlock = extern struct {
+    block: shared.PlatformMemoryBlock,
     prev: *MemoryBlock,
     next: *MemoryBlock,
-    size: u64,
-    flags: u64 = 0,
     looping_flags: u64 = 0,
-    base: [*]u8 = undefined,
-    pad: [2]u64 = undefined,
 };
 
 const SavedMemoryBlock = extern struct {
@@ -381,16 +378,27 @@ fn isInLoop() bool {
     return result;
 }
 
-fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*anyopaque {
+fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*PlatformMemoryBlock {
     // We require memory block headers not to change the cache line alignment of an allocation.
     std.debug.assert(@sizeOf(MemoryBlock) == 64);
 
+    const page_size: MemoryIndex = 4096;
     var total_size: MemoryIndex = size + @sizeOf(MemoryBlock);
+    var base_offset: MemoryIndex = @sizeOf(MemoryBlock);
+    var protected_offset: MemoryIndex = 0;
     if (flags & @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) != 0) {
-        total_size += 2 * PAGE_SIZE;
+        total_size = size + 2 * page_size;
+        base_offset = 2 * page_size;
+        protected_offset = page_size;
+    }
+    if (flags & @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck) != 0) {
+        const size_rounded_up: MemoryIndex = shared.alignPow2(@intCast(size), page_size);
+        total_size = size_rounded_up + 2 * page_size;
+        base_offset = page_size + size_rounded_up - size;
+        protected_offset = page_size + size_rounded_up;
     }
 
-    var result: ?*anyopaque = null;
+    var result: ?*PlatformMemoryBlock = null;
     const opt_block: ?*MemoryBlock = @ptrCast(@alignCast(win32.VirtualAlloc(
         null,
         total_size,
@@ -400,20 +408,21 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*anyopaque {
 
     if (opt_block) |b| {
         var block = b;
-        block.base = @ptrFromInt(@intFromPtr(block) + @sizeOf(MemoryBlock));
+        block.block.base = @ptrFromInt(@intFromPtr(block) + base_offset);
 
-        if (flags & @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) != 0) {
+        std.debug.assert(block.block.used == 0);
+        std.debug.assert(block.block.arena_prev == null);
+
+        if (flags & (@intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) | @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck)) != 0) {
             var old_protect: win32.PAGE_PROTECTION_FLAGS = undefined;
-            const protected = win32.VirtualProtect(@ptrFromInt(@intFromPtr(block) + PAGE_SIZE), PAGE_SIZE, win32.PAGE_NOACCESS, &old_protect);
+            const protected = win32.VirtualProtect(@ptrFromInt(@intFromPtr(block) + protected_offset), page_size, win32.PAGE_NOACCESS, &old_protect);
             std.debug.assert(protected != 0);
-            block.base = @ptrFromInt(@intFromPtr(block) + 2 * PAGE_SIZE);
         }
 
         const sentinel: *MemoryBlock = &global_state.memory_sentinel;
         block.next = sentinel;
-        block.size = size;
-        block.flags = flags;
-
+        block.block.size = size;
+        block.block.flags = flags;
         block.looping_flags = if (isInLoop()) @intFromEnum(MemoryBlockLoopingFlag.AllocatedDuringLooping) else 0;
 
         global_state.memory_mutex.begin();
@@ -422,7 +431,7 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*anyopaque {
         block.next.prev = block;
         global_state.memory_mutex.end();
 
-        result = block.base;
+        result = &block.block;
     } else {
         outputLastError("Failed to allocate memory");
         unreachable;
@@ -441,14 +450,9 @@ fn freeMemoryBlock(block: *MemoryBlock) void {
     std.debug.assert(result != 0);
 }
 
-fn deallocateMemory(opt_memory: ?*anyopaque, flags: u64) callconv(.C) void {
-    if (opt_memory) |mem| {
-        var block: *MemoryBlock = @ptrFromInt(@intFromPtr(mem) - @sizeOf(MemoryBlock));
-
-        if (flags & @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) != 0) {
-            block = @ptrFromInt(@intFromPtr(mem) + 2 * PAGE_SIZE);
-        }
-
+fn deallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.C) void {
+    if (opt_platform_block) |platform_block| {
+        var block: *MemoryBlock = @ptrCast(platform_block);
         if (isInLoop()) {
             block.looping_flags = @intFromEnum(MemoryBlockLoopingFlag.FreedDuringLooping);
         } else {
@@ -1744,11 +1748,11 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
         const sentinel: *MemoryBlock = &global_state.memory_sentinel;
         var source_block = sentinel.next;
         while (source_block != sentinel) : (source_block = source_block.next) {
-            if ((source_block.flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
-                const base_pointer = source_block.base;
+            if ((source_block.block.flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
+                const base_pointer = source_block.block.base;
                 var dest_block: SavedMemoryBlock = .{
                     .base_pointer = @intFromPtr(base_pointer),
-                    .size = source_block.size,
+                    .size = source_block.block.size,
                 };
                 _ = win32.WriteFile(
                     state.recording_handle,

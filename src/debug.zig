@@ -275,14 +275,6 @@ pub const DebugState = struct {
             if (result != null) {
                 self.first_free_stored_event = result.?.next;
             } else {
-                // if (self.per_frame_arena.hasRoomFor(@sizeOf(DebugStoredEvent), null)) {
-                //     result = self.per_frame_arena.pushStruct(
-                //         DebugStoredEvent,
-                //         ArenaPushParams.aligned(@alignOf(DebugStoredEvent), true),
-                //     );
-                // } else {
-                //     self.freeOldestFrame();
-                // }
                 result = self.per_frame_arena.pushStruct(
                     DebugStoredEvent,
                     ArenaPushParams.aligned(@alignOf(DebugStoredEvent), true),
@@ -1386,35 +1378,38 @@ fn drawArenaOccupancy(
     mouse_position: Vector2,
     root_element: *DebugElement,
 ) void {
+    _ = debug_state;
     _ = graph_id;
+    _ = frame_rect;
     _ = mouse_position;
+    _ = root_element;
 
-    const root_frame: *DebugElementFrame = &root_element.frames[debug_state.viewing_frame_ordinal];
-    if (root_frame.oldest_event) |event| {
-        const arena: *MemoryArena = event.data.event.data.MemoryArena;
-        const split_point: f32 = math.lerpf(
-            frame_rect.min.x(),
-            frame_rect.max.x(),
-            @floatCast(@as(f64, @floatFromInt(arena.used)) / @as(f64, @floatFromInt(arena.size))),
-        );
-        const used_rect = math.Rectangle2.new(
-            frame_rect.min.x(),
-            frame_rect.min.y(),
-            split_point,
-            frame_rect.max.y(),
-        );
-        const unused_rect = math.Rectangle2.new(
-            split_point,
-            frame_rect.min.y(),
-            frame_rect.max.x(),
-            frame_rect.max.y(),
-        );
-        debug_state.render_group.pushRectangle2(&debug_state.ui_transform, used_rect, 0, Color.new(1, 0.5, 0, 1));
-        debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, used_rect, 0, Color.black(), 2);
-
-        debug_state.render_group.pushRectangle2(&debug_state.ui_transform, unused_rect, 0, Color.new(0, 1, 0, 1));
-        debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, unused_rect, 0, Color.black(), 2);
-    }
+    // const root_frame: *DebugElementFrame = &root_element.frames[debug_state.viewing_frame_ordinal];
+    // if (root_frame.oldest_event) |event| {
+    //     const arena: *MemoryArena = event.data.event.data.MemoryArena;
+    //     const split_point: f32 = math.lerpf(
+    //         frame_rect.min.x(),
+    //         frame_rect.max.x(),
+    //         @floatCast(@as(f64, @floatFromInt(arena.used)) / @as(f64, @floatFromInt(arena.size))),
+    //     );
+    //     const used_rect = math.Rectangle2.new(
+    //         frame_rect.min.x(),
+    //         frame_rect.min.y(),
+    //         split_point,
+    //         frame_rect.max.y(),
+    //     );
+    //     const unused_rect = math.Rectangle2.new(
+    //         split_point,
+    //         frame_rect.min.y(),
+    //         frame_rect.max.x(),
+    //         frame_rect.max.y(),
+    //     );
+    //     debug_state.render_group.pushRectangle2(&debug_state.ui_transform, used_rect, 0, Color.new(1, 0.5, 0, 1));
+    //     debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, used_rect, 0, Color.black(), 2);
+    //
+    //     debug_state.render_group.pushRectangle2(&debug_state.ui_transform, unused_rect, 0, Color.new(0, 1, 0, 1));
+    //     debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, unused_rect, 0, Color.black(), 2);
+    // }
 }
 
 const ClockEntry = struct {
@@ -1833,11 +1828,11 @@ fn drawDebugElement(
             _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         .DebugMemoryInfo => {
-            var text: [128:0]u8 = undefined;
-            _ = shared.formatString(text.len, &text, "Per-frame arena space remaining: %ukb", .{
-                debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
-            });
-            _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
+            // var text: [128:0]u8 = undefined;
+            // _ = shared.formatString(text.len, &text, "Per-frame arena space remaining: %ukb", .{
+            //     debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
+            // });
+            // _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         else => {
             var null_event: DebugEvent = .{

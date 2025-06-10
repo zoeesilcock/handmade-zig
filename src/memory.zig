@@ -4,14 +4,15 @@ const debug_interface = @import("debug_interface.zig");
 
 // Types.
 const DebugTable = debug_interface.DebugTable;
+const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 
 pub const MemoryIndex = usize;
 
 pub const TemporaryMemory = struct {
     arena: *MemoryArena,
-    base: [*]u8,
-    used: MemoryIndex,
+    block: ?*PlatformMemoryBlock = null,
+    used: MemoryIndex = 0,
 };
 
 const ArenaPushFlag = enum(u32) {
@@ -74,20 +75,10 @@ pub const ArenaBootstrapParams = extern struct {
     }
 };
 
-const MemoryBlockChain = extern struct {
-    base: [*]u8 = undefined,
-    size: MemoryIndex = 0,
-    used: MemoryIndex = 0,
-    pad: MemoryIndex = 0,
-};
-
 pub const MemoryArena = extern struct {
-    size: MemoryIndex = 0,
-    base: [*]u8 = undefined,
-    used: MemoryIndex = 0,
+    current_block: ?*PlatformMemoryBlock = undefined,
     minimum_block_size: MemoryIndex = 0,
     allocation_flags: u64 = 0,
-    block_count: u32 = 0,
     temp_count: i32 = 0,
 
     pub fn setMinimumBlockSize(self: *MemoryArena, minimum_block_size: MemoryIndex) void {
@@ -96,26 +87,16 @@ pub const MemoryArena = extern struct {
 
     fn getAlignmentOffset(self: *MemoryArena, alignment: MemoryIndex) MemoryIndex {
         var alignment_offset: MemoryIndex = 0;
-        const result_pointer: MemoryIndex = @intFromPtr(self.base + self.used);
-        const alignment_mask: MemoryIndex = alignment - 1;
+        if (self.current_block) |current_block| {
+            const result_pointer: MemoryIndex = @intFromPtr(current_block.base + current_block.used);
+            const alignment_mask: MemoryIndex = alignment - 1;
 
-        if (result_pointer & alignment_mask != 0) {
-            alignment_offset = alignment - (result_pointer & alignment_mask);
+            if (result_pointer & alignment_mask != 0) {
+                alignment_offset = alignment - (result_pointer & alignment_mask);
+            }
         }
 
         return alignment_offset;
-    }
-
-    pub fn getRemainingSize(self: *MemoryArena, in_params: ?ArenaPushParams) MemoryIndex {
-        const params = in_params orelse ArenaPushParams.default();
-        return self.size - (self.used + self.getAlignmentOffset(params.alignment));
-    }
-
-    pub fn makeSubArena(self: *MemoryArena, arena: *MemoryArena, size: MemoryIndex, params: ?ArenaPushParams) void {
-        arena.size = size;
-        arena.base = self.pushSize(size, params);
-        arena.used = 0;
-        arena.temp_count = 0;
     }
 
     pub fn getEffectiveSizeFor(self: *MemoryArena, size: MemoryIndex, in_params: ?ArenaPushParams) MemoryIndex {
@@ -125,56 +106,40 @@ pub const MemoryArena = extern struct {
         return aligned_size;
     }
 
-    pub fn hasRoomFor(self: *MemoryArena, size: MemoryIndex, params: ?ArenaPushParams) bool {
-        const effective_size = self.getEffectiveSizeFor(size, params);
-        return (self.used + effective_size) <= self.size;
-    }
-
-    fn getFooter(self: *MemoryArena) *MemoryBlockChain {
-        const result: *MemoryBlockChain = @ptrFromInt(@intFromPtr(self.base) + self.size);
-        return result;
-    }
-
     pub fn pushSize(self: *MemoryArena, size: MemoryIndex, in_params: ?ArenaPushParams) [*]u8 {
         var result: [*]u8 = undefined;
         const params = in_params orelse ArenaPushParams.default();
 
-        // self.allocation_flags |= @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck);
+        var aligned_size: MemoryIndex = 0;
+        if (self.current_block != null) {
+            aligned_size = self.getEffectiveSizeFor(size, params);
+        }
 
-        var aligned_size = self.getEffectiveSizeFor(size, params);
+        if (self.current_block == null or (self.current_block.?.used + aligned_size) > self.current_block.?.size) {
+            aligned_size = size;
 
-        if ((self.used + aligned_size) > self.size) {
             if (self.allocation_flags &
                 (@intFromEnum(PlatformMemoryBlockFlags.OverflowCheck) |
                  @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck)) != 0)
             {
                 self.minimum_block_size = 0;
+                aligned_size = shared.alignPow2(@intCast(size), params.alignment);
             } else if (self.minimum_block_size == 0) {
                 self.minimum_block_size = 1024 * 1024;
             }
 
-            const save: MemoryBlockChain = .{
-                .base = self.base,
-                .size = self.size,
-                .used = self.used,
-            };
-
-            aligned_size = size; // The base will automatically be aligned now.
-            const block_size: MemoryIndex = @max(aligned_size + @sizeOf(MemoryBlockChain), self.minimum_block_size);
-            self.size = block_size - @sizeOf(MemoryBlockChain);
-            self.base = @ptrCast(shared.platform.allocateMemory(block_size, self.allocation_flags).?);
-            self.used = 0;
-            self.block_count += 1;
-
-            const footer = self.getFooter();
-            footer.* = save;
+            const block_size: MemoryIndex = @max(aligned_size, self.minimum_block_size);
+            var new_block: *PlatformMemoryBlock =
+                @ptrCast(shared.platform.allocateMemory(block_size, self.allocation_flags).?);
+            new_block.arena_prev = self.current_block;
+            self.current_block = new_block;
         }
 
-        std.debug.assert((self.used + aligned_size) <= self.size);
+        std.debug.assert((self.current_block.?.used + aligned_size) <= self.current_block.?.size);
 
         const alignment_offset = self.getAlignmentOffset(params.alignment);
-        result = @ptrCast(self.base + self.used + alignment_offset);
-        self.used += aligned_size;
+        result = @ptrCast(self.current_block.?.base + self.current_block.?.used + alignment_offset);
+        self.current_block.?.used += aligned_size;
 
         std.debug.assert(aligned_size >= size);
 
@@ -231,11 +196,14 @@ pub const MemoryArena = extern struct {
     }
 
     pub fn beginTemporaryMemory(self: *MemoryArena) TemporaryMemory {
-        const result = TemporaryMemory{
+        var result = TemporaryMemory{
             .arena = self,
-            .base = self.base,
-            .used = self.used,
         };
+
+        result.block = self.current_block;
+        if (self.current_block) |current_block| {
+           result.used = current_block.used;
+        }
 
         self.temp_count += 1;
 
@@ -243,33 +211,30 @@ pub const MemoryArena = extern struct {
     }
 
     fn freeLastBlock(self: *MemoryArena) void {
-        const free: [*]u8 = self.base;
-        const footer: *MemoryBlockChain = self.getFooter();
-
-        self.base = footer.base;
-        self.size = footer.size;
-        self.used = footer.used;
-
-        shared.platform.deallocateMemory(free, self.allocation_flags);
-
-        self.block_count -= 1;
+        if (self.current_block) |current_block| {
+            self.current_block = current_block.arena_prev;
+            shared.platform.deallocateMemory(current_block);
+        }
     }
 
     pub fn endTemporaryMemory(self: *MemoryArena, temp_memory: TemporaryMemory) void {
         const arena: *MemoryArena = temp_memory.arena;
 
-        while (@intFromPtr(arena.base) != @intFromPtr(temp_memory.base)) {
+        while (@intFromPtr(arena.current_block) != @intFromPtr(temp_memory.block)) {
             arena.freeLastBlock();
         }
 
-        std.debug.assert(self.used >= temp_memory.used);
-        self.used = temp_memory.used;
-        std.debug.assert(self.temp_count > 0);
+        if (arena.current_block) |current_block| {
+            std.debug.assert(current_block.used >= temp_memory.used);
+            current_block.used = temp_memory.used;
+            std.debug.assert(self.temp_count > 0);
+        }
+
         self.temp_count -= 1;
     }
 
     pub fn clear(self: *MemoryArena) void {
-        while (self.block_count > 0) {
+        while (self.current_block != null) {
             self.freeLastBlock();
         }
     }
