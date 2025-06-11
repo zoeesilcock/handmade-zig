@@ -20,6 +20,7 @@ const DebugInteraction = debug_ui.DebugInteraction;
 const Layout = debug_ui.Layout;
 const LayoutElement = debug_ui.LayoutElement;
 const TooltipBuffer = debug_ui.TooltipBuffer;
+const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -2234,14 +2235,24 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
     debug_state.render_group.pushSortBarrier(true);
 
+    const mem_stats: DebugPlatformMemoryStats = shared.platform.debugGetMemoryStats();
+
     // Set the text shown in the root node of the debug menu.
     const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
-    _ = shared.formatString(debug_state.root_info_size, debug_state.root_info, "%.02fms %de %dp %dd", .{
-        most_recent_frame.wall_seconds_elapsed * 1000,
-        most_recent_frame.stored_event_count,
-        most_recent_frame.profile_block_count,
-        most_recent_frame.data_block_count,
-    });
+    _ = shared.formatString(
+        debug_state.root_info_size,
+        debug_state.root_info,
+        "%.02fms %de %dp %dd - Mem: %lu blocks, %lu used / %lu size",
+        .{
+            most_recent_frame.wall_seconds_elapsed * 1000,
+            most_recent_frame.stored_event_count,
+            most_recent_frame.profile_block_count,
+            most_recent_frame.data_block_count,
+            mem_stats.block_count,
+            mem_stats.total_used,
+            mem_stats.total_size,
+        },
+    );
 
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;

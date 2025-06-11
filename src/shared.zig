@@ -762,6 +762,12 @@ pub const DebugExecutingProcessState = extern struct {
     return_code: u32 = 0,
 };
 
+pub const DebugPlatformMemoryStats = extern struct {
+    block_count: MemoryIndex = 0,
+    total_size: MemoryIndex = 0, // This doesn't include the header.
+    total_used: MemoryIndex = 0,
+};
+
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
 
@@ -780,6 +786,7 @@ const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32,
 const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult;
 const debugExecuteSystemCommandType: type = fn (path: [*:0]const u8, command: [*:0]const u8, command_line: [*:0]const u8) callconv(.C) DebugExecutingProcess;
 const debugGetProcessStateType: type = fn (process: DebugExecutingProcess) callconv(.C) DebugExecutingProcessState;
+const debugGetMemoryStatsType = fn () callconv(.C) DebugPlatformMemoryStats;
 
 pub fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
     return file_handle.no_errors;
@@ -804,6 +811,7 @@ pub const Platform = if (INTERNAL) extern struct {
     debugReadEntireFile: *const debugReadEntireFileType = undefined,
     debugExecuteSystemCommand: *const debugExecuteSystemCommandType = undefined,
     debugGetProcessState: *const debugGetProcessStateType = undefined,
+    debugGetMemoryStats: * const debugGetMemoryStatsType = undefined,
 } else extern struct {
     addQueueEntry: *const addQueueEntryType = undefined,
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,

@@ -53,6 +53,7 @@ const DebugId = debug_interface.DebugId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const GameRenderPrep = shared.GameRenderPrep;
+const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
 const Rectangle2i = math.Rectangle2i;
 const TicketMutex = shared.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
@@ -390,8 +391,7 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*PlatformMemoryBl
         total_size = size + 2 * page_size;
         base_offset = 2 * page_size;
         protected_offset = page_size;
-    }
-    if (flags & @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck) != 0) {
+    } else if (flags & @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck) != 0) {
         const size_rounded_up: MemoryIndex = shared.alignPow2(@intCast(size), page_size);
         total_size = size_rounded_up + 2 * page_size;
         base_offset = page_size + size_rounded_up - size;
@@ -413,7 +413,10 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*PlatformMemoryBl
         std.debug.assert(block.block.used == 0);
         std.debug.assert(block.block.arena_prev == null);
 
-        if (flags & (@intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) | @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck)) != 0) {
+        if (flags &
+            (@intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) |
+             @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck)) != 0)
+        {
             var old_protect: win32.PAGE_PROTECTION_FLAGS = undefined;
             const protected = win32.VirtualProtect(@ptrFromInt(@intFromPtr(block) + protected_offset), page_size, win32.PAGE_NOACCESS, &old_protect);
             std.debug.assert(protected != 0);
@@ -462,6 +465,10 @@ fn deallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.C) void
 }
 
 const DebugFunctions = if (INTERNAL) struct {
+    pub fn debugFreeFileMemory(mem: *anyopaque) callconv(.C) void {
+        _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
+    }
+
     pub fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
         var result = shared.DebugReadFileResult{};
 
@@ -618,8 +625,22 @@ const DebugFunctions = if (INTERNAL) struct {
         return result;
     }
 
-    pub fn debugFreeFileMemory(mem: *anyopaque) callconv(.C) void {
-        _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
+    pub fn debugGetMemoryStats() callconv(.C) DebugPlatformMemoryStats {
+        global_state.memory_mutex.begin();
+        defer global_state.memory_mutex.end();
+
+        var stats: DebugPlatformMemoryStats = .{};
+        const sentinel: *MemoryBlock = &global_state.memory_sentinel;
+        var source_block = sentinel.next;
+        while (source_block != sentinel) : (source_block = source_block.next) {
+            std.debug.assert(source_block.block.size <= std.math.maxInt(u32));
+
+            stats.block_count += 1;
+            stats.total_size += source_block.block.size;
+            stats.total_used += source_block.block.used;
+        }
+
+        return stats;
     }
 } else struct {
     pub fn debugFreeFileMemory(_: *anyopaque) callconv(.C) void {}
@@ -639,6 +660,7 @@ const DebugFunctions = if (INTERNAL) struct {
     pub fn debugGetProcessState(_: shared.DebugExecutingProcess) callconv(.C) shared.DebugExecutingProcessState {
         return undefined;
     }
+    pub fn debugGetMemoryStats() callconv(.C) DebugPlatformMemoryStats {}
 };
 
 inline fn getLastWriteTime(file_name: [*:0]const u8) win32.FILETIME {
@@ -1728,6 +1750,20 @@ fn getInputFileLocation(state: *Win32State, is_input: bool, slot_index: u32, des
     buildExePathFileName(state, &temp, dest);
 }
 
+var integrity_fail_counter: u32 = 0;
+fn verifyMemoryListIntegrity() void {
+    global_state.memory_mutex.begin();
+    defer global_state.memory_mutex.end();
+
+    const sentinel: *MemoryBlock = &global_state.memory_sentinel;
+    var source_block = sentinel.next;
+    while (source_block != sentinel) : (source_block = source_block.next) {
+        std.debug.assert(source_block.block.size <= std.math.maxInt(u32));
+    }
+
+    integrity_fail_counter += 1;
+}
+
 fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
     var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
     getInputFileLocation(state, true, @intCast(input_recording_index), &file_path);
@@ -1746,6 +1782,8 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
 
         var bytes_written: u32 = undefined;
         const sentinel: *MemoryBlock = &global_state.memory_sentinel;
+
+        global_state.memory_mutex.begin();
         var source_block = sentinel.next;
         while (source_block != sentinel) : (source_block = source_block.next) {
             if ((source_block.block.flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
@@ -1773,6 +1811,7 @@ fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
                 );
             }
         }
+        global_state.memory_mutex.end();
 
         var dest_block: SavedMemoryBlock = .{};
         _ = win32.WriteFile(
@@ -2127,6 +2166,7 @@ pub export fn wWinMain(
         platform.debugWriteEntireFile = DebugFunctions.debugWriteEntireFile;
         platform.debugExecuteSystemCommand = DebugFunctions.debugExecuteSystemCommand;
         platform.debugGetProcessState = DebugFunctions.debugGetProcessState;
+        platform.debugGetMemoryStats = DebugFunctions.debugGetMemoryStats;
     }
 
     const window_class: win32.WNDCLASSW = .{
@@ -2274,7 +2314,8 @@ pub export fn wWinMain(
 
                 var frame_temp_arena: MemoryArena = .{};
                 const push_buffer_size: u32 = shared.megabytes(64);
-                const push_buffer = allocateMemory(push_buffer_size, @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
+                const push_buffer_block: ?*PlatformMemoryBlock = allocateMemory(push_buffer_size, @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
+                const push_buffer = push_buffer_block.?.base;
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
@@ -2300,7 +2341,7 @@ pub export fn wWinMain(
                     // TimedBlock.beginBlock(@src(), .InputProcessing);
                     var render_commands: shared.RenderCommands = shared.initializeRenderCommands(
                         push_buffer_size,
-                        push_buffer.?,
+                        push_buffer,
                         @intCast(back_buffer.width),
                         @intCast(back_buffer.height),
                     );
