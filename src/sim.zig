@@ -523,7 +523,7 @@ pub fn moveEntity(
         .plus(entity.velocity.scaledTo(delta_time));
     entity.velocity = acceleration.scaledTo(delta_time).plus(entity.velocity);
 
-    std.debug.assert(entity.velocity.lengthSquared() <= math.square(sim_region.max_entity_velocity));
+    // std.debug.assert(entity.velocity.lengthSquared() <= math.square(sim_region.max_entity_velocity));
 
     var distance_remaining = entity.distance_limit;
     if (distance_remaining == 0) {

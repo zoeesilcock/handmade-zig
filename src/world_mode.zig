@@ -27,6 +27,7 @@ var global_config = &@import("config.zig").global_config;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle3 = math.Rectangle3;
+const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
 const Color = math.Color;
 const State = shared.State;
@@ -144,8 +145,8 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     particles.initParticleCache(world_mode.particle_cache, transient_state.assets);
 
     world_mode.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
-    world_mode.game_entropy = .seed(3);
-    world_mode.effects_entropy = .seed(3);
+    world_mode.game_entropy = .seed(1234);
+    world_mode.effects_entropy = .seed(1234);
     world_mode.typical_floor_height = 3;
 
     // TODO: Replace this with a value received from the renderer.
@@ -221,16 +222,16 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
     var prev_room: StandardRoom = .{};
 
-    for (0..2) |screen_index| {
+    for (0..20) |screen_index| {
         last_screen_x = screen_x;
         last_screen_y = screen_y;
         last_screen_z = abs_tile_z;
 
-        const door_direction = 1;
-        _ = series.randomChoice(2);
+        // const door_direction = 1;
+        // _ = series.randomChoice(2);
         // const door_direction = 3;
         // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
-        // const door_direction = series.randomChoice(2);
+        const door_direction = series.randomChoice(2);
 
         var created_z_door = false;
         if (door_direction == 3) {
@@ -365,45 +366,20 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     state.mode = .{ .world = world_mode };
 }
 
-pub fn updateAndRenderWorld(
+fn updateAndRenderSimRegion(
     state: *shared.State,
     world_mode: *GameModeWorld,
     transient_state: *TransientState,
-    input: *shared.GameInput,
+    opt_input: ?*shared.GameInput,
     render_group: *RenderGroup,
     draw_buffer: *asset.LoadedBitmap,
-) bool {
-    TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
-    defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
-
-    const result = false;
-
-    const camera: CameraParams = .get(draw_buffer.width, 0.3);
-    const distance_above_ground: f32 = 11;
-    const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
-
-    render_group.perspectiveMode(
-        camera.meters_to_pixels,
-        camera.focal_length,
-        distance_above_ground,
-    );
-
-    // Clear background.
-    const background_color: Color = .new(0.15, 0.15, 0.15, 0);
-    render_group.pushClear(background_color);
-
-    const screen_bounds = render_group.getCameraRectangleAtTarget();
-    var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
-        screen_bounds.min.toVector3(0),
-        screen_bounds.max.toVector3(0),
-    );
-    _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
-    _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
-
-    const sim_bounds_expansion = Vector3.new(15, 15, 15);
-    const sim_bounds = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
+    sim_bounds: Rectangle3,
+    screen_bounds: Rectangle2,
+    background_color: Color,
+) void {
     const sim_memory = transient_state.arena.beginTemporaryMemory();
-
+    const mouse_position: Vector2 = if (opt_input) |input| Vector2.new(input.mouse_x, input.mouse_y) else .zero();
+    const delta_time = if (opt_input) |input| input.frame_delta_time else 0;
     const sim_center_position = world_mode.camera_position;
     const frame_to_frame_camera_delta_position: Vector3 =
         world.subtractPositions(world_mode.world, &world_mode.camera_position, &world_mode.last_camera_position);
@@ -415,7 +391,7 @@ pub fn updateAndRenderWorld(
         world_mode.world,
         sim_center_position,
         sim_bounds,
-        input.frame_delta_time,
+        delta_time,
         world_mode.particle_cache,
     );
 
@@ -454,19 +430,19 @@ pub fn updateAndRenderWorld(
         0.1,
     );
 
-    const delta_time = input.frame_delta_time;
-
     // Check if any players are trying to join.
-    for (&input.controllers, 0..) |*controller, controller_index| {
-        const controlled_hero = &state.controlled_heroes[controller_index];
-        if (controlled_hero.brain_id.value == 0) {
-            if (controller.start_button.wasPressed()) {
-                controlled_hero.* = shared.ControlledHero{};
+    if (opt_input) |input| {
+        for (&input.controllers, 0..) |*controller, controller_index| {
+            const controlled_hero = &state.controlled_heroes[controller_index];
+            if (controlled_hero.brain_id.value == 0) {
+                if (controller.start_button.wasPressed()) {
+                    controlled_hero.* = shared.ControlledHero{};
 
-                var traversable: TraversableReference = undefined;
-                if (sim.getClosestTraversable(sim_region, camera_position, &traversable, 0)) {
-                    controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
-                    addPlayer(state.mode.world, sim_region, traversable, controlled_hero.brain_id);
+                    var traversable: TraversableReference = undefined;
+                    if (sim.getClosestTraversable(sim_region, camera_position, &traversable, 0)) {
+                        controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
+                        addPlayer(state.mode.world, sim_region, traversable, controlled_hero.brain_id);
+                    }
                 }
             }
         }
@@ -483,7 +459,7 @@ pub fn updateAndRenderWorld(
     brain_index = 0;
     while (brain_index < sim_region.brain_count) : (brain_index += 1) {
         const brain: *Brain = &sim_region.brains[brain_index];
-        brains.executeBrain(state, world_mode, sim_region, input, render_group, brain, delta_time);
+        brains.executeBrain(state, world_mode, sim_region, opt_input.?, render_group, brain, delta_time);
     }
     TimedBlock.endBlock(@src(), .ExecuteBrains);
 
@@ -518,6 +494,56 @@ pub fn updateAndRenderWorld(
 
     sim.endSimulation(world_mode, sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
+}
+
+pub fn updateAndRenderWorld(
+    state: *shared.State,
+    world_mode: *GameModeWorld,
+    transient_state: *TransientState,
+    input: *shared.GameInput,
+    render_group: *RenderGroup,
+    draw_buffer: *asset.LoadedBitmap,
+) bool {
+    TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
+    defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
+
+    const result = false;
+
+    const camera: CameraParams = .get(draw_buffer.width, 0.3);
+    const distance_above_ground: f32 = 11;
+
+    render_group.perspectiveMode(
+        camera.meters_to_pixels,
+        camera.focal_length,
+        distance_above_ground,
+    );
+
+    // Clear background.
+    const background_color: Color = .new(0.15, 0.15, 0.15, 0);
+    render_group.pushClear(background_color);
+
+    const screen_bounds = render_group.getCameraRectangleAtTarget();
+    var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
+        screen_bounds.min.toVector3(0),
+        screen_bounds.max.toVector3(0),
+    );
+    _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
+    _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
+
+    const sim_bounds_expansion = Vector3.new(15, 15, 15);
+    const sim_bounds: Rectangle3 = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
+
+    updateAndRenderSimRegion(
+        state,
+        world_mode,
+        transient_state,
+        input,
+        render_group,
+        draw_buffer,
+        sim_bounds,
+        screen_bounds,
+        background_color,
+    );
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;
@@ -605,12 +631,13 @@ fn addStandardRoom(
                 // Hole down to the floor below.
             } else {
                 const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                standing_on.entity.ptr = entity;
                 standing_on.entity.index = entity.id;
                 entity.traversable_count = 1;
                 entity.traversables[0].position = Vector3.zero();
                 entity.traversables[0].occupier = null;
-                if ((left_hole and offset_x == -2 and offset_y == 1) or
-                    (right_hole and offset_x == 2 and offset_y == 2))
+                if ((left_hole and offset_x == -2 and offset_y == 0) or
+                    (right_hole and offset_x == 2 and offset_y == 0))
                 {
                     entity.auto_boost_to = target_ref;
                 }

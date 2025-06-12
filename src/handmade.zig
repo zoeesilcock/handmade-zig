@@ -18,13 +18,6 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
-/// * Arena upgrade!
-///     * Set default alignment to 1 in overflow/underflow checking modes?
-///     * Clean up where arenas are used and how.
-///
-/// * Cutscenes now malfunctioning?
-/// * Bug in traversables where trees aren't occupying their spots?
-///
 /// * Implement multiple sim regions per frame.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?

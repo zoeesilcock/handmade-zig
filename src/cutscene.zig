@@ -423,7 +423,9 @@ fn renderLayeredScene(
                     _ = transform.offset_position.setY(position.y() - camera_offset.y());
                 }
 
-                _ = transform.offset_position.setZ(position.z() - camera_offset.z());
+                transform.floor_z = position.z() - camera_offset.z();
+                _ = transform.offset_position.setZ(transform.floor_z);
+
                 render_group.debug_tag = layer_index;
                 render_group.pushBitmapId(&transform, layer_image, layer.height, Vector3.zero(), color, null, null, null);
             } else {
