@@ -10,6 +10,7 @@ const rendergroup = @import("rendergroup.zig");
 var global_config = &@import("config.zig").global_config;
 
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
+const ControlledHero = shared.ControlledHero;
 const Entity = entities.Entity;
 const EntityFlags = entities.EntityFlags;
 const TraversableReference = entities.TraversableReference;
@@ -139,16 +140,17 @@ pub fn markBrainActive(
 }
 
 pub fn executeBrain(
-    state: *shared.State,
+    opt_state: ?*shared.State,
     world_mode: *GameModeWorld,
     sim_region: *SimRegion,
-    input: *shared.GameInput,
-    render_group: *RenderGroup,
+    opt_input: ?*shared.GameInput,
     brain: *Brain,
     delta_time: f32,
 ) void {
     switch (brain.type) {
         .BrainHero => {
+            var controlled_hero_: ControlledHero = .{};
+            var controlled_hero: *ControlledHero = &controlled_hero_;
             const parts: *BrainHero = &brain.parts.hero;
             const opt_head: ?*Entity = parts.head;
             const opt_body: ?*Entity = parts.body;
@@ -156,111 +158,115 @@ pub fn executeBrain(
 
             var sword_direction: Vector2 = Vector2.zero();
             var exited: bool = false;
+            var attacked: bool = false;
 
-            const controller_index: u32 = brain.id.value - @intFromEnum(ReservedBrainId.FirstHero);
-            const controller: *shared.ControllerInput = input.getController(controller_index);
-            const controlled_hero = &state.controlled_heroes[controller_index];
-            if (controller.is_analog) {
-                controlled_hero.controller_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
-            } else {
-                const recenter: f32 = 0.5;
-                if (controller.move_up.wasPressed()) {
-                    _ = controlled_hero.controller_direction.setX(0);
-                    _ = controlled_hero.controller_direction.setY(1);
-                    controlled_hero.recenter_timer = recenter;
-                }
-                if (controller.move_down.wasPressed()) {
-                    _ = controlled_hero.controller_direction.setX(0);
-                    _ = controlled_hero.controller_direction.setY(-1);
-                    controlled_hero.recenter_timer = recenter;
-                }
-                if (controller.move_left.wasPressed()) {
-                    _ = controlled_hero.controller_direction.setX(-1);
-                    _ = controlled_hero.controller_direction.setY(0);
-                    controlled_hero.recenter_timer = recenter;
-                }
-                if (controller.move_right.wasPressed()) {
-                    _ = controlled_hero.controller_direction.setX(1);
-                    _ = controlled_hero.controller_direction.setY(0);
-                    controlled_hero.recenter_timer = recenter;
-                }
+            if (opt_input) |input| {
+                if (opt_state) |state| {
+                    const controller_index: u32 = brain.id.value - @intFromEnum(ReservedBrainId.FirstHero);
+                    const controller: *shared.ControllerInput = input.getController(controller_index);
+                    controlled_hero = &state.controlled_heroes[controller_index];
+                    if (controller.is_analog) {
+                        controlled_hero.controller_direction = Vector2.new(controller.stick_average_x, controller.stick_average_y);
+                    } else {
+                        const recenter: f32 = 0.5;
+                        if (controller.move_up.wasPressed()) {
+                            _ = controlled_hero.controller_direction.setX(0);
+                            _ = controlled_hero.controller_direction.setY(1);
+                            controlled_hero.recenter_timer = recenter;
+                        }
+                        if (controller.move_down.wasPressed()) {
+                            _ = controlled_hero.controller_direction.setX(0);
+                            _ = controlled_hero.controller_direction.setY(-1);
+                            controlled_hero.recenter_timer = recenter;
+                        }
+                        if (controller.move_left.wasPressed()) {
+                            _ = controlled_hero.controller_direction.setX(-1);
+                            _ = controlled_hero.controller_direction.setY(0);
+                            controlled_hero.recenter_timer = recenter;
+                        }
+                        if (controller.move_right.wasPressed()) {
+                            _ = controlled_hero.controller_direction.setX(1);
+                            _ = controlled_hero.controller_direction.setY(0);
+                            controlled_hero.recenter_timer = recenter;
+                        }
 
-                if (!controller.move_left.isDown() and !controller.move_right.isDown()) {
-                    _ = controlled_hero.controller_direction.setX(0);
+                        if (!controller.move_left.isDown() and !controller.move_right.isDown()) {
+                            _ = controlled_hero.controller_direction.setX(0);
 
-                    if (controller.move_up.isDown()) {
-                        _ = controlled_hero.controller_direction.setY(1);
-                    } else if (controller.move_down.isDown()) {
-                        _ = controlled_hero.controller_direction.setY(-1);
-                    }
-                }
+                            if (controller.move_up.isDown()) {
+                                _ = controlled_hero.controller_direction.setY(1);
+                            } else if (controller.move_down.isDown()) {
+                                _ = controlled_hero.controller_direction.setY(-1);
+                            }
+                        }
 
-                if (!controller.move_up.isDown() and !controller.move_down.isDown()) {
-                    _ = controlled_hero.controller_direction.setY(0);
+                        if (!controller.move_up.isDown() and !controller.move_down.isDown()) {
+                            _ = controlled_hero.controller_direction.setY(0);
 
-                    if (controller.move_left.isDown()) {
-                        _ = controlled_hero.controller_direction.setX(-1);
-                    } else if (controller.move_right.isDown()) {
-                        _ = controlled_hero.controller_direction.setX(1);
-                    }
-                }
-            }
-
-            if (controller.start_button.wasPressed()) {
-                if (opt_head) |head| {
-                    var opt_closest_hero: ?*Entity = null;
-                    var closest_hero_squared: f32 = math.square(10.0);
-
-                    var hero_entity_index: u32 = 0;
-                    while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
-                        var test_entity = &sim_region.entities[hero_entity_index];
-                        if (test_entity.brain_id.value != 0 and test_entity.brain_id.value != brain.id.value) {
-                            const distance = test_entity.position.minus(head.position).lengthSquared();
-
-                            if (distance < closest_hero_squared) {
-                                opt_closest_hero = test_entity;
-                                closest_hero_squared = distance;
+                            if (controller.move_left.isDown()) {
+                                _ = controlled_hero.controller_direction.setX(-1);
+                            } else if (controller.move_right.isDown()) {
+                                _ = controlled_hero.controller_direction.setX(1);
                             }
                         }
                     }
 
-                    if (opt_closest_hero) |closest_hero| {
-                        const old_brain_id = head.brain_id;
-                        const old_brain_slot = head.brain_slot;
-                        head.brain_id = closest_hero.brain_id;
-                        head.brain_slot = closest_hero.brain_slot;
-                        closest_hero.brain_id = old_brain_id;
-                        closest_hero.brain_slot = old_brain_slot;
+                    if (controller.start_button.wasPressed()) {
+                        if (opt_head) |head| {
+                            var opt_closest_hero: ?*Entity = null;
+                            var closest_hero_squared: f32 = math.square(10.0);
+
+                            var hero_entity_index: u32 = 0;
+                            while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
+                                var test_entity = &sim_region.entities[hero_entity_index];
+                                if (test_entity.brain_id.value != 0 and test_entity.brain_id.value != brain.id.value) {
+                                    const distance = test_entity.position.minus(head.position).lengthSquared();
+
+                                    if (distance < closest_hero_squared) {
+                                        opt_closest_hero = test_entity;
+                                        closest_hero_squared = distance;
+                                    }
+                                }
+                            }
+
+                            if (opt_closest_hero) |closest_hero| {
+                                const old_brain_id = head.brain_id;
+                                const old_brain_slot = head.brain_slot;
+                                head.brain_id = closest_hero.brain_id;
+                                head.brain_slot = closest_hero.brain_slot;
+                                closest_hero.brain_id = old_brain_id;
+                                closest_hero.brain_slot = old_brain_slot;
+                            }
+                        }
+                    }
+
+                    if (controller.action_up.ended_down) {
+                        attacked = true;
+                        sword_direction = sword_direction.plus(Vector2.new(0, 1));
+                    }
+                    if (controller.action_down.ended_down) {
+                        attacked = true;
+                        sword_direction = sword_direction.plus(Vector2.new(0, -1));
+                    }
+                    if (controller.action_left.ended_down) {
+                        attacked = true;
+                        sword_direction = sword_direction.plus(Vector2.new(-1, 0));
+                    }
+                    if (controller.action_right.ended_down) {
+                        attacked = true;
+                        sword_direction = sword_direction.plus(Vector2.new(1, 0));
+                    }
+
+                    if (opt_glove) |glove| {
+                        if (glove.movement_mode != .AngleOffset) {
+                            attacked = false;
+                        }
+                    }
+
+                    if (controller.back_button.wasPressed()) {
+                        exited = true;
                     }
                 }
-            }
-
-            var attacked: bool = false;
-            if (controller.action_up.ended_down) {
-                attacked = true;
-                sword_direction = sword_direction.plus(Vector2.new(0, 1));
-            }
-            if (controller.action_down.ended_down) {
-                attacked = true;
-                sword_direction = sword_direction.plus(Vector2.new(0, -1));
-            }
-            if (controller.action_left.ended_down) {
-                attacked = true;
-                sword_direction = sword_direction.plus(Vector2.new(-1, 0));
-            }
-            if (controller.action_right.ended_down) {
-                attacked = true;
-                sword_direction = sword_direction.plus(Vector2.new(1, 0));
-            }
-
-            if (opt_glove) |glove| {
-                if (glove.movement_mode != .AngleOffset) {
-                    attacked = false;
-                }
-            }
-
-            if (controller.back_button.wasPressed()) {
-                exited = true;
             }
 
             if (opt_glove) |glove| {
@@ -276,12 +282,6 @@ pub fn executeBrain(
             if (opt_head) |head| {
                 if (attacked) {
                     head.facing_direction = intrinsics.atan2(sword_direction.y(), sword_direction.x());
-                }
-
-                if (opt_body) |body| {
-                    const key: u16 = render_group.reserveSortKey();
-                    head.manual_sort.always_in_front_of = key;
-                    body.manual_sort.always_behind = key;
                 }
 
                 var traversable: TraversableReference = undefined;

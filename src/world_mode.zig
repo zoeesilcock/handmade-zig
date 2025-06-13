@@ -367,19 +367,20 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 }
 
 fn updateAndRenderSimRegion(
-    state: *shared.State,
-    world_mode: *GameModeWorld,
     transient_state: *TransientState,
-    opt_input: ?*shared.GameInput,
-    render_group: *RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
+    world_mode: *GameModeWorld,
     sim_bounds: Rectangle3,
-    screen_bounds: Rectangle2,
+    delta_time: f32,
+    // Optional...
     background_color: Color,
+    screen_bounds: Rectangle2,
+    opt_state: ?*shared.State,
+    opt_input: ?*shared.GameInput,
+    opt_render_group: ?*RenderGroup,
+    draw_buffer: ?*asset.LoadedBitmap,
 ) void {
     const sim_memory = transient_state.arena.beginTemporaryMemory();
     const mouse_position: Vector2 = if (opt_input) |input| Vector2.new(input.mouse_x, input.mouse_y) else .zero();
-    const delta_time = if (opt_input) |input| input.frame_delta_time else 0;
     const sim_center_position = world_mode.camera_position;
     const frame_to_frame_camera_delta_position: Vector3 =
         world.subtractPositions(world_mode.world, &world_mode.camera_position, &world_mode.last_camera_position);
@@ -399,49 +400,20 @@ fn updateAndRenderSimRegion(
         world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
             .plus(world_mode.camera_offset);
 
-    var world_transform = ObjectTransform.defaultUpright();
-    world_transform.offset_position = world_transform.offset_position.minus(camera_position);
-
-    render_group.pushRectangleOutline(
-        &world_transform,
-        screen_bounds.getDimension(),
-        Vector3.zero(),
-        Color.new(1, 1, 0, 1),
-        0.1,
-    );
-    // render_group.pushRectangleOutline(
-    //     world_transform,
-    //     camera_bounds_in_meters.getDimension().xy(),
-    //     Vector3.zero(),
-    //     Color.new(1, 1, 1, 1),
-    // );
-    render_group.pushRectangleOutline(
-        &world_transform,
-        sim_bounds.getDimension().xy(),
-        Vector3.zero(),
-        Color.new(0, 1, 1, 1),
-        0.1,
-    );
-    render_group.pushRectangleOutline(
-        &world_transform,
-        sim_region.bounds.getDimension().xy(),
-        Vector3.zero(),
-        Color.new(1, 0, 1, 1),
-        0.1,
-    );
-
     // Check if any players are trying to join.
     if (opt_input) |input| {
-        for (&input.controllers, 0..) |*controller, controller_index| {
-            const controlled_hero = &state.controlled_heroes[controller_index];
-            if (controlled_hero.brain_id.value == 0) {
-                if (controller.start_button.wasPressed()) {
-                    controlled_hero.* = shared.ControlledHero{};
+        if (opt_state) |state| {
+            for (&input.controllers, 0..) |*controller, controller_index| {
+                const controlled_hero = &state.controlled_heroes[controller_index];
+                if (controlled_hero.brain_id.value == 0) {
+                    if (controller.start_button.wasPressed()) {
+                        controlled_hero.* = shared.ControlledHero{};
 
-                    var traversable: TraversableReference = undefined;
-                    if (sim.getClosestTraversable(sim_region, camera_position, &traversable, 0)) {
-                        controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
-                        addPlayer(state.mode.world, sim_region, traversable, controlled_hero.brain_id);
+                        var traversable: TraversableReference = undefined;
+                        if (sim.getClosestTraversable(sim_region, camera_position, &traversable, 0)) {
+                            controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
+                            addPlayer(state.mode.world, sim_region, traversable, controlled_hero.brain_id);
+                        }
                     }
                 }
             }
@@ -459,38 +431,62 @@ fn updateAndRenderSimRegion(
     brain_index = 0;
     while (brain_index < sim_region.brain_count) : (brain_index += 1) {
         const brain: *Brain = &sim_region.brains[brain_index];
-        brains.executeBrain(state, world_mode, sim_region, opt_input.?, render_group, brain, delta_time);
+        brains.executeBrain(opt_state, world_mode, sim_region, opt_input, brain, delta_time);
     }
     TimedBlock.endBlock(@src(), .ExecuteBrains);
 
     entities.updateAndRenderEntities(
         world_mode,
-        transient_state,
-        render_group,
         sim_region,
+        delta_time,
+        opt_render_group,
         camera_position,
         draw_buffer,
         background_color,
-        delta_time,
+        transient_state.assets,
         mouse_position,
     );
 
-    particles.updateAndRenderParticleSystem(
-        world_mode.particle_cache,
-        delta_time,
-        render_group,
-        frame_to_frame_camera_delta_position.negated(),
-        camera_position,
-    );
+    if (opt_render_group) |render_group| {
+        particles.updateAndRenderParticleSystem(
+            world_mode.particle_cache,
+            delta_time,
+            render_group,
+            frame_to_frame_camera_delta_position.negated(),
+            camera_position,
+        );
 
-    render_group.orthographicMode(1);
-    render_group.pushRectangleOutline(
-        &ObjectTransform.defaultFlat(),
-        Vector2.new(5, 5),
-        mouse_position.toVector3(0),
-        Color.new(1, 1, 1, 1),
-        0.2,
-    );
+        var world_transform = ObjectTransform.defaultUpright();
+        world_transform.offset_position = world_transform.offset_position.minus(camera_position);
+
+        render_group.pushRectangleOutline(
+            &world_transform,
+            screen_bounds.getDimension(),
+            Vector3.zero(),
+            Color.new(1, 1, 0, 1),
+            0.1,
+        );
+        // render_group.pushRectangleOutline(
+        //     world_transform,
+        //     camera_bounds_in_meters.getDimension().xy(),
+        //     Vector3.zero(),
+        //     Color.new(1, 1, 1, 1),
+        // );
+        render_group.pushRectangleOutline(
+            &world_transform,
+            sim_bounds.getDimension().xy(),
+            Vector3.zero(),
+            Color.new(0, 1, 1, 1),
+            0.1,
+        );
+        render_group.pushRectangleOutline(
+            &world_transform,
+            sim_region.bounds.getDimension().xy(),
+            Vector3.zero(),
+            Color.new(1, 0, 1, 1),
+            0.1,
+        );
+    }
 
     sim.endSimulation(world_mode, sim_region);
     transient_state.arena.endTemporaryMemory(sim_memory);
@@ -534,15 +530,30 @@ pub fn updateAndRenderWorld(
     const sim_bounds: Rectangle3 = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
 
     updateAndRenderSimRegion(
-        state,
-        world_mode,
         transient_state,
+        world_mode,
+        sim_bounds,
+        input.frame_delta_time,
+        background_color,
+        screen_bounds,
+        state,
         input,
         render_group,
         draw_buffer,
-        sim_bounds,
-        screen_bounds,
+    );
+
+    const sim_bounds2: Rectangle3 = sim_bounds.offsetBy(.new(-100, -100, 0));
+    updateAndRenderSimRegion(
+        transient_state,
+        world_mode,
+        sim_bounds2,
+        input.frame_delta_time,
         background_color,
+        screen_bounds,
+        null,
+        null,
+        render_group,
+        draw_buffer,
     );
 
     var heores_exist: bool = false;
