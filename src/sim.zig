@@ -246,7 +246,7 @@ fn addEntityToHash(sim_region: *SimRegion, entity: *Entity) void {
     }
 }
 
-pub fn beginSimulation(
+pub fn beginWorldChange(
     sim_arena: *MemoryArena,
     game_world: *World,
     origin: world.WorldPosition,
@@ -694,7 +694,7 @@ pub fn moveEntity(
     }
 }
 
-pub fn endSimulation(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
+pub fn endWorldChange(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
     TimedBlock.beginFunction(@src(), .EndSimulation);
     defer TimedBlock.endFunction(@src(), .EndSimulation);
 

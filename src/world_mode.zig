@@ -46,6 +46,7 @@ const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
 const ArenaPushParams = memory.ArenaPushParams;
+const TemporaryMemory = memory.TemporaryMemory;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
 const EntityType = entities.EntityType;
@@ -103,6 +104,12 @@ pub const GameModeWorld = struct {
 
     creation_region: ?*SimRegion,
     last_used_entity_storage_index: u32,
+};
+
+const WorldSim = struct {
+    camera_position: Vector3 = .zero(),
+    sim_region: *SimRegion = undefined,
+    sim_memory: TemporaryMemory = undefined,
 };
 
 pub const ParticleCel = struct {
@@ -193,7 +200,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     const sim_memory = transient_state.arena.beginTemporaryMemory();
     const null_origin: WorldPosition = .zero();
     const null_rect: Rectangle3 = .{ .min = .zero(), .max = .zero() };
-    world_mode.creation_region = sim.beginSimulation(
+    world_mode.creation_region = sim.beginWorldChange(
         &transient_state.arena,
         world_mode.world,
         null_origin,
@@ -359,48 +366,19 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     );
     world_mode.last_camera_position = world_mode.camera_position;
 
-    sim.endSimulation(world_mode, world_mode.creation_region.?);
+    sim.endWorldChange(world_mode, world_mode.creation_region.?);
     world_mode.creation_region = null;
     transient_state.arena.endTemporaryMemory(sim_memory);
 
     state.mode = .{ .world = world_mode };
 }
 
-fn updateAndRenderSimRegion(
-    transient_state: *TransientState,
-    world_mode: *GameModeWorld,
-    sim_bounds: Rectangle3,
-    delta_time: f32,
-    // Optional...
-    background_color: Color,
-    screen_bounds: Rectangle2,
+fn checkForJoiningPlayers(
     opt_state: ?*shared.State,
     opt_input: ?*shared.GameInput,
-    opt_render_group: ?*RenderGroup,
-    draw_buffer: ?*asset.LoadedBitmap,
+    sim_region: *SimRegion,
+    camera_position: Vector3,
 ) void {
-    const sim_memory = transient_state.arena.beginTemporaryMemory();
-    const mouse_position: Vector2 = if (opt_input) |input| Vector2.new(input.mouse_x, input.mouse_y) else .zero();
-    const sim_center_position = world_mode.camera_position;
-    const frame_to_frame_camera_delta_position: Vector3 =
-        world.subtractPositions(world_mode.world, &world_mode.camera_position, &world_mode.last_camera_position);
-
-    world_mode.last_camera_position = world_mode.camera_position;
-
-    const sim_region = sim.beginSimulation(
-        &transient_state.arena,
-        world_mode.world,
-        sim_center_position,
-        sim_bounds,
-        delta_time,
-        world_mode.particle_cache,
-    );
-
-    const camera_position: Vector3 =
-        world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
-            .plus(world_mode.camera_offset);
-
-    // Check if any players are trying to join.
     if (opt_input) |input| {
         if (opt_state) |state| {
             for (&input.controllers, 0..) |*controller, controller_index| {
@@ -419,6 +397,53 @@ fn updateAndRenderSimRegion(
             }
         }
     }
+}
+
+fn beginSim(
+    transient_state: *TransientState,
+    world_mode: *GameModeWorld,
+    sim_bounds: Rectangle3,
+    delta_time: f32,
+) WorldSim {
+    var result: WorldSim = .{};
+    const sim_memory: TemporaryMemory = transient_state.arena.beginTemporaryMemory();
+    const sim_center_position = world_mode.camera_position;
+
+    world_mode.last_camera_position = world_mode.camera_position;
+
+    const sim_region = sim.beginWorldChange(
+        &transient_state.arena,
+        world_mode.world,
+        sim_center_position,
+        sim_bounds,
+        delta_time,
+        world_mode.particle_cache,
+    );
+
+    const camera_position: Vector3 =
+        world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
+            .plus(world_mode.camera_offset);
+
+    result.camera_position = camera_position;
+    result.sim_region = sim_region;
+    result.sim_memory = sim_memory;
+
+    return result;
+}
+
+fn simulate(
+    world_sim: *WorldSim,
+    world_mode: *GameModeWorld,
+    delta_time: f32,
+    // Optional...
+    background_color: Color,
+    assets: ?*asset.Assets,
+    opt_state: ?*shared.State,
+    opt_input: ?*shared.GameInput,
+    opt_render_group: ?*RenderGroup,
+    draw_buffer: ?*asset.LoadedBitmap,
+) void {
+    const sim_region: *SimRegion = world_sim.sim_region;
 
     // Run all brains.
     TimedBlock.beginBlock(@src(), .ExecuteBrains);
@@ -440,24 +465,88 @@ fn updateAndRenderSimRegion(
         sim_region,
         delta_time,
         opt_render_group,
-        camera_position,
+        world_sim.camera_position,
         draw_buffer,
         background_color,
-        transient_state.assets,
-        mouse_position,
+        assets,
+    );
+}
+
+fn endSim(
+    world_mode: *GameModeWorld,
+    transient_state: *TransientState,
+    world_sim: *WorldSim,
+) void {
+    sim.endWorldChange(world_mode, world_sim.sim_region);
+    transient_state.arena.endTemporaryMemory(world_sim.sim_memory);
+}
+
+pub fn updateAndRenderWorld(
+    state: *shared.State,
+    world_mode: *GameModeWorld,
+    transient_state: *TransientState,
+    input: *shared.GameInput,
+    render_group: *RenderGroup,
+    draw_buffer: *asset.LoadedBitmap,
+) bool {
+    TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
+    defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
+
+    const result = false;
+
+    const camera: CameraParams = .get(draw_buffer.width, 0.3);
+    const distance_above_ground: f32 = 11;
+    const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
+    DebugInterface.debugSetMousePosition(mouse_position);
+
+    render_group.perspectiveMode(
+        camera.meters_to_pixels,
+        camera.focal_length,
+        distance_above_ground,
     );
 
-    if (opt_render_group) |render_group| {
-        particles.updateAndRenderParticleSystem(
-            world_mode.particle_cache,
-            delta_time,
+    // Clear background.
+    const background_color: Color = .new(0.15, 0.15, 0.15, 0);
+    render_group.pushClear(background_color);
+
+    const screen_bounds = render_group.getCameraRectangleAtTarget();
+    var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
+        screen_bounds.min.toVector3(0),
+        screen_bounds.max.toVector3(0),
+    );
+    _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
+    _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
+
+    const sim_bounds_expansion = Vector3.new(15, 15, 15);
+    const sim_bounds: Rectangle3 = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
+
+    var world_sim: WorldSim = beginSim(transient_state, world_mode, sim_bounds, input.frame_delta_time);
+    {
+        checkForJoiningPlayers(state, input, world_sim.sim_region, world_sim.camera_position);
+
+        simulate(
+            &world_sim,
+            world_mode,
+            input.frame_delta_time,
+            background_color,
+            transient_state.assets,
+            state,
+            input,
             render_group,
-            frame_to_frame_camera_delta_position.negated(),
-            camera_position,
+            draw_buffer,
         );
 
+        const frame_to_frame_camera_delta_position: Vector3 =
+            world.subtractPositions(world_mode.world, &world_mode.camera_position, &world_mode.last_camera_position);
+        particles.updateAndRenderParticleSystem(
+            world_mode.particle_cache,
+            input.frame_delta_time,
+            render_group,
+            frame_to_frame_camera_delta_position.negated(),
+            world_sim.camera_position,
+        );
         var world_transform = ObjectTransform.defaultUpright();
-        world_transform.offset_position = world_transform.offset_position.minus(camera_position);
+        world_transform.offset_position = world_transform.offset_position.minus(world_sim.camera_position);
 
         render_group.pushRectangleOutline(
             &world_transform,
@@ -481,80 +570,44 @@ fn updateAndRenderSimRegion(
         );
         render_group.pushRectangleOutline(
             &world_transform,
-            sim_region.bounds.getDimension().xy(),
+            world_sim.sim_region.bounds.getDimension().xy(),
             Vector3.zero(),
             Color.new(1, 0, 1, 1),
             0.1,
         );
     }
-
-    sim.endSimulation(world_mode, sim_region);
-    transient_state.arena.endTemporaryMemory(sim_memory);
-}
-
-pub fn updateAndRenderWorld(
-    state: *shared.State,
-    world_mode: *GameModeWorld,
-    transient_state: *TransientState,
-    input: *shared.GameInput,
-    render_group: *RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
-) bool {
-    TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
-    defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
-
-    const result = false;
-
-    const camera: CameraParams = .get(draw_buffer.width, 0.3);
-    const distance_above_ground: f32 = 11;
-
-    render_group.perspectiveMode(
-        camera.meters_to_pixels,
-        camera.focal_length,
-        distance_above_ground,
-    );
-
-    // Clear background.
-    const background_color: Color = .new(0.15, 0.15, 0.15, 0);
-    render_group.pushClear(background_color);
-
-    const screen_bounds = render_group.getCameraRectangleAtTarget();
-    var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
-        screen_bounds.min.toVector3(0),
-        screen_bounds.max.toVector3(0),
-    );
-    _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
-    _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
-
-    const sim_bounds_expansion = Vector3.new(15, 15, 15);
-    const sim_bounds: Rectangle3 = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
-
-    updateAndRenderSimRegion(
-        transient_state,
-        world_mode,
-        sim_bounds,
-        input.frame_delta_time,
-        background_color,
-        screen_bounds,
-        state,
-        input,
-        render_group,
-        draw_buffer,
-    );
+    endSim(world_mode, transient_state, &world_sim);
 
     const sim_bounds2: Rectangle3 = sim_bounds.offsetBy(.new(-100, -100, 0));
-    updateAndRenderSimRegion(
-        transient_state,
-        world_mode,
-        sim_bounds2,
-        input.frame_delta_time,
-        background_color,
-        screen_bounds,
-        null,
-        null,
-        render_group,
-        draw_buffer,
-    );
+    world_sim = beginSim(transient_state, world_mode, sim_bounds2, input.frame_delta_time);
+    {
+        if (false) {
+            simulate(
+                &world_sim,
+                world_mode,
+                input.frame_delta_time,
+                background_color,
+                null,
+                null,
+                null,
+                null,
+                null,
+            );
+        } else {
+            simulate(
+                &world_sim,
+                world_mode,
+                input.frame_delta_time,
+                background_color,
+                transient_state.assets,
+                state,
+                input,
+                render_group,
+                draw_buffer,
+            );
+        }
+    }
+    endSim(world_mode, transient_state, &world_sim);
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;

@@ -34,6 +34,7 @@ pub const MAX_DEBUG_REGIONS_PER_FRAME = 2 * 4096;
 
 pub const DebugTable = extern struct {
     edit_event: DebugEvent = DebugEvent{},
+    mouse_position: Vector2 = .zero(),
     record_increment: u32 = 0,
     current_event_array_index: u32 = 0,
     event_array_index_event_index: u64 = 0,
@@ -400,6 +401,14 @@ pub const DebugInterface = if (INTERNAL) struct {
         _ = DebugEvent.record(.CloseDataBlock, DebugEvent.debugName(source, null, "End Data Block"));
     }
 
+    pub fn debugGetMousePosition() Vector2 {
+        return shared.global_debug_table.mouse_position;
+    }
+
+    pub fn debugSetMousePosition(position: Vector2) void {
+        shared.global_debug_table.mouse_position = position;
+    }
+
     pub fn debugValue(
         comptime source: std.builtin.SourceLocation,
         value_ptr: anytype,
@@ -476,6 +485,14 @@ pub const DebugInterface = if (INTERNAL) struct {
 
     pub fn debugEndDataBlock(source: std.builtin.SourceLocation) void {
         _ = source;
+    }
+
+    pub fn debugGetMousePosition() Vector2 {
+        return .zero();
+    }
+
+    pub fn debugSetMousePosition(position: Vector2) void {
+        _ = position;
     }
 
     pub fn debugStruct(source: std.builtin.SourceLocation, parent: anytype) void {

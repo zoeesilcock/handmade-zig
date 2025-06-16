@@ -338,7 +338,12 @@ fn readVarArgUnsignedInteger(args: anytype, index: *u32) u64 {
                 },
                 i8, i16, i32 => {
                     index.* += 1;
-                    result = @intCast(@field(args, field.name));
+                    const value = @field(args, field.name);
+                    if (value >= 0) {
+                        result = @intCast(value);
+                    } else {
+                        result = 0;
+                    }
                 },
                 else => |t| {
                     @panic("Unexpected argument type, expected integer type. Got: " ++ @typeName(t));

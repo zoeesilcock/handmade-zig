@@ -2023,12 +2023,11 @@ fn outputLastError(title: []const u8) void {
         std.debug.print("{s}: {d}\n", .{ title, @intFromEnum(last_error) });
     } else {
         var buffer: [128]u8 = undefined;
-        _ = shared.formatString(buffer.len, &buffer, "%s: %d\n", .{
+        const length = shared.formatString(buffer.len, &buffer, "%s: %d\n", .{
             title,
             @intFromEnum(last_error),
         });
-
-        win32.OutputDebugStringA(buffer);
+        win32.OutputDebugStringA(@ptrCast(buffer[0..length]));
     }
 }
 
@@ -2039,8 +2038,8 @@ fn outputLastGLError(title: []const u8) void {
         std.debug.print("{s}: {d}\n", .{ title, last_error });
     } else {
         var buffer: [128]u8 = undefined;
-        _ = shared.formatString(buffer.len, &buffer, "{s}: {d}\n", .{ title, last_error }) catch "";
-        win32.OutputDebugStringA(buffer);
+        const length = shared.formatString(buffer.len, &buffer, "{s}: {d}\n", .{ title, last_error });
+        win32.OutputDebugStringA(@ptrCast(buffer[0..length]));
     }
 }
 

@@ -37,6 +37,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
+pub const INTERNAL = @import("build_options").internal;
 var global_config = &@import("config.zig").global_config;
 
 pub const EntityId = packed struct {
@@ -300,6 +301,61 @@ pub const EntityCollisionVolumeGroup = extern struct {
     }
 };
 
+fn debugPickEntity(
+    entity: *Entity,
+    render_group: *RenderGroup,
+    entity_transform: *ObjectTransform,
+) void {
+    const entity_debug_id = debug_interface.DebugId.fromPointer(&entity.id.value);
+
+    if (debug_interface.requested(entity_debug_id)) {
+        DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
+    }
+
+    if (global_config.Simulation_VisualizeCollisionVolumes) {
+        var volume_index: u32 = 0;
+        while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+            const volume = entity.collision.volumes[volume_index];
+            const local_mouse_position = render_group.unproject(
+                entity_transform,
+                DebugInterface.debugGetMousePosition(),
+            );
+
+            if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
+                local_mouse_position.x() < 0.5 * volume.dimension.x() and
+                local_mouse_position.y() > -0.5 * volume.dimension.y() and
+                local_mouse_position.y() < 0.5 * volume.dimension.y())
+            {
+                debug_interface.hit(entity_debug_id, local_mouse_position.z());
+            }
+
+            var outline_color: Color = undefined;
+            if (debug_interface.highlighted(entity_debug_id, &outline_color)) {
+                render_group.pushRectangleOutline(
+                    entity_transform,
+                    volume.dimension.xy(),
+                    volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                    outline_color,
+                    0.05,
+                );
+            }
+        }
+    }
+
+    if (global_config.Simulation_InspectSelectedEntity) {
+        if (debug_interface.requested(entity_debug_id)) {
+            DebugInterface.debugStruct(@src(), entity);
+            // DebugInterface.debugBeginArray(entity.hit_points);
+            // var hit_point_index: u32 = 0;
+            // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
+            //     DebugInterface.debugValue(@src(), entity.hit_points[hit_point_index]);
+            // }
+            // DebugInterface.debugEndArray();
+            DebugInterface.debugEndDataBlock(@src());
+        }
+    }
+}
+
 pub fn updateAndRenderEntities(
     world_mode: *GameModeWorld,
     sim_region: *SimRegion,
@@ -310,7 +366,6 @@ pub fn updateAndRenderEntities(
     opt_draw_buffer: ?*asset.LoadedBitmap,
     background_color: Color,
     opt_assets: ?*Assets,
-    mouse_position: Vector2,
 ) void {
     TimedBlock.beginFunction(@src(), .UpdateAndRenderEntities);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderEntities);
@@ -365,14 +420,9 @@ pub fn updateAndRenderEntities(
 
     var current_absolute_z_layer: i32 = if (sim_region.entity_count > 0) sim_region.entities[0].z_layer else 0;
 
-    var hot_entity_count: u32 = 0;
     var entity_index: u32 = 0;
     while (entity_index < sim_region.entity_count) : (entity_index += 1) {
         const entity = &sim_region.entities[entity_index];
-        const entity_debug_id = debug_interface.DebugId.fromPointer(&entity.id.value);
-        if (debug_interface.requested(entity_debug_id)) {
-            DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
-        }
 
         if (entity.hasFlag(EntityFlags.Active.toInt())) {
             if (entity.auto_boost_to.getTraversable() != null) {
@@ -459,7 +509,7 @@ pub fn updateAndRenderEntities(
             if (entity.movement_mode == .AngleAttackSwipe or entity.movement_mode == .AngleOffset) {
                 const arm: Vector2 =
                     Vector2.arm2(entity.angle_current + entity.facing_direction)
-                    .scaledTo(entity.angle_current_distance);
+                        .scaledTo(entity.angle_current_distance);
                 entity.position = entity.angle_base.plus(.new(arm.x(), arm.y() + 0.5, 0));
             }
 
@@ -611,50 +661,10 @@ pub fn updateAndRenderEntities(
                             // );
                         }
                     }
-
-                    if (global_config.Simulation_VisualizeCollisionVolumes) {
-                        var volume_index: u32 = 0;
-                        while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                            const volume = entity.collision.volumes[volume_index];
-                            const local_mouse_position = render_group.unproject(
-                                &entity_transform,
-                                mouse_position,
-                            );
-
-                            if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
-                                local_mouse_position.x() < 0.5 * volume.dimension.x() and
-                                local_mouse_position.y() > -0.5 * volume.dimension.y() and
-                                local_mouse_position.y() < 0.5 * volume.dimension.y())
-                            {
-                                debug_interface.hit(entity_debug_id, local_mouse_position.z());
-                            }
-
-                            var outline_color: Color = undefined;
-                            if (debug_interface.highlighted(entity_debug_id, &outline_color)) {
-                                render_group.pushRectangleOutline(
-                                    &entity_transform,
-                                    volume.dimension.xy(),
-                                    volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                                    outline_color,
-                                    0.05,
-                                );
-                            }
-                        }
-                    }
                 }
-            }
 
-            if (global_config.Simulation_InspectSelectedEntity) {
-                if (debug_interface.requested(entity_debug_id)) {
-                    DebugInterface.debugStruct(@src(), entity);
-                    // DebugInterface.debugBeginArray(entity.hit_points);
-                    // var hit_point_index: u32 = 0;
-                    // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-                    //     DebugInterface.debugValue(@src(), entity.hit_points[hit_point_index]);
-                    // }
-                    // DebugInterface.debugEndArray();
-                    hot_entity_count += 1;
-                    DebugInterface.debugEndDataBlock(@src());
+                if (INTERNAL) {
+                    debugPickEntity(entity, render_group, &entity_transform);
                 }
             }
         }

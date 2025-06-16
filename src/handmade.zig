@@ -22,8 +22,6 @@ const std = @import("std");
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
 ///
-/// * Why is somebody still drawing the mouse cursor, and in the wrong poisition?
-///
 /// * Graphics upgrade
 ///     * Particle systems.
 ///         * Bug with sliding relative to the grid during camera offset?
