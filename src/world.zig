@@ -25,12 +25,14 @@ const EntityReference = entities.EntityReference;
 const StoredEntityReference = entities.StoredEntityReference;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
+const TicketMutex = shared.TicketMutex;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
 const TILES_PER_CHUNK = 16;
 
 pub const World = extern struct {
+    change_ticket: TicketMutex,
     chunk_dimension_in_meters: Vector3,
 
     first_free: ?*WorldEntityBlock,

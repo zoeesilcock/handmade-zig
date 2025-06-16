@@ -19,6 +19,9 @@ const std = @import("std");
 /// TODO: An overview of upcoming tasks.
 ///
 /// * Implement multiple sim regions per frame.
+///     * Pull out the camera concept into something clear and optional.
+///     * Where do things like typical_floor_height live etc.
+///     * Eliminate world mode from sim step entirely.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
 ///

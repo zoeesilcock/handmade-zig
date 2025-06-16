@@ -1,5 +1,6 @@
 const std = @import("std");
 const shared = @import("shared.zig");
+const random = @import("random.zig");
 const entities = @import("entities.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
@@ -9,7 +10,6 @@ const rendergroup = @import("rendergroup.zig");
 
 var global_config = &@import("config.zig").global_config;
 
-const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const ControlledHero = shared.ControlledHero;
 const Entity = entities.Entity;
 const EntityFlags = entities.EntityFlags;
@@ -141,7 +141,7 @@ pub fn markBrainActive(
 
 pub fn executeBrain(
     opt_state: ?*shared.State,
-    world_mode: *GameModeWorld,
+    entropy: *random.Series,
     sim_region: *SimRegion,
     opt_input: ?*shared.GameInput,
     brain: *Brain,
@@ -426,8 +426,8 @@ pub fn executeBrain(
 
             if (opt_body) |body| {
                 const delta: Vector3 = .new(
-                    world_mode.game_entropy.randomBilateral(),
-                    world_mode.game_entropy.randomBilateral(),
+                    entropy.randomBilateral(),
+                    entropy.randomBilateral(),
                     0,
                 );
                 var traversable: TraversableReference = undefined;
@@ -450,8 +450,8 @@ pub fn executeBrain(
 
             if (opt_head) |head| {
                 const delta: Vector3 = .new(
-                    world_mode.game_entropy.randomBilateral(),
-                    world_mode.game_entropy.randomBilateral(),
+                    entropy.randomBilateral(),
+                    entropy.randomBilateral(),
                     0,
                 );
                 var traversable: TraversableReference = undefined;

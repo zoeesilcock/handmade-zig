@@ -252,10 +252,7 @@ pub fn beginWorldChange(
     origin: world.WorldPosition,
     bounds: Rectangle3,
     delta_time: f32,
-    opt_particle_cache: ?*ParticleCache,
 ) *SimRegion {
-    _ = opt_particle_cache;
-
     TimedBlock.beginFunction(@src(), .BeginSimulation);
     defer TimedBlock.endFunction(@src(), .BeginSimulation);
 
@@ -432,7 +429,7 @@ fn entitiesOverlap(entity: *Entity, test_entity: *Entity, epsilon: Vector3) bool
     return overlapped;
 }
 
-fn canCollide(world_mode: *GameModeWorld, entity: *Entity, hit_entity: *Entity) bool {
+fn canCollide(entity: *Entity, hit_entity: *Entity) bool {
     var result = false;
 
     if (entity != hit_entity) {
@@ -451,27 +448,13 @@ fn canCollide(world_mode: *GameModeWorld, entity: *Entity, hit_entity: *Entity) 
             b.hasFlag(EntityFlags.Collides.toInt()))
         {
             result = true;
-
-            // Specific rules.
-            const hash_bucket = a.id.value & ((world_mode.collision_rule_hash.len) - 1);
-            var opt_rule: ?*PairwiseCollisionRule = world_mode.collision_rule_hash[hash_bucket];
-            while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
-                if ((rule.id_a == a.id.value) and
-                    (rule.id_b == b.id.value))
-                {
-                    result = rule.can_collide;
-                    break;
-                }
-            }
         }
     }
 
     return result;
 }
 
-pub fn handleCollision(world_mode: *GameModeWorld, entity: *Entity, hit_entity: *Entity) bool {
-    _ = world_mode;
-
+pub fn handleCollision(entity: *Entity, hit_entity: *Entity) bool {
     const stops_on_collision = true;
 
     _ = entity;
@@ -509,7 +492,6 @@ pub fn transactionalOccupy(entity: *Entity, dest_ref: *TraversableReference, des
 }
 
 pub fn moveEntity(
-    world_mode: *GameModeWorld,
     sim_region: *SimRegion,
     entity: *Entity,
     delta_time: f32,
@@ -556,7 +538,7 @@ pub fn moveEntity(
                 const test_entity = &sim_region.entities[test_entity_index];
 
                 if (entitiesOverlap(entity, test_entity, overlap_epsilon) or
-                    canCollide(world_mode, entity, test_entity))
+                    canCollide(entity, test_entity))
                 {
                     var entity_volume_index: u32 = 0;
                     while (entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
@@ -675,7 +657,7 @@ pub fn moveEntity(
                 // Remove the applied delta.
                 entity_delta = desired_position.minus(entity.position);
 
-                const stops_on_collision = handleCollision(world_mode, entity, hit_entity);
+                const stops_on_collision = handleCollision(entity, hit_entity);
                 if (stops_on_collision) {
                     // Remove velocity that is facing into the wall.
                     entity_delta = entity_delta.minus(wall_normal.scaledTo(entity_delta.dotProduct(wall_normal)));
@@ -694,7 +676,7 @@ pub fn moveEntity(
     }
 }
 
-pub fn endWorldChange(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
+pub fn endWorldChange(world_mode: *GameModeWorld, world_ptr: *World, sim_region: *SimRegion) void {
     TimedBlock.beginFunction(@src(), .EndSimulation);
     defer TimedBlock.endFunction(@src(), .EndSimulation);
 
@@ -704,7 +686,7 @@ pub fn endWorldChange(world_mode: *GameModeWorld, sim_region: *SimRegion) void {
 
         if (!entity.hasFlag(EntityFlags.Deleted.toInt())) {
             const entity_position: world.WorldPosition =
-                world.mapIntoChunkSpace(world_mode.world, sim_region.origin, entity.position);
+                world.mapIntoChunkSpace(world_ptr, sim_region.origin, entity.position);
             var chunk_position: world.WorldPosition = entity_position;
             chunk_position.offset = .zero();
 

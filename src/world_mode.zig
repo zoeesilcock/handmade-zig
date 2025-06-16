@@ -45,6 +45,7 @@ const TransientState = shared.TransientState;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
+const MemoryArena = memory.MemoryArena;
 const ArenaPushParams = memory.ArenaPushParams;
 const TemporaryMemory = memory.TemporaryMemory;
 const Entity = entities.Entity;
@@ -77,9 +78,6 @@ pub const GameModeWorld = struct {
     last_camera_position: WorldPosition,
     camera_offset: Vector3,
 
-    collision_rule_hash: [256]?*PairwiseCollisionRule = [1]?*PairwiseCollisionRule{null} ** 256,
-    first_free_collision_rule: ?*PairwiseCollisionRule = null,
-
     null_collision: *EntityCollisionVolumeGroup = undefined,
     floor_collision: *EntityCollisionVolumeGroup = undefined,
     wall_collision: *EntityCollisionVolumeGroup = undefined,
@@ -110,6 +108,12 @@ const WorldSim = struct {
     camera_position: Vector3 = .zero(),
     sim_region: *SimRegion = undefined,
     sim_memory: TemporaryMemory = undefined,
+};
+
+const WorldSimWork = struct {
+    sim_bounds: Rectangle3,
+    world_mode: *GameModeWorld,
+    delta_time: f32,
 };
 
 pub const ParticleCel = struct {
@@ -206,7 +210,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         null_origin,
         null_rect,
         0,
-        null,
     );
 
     var series = world_mode.game_entropy;
@@ -366,7 +369,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     );
     world_mode.last_camera_position = world_mode.camera_position;
 
-    sim.endWorldChange(world_mode, world_mode.creation_region.?);
+    sim.endWorldChange(world_mode, world_mode.world, world_mode.creation_region.?);
     world_mode.creation_region = null;
     transient_state.arena.endTemporaryMemory(sim_memory);
 
@@ -400,24 +403,23 @@ fn checkForJoiningPlayers(
 }
 
 fn beginSim(
-    transient_state: *TransientState,
+    temp_arena: *MemoryArena,
     world_mode: *GameModeWorld,
     sim_bounds: Rectangle3,
     delta_time: f32,
 ) WorldSim {
     var result: WorldSim = .{};
-    const sim_memory: TemporaryMemory = transient_state.arena.beginTemporaryMemory();
+    const sim_memory: TemporaryMemory = temp_arena.beginTemporaryMemory();
     const sim_center_position = world_mode.camera_position;
 
     world_mode.last_camera_position = world_mode.camera_position;
 
     const sim_region = sim.beginWorldChange(
-        &transient_state.arena,
+        temp_arena,
         world_mode.world,
         sim_center_position,
         sim_bounds,
         delta_time,
-        world_mode.particle_cache,
     );
 
     const camera_position: Vector3 =
@@ -441,6 +443,7 @@ fn simulate(
     opt_state: ?*shared.State,
     opt_input: ?*shared.GameInput,
     opt_render_group: ?*RenderGroup,
+    particle_cache: ?*ParticleCache,
     draw_buffer: ?*asset.LoadedBitmap,
 ) void {
     const sim_region: *SimRegion = world_sim.sim_region;
@@ -456,29 +459,56 @@ fn simulate(
     brain_index = 0;
     while (brain_index < sim_region.brain_count) : (brain_index += 1) {
         const brain: *Brain = &sim_region.brains[brain_index];
-        brains.executeBrain(opt_state, world_mode, sim_region, opt_input, brain, delta_time);
+        brains.executeBrain(opt_state, &world_mode.game_entropy, sim_region, opt_input, brain, delta_time);
     }
     TimedBlock.endBlock(@src(), .ExecuteBrains);
 
     entities.updateAndRenderEntities(
-        world_mode,
+        world_mode.typical_floor_height,
         sim_region,
         delta_time,
         opt_render_group,
         world_sim.camera_position,
         draw_buffer,
         background_color,
+        particle_cache,
         assets,
     );
 }
 
 fn endSim(
     world_mode: *GameModeWorld,
-    transient_state: *TransientState,
+    arena: *MemoryArena,
     world_sim: *WorldSim,
 ) void {
-    sim.endWorldChange(world_mode, world_sim.sim_region);
-    transient_state.arena.endTemporaryMemory(world_sim.sim_memory);
+    sim.endWorldChange(world_mode, world_mode.world, world_sim.sim_region);
+    arena.endTemporaryMemory(world_sim.sim_memory);
+}
+
+pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void {
+    _ = queue;
+
+    TimedBlock.beginFunction(@src(), .DoWorldSim);
+    defer TimedBlock.endFunction(@src(), .DoWorldSim);
+
+    // TODO: It is inneficient to reallocate every time - this should be something that is passsed as a property
+    // of the worker thread.
+    var arena: MemoryArena = .{};
+
+    const work: *WorldSimWork = @ptrCast(@alignCast(data));
+    const world_ptr: *world.World = work.world_mode.world;
+
+    world_ptr.change_ticket.begin();
+    var world_sim: WorldSim = beginSim(&arena, work.world_mode, work.sim_bounds, work.delta_time);
+    world_ptr.change_ticket.end();
+
+    simulate(&world_sim, work.world_mode, work.delta_time, .white(), null, null, null, null, null, null);
+
+    world_ptr.change_ticket.begin();
+    endSim(work.world_mode, &arena, &world_sim);
+    world_ptr.change_ticket.end();
+
+    arena.clear();
 }
 
 pub fn updateAndRenderWorld(
@@ -520,7 +550,31 @@ pub fn updateAndRenderWorld(
     const sim_bounds_expansion = Vector3.new(15, 15, 15);
     const sim_bounds: Rectangle3 = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
 
-    var world_sim: WorldSim = beginSim(transient_state, world_mode, sim_bounds, input.frame_delta_time);
+    var sim_work: [16]WorldSimWork = undefined;
+    var sim_index: u32 = 0;
+    for (0..4) |sim_y| {
+        for (0..4) |sim_x| {
+            var work: *WorldSimWork = &sim_work[sim_index];
+            sim_index += 1;
+
+            const offset_x: f32 = @as(f32, @floatFromInt(sim_x + 1)) * -100;
+            const offset_y: f32 = @as(f32, @floatFromInt(sim_y + 1)) * -100;
+
+            work.sim_bounds = sim_bounds.offsetBy(.new(offset_x, offset_y, 0));
+            work.world_mode = world_mode;
+            work.delta_time = input.frame_delta_time;
+
+            if (true) {
+                shared.platform.addQueueEntry(transient_state.high_priority_queue, &doWorldSim, work);
+            } else {
+                doWorldSim(transient_state.high_priority_queue, work);
+            }
+        }
+    }
+
+    shared.platform.completeAllQueuedWork(transient_state.high_priority_queue);
+
+    var world_sim: WorldSim  = beginSim(&transient_state.arena, world_mode, sim_bounds, input.frame_delta_time);
     {
         checkForJoiningPlayers(state, input, world_sim.sim_region, world_sim.camera_position);
 
@@ -533,6 +587,7 @@ pub fn updateAndRenderWorld(
             state,
             input,
             render_group,
+            world_mode.particle_cache,
             draw_buffer,
         );
 
@@ -576,38 +631,7 @@ pub fn updateAndRenderWorld(
             0.1,
         );
     }
-    endSim(world_mode, transient_state, &world_sim);
-
-    const sim_bounds2: Rectangle3 = sim_bounds.offsetBy(.new(-100, -100, 0));
-    world_sim = beginSim(transient_state, world_mode, sim_bounds2, input.frame_delta_time);
-    {
-        if (false) {
-            simulate(
-                &world_sim,
-                world_mode,
-                input.frame_delta_time,
-                background_color,
-                null,
-                null,
-                null,
-                null,
-                null,
-            );
-        } else {
-            simulate(
-                &world_sim,
-                world_mode,
-                input.frame_delta_time,
-                background_color,
-                transient_state.assets,
-                state,
-                input,
-                render_group,
-                draw_buffer,
-            );
-        }
-    }
-    endSim(world_mode, transient_state, &world_sim);
+    endSim(world_mode, &transient_state.arena, &world_sim);
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;
@@ -871,69 +895,6 @@ fn addFamiliar(world_mode: *GameModeWorld, world_position: WorldPosition, standi
     entity.addPiece(.Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
 
     endEntity(world_mode, entity, world_position);
-}
-
-pub fn addCollisionRule(world_mode: *GameModeWorld, in_id_a: u32, in_id_b: u32, can_collide: bool) void {
-    var id_a = in_id_a;
-    var id_b = in_id_b;
-
-    // Sort entities based on storage index.
-    if (id_a > id_b) {
-        const temp = id_a;
-        id_a = id_b;
-        id_b = temp;
-    }
-
-    // Look for an existing rule in the hash.
-    const hash_bucket = id_a & ((world_mode.collision_rule_hash.len) - 1);
-    var found_rule: ?*PairwiseCollisionRule = null;
-    var opt_rule: ?*PairwiseCollisionRule = world_mode.collision_rule_hash[hash_bucket];
-    while (opt_rule) |rule| : (opt_rule = rule.next_in_hash) {
-        if (rule.id_a == id_a and rule.id_b == id_b) {
-            found_rule = rule;
-            break;
-        }
-    }
-
-    // Create a new rule if it didn't exist.
-    if (found_rule == null) {
-        found_rule = world_mode.first_free_collision_rule;
-
-        if (found_rule) |rule| {
-            world_mode.first_free_collision_rule = rule.next_in_hash;
-        } else {
-            found_rule = world_mode.world.arena.pushStruct(PairwiseCollisionRule, null);
-        }
-
-        found_rule.?.next_in_hash = world_mode.collision_rule_hash[hash_bucket];
-        world_mode.collision_rule_hash[hash_bucket] = found_rule.?;
-    }
-
-    // Apply the rule settings.
-    if (found_rule) |found| {
-        found.id_a = id_a;
-        found.id_b = id_b;
-        found.can_collide = can_collide;
-    }
-}
-
-pub fn clearCollisionRulesFor(world_mode: *GameModeWorld, id: u32) void {
-    var hash_bucket: u32 = 0;
-    while (hash_bucket < world_mode.collision_rule_hash.len) : (hash_bucket += 1) {
-        var opt_rule = &world_mode.collision_rule_hash[hash_bucket];
-        while (opt_rule.*) |rule| {
-            if (rule.id_a == id or rule.id_b == id) {
-                const removed_rule = rule;
-
-                opt_rule.* = rule.next_in_hash;
-
-                removed_rule.next_in_hash = world_mode.first_free_collision_rule;
-                world_mode.first_free_collision_rule = removed_rule;
-            } else {
-                opt_rule = &rule.next_in_hash;
-            }
-        }
-    }
 }
 
 fn initHitPoints(entity: *Entity, count: u32) void {

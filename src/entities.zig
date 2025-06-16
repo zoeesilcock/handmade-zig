@@ -34,7 +34,6 @@ const AssetTagId = file_formats.AssetTagId;
 const BitmapId = file_formats.BitmapId;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
-const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
 pub const INTERNAL = @import("build_options").internal;
@@ -357,7 +356,7 @@ fn debugPickEntity(
 }
 
 pub fn updateAndRenderEntities(
-    world_mode: *GameModeWorld,
+    typical_floor_height: f32,
     sim_region: *SimRegion,
     delta_time: f32,
     // Optional...
@@ -365,6 +364,7 @@ pub fn updateAndRenderEntities(
     camera_position: Vector3,
     opt_draw_buffer: ?*asset.LoadedBitmap,
     background_color: Color,
+    particle_cache: ?*ParticleCache,
     opt_assets: ?*Assets,
 ) void {
     TimedBlock.beginFunction(@src(), .UpdateAndRenderEntities);
@@ -375,17 +375,17 @@ pub fn updateAndRenderEntities(
     var fog_amount: [maximum_level_index - minimum_level_index + 1]f32 = undefined;
     var test_alpha: f32 = 0;
 
-    const fade_top_end_z: f32 = 1 * world_mode.typical_floor_height;
-    const fade_top_start_z: f32 = 0.5 * world_mode.typical_floor_height;
-    const fade_bottom_start_z: f32 = -1 * world_mode.typical_floor_height;
-    const fade_bottom_end_z: f32 = -4 * world_mode.typical_floor_height;
+    const fade_top_end_z: f32 = 1 * typical_floor_height;
+    const fade_top_start_z: f32 = 0.5 * typical_floor_height;
+    const fade_bottom_start_z: f32 = -1 * typical_floor_height;
+    const fade_bottom_end_z: f32 = -4 * typical_floor_height;
     var cam_rel_ground_z: [fog_amount.len]f32 = undefined;
 
     var level_index: u32 = 0;
     while (level_index < fog_amount.len) : (level_index += 1) {
         const relative_layer_index: i32 = minimum_level_index + @as(i32, @intCast(level_index));
         const camera_relative_ground_z: f32 =
-            @as(f32, @floatFromInt(relative_layer_index)) * world_mode.typical_floor_height - camera_position.z();
+            @as(f32, @floatFromInt(relative_layer_index)) * typical_floor_height - camera_position.z();
         cam_rel_ground_z[level_index] = camera_relative_ground_z;
 
         test_alpha = math.clamp01MapToRange(
@@ -469,8 +469,8 @@ pub fn updateAndRenderEntities(
 
                         const camera_relative_ground_z: f32 =
                             @as(f32, @floatFromInt(entity.z_layer - sim_region.origin.chunk_z)) *
-                            world_mode.typical_floor_height - camera_position.z();
-                        particles.spawnFire(world_mode.particle_cache, entity.position, entity.z_layer, camera_relative_ground_z);
+                            typical_floor_height - camera_position.z();
+                        particles.spawnFire(particle_cache, entity.position, entity.z_layer, camera_relative_ground_z);
                     }
 
                     entity.movement_time += 4 * delta_time;
@@ -524,7 +524,7 @@ pub fn updateAndRenderEntities(
             entity.bob_delta_time += entity.bob_acceleration * delta_time;
 
             if (entity.velocity.lengthSquared() > 0 or entity.acceleration.lengthSquared() > 0) {
-                sim.moveEntity(world_mode, sim_region, entity, delta_time, entity.acceleration);
+                sim.moveEntity(sim_region, entity, delta_time, entity.acceleration);
             }
 
             if (opt_render_group) |render_group| {

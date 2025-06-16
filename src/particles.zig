@@ -87,45 +87,47 @@ pub fn updateAndRenderParticleSystem(
     );
 }
 
-pub fn spawnFire(cache: *ParticleCache, at_position_in: Vector3, chunk_z: i32, floor_z: f32) void {
-    const system: *ParticleSystem = &cache.fire_system;
-    const entropy: *RandomSeries = &cache.particle_entropy;
-    const at_position: V3_4x = .fromVector3(at_position_in);
+pub fn spawnFire(opt_cache: ?*ParticleCache, at_position_in: Vector3, chunk_z: i32, floor_z: f32) void {
+    if (opt_cache) |cache| {
+        const system: *ParticleSystem = &cache.fire_system;
+        const entropy: *RandomSeries = &cache.particle_entropy;
+        const at_position: V3_4x = .fromVector3(at_position_in);
 
-    const particle_index = system.next_particle_4;
-    system.next_particle_4 += 1;
+        const particle_index = system.next_particle_4;
+        system.next_particle_4 += 1;
 
-    if (system.next_particle_4 >= MAX_PARTICLE_COUNT_4) {
-        system.next_particle_4 = 0;
+        if (system.next_particle_4 >= MAX_PARTICLE_COUNT_4) {
+            system.next_particle_4 = 0;
+        }
+
+        const a: *Particle4x = &system.particles[particle_index];
+
+        a.p.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.05, 0.05 });
+        a.p.y = @splat(0);
+        a.p.z = @splat(0);
+        a.p = a.p.plus(at_position);
+
+        a.dp.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.01, 0.01 });
+        a.dp.y = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.7, 1 }) * @as(Vec4f, @splat(7));
+        a.dp.z = @splat(0);
+
+        a.ddp.x = @splat(0);
+        a.ddp.y = @splat(-9.8);
+        a.ddp.z = @splat(0);
+
+        a.c.r = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.75, 1 });
+        a.c.g = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.75, 1 });
+        a.c.b = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.75, 1 });
+        a.c.a = @splat(1);
+
+        a.dc.r = @splat(0);
+        a.dc.g = @splat(0);
+        a.dc.b = @splat(0);
+        a.dc.a = @splat(-1);
+
+        a.chunk_z = chunk_z;
+        a.floor_z = floor_z;
     }
-
-    const a: *Particle4x = &system.particles[particle_index];
-
-    a.p.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.05, 0.05 });
-    a.p.y = @splat(0);
-    a.p.z = @splat(0);
-    a.p = a.p.plus(at_position);
-
-    a.dp.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.01, 0.01 });
-    a.dp.y = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.7, 1 }) * @as(Vec4f, @splat(7));
-    a.dp.z = @splat(0);
-
-    a.ddp.x = @splat(0);
-    a.ddp.y = @splat(-9.8);
-    a.ddp.z = @splat(0);
-
-    a.c.r = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.75, 1 });
-    a.c.g = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.75, 1 });
-    a.c.b = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.75, 1 });
-    a.c.a = @splat(1);
-
-    a.dc.r = @splat(0);
-    a.dc.g = @splat(0);
-    a.dc.b = @splat(0);
-    a.dc.a = @splat(-1);
-
-    a.chunk_z = chunk_z;
-    a.floor_z = floor_z;
 }
 
 fn updateAndRenderFire(
