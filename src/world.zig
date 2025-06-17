@@ -13,6 +13,7 @@ const std = @import("std");
 
 // Types.
 const Vector3 = math.Vector3;
+const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const MemoryArena = memory.MemoryArena;
 const ArenaPushParams = memory.ArenaPushParams;
@@ -177,17 +178,42 @@ pub fn useChunkSpaceAt(
     size: u32,
     at: WorldPosition,
 ) *Entity {
+    TimedBlock.beginFunction(@src(), .UseChunkSpaceAt);
+    defer TimedBlock.endFunction(@src(), .UseChunkSpaceAt);
+
+    world.change_ticket.begin();
+
     const chunk: ?*WorldChunk = getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, world.arena);
     std.debug.assert(chunk != null);
-    return useChunkSpace(world, size, chunk.?);
+    const result: *Entity = useChunkSpace(world, size, chunk.?);
+
+    world.change_ticket.end();
+
+    return result;
 }
 
-pub fn addChunkToFreeList(
+pub fn addToFreeList(
     world: *World,
     old: *WorldChunk,
+    first_block: ?*WorldEntityBlock,
+    last_block: ?*WorldEntityBlock,
 ) void {
+    TimedBlock.beginFunction(@src(), .AddToFreeList);
+    defer TimedBlock.endFunction(@src(), .AddToFreeList);
+
+    world.change_ticket.begin();
+
     old.next_in_hash = world.first_free_chunk;
     world.first_free_chunk = old;
+
+    if (first_block) |first| {
+        if (last_block) |last| {
+            last.next = world.first_free_block;
+            world.first_free_block = first;
+        }
+    }
+
+    world.change_ticket.end();
 }
 
 pub fn addBlockToFreeList(
@@ -204,6 +230,11 @@ pub fn removeWorldChunk(
     chunk_y: i32,
     chunk_z: i32,
 ) ?*WorldChunk {
+    TimedBlock.beginFunction(@src(), .GetWorldChunkInternal);
+    defer TimedBlock.endFunction(@src(), .GetWorldChunkInternal);
+
+    world.change_ticket.begin();
+
     const chunk_ptr: *?*WorldChunk = getWorldChunkInternal(world, chunk_x, chunk_y, chunk_z);
     const result: ?*WorldChunk = chunk_ptr.*;
 
@@ -211,10 +242,12 @@ pub fn removeWorldChunk(
         chunk_ptr.* = result.?.next_in_hash;
     }
 
+    world.change_ticket.end();
+
     return result;
 }
 
-pub fn getWorldChunk(
+fn getWorldChunk(
     world: *World,
     chunk_x: i32,
     chunk_y: i32,
@@ -247,14 +280,25 @@ pub fn getWorldChunk(
     return result;
 }
 
+pub fn getWorldChunkBounds(
+    world: *World,
+    chunk_x: i32,
+    chunk_y: i32,
+    chunk_z: i32,
+) Rectangle3 {
+    const chunk_center: Vector3 = Vector3.newI(chunk_x, chunk_y, chunk_z).hadamardProduct(world.chunk_dimension_in_meters);
+    const result: Rectangle3 = .fromCenterDimension(chunk_center, world.chunk_dimension_in_meters);
+    return result;
+}
+
 pub fn getWorldChunkInternal(
     world: *World,
     chunk_x: i32,
     chunk_y: i32,
     chunk_z: i32,
 ) *?*WorldChunk {
-    TimedBlock.beginFunction(@src(), .GetWorldChunk);
-    defer TimedBlock.endFunction(@src(), .GetWorldChunk);
+    TimedBlock.beginFunction(@src(), .GetWorldChunkInternal);
+    defer TimedBlock.endFunction(@src(), .GetWorldChunkInternal);
 
     std.debug.assert(chunk_x > -TILE_CHUNK_SAFE_MARGIN);
     std.debug.assert(chunk_x > -TILE_CHUNK_SAFE_MARGIN);

@@ -18,6 +18,7 @@ const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const MemoryArena = memory.MemoryArena;
+const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
@@ -40,8 +41,6 @@ const ParticleCache = particles.ParticleCache;
 
 pub const SimRegion = extern struct {
     world: *World,
-    max_entity_radius: f32,
-    max_entity_velocity: f32,
 
     origin: world.WorldPosition,
     bounds: Rectangle3,
@@ -58,17 +57,18 @@ pub const SimRegion = extern struct {
     entity_hash: [4096]EntityHash = [1]EntityHash{undefined} ** 4096,
     brain_hash: [256]BrainHash = [1]BrainHash{undefined} ** 256,
 
+    entity_hash_occupancy: [4096 / 64]u64,
+    brain_hash_occupancy: [256 / 64]u64,
+
     null_entity: Entity,
 };
 
 pub const EntityHash = extern struct {
     ptr: ?*Entity = null,
-    index: EntityId = .{},
 };
 
 pub const BrainHash = extern struct {
-    ptr: *Brain,
-    id: BrainId,
+    ptr: ?*Brain = null,
 };
 
 pub const MoveSpec = extern struct {
@@ -88,6 +88,35 @@ const WallTestData = struct {
     normal: Vector3,
 };
 
+fn shiftIndex(index: MemoryIndex) MemoryIndex {
+    const shiftee: u64 = 1;
+    const shift: u6 = @truncate(index);
+    const mask: u64 = shiftee << shift;
+    return mask;
+}
+
+fn markBit(array: [*]u64, index: MemoryIndex) void {
+    const occ_index: MemoryIndex = index / 64;
+    const bit_index: MemoryIndex = @mod(index, 64);
+    array[occ_index] |= shiftIndex(bit_index);
+}
+
+fn isEmpty(array: [*]u64, index: MemoryIndex) bool {
+    const occ_index: MemoryIndex = index / 64;
+    const bit_index: MemoryIndex = @mod(index, 64);
+    return (array[occ_index] & shiftIndex(bit_index)) == 0;
+}
+
+fn markEntityOccupied(sim_region: *SimRegion, entry: *EntityHash) void {
+    const index: MemoryIndex = entry - &sim_region.entity_hash;
+    markBit(&sim_region.entity_hash_occupancy, index);
+}
+
+fn markBrainOccupied(sim_region: *SimRegion, entry: *BrainHash) void {
+    const index: MemoryIndex = entry - &sim_region.brain_hash;
+    markBit(&sim_region.brain_hash_occupancy, index);
+}
+
 pub fn getEntityHashFromId(sim_region: *SimRegion, id: EntityId) ?*EntityHash {
     std.debug.assert(id.value != 0);
 
@@ -95,17 +124,22 @@ pub fn getEntityHashFromId(sim_region: *SimRegion, id: EntityId) ?*EntityHash {
 
     const hash_value = id.value;
     var offset: u32 = 0;
-
     while (offset < sim_region.entity_hash.len) : (offset += 1) {
         const hash_mask = sim_region.entity_hash.len - 1;
         const hash_index = (hash_value + offset) & hash_mask;
         const entry: *EntityHash = &sim_region.entity_hash[hash_index];
 
-        if (entry.index.value == 0 or entry.index.value == id.value) {
+        if (isEmpty(&sim_region.entity_hash_occupancy, hash_index)) {
+            result = entry;
+            result.?.ptr = null;
+            break;
+        } else if (entry.ptr != null and entry.ptr.?.id.value == id.value) {
             result = entry;
             break;
         }
     }
+
+    std.debug.assert(result != null);
 
     return result;
 }
@@ -123,11 +157,17 @@ pub fn getBrainHashFromId(sim_region: *SimRegion, id: BrainId) ?*BrainHash {
         const hash_index = (hash_value + offset) & hash_mask;
         const entry: *BrainHash = &sim_region.brain_hash[hash_index];
 
-        if (entry.id.value == 0 or entry.id.value == id.value) {
+        if (isEmpty(&sim_region.brain_hash_occupancy, hash_index)) {
+            result = entry;
+            result.?.ptr = null;
+            break;
+        } else if (entry.ptr != null and entry.ptr.?.id.value == id.value) {
             result = entry;
             break;
         }
     }
+
+    std.debug.assert(result != null);
 
     return result;
 }
@@ -161,6 +201,9 @@ pub fn entityOverlapsRectangle(position: Vector3, volume: EntityCollisionVolume,
 }
 
 fn getOrAddBrain(sim_region: *SimRegion, brain_id: BrainId, brain_type: BrainType) *Brain {
+    TimedBlock.beginFunction(@src(), .GetOrAddBrain);
+    defer TimedBlock.endFunction(@src(), .GetOrAddBrain);
+
     var result: ?*Brain = null;
 
     const opt_hash: ?*BrainHash = getBrainHashFromId(sim_region, brain_id);
@@ -168,13 +211,23 @@ fn getOrAddBrain(sim_region: *SimRegion, brain_id: BrainId, brain_type: BrainTyp
 
     if (result == null) {
         std.debug.assert(sim_region.brain_count < sim_region.max_brain_count);
+        std.debug.assert(
+            isEmpty(&sim_region.brain_hash_occupancy, opt_hash.? - &sim_region.brain_hash),
+        );
 
         result = &sim_region.brains[sim_region.brain_count];
         sim_region.brain_count += 1;
+
+        memory.zeroStruct(Brain, result.?);
         result.?.id = brain_id;
         result.?.type = brain_type;
 
         opt_hash.?.ptr = result.?;
+
+        markBrainOccupied(sim_region, opt_hash.?);
+        std.debug.assert(
+            !isEmpty(&sim_region.brain_hash_occupancy, opt_hash.? - &sim_region.brain_hash),
+        );
     }
 
     return result.?;
@@ -239,11 +292,16 @@ fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *Traversable
 }
 
 fn addEntityToHash(sim_region: *SimRegion, entity: *Entity) void {
-    if (getEntityHashFromId(sim_region, entity.id)) |entry| {
-        std.debug.assert(entry.ptr == null);
-        entry.index = entity.id;
-        entry.ptr = entity;
-    }
+    TimedBlock.beginFunction(@src(), .AddEntityToHash);
+    defer TimedBlock.endFunction(@src(), .AddEntityToHash);
+
+    const entry: *EntityHash = getEntityHashFromId(sim_region, entity.id).?;
+    std.debug.assert(
+        isEmpty(&sim_region.entity_hash_occupancy, entry - &sim_region.entity_hash),
+    );
+    entry.ptr = entity;
+
+    markEntityOccupied(sim_region, entry);
 }
 
 pub fn beginWorldChange(
@@ -253,25 +311,28 @@ pub fn beginWorldChange(
     bounds: Rectangle3,
     delta_time: f32,
 ) *SimRegion {
-    TimedBlock.beginFunction(@src(), .BeginSimulation);
-    defer TimedBlock.endFunction(@src(), .BeginSimulation);
+    _ = delta_time;
 
-    var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, ArenaPushParams.aligned(@alignOf(SimRegion), true));
+    TimedBlock.beginFunction(@src(), .BeginWorldChange);
+    defer TimedBlock.endFunction(@src(), .BeginWorldChange);
+
+    TimedBlock.beginBlock(@src(), .SimArenaAlloc);
+    var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, ArenaPushParams.aligned(16, false));
+    TimedBlock.endBlock(@src(), .SimArenaAlloc);
+
+    TimedBlock.beginBlock(@src(), .SimArenaClear);
+    memory.zeroStruct(@TypeOf(sim_region.entity_hash), &sim_region.entity_hash);
+    memory.zeroStruct(@TypeOf(sim_region.brain_hash), &sim_region.brain_hash);
+    memory.zeroStruct(@TypeOf(sim_region.entity_hash_occupancy), &sim_region.entity_hash_occupancy);
+    memory.zeroStruct(@TypeOf(sim_region.brain_hash_occupancy), &sim_region.brain_hash_occupancy);
+    memory.zeroStruct(@TypeOf(sim_region.null_entity), &sim_region.null_entity);
+    TimedBlock.endBlock(@src(), .SimArenaClear);
 
     sim_region.world = game_world;
 
-    sim_region.max_entity_radius = 5;
-    sim_region.max_entity_velocity = 30;
-    const update_safety_margin = sim_region.max_entity_radius + sim_region.max_entity_velocity * delta_time;
-    const update_safety_margin_z = 1;
-
     sim_region.origin = origin;
-    sim_region.updatable_bounds = bounds.addRadius(
-        Vector3.new(sim_region.max_entity_radius, sim_region.max_entity_radius, 0),
-    );
-    sim_region.bounds = sim_region.updatable_bounds.addRadius(
-        Vector3.new(update_safety_margin, update_safety_margin, update_safety_margin_z),
-    );
+    sim_region.bounds = bounds;
+    sim_region.updatable_bounds = sim_region.bounds;
     sim_region.max_entity_count = 4096;
     sim_region.entity_count = 0;
     sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, Entity, ArenaPushParams.noClear());
@@ -315,8 +376,12 @@ pub fn beginWorldChange(
                     };
                     const chunk_delta: Vector3 =
                         world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);
-                    var opt_block: ?*world.WorldEntityBlock = chunk.first_block;
-                    while (opt_block) |block| {
+                    const first_block: ?*world.WorldEntityBlock = chunk.first_block;
+                    var last_block: ?*world.WorldEntityBlock = first_block;
+                    var opt_block: ?*world.WorldEntityBlock = first_block;
+                    while (opt_block) |block| : (opt_block = block.next) {
+                        last_block = block;
+
                         var entity_index: u32 = 0;
                         while (entity_index < block.entity_count) : (entity_index += 1) {
                             if (sim_region.entity_count < sim_region.max_entity_count) {
@@ -339,9 +404,9 @@ pub fn beginWorldChange(
                                 dest.position = dest.position.plus(chunk_delta);
 
                                 if (entityOverlapsRectangle(
-                                        dest.position,
-                                        dest.collision.total_volume,
-                                        sim_region.updatable_bounds,
+                                    dest.position,
+                                    dest.collision.total_volume,
+                                    sim_region.updatable_bounds,
                                 )) {
                                     dest.flags |= EntityFlags.Active.toInt();
                                 }
@@ -361,13 +426,9 @@ pub fn beginWorldChange(
                                 unreachable;
                             }
                         }
-
-                        const next_block: ?*world.WorldEntityBlock = block.next;
-                        world.addBlockToFreeList(sim_region.world, block);
-                        opt_block = next_block;
                     }
 
-                    world.addChunkToFreeList(sim_region.world, chunk);
+                    world.addToFreeList(sim_region.world, chunk, first_block, last_block);
                 }
             }
         }
@@ -381,9 +442,6 @@ pub fn beginWorldChange(
 }
 
 fn speculativeCollide(mover: *Entity, region: *Entity, test_position: Vector3) bool {
-    TimedBlock.beginFunction(@src(), .SpeculativeCollide);
-    defer TimedBlock.endFunction(@src(), .SpeculativeCollide);
-
     const result = true;
 
     _ = mover;
@@ -400,9 +458,6 @@ fn speculativeCollide(mover: *Entity, region: *Entity, test_position: Vector3) b
 }
 
 fn entitiesOverlap(entity: *Entity, test_entity: *Entity, epsilon: Vector3) bool {
-    TimedBlock.beginFunction(@src(), .EntitiesOverlap);
-    defer TimedBlock.endFunction(@src(), .EntitiesOverlap);
-
     var overlapped = false;
 
     var entity_volume_index: u32 = 0;
@@ -497,9 +552,6 @@ pub fn moveEntity(
     delta_time: f32,
     acceleration: Vector3,
 ) void {
-    TimedBlock.beginFunction(@src(), .MoveEntity);
-    defer TimedBlock.endFunction(@src(), .MoveEntity);
-
     // Calculate movement delta.
     var entity_delta = acceleration.scaledTo(0.5 * math.square(delta_time))
         .plus(entity.velocity.scaledTo(delta_time));
@@ -677,8 +729,8 @@ pub fn moveEntity(
 }
 
 pub fn endWorldChange(world_mode: *GameModeWorld, world_ptr: *World, sim_region: *SimRegion) void {
-    TimedBlock.beginFunction(@src(), .EndSimulation);
-    defer TimedBlock.endFunction(@src(), .EndSimulation);
+    TimedBlock.beginFunction(@src(), .EndWorldChange);
+    defer TimedBlock.endFunction(@src(), .EndWorldChange);
 
     var sim_entity_index: u32 = 0;
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {

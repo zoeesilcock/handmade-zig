@@ -19,6 +19,8 @@ const std = @import("std");
 /// TODO: An overview of upcoming tasks.
 ///
 /// * Implement multiple sim regions per frame.
+///     * Fix has table routines in SimRegion to not have to do clears on returns (just have them return a bool
+///     as to wheter they found the entry or not).
 ///     * Pull out the camera concept into something clear and optional.
 ///     * Where do things like typical_floor_height live etc.
 ///     * Eliminate world mode from sim step entirely.

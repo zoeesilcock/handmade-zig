@@ -1021,6 +1021,24 @@ pub inline fn safeRatio1(numerator: f32, divisor: f32) f32 {
     return safeRatioN(numerator, divisor, 1);
 }
 
+pub inline fn safeRatioNf64(numerator: f64, divisor: f64, fallback: f64) f64 {
+    var result: f64 = fallback;
+
+    if (divisor != 0) {
+        result = numerator / divisor;
+    }
+
+    return result;
+}
+
+pub inline fn safeRatio0f64(numerator: f64, divisor: f64) f64 {
+    return safeRatioNf64(numerator, divisor, 0);
+}
+
+pub inline fn safeRatio1f64(numerator: f64, divisor: f64) f64 {
+    return safeRatioNf64(numerator, divisor, 1);
+}
+
 pub inline fn sRGB255ToLinear1(color: Color) Color {
     const inverse_255: f32 = 1.0 / 255.0;
 

@@ -45,6 +45,7 @@ const BrainId = brains.BrainId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const TemporaryMemory = memory.TemporaryMemory;
+const TimedBlock = debug_interface.TimedBlock;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -101,6 +102,9 @@ pub const TicketMutex = extern struct {
     serving: u64,
 
     pub fn begin(self: *TicketMutex) void {
+        TimedBlock.beginBlock(@src(), .BeginTicketMutex);
+        defer TimedBlock.endBlock(@src(), .BeginTicketMutex);
+
         const ticket = @atomicRmw(u64, &self.ticket, .Add, 1, .seq_cst);
         while (ticket != self.serving) {
             // TODO: This isn't implemented in Zig yet:

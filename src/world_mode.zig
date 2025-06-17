@@ -18,9 +18,6 @@ const cutscene = @import("cutscene.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
-pub const GROUND_BUFFER_WIDTH: u32 = 256;
-pub const GROUND_BUFFER_HEIGHT: u32 = 256;
-
 var global_config = &@import("config.zig").global_config;
 
 // Types.
@@ -72,6 +69,7 @@ const SimRegion = sim.SimRegion;
 pub const GameModeWorld = struct {
     world: *world.World = undefined,
     typical_floor_height: f32 = 0,
+    standard_room_dimension: Vector3 = .zero(),
 
     camera_following_entity_index: EntityId = .{},
     camera_position: WorldPosition,
@@ -161,14 +159,11 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     world_mode.typical_floor_height = 3;
 
     // TODO: Replace this with a value received from the renderer.
-    const pixels_to_meters = 1.0 / 42.0;
-    const chunk_dimension_in_meters = Vector3.new(
-        pixels_to_meters * @as(f32, @floatFromInt(GROUND_BUFFER_WIDTH)),
-        pixels_to_meters * @as(f32, @floatFromInt(GROUND_BUFFER_HEIGHT)),
-        world_mode.typical_floor_height,
-    );
+    // const pixels_to_meters = 1.0 / 42.0;
+    const chunk_dimension_in_meters = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
 
     world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
+    world_mode.standard_room_dimension = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
 
     const tile_side_in_meters: f32 = 1.4;
     const tiles_per_width: u32 = 17;
@@ -496,17 +491,10 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
     var arena: MemoryArena = .{};
 
     const work: *WorldSimWork = @ptrCast(@alignCast(data));
-    const world_ptr: *world.World = work.world_mode.world;
 
-    world_ptr.change_ticket.begin();
     var world_sim: WorldSim = beginSim(&arena, work.world_mode, work.sim_bounds, work.delta_time);
-    world_ptr.change_ticket.end();
-
     simulate(&world_sim, work.world_mode, work.delta_time, .white(), null, null, null, null, null, null);
-
-    world_ptr.change_ticket.begin();
     endSim(work.world_mode, &arena, &world_sim);
-    world_ptr.change_ticket.end();
 
     arena.clear();
 }
@@ -547,8 +535,10 @@ pub fn updateAndRenderWorld(
     _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
     _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
 
-    const sim_bounds_expansion = Vector3.new(15, 15, 15);
-    const sim_bounds: Rectangle3 = camera_bounds_in_meters.addRadius(sim_bounds_expansion);
+    const sim_bounds: Rectangle3 = .fromCenterDimension(
+        screen_bounds.getCenter().toVector3(0),
+        world_mode.standard_room_dimension.scaledTo(3),
+    );
 
     var sim_work: [16]WorldSimWork = undefined;
     var sim_index: u32 = 0;
@@ -574,7 +564,7 @@ pub fn updateAndRenderWorld(
 
     shared.platform.completeAllQueuedWork(transient_state.high_priority_queue);
 
-    var world_sim: WorldSim  = beginSim(&transient_state.arena, world_mode, sim_bounds, input.frame_delta_time);
+    var world_sim: WorldSim = beginSim(&transient_state.arena, world_mode, sim_bounds, input.frame_delta_time);
     {
         checkForJoiningPlayers(state, input, world_sim.sim_region, world_sim.camera_position);
 
@@ -628,6 +618,15 @@ pub fn updateAndRenderWorld(
             world_sim.sim_region.bounds.getDimension().xy(),
             Vector3.zero(),
             Color.new(1, 0, 1, 1),
+            0.1,
+        );
+
+        const chunk_rect: Rectangle3 = world.getWorldChunkBounds(world_mode.world, 0, 0, 0);
+        render_group.pushRectangleOutline(
+            &world_transform,
+            chunk_rect.getDimension().xy(),
+            chunk_rect.getCenter(),
+            Color.new(1, 1, 1, 1),
             0.1,
         );
     }
