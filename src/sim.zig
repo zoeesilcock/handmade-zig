@@ -22,6 +22,7 @@ const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
+const GameCamera = @import("world_mode.zig").GameCamera;
 const World = world.World;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
@@ -441,6 +442,42 @@ pub fn beginWorldChange(
     return sim_region;
 }
 
+pub fn endWorldChange(world_ptr: *World, sim_region: *SimRegion) void {
+    TimedBlock.beginFunction(@src(), .EndWorldChange);
+    defer TimedBlock.endFunction(@src(), .EndWorldChange);
+
+    var sim_entity_index: u32 = 0;
+    while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
+        const entity = &sim_region.entities[sim_entity_index];
+
+        if (!entity.hasFlag(EntityFlags.Deleted.toInt())) {
+            const entity_position: world.WorldPosition =
+                world.mapIntoChunkSpace(world_ptr, sim_region.origin, entity.position);
+            var chunk_position: world.WorldPosition = entity_position;
+            chunk_position.offset = .zero();
+
+            const chunk_delta: Vector3 = entity_position.offset.minus(entity.position);
+
+            // const old_entity_position: Vector3 = entity.position;
+            entity.position = entity.position.plus(chunk_delta);
+            var dest_e: *Entity = world.useChunkSpaceAt(world_ptr, @sizeOf(Entity), chunk_position);
+
+            dest_e.* = entity.*;
+            packTraversableReference(sim_region, &dest_e.occupying);
+            packTraversableReference(sim_region, &dest_e.came_from);
+            packTraversableReference(sim_region, &dest_e.auto_boost_to);
+
+            dest_e.acceleration = .zero();
+            dest_e.bob_acceleration = 0;
+
+            // const reverse_chunk_delta: Vector3 =
+            //     world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);
+            // const test_position: Vector3 = entity.position.plus(reverse_chunk_delta);
+            // std.debug.assert(old_entity_position.z() == test_position.z());
+        }
+    }
+}
+
 fn speculativeCollide(mover: *Entity, region: *Entity, test_position: Vector3) bool {
     const result = true;
 
@@ -728,107 +765,88 @@ pub fn moveEntity(
     }
 }
 
-pub fn endWorldChange(world_mode: *GameModeWorld, world_ptr: *World, sim_region: *SimRegion) void {
-    TimedBlock.beginFunction(@src(), .EndWorldChange);
-    defer TimedBlock.endFunction(@src(), .EndWorldChange);
+pub fn updateCameraForEntityMovement(
+    world_ptr: *World,
+    sim_region: *SimRegion,
+    camera: *GameCamera,
+    entity: *Entity,
+) void {
+    std.debug.assert(entity.id.value == camera.following_entity_index.value);
 
-    var sim_entity_index: u32 = 0;
-    while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
-        const entity = &sim_region.entities[sim_entity_index];
-
-        if (!entity.hasFlag(EntityFlags.Deleted.toInt())) {
-            const entity_position: world.WorldPosition =
-                world.mapIntoChunkSpace(world_ptr, sim_region.origin, entity.position);
-            var chunk_position: world.WorldPosition = entity_position;
-            chunk_position.offset = .zero();
-
-            const chunk_delta: Vector3 = entity_position.offset.minus(entity.position);
-
-            // Update camera position.
-            if (entity.id.value == world_mode.camera_following_entity_index.value) {
-                var new_camera_position = world_mode.camera_position;
-                const room_delta: Vector3 = .new(24, 12.5, world_mode.typical_floor_height);
-                const h_room_delta: Vector3 = room_delta.scaledTo(0.5);
-                const apron_size: f32 = 0.7;
-                const bounce_height: f32 = 0.5;
-                const h_room_apron: Vector3 = .new(
-                    h_room_delta.x() - apron_size,
-                    h_room_delta.y() - apron_size,
-                    h_room_delta.z() - apron_size,
-                );
-
-                if (global_config.Renderer_Camera_RoomBased) {
-                    world_mode.camera_offset = .zero();
-
-                    var applied_delta: Vector3 = .zero();
-                    for (0..3) |e| {
-                        if (entity.position.values[e] > h_room_delta.values[e]) {
-                            applied_delta.values[e] = room_delta.values[e];
-                            new_camera_position = world.mapIntoChunkSpace(
-                                world_mode.world,
-                                new_camera_position,
-                                applied_delta,
-                            );
-                        }
-                        if (entity.position.values[e] < -h_room_delta.values[e]) {
-                            applied_delta.values[e] = -room_delta.values[e];
-                            new_camera_position = world.mapIntoChunkSpace(
-                                world_mode.world,
-                                new_camera_position,
-                                applied_delta,
-                            );
-                        }
-                    }
-
-                    const new_entity_position: Vector3 = entity.position.minus(applied_delta);
-                    if (new_entity_position.x() > h_room_apron.x()) {
-                        const t: f32 = math.clamp01MapToRange(h_room_apron.x(), h_room_delta.x(), new_entity_position.x());
-                        world_mode.camera_offset = .new(t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
-                    }
-                    if (new_entity_position.x() < -h_room_apron.x()) {
-                        const t: f32 = math.clamp01MapToRange(-h_room_apron.x(), -h_room_delta.x(), new_entity_position.x());
-                        world_mode.camera_offset = .new(-t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
-                    }
-                    if (new_entity_position.y() > h_room_apron.y()) {
-                        const t: f32 = math.clamp01MapToRange(h_room_apron.y(), h_room_delta.y(), new_entity_position.y());
-                        world_mode.camera_offset = .new(0, t * h_room_delta.y(), (-(t * t) + 2 * t) * bounce_height);
-                    }
-                    if (new_entity_position.y() < -h_room_apron.y()) {
-                        const t: f32 = math.clamp01MapToRange(-h_room_apron.y(), -h_room_delta.y(), new_entity_position.y());
-                        world_mode.camera_offset = .new(0, -t * h_room_delta.y(), (-(t * t) + 2 * t) * bounce_height);
-                    }
-                    if (new_entity_position.z() > h_room_apron.z()) {
-                        const t: f32 = math.clamp01MapToRange(h_room_apron.z(), h_room_delta.z(), new_entity_position.z());
-                        world_mode.camera_offset = .new(0, 0, t * h_room_delta.z());
-                    }
-                    if (new_entity_position.z() < -h_room_apron.z()) {
-                        const t: f32 = math.clamp01MapToRange(-h_room_apron.z(), -h_room_delta.z(), new_entity_position.z());
-                        world_mode.camera_offset = .new(0, 0, -t * h_room_delta.z());
-                    }
-                } else {
-                    new_camera_position = entity_position;
-                }
-
-                world_mode.camera_position = new_camera_position;
+    var opt_in_room: ?*Entity = null;
+    var test_index: u32 = 0;
+    while (test_index < sim_region.entity_count) : (test_index += 1) {
+        const test_entity: *Entity = &sim_region.entities[test_index];
+        if (test_entity.brain_slot.type == @intFromEnum(BrainType.BrainRoom)) {
+            // TODO: Fix this testing.
+            if (entityOverlapsRectangle(test_entity.position, test_entity.collision.total_volume, .zero())) {
+                opt_in_room = test_entity;
+                break;
             }
-
-            // const old_entity_position: Vector3 = entity.position;
-            entity.position = entity.position.plus(chunk_delta);
-            var dest_e: *Entity = world.useChunkSpaceAt(world_mode.world, @sizeOf(Entity), chunk_position);
-
-            dest_e.* = entity.*;
-            packTraversableReference(sim_region, &dest_e.occupying);
-            packTraversableReference(sim_region, &dest_e.came_from);
-            packTraversableReference(sim_region, &dest_e.auto_boost_to);
-
-            dest_e.acceleration = .zero();
-            dest_e.bob_acceleration = 0;
-
-            // const reverse_chunk_delta: Vector3 =
-            //     world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);
-            // const test_position: Vector3 = entity.position.plus(reverse_chunk_delta);
-            // std.debug.assert(old_entity_position.z() == test_position.z());
         }
+    }
+
+    if (opt_in_room) |in_room| {
+        const room_delta: Vector3 = in_room.collision.total_volume.dimension;
+        var new_camera_position = camera.position;
+        const h_room_delta: Vector3 = room_delta.scaledTo(0.5);
+        const apron_size: f32 = 0.7;
+        const bounce_height: f32 = 0.5;
+        const h_room_apron: Vector3 = .new(
+            h_room_delta.x() - apron_size,
+            h_room_delta.y() - apron_size,
+            h_room_delta.z() - apron_size,
+        );
+
+        camera.offset = .zero();
+
+        var applied_delta: Vector3 = .zero();
+        for (0..3) |e| {
+            if (entity.position.values[e] > h_room_delta.values[e]) {
+                applied_delta.values[e] = room_delta.values[e];
+                new_camera_position = world.mapIntoChunkSpace(
+                    world_ptr,
+                    new_camera_position,
+                    applied_delta,
+                );
+            }
+            if (entity.position.values[e] < -h_room_delta.values[e]) {
+                applied_delta.values[e] = -room_delta.values[e];
+                new_camera_position = world.mapIntoChunkSpace(
+                    world_ptr,
+                    new_camera_position,
+                    applied_delta,
+                );
+            }
+        }
+
+        const new_entity_position: Vector3 = entity.position.minus(applied_delta);
+        if (new_entity_position.x() > h_room_apron.x()) {
+            const t: f32 = math.clamp01MapToRange(h_room_apron.x(), h_room_delta.x(), new_entity_position.x());
+            camera.offset = .new(t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
+        }
+        if (new_entity_position.x() < -h_room_apron.x()) {
+            const t: f32 = math.clamp01MapToRange(-h_room_apron.x(), -h_room_delta.x(), new_entity_position.x());
+            camera.offset = .new(-t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
+        }
+        if (new_entity_position.y() > h_room_apron.y()) {
+            const t: f32 = math.clamp01MapToRange(h_room_apron.y(), h_room_delta.y(), new_entity_position.y());
+            camera.offset = .new(0, t * h_room_delta.y(), (-(t * t) + 2 * t) * bounce_height);
+        }
+        if (new_entity_position.y() < -h_room_apron.y()) {
+            const t: f32 = math.clamp01MapToRange(-h_room_apron.y(), -h_room_delta.y(), new_entity_position.y());
+            camera.offset = .new(0, -t * h_room_delta.y(), (-(t * t) + 2 * t) * bounce_height);
+        }
+        if (new_entity_position.z() > h_room_apron.z()) {
+            const t: f32 = math.clamp01MapToRange(h_room_apron.z(), h_room_delta.z(), new_entity_position.z());
+            camera.offset = .new(0, 0, t * h_room_delta.z());
+        }
+        if (new_entity_position.z() < -h_room_apron.z()) {
+            const t: f32 = math.clamp01MapToRange(-h_room_apron.z(), -h_room_delta.z(), new_entity_position.z());
+            camera.offset = .new(0, 0, -t * h_room_delta.z());
+        }
+
+        camera.position = new_camera_position;
     }
 }
 

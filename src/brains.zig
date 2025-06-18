@@ -74,6 +74,10 @@ pub const BrainId = extern struct {
 pub const BrainType = enum(u16) {
     BrainHero,
 
+    // These are special types which are used to mark special entities,
+    // but these entities do not get actual brains (the brain ID value is set to 0).
+    BrainRoom,
+
     // Test brains.
     BrainSnake,
     BrainFamiliar,
@@ -110,6 +114,11 @@ pub const BrainSlot = extern struct {
     pub fn forIndexedField(comptime slot_type: type, comptime field_name: []const u8, index: u32) BrainSlot {
         var slot: BrainSlot = BrainSlot.forField(slot_type, field_name);
         slot.index += @as(u16, @intCast(index));
+        return slot;
+    }
+
+    pub fn forSpecialBrain(brain_type: BrainType) BrainSlot {
+        const slot: BrainSlot = .{ .type = @intFromEnum(brain_type), .index = 0 };
         return slot;
     }
 
@@ -371,6 +380,7 @@ pub fn executeBrain(
                 controlled_hero.brain_id = .{};
             }
         },
+        .BrainRoom => {},
         .BrainFamiliar => {
             const parts: *BrainFamiliar = &brain.parts.familiar;
             const opt_head: ?*Entity = parts.head;

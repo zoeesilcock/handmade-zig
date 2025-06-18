@@ -21,13 +21,15 @@ const std = @import("std");
 /// * Implement multiple sim regions per frame.
 ///     * Fix has table routines in SimRegion to not have to do clears on returns (just have them return a bool
 ///     as to wheter they found the entry or not).
-///     * Pull out the camera concept into something clear and optional.
-///     * Where do things like typical_floor_height live etc.
 ///     * Eliminate world mode from sim step entirely.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
 ///
 /// * Graphics upgrade
+///     * 3D.
+///         * 3D pipeline.
+///         * Make concpet of 3D rooms that can be queried.
+///         * Update camera to move between viewing locations for 3D rooms.
 ///     * Particle systems.
 ///         * Bug with sliding relative to the grid during camera offset?
 ///         * How will floor Z's be handled?

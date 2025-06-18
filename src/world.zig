@@ -35,6 +35,7 @@ const TILES_PER_CHUNK = 16;
 pub const World = extern struct {
     change_ticket: TicketMutex,
     chunk_dimension_in_meters: Vector3,
+    game_entropy: random.Series,
 
     first_free: ?*WorldEntityBlock,
 
@@ -112,6 +113,7 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
     world.first_free = null;
     world.arena = parent_arena;
+    world.game_entropy = .seed(1234);
 
     return world;
 }

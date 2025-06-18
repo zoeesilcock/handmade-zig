@@ -4,7 +4,7 @@ const math = @import("math.zig");
 pub const MIN_RANDOM_NUMBER = 0x0002890;
 pub const MAX_RANDOM_NUMBER = 0x5F515C5;
 
-pub const Series = struct {
+pub const Series = extern struct {
     index: u32 = 0,
 
     pub fn seed(seed_value: u32) Series {

@@ -47,7 +47,6 @@ const ArenaPushParams = memory.ArenaPushParams;
 const TemporaryMemory = memory.TemporaryMemory;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
-const EntityType = entities.EntityType;
 const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const EntityFlags = entities.EntityFlags;
@@ -66,18 +65,23 @@ const BrainFamiliar = brains.BrainFamiliar;
 const ReservedBrainId = brains.ReservedBrainId;
 const SimRegion = sim.SimRegion;
 
+pub const GameCamera = struct {
+    following_entity_index: EntityId = .{},
+    position: WorldPosition,
+    last_position: WorldPosition,
+    offset: Vector3,
+};
+
 pub const GameModeWorld = struct {
     world: *world.World = undefined,
-    typical_floor_height: f32 = 0,
-    standard_room_dimension: Vector3 = .zero(),
+    camera: GameCamera,
 
-    camera_following_entity_index: EntityId = .{},
-    camera_position: WorldPosition,
-    last_camera_position: WorldPosition,
-    camera_offset: Vector3,
+    standard_room_dimension: Vector3 = .zero(),
+    typical_floor_height: f32 = 0,
 
     null_collision: *EntityCollisionVolumeGroup = undefined,
     floor_collision: *EntityCollisionVolumeGroup = undefined,
+    room_collision: *EntityCollisionVolumeGroup = undefined,
     wall_collision: *EntityCollisionVolumeGroup = undefined,
     stair_collsion: *EntityCollisionVolumeGroup = undefined,
     hero_body_collision: *EntityCollisionVolumeGroup = undefined,
@@ -86,11 +90,6 @@ pub const GameModeWorld = struct {
     familiar_collsion: *EntityCollisionVolumeGroup = undefined,
     monster_collsion: *EntityCollisionVolumeGroup = undefined,
 
-    time: f32 = 0,
-
-    t_sine: f32 = 0,
-
-    game_entropy: random.Series,
     effects_entropy: random.Series,
 
     next_particle: u32 = 0,
@@ -103,12 +102,12 @@ pub const GameModeWorld = struct {
 };
 
 const WorldSim = struct {
-    camera_position: Vector3 = .zero(),
     sim_region: *SimRegion = undefined,
     sim_memory: TemporaryMemory = undefined,
 };
 
 const WorldSimWork = struct {
+    sim_center_position: WorldPosition,
     sim_bounds: Rectangle3,
     world_mode: *GameModeWorld,
     delta_time: f32,
@@ -154,7 +153,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     particles.initParticleCache(world_mode.particle_cache, transient_state.assets);
 
     world_mode.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
-    world_mode.game_entropy = .seed(1234);
     world_mode.effects_entropy = .seed(1234);
     world_mode.typical_floor_height = 3;
 
@@ -175,6 +173,13 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         tile_side_in_meters,
         tile_side_in_meters,
         tile_depth_in_meters,
+    );
+    world_mode.room_collision = makeSimpleGroundedCollision(
+        world_mode,
+        17 * tile_side_in_meters,
+        9 * tile_side_in_meters,
+        world_mode.typical_floor_height,
+        0,
     );
     world_mode.wall_collision = makeSimpleGroundedCollision(
         world_mode,
@@ -207,7 +212,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         0,
     );
 
-    var series = world_mode.game_entropy;
+    var series = world_mode.world.game_entropy;
     const screen_base_x: i32 = 0;
     const screen_base_y: i32 = 0;
     const screen_base_z: i32 = 0;
@@ -355,16 +360,16 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     const camera_tile_x = last_screen_x * tiles_per_width + (17 / 2);
     const camera_tile_y = last_screen_y * tiles_per_height + (9 / 2);
     const camera_tile_z = last_screen_z;
-    world_mode.camera_position = chunkPositionFromTilePosition(
+    world_mode.camera.position = chunkPositionFromTilePosition(
         world_mode.world,
         camera_tile_x,
         camera_tile_y,
         camera_tile_z,
         null,
     );
-    world_mode.last_camera_position = world_mode.camera_position;
+    world_mode.camera.last_position = world_mode.camera.position;
 
-    sim.endWorldChange(world_mode, world_mode.world, world_mode.creation_region.?);
+    sim.endWorldChange(world_mode.world, world_mode.creation_region.?);
     world_mode.creation_region = null;
     transient_state.arena.endTemporaryMemory(sim_memory);
 
@@ -375,7 +380,6 @@ fn checkForJoiningPlayers(
     opt_state: ?*shared.State,
     opt_input: ?*shared.GameInput,
     sim_region: *SimRegion,
-    camera_position: Vector3,
 ) void {
     if (opt_input) |input| {
         if (opt_state) |state| {
@@ -386,7 +390,7 @@ fn checkForJoiningPlayers(
                         controlled_hero.* = shared.ControlledHero{};
 
                         var traversable: TraversableReference = undefined;
-                        if (sim.getClosestTraversable(sim_region, camera_position, &traversable, 0)) {
+                        if (sim.getClosestTraversable(sim_region, .zero(), &traversable, 0)) {
                             controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
                             addPlayer(state.mode.world, sim_region, traversable, controlled_hero.brain_id);
                         }
@@ -399,29 +403,22 @@ fn checkForJoiningPlayers(
 
 fn beginSim(
     temp_arena: *MemoryArena,
-    world_mode: *GameModeWorld,
+    world_ptr: *world.World,
+    sim_center_position: WorldPosition,
     sim_bounds: Rectangle3,
     delta_time: f32,
 ) WorldSim {
     var result: WorldSim = .{};
     const sim_memory: TemporaryMemory = temp_arena.beginTemporaryMemory();
-    const sim_center_position = world_mode.camera_position;
-
-    world_mode.last_camera_position = world_mode.camera_position;
 
     const sim_region = sim.beginWorldChange(
         temp_arena,
-        world_mode.world,
+        world_ptr,
         sim_center_position,
         sim_bounds,
         delta_time,
     );
 
-    const camera_position: Vector3 =
-        world.subtractPositions(world_mode.world, &world_mode.camera_position, &sim_center_position)
-            .plus(world_mode.camera_offset);
-
-    result.camera_position = camera_position;
     result.sim_region = sim_region;
     result.sim_memory = sim_memory;
 
@@ -430,7 +427,8 @@ fn beginSim(
 
 fn simulate(
     world_sim: *WorldSim,
-    world_mode: *GameModeWorld,
+    typical_floor_height: f32,
+    game_entropy: *random.Series,
     delta_time: f32,
     // Optional...
     background_color: Color,
@@ -440,6 +438,7 @@ fn simulate(
     opt_render_group: ?*RenderGroup,
     particle_cache: ?*ParticleCache,
     draw_buffer: ?*asset.LoadedBitmap,
+    camera_offset: Vector3,
 ) void {
     const sim_region: *SimRegion = world_sim.sim_region;
 
@@ -454,16 +453,16 @@ fn simulate(
     brain_index = 0;
     while (brain_index < sim_region.brain_count) : (brain_index += 1) {
         const brain: *Brain = &sim_region.brains[brain_index];
-        brains.executeBrain(opt_state, &world_mode.game_entropy, sim_region, opt_input, brain, delta_time);
+        brains.executeBrain(opt_state, game_entropy, sim_region, opt_input, brain, delta_time);
     }
     TimedBlock.endBlock(@src(), .ExecuteBrains);
 
     entities.updateAndRenderEntities(
-        world_mode.typical_floor_height,
+        typical_floor_height,
         sim_region,
         delta_time,
         opt_render_group,
-        world_sim.camera_position,
+        camera_offset,
         draw_buffer,
         background_color,
         particle_cache,
@@ -472,11 +471,11 @@ fn simulate(
 }
 
 fn endSim(
-    world_mode: *GameModeWorld,
     arena: *MemoryArena,
     world_sim: *WorldSim,
+    world_ptr: *world.World,
 ) void {
-    sim.endWorldChange(world_mode, world_mode.world, world_sim.sim_region);
+    sim.endWorldChange(world_ptr, world_sim.sim_region);
     arena.endTemporaryMemory(world_sim.sim_memory);
 }
 
@@ -492,9 +491,28 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
 
     const work: *WorldSimWork = @ptrCast(@alignCast(data));
 
-    var world_sim: WorldSim = beginSim(&arena, work.world_mode, work.sim_bounds, work.delta_time);
-    simulate(&world_sim, work.world_mode, work.delta_time, .white(), null, null, null, null, null, null);
-    endSim(work.world_mode, &arena, &world_sim);
+    var world_sim: WorldSim = beginSim(
+        &arena,
+        work.world_mode.world,
+        work.sim_center_position,
+        work.sim_bounds,
+        work.delta_time,
+    );
+    simulate(
+        &world_sim,
+        work.world_mode.typical_floor_height,
+        &work.world_mode.world.game_entropy,
+        work.delta_time,
+        .white(),
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        .zero(),
+    );
+    endSim(&arena, &world_sim, work.world_mode.world);
 
     arena.clear();
 }
@@ -547,10 +565,12 @@ pub fn updateAndRenderWorld(
             var work: *WorldSimWork = &sim_work[sim_index];
             sim_index += 1;
 
-            const offset_x: f32 = @as(f32, @floatFromInt(sim_x + 1)) * -100;
-            const offset_y: f32 = @as(f32, @floatFromInt(sim_y + 1)) * -100;
+            var center_position: WorldPosition = world_mode.camera.position;
+            center_position.chunk_x -= @intCast(70 * (sim_x + 1));
+            center_position.chunk_y -= @intCast(70 * (sim_y + 1));
 
-            work.sim_bounds = sim_bounds.offsetBy(.new(offset_x, offset_y, 0));
+            work.sim_center_position = center_position;
+            work.sim_bounds = sim_bounds;
             work.world_mode = world_mode;
             work.delta_time = input.frame_delta_time;
 
@@ -564,13 +584,20 @@ pub fn updateAndRenderWorld(
 
     shared.platform.completeAllQueuedWork(transient_state.high_priority_queue);
 
-    var world_sim: WorldSim = beginSim(&transient_state.arena, world_mode, sim_bounds, input.frame_delta_time);
+    var world_sim: WorldSim = beginSim(
+        &transient_state.arena,
+        world_mode.world,
+        world_mode.camera.position,
+        sim_bounds,
+        input.frame_delta_time,
+    );
     {
-        checkForJoiningPlayers(state, input, world_sim.sim_region, world_sim.camera_position);
+        checkForJoiningPlayers(state, input, world_sim.sim_region);
 
         simulate(
             &world_sim,
-            world_mode,
+            world_mode.typical_floor_height,
+            &world_mode.world.game_entropy,
             input.frame_delta_time,
             background_color,
             transient_state.assets,
@@ -579,20 +606,22 @@ pub fn updateAndRenderWorld(
             render_group,
             world_mode.particle_cache,
             draw_buffer,
+            world_mode.camera.offset,
         );
 
         const frame_to_frame_camera_delta_position: Vector3 =
-            world.subtractPositions(world_mode.world, &world_mode.camera_position, &world_mode.last_camera_position);
+            world.subtractPositions(world_mode.world, &world_mode.camera.position, &world_mode.camera.last_position);
         particles.updateAndRenderParticleSystem(
             world_mode.particle_cache,
             input.frame_delta_time,
             render_group,
             frame_to_frame_camera_delta_position.negated(),
-            world_sim.camera_position,
+            world_mode.camera.offset,
         );
         var world_transform = ObjectTransform.defaultUpright();
-        world_transform.offset_position = world_transform.offset_position.minus(world_sim.camera_position);
+        world_transform.offset_position = world_transform.offset_position.minus(world_mode.camera.offset);
 
+        if (false) {
         render_group.pushRectangleOutline(
             &world_transform,
             screen_bounds.getDimension(),
@@ -629,8 +658,13 @@ pub fn updateAndRenderWorld(
             Color.new(1, 1, 1, 1),
             0.1,
         );
+        }
+
+        if (sim.getEntityByStorageIndex(world_sim.sim_region, world_mode.camera.following_entity_index)) |camera_following_entity| {
+            sim.updateCameraForEntityMovement(world_mode.world, world_sim.sim_region, &world_mode.camera, camera_following_entity);
+        }
     }
-    endSim(world_mode, &transient_state.arena, &world_sim);
+    endSim(&transient_state.arena, &world_sim, world_mode.world);
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;
@@ -707,9 +741,9 @@ fn addStandardRoom(
             );
 
             if (false) {
-                _ = world_position.offset.setX(world_position.offset.x() + 0.25 * world_mode.game_entropy.randomBilateral());
-                _ = world_position.offset.setY(world_position.offset.y() + 0.25 * world_mode.game_entropy.randomBilateral());
-                _ = world_position.offset.setZ(world_position.offset.z() + 0.1 * world_mode.game_entropy.randomBilateral());
+                _ = world_position.offset.setX(world_position.offset.x() + 0.25 * world_mode.world.game_entropy.randomBilateral());
+                _ = world_position.offset.setY(world_position.offset.y() + 0.25 * world_mode.world.game_entropy.randomBilateral());
+                _ = world_position.offset.setZ(world_position.offset.z() + 0.1 * world_mode.world.game_entropy.randomBilateral());
             }
 
             if (left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
@@ -726,7 +760,8 @@ fn addStandardRoom(
                 if ((left_hole and offset_x == -2 and offset_y == 0) or
                     (right_hole and offset_x == 2 and offset_y == 0))
                 {
-                    entity.auto_boost_to = target_ref;
+                    _ = target_ref;
+                    // entity.auto_boost_to = target_ref;
                 }
                 endEntity(world_mode, entity, world_position);
             }
@@ -735,6 +770,17 @@ fn addStandardRoom(
             result.ground[@intCast(offset_x + 8)][@intCast(offset_y + 4)] = standing_on;
         }
     }
+
+    const room_position = chunkPositionFromTilePosition(
+        world_mode.world,
+        abs_tile_x,
+        abs_tile_y,
+        abs_tile_z,
+        null,
+    );
+    const room: *Entity = beginGroundedEntity(world_mode, world_mode.room_collision);
+    room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
+    endEntity(world_mode, room, room_position);
 
     return result;
 }
@@ -785,8 +831,8 @@ pub fn addPlayer(
     glove.brain_slot = BrainSlot.forField(BrainHero, "glove");
     glove.brain_id = brain_id;
 
-    if (world_mode.camera_following_entity_index.value == 0) {
-        world_mode.camera_following_entity_index = head.id;
+    if (world_mode.camera.following_entity_index.value == 0) {
+        world_mode.camera.following_entity_index = head.id;
     }
 
     const hero_scale = 3;
