@@ -14,6 +14,7 @@ const Package = enum {
     Library,
     AssetBuilder,
     Preprocessor,
+    Compressor,
 };
 
 pub fn build(b: *std.Build) void {
@@ -47,6 +48,10 @@ pub fn build(b: *std.Build) void {
 
     if (package == .All or package == .Preprocessor) {
         addSimplePreprocessor(b, build_options, target, optimize);
+    }
+
+    if (package == .All or package == .Compressor) {
+        addSimpleCompressor(b, build_options, target, optimize);
     }
 }
 
@@ -208,4 +213,30 @@ fn addSimplePreprocessor(
 
     // const output = run_simple_preprocessor.captureStdOut();
     // simple_preprocessor_run_step.dependOn(&b.addInstallFileWithDir(output, .prefix, "../src/generated.zig").step);
+}
+
+fn addSimpleCompressor(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const simple_compressor_exe = b.addExecutable(.{
+        .name = "simple-compressor",
+        .root_source_file = b.path("tools/simple_compressor.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    simple_compressor_exe.root_module.addOptions("build_options", build_options);
+
+    b.installArtifact(simple_compressor_exe);
+
+    // Allow running the preprocessor from build command.
+    const run_simple_compressor = b.addRunArtifact(simple_compressor_exe);
+    if (b.args) |args| {
+        run_simple_compressor.addArgs(args);
+    }
+    const simple_preprocessor_run_step = b.step("simple-compressor", "Run the compressor");
+    run_simple_compressor.setCwd(b.path("."));
+    simple_preprocessor_run_step.dependOn(&run_simple_compressor.step);
 }
