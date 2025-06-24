@@ -1508,10 +1508,10 @@ fn drawTopClocksList(
 
         const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, @ptrCast(&buffer), at);
         if (mouse_position.isInRectangle(text_rect)) {
-            const text_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+            const tooltip_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
             _ = shared.formatString(
-                text_buffer.size,
-                text_buffer.data,
+                tooltip_buffer.size,
+                tooltip_buffer.data,
                 "  %05.02fcy each; cumulative to this point: %05.02f%%",
                 .{
                     math.safeRatio0f64(stats.sum, @as(f64, @floatFromInt(stats.count))),

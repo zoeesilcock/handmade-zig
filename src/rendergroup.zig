@@ -808,15 +808,16 @@ pub const RenderGroup = extern struct {
         render_target_index: u32,
     ) u32 {
         var result: u32 = 0;
-        const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
+        const modified_position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
 
-        const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
+        const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, modified_position);
         if (basis.valid) {
+            const position = basis.position;
             const basis_dimension: Vector2 = dimension.scaledTo(basis.scale);
 
             result = self.pushClipRect(
-                intrinsics.roundReal32ToInt32(basis.position.x()),
-                intrinsics.roundReal32ToInt32(basis.position.y()),
+                intrinsics.roundReal32ToInt32(position.x()),
+                intrinsics.roundReal32ToInt32(position.y()),
                 intrinsics.roundReal32ToInt32(basis_dimension.x()),
                 intrinsics.roundReal32ToInt32(basis_dimension.y()),
                 render_target_index,

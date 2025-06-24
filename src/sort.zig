@@ -114,7 +114,7 @@ pub fn mergeSort(count: u32, first: [*]SortEntry, temp: [*]SortEntry) void {
     }
 }
 
-pub fn radixSort(count: u32, first: [*]SortEntry, temp: [*]SortEntry) void {
+pub fn radixSort(entry_count: u32, first: [*]SortEntry, temp: [*]SortEntry) void {
     var source: [*]SortEntry = first;
     var dest: [*]SortEntry = temp;
 
@@ -124,7 +124,7 @@ pub fn radixSort(count: u32, first: [*]SortEntry, temp: [*]SortEntry) void {
 
         // First pass, count how many of each key.
         var index: u32 = 0;
-        while (index < count) : (index += 1) {
+        while (index < entry_count) : (index += 1) {
             const radix_value: u32 = sortKeyToU32(source[index].sort_key);
             const radix_piece: u32 = (radix_value >> @as(u5, @intCast(byte_index))) & 0xff;
             sort_key_offsets[radix_piece] += 1;
@@ -134,14 +134,14 @@ pub fn radixSort(count: u32, first: [*]SortEntry, temp: [*]SortEntry) void {
         var total: u32 = 0;
         var sort_key_index: u32 = 0;
         while (sort_key_index < sort_key_offsets.len) : (sort_key_index += 1) {
-            const key_count: u32 = sort_key_offsets[sort_key_index];
+            const count: u32 = sort_key_offsets[sort_key_index];
             sort_key_offsets[sort_key_index] = total;
-            total += key_count;
+            total += count;
         }
 
         // Second pass, place elements into the right location.
         index = 0;
-        while (index < count) : (index += 1) {
+        while (index < entry_count) : (index += 1) {
             const radix_value: u32 = sortKeyToU32(source[index].sort_key);
             const radix_piece: u32 = (radix_value >> @as(u5, @intCast(byte_index))) & 0xff;
             dest[sort_key_offsets[radix_piece]] = source[index];

@@ -562,8 +562,8 @@ pub fn textOp(
                     if (code_point != ' ') {
                         match_vector.e[@intFromEnum(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
                         if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
-                            const info = render_group.assets.getBitmapInfo(bitmap_id);
-                            const bitmap_scale = char_scale * @as(f32, @floatFromInt(info.dim[1]));
+                            const bitmap_info = render_group.assets.getBitmapInfo(bitmap_id);
+                            const bitmap_scale = char_scale * @as(f32, @floatFromInt(bitmap_info.dim[1]));
                             const bitamp_offset: Vector3 = Vector3.new(x, position.y(), z);
 
                             if (op == .DrawText) {

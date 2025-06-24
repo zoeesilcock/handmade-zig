@@ -444,7 +444,7 @@ pub const Assets = struct {
         self.transient_state.operation_lock = 0;
     }
 
-    fn acquireAssetMemory(self: *Assets, size: u32, asset_index: u32, asset_type: AssetHeaderType) ?*AssetMemoryHeader {
+    fn acquireAssetMemory(self: *Assets, size: u32, new_asset_index: u32, asset_type: AssetHeaderType) ?*AssetMemoryHeader {
         TimedBlock.beginFunction(@src(), .AcquireAssetMemory);
         defer TimedBlock.endFunction(@src(), .AcquireAssetMemory);
 
@@ -516,7 +516,7 @@ pub const Assets = struct {
 
         if (result) |header| {
             header.asset_type = asset_type;
-            header.asset_index = asset_index;
+            header.asset_index = new_asset_index;
             header.total_size = size;
             self.insertAssetHeaderAtFront(header);
         }

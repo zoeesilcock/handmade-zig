@@ -415,7 +415,7 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*PlatformMemoryBl
 
         if (flags &
             (@intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck) |
-             @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck)) != 0)
+                @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck)) != 0)
         {
             var old_protect: win32.PAGE_PROTECTION_FLAGS = undefined;
             const protected = win32.VirtualProtect(@ptrFromInt(@intFromPtr(block) + protected_offset), page_size, win32.PAGE_NOACCESS, &old_protect);
@@ -2368,12 +2368,39 @@ pub export fn wWinMain(
                     // Process all messages provided by Windows.
                     while (true) {
                         TimedBlock.beginBlock(@src(), .PeekMessage);
-                        const got_message = win32.PeekMessageW(&message, window_handle, 0, 0, win32.PM_REMOVE) != 0;
-                        TimedBlock.endBlock(@src(), .PeekMessage);
+                        var got_message: bool = win32.PeekMessageW(
+                            &message,
+                            window_handle,
+                            0,
+                            win32.WM_PAINT - 1,
+                            win32.PM_REMOVE,
+                        ) != 0;
+
+                        if (!got_message) {
+                            got_message =
+                                win32.PeekMessageW(
+                                    &message,
+                                    window_handle,
+                                    win32.WM_PAINT + 1,
+                                    win32.WM_MOUSEMOVE - 1,
+                                    win32.PM_REMOVE,
+                                ) != 0;
+                            if (!got_message) {
+                                got_message =
+                                    win32.PeekMessageW(
+                                        &message,
+                                        window_handle,
+                                        win32.WM_MOUSEMOVE + 1,
+                                        0xffffffff,
+                                        win32.PM_REMOVE,
+                                    ) != 0;
+                            }
+                        }
 
                         if (!got_message) {
                             break;
                         }
+                        TimedBlock.endBlock(@src(), .PeekMessage);
 
                         switch (message.message) {
                             win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {

@@ -260,12 +260,12 @@ pub fn renderCommandsToBitmap(
         clearRectangle(clip_rect, output_target, commands.clear_color);
     }
 
-    var sort_entry: [*]u32 = prep.sorted_indices;
+    var entry_offset: [*]u32 = prep.sorted_indices;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < prep.sorted_index_count) : (sort_entry_index += 1) {
-        defer sort_entry += 1;
+        defer entry_offset += 1;
 
-        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + entry_offset[0]));
         const alignment: usize = switch (header.type) {
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
@@ -750,6 +750,10 @@ pub fn drawRectangle(
             if (fill_rect.max.x() & 3 != 0) {
                 end_clip_mask = end_clip_masks[@intCast(fill_rect.max.x() & 3)];
                 _ = fill_rect.max.setX((fill_rect.max.x() & ~@as(i32, @intCast(3))) + 4);
+            }
+
+            if ((fill_rect.max.x() - fill_rect.min.x()) == 4) {
+                start_clip_mask &= end_clip_mask;
             }
 
             const min_x = fill_rect.min.x();
@@ -1284,13 +1288,13 @@ pub fn drawRectangleSlowly(
     // TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
     // defer TimedBlock.endBlock(@src(), .ProcessPixel);
 
-    var y: i32 = y_min;
-    while (y < y_max) : (y += 1) {
+    var step_y: i32 = y_min;
+    while (step_y < y_max) : (step_y += 1) {
         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
 
-        var x: i32 = x_min;
-        while (x < x_max) : (x += 1) {
-            const pixel_position = Vector2.newI(x, y);
+        var step_x: i32 = x_min;
+        while (step_x < x_max) : (step_x += 1) {
+            const pixel_position = Vector2.newI(step_x, step_y);
             const d = pixel_position.minus(origin);
 
             const edge0 = d.dotProduct(x_axis.perp().negated());
@@ -1301,16 +1305,16 @@ pub fn drawRectangleSlowly(
             if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
                 // For items that are standing up.
                 var screen_space_uv = Vector2.new(
-                    inv_width_max * @as(f32, @floatFromInt(x)),
+                    inv_width_max * @as(f32, @floatFromInt(step_x)),
                     fixed_cast_y,
                 );
-                var z_diff: f32 = pixels_to_meters * (@as(f32, @floatFromInt(y)) - origin_y);
+                var z_diff: f32 = pixels_to_meters * (@as(f32, @floatFromInt(step_y)) - origin_y);
 
                 if (false) {
                     // For items that are lying down on the ground.
                     screen_space_uv = Vector2.new(
-                        inv_width_max * @as(f32, @floatFromInt(x)),
-                        inv_height_max * @as(f32, @floatFromInt(y)),
+                        inv_width_max * @as(f32, @floatFromInt(step_x)),
+                        inv_height_max * @as(f32, @floatFromInt(step_y)),
                     );
                     z_diff = 0;
                 }

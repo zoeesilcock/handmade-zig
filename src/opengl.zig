@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const intrinsics = @import("intrinsics.zig");
 const rendergroup = @import("rendergroup.zig");
 const render = @import("render.zig");
 const asset = @import("asset.zig");
@@ -269,16 +270,19 @@ pub fn renderCommands(
         gl.glClear(gl.GL_COLOR_BUFFER_BIT);
     }
 
+    const clip_scale_x: f32 = math.safeRatio0(@floatFromInt(draw_region.getWidth()), @floatFromInt(commands.width));
+    const clip_scale_y: f32 = math.safeRatio0(@floatFromInt(draw_region.getHeight()), @floatFromInt(commands.height));
+
     setScreenSpace(commands.width, commands.height);
 
     var clip_rect_index: u32 = 0xffffffff;
     var current_render_target_index: u32 = 0xffffffff;
-    var sort_entry: [*]u32 = prep.sorted_indices;
+    var entry_offset: [*]u32 = prep.sorted_indices;
     var sort_entry_index: u32 = 0;
     while (sort_entry_index < prep.sorted_index_count) : (sort_entry_index += 1) {
-        defer sort_entry += 1;
+        defer entry_offset += 1;
 
-        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + sort_entry[0]));
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + entry_offset[0]));
         const alignment: usize = switch (header.type) {
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
@@ -313,6 +317,19 @@ pub fn renderCommands(
                         bindFrameBuffer(current_render_target_index, draw_region);
                     }
                 }
+
+                _ = clip_rect.min.setX(
+                    intrinsics.roundReal32ToInt32(@as(f32, @floatFromInt(clip_rect.min.x())) * clip_scale_x),
+                );
+                _ = clip_rect.max.setX(
+                    intrinsics.roundReal32ToInt32(@as(f32, @floatFromInt(clip_rect.max.x())) * clip_scale_x),
+                );
+                _ = clip_rect.min.setY(
+                    intrinsics.roundReal32ToInt32(@as(f32, @floatFromInt(clip_rect.min.y())) * clip_scale_y),
+                );
+                _ = clip_rect.max.setY(
+                    intrinsics.roundReal32ToInt32(@as(f32, @floatFromInt(clip_rect.max.y())) * clip_scale_y),
+                );
 
                 if (!use_render_targets or clip.render_target_index == 0) {
                     clip_rect = clip_rect.offsetBy(draw_region.min);

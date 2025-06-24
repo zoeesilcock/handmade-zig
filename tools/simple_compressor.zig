@@ -134,6 +134,7 @@ pub fn main() anyerror!void {
     } else {
         std.log.err("Usage: {s} [algorithm] compress [raw filename] [compressed filename]", .{args[0]});
         std.log.err("       {s} [algorithm] decompress [raw filename] [compressed filename]", .{args[0]});
+        std.log.err("       {s} [algorithm] test [raw filename] [compressed filename]", .{args[0]});
 
         var compressor_index: u32 = 0;
         while (compressor_index < compressors.len) : (compressor_index += 1) {
@@ -210,16 +211,16 @@ fn rleCompress(stats: *StatGroup, in_size: usize, in_base: [*]const u8, max_out_
             out += 1;
 
             in += run;
+
+            if (@intFromPtr(in) == @intFromPtr(in_end)) {
+                break;
+            }
         } else {
             // Buffer literals.
             literals[literal_count] = starting_value;
             literal_count += 1;
 
             in += 1;
-        }
-
-        if (@intFromPtr(in) == @intFromPtr(in_end)) {
-            break;
         }
     }
 
@@ -342,15 +343,15 @@ fn lzCompress(stats: *StatGroup, in_size: usize, in_base: [*]const u8, max_out_s
 
                 in += best_run;
             }
+
+            if (@intFromPtr(in) == @intFromPtr(in_end)) {
+                break;
+            }
         } else {
             // Buffer literals.
             literals[literal_count] = in[0];
             in += 1;
             literal_count += 1;
-        }
-
-        if (@intFromPtr(in) == @intFromPtr(in_end)) {
-            break;
         }
     }
 
