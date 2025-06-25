@@ -773,22 +773,33 @@ pub fn updateCameraForEntityMovement(
 ) void {
     std.debug.assert(entity.id.value == camera.following_entity_index.value);
 
+    var room_delta: Vector3 = .zero();
+    var room_rel_position: Vector3 = .zero();
+    var room_cam_position: Vector3 = .zero();
+
     var opt_in_room: ?*Entity = null;
     var test_index: u32 = 0;
     while (test_index < sim_region.entity_count) : (test_index += 1) {
         const test_entity: *Entity = &sim_region.entities[test_index];
         if (test_entity.brain_slot.type == @intFromEnum(BrainType.BrainRoom)) {
-            // TODO: Fix this testing.
-            if (entityOverlapsRectangle(test_entity.position, test_entity.collision.total_volume, .zero())) {
+            const volume_position: Vector3 =
+                test_entity.position.plus(test_entity.collision.total_volume.offset_position);
+            const volume_rect: Rectangle3 = .fromCenterDimension(
+                volume_position,
+                test_entity.collision.total_volume.dimension,
+            );
+
+            if (entity.position.isInRectangle(volume_rect)) {
+                room_delta = test_entity.collision.total_volume.dimension;
+                room_rel_position = entity.position.minus(test_entity.position);
+                room_cam_position = test_entity.position;
                 opt_in_room = test_entity;
                 break;
             }
         }
     }
 
-    if (opt_in_room) |in_room| {
-        const room_delta: Vector3 = in_room.collision.total_volume.dimension;
-        var new_camera_position = camera.position;
+    if (opt_in_room != null) {
         const h_room_delta: Vector3 = room_delta.scaledTo(0.5);
         const apron_size: f32 = 0.7;
         const bounce_height: f32 = 0.5;
@@ -799,28 +810,9 @@ pub fn updateCameraForEntityMovement(
         );
 
         camera.offset = .zero();
+        camera.position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, room_cam_position);
 
-        var applied_delta: Vector3 = .zero();
-        for (0..3) |e| {
-            if (entity.position.values[e] > h_room_delta.values[e]) {
-                applied_delta.values[e] = room_delta.values[e];
-                new_camera_position = world.mapIntoChunkSpace(
-                    world_ptr,
-                    new_camera_position,
-                    applied_delta,
-                );
-            }
-            if (entity.position.values[e] < -h_room_delta.values[e]) {
-                applied_delta.values[e] = -room_delta.values[e];
-                new_camera_position = world.mapIntoChunkSpace(
-                    world_ptr,
-                    new_camera_position,
-                    applied_delta,
-                );
-            }
-        }
-
-        const new_entity_position: Vector3 = entity.position.minus(applied_delta);
+        const new_entity_position: Vector3 = room_rel_position;
         if (new_entity_position.x() > h_room_apron.x()) {
             const t: f32 = math.clamp01MapToRange(h_room_apron.x(), h_room_delta.x(), new_entity_position.x());
             camera.offset = .new(t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
@@ -845,8 +837,6 @@ pub fn updateCameraForEntityMovement(
             const t: f32 = math.clamp01MapToRange(-h_room_apron.z(), -h_room_delta.z(), new_entity_position.z());
             camera.offset = .new(0, 0, -t * h_room_delta.z());
         }
-
-        camera.position = new_camera_position;
     }
 }
 

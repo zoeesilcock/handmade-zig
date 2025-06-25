@@ -106,6 +106,7 @@ pub const DebugType = if (INTERNAL) enum(u32) {
 pub const DebugEvent = if (INTERNAL) extern struct {
     clock: u64 = 0,
     guid: [*:0]const u8 = undefined,
+    name: [*:0]const u8 = undefined,
     thread_id: u16 = undefined,
     core_index: u16 = undefined,
     event_type: DebugType = undefined,
@@ -135,12 +136,14 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     ) [*:0]const u8 {
         const counter_name = if (counter != null) @tagName(counter.?) else "NOCOUNTER";
         const line_number = std.fmt.comptimePrint("{d}", .{source.line});
-        return source.fn_name ++ "|" ++ line_number ++ "|" ++ counter_name ++ "|" ++ name;
+        // return source.fn_name ++ "|" ++ line_number ++ "|" ++ counter_name ++ "|" ++ name;
+        return line_number ++ "|" ++ counter_name ++ "|" ++ name;
     }
 
     pub fn record(
         comptime event_type: DebugType,
         guid: [*:0]const u8,
+        name: [*:0]const u8,
     ) *DebugEvent {
         const event_array_index_event_index =
             @atomicRmw(
@@ -160,6 +163,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         event.core_index = 0;
         event.thread_id = @truncate(shared.getThreadId());
         event.guid = guid;
+        event.name = name;
 
         return event;
     }
@@ -304,27 +308,27 @@ pub const DebugEvent = if (INTERNAL) extern struct {
 
 pub const TimedBlock = if (INTERNAL) struct {
     pub fn beginBlock(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        begin(DebugEvent.debugName(source, counter, @tagName(counter)));
+        begin(DebugEvent.debugName(source, counter, @tagName(counter)), source.fn_name);
     }
 
     pub fn endBlock(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        end(DebugEvent.debugName(source, counter, "END_BLOCK_"));
+        end(DebugEvent.debugName(source, counter, "END_BLOCK_"), "END_BLOCK_");
     }
 
     pub fn beginFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        begin(DebugEvent.debugName(source, counter, source.fn_name));
+        begin(DebugEvent.debugName(source, counter, source.fn_name), source.fn_name);
     }
 
     pub fn endFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        end(DebugEvent.debugName(source, counter, "END_BLOCK_"));
+        end(DebugEvent.debugName(source, counter, "END_BLOCK_"), "END_BLOCK_");
     }
 
-    fn begin(guid: [*:0]const u8) void {
-        _ = DebugEvent.record(.BeginBlock, guid);
+    fn begin(guid: [*:0]const u8, name: [*:0]const u8) void {
+        _ = DebugEvent.record(.BeginBlock, guid, name);
     }
 
-    fn end(guid: [*:0]const u8) void {
-        _ = DebugEvent.record(.EndBlock, guid);
+    fn end(guid: [*:0]const u8, name: [*:0]const u8) void {
+        _ = DebugEvent.record(.EndBlock, guid, name);
     }
 
     pub fn frameMarker(
@@ -332,7 +336,7 @@ pub const TimedBlock = if (INTERNAL) struct {
         comptime counter: @TypeOf(.EnumLiteral),
         seconds_elapsed: f32,
     ) void {
-        var event = DebugEvent.record(.FrameMarker, DebugEvent.debugName(source, counter, "Frame Marker"));
+        var event = DebugEvent.record(.FrameMarker, DebugEvent.debugName(source, counter, "Frame Marker"), "Frame Marker",);
         event.data = .{ .f32 = seconds_elapsed };
     }
 
@@ -393,12 +397,12 @@ pub const DebugInterface = if (INTERNAL) struct {
         comptime source: std.builtin.SourceLocation,
         comptime name: []const u8,
     ) void {
-        var event = DebugEvent.record(.OpenDataBlock, DebugEvent.debugName(source, null, name));
+        var event = DebugEvent.record(.OpenDataBlock, DebugEvent.debugName(source, null, name), @ptrCast(name));
         event.data = .{ .debug_id = DebugId.fromPointer(@ptrCast(@constCast(name))) };
     }
 
     pub fn debugEndDataBlock(comptime source: std.builtin.SourceLocation) void {
-        _ = DebugEvent.record(.CloseDataBlock, DebugEvent.debugName(source, null, "End Data Block"));
+        _ = DebugEvent.record(.CloseDataBlock, DebugEvent.debugName(source, null, "End Data Block"), "End Data Block");
     }
 
     pub fn debugGetMousePosition() Vector2 {
@@ -415,7 +419,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         comptime field_name: []const u8,
     ) void {
         const guid = DebugEvent.debugName(source, null, field_name);
-        var event = DebugEvent.record(.Unknown, guid);
+        var event = DebugEvent.record(.Unknown, guid, source.fn_name);
         event.setValue(value_ptr.*, value_ptr);
     }
 
@@ -426,22 +430,12 @@ pub const DebugInterface = if (INTERNAL) struct {
         }
     }
 
-    pub fn debugNamedValue(
-        comptime source: std.builtin.SourceLocation,
-        value_ptr: anytype,
-        comptime field_name: []const u8,
-    ) void {
-        var event = DebugEvent.record(.Unknown, source.fn_name ++ field_name);
-        event.setValue(value_ptr.*, value_ptr);
-    }
-
     pub fn debugUIElement(
         comptime source: std.builtin.SourceLocation,
         comptime element_type: DebugType,
         comptime name: []const u8,
     ) void {
-        _ = source;
-        _ = DebugEvent.record(element_type, @ptrCast(name));
+        _ = DebugEvent.record(element_type, @ptrCast(name), source.fn_name);
     }
 
     pub fn debugBeginArray(array: anytype) void {
@@ -498,16 +492,6 @@ pub const DebugInterface = if (INTERNAL) struct {
     pub fn debugStruct(source: std.builtin.SourceLocation, parent: anytype) void {
         _ = source;
         _ = parent;
-    }
-
-    pub fn debugNamedValue(
-        comptime source: std.builtin.SourceLocation,
-        value_ptr: anytype,
-        comptime field_name: []const u8,
-    ) void {
-        _ = source;
-        _ = value_ptr;
-        _ = field_name;
     }
 
     pub fn debugValue(source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {

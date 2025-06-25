@@ -487,7 +487,7 @@ pub const DebugState = struct {
         return dest;
     }
 
-    fn parseName(guid: [*:0]const u8) DebugParsedName {
+    fn parseName(guid: [*:0]const u8, proper_name: ?[*:0]const u8) DebugParsedName {
         var result = DebugParsedName{};
         var pipe_count: u32 = 0;
         var scan = guid;
@@ -504,15 +504,20 @@ pub const DebugState = struct {
 
             result.hash_value %= 65599 * result.hash_value + scan[0];
         }
-        result.name_length = @intCast((@intFromPtr(scan) - @intFromPtr(guid)) - result.name_starts_at);
-        result.name = guid + result.name_starts_at;
+        if (false) {
+            result.name_length = @intCast((@intFromPtr(scan) - @intFromPtr(guid)) - result.name_starts_at);
+            result.name = guid + result.name_starts_at;
+        } else {
+            result.name_length = shared.stringLength(proper_name);
+            result.name = proper_name;
+        }
         return result;
     }
 
     fn getElementFromGuid(self: *DebugState, opt_guid: ?[*:0]const u8) ?*DebugElement {
         var result: ?*DebugElement = null;
         if (opt_guid) |guid| {
-            const parsed_name: DebugParsedName = parseName(guid);
+            const parsed_name: DebugParsedName = parseName(guid, null);
             const index: u32 = @mod(parsed_name.hash_value, @as(u32, @intCast(self.element_hash.len)));
             result = self.getElementFromGuidHash(index, guid);
         }
@@ -538,7 +543,7 @@ pub const DebugState = struct {
         op: u32,
     ) ?*DebugElement {
         var result: ?*DebugElement = null;
-        const parsed_name: DebugParsedName = parseName(event.guid);
+        const parsed_name: DebugParsedName = parseName(event.guid, event.name);
         const index: u32 = @mod(parsed_name.hash_value, @as(u32, @intCast(self.element_hash.len)));
         result = self.getElementFromGuidHash(index, event.guid);
 
@@ -552,8 +557,8 @@ pub const DebugState = struct {
             result.?.guid = self.debug_arena.pushString(event.guid);
             result.?.file_name_count = parsed_name.file_name_count;
             result.?.line_number = parsed_name.line_number;
-            result.?.name_starts_at = parsed_name.name_starts_at;
             result.?.next_in_hash = self.element_hash[index];
+            result.?.name = self.debug_arena.pushString(event.name);
             result.?.type = event.event_type;
             self.element_hash[index] = result;
 
@@ -700,9 +705,9 @@ pub const DebugState = struct {
                         var debug_block: *OpenDebugBlock =
                             self.allocateOpenDebugBlock(null, frame_index, event, &thread.first_open_data_block);
 
-                        const parsed_name: DebugParsedName = parseName(event.guid);
+                        const parsed_name: DebugParsedName = parseName(event.guid, event.name);
                         debug_block.group =
-                            self.getGroupForHierarchicalName(default_parent_group, parsed_name.name, true);
+                            self.getGroupForHierarchicalName(default_parent_group, parsed_name.name orelse "", true);
                     },
                     .CloseDataBlock => {
                         std.debug.assert(thread.id == event.thread_id);
@@ -958,7 +963,7 @@ pub const DebugElement = struct {
     guid: [*:0]const u8,
     file_name_count: u32,
     line_number: u32,
-    name_starts_at: u32,
+    name: [*:0] const u8,
 
     type: DebugType,
 
@@ -969,7 +974,7 @@ pub const DebugElement = struct {
     next_in_hash: ?*DebugElement,
 
     pub fn getName(self: *DebugElement) [*:0]const u8 {
-        return self.guid + self.name_starts_at;
+        return self.name;
     }
 };
 
@@ -980,7 +985,7 @@ pub const DebugParsedName = struct {
     line_number: u32 = 0,
 
     name_length: u32 = 0,
-    name: [*:0]const u8 = undefined,
+    name: ?[*:0]const u8 = null,
 };
 
 pub const DebugVariableLink = struct {
@@ -2172,6 +2177,7 @@ fn debugInit(
 
     var root_profile_event: DebugEvent = .{
         .guid = DebugEvent.debugName(@src(), .RootProfile, "RootProfile"),
+        .name = "RootProfile",
     };
     debug_state.root_profile_element = debug_state.getElementFromEvent(&root_profile_event, null, 0);
 

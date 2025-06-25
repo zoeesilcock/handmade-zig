@@ -164,8 +164,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     world_mode.standard_room_dimension = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
 
     const tile_side_in_meters: f32 = 1.4;
-    const tiles_per_width: u32 = 17;
-    const tiles_per_height: u32 = 9;
     const tile_depth_in_meters = world_mode.typical_floor_height;
     world_mode.null_collision = makeNullCollision(world_mode);
     world_mode.floor_collision = makeSimpleFloorCollision(
@@ -213,15 +211,12 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     );
 
     var series = world_mode.world.game_entropy;
-    const screen_base_x: i32 = 0;
-    const screen_base_y: i32 = 0;
     const screen_base_z: i32 = 0;
-    var screen_x = screen_base_x;
-    var screen_y = screen_base_y;
+    var door_direction: u32 = 0;
+    var room_center_tile_x: i32 = 0;
+    var room_center_tile_y: i32 = 0;
     var abs_tile_z: i32 = screen_base_z;
 
-    var last_screen_x: i32 = screen_x;
-    var last_screen_y: i32 = screen_y;
     var last_screen_z: i32 = abs_tile_z;
 
     var door_left = false;
@@ -232,16 +227,22 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
     var prev_room: StandardRoom = .{};
 
-    for (0..20) |screen_index| {
-        last_screen_x = screen_x;
-        last_screen_y = screen_y;
+    for (0..10) |screen_index| {
         last_screen_z = abs_tile_z;
+
+        const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
+        const room_radius_y: i32 = 4 + @as(i32, @intCast(series.randomChoice(4)));
+        if (door_direction == 1) {
+            room_center_tile_x += room_radius_x;
+        } else if (door_direction == 0) {
+            room_center_tile_y += room_radius_y;
+        }
 
         // const door_direction = 1;
         // _ = series.randomChoice(2);
         // const door_direction = 3;
         // const door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
-        const door_direction = series.randomChoice(2);
+        door_direction = series.randomChoice(2);
 
         var created_z_door = false;
         if (door_direction == 3) {
@@ -263,20 +264,17 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             right_hole = false;
         }
 
-        var target_ref: TraversableReference = .{};
-        if (left_hole) {
-            target_ref = prev_room.ground[-3 + 8][1 + 4];
-        } else if (right_hole) {
-            target_ref = prev_room.ground[3 + 8][2 + 4];
-        }
+        const room_width: i32 = 2 * room_radius_x + 1;
+        const room_height: i32 = 2 * room_radius_y + 1;
         const room: StandardRoom = addStandardRoom(
             world_mode,
-            screen_x * tiles_per_width + (tiles_per_width / 2),
-            screen_y * tiles_per_height + (tiles_per_height / 2),
+            room_center_tile_x,
+            room_center_tile_y,
             abs_tile_z,
             left_hole,
             right_hole,
-            target_ref,
+            room_radius_x,
+            room_radius_y,
         );
 
         if (true) {
@@ -291,22 +289,22 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             }
         }
 
-        for (0..room.position[0].len) |tile_y| {
-            for (0..room.position.len) |tile_x| {
+        for (0..@intCast(room_height)) |tile_y| {
+            for (0..@intCast(room_width)) |tile_x| {
                 const position: WorldPosition = room.position[tile_x][tile_y];
                 const ground: TraversableReference = room.ground[tile_x][tile_y];
 
                 var should_be_door = true;
-                if ((tile_x == 0) and (!door_left or (tile_y != (tiles_per_height / 2)))) {
+                if ((tile_x == 0) and (!door_left or (tile_y != @divFloor(room_height, 2)))) {
                     should_be_door = false;
                 }
-                if ((tile_x == (tiles_per_width - 1)) and (!door_right or (tile_y != (tiles_per_height / 2)))) {
+                if ((tile_x == (room_width - 1)) and (!door_right or (tile_y != @divFloor(room_height, 2)))) {
                     should_be_door = false;
                 }
-                if ((tile_y == 0) and (!door_bottom or (tile_x != (tiles_per_width / 2)))) {
+                if ((tile_y == 0) and (!door_bottom or (tile_x != @divFloor(room_width, 2)))) {
                     should_be_door = false;
                 }
-                if ((tile_y == (tiles_per_height - 1)) and (!door_top or (tile_x != (tiles_per_width / 2)))) {
+                if ((tile_y == (room_height - 1)) and (!door_top or (tile_x != @divFloor(room_width, 2)))) {
                     should_be_door = false;
                 }
 
@@ -341,9 +339,9 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         } else if (door_direction == 2) {
             abs_tile_z += 1;
         } else if (door_direction == 1) {
-            screen_x += 1;
+            room_center_tile_x += room_radius_x + 1;
         } else {
-            screen_y += 1;
+            room_center_tile_y += room_radius_y + 1;
         }
 
         prev_room = room;
@@ -357,8 +355,8 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         }
     }
 
-    const camera_tile_x = last_screen_x * tiles_per_width + (17 / 2);
-    const camera_tile_y = last_screen_y * tiles_per_height + (9 / 2);
+    const camera_tile_x = 0; //room_center_tile_x;
+    const camera_tile_y = 4; //room_center_tile_y;
     const camera_tile_z = last_screen_z;
     world_mode.camera.position = chunkPositionFromTilePosition(
         world_mode.world,
@@ -558,31 +556,33 @@ pub fn updateAndRenderWorld(
         world_mode.standard_room_dimension.scaledTo(3),
     );
 
-    var sim_work: [16]WorldSimWork = undefined;
-    var sim_index: u32 = 0;
-    for (0..4) |sim_y| {
-        for (0..4) |sim_x| {
-            var work: *WorldSimWork = &sim_work[sim_index];
-            sim_index += 1;
+    if (false) {
+        var sim_work: [16]WorldSimWork = undefined;
+        var sim_index: u32 = 0;
+        for (0..4) |sim_y| {
+            for (0..4) |sim_x| {
+                var work: *WorldSimWork = &sim_work[sim_index];
+                sim_index += 1;
 
-            var center_position: WorldPosition = world_mode.camera.position;
-            center_position.chunk_x -= @intCast(70 * (sim_x + 1));
-            center_position.chunk_y -= @intCast(70 * (sim_y + 1));
+                var center_position: WorldPosition = world_mode.camera.position;
+                center_position.chunk_x -= @intCast(70 * (sim_x + 1));
+                center_position.chunk_y -= @intCast(70 * (sim_y + 1));
 
-            work.sim_center_position = center_position;
-            work.sim_bounds = sim_bounds;
-            work.world_mode = world_mode;
-            work.delta_time = input.frame_delta_time;
+                work.sim_center_position = center_position;
+                work.sim_bounds = sim_bounds;
+                work.world_mode = world_mode;
+                work.delta_time = input.frame_delta_time;
 
-            if (true) {
-                shared.platform.addQueueEntry(transient_state.high_priority_queue, &doWorldSim, work);
-            } else {
-                doWorldSim(transient_state.high_priority_queue, work);
+                if (true) {
+                    shared.platform.addQueueEntry(transient_state.high_priority_queue, &doWorldSim, work);
+                } else {
+                    doWorldSim(transient_state.high_priority_queue, work);
+                }
             }
         }
-    }
 
-    shared.platform.completeAllQueuedWork(transient_state.high_priority_queue);
+        shared.platform.completeAllQueuedWork(transient_state.high_priority_queue);
+    }
 
     var world_sim: WorldSim = beginSim(
         &transient_state.arena,
@@ -713,8 +713,8 @@ fn beginGroundedEntity(
 }
 
 const StandardRoom = struct {
-    position: [17][9]WorldPosition = undefined,
-    ground: [17][9]TraversableReference = undefined,
+    position: [64][64]WorldPosition = undefined,
+    ground: [64][64]TraversableReference = undefined,
 };
 
 fn addStandardRoom(
@@ -724,13 +724,14 @@ fn addStandardRoom(
     abs_tile_z: i32,
     left_hole: bool,
     right_hole: bool,
-    target_ref: TraversableReference,
+    radius_x: i32,
+    radius_y: i32,
 ) StandardRoom {
     var result: StandardRoom = .{};
-    var offset_x: i32 = -8;
-    while (offset_x <= 8) : (offset_x += 1) {
-        var offset_y: i32 = -4;
-        while (offset_y <= 4) : (offset_y += 1) {
+    var offset_y: i32 = -radius_y;
+    while (offset_y <= radius_y) : (offset_y += 1) {
+        var offset_x: i32 = -radius_x;
+        while (offset_x <= radius_x) : (offset_x += 1) {
             var standing_on: TraversableReference = .{};
             var world_position = chunkPositionFromTilePosition(
                 world_mode.world,
@@ -757,17 +758,13 @@ fn addStandardRoom(
                 entity.traversable_count = 1;
                 entity.traversables[0].position = Vector3.zero();
                 entity.traversables[0].occupier = null;
-                if ((left_hole and offset_x == -2 and offset_y == 0) or
-                    (right_hole and offset_x == 2 and offset_y == 0))
-                {
-                    _ = target_ref;
-                    // entity.auto_boost_to = target_ref;
-                }
                 endEntity(world_mode, entity, world_position);
             }
 
-            result.position[@intCast(offset_x + 8)][@intCast(offset_y + 4)] = world_position;
-            result.ground[@intCast(offset_x + 8)][@intCast(offset_y + 4)] = standing_on;
+            const array_x: usize = @intCast(offset_x + radius_x);
+            const array_y: usize = @intCast(offset_y + radius_y);
+            result.position[array_x][array_y] = world_position;
+            result.ground[array_x][array_y] = standing_on;
         }
     }
 
