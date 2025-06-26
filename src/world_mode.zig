@@ -273,13 +273,12 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
             _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
-            // TODO: Re-enable this once we have figured out why it causes a segfault when moving between rooms.
-            // const snake_brain_id = addBrain(world_mode);
-            // var segment_index: u32 = 0;
-            // while (segment_index < 5) : (segment_index += 1) {
-            //     const x: u32 = 2 + segment_index;
-            //     _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
-            // }
+            const snake_brain_id = addBrain(world_mode);
+            var segment_index: u32 = 0;
+            while (segment_index < 5) : (segment_index += 1) {
+                const x: u32 = 2 + segment_index;
+                _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
+            }
         }
 
         for (0..@intCast(room_height)) |tile_y| {
