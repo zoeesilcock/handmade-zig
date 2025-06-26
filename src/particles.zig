@@ -73,7 +73,6 @@ pub fn updateAndRenderParticleSystem(
     delta_time: f32,
     render_group: *RenderGroup,
     frame_displacement: Vector3,
-    camera_position: Vector3,
 ) void {
     TimedBlock.beginFunction(@src(), .UpdateAndRenderParticleSystem);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderParticleSystem);
@@ -83,7 +82,6 @@ pub fn updateAndRenderParticleSystem(
         delta_time,
         frame_displacement,
         render_group,
-        camera_position,
     );
 }
 
@@ -135,7 +133,6 @@ fn updateAndRenderFire(
     delta_time: f32,
     frame_displacement_in: Vector3,
     render_group: *RenderGroup,
-    camera_position: Vector3,
 ) void {
     const frame_displacement: V3_4x = .fromVector3(frame_displacement_in);
     var transform: ObjectTransform = .defaultUpright();
@@ -269,13 +266,12 @@ fn updateAndRenderFire(
 
         // Render particle.
         transform.chunk_z = a.chunk_z;
-        transform.floor_z = a.floor_z - camera_position.z();
+        transform.floor_z = a.floor_z;
 
         var sub_index: u32 = 0;
         while (sub_index < 4) : (sub_index += 1) {
             const p: Vector3 = .new(a.p.x[sub_index], a.p.y[sub_index], a.p.z[sub_index]);
             const c: Color = .new(a.c.r[sub_index], a.c.g[sub_index], a.c.b[sub_index], a.c.a[sub_index]);
-            transform.offset_position = camera_position.negated();
             if (c.a() > 0) {
                 render_group.pushBitmapId(&transform, system.bitmap_id, 1, p, c, null, null, null);
             }

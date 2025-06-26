@@ -4,7 +4,6 @@ const debug_interface = @import("debug_interface.zig");
 
 // Types.
 const DebugTable = debug_interface.DebugTable;
-const TimedBlock = debug_interface.TimedBlock;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 

@@ -48,9 +48,6 @@ const std = @import("std");
 ///     * Implement reprojection to handle interpenetration.
 ///     * Things pushing other things.
 ///
-/// * AI.
-///     * AI storage.
-///
 ///
 /// Production:
 ///

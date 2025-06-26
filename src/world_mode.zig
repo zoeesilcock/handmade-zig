@@ -19,6 +19,7 @@ const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 var global_config = &@import("config.zig").global_config;
+const tile_side_in_meters: f32 = 1.4;
 
 // Types.
 const Vector2 = math.Vector2;
@@ -81,7 +82,6 @@ pub const GameModeWorld = struct {
 
     null_collision: *EntityCollisionVolumeGroup = undefined,
     floor_collision: *EntityCollisionVolumeGroup = undefined,
-    room_collision: *EntityCollisionVolumeGroup = undefined,
     wall_collision: *EntityCollisionVolumeGroup = undefined,
     stair_collsion: *EntityCollisionVolumeGroup = undefined,
     hero_body_collision: *EntityCollisionVolumeGroup = undefined,
@@ -163,7 +163,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
     world_mode.standard_room_dimension = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
 
-    const tile_side_in_meters: f32 = 1.4;
     const tile_depth_in_meters = world_mode.typical_floor_height;
     world_mode.null_collision = makeNullCollision(world_mode);
     world_mode.floor_collision = makeSimpleFloorCollision(
@@ -171,13 +170,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         tile_side_in_meters,
         tile_side_in_meters,
         tile_depth_in_meters,
-    );
-    world_mode.room_collision = makeSimpleGroundedCollision(
-        world_mode,
-        17 * tile_side_in_meters,
-        9 * tile_side_in_meters,
-        world_mode.typical_floor_height,
-        0,
     );
     world_mode.wall_collision = makeSimpleGroundedCollision(
         world_mode,
@@ -281,12 +273,13 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
             _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
-            const snake_brain_id = addBrain(world_mode);
-            var segment_index: u32 = 0;
-            while (segment_index < 5) : (segment_index += 1) {
-                const x: u32 = 2 + segment_index;
-                _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
-            }
+            // TODO: Re-enable this once we have figured out why it causes a segfault when moving between rooms.
+            // const snake_brain_id = addBrain(world_mode);
+            // var segment_index: u32 = 0;
+            // while (segment_index < 5) : (segment_index += 1) {
+            //     const x: u32 = 2 + segment_index;
+            //     _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
+            // }
         }
 
         for (0..@intCast(room_height)) |tile_y| {
@@ -355,8 +348,8 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         }
     }
 
-    const camera_tile_x = 0; //room_center_tile_x;
-    const camera_tile_y = 4; //room_center_tile_y;
+    const camera_tile_x = room_center_tile_x;
+    const camera_tile_y = room_center_tile_y;
     const camera_tile_z = last_screen_z;
     world_mode.camera.position = chunkPositionFromTilePosition(
         world_mode.world,
@@ -436,7 +429,6 @@ fn simulate(
     opt_render_group: ?*RenderGroup,
     particle_cache: ?*ParticleCache,
     draw_buffer: ?*asset.LoadedBitmap,
-    camera_offset: Vector3,
 ) void {
     const sim_region: *SimRegion = world_sim.sim_region;
 
@@ -460,7 +452,6 @@ fn simulate(
         sim_region,
         delta_time,
         opt_render_group,
-        camera_offset,
         draw_buffer,
         background_color,
         particle_cache,
@@ -508,7 +499,6 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
         null,
         null,
         null,
-        .zero(),
     );
     endSim(&arena, &world_sim, work.world_mode.world);
 
@@ -529,14 +519,13 @@ pub fn updateAndRenderWorld(
     const result = false;
 
     const camera: CameraParams = .get(draw_buffer.width, 0.3);
-    const distance_above_ground: f32 = 11;
     const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
     DebugInterface.debugSetMousePosition(mouse_position);
 
     render_group.perspectiveMode(
         camera.meters_to_pixels,
         camera.focal_length,
-        distance_above_ground,
+        world_mode.camera.offset,
     );
 
     // Clear background.
@@ -565,8 +554,8 @@ pub fn updateAndRenderWorld(
                 sim_index += 1;
 
                 var center_position: WorldPosition = world_mode.camera.position;
-                center_position.chunk_x -= @intCast(70 * (sim_x + 1));
-                center_position.chunk_y -= @intCast(70 * (sim_y + 1));
+                center_position.chunk_x += @intCast(-70 * (sim_x + 1));
+                center_position.chunk_y += @intCast(-70 * (sim_y + 1));
 
                 work.sim_center_position = center_position;
                 work.sim_bounds = sim_bounds;
@@ -606,26 +595,24 @@ pub fn updateAndRenderWorld(
             render_group,
             world_mode.particle_cache,
             draw_buffer,
-            world_mode.camera.offset,
         );
 
         const frame_to_frame_camera_delta_position: Vector3 =
             world.subtractPositions(world_mode.world, &world_mode.camera.position, &world_mode.camera.last_position);
+        world_mode.camera.last_position = world_mode.camera.position;
         particles.updateAndRenderParticleSystem(
             world_mode.particle_cache,
             input.frame_delta_time,
             render_group,
             frame_to_frame_camera_delta_position.negated(),
-            world_mode.camera.offset,
         );
         var world_transform = ObjectTransform.defaultUpright();
-        world_transform.offset_position = world_transform.offset_position.minus(world_mode.camera.offset);
 
-        if (false) {
+        if (true) {
         render_group.pushRectangleOutline(
             &world_transform,
             screen_bounds.getDimension(),
-            Vector3.zero(),
+            Vector3.new(0, 0, 0.005),
             Color.new(1, 1, 0, 1),
             0.1,
         );
@@ -638,14 +625,14 @@ pub fn updateAndRenderWorld(
         render_group.pushRectangleOutline(
             &world_transform,
             sim_bounds.getDimension().xy(),
-            Vector3.zero(),
+            Vector3.new(0, 0, 0.005),
             Color.new(0, 1, 1, 1),
             0.1,
         );
         render_group.pushRectangleOutline(
             &world_transform,
             world_sim.sim_region.bounds.getDimension().xy(),
-            Vector3.zero(),
+            Vector3.new(0, 0, 0.005),
             Color.new(1, 0, 1, 1),
             0.1,
         );
@@ -775,8 +762,18 @@ fn addStandardRoom(
         abs_tile_z,
         null,
     );
-    const room: *Entity = beginGroundedEntity(world_mode, world_mode.room_collision);
+
+    const room_collision: *EntityCollisionVolumeGroup = makeSimpleGroundedCollision(
+        world_mode,
+        @as(f32, @floatFromInt((2 * radius_x + 1))) * tile_side_in_meters,
+        @as(f32, @floatFromInt((2 * radius_y + 1))) * tile_side_in_meters,
+        world_mode.typical_floor_height,
+        0,
+    );
+    const room: *Entity = beginGroundedEntity(world_mode, room_collision);
     room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
+    const diff: f32 = @max(0, @max(@as(f32, @floatFromInt(radius_x)) - 8, @as(f32, @floatFromInt(radius_y)) - 4));
+    room.camera_height = 11 + diff;
     endEntity(world_mode, room, room_position);
 
     return result;
@@ -1013,7 +1010,6 @@ pub fn chunkPositionFromTilePosition(
     abs_tile_z: i32,
     opt_additional_offset: ?Vector3,
 ) WorldPosition {
-    const tile_side_in_meters = 1.4;
     const tile_depth_in_meters = game_world.chunk_dimension_in_meters.z();
 
     const base_position = WorldPosition.zero();

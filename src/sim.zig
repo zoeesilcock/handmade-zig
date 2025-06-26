@@ -322,8 +322,6 @@ pub fn beginWorldChange(
     TimedBlock.endBlock(@src(), .SimArenaAlloc);
 
     TimedBlock.beginBlock(@src(), .SimArenaClear);
-    memory.zeroStruct(@TypeOf(sim_region.entity_hash), &sim_region.entity_hash);
-    memory.zeroStruct(@TypeOf(sim_region.brain_hash), &sim_region.brain_hash);
     memory.zeroStruct(@TypeOf(sim_region.entity_hash_occupancy), &sim_region.entity_hash_occupancy);
     memory.zeroStruct(@TypeOf(sim_region.brain_hash_occupancy), &sim_region.brain_hash_occupancy);
     memory.zeroStruct(@TypeOf(sim_region.null_entity), &sim_region.null_entity);
@@ -601,7 +599,6 @@ pub fn moveEntity(
         distance_remaining = 10000;
     }
 
-    const overlap_epsilon = Vector3.splat(0.001);
     const time_epsilon = 0.001;
 
     var iterations: u32 = 0;
@@ -626,9 +623,7 @@ pub fn moveEntity(
             while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
                 const test_entity = &sim_region.entities[test_entity_index];
 
-                if (entitiesOverlap(entity, test_entity, overlap_epsilon) or
-                    canCollide(entity, test_entity))
-                {
+                if (canCollide(entity, test_entity)) {
                     var entity_volume_index: u32 = 0;
                     while (entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
                         const entity_volume = entity.collision.volumes[entity_volume_index];
@@ -765,6 +760,9 @@ pub fn moveEntity(
     }
 }
 
+/// It is mandatory fthat the camera "center" be tehe sim region center for this code to work properl, because it
+/// cannot add the offset from the sim center to the camera as a displacement or it will fail when moving between
+/// rooms at the changeover point.
 pub fn updateCameraForEntityMovement(
     world_ptr: *World,
     sim_region: *SimRegion,
@@ -799,7 +797,7 @@ pub fn updateCameraForEntityMovement(
         }
     }
 
-    if (opt_in_room != null) {
+    if (opt_in_room) |in_room| {
         const h_room_delta: Vector3 = room_delta.scaledTo(0.5);
         const apron_size: f32 = 0.7;
         const bounce_height: f32 = 0.5;
@@ -837,6 +835,8 @@ pub fn updateCameraForEntityMovement(
             const t: f32 = math.clamp01MapToRange(-h_room_apron.z(), -h_room_delta.z(), new_entity_position.z());
             camera.offset = .new(0, 0, -t * h_room_delta.z());
         }
+
+        _ = camera.offset.setZ(camera.offset.z() + in_room.camera_height);
     }
 }
 

@@ -372,7 +372,7 @@ fn renderLayeredScene(
         render_group.perspectiveMode(
             camera.meters_to_pixels,
             camera.focal_length,
-            0,
+            .zero(),
         );
 
         if (scene.layers.len == 0) {

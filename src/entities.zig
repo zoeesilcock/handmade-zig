@@ -144,6 +144,8 @@ pub const Entity = extern struct {
     piece_count: u32,
     pieces: [4]EntityVisiblePiece, // 0 is the "on top" piece.
 
+    camera_height: f32,
+
     pub fn addPiece(
         self: *Entity,
         asset_type: AssetTypeId,
@@ -361,7 +363,6 @@ pub fn updateAndRenderEntities(
     delta_time: f32,
     // Optional...
     opt_render_group: ?*RenderGroup,
-    camera_position: Vector3,
     opt_draw_buffer: ?*asset.LoadedBitmap,
     background_color: Color,
     particle_cache: ?*ParticleCache,
@@ -370,6 +371,10 @@ pub fn updateAndRenderEntities(
     TimedBlock.beginFunction(@src(), .UpdateAndRenderEntities);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderEntities);
 
+    var camera_position: Vector3 = .zero();
+    if (opt_render_group) |render_group| {
+        camera_position = render_group.camera_transform.camera_position;
+    }
     const minimum_level_index: i32 = -4;
     const maximum_level_index: i32 = 1;
     var fog_amount: [maximum_level_index - minimum_level_index + 1]f32 = undefined;
@@ -385,7 +390,7 @@ pub fn updateAndRenderEntities(
     while (level_index < fog_amount.len) : (level_index += 1) {
         const relative_layer_index: i32 = minimum_level_index + @as(i32, @intCast(level_index));
         const camera_relative_ground_z: f32 =
-            @as(f32, @floatFromInt(relative_layer_index)) * typical_floor_height - camera_position.z();
+            @as(f32, @floatFromInt(relative_layer_index)) * typical_floor_height - (camera_position.z() - 11);
         cam_rel_ground_z[level_index] = camera_relative_ground_z;
 
         test_alpha = math.clamp01MapToRange(
@@ -469,7 +474,7 @@ pub fn updateAndRenderEntities(
 
                         const camera_relative_ground_z: f32 =
                             @as(f32, @floatFromInt(entity.z_layer - sim_region.origin.chunk_z)) *
-                            typical_floor_height - camera_position.z();
+                            typical_floor_height - (camera_position.z() - 11);
                         particles.spawnFire(particle_cache, entity.position, entity.z_layer, camera_relative_ground_z);
                     }
 
@@ -529,7 +534,7 @@ pub fn updateAndRenderEntities(
 
             if (opt_render_group) |render_group| {
                 var entity_transform = ObjectTransform.defaultUpright();
-                entity_transform.offset_position = entity.getGroundPoint().minus(camera_position);
+                entity_transform.offset_position = entity.getGroundPoint();
 
                 const relative_layer: i32 = entity.z_layer - sim_region.origin.chunk_z;
 

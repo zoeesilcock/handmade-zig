@@ -196,7 +196,7 @@ const CameraTransform = extern struct {
     screen_center: Vector2,
 
     focal_length: f32,
-    distance_above_target: f32,
+    camera_position: Vector3,
 };
 
 const PushBufferResult = extern struct {
@@ -211,14 +211,16 @@ fn getRenderEntityBasisPosition(
 ) RenderEntityBasisResult {
     var result = RenderEntityBasisResult{};
 
-    const position: Vector3 = original_position.xy().toVector3(0).plus(object_transform.offset_position);
+    var position: Vector3 = original_position.xy().toVector3(0).plus(object_transform.offset_position);
+
+    _ = position.setXY(position.xy().minus(camera_transform.camera_position.xy()));
 
     if (camera_transform.orthographic) {
         result.position = camera_transform.screen_center.plus(position.xy().scaledTo(camera_transform.meters_to_pixels));
         result.scale = camera_transform.meters_to_pixels;
         result.valid = true;
     } else {
-        var distance_above_target = camera_transform.distance_above_target;
+        var distance_above_target = camera_transform.camera_position.z();
 
         if (global_config.Renderer_Camera_UseDebug) {
             distance_above_target += global_config.Renderer_Camera_DebugDistance;
@@ -308,7 +310,7 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         meters_to_pixels: f32,
         focal_length: f32,
-        distance_above_target: f32,
+        camera_position: Vector3,
     ) void {
         const screen_dimension: Vector2 = self.screen_area.getDimension();
         const pixel_width: f32 = screen_dimension.x();
@@ -322,7 +324,7 @@ pub const RenderGroup = extern struct {
 
         self.camera_transform.meters_to_pixels = meters_to_pixels;
         self.camera_transform.focal_length = focal_length;
-        self.camera_transform.distance_above_target = distance_above_target;
+        self.camera_transform.camera_position = camera_position;
         self.camera_transform.screen_center = Vector2.new(
             0.5 * pixel_width,
             0.5 * pixel_height,
@@ -346,7 +348,7 @@ pub const RenderGroup = extern struct {
 
         self.camera_transform.meters_to_pixels = meters_to_pixels;
         self.camera_transform.focal_length = 1;
-        self.camera_transform.distance_above_target = 1;
+        self.camera_transform.camera_position = .new(0, 0, 1);
         self.camera_transform.screen_center = Vector2.new(0.5 * pixel_width, 0.5 * pixel_height);
         self.camera_transform.orthographic = true;
     }
@@ -491,11 +493,13 @@ pub const RenderGroup = extern struct {
                 pixels_xy.minus(camera_transform.screen_center).scaledTo(1.0 / camera_transform.meters_to_pixels);
             unprojected_xy =
                 a.scaledTo(
-                    (camera_transform.distance_above_target - object_transform.offset_position.z()) / camera_transform.focal_length,
+                    (camera_transform.camera_position.z() - object_transform.offset_position.z()) /
+                    camera_transform.focal_length,
                 );
         }
 
-        var result: Vector3 = unprojected_xy.toVector3(object_transform.offset_position.z());
+        var result: Vector3 =
+            unprojected_xy.plus(camera_transform.camera_position.xy()).toVector3(object_transform.offset_position.z());
         result = result.minus(object_transform.offset_position);
 
         return result;
@@ -511,7 +515,28 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn getCameraRectangleAtTarget(self: *RenderGroup) Rectangle2 {
-        return self.getCameraRectangleAtDistance(self.camera_transform.distance_above_target);
+        return self.getCameraRectangleAtDistance(self.camera_transform.camera_position.z());
+    }
+
+    pub fn fitCameraDistanceToHalfDistance(
+        focal_length: f32,
+        monitor_half_dim_in_meters: f32,
+        half_dim_in_meters: f32,
+    ) f32 {
+        const result: f32 = (focal_length * half_dim_in_meters) / monitor_half_dim_in_meters;
+        return result;
+    }
+
+    pub fn fitCameraDistanceToHalfDimensionV2(
+        focal_length: f32,
+        monitor_half_dim_in_meters: f32,
+        half_dim_in_meters: Vector2,
+    ) Vector2 {
+        const result: Vector2 = .new(
+            fitCameraDistanceToHalfDistance(focal_length, monitor_half_dim_in_meters, half_dim_in_meters.x()),
+            fitCameraDistanceToHalfDistance(focal_length, monitor_half_dim_in_meters, half_dim_in_meters.y()),
+        );
+        return result;
     }
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
