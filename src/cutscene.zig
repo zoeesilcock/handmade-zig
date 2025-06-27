@@ -370,7 +370,7 @@ fn renderLayeredScene(
 
     if (opt_render_group) |render_group| {
         render_group.perspectiveMode(
-            camera.meters_to_pixels,
+            camera.world_scale,
             camera.focal_length,
             .zero(),
         );

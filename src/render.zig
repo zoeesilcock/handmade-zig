@@ -37,7 +37,6 @@ const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
-const RenderEntryCoordinateSystem = rendergroup.RenderEntryCoordinateSystem;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
 const RenderEntryBlendRenderTarget = rendergroup.RenderEntryBlendRenderTarget;
 const EnvironmentMap = rendergroup.EnvironmentMap;
@@ -125,15 +124,16 @@ pub const SpriteEdge = struct {
 };
 
 pub const CameraParams = struct {
-    width_of_monitor: f32 = 0,
-    meters_to_pixels: f32 = 0,
+    world_scale: f32 = 0,
     focal_length: f32 = 0,
 
     pub fn get(width_in_pixels: u32, focal_length: f32) CameraParams {
+        _ = width_in_pixels;
+
         var result: CameraParams = .{};
 
-        result.width_of_monitor = 0.635;
-        result.meters_to_pixels = @as(f32, @floatFromInt(width_in_pixels)) / result.width_of_monitor;
+        const width_of_monitor: f32 = 0.635;
+        result.world_scale = 1 / width_of_monitor;
         result.focal_length = focal_length;
 
         return result;
@@ -269,7 +269,6 @@ pub fn renderCommandsToBitmap(
         const alignment: usize = switch (header.type) {
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
-            .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
             .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
             .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
             else => {
@@ -305,7 +304,7 @@ pub fn renderCommandsToBitmap(
                     if (false) {
                         drawRectangleSlowly(
                             output_target,
-                            entry.position,
+                            entry.position.xy(),
                             entry.x_axis,
                             entry.y_axis,
                             entry.color,
@@ -319,7 +318,7 @@ pub fn renderCommandsToBitmap(
                     } else {
                         drawRectangleQuickly(
                             output_target,
-                            entry.position,
+                            entry.position.xy(),
                             entry.x_axis,
                             entry.y_axis,
                             entry.premultiplied_color,
@@ -335,42 +334,11 @@ pub fn renderCommandsToBitmap(
 
                 drawRectangle(
                     output_target,
-                    entry.position,
-                    entry.position.plus(entry.dimension),
+                    entry.position.xy(),
+                    entry.position.xy().plus(entry.dimension),
                     entry.premultiplied_color,
                     clip_rect,
                 );
-            },
-            .RenderEntryCoordinateSystem => {
-                // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
-                // const max = entry.origin.plus(entry.x_axis).plus(entry.y_axis);
-                // drawRectangleSlowly(
-                //     output_target,
-                //     entry.origin,
-                //     entry.x_axis,
-                //     entry.y_axis,
-                //     entry.color,
-                //     entry.texture,
-                //     entry.normal_map,
-                //     entry.top,
-                //     entry.middle,
-                //     entry.bottom,
-                //     null_pixels_to_meters,
-                // );
-                //
-                // const color = Color.new(1, 1, 0, 1);
-                // const dimension = Vector2.new(2, 2);
-                // var position = entry.origin;
-                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                //
-                // position = entry.origin.plus(entry.x_axis);
-                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                //
-                // position = entry.origin.plus(entry.y_axis);
-                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
-                //
-                // position = max;
-                // drawRectangle(output_target, position.minus(dimension), position.plus(dimension), color);
             },
             .RenderEntryBlendRenderTarget => {
                 const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));

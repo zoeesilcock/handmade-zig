@@ -52,11 +52,11 @@ const RenderEntryClear = rendergroup.RenderEntryClear;
 const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
-const RenderEntryCoordinateSystem = rendergroup.RenderEntryCoordinateSystem;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
 const RenderEntryBlendRenderTarget = rendergroup.RenderEntryBlendRenderTarget;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
+const Vector3 = math.Vector3;
 const Color = math.Color;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
@@ -286,7 +286,6 @@ pub fn renderCommands(
         const alignment: usize = switch (header.type) {
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
-            .RenderEntryCoordinateSystem => @alignOf(RenderEntryCoordinateSystem),
             .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
             .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
             else => {
@@ -348,9 +347,9 @@ pub fn renderCommands(
                     var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                     if (entry.bitmap) |bitmap| {
                         if (bitmap.width > 0 and bitmap.height > 0) {
-                            const x_axis: Vector2 = entry.x_axis;
-                            const y_axis: Vector2 = entry.y_axis;
-                            const min_position: Vector2 = entry.position;
+                            const x_axis: Vector3 = entry.x_axis.toVector3(0);
+                            const y_axis: Vector3 = entry.y_axis.toVector3(0);
+                            const min_position: Vector3 = entry.position;
 
                             if (bitmap.texture_handle > 0) {
                                 gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
@@ -366,10 +365,10 @@ pub fn renderCommands(
                                 // This value is not gamma corrected by OpenGL.
                                 gl.glColor4fv(entry.premultiplied_color.toGL());
 
-                                const min_x_min_y: Vector2 = min_position;
-                                const min_x_max_y: Vector2 = min_position.plus(y_axis);
-                                const max_x_min_y: Vector2 = min_position.plus(x_axis);
-                                const max_x_max_y: Vector2 = min_position.plus(x_axis).plus(y_axis);
+                                const min_x_min_y: Vector3 = min_position;
+                                const min_x_max_y: Vector3 = min_position.plus(y_axis);
+                                const max_x_min_y: Vector3 = min_position.plus(x_axis);
+                                const max_x_max_y: Vector3 = min_position.plus(x_axis).plus(y_axis);
 
                                 // Lower triangle.
                                 gl.glTexCoord2f(min_uv.x(), min_uv.y());
@@ -394,12 +393,12 @@ pub fn renderCommands(
                 .RenderEntryRectangle => {
                     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                     gl.glDisable(gl.GL_TEXTURE_2D);
-                    drawRectangle(entry.position, entry.position.plus(entry.dimension), entry.premultiplied_color, null, null);
+                    drawRectangle(entry.position, entry.position.plus(entry.dimension.toVector3(0)), entry.premultiplied_color, null, null);
 
                     if (true) {
                         gl.glBegin(gl.GL_LINES);
                         gl.glColor4f(0, 0, 0, entry.premultiplied_color.a());
-                        drawLineVertices(entry.position, entry.position.plus(entry.dimension));
+                        drawLineVertices(entry.position, entry.position.plus(entry.dimension.toVector3(0)));
                         gl.glEnd();
                     }
 
@@ -408,9 +407,6 @@ pub fn renderCommands(
                 .RenderEntrySaturation => {
                     // const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
                 },
-                .RenderEntryCoordinateSystem => {
-                    // const entry: *RenderEntryCoordinateSystem = @ptrCast(@alignCast(data));
-                },
                 .RenderEntryBlendRenderTarget => {
                     const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
                     if (use_render_targets) {
@@ -418,7 +414,7 @@ pub fn renderCommands(
                         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA);
                         drawRectangle(
                             .zero(),
-                            .new(@floatFromInt(commands.width), @floatFromInt(commands.height)),
+                            .new(@floatFromInt(commands.width), @floatFromInt(commands.height), 0),
                             .new(1, 1, 1, entry.alpha),
                             null,
                             null,
@@ -494,7 +490,7 @@ fn drawBoundsRecursive(bounds: [*]SortSpriteBound, bound_index: u32) void {
 
         const screen_min = bound.screen_area.getMinCorner();
         const screen_max = bound.screen_area.getMaxCorner();
-        drawLineVertices(screen_min, screen_max);
+        drawLineVertices(screen_min.toVector3(0), screen_max.toVector3(0));
     }
 }
 
@@ -540,29 +536,32 @@ fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.C) u32 
 }
 
 fn drawLineVertices(
-    min_position: Vector2,
-    max_position: Vector2,
+    min_position: Vector3,
+    max_position: Vector3,
 ) void {
-    gl.glVertex2f(min_position.x(), min_position.y());
-    gl.glVertex2f(max_position.x(), min_position.y());
+    const z: f32 = max_position.z();
 
-    gl.glVertex2f(max_position.x(), min_position.y());
-    gl.glVertex2f(max_position.x(), max_position.y());
+    gl.glVertex3f(min_position.x(), min_position.y(), z);
+    gl.glVertex3f(max_position.x(), min_position.y(), z);
 
-    gl.glVertex2f(max_position.x(), max_position.y());
-    gl.glVertex2f(min_position.x(), max_position.y());
+    gl.glVertex3f(max_position.x(), min_position.y(), z);
+    gl.glVertex3f(max_position.x(), max_position.y(), z);
 
-    gl.glVertex2f(min_position.x(), max_position.y());
-    gl.glVertex2f(min_position.x(), min_position.y());
+    gl.glVertex3f(max_position.x(), max_position.y(), z);
+    gl.glVertex3f(min_position.x(), max_position.y(), z);
+
+    gl.glVertex3f(min_position.x(), max_position.y(), z);
+    gl.glVertex3f(min_position.x(), min_position.y(), z);
 }
 
 fn drawRectangle(
-    min_position: Vector2,
-    max_position: Vector2,
+    min_position: Vector3,
+    max_position: Vector3,
     premultiplied_color: Color,
     opt_min_uv: ?Vector2,
     opt_max_uv: ?Vector2,
 ) void {
+    const z: f32 = min_position.z();
     const min_uv = opt_min_uv orelse Vector2.splat(0);
     const max_uv = opt_max_uv orelse Vector2.splat(1);
 
@@ -578,19 +577,19 @@ fn drawRectangle(
 
         // Lower triangle.
         gl.glTexCoord2f(min_uv.x(), min_uv.y());
-        gl.glVertex2f(min_position.x(), min_position.y());
+        gl.glVertex3f(min_position.x(), min_position.y(), z);
         gl.glTexCoord2f(max_uv.x(), min_uv.y());
-        gl.glVertex2f(max_position.x(), min_position.y());
+        gl.glVertex3f(max_position.x(), min_position.y(), z);
         gl.glTexCoord2f(max_uv.x(), max_uv.y());
-        gl.glVertex2f(max_position.x(), max_position.y());
+        gl.glVertex3f(max_position.x(), max_position.y(), z);
 
         // Upper triangle
         gl.glTexCoord2f(min_uv.x(), min_uv.y());
-        gl.glVertex2f(min_position.x(), min_position.y());
+        gl.glVertex3f(min_position.x(), min_position.y(), z);
         gl.glTexCoord2f(max_uv.x(), max_uv.y());
-        gl.glVertex2f(max_position.x(), max_position.y());
+        gl.glVertex3f(max_position.x(), max_position.y(), z);
         gl.glTexCoord2f(min_uv.x(), max_uv.y());
-        gl.glVertex2f(min_position.x(), max_position.y());
+        gl.glVertex3f(min_position.x(), max_position.y(), z);
     }
     gl.glEnd();
 }
@@ -600,13 +599,13 @@ fn setScreenSpace(width: u32, height: u32) void {
     gl.glLoadIdentity();
 
     gl.glMatrixMode(gl.GL_PROJECTION);
-    const a = math.safeRatio1(2, @as(f32, @floatFromInt(width)));
-    const b = math.safeRatio1(2, @as(f32, @floatFromInt(height)));
+    const a = math.safeRatio1(2, 1);
+    const b = math.safeRatio1(2 * @as(f32, @floatFromInt(width)), @as(f32, @floatFromInt(height)));
     const projection: []const f32 = &.{
         a,  0,  0, 0,
         0,  b,  0, 0,
         0,  0,  1, 0,
-        -1, -1, 0, 1,
+        0,  0,  0, 1,
     };
     gl.glLoadMatrixf(@ptrCast(projection));
 }
@@ -657,8 +656,8 @@ pub fn displayBitmap(
 
     setScreenSpace(@intCast(width), @intCast(height));
 
-    const min_position = math.Vector2.new(0, 0);
-    const max_position = math.Vector2.new(@floatFromInt(width), @floatFromInt(height));
+    const min_position = math.Vector3.new(0, 0, 0);
+    const max_position = math.Vector3.new(@floatFromInt(width), @floatFromInt(height), 0);
     const color = math.Color.new(1, 1, 1, 1);
 
     drawRectangle(min_position, max_position, color, null, null);

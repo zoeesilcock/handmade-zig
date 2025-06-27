@@ -69,7 +69,7 @@ pub const EnvironmentMap = extern struct {
 };
 
 pub const RenderEntityBasisResult = extern struct {
-    position: Vector2 = Vector2.zero(),
+    position: Vector3 = Vector3.zero(),
     scale: f32 = 0,
     valid: bool = false,
 };
@@ -78,7 +78,6 @@ pub const RenderEntryType = enum(u16) {
     RenderEntryClipRect,
     RenderEntryBitmap,
     RenderEntryRectangle,
-    RenderEntryCoordinateSystem,
     RenderEntrySaturation,
     RenderEntryBlendRenderTarget,
 };
@@ -128,7 +127,7 @@ pub const RenderEntrySaturation = extern struct {
 pub const RenderEntryBitmap = extern struct {
     bitmap: ?*LoadedBitmap,
     premultiplied_color: Color,
-    position: Vector2,
+    position: Vector3,
     // These are already scaled by the half dimension.
     x_axis: Vector2,
     y_axis: Vector2,
@@ -136,30 +135,13 @@ pub const RenderEntryBitmap = extern struct {
 
 pub const RenderEntryRectangle = extern struct {
     premultiplied_color: Color,
-    position: Vector2,
+    position: Vector3,
     dimension: Vector2 = Vector2.zero(),
 };
 
 pub const RenderEntryBlendRenderTarget = extern struct {
     source_target_index: u32,
     alpha: f32,
-};
-
-/// This is only for testing.
-pub const RenderEntryCoordinateSystem = extern struct {
-    origin: Vector2,
-    x_axis: Vector2,
-    y_axis: Vector2,
-    color: Color,
-
-    texture: *LoadedBitmap,
-    normal_map: ?*LoadedBitmap,
-
-    pixels_to_meters: f32,
-
-    top: *EnvironmentMap,
-    middle: *EnvironmentMap,
-    bottom: *EnvironmentMap,
 };
 
 pub const ObjectTransform = extern struct {
@@ -216,7 +198,7 @@ fn getRenderEntityBasisPosition(
     _ = position.setXY(position.xy().minus(camera_transform.camera_position.xy()));
 
     if (camera_transform.orthographic) {
-        result.position = camera_transform.screen_center.plus(position.xy().scaledTo(camera_transform.meters_to_pixels));
+        result.position = position.scaledTo(camera_transform.meters_to_pixels);
         result.scale = camera_transform.meters_to_pixels;
         result.valid = true;
     } else {
@@ -238,7 +220,7 @@ fn getRenderEntityBasisPosition(
 
             const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * camera_transform.focal_length);
             result.scale = projected_xy.z() * camera_transform.meters_to_pixels;
-            result.position = camera_transform.screen_center.plus(projected_xy.xy().scaledTo(camera_transform.meters_to_pixels));
+            result.position = projected_xy.scaledTo(camera_transform.meters_to_pixels);
             result.valid = true;
         }
     }
@@ -635,7 +617,7 @@ pub const RenderGroup = extern struct {
         if (dim.basis.valid) {
             const sort_key: SpriteBound = getBoundFor(object_transform, height, offset);
             const size: Vector2 = dim.size.scaledTo(dim.basis.scale);
-            const screen_area: Rectangle2 = .fromMinDimension(dim.basis.position, size);
+            const screen_area: Rectangle2 = .zero();
             if (self.pushRenderElement(RenderEntryBitmap, sort_key, screen_area)) |entry| {
                 entry.bitmap = bitmap;
                 entry.position = dim.basis.position;
@@ -709,8 +691,7 @@ pub const RenderGroup = extern struct {
         const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
         if (basis.valid) {
             const sort_key: SpriteBound = getBoundFor(object_transform, dimension.y(), offset);
-            const scale_dim = dimension.scaledTo(basis.scale);
-            const screen_area: Rectangle2 = .fromMinDimension(basis.position, scale_dim);
+            const screen_area: Rectangle2 = .zero();
             if (self.pushRenderElement(RenderEntryRectangle, sort_key, screen_area)) |entry| {
                 entry.position = basis.position;
                 entry.dimension = dimension.scaledTo(basis.scale);
@@ -784,45 +765,6 @@ pub const RenderGroup = extern struct {
             offset.plus(Vector3.new(0.5 * dimension.x(), 0, 0)),
             color,
         );
-    }
-
-    pub fn pushCoordinateSystem(
-        self: *RenderGroup,
-        origin: Vector2,
-        x_axis: Vector2,
-        y_axis: Vector2,
-        color: Color,
-        texture: *LoadedBitmap,
-        normal_map: ?*LoadedBitmap,
-        top: *EnvironmentMap,
-        middle: *EnvironmentMap,
-        bottom: *EnvironmentMap,
-    ) void {
-        _ = self;
-        _ = origin;
-        _ = x_axis;
-        _ = y_axis;
-        _ = color;
-        _ = texture;
-        _ = normal_map;
-        _ = top;
-        _ = middle;
-        _ = bottom;
-        // const basis = getRenderEntityBasisPosition(&entry.entity_basis, screen_dimension);
-        //
-        // if (basis.valid) {
-        //     if (self.pushRenderElement(RenderEntryCoordinateSystem)) |entry| {
-        //         entry.origin = origin;
-        //         entry.x_axis = x_axis;
-        //         entry.y_axis = y_axis;
-        //         entry.color = color;
-        //         entry.texture = texture;
-        //         entry.normal_map = normal_map;
-        //         entry.top = top;
-        //         entry.middle = middle;
-        //         entry.bottom = bottom;
-        //     }
-        // }
     }
 
     pub fn pushClipRectByTransform(

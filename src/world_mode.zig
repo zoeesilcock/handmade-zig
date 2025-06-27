@@ -522,7 +522,7 @@ pub fn updateAndRenderWorld(
     DebugInterface.debugSetMousePosition(mouse_position);
 
     render_group.perspectiveMode(
-        camera.meters_to_pixels,
+        camera.world_scale,
         camera.focal_length,
         world_mode.camera.offset,
     );
