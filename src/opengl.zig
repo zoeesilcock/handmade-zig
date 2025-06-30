@@ -208,6 +208,9 @@ pub fn renderCommands(
     gl.glMatrixMode(gl.GL_TEXTURE);
     gl.glLoadIdentity();
 
+    gl.glMatrixMode(gl.GL_MODELVIEW);
+    gl.glLoadIdentity();
+
     std.debug.assert(commands.max_render_target_index < frame_buffer_handles.len);
 
     const use_render_targets: bool = platform.optGlBindFramebufferEXT != null;
@@ -273,16 +276,12 @@ pub fn renderCommands(
     const clip_scale_x: f32 = math.safeRatio0(@floatFromInt(draw_region.getWidth()), @floatFromInt(commands.width));
     const clip_scale_y: f32 = math.safeRatio0(@floatFromInt(draw_region.getHeight()), @floatFromInt(commands.height));
 
-    setScreenSpace(commands.width, commands.height);
-
     var clip_rect_index: u32 = 0xffffffff;
     var current_render_target_index: u32 = 0xffffffff;
-    var entry_offset: [*]u32 = prep.sorted_indices;
-    var sort_entry_index: u32 = 0;
-    while (sort_entry_index < prep.sorted_index_count) : (sort_entry_index += 1) {
-        defer entry_offset += 1;
-
-        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + entry_offset[0]));
+    // TODO: Make the loop work like it did before (need to have the headers push in order again!)
+    if (false) {
+        const header_offset: u32 = 0;
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + header_offset[0]));
         const alignment: usize = switch (header.type) {
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
@@ -307,6 +306,21 @@ pub fn renderCommands(
                 std.debug.assert(clip_rect_index < commands.clip_rect_count);
 
                 const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
+
+                gl.glMatrixMode(gl.GL_PROJECTION);
+                const a: f32 = 1;
+                const b = math.safeRatio1(
+                    @as(f32, @floatFromInt(commands.width)),
+                    @as(f32, @floatFromInt(commands.height)),
+                );
+                const projection: []const f32 = &.{
+                    a, 0, 0, 0,
+                    0, b, 0, 0,
+                    0, 0, 1, (1 / clip.focal_length),
+                    0, 0, 0, 0,
+                };
+                gl.glLoadMatrixf(@ptrCast(projection));
+
                 var clip_rect: Rectangle2i = clip.rect;
 
                 if (current_render_target_index != clip.render_target_index) {
@@ -372,19 +386,19 @@ pub fn renderCommands(
 
                                 // Lower triangle.
                                 gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                                gl.glVertex2fv(min_x_min_y.toGL());
+                                gl.glVertex3fv(min_x_min_y.toGL());
                                 gl.glTexCoord2f(max_uv.x(), min_uv.y());
-                                gl.glVertex2fv(max_x_min_y.toGL());
+                                gl.glVertex3fv(max_x_min_y.toGL());
                                 gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                                gl.glVertex2fv(max_x_max_y.toGL());
+                                gl.glVertex3fv(max_x_max_y.toGL());
 
                                 // Upper triangle
                                 gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                                gl.glVertex2fv(min_x_min_y.toGL());
+                                gl.glVertex3fv(min_x_min_y.toGL());
                                 gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                                gl.glVertex2fv(max_x_max_y.toGL());
+                                gl.glVertex3fv(max_x_max_y.toGL());
                                 gl.glTexCoord2f(min_uv.x(), max_uv.y());
-                                gl.glVertex2fv(min_x_max_y.toGL());
+                                gl.glVertex3fv(min_x_max_y.toGL());
                             }
                             gl.glEnd();
                         }
@@ -437,61 +451,6 @@ pub fn renderCommands(
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
     gl.glDisable(gl.GL_TEXTURE_2D);
-
-    if (global_config.Platform_ShowSortGroups) {
-        const bound_count: u32 = commands.sort_entry_count;
-        const bounds: [*]SortSpriteBound = render.getSortEntries(commands);
-        var group_index: u32 = 0;
-        var bound_index: u32 = 0;
-        while (bound_index < bound_count) : (bound_index += 1) {
-            const bound: *SortSpriteBound = @ptrCast(bounds + bound_index);
-            if (bound.offset != render.SPRITE_BARRIER_OFFSET_VALUE and
-                (bound.flags & @intFromEnum(SpriteFlag.DebugBox)) == -1)
-            {
-                var color: Color = debug_color_table[group_index % debug_color_table.len].toColor(0.2);
-                group_index += 1;
-
-                if ((bound.flags & @intFromEnum(SpriteFlag.Cycle)) != 0) {
-                    _ = color.setA(1);
-                }
-                _ = color.setRGB(color.rgb().scaledTo(color.a()));
-
-                gl.glBegin(gl.GL_LINES);
-                gl.glColor4f(
-                    color.r(),
-                    color.g(),
-                    color.b(),
-                    color.a(),
-                );
-                drawBoundsRecursive(bounds, bound_index);
-                gl.glEnd();
-
-                group_index += 1;
-            }
-        }
-    }
-}
-
-fn drawBoundsRecursive(bounds: [*]SortSpriteBound, bound_index: u32) void {
-    const bound: *SortSpriteBound = @ptrCast(bounds + bound_index);
-    if ((bound.flags & @intFromEnum(SpriteFlag.DebugBox)) == 0) {
-        const center: Vector2 = bound.screen_area.getCenter();
-        bound.flags |= @intFromEnum(SpriteFlag.DebugBox);
-
-        var opt_edge: ?*SpriteEdge = bound.first_edge_with_me_as_front;
-        while (opt_edge) |edge| : (opt_edge = edge.next_edge_with_same_front) {
-            const behind: *SortSpriteBound = @ptrCast(bounds + edge.behind);
-            const behind_center: Vector2 = behind.screen_area.getCenter();
-            gl.glVertex2fv(@ptrCast(&center.values));
-            gl.glVertex2fv(@ptrCast(&behind_center.values));
-
-            drawBoundsRecursive(bounds, edge.behind);
-        }
-
-        const screen_min = bound.screen_area.getMinCorner();
-        const screen_max = bound.screen_area.getMaxCorner();
-        drawLineVertices(screen_min.toVector3(0), screen_max.toVector3(0));
-    }
 }
 
 pub fn manageTextures(first_op: ?*TextureOp) void {
@@ -594,22 +553,6 @@ fn drawRectangle(
     gl.glEnd();
 }
 
-fn setScreenSpace(width: u32, height: u32) void {
-    gl.glMatrixMode(gl.GL_MODELVIEW);
-    gl.glLoadIdentity();
-
-    gl.glMatrixMode(gl.GL_PROJECTION);
-    const a = math.safeRatio1(2, 1);
-    const b = math.safeRatio1(2 * @as(f32, @floatFromInt(width)), @as(f32, @floatFromInt(height)));
-    const projection: []const f32 = &.{
-        a,  0,  0, 0,
-        0,  b,  0, 0,
-        0,  0,  1, 0,
-        0,  0,  0, 1,
-    };
-    gl.glLoadMatrixf(@ptrCast(projection));
-}
-
 pub fn displayBitmap(
     width: i32,
     height: i32,
@@ -654,7 +597,22 @@ pub fn displayBitmap(
     gl.glMatrixMode(gl.GL_TEXTURE);
     gl.glLoadIdentity();
 
-    setScreenSpace(@intCast(width), @intCast(height));
+    gl.glMatrixMode(gl.GL_MODELVIEW);
+    gl.glLoadIdentity();
+
+    shared.notImplemented();
+
+    // TODO: This has to be worked out specifically for doing the full-screen draw.
+    gl.glMatrixMode(gl.GL_PROJECTION);
+    const a = math.safeRatio1(2, 1);
+    const b = math.safeRatio1(2 * @as(f32, @floatFromInt(width)), @as(f32, @floatFromInt(height)));
+    const projection: []const f32 = &.{
+        a, 0, 0, 0,
+        0, b, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+    gl.glLoadMatrixf(@ptrCast(projection));
 
     const min_position = math.Vector3.new(0, 0, 0);
     const max_position = math.Vector3.new(@floatFromInt(width), @floatFromInt(height), 0);

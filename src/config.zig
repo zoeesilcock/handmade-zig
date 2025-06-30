@@ -1,9 +1,8 @@
 pub var global_config = Config{};
 
 pub const Config = struct {
-    Platform_ShowSortGroups: bool = false,
     Renderer_Camera_UseDebug: bool = false,
-    Renderer_Camera_DebugDistance: f32 = 10,
+    Renderer_Camera_DebugDistance: f32 = 30,
     Renderer_Camera_RoomBased: bool = true,
     Renderer_TestWeirdDrawBufferSize: bool = false,
     AI_Familiar_FollowsHero: bool = true,

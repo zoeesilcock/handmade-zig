@@ -522,7 +522,6 @@ pub fn updateAndRenderWorld(
     DebugInterface.debugSetMousePosition(mouse_position);
 
     render_group.perspectiveMode(
-        camera.world_scale,
         camera.focal_length,
         world_mode.camera.offset,
     );
@@ -531,7 +530,11 @@ pub fn updateAndRenderWorld(
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
     render_group.pushClear(background_color);
 
-    const screen_bounds = render_group.getCameraRectangleAtTarget();
+    const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget();
+    const screen_bounds: Rectangle2 = .fromCenterDimension(.zero(), .new(
+        world_camera_rect.max.x() - world_camera_rect.min.x(),
+        world_camera_rect.max.y() - world_camera_rect.min.y(),
+    ));
     var camera_bounds_in_meters = math.Rectangle3.fromMinMax(
         screen_bounds.min.toVector3(0),
         screen_bounds.max.toVector3(0),
@@ -608,42 +611,33 @@ pub fn updateAndRenderWorld(
         var world_transform = ObjectTransform.defaultUpright();
 
         if (true) {
-        render_group.pushRectangleOutline(
-            &world_transform,
-            screen_bounds.getDimension(),
-            Vector3.new(0, 0, 0.005),
-            Color.new(1, 1, 0, 1),
-            0.1,
-        );
-        // render_group.pushRectangleOutline(
-        //     world_transform,
-        //     camera_bounds_in_meters.getDimension().xy(),
-        //     Vector3.zero(),
-        //     Color.new(1, 1, 1, 1),
-        // );
-        render_group.pushRectangleOutline(
-            &world_transform,
-            sim_bounds.getDimension().xy(),
-            Vector3.new(0, 0, 0.005),
-            Color.new(0, 1, 1, 1),
-            0.1,
-        );
-        render_group.pushRectangleOutline(
-            &world_transform,
-            world_sim.sim_region.bounds.getDimension().xy(),
-            Vector3.new(0, 0, 0.005),
-            Color.new(1, 0, 1, 1),
-            0.1,
-        );
-
-        const chunk_rect: Rectangle3 = world.getWorldChunkBounds(world_mode.world, 0, 0, 0);
-        render_group.pushRectangleOutline(
-            &world_transform,
-            chunk_rect.getDimension().xy(),
-            chunk_rect.getCenter(),
-            Color.new(1, 1, 1, 1),
-            0.1,
-        );
+            render_group.pushRectangleOutline(
+                &world_transform,
+                screen_bounds.getDimension(),
+                Vector3.new(0, 0, 0.005),
+                Color.new(1, 1, 0, 1),
+                0.1,
+            );
+            // render_group.pushRectangleOutline(
+            //     world_transform,
+            //     camera_bounds_in_meters.getDimension().xy(),
+            //     Vector3.zero(),
+            //     Color.new(1, 1, 1, 1),
+            // );
+            render_group.pushRectangleOutline(
+                &world_transform,
+                sim_bounds.getDimension().xy(),
+                Vector3.new(0, 0, 0.005),
+                Color.new(0, 1, 1, 1),
+                0.1,
+            );
+            render_group.pushRectangleOutline(
+                &world_transform,
+                world_sim.sim_region.bounds.getDimension().xy(),
+                Vector3.new(0, 0, 0.005),
+                Color.new(1, 0, 1, 1),
+                0.1,
+            );
         }
 
         if (sim.getEntityByStorageIndex(world_sim.sim_region, world_mode.camera.following_entity_index)) |camera_following_entity| {
@@ -772,7 +766,7 @@ fn addStandardRoom(
     const room: *Entity = beginGroundedEntity(world_mode, room_collision);
     room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
     const diff: f32 = @max(0, @max(@as(f32, @floatFromInt(radius_x)) - 8, @as(f32, @floatFromInt(radius_y)) - 4));
-    room.camera_height = 11 + diff;
+    room.camera_height = 6 + diff;
     endEntity(world_mode, room, room_position);
 
     return result;

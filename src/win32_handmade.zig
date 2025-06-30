@@ -2323,7 +2323,6 @@ pub export fn wWinMain(
                     {
                         DebugInterface.debugValue(@src(), &paused, "paused");
                         DebugInterface.debugValue(@src(), &software_rendering, "software_rendering");
-                        DebugInterface.debugValue(@src(), &global_config.Platform_ShowSortGroups, "show_sort_groups");
                     }
                     DebugInterface.debugEndDataBlock(@src());
 

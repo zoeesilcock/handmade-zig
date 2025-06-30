@@ -418,7 +418,14 @@ pub fn updateAndRenderEntities(
             if (test_alpha > 0) {
                 stop_level_index = maximum_level_index;
                 alpha_floor_clip_rect =
-                    render_group.pushClipRect(0, 0, draw_buffer.width, draw_buffer.height, alpha_floor_render_target);
+                    render_group.pushClipRect(
+                        0,
+                        0,
+                        draw_buffer.width,
+                        draw_buffer.height,
+                        alpha_floor_render_target,
+                        render_group.camera_transform.focal_length,
+                    );
             }
         }
     }
@@ -580,10 +587,6 @@ pub fn updateAndRenderEntities(
                     // * And probably, we will want the sort keys to be u32's now, so we'll convert from float at this
                     // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
 
-                    if (entity.piece_count > 1) {
-                        render_group.beginAggregateSortKey();
-                    }
-
                     var piece_index: u32 = 0;
                     while (piece_index < entity.piece_count) : (piece_index += 1) {
                         const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
@@ -617,10 +620,6 @@ pub fn updateAndRenderEntities(
                             x_axis,
                             y_axis,
                         );
-                    }
-
-                    if (entity.piece_count > 1) {
-                        render_group.endAggregateSortKey();
                     }
 
                     drawHitPoints(entity, render_group, &entity_transform);

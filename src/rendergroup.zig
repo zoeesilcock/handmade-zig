@@ -40,6 +40,7 @@ const Vector4 = math.Vector4;
 const Color = math.Color;
 const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
+const Rectangle3 = math.Rectangle3;
 const Rectangle2i = math.Rectangle2i;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
@@ -47,8 +48,6 @@ const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const RenderCommands = shared.RenderCommands;
 const ArenaPushParams = shared.ArenaPushParams;
-const SpriteBound = render.SpriteBound;
-const SortSpriteBound = render.SortSpriteBound;
 const ManualSortKey = render.ManualSortKey;
 const SpriteFlag = render.SpriteFlag;
 
@@ -57,7 +56,7 @@ const Vec4u = math.Vec4u;
 const Vec4i = math.Vec4i;
 
 pub const UsedBitmapDim = struct {
-    basis: RenderEntityBasisResult = undefined,
+    basis_position: Vector3 = undefined,
     size: Vector2 = undefined,
     alignment: Vector2 = undefined,
     position: Vector3 = undefined,
@@ -66,12 +65,6 @@ pub const UsedBitmapDim = struct {
 pub const EnvironmentMap = extern struct {
     lod: [4]LoadedBitmap,
     z_position: f32,
-};
-
-pub const RenderEntityBasisResult = extern struct {
-    position: Vector3 = Vector3.zero(),
-    scale: f32 = 0,
-    valid: bool = false,
 };
 
 pub const RenderEntryType = enum(u16) {
@@ -92,6 +85,7 @@ pub const RenderEntryClipRect = extern struct {
     next: ?*RenderEntryClipRect,
     rect: Rectangle2i,
     render_target_index: u32,
+    focal_length: f32,
 };
 
 pub const TransientClipRect = extern struct {
@@ -173,16 +167,11 @@ pub const ObjectTransform = extern struct {
 
 const CameraTransform = extern struct {
     orthographic: bool,
-
-    meters_to_pixels: f32,
-    screen_center: Vector2,
-
     focal_length: f32,
     camera_position: Vector3,
 };
 
 const PushBufferResult = extern struct {
-    sort_entry: ?*SortSpriteBound = null,
     header: ?*RenderEntryHeader = null,
 };
 
@@ -190,17 +179,14 @@ fn getRenderEntityBasisPosition(
     camera_transform: CameraTransform,
     object_transform: *const ObjectTransform,
     original_position: Vector3,
-) RenderEntityBasisResult {
-    var result = RenderEntityBasisResult{};
-
+) Vector3 {
+    var result: Vector3 = .zero();
     var position: Vector3 = original_position.xy().toVector3(0).plus(object_transform.offset_position);
 
     _ = position.setXY(position.xy().minus(camera_transform.camera_position.xy()));
 
     if (camera_transform.orthographic) {
-        result.position = position.scaledTo(camera_transform.meters_to_pixels);
-        result.scale = camera_transform.meters_to_pixels;
-        result.valid = true;
+        result = position;
     } else {
         var distance_above_target = camera_transform.camera_position.z();
 
@@ -210,19 +196,14 @@ fn getRenderEntityBasisPosition(
 
         const floor_z: f32 = object_transform.floor_z;
         const distance_to_position_z: f32 = distance_above_target - floor_z;
-        const near_clip_plane = 0.1;
 
-        if (distance_to_position_z > near_clip_plane) {
-            const height_of_floor: f32 = position.z() - floor_z;
-            var raw_xy = position.xy().toVector3(1);
-            const ortho_y_from_z: f32 = 1;
-            _ = raw_xy.setY(raw_xy.y() + ortho_y_from_z * height_of_floor);
+        const height_of_floor: f32 = position.z() - floor_z;
 
-            const projected_xy = raw_xy.scaledTo((1.0 / distance_to_position_z) * camera_transform.focal_length);
-            result.scale = projected_xy.z() * camera_transform.meters_to_pixels;
-            result.position = projected_xy.scaledTo(camera_transform.meters_to_pixels);
-            result.valid = true;
-        }
+        var raw_xy = position.xy().toVector3(1);
+        const ortho_y_from_z: f32 = 1;
+        _ = raw_xy.setY(raw_xy.y() + ortho_y_from_z * height_of_floor);
+
+        result = .new(raw_xy.x(), raw_xy.y(), distance_to_position_z);
     }
 
     return result;
@@ -231,10 +212,8 @@ fn getRenderEntityBasisPosition(
 pub const RenderGroup = extern struct {
     assets: *asset.Assets,
 
-    screen_area: Rectangle2,
+    screen_dimensions: Vector2,
     debug_tag: u32,
-
-    monitor_half_dim_in_meters: Vector2,
 
     camera_transform: CameraTransform,
 
@@ -245,9 +224,6 @@ pub const RenderGroup = extern struct {
     commands: *RenderCommands,
 
     current_clip_rect_index: u32,
-
-    aggregate_bound: SpriteBound,
-    first_aggregate: ?*SortSpriteBound,
 
     pub fn begin(
         assets: *asset.Assets,
@@ -263,16 +239,20 @@ pub const RenderGroup = extern struct {
             .missing_resource_count = 0,
             .generation_id = generation_id,
             .commands = commands,
-            .monitor_half_dim_in_meters = undefined,
-            .screen_area = .fromMinDimension(.zero(), .newI(pixel_width, pixel_height)),
+            .screen_dimensions = .newI(pixel_width, pixel_height),
             .debug_tag = undefined,
             .camera_transform = undefined,
             .current_clip_rect_index = 0,
-            .aggregate_bound = undefined,
-            .first_aggregate = null,
         };
 
-        result.current_clip_rect_index = result.pushClipRect(0, 0, @intCast(pixel_width), @intCast(pixel_height), 0);
+        result.current_clip_rect_index = result.pushClipRect(
+            0,
+            0,
+            @intCast(pixel_width),
+            @intCast(pixel_height),
+            0,
+            1,
+        );
 
         return result;
     }
@@ -288,66 +268,49 @@ pub const RenderGroup = extern struct {
         return self.missing_resource_count == 0;
     }
 
+    pub fn setCameraTransform(
+        self: *RenderGroup,
+        focal_length: f32,
+        camera_position: Vector3,
+        ortho: bool,
+    ) void {
+        const pixel_width: f32 = self.screen_dimensions.x();
+        const pixel_height: f32 = self.screen_dimensions.y();
+
+        self.camera_transform.focal_length = focal_length;
+        self.camera_transform.camera_position = camera_position;
+        self.camera_transform.orthographic = ortho;
+        self.current_clip_rect_index = self.pushClipRect(
+            0,
+            0,
+            @intFromFloat(pixel_width),
+            @intFromFloat(pixel_height),
+            0,
+            focal_length,
+        );
+    }
+
     pub fn perspectiveMode(
         self: *RenderGroup,
-        meters_to_pixels: f32,
         focal_length: f32,
         camera_position: Vector3,
     ) void {
-        const screen_dimension: Vector2 = self.screen_area.getDimension();
-        const pixel_width: f32 = screen_dimension.x();
-        const pixel_height: f32 = screen_dimension.y();
-
-        const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
-        self.monitor_half_dim_in_meters = Vector2.new(
-            0.5 * pixel_width * pixels_to_meters,
-            0.5 * pixel_height * pixels_to_meters,
-        );
-
-        self.camera_transform.meters_to_pixels = meters_to_pixels;
-        self.camera_transform.focal_length = focal_length;
-        self.camera_transform.camera_position = camera_position;
-        self.camera_transform.screen_center = Vector2.new(
-            0.5 * pixel_width,
-            0.5 * pixel_height,
-        );
-        self.camera_transform.orthographic = false;
+        self.setCameraTransform(focal_length, camera_position, false);
     }
 
     pub fn orthographicMode(
         self: *RenderGroup,
-        meters_to_pixels: f32,
     ) void {
-        const screen_dimension: Vector2 = self.screen_area.getDimension();
-        const pixel_width: f32 = screen_dimension.x();
-        const pixel_height: f32 = screen_dimension.y();
-
-        const pixels_to_meters: f32 = math.safeRatio1(1.0, meters_to_pixels);
-        self.monitor_half_dim_in_meters = Vector2.new(
-            0.5 * pixel_width * pixels_to_meters,
-            0.5 * pixel_height * pixels_to_meters,
-        );
-
-        self.camera_transform.meters_to_pixels = meters_to_pixels;
-        self.camera_transform.focal_length = 1;
-        self.camera_transform.camera_position = .new(0, 0, 1);
-        self.camera_transform.screen_center = Vector2.new(0.5 * pixel_width, 0.5 * pixel_height);
-        self.camera_transform.orthographic = true;
+        self.setCameraTransform(1, .new(0, 0, 1), true);
     }
 
-    fn pushBuffer(self: *RenderGroup, sort_entry_count: u32, data_size: u32) PushBufferResult {
+    fn pushBuffer(self: *RenderGroup, data_size: u32) PushBufferResult {
         var result: PushBufferResult = .{};
         const commands: *RenderCommands = self.commands;
-        const sprite_bounds: [*]SortSpriteBound = render.getSortEntries(commands);
 
-        if ((@intFromPtr(sprite_bounds) + commands.sort_entry_count + sort_entry_count) <=
-            @intFromPtr(commands.push_buffer_data_at - data_size))
-        {
+        if (@intFromPtr(commands.push_buffer_data_at - data_size) > 0) {
             commands.push_buffer_data_at -= data_size;
             result.header = @ptrCast(@alignCast(commands.push_buffer_data_at));
-
-            result.sort_entry = @ptrCast(sprite_bounds + commands.sort_entry_count);
-            commands.sort_entry_count += sort_entry_count;
         } else {
             unreachable;
         }
@@ -356,80 +319,43 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushSortBarrier(self: *RenderGroup, turn_off_sorting: bool) void {
-        const push: PushBufferResult = self.pushBuffer(1, 0);
+        _ = self;
+        _ = turn_off_sorting;
 
-        if (push.sort_entry) |sort_entry| {
-            sort_entry.offset = render.SPRITE_BARRIER_OFFSET_VALUE;
-            sort_entry.flags = if (turn_off_sorting) @intFromEnum(SpriteFlag.BarrierTurnsOffSorting) else 0;
-        }
+        // TODO: Do we want the sort barrier again?
     }
 
-    fn pushRenderElement(self: *RenderGroup, comptime T: type, sort_key: SpriteBound, screen_area: Rectangle2) ?*T {
+    fn pushRenderElement(self: *RenderGroup, comptime T: type) ?*T {
         // TimedBlock.beginFunction(@src(), .PushRenderElement);
         // defer TimedBlock.endFunction(@src(), .PushRenderElement);
 
         // This depends on the name of this file, if the file name changes the magic number may need to be adjusted.
         const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[12..]);
-        return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, sort_key, screen_area, @alignOf(T))));
+        return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, @alignOf(T))));
     }
 
     fn pushRenderElement_(
         self: *RenderGroup,
         in_size: u32,
         entry_type: RenderEntryType,
-        sort_key: SpriteBound,
-        screen_area: Rectangle2,
         comptime alignment: u32,
     ) ?*anyopaque {
         var result: ?*anyopaque = null;
-        const commands: *RenderCommands = self.commands;
 
         const size = in_size + @sizeOf(RenderEntryHeader);
         const data_address = @intFromPtr(self.commands.push_buffer_data_at) + @sizeOf(RenderEntryHeader);
         const aligned_address = std.mem.alignForward(usize, data_address, alignment);
         const aligned_offset = aligned_address - data_address;
         const aligned_size: u32 = @intCast(size + aligned_offset);
-        const push: PushBufferResult = self.pushBuffer(1, aligned_size);
+        const push: PushBufferResult = self.pushBuffer(aligned_size);
 
-        if (push.sort_entry) |sort_entry| {
-            if (push.header) |header| {
-                header.type = entry_type;
-                std.debug.assert(header.type != RenderEntryType.RenderEntryClipRect);
-                header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
+        if (push.header) |header| {
+            header.type = entry_type;
+            header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
+            result = @ptrFromInt(@intFromPtr(header) + @sizeOf(RenderEntryHeader) + aligned_offset);
 
-                if (INTERNAL) {
-                    header.debug_tag = self.debug_tag;
-                }
-
-                result = @ptrFromInt(@intFromPtr(header) + @sizeOf(RenderEntryHeader) + aligned_offset);
-
-                sort_entry.first_edge_with_me_as_front = null;
-                sort_entry.sort_key = sort_key;
-                sort_entry.offset = @intCast(@intFromPtr(header) - @intFromPtr(commands.push_buffer_base));
-                sort_entry.screen_area = screen_area;
-                sort_entry.flags = 0;
-
-                if (INTERNAL) {
-                    sort_entry.debug_tag = self.debug_tag;
-                }
-
-                std.debug.assert(sort_entry.offset != 0);
-
-                if (self.first_aggregate) |first_aggregate| {
-                    if (first_aggregate == push.sort_entry) {
-                        self.aggregate_bound = sort_key;
-                    } else if (render.isZSprite(self.aggregate_bound)) {
-                        std.debug.assert(render.isZSprite(sort_key));
-                        self.aggregate_bound.y_min = @min(self.aggregate_bound.y_min, sort_key.y_min);
-                        self.aggregate_bound.y_max = @max(self.aggregate_bound.y_max, sort_key.y_max);
-                        self.aggregate_bound.z_max = @max(self.aggregate_bound.z_max, sort_key.z_max);
-                    } else {
-                        std.debug.assert(!render.isZSprite(sort_key));
-                        self.aggregate_bound.z_max = @max(self.aggregate_bound.z_max, sort_key.z_max);
-                    }
-                }
-            } else {
-                unreachable;
+            if (INTERNAL) {
+                header.debug_tag = self.debug_tag;
             }
         } else {
             unreachable;
@@ -438,45 +364,21 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-    pub fn beginAggregateSortKey(self: *RenderGroup) void {
-        std.debug.assert(self.first_aggregate == null);
-
-        const commands: *RenderCommands = self.commands;
-        self.first_aggregate = @ptrCast(render.getSortEntries(commands) + commands.sort_entry_count);
-        self.aggregate_bound.y_min = std.math.floatMax(f32);
-        self.aggregate_bound.y_max = std.math.floatMin(f32);
-        self.aggregate_bound.z_max = std.math.floatMin(f32);
-    }
-
-    pub fn endAggregateSortKey(self: *RenderGroup) void {
-        std.debug.assert(self.first_aggregate != null);
-
-        const commands: *RenderCommands = self.commands;
-        const one_past_last_entry: [*]SortSpriteBound = render.getSortEntries(commands) + commands.sort_entry_count;
-
-        var entry: [*]SortSpriteBound = @ptrCast(self.first_aggregate.?);
-        while (entry != one_past_last_entry) : (entry += 1) {
-            entry[0].sort_key = self.aggregate_bound;
-        }
-
-        self.first_aggregate = null;
-    }
-
     // Renderer API.
     pub fn unproject(self: *RenderGroup, object_transform: *const ObjectTransform, pixels_xy: Vector2) Vector3 {
-        var unprojected_xy: Vector2 = undefined;
         const camera_transform = self.camera_transform;
+        const screen_center: Vector2 = self.screen_dimensions.scaledTo(0.5);
 
-        if (camera_transform.orthographic) {
+        var unprojected_xy: Vector2 = pixels_xy.minus(screen_center);
+        const aspect: f32 = self.screen_dimensions.x() / self.screen_dimensions.y();
+        _ = unprojected_xy.setX(unprojected_xy.x() * 0.5 / self.screen_dimensions.x());
+        _ = unprojected_xy.setY(unprojected_xy.y() * 0.5 / (self.screen_dimensions.y() * aspect));
+
+        if (!camera_transform.orthographic) {
             unprojected_xy =
-                pixels_xy.minus(camera_transform.screen_center).scaledTo(1.0 / camera_transform.meters_to_pixels);
-        } else {
-            const a: Vector2 =
-                pixels_xy.minus(camera_transform.screen_center).scaledTo(1.0 / camera_transform.meters_to_pixels);
-            unprojected_xy =
-                a.scaledTo(
+                unprojected_xy.scaledTo(
                     (camera_transform.camera_position.z() - object_transform.offset_position.z()) /
-                    camera_transform.focal_length,
+                        camera_transform.focal_length,
                 );
         }
 
@@ -487,16 +389,17 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-    pub fn unprojectOld(self: *RenderGroup, projected_xy: Vector2, distance_from_camera: f32) Vector2 {
-        return projected_xy.scaledTo(distance_from_camera / self.camera_transform.focal_length);
+    pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle3 {
+        var transform: ObjectTransform = .defaultFlat();
+        _ = transform.offset_position.setZ(-distance_from_camera);
+
+        const min_corner = self.unproject(&transform, .zero());
+        const max_corner = self.unproject(&transform, self.screen_dimensions);
+
+        return Rectangle3.fromMinMax(min_corner, max_corner);
     }
 
-    pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle2 {
-        const raw_xy = self.unprojectOld(self.monitor_half_dim_in_meters, distance_from_camera);
-        return Rectangle2.fromCenterHalfDimension(Vector2.zero(), raw_xy);
-    }
-
-    pub fn getCameraRectangleAtTarget(self: *RenderGroup) Rectangle2 {
+    pub fn getCameraRectangleAtTarget(self: *RenderGroup) Rectangle3 {
         return self.getCameraRectangleAtDistance(self.camera_transform.camera_position.z());
     }
 
@@ -551,7 +454,7 @@ pub const RenderGroup = extern struct {
         _ = dim.position.setXY(
             offset.xy().minus(x_axis.scaledTo(dim.alignment.x())).minus(y_axis.scaledTo(dim.alignment.y())),
         );
-        dim.basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, dim.position);
+        dim.basis_position = getRenderEntityBasisPosition(self.camera_transform, object_transform, dim.position);
 
         return dim;
     }
@@ -567,29 +470,6 @@ pub const RenderGroup = extern struct {
         _ = dest.setB(dest.a() * math.lerpf(source.b(), color.b(), time.b()));
 
         return dest;
-    }
-
-    fn getBoundFor(
-        object_transform: *const ObjectTransform,
-        height: f32,
-        offset: Vector3,
-    ) SpriteBound {
-        var sprite_bound: SpriteBound = .{
-            .chunk_z = object_transform.chunk_z,
-            .y_min = object_transform.offset_position.y() + offset.y(),
-            .y_max = object_transform.offset_position.y() + offset.y(),
-            .z_max = object_transform.offset_position.z() + offset.z(),
-            .manual_sort = object_transform.manual_sort,
-        };
-
-        if (object_transform.upright) {
-            sprite_bound.z_max += 0.5 * height;
-        } else {
-            sprite_bound.y_min -= 0.5 * height;
-            sprite_bound.y_max += 0.5 * height;
-        }
-
-        return sprite_bound;
     }
 
     pub fn reserveSortKey(self: *RenderGroup) u16 {
@@ -614,17 +494,13 @@ pub const RenderGroup = extern struct {
         const y_axis: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
         const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient, x_axis, y_axis);
 
-        if (dim.basis.valid) {
-            const sort_key: SpriteBound = getBoundFor(object_transform, height, offset);
-            const size: Vector2 = dim.size.scaledTo(dim.basis.scale);
-            const screen_area: Rectangle2 = .zero();
-            if (self.pushRenderElement(RenderEntryBitmap, sort_key, screen_area)) |entry| {
-                entry.bitmap = bitmap;
-                entry.position = dim.basis.position;
-                entry.premultiplied_color = storeColor(object_transform, color);
-                entry.x_axis = size.times(x_axis);
-                entry.y_axis = size.times(y_axis);
-            }
+        const size: Vector2 = dim.size;
+        if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
+            entry.bitmap = bitmap;
+            entry.position = dim.basis_position;
+            entry.premultiplied_color = storeColor(object_transform, color);
+            entry.x_axis = size.times(x_axis);
+            entry.y_axis = size.times(y_axis);
         }
     }
 
@@ -688,15 +564,11 @@ pub const RenderGroup = extern struct {
     ) void {
         const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
 
-        const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
-        if (basis.valid) {
-            const sort_key: SpriteBound = getBoundFor(object_transform, dimension.y(), offset);
-            const screen_area: Rectangle2 = .zero();
-            if (self.pushRenderElement(RenderEntryRectangle, sort_key, screen_area)) |entry| {
-                entry.position = basis.position;
-                entry.dimension = dimension.scaledTo(basis.scale);
-                entry.premultiplied_color = storeColor(object_transform, color);
-            }
+        const basis_position = getRenderEntityBasisPosition(self.camera_transform, object_transform, position);
+        if (self.pushRenderElement(RenderEntryRectangle)) |entry| {
+            entry.position = basis_position;
+            entry.dimension = dimension;
+            entry.premultiplied_color = storeColor(object_transform, color);
         }
     }
 
@@ -777,19 +649,16 @@ pub const RenderGroup = extern struct {
         var result: u32 = 0;
         const modified_position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
 
-        const basis = getRenderEntityBasisPosition(self.camera_transform, object_transform, modified_position);
-        if (basis.valid) {
-            const position = basis.position;
-            const basis_dimension: Vector2 = dimension.scaledTo(basis.scale);
-
-            result = self.pushClipRect(
-                intrinsics.roundReal32ToInt32(position.x()),
-                intrinsics.roundReal32ToInt32(position.y()),
-                intrinsics.roundReal32ToInt32(basis_dimension.x()),
-                intrinsics.roundReal32ToInt32(basis_dimension.y()),
-                render_target_index,
-            );
-        }
+        const position = getRenderEntityBasisPosition(self.camera_transform, object_transform, modified_position);
+        const basis_dimension: Vector2 = dimension;
+        result = self.pushClipRect(
+            intrinsics.roundReal32ToInt32(position.x()),
+            intrinsics.roundReal32ToInt32(position.y()),
+            intrinsics.roundReal32ToInt32(basis_dimension.x()),
+            intrinsics.roundReal32ToInt32(basis_dimension.y()),
+            render_target_index,
+            self.camera_transform.focal_length,
+        );
 
         return result;
     }
@@ -809,10 +678,18 @@ pub const RenderGroup = extern struct {
         );
     }
 
-    pub fn pushClipRect(self: *RenderGroup, x: i32, y: i32, w: i32, h: i32, render_target_index: u32) u32 {
+    pub fn pushClipRect(
+        self: *RenderGroup,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        render_target_index: u32,
+        focal_length: f32,
+    ) u32 {
         var result: u32 = 0;
         const size = @sizeOf(RenderEntryClipRect);
-        const push: PushBufferResult = self.pushBuffer(0, size);
+        const push: PushBufferResult = self.pushBuffer(size);
 
         if (push.header) |header| {
             const rect: *RenderEntryClipRect = @ptrCast(@alignCast(header));
@@ -830,6 +707,7 @@ pub const RenderGroup = extern struct {
             rect.next = null;
 
             rect.rect = Rectangle2i.new(x, y, x + w, y + h);
+            rect.focal_length = focal_length;
 
             rect.render_target_index = render_target_index;
             if (self.commands.max_render_target_index < render_target_index) {
@@ -842,7 +720,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushBlendRenderTarget(self: *RenderGroup, alpha: f32, source_render_target_index: u32) void {
         self.pushSortBarrier(false);
-        if (self.pushRenderElement(RenderEntryBlendRenderTarget, .{}, .{ .min = .zero(), .max = .zero() })) |blend| {
+        if (self.pushRenderElement(RenderEntryBlendRenderTarget)) |blend| {
             blend.alpha = alpha;
             blend.source_target_index = source_render_target_index;
         }

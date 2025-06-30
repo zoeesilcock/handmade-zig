@@ -2221,7 +2221,7 @@ fn debugStart(
     debug_state.font_scale = 1;
     debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
     debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-    debug_state.render_group.orthographicMode(1);
+    debug_state.render_group.orthographicMode();
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();
     debug_state.shadow_transform = ObjectTransform.defaultFlat();

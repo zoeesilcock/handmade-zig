@@ -52,6 +52,14 @@ pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
 
 // Helper functions.
+pub fn notImplemented() void {
+    if (INTERNAL) {
+        std.debug.assert(true);
+    } else {
+        unreachable;
+    }
+}
+
 pub inline fn kilobytes(value: u32) u64 {
     return value * 1024;
 }
@@ -891,8 +899,6 @@ pub const RenderCommands = extern struct {
 
 pub const GameRenderPrep = extern struct {
     clip_rects: [*]rendergroup.RenderEntryClipRect = undefined,
-    sorted_index_count: u32 = 0,
-    sorted_indices: [*]u32 = undefined,
 };
 
 pub fn initializeRenderCommands(
