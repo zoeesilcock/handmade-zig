@@ -308,9 +308,10 @@ pub const RenderGroup = extern struct {
         var result: PushBufferResult = .{};
         const commands: *RenderCommands = self.commands;
 
-        if (@intFromPtr(commands.push_buffer_data_at - data_size) > 0) {
-            commands.push_buffer_data_at -= data_size;
+        const push_buffer_end: [*]u8 = commands.push_buffer_base + commands.max_push_buffer_size;
+        if ((@intFromPtr(commands.push_buffer_data_at) + data_size) <= @intFromPtr(push_buffer_end)) {
             result.header = @ptrCast(@alignCast(commands.push_buffer_data_at));
+            commands.push_buffer_data_at += data_size;
         } else {
             unreachable;
         }
@@ -470,13 +471,6 @@ pub const RenderGroup = extern struct {
         _ = dest.setB(dest.a() * math.lerpf(source.b(), color.b(), time.b()));
 
         return dest;
-    }
-
-    pub fn reserveSortKey(self: *RenderGroup) u16 {
-        std.debug.assert(self.commands.last_used_manual_sort_key < std.math.maxInt(u16));
-        self.commands.last_used_manual_sort_key += 1;
-        const result: u16 = @intCast(self.commands.last_used_manual_sort_key);
-        return result;
     }
 
     pub fn pushBitmap(
@@ -688,12 +682,8 @@ pub const RenderGroup = extern struct {
         focal_length: f32,
     ) u32 {
         var result: u32 = 0;
-        const size = @sizeOf(RenderEntryClipRect);
-        const push: PushBufferResult = self.pushBuffer(size);
 
-        if (push.header) |header| {
-            const rect: *RenderEntryClipRect = @ptrCast(@alignCast(header));
-
+        if (self.pushRenderElement(RenderEntryClipRect)) |rect| {
             result = self.commands.clip_rect_count;
             self.commands.clip_rect_count += 1;
 

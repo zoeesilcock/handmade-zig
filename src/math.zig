@@ -17,6 +17,7 @@ pub const Rectangle3 = Rectangle3Type(f32);
 
 pub const Matrix2x2 = MatrixType(2, 2);
 pub const Matrix3x3 = MatrixType(3, 3);
+pub const Matrix4x4 = MatrixType(4, 4);
 
 fn Vector2Type(comptime ScalarType: type) type {
     return extern struct {
@@ -907,9 +908,14 @@ fn RectangleShared(
 
 fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int) type {
     return extern struct {
-        const VectorType = if (row_count == 2 and col_count == 2) Vector2Type(f32) else Vector3Type(f32);
+        const VectorType =
+            if (row_count != col_count) unreachable
+            else if (row_count == 2) Vector2Type(f32)
+            else if (row_count == 3) Vector3Type(f32)
+            else if (row_count == 4) Vector4Type(f32);
 
-        values: [row_count]VectorType,
+        // Row major storage.
+        values: [row_count]VectorType = [1]VectorType{.zero()} ** row_count,
 
         const Self = @This();
 
@@ -921,6 +927,99 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             }
 
             return result;
+        }
+
+        pub inline fn times(self: Self, b: Self) Self {
+            var result = Self{};
+
+            for (0..row_count) |r| { // Rows of self.
+                for (0..col_count) |c| { // Columns of b.
+                    for (0..col_count) |i| { // Columns of self, and rows of b.
+                        result.values[r].values[c] = self.values[r][i] * b.values[i][c];
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        pub inline fn identity() Self {
+            var result: Self = .{};
+
+            for (0..row_count) |r| {
+                result.values[r].values[r] = 1;
+            }
+
+            return result;
+        }
+
+        pub inline fn xRotation(angle: f32) Matrix4x4 {
+            const c = @cos(angle);
+            const s = @sin(angle);
+            return .{
+                .values = .{
+                    .new(1, 0, 0, 0),
+                    .new(0, c, -s, 0),
+                    .new(0, s, c, 0),
+                    .new(0, 0, 0, 1),
+                },
+            };
+        }
+
+        pub inline fn yRotation(angle: f32) Matrix4x4 {
+            const c = @cos(angle);
+            const s = @sin(angle);
+            return .{
+                .values = .{
+                    .new(c, 0, s, 0),
+                    .new(0, 1, 0, 0),
+                    .new(-s, 0, c, 0),
+                    .new(0, 0, 0, 1),
+                },
+            };
+        }
+
+        pub inline fn zRotation(angle: f32) Matrix4x4 {
+            const c = @cos(angle);
+            const s = @sin(angle);
+            return .{
+                .values = .{
+                    .new(c, -s, 0, 0),
+                    .new(s, c, 0, 0),
+                    .new(0, 0, 1, 0),
+                    .new(0, 0, 0, 1),
+                },
+            };
+        }
+
+        pub inline fn transpose(self: Self) Self {
+            var result: Self = .{};
+
+            for (0..row_count) |j| {
+                for (0..col_count) |i| {
+                    result.values[j].values[i] = self.values[i].values[j];
+                }
+            }
+
+            return result;
+        }
+
+        pub inline fn projection(aspect_width_over_height: f32, one_over_focal_length: f32) Matrix4x4 {
+            const a: f32 = 1;
+            const b: f32 = aspect_width_over_height;
+            const c: f32 = one_over_focal_length;
+            return .{
+                .values = .{
+                    .new(a, 0, 0, 0),
+                    .new(0, b, 0, 0),
+                    .new(0, 0, 1, 0),
+                    .new(0, 0, c, 0),
+                },
+            };
+        }
+
+        pub inline fn toGL(self: Self) *const f32 {
+            return @ptrCast(&self.values);
         }
     };
 }

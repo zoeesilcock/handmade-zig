@@ -883,13 +883,11 @@ pub const RenderCommands = extern struct {
     height: u32 = 0,
 
     max_push_buffer_size: u32,
-    sort_entry_count: u32,
     push_buffer_base: [*]u8,
     push_buffer_data_at: [*]u8,
 
     clear_color: Color,
 
-    last_used_manual_sort_key: u32 = 0,
     max_render_target_index: u32 = 0,
 
     clip_rect_count: u32 = 0,
@@ -912,9 +910,8 @@ pub fn initializeRenderCommands(
         .height = height,
 
         .max_push_buffer_size = max_push_buffer_size,
-        .sort_entry_count = 0,
         .push_buffer_base = @ptrCast(push_buffer),
-        .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer) + max_push_buffer_size),
+        .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer)),
 
         .clear_color = .black(),
     };

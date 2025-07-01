@@ -60,6 +60,7 @@ const Vector3 = math.Vector3;
 const Color = math.Color;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
+const Matrix4x4 = math.Matrix4x4;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
 const SortSpriteBound = render.SortSpriteBound;
@@ -278,24 +279,23 @@ pub fn renderCommands(
 
     var clip_rect_index: u32 = 0xffffffff;
     var current_render_target_index: u32 = 0xffffffff;
-    // TODO: Make the loop work like it did before (need to have the headers push in order again!)
-    if (false) {
-        const header_offset: u32 = 0;
-        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + header_offset[0]));
+    var header_at: [*]u8 = commands.push_buffer_base;
+    while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) : (header_at += @sizeOf(RenderEntryHeader)) {
+        const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
         const alignment: usize = switch (header.type) {
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
             .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
             .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
-            else => {
-                unreachable;
-            },
+            .RenderEntryClipRect => @alignOf(RenderEntryClipRect),
         };
 
         const header_address = @intFromPtr(header);
         const data_address = header_address + @sizeOf(RenderEntryHeader);
         const aligned_address = std.mem.alignForward(usize, data_address, alignment);
         const data: *anyopaque = @ptrFromInt(aligned_address);
+
+        header_at += aligned_address - data_address;
 
         if (use_render_targets or
             prep.clip_rects[header.clip_rect_index].render_target_index <= max_render_target_index)
@@ -308,18 +308,13 @@ pub fn renderCommands(
                 const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
 
                 gl.glMatrixMode(gl.GL_PROJECTION);
-                const a: f32 = 1;
-                const b = math.safeRatio1(
+                const b: f32 = math.safeRatio1(
                     @as(f32, @floatFromInt(commands.width)),
                     @as(f32, @floatFromInt(commands.height)),
                 );
-                const projection: []const f32 = &.{
-                    a, 0, 0, 0,
-                    0, b, 0, 0,
-                    0, 0, 1, (1 / clip.focal_length),
-                    0, 0, 0, 0,
-                };
-                gl.glLoadMatrixf(@ptrCast(projection));
+                const c: f32 = (1 / clip.focal_length);
+                const projection: Matrix4x4 = .projection(b, c);
+                gl.glLoadMatrixf(@ptrCast(projection.transpose().toGL()));
 
                 var clip_rect: Rectangle2i = clip.rect;
 
@@ -358,6 +353,7 @@ pub fn renderCommands(
 
             switch (header.type) {
                 .RenderEntryBitmap => {
+                    header_at += @sizeOf(RenderEntryBitmap);
                     var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                     if (entry.bitmap) |bitmap| {
                         if (bitmap.width > 0 and bitmap.height > 0) {
@@ -405,6 +401,7 @@ pub fn renderCommands(
                     }
                 },
                 .RenderEntryRectangle => {
+                    header_at += @sizeOf(RenderEntryRectangle);
                     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                     gl.glDisable(gl.GL_TEXTURE_2D);
                     drawRectangle(entry.position, entry.position.plus(entry.dimension.toVector3(0)), entry.premultiplied_color, null, null);
@@ -419,9 +416,11 @@ pub fn renderCommands(
                     gl.glEnable(gl.GL_TEXTURE_2D);
                 },
                 .RenderEntrySaturation => {
+                    header_at += @sizeOf(RenderEntrySaturation);
                     // const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
                 },
                 .RenderEntryBlendRenderTarget => {
+                    header_at += @sizeOf(RenderEntryBlendRenderTarget);
                     const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
                     if (use_render_targets) {
                         gl.glBindTexture(gl.GL_TEXTURE_2D, frame_buffer_textures[entry.source_target_index]);
@@ -436,8 +435,9 @@ pub fn renderCommands(
                         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
                     }
                 },
-                else => {
-                    unreachable;
+                .RenderEntryClipRect => {
+                    // These are being handled elsewhere currently.
+                    header_at += @sizeOf(RenderEntryClipRect);
                 },
             }
         }
