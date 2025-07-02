@@ -42,6 +42,7 @@ const Color3 = math.Color3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const Rectangle2i = math.Rectangle2i;
+const Matrix4x4 = math.Matrix4x4;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
 const TimedBlock = debug_interface.TimedBlock;
@@ -85,7 +86,7 @@ pub const RenderEntryClipRect = extern struct {
     next: ?*RenderEntryClipRect,
     rect: Rectangle2i,
     render_target_index: u32,
-    focal_length: f32,
+    proj: Matrix4x4,
 };
 
 pub const TransientClipRect = extern struct {
@@ -697,7 +698,13 @@ pub const RenderGroup = extern struct {
             rect.next = null;
 
             rect.rect = Rectangle2i.new(x, y, x + w, y + h);
-            rect.focal_length = focal_length;
+
+            const b: f32 = math.safeRatio1(
+                @as(f32, @floatFromInt(self.commands.width)),
+                @as(f32, @floatFromInt(self.commands.height)),
+            );
+            const c: f32 = (1 / focal_length);
+            rect.proj = .projection(b, c);
 
             rect.render_target_index = render_target_index;
             if (self.commands.max_render_target_index < render_target_index) {

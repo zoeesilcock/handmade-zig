@@ -308,13 +308,7 @@ pub fn renderCommands(
                 const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
 
                 gl.glMatrixMode(gl.GL_PROJECTION);
-                const b: f32 = math.safeRatio1(
-                    @as(f32, @floatFromInt(commands.width)),
-                    @as(f32, @floatFromInt(commands.height)),
-                );
-                const c: f32 = (1 / clip.focal_length);
-                const projection: Matrix4x4 = .projection(b, c);
-                gl.glLoadMatrixf(@ptrCast(projection.transpose().toGL()));
+                gl.glLoadMatrixf(@ptrCast(clip.proj.transpose().toGL()));
 
                 var clip_rect: Rectangle2i = clip.rect;
 

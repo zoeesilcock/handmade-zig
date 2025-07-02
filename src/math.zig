@@ -909,15 +909,40 @@ fn RectangleShared(
 fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int) type {
     return extern struct {
         const VectorType =
-            if (row_count != col_count) unreachable
-            else if (row_count == 2) Vector2Type(f32)
-            else if (row_count == 3) Vector3Type(f32)
-            else if (row_count == 4) Vector4Type(f32);
+            if (row_count != col_count) unreachable else if (row_count == 2) Vector2Type(f32) else if (row_count == 3) Vector3Type(f32) else if (row_count == 4) Vector4Type(f32);
 
         // Row major storage.
         values: [row_count]VectorType = [1]VectorType{.zero()} ** row_count,
 
         const Self = @This();
+
+        pub fn columns3x3(x: Vector3, y: Vector3, z: Vector3) Matrix4x4 {
+            return .{
+                .values = .{
+                    .new(x.x(), y.x(), z.x(), 0),
+                    .new(x.y(), y.y(), z.y(), 0),
+                    .new(x.z(), y.z(), z.z(), 0),
+                    .new(0, 0, 0, 1),
+                },
+            };
+        }
+
+        pub fn rows3x3(x: Vector3, y: Vector3, z: Vector3) Matrix4x4 {
+            return .{
+                .values = .{
+                    .new(x.x(), x.y(), x.z(), 0),
+                    .new(y.x(), y.y(), y.z(), 0),
+                    .new(z.x(), z.y(), z.z(), 0),
+                    .new(0, 0, 0, 1),
+                },
+            };
+        }
+
+        pub fn cameraTransform(x: Vector3, y: Vector3, z: Vector3, p: Vector3) Matrix4x4 {
+            var r: Matrix4x4 = .rows3x3(x, y, z);
+            r = r.translate(r.timesV(p).negated());
+            return r;
+        }
 
         pub inline fn plus(self: Self, b: Self) Self {
             var result = self;
@@ -941,6 +966,32 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             }
 
             return result;
+        }
+
+        pub inline fn timesV(self: Self, w: VectorType, opt_pw: ?VectorType.ScalarType) VectorType.ScalarType {
+            var r: VectorType = .zero();
+            const pw: VectorType.ScalarType = opt_pw orelse 1;
+
+            _ = r.setX(
+                w.x() * self.values[0].values[0] +
+                w.y() * self.values[0].values[1] +
+                w.z() * self.values[0].values[2] +
+                pw * self.values[0].values[3]
+            );
+            _ = r.setY(
+                w.x() * self.values[1].values[0] +
+                w.y() * self.values[1].values[1] +
+                w.z() * self.values[1].values[2] +
+                pw * self.values[1].values[3]
+            );
+            _ = r.setZ(
+                w.x() * self.values[2].values[0] +
+                w.y() * self.values[2].values[1] +
+                w.z() * self.values[2].values[2] +
+                pw * self.values[2].values[3]
+            );
+
+            return r;
         }
 
         pub inline fn identity() Self {
@@ -1016,6 +1067,30 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
                     .new(0, 0, c, 0),
                 },
             };
+        }
+
+        pub inline fn translate(self: Matrix4x4, t: Vector3) Matrix4x4 {
+            var result = self;
+
+            result.values[0][3] += t.x();
+            result.values[1][3] += t.y();
+            result.values[2][3] += t.z();
+
+            return result;
+        }
+
+        pub inline fn getColumn(self: Self, column: usize) VectorType {
+            var result: VectorType = .zero();
+
+            for (0..row_count) |r| {
+                result.values[r] = self.values[r][column];
+            }
+
+            return result;
+        }
+
+        pub inline fn getRow(self: Self, row: usize) VectorType {
+            return self.values[row];
         }
 
         pub inline fn toGL(self: Self) *const f32 {
