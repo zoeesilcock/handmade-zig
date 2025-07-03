@@ -85,8 +85,6 @@ pub const Entity = extern struct {
     brain_slot: BrainSlot = .{},
     brain_id: BrainId = .{},
 
-    z_layer: i32,
-
     //
     // Transient
     //
@@ -358,79 +356,16 @@ fn debugPickEntity(
 }
 
 pub fn updateAndRenderEntities(
-    typical_floor_height: f32,
     sim_region: *SimRegion,
     delta_time: f32,
     // Optional...
     opt_render_group: ?*RenderGroup,
-    opt_draw_buffer: ?*asset.LoadedBitmap,
     background_color: Color,
     particle_cache: ?*ParticleCache,
     opt_assets: ?*Assets,
 ) void {
     TimedBlock.beginFunction(@src(), .UpdateAndRenderEntities);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderEntities);
-
-    var camera_position: Vector3 = .zero();
-    if (opt_render_group) |render_group| {
-        camera_position = render_group.camera_transform.camera_position;
-    }
-    const minimum_level_index: i32 = -4;
-    const maximum_level_index: i32 = 1;
-    var fog_amount: [maximum_level_index - minimum_level_index + 1]f32 = undefined;
-    var test_alpha: f32 = 0;
-
-    const fade_top_end_z: f32 = 1 * typical_floor_height;
-    const fade_top_start_z: f32 = 0.5 * typical_floor_height;
-    const fade_bottom_start_z: f32 = -1 * typical_floor_height;
-    const fade_bottom_end_z: f32 = -4 * typical_floor_height;
-    var cam_rel_ground_z: [fog_amount.len]f32 = undefined;
-
-    var level_index: u32 = 0;
-    while (level_index < fog_amount.len) : (level_index += 1) {
-        const relative_layer_index: i32 = minimum_level_index + @as(i32, @intCast(level_index));
-        const camera_relative_ground_z: f32 =
-            @as(f32, @floatFromInt(relative_layer_index)) * typical_floor_height - (camera_position.z() - 11);
-        cam_rel_ground_z[level_index] = camera_relative_ground_z;
-
-        test_alpha = math.clamp01MapToRange(
-            fade_top_end_z,
-            fade_top_start_z,
-            camera_relative_ground_z,
-        );
-        fog_amount[level_index] = math.clamp01MapToRange(
-            fade_bottom_start_z,
-            fade_bottom_end_z,
-            camera_relative_ground_z,
-        );
-    }
-
-    var stop_level_index: u32 = maximum_level_index - 1;
-    const alpha_floor_render_target: u32 = 1;
-    var normal_floor_clip_rect: u32 = 0;
-    var alpha_floor_clip_rect: u32 = 0;
-
-    if (opt_render_group) |render_group| {
-        if (opt_draw_buffer) |draw_buffer| {
-            normal_floor_clip_rect = render_group.current_clip_rect_index;
-            alpha_floor_clip_rect = render_group.current_clip_rect_index;
-
-            if (test_alpha > 0) {
-                stop_level_index = maximum_level_index;
-                alpha_floor_clip_rect =
-                    render_group.pushClipRect(
-                        0,
-                        0,
-                        draw_buffer.width,
-                        draw_buffer.height,
-                        alpha_floor_render_target,
-                        render_group.camera_transform.focal_length,
-                    );
-            }
-        }
-    }
-
-    var current_absolute_z_layer: i32 = if (sim_region.entity_count > 0) sim_region.entities[0].z_layer else 0;
 
     var entity_index: u32 = 0;
     while (entity_index < sim_region.entity_count) : (entity_index += 1) {
@@ -479,10 +414,7 @@ pub fn updateAndRenderEntities(
                         entity.movement_mode = .Planted;
                         entity.bob_delta_time = -2;
 
-                        const camera_relative_ground_z: f32 =
-                            @as(f32, @floatFromInt(entity.z_layer - sim_region.origin.chunk_z)) *
-                            typical_floor_height - (camera_position.z() - 11);
-                        particles.spawnFire(particle_cache, entity.position, entity.z_layer, camera_relative_ground_z);
+                        particles.spawnFire(particle_cache, entity.position);
                     }
 
                     entity.movement_time += 4 * delta_time;
@@ -543,129 +475,108 @@ pub fn updateAndRenderEntities(
                 var entity_transform = ObjectTransform.defaultUpright();
                 entity_transform.offset_position = entity.getGroundPoint();
 
-                const relative_layer: i32 = entity.z_layer - sim_region.origin.chunk_z;
+                entity_transform.color = background_color;
+                entity_transform.color_time = Color.new(1, 1, 1, 0).scaledTo(0);
 
-                entity_transform.manual_sort = entity.manual_sort;
-                entity_transform.chunk_z = entity.z_layer;
+                var match_vector = asset.AssetVector{};
+                match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
+                var weight_vector = asset.AssetVector{};
+                weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
 
-                if (relative_layer >= minimum_level_index and relative_layer <= stop_level_index) {
-                    if (current_absolute_z_layer != entity.z_layer) {
-                        std.debug.assert(current_absolute_z_layer < entity.z_layer);
-                        current_absolute_z_layer = entity.z_layer;
-                        render_group.pushSortBarrier(false);
+                // TODO:
+                // * This is where articulated figures will be happening, so we need to have this code look correct in
+                // terms if how we want rendering submitted.
+                // * It should begin by creating a sort key for the entire armature, and then it should be able to
+                // guarantee that each piece will be renndered in the order it was submitted after being sorted into
+                // the scene at large by the key.
+                //
+                // * This should eliminate the need for RenderGroup-side sort bias as well, since now the user is in
+                // control of setting the sort value specifically.
+                //
+                // * This also means we should be able to call a sort key transform routine that does the entity
+                // basis transform and then reports the sort key to us.
+                //
+                // * And probably, we will want the sort keys to be u32's now, so we'll convert from float at this
+                // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
+
+                var piece_index: u32 = 0;
+                while (piece_index < entity.piece_count) : (piece_index += 1) {
+                    const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
+                    var bitmap_id: ?BitmapId = null;
+                    if (opt_assets) |assets| {
+                        bitmap_id = assets.getBestMatchBitmap(piece.asset_type, &match_vector, &weight_vector);
                     }
 
-                    const layer_index: u32 = @intCast(relative_layer - minimum_level_index);
-                    if (relative_layer == maximum_level_index) {
-                        render_group.current_clip_rect_index = alpha_floor_clip_rect;
-                        entity_transform.color_time = .new(0, 0, 0, 0);
-                    } else {
-                        render_group.current_clip_rect_index = normal_floor_clip_rect;
-                        entity_transform.color = background_color;
-                        entity_transform.color_time = Color.new(1, 1, 1, 0).scaledTo(fog_amount[layer_index]);
-                    }
-                    entity_transform.floor_z = cam_rel_ground_z[layer_index];
-
-                    var match_vector = asset.AssetVector{};
-                    match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
-                    var weight_vector = asset.AssetVector{};
-                    weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
-
-                    // TODO:
-                    // * This is where articulated figures will be happening, so we need to have this code look correct in
-                    // terms if how we want rendering submitted.
-                    // * It should begin by creating a sort key for the entire armature, and then it should be able to
-                    // guarantee that each piece will be renndered in the order it was submitted after being sorted into
-                    // the scene at large by the key.
-                    //
-                    // * This should eliminate the need for RenderGroup-side sort bias as well, since now the user is in
-                    // control of setting the sort value specifically.
-                    //
-                    // * This also means we should be able to call a sort key transform routine that does the entity
-                    // basis transform and then reports the sort key to us.
-                    //
-                    // * And probably, we will want the sort keys to be u32's now, so we'll convert from float at this
-                    // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
-
-                    var piece_index: u32 = 0;
-                    while (piece_index < entity.piece_count) : (piece_index += 1) {
-                        const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
-                        var bitmap_id: ?BitmapId = null;
-                        if (opt_assets) |assets| {
-                            bitmap_id = assets.getBestMatchBitmap(piece.asset_type, &match_vector, &weight_vector);
-                        }
-
-                        var x_axis: Vector2 = .new(1, 0);
-                        var y_axis: Vector2 = .new(0, 1);
-                        if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.AxesDeform) != 0) {
-                            x_axis = entity.x_axis;
-                            y_axis = entity.y_axis;
-                        }
-
-                        var bob_time: f32 = 0;
-                        var offset: Vector3 = .zero();
-                        if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.BobOffset) != 0) {
-                            bob_time = entity.bob_time;
-                            offset = entity.floor_displace.toVector3(0);
-                            _ = offset.setY(offset.y() + bob_time);
-                        }
-
-                        render_group.pushBitmapId(
-                            &entity_transform,
-                            bitmap_id,
-                            piece.height,
-                            piece.offset.plus(offset),
-                            piece.color,
-                            null,
-                            x_axis,
-                            y_axis,
-                        );
+                    var x_axis: Vector2 = .new(1, 0);
+                    var y_axis: Vector2 = .new(0, 1);
+                    if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.AxesDeform) != 0) {
+                        x_axis = entity.x_axis;
+                        y_axis = entity.y_axis;
                     }
 
-                    drawHitPoints(entity, render_group, &entity_transform);
+                    var bob_time: f32 = 0;
+                    var offset: Vector3 = .zero();
+                    if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.BobOffset) != 0) {
+                        bob_time = entity.bob_time;
+                        offset = entity.floor_displace.toVector3(0);
+                        _ = offset.setY(offset.y() + bob_time);
+                    }
 
-                    entity_transform.upright = false;
-                    {
-                        if (global_config.Simulation_VisualizeCollisionVolumes) {
-                            var volume_index: u32 = 0;
-                            while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                                const volume = entity.collision.volumes[volume_index];
-                                render_group.pushRectangleOutline(
-                                    &entity_transform,
-                                    volume.dimension.xy(),
-                                    volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                                    Color.new(0, 0.5, 1, 1),
-                                    0.1,
-                                );
-                            }
-                        }
+                    render_group.pushBitmapId(
+                        &entity_transform,
+                        bitmap_id,
+                        piece.height,
+                        piece.offset.plus(offset),
+                        piece.color,
+                        null,
+                        x_axis,
+                        y_axis,
+                    );
+                }
 
-                        var traversable_index: u32 = 0;
-                        while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
-                            const traversable = entity.traversables[traversable_index];
-                            var color: Color = .new(0.05, 0.25, 0.05, 1);
-                            if (entity.auto_boost_to.getTraversable() != null) {
-                                color = .new(1, 0, 1, 1);
-                            }
-                            if (traversable.occupier != null) {
-                                color = .new(1, 0.5, 0, 1);
-                            }
+                drawHitPoints(entity, render_group, &entity_transform);
 
-                            render_group.pushRectangle(
+                entity_transform.upright = false;
+                {
+                    if (global_config.Simulation_VisualizeCollisionVolumes) {
+                        var volume_index: u32 = 0;
+                        while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+                            const volume = entity.collision.volumes[volume_index];
+                            render_group.pushRectangleOutline(
                                 &entity_transform,
-                                Vector2.new(1.4, 1.4),
-                                traversable.position,
-                                color,
+                                volume.dimension.xy(),
+                                volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+                                Color.new(0, 0.5, 1, 1),
+                                0.1,
                             );
-
-                            // render_group.pushRectangleOutline(
-                            //     entity_transform,
-                            //     Vector2.new(1.2, 1.2),
-                            //     traversable.position,
-                            //     Color.new(0, 0, 0, 1),
-                            //     0.1,
-                            // );
                         }
+                    }
+
+                    var traversable_index: u32 = 0;
+                    while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
+                        const traversable = entity.traversables[traversable_index];
+                        var color: Color = .new(0.05, 0.25, 0.05, 1);
+                        if (entity.auto_boost_to.getTraversable() != null) {
+                            color = .new(1, 0, 1, 1);
+                        }
+                        if (traversable.occupier != null) {
+                            color = .new(1, 0.5, 0, 1);
+                        }
+
+                        render_group.pushRectangle(
+                            &entity_transform,
+                            Vector2.new(1.4, 1.4),
+                            traversable.position,
+                            color,
+                        );
+
+                        // render_group.pushRectangleOutline(
+                        //     entity_transform,
+                        //     Vector2.new(1.2, 1.2),
+                        //     traversable.position,
+                        //     Color.new(0, 0, 0, 1),
+                        //     0.1,
+                        // );
                     }
                 }
 
@@ -673,13 +584,6 @@ pub fn updateAndRenderEntities(
                     debugPickEntity(entity, render_group, &entity_transform);
                 }
             }
-        }
-    }
-
-    if (opt_render_group) |render_group| {
-        render_group.current_clip_rect_index = normal_floor_clip_rect;
-        if (test_alpha > 0) {
-            render_group.pushBlendRenderTarget(test_alpha, alpha_floor_render_target);
         }
     }
 }

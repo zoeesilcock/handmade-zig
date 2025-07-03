@@ -940,7 +940,7 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
 
         pub fn cameraTransform(x: Vector3, y: Vector3, z: Vector3, p: Vector3) Matrix4x4 {
             var r: Matrix4x4 = .rows3x3(x, y, z);
-            r = r.translate(r.timesV(p).negated());
+            r = r.translate(r.timesV(p, null).negated());
             return r;
         }
 
@@ -960,7 +960,7 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             for (0..row_count) |r| { // Rows of self.
                 for (0..col_count) |c| { // Columns of b.
                     for (0..col_count) |i| { // Columns of self, and rows of b.
-                        result.values[r].values[c] = self.values[r][i] * b.values[i][c];
+                        result.values[r].values[c] += self.values[r].values[i] * b.values[i].values[c];
                     }
                 }
             }
@@ -968,28 +968,22 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             return result;
         }
 
-        pub inline fn timesV(self: Self, w: VectorType, opt_pw: ?VectorType.ScalarType) VectorType.ScalarType {
-            var r: VectorType = .zero();
-            const pw: VectorType.ScalarType = opt_pw orelse 1;
+        pub inline fn timesV(self: Matrix4x4, w: Vector3, opt_pw: ?f32) Vector3 {
+            var r: Vector3 = .zero();
+            const pw: f32 = opt_pw orelse 1;
 
-            _ = r.setX(
-                w.x() * self.values[0].values[0] +
+            _ = r.setX(w.x() * self.values[0].values[0] +
                 w.y() * self.values[0].values[1] +
                 w.z() * self.values[0].values[2] +
-                pw * self.values[0].values[3]
-            );
-            _ = r.setY(
-                w.x() * self.values[1].values[0] +
+                pw * self.values[0].values[3]);
+            _ = r.setY(w.x() * self.values[1].values[0] +
                 w.y() * self.values[1].values[1] +
                 w.z() * self.values[1].values[2] +
-                pw * self.values[1].values[3]
-            );
-            _ = r.setZ(
-                w.x() * self.values[2].values[0] +
+                pw * self.values[1].values[3]);
+            _ = r.setZ(w.x() * self.values[2].values[0] +
                 w.y() * self.values[2].values[1] +
                 w.z() * self.values[2].values[2] +
-                pw * self.values[2].values[3]
-            );
+                pw * self.values[2].values[3]);
 
             return r;
         }
@@ -1055,16 +1049,29 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             return result;
         }
 
-        pub inline fn projection(aspect_width_over_height: f32, one_over_focal_length: f32) Matrix4x4 {
+        pub inline fn perspectiveProjection(aspect_width_over_height: f32, focal_length: f32) Matrix4x4 {
             const a: f32 = 1;
             const b: f32 = aspect_width_over_height;
-            const c: f32 = one_over_focal_length;
+            const c: f32 = focal_length;
+            return .{
+                .values = .{
+                    .new(a * c, 0, 0, 0),
+                    .new(0, b * c, 0, 0),
+                    .new(0, 0, 1, 0),
+                    .new(0, 0, -1, 0),
+                },
+            };
+        }
+
+        pub inline fn orthographicProjection(aspect_width_over_height: f32) Matrix4x4 {
+            const a: f32 = 1;
+            const b: f32 = aspect_width_over_height;
             return .{
                 .values = .{
                     .new(a, 0, 0, 0),
                     .new(0, b, 0, 0),
                     .new(0, 0, 1, 0),
-                    .new(0, 0, c, 0),
+                    .new(0, 0, 0, 1),
                 },
             };
         }
@@ -1072,18 +1079,18 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
         pub inline fn translate(self: Matrix4x4, t: Vector3) Matrix4x4 {
             var result = self;
 
-            result.values[0][3] += t.x();
-            result.values[1][3] += t.y();
-            result.values[2][3] += t.z();
+            result.values[0].values[3] += t.x();
+            result.values[1].values[3] += t.y();
+            result.values[2].values[3] += t.z();
 
             return result;
         }
 
-        pub inline fn getColumn(self: Self, column: usize) VectorType {
-            var result: VectorType = .zero();
+        pub inline fn getColumn(self: Matrix4x4, column: usize) Vector3 {
+            var result: Vector3 = .zero();
 
-            for (0..row_count) |r| {
-                result.values[r] = self.values[r][column];
+            for (0..row_count - 1) |r| {
+                result.values[r] = self.values[r].values[column];
             }
 
             return result;

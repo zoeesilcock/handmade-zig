@@ -50,9 +50,6 @@ const Particle4x = extern struct {
     ddp: V3_4x,
     c: V4_4x,
     dc: V4_4x,
-
-    chunk_z: i32,
-    floor_z: f32,
     pad: [2]u32,
 };
 
@@ -85,7 +82,7 @@ pub fn updateAndRenderParticleSystem(
     );
 }
 
-pub fn spawnFire(opt_cache: ?*ParticleCache, at_position_in: Vector3, chunk_z: i32, floor_z: f32) void {
+pub fn spawnFire(opt_cache: ?*ParticleCache, at_position_in: Vector3) void {
     if (opt_cache) |cache| {
         const system: *ParticleSystem = &cache.fire_system;
         const entropy: *RandomSeries = &cache.particle_entropy;
@@ -122,9 +119,6 @@ pub fn spawnFire(opt_cache: ?*ParticleCache, at_position_in: Vector3, chunk_z: i
         a.dc.g = @splat(0);
         a.dc.b = @splat(0);
         a.dc.a = @splat(-1);
-
-        a.chunk_z = chunk_z;
-        a.floor_z = floor_z;
     }
 }
 
@@ -265,9 +259,6 @@ fn updateAndRenderFire(
         // }
 
         // Render particle.
-        transform.chunk_z = a.chunk_z;
-        transform.floor_z = a.floor_z;
-
         var sub_index: u32 = 0;
         while (sub_index < 4) : (sub_index += 1) {
             const p: Vector3 = .new(a.p.x[sub_index], a.p.y[sub_index], a.p.z[sub_index]);

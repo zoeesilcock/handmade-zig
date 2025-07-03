@@ -395,7 +395,6 @@ pub fn beginWorldChange(
                                 dest.* = source.*;
 
                                 dest.id = id;
-                                dest.z_layer = chunk_z;
 
                                 dest.manual_sort = .{};
 

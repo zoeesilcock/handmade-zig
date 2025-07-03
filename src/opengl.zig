@@ -300,7 +300,7 @@ pub fn renderCommands(
         if (use_render_targets or
             prep.clip_rects[header.clip_rect_index].render_target_index <= max_render_target_index)
         {
-            if (clip_rect_index != header.clip_rect_index) {
+            if (header.type != .RenderEntryClipRect and clip_rect_index != header.clip_rect_index) {
                 clip_rect_index = header.clip_rect_index;
 
                 std.debug.assert(clip_rect_index < commands.clip_rect_count);

@@ -27,9 +27,12 @@ const Vector3 = math.Vector3;
 const Rectangle3 = math.Rectangle3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
+const Matrix4x4 = math.Matrix4x4;
 const Color = math.Color;
 const State = shared.State;
 const ControlledHero = shared.ControlledHero;
+const GameInputMouseButton = shared.GameInputMouseButton;
+const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const LoadedBitmap = asset.LoadedBitmap;
 const PlayingSound = audio.PlayingSound;
@@ -39,7 +42,6 @@ const ObjectTransform = rendergroup.ObjectTransform;
 const TransientClipRect = rendergroup.TransientClipRect;
 const CameraParams = render.CameraParams;
 const ParticleCache = particles.ParticleCache;
-const TransientState = shared.TransientState;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
@@ -99,6 +101,11 @@ pub const GameModeWorld = struct {
 
     creation_region: ?*SimRegion,
     last_used_entity_storage_index: u32,
+
+    last_mouse_position: Vector2,
+    debug_camera_pitch: f32,
+    debug_camera_orbit: f32,
+    debug_camera_dolly: f32,
 };
 
 const WorldSim = struct {
@@ -417,7 +424,6 @@ fn beginSim(
 
 fn simulate(
     world_sim: *WorldSim,
-    typical_floor_height: f32,
     game_entropy: *random.Series,
     delta_time: f32,
     // Optional...
@@ -427,7 +433,6 @@ fn simulate(
     opt_input: ?*shared.GameInput,
     opt_render_group: ?*RenderGroup,
     particle_cache: ?*ParticleCache,
-    draw_buffer: ?*asset.LoadedBitmap,
 ) void {
     const sim_region: *SimRegion = world_sim.sim_region;
 
@@ -447,11 +452,9 @@ fn simulate(
     TimedBlock.endBlock(@src(), .ExecuteBrains);
 
     entities.updateAndRenderEntities(
-        typical_floor_height,
         sim_region,
         delta_time,
         opt_render_group,
-        draw_buffer,
         background_color,
         particle_cache,
         assets,
@@ -488,11 +491,9 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
     );
     simulate(
         &world_sim,
-        work.world_mode.typical_floor_height,
         &work.world_mode.world.game_entropy,
         work.delta_time,
         .white(),
-        null,
         null,
         null,
         null,
@@ -517,13 +518,35 @@ pub fn updateAndRenderWorld(
 
     const result = false;
 
-    const camera: CameraParams = .get(draw_buffer.width, 0.3);
+    var camera_offset: Vector3 = world_mode.camera.offset;
+    const camera: CameraParams = .get(draw_buffer.width, 0.6);
     const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
+    const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
+    if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Left.toInt()].isDown()) {
+        const rotation_speed: f32 = 0.001 * math.PI32;
+        world_mode.debug_camera_orbit -= rotation_speed * d_mouse_p.x();
+        world_mode.debug_camera_pitch += rotation_speed * d_mouse_p.y();
+    } else if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Middle.toInt()].isDown()) {
+        const zoom_speed: f32 = (camera_offset.z() + world_mode.debug_camera_dolly) * 0.005;
+        world_mode.debug_camera_dolly -= zoom_speed * d_mouse_p.y();
+    }
+    world_mode.last_mouse_position = mouse_position;
     DebugInterface.debugSetMousePosition(mouse_position);
 
-    render_group.perspectiveMode(
+    var camera_o: Matrix4x4 =
+        Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
+    _ = camera_offset.setZ(camera_offset.z() + world_mode.debug_camera_dolly);
+    const camera_ot: Vector3 = camera_o.timesV(camera_offset, null);
+    var camera_c: Matrix4x4 = .cameraTransform(
+        camera_o.getColumn(0),
+        camera_o.getColumn(1),
+        camera_o.getColumn(2),
+        camera_ot,
+    );
+    render_group.setCameraTransform(
         camera.focal_length,
-        world_mode.camera.offset,
+        &camera_c,
+        false,
     );
 
     // Clear background.
@@ -587,7 +610,6 @@ pub fn updateAndRenderWorld(
 
         simulate(
             &world_sim,
-            world_mode.typical_floor_height,
             &world_mode.world.game_entropy,
             input.frame_delta_time,
             background_color,
@@ -596,7 +618,6 @@ pub fn updateAndRenderWorld(
             input,
             render_group,
             world_mode.particle_cache,
-            draw_buffer,
         );
 
         const frame_to_frame_camera_delta_position: Vector3 =

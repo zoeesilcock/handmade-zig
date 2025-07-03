@@ -27,13 +27,13 @@ const std = @import("std");
 ///
 /// * Graphics upgrade
 ///     * Freely rotatable world (for debug).
+///     * Fix unproject! (getCameraRectangleAtTarget)
+///     * Look at orthographic.
 ///     * Turn on z-buffer.
 ///     * Draw the world in a logical way.
 ///         * Stand-up cards for some things.
 ///         * Cubes for other things.
-///     * Fix unproject!
-///     * 3D.
-///         * 3D pipeline.
+///     * Re-enable fog.
 ///     * Particle systems.
 ///         * Bug with sliding relative to the grid during camera offset?
 ///         * How will floor Z's be handled?

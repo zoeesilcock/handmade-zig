@@ -15,6 +15,7 @@ const AssetTagId = file_formats.AssetTagId;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
+const Matrix4x4 = math.Matrix4x4;
 const Color = math.Color;
 const ObjectTransform = rendergroup.ObjectTransform;
 const RenderGroup = rendergroup.RenderGroup;
@@ -369,9 +370,11 @@ fn renderLayeredScene(
     const color = Color.new(scene_fade_value, scene_fade_value, scene_fade_value, 1);
 
     if (opt_render_group) |render_group| {
-        render_group.perspectiveMode(
+        var identity: Matrix4x4 = .identity();
+        render_group.setCameraTransform(
             camera.focal_length,
-            .zero(),
+            &identity,
+            false,
         );
 
         if (scene.layers.len == 0) {
@@ -422,8 +425,7 @@ fn renderLayeredScene(
                     _ = transform.offset_position.setY(position.y() - camera_offset.y());
                 }
 
-                transform.floor_z = position.z() - camera_offset.z();
-                _ = transform.offset_position.setZ(transform.floor_z);
+                _ = transform.offset_position.setZ(camera_offset.z());
 
                 render_group.debug_tag = layer_index;
                 render_group.pushBitmapId(&transform, layer_image, layer.height, Vector3.zero(), color, null, null, null);

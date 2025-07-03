@@ -26,6 +26,7 @@ const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Color = math.Color;
 const Color3 = math.Color3;
+const Matrix4x4 = math.Matrix4x4;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const MemoryArena = memory.MemoryArena;
@@ -198,8 +199,6 @@ pub const DebugState = struct {
 
     // Per-frame storage management.
     first_free_stored_event: ?*DebugStoredEvent,
-
-    render_target: u32 = 0,
 
     root_info_size: u32,
     root_info: [*:0]u8,
@@ -1680,7 +1679,6 @@ fn drawDebugElement(
                 &debug_state.backing_transform,
                 layout_element.bounds,
                 0,
-                debug_state.render_target,
             );
 
             switch (element.type) {
@@ -1744,7 +1742,6 @@ fn drawDebugElement(
                 &debug_state.backing_transform,
                 layout_element.bounds,
                 0,
-                debug_state.render_target,
             );
 
             var opt_viewing_element: ?*DebugElement =
@@ -2221,21 +2218,21 @@ fn debugStart(
     debug_state.font_scale = 1;
     debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
     debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-    debug_state.render_group.orthographicMode();
+    var identity: Matrix4x4 = .identity();
+    debug_state.render_group.setCameraTransform(1, &identity, true);
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();
     debug_state.shadow_transform = ObjectTransform.defaultFlat();
     debug_state.ui_transform = ObjectTransform.defaultFlat();
     debug_state.text_transform = ObjectTransform.defaultFlat();
     debug_state.tooltip_transform = ObjectTransform.defaultFlat();
-    debug_state.backing_transform.chunk_z = 100000;
-    debug_state.shadow_transform.chunk_z = 200000;
-    debug_state.ui_transform.chunk_z = 300000;
-    debug_state.text_transform.chunk_z = 400000;
-    debug_state.tooltip_transform.chunk_z = 500000;
+    _ = debug_state.backing_transform.offset_position.setZ(100000);
+    _ = debug_state.shadow_transform.offset_position.setZ(200000);
+    _ = debug_state.ui_transform.offset_position.setZ(300000);
+    _ = debug_state.text_transform.offset_position.setZ(400000);
+    _ = debug_state.tooltip_transform.offset_position.setZ(500000);
 
     debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
-    debug_state.render_target = 0;
     debug_state.tooltip_count = 0;
 
     if (!debug_state.paused) {
