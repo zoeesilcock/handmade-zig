@@ -1264,12 +1264,17 @@ fn setPixelFormat(window_dc: win32.HDC) void {
             opengl.WGL_SUPPORT_OPENGL_ARB,           win32.GL_TRUE,
             opengl.WGL_DOUBLE_BUFFER_ARB,            win32.GL_TRUE,
             opengl.WGL_PIXEL_TYPE_ARB,               opengl.WGL_TYPE_RGBA_ARB,
+            opengl.WGL_RED_BITS_ARB,                 8,
+            opengl.WGL_GREEN_BITS_ARB,               8,
+            opengl.WGL_BLUE_BITS_ARB,                8,
+            opengl.WGL_ALPHA_BITS_ARB,               8,
+            opengl.WGL_DEPTH_BITS_ARB,               24,
             opengl.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, win32.GL_TRUE,
             0,
         };
 
         if (!opengl_supports_srgb_frame_buffer) {
-            int_attrib_list[10] = 0;
+            int_attrib_list[20] = 0;
         }
 
         if (wglChoosePixelFormatARB(
@@ -1296,6 +1301,7 @@ fn setPixelFormat(window_dc: win32.HDC) void {
             },
             .cColorBits = 32,
             .cAlphaBits = 8,
+            .cDepthBits = 24,
             .iLayerType = win32.PFD_MAIN_PLANE,
             // Clear the rest to zero.
             .cRedBits = 0,
@@ -1310,7 +1316,6 @@ fn setPixelFormat(window_dc: win32.HDC) void {
             .cAccumGreenBits = 0,
             .cAccumBlueBits = 0,
             .cAccumAlphaBits = 0,
-            .cDepthBits = 0,
             .cStencilBits = 0,
             .cAuxBuffers = 0,
             .bReserved = 0,

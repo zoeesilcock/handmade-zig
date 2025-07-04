@@ -1053,11 +1053,23 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             const a: f32 = 1;
             const b: f32 = aspect_width_over_height;
             const c: f32 = focal_length;
+
+            const n: f32 = -0.1; // Near clip plane distance.
+            const f: f32 = 100; // Far clip plaen distance.
+
+            // These are perspective corrected terms, for when you divide by -z.
+            const d: f32 = 2 / (n - f);
+            const e: f32 = (n + f) / (n - f);
+
+            // These are non-perspective corrected terms, for orthographic.
+            // const d: f32 = 1 + (2 * f * n) / (n * (n - f));
+            // const e: f32 = (2 * f * n) / (n - f);
+
             return .{
                 .values = .{
                     .new(a * c, 0, 0, 0),
                     .new(0, b * c, 0, 0),
-                    .new(0, 0, 1, 0),
+                    .new(0, 0, d, e),
                     .new(0, 0, -1, 0),
                 },
             };

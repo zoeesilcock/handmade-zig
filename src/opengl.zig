@@ -41,6 +41,13 @@ pub const WGL_PIXEL_TYPE_ARB = 0x2013;
 pub const WGL_TYPE_RGBA_ARB = 0x202B;
 pub const WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB = 0x20A9;
 
+pub const WGL_RED_BITS_ARB = 0x2015;
+pub const WGL_GREEN_BITS_ARB = 0x2017;
+pub const WGL_BLUE_BITS_ARB = 0x2019;
+pub const WGL_ALPHA_BITS_ARB = 0x201B;
+pub const WGL_ACCUM_BITS_ARB = 0x201D;
+pub const WGL_DEPTH_BITS_ARB = 0x2022;
+
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
@@ -201,6 +208,13 @@ pub fn renderCommands(
     // TimedBlock.beginFunction(@src(), .RenderCommandsToOpenGL);
     // defer TimedBlock.endFunction(@src(), .RenderCommandsToOpenGL);
 
+    gl.glDepthMask(gl.GL_TRUE);
+    gl.glColorMask(gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE);
+    gl.glDepthFunc(gl.GL_LEQUAL);
+    gl.glEnable(gl.GL_DEPTH_TEST);
+    gl.glAlphaFunc(gl.GL_GREATER, 0);
+    gl.glEnable(gl.GL_ALPHA_TEST);
+
     gl.glEnable(gl.GL_TEXTURE_2D);
     gl.glEnable(gl.GL_SCISSOR_TEST);
     gl.glEnable(gl.GL_BLEND);
@@ -240,6 +254,14 @@ pub fn renderCommands(
                         texture_handle,
                         0,
                     );
+                    // TODO: Create a depth buffer for this framebuffer.
+                    // glBindFrameBufferTexture2D(
+                    //     GL_FRAMEBUFFER,
+                    //     GL_DEPTH_ATTACHMENT,
+                    //     gl.GL_TEXTURE_2D,
+                    //     texture_handle,
+                    //     0,
+                    // );
 
                     if (platform.optGlCheckFramebufferStatusEXT) |checkFramebufferStatus| {
                         const status: u32 = checkFramebufferStatus(GL_FRAMEBUFFER);
@@ -264,14 +286,14 @@ pub fn renderCommands(
             gl.glScissor(0, 0, draw_region.getWidth(), draw_region.getHeight());
         }
 
+        gl.glClearDepth(1);
         gl.glClearColor(
             commands.clear_color.r(),
             commands.clear_color.g(),
             commands.clear_color.b(),
             commands.clear_color.a(),
         );
-
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT);
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT);
     }
 
     const clip_scale_x: f32 = math.safeRatio0(@floatFromInt(draw_region.getWidth()), @floatFromInt(commands.width));
@@ -351,8 +373,8 @@ pub fn renderCommands(
                     var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                     if (entry.bitmap) |bitmap| {
                         if (bitmap.width > 0 and bitmap.height > 0) {
-                            const x_axis: Vector3 = entry.x_axis.toVector3(0);
-                            const y_axis: Vector3 = entry.y_axis.toVector3(0);
+                            const x_axis: Vector3 = entry.x_axis;
+                            const y_axis: Vector3 = entry.y_axis;
                             const min_position: Vector3 = entry.position;
 
                             if (bitmap.texture_handle > 0) {

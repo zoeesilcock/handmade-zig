@@ -258,8 +258,8 @@ pub fn renderCommandsToBitmap(
                         drawRectangleSlowly(
                             output_target,
                             entry.position.xy(),
-                            entry.x_axis,
-                            entry.y_axis,
+                            entry.x_axis.xy(),
+                            entry.y_axis.xy(),
                             entry.color,
                             @constCast(bitmap),
                             null,
@@ -272,8 +272,8 @@ pub fn renderCommandsToBitmap(
                         drawRectangleQuickly(
                             output_target,
                             entry.position.xy(),
-                            entry.x_axis,
-                            entry.y_axis,
+                            entry.x_axis.xy(),
+                            entry.y_axis.xy(),
                             entry.premultiplied_color,
                             @constCast(bitmap),
                             null_pixels_to_meters,
