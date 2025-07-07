@@ -190,6 +190,11 @@ pub const RenderGroup = extern struct {
     last_clip_h: i32,
     current_clip_rect_index: u32,
     last_render_target: u32,
+
+    camera_position: Vector3,
+    camera_x: Vector3,
+    camera_y: Vector3,
+    camera_z: Vector3,
     last_proj: Matrix4x4,
 
     generation_id: u32,
@@ -213,6 +218,10 @@ pub const RenderGroup = extern struct {
             .last_clip_y = 0,
             .last_clip_w = 0,
             .last_clip_h = 0,
+            .camera_position = .zero(),
+            .camera_x = .zero(),
+            .camera_y = .zero(),
+            .camera_z = .zero(),
             .last_proj = .{},
             .last_render_target = 0,
             .current_clip_rect_index = 0,
@@ -434,6 +443,28 @@ pub const RenderGroup = extern struct {
             entry.premultiplied_color = storeColor(object_transform, color);
             entry.x_axis = x_axis.toVector3(0).scaledTo(size.x());
             entry.y_axis = y_axis.toVector3(0).scaledTo(size.y());
+
+            if (object_transform.upright) {
+                if (false) {
+                const camera_position_yz: Vector2 = self.camera_position.yz();
+                const camera_ray_yz: Vector2 =
+                    entry.position.yz().plus(self.camera_y.yz().scaledTo(size.y())).minus(self.camera_position.yz());
+                const card_position_yz: Vector2 = entry.position.yz();
+                const card_ray_yz: Vector2 = .new(0.25, 0.75);
+
+                const intersect_point: Vector2 = Vector2.rayIntersection(
+                    camera_position_yz,
+                    camera_ray_yz,
+                    card_position_yz,
+                    card_ray_yz,
+                );
+                // TODO: Use the input y_axis again.
+                entry.y_axis = Vector3.new(0, card_ray_yz.x(), card_ray_yz.y()).scaledTo(intersect_point.y());
+                } else {
+                    entry.x_axis = self.camera_x.scaledTo(size.x());
+                    entry.y_axis = self.camera_y.scaledTo(size.y());
+                }
+            }
         }
     }
 
@@ -652,21 +683,25 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushRenderTarget(self: *RenderGroup, render_target_index: u31) u32 {
-        self.current_clip_rect_index = self.pushSetup(
-            self.last_clip_x,
-            self.last_clip_y,
-            self.last_clip_w,
-            self.last_clip_h,
-            render_target_index,
-            &self.last_proj
-        );
+        self.current_clip_rect_index = self.pushSetup(self.last_clip_x, self.last_clip_y, self.last_clip_w, self.last_clip_h, render_target_index, &self.last_proj);
         return 0;
+    }
+
+    pub fn setCameraTransformToIdentity(
+        self: *RenderGroup,
+        focal_length: f32,
+        ortho: bool,
+    ) void {
+        self.setCameraTransform(focal_length, .new(1, 0, 0), .new(0, 1, 0), .new(0, 0, 1), .zero(), ortho);
     }
 
     pub fn setCameraTransform(
         self: *RenderGroup,
         focal_length: f32,
-        camera_transform: *Matrix4x4,
+        camera_x: Vector3,
+        camera_y: Vector3,
+        camera_z: Vector3,
+        camera_position: Vector3,
         ortho: bool,
     ) void {
         const b: f32 = math.safeRatio1(
@@ -681,16 +716,15 @@ pub const RenderGroup = extern struct {
             proj = .perspectiveProjection(b, focal_length);
         }
 
-        proj = proj.times(camera_transform.*);
+        self.camera_x = camera_x;
+        self.camera_y = camera_y;
+        self.camera_z = camera_z;
+        self.camera_position = camera_position;
+        const camera_c: Matrix4x4 = .cameraTransform(camera_x, camera_y, camera_z, camera_position);
 
-        self.current_clip_rect_index = self.pushSetup(
-            self.last_clip_x,
-            self.last_clip_y,
-            self.last_clip_w,
-            self.last_clip_h,
-            self.last_render_target,
-            &proj
-        );
+        proj = proj.times(camera_c);
+
+        self.current_clip_rect_index = self.pushSetup(self.last_clip_x, self.last_clip_y, self.last_clip_w, self.last_clip_h, self.last_render_target, &proj);
     }
 
     pub fn pushBlendRenderTarget(self: *RenderGroup, alpha: f32, source_render_target_index: u32) void {

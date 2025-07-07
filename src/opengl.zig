@@ -213,6 +213,7 @@ pub fn renderCommands(
     gl.glDepthFunc(gl.GL_LEQUAL);
     gl.glEnable(gl.GL_DEPTH_TEST);
     gl.glAlphaFunc(gl.GL_GREATER, 0);
+    // gl.glAlphaFunc(gl.GL_EQUAL, 1);
     gl.glEnable(gl.GL_ALPHA_TEST);
 
     gl.glEnable(gl.GL_TEXTURE_2D);

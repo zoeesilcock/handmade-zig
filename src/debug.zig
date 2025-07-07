@@ -2218,8 +2218,7 @@ fn debugStart(
     debug_state.font_scale = 1;
     debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
     debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-    var identity: Matrix4x4 = .identity();
-    debug_state.render_group.setCameraTransform(1, &identity, true);
+    debug_state.render_group.setCameraTransformToIdentity(1, true);
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();
     debug_state.shadow_transform = ObjectTransform.defaultFlat();

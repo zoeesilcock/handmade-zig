@@ -82,6 +82,24 @@ fn Vector2Type(comptime ScalarType: type) type {
             return Self.new(intrinsics.cos(angle), intrinsics.sin(angle));
         }
 
+        pub inline fn rayIntersection(pa: Self, ra: Self, pb: Self, rb: Self) Self {
+            var result: Self = .zero();
+
+            // Equation:
+            // Pa.x + ta * ra.x = Pb.x + tb * rb.x
+            // Pa.y + ta * ra.y = Pb.y + tb * rb.y
+
+            const d: f32 = (rb.x() * ra.y() - rb.y() * ra.x());
+            if (d != 0) {
+                const ta: f32 = ((pa.x() - pb.x()) * rb.y() + (pb.y() - pa.y()) * rb.x()) / d;
+                const tb: f32 = ((pa.x() - pb.x()) * ra.y() + (pb.y() - pa.y()) * ra.x()) / d;
+
+                result = .new(ta, tb);
+            }
+
+            return result;
+        }
+
         const Shared = VectorShared(2, ScalarType, Self);
         pub const zero = Shared.zero;
         pub const one = Shared.one;
@@ -147,6 +165,10 @@ fn Vector3Type(comptime ScalarType: type) type {
             return Vector2.new(self.x(), self.y());
         }
 
+        pub inline fn yz(self: *const Self) Vector2 {
+            return Vector2.new(self.y(), self.z());
+        }
+
         pub inline fn setX(self: *Self, value: ScalarType) *Self {
             self.values[0] = value;
             return self;
@@ -165,6 +187,12 @@ fn Vector3Type(comptime ScalarType: type) type {
         pub inline fn setXY(self: *Self, value: Vector2) *Self {
             self.values[0] = value.values[0];
             self.values[1] = value.values[1];
+            return self;
+        }
+
+        pub inline fn setYZ(self: *Self, value: Vector2) *Self {
+            self.values[1] = value.values[0];
+            self.values[2] = value.values[1];
             return self;
         }
 
@@ -1054,16 +1082,16 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             const b: f32 = aspect_width_over_height;
             const c: f32 = focal_length;
 
-            const n: f32 = -0.1; // Near clip plane distance.
-            const f: f32 = 100; // Far clip plaen distance.
+            const n: f32 = 0.1; // Near clip plane distance.
+            const f: f32 = 100; // Far clip plane distance.
 
             // These are perspective corrected terms, for when you divide by -z.
-            const d: f32 = 2 / (n - f);
-            const e: f32 = (n + f) / (n - f);
+            const d: f32 = (n * f) / (n - f);
+            const e: f32 = (2 * f * n) / (n - f);
 
             // These are non-perspective corrected terms, for orthographic.
-            // const d: f32 = 1 + (2 * f * n) / (n * (n - f));
-            // const e: f32 = (2 * f * n) / (n - f);
+            // const d: f32 = 2 / (n - f);
+            // const e: f32 = (n + f) / (n - f);
 
             return .{
                 .values = .{

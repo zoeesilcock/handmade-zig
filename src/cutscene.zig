@@ -370,12 +370,7 @@ fn renderLayeredScene(
     const color = Color.new(scene_fade_value, scene_fade_value, scene_fade_value, 1);
 
     if (opt_render_group) |render_group| {
-        var identity: Matrix4x4 = .identity();
-        render_group.setCameraTransform(
-            camera.focal_length,
-            &identity,
-            false,
-        );
+        render_group.setCameraTransformToIdentity(camera.focal_length, false);
 
         if (scene.layers.len == 0) {
             render_group.pushClear(Color.new(0, 0, 0, 0));

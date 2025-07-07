@@ -537,15 +537,12 @@ pub fn updateAndRenderWorld(
         Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
     _ = camera_offset.setZ(camera_offset.z() + world_mode.debug_camera_dolly);
     const camera_ot: Vector3 = camera_o.timesV(camera_offset, null);
-    var camera_c: Matrix4x4 = .cameraTransform(
+    render_group.setCameraTransform(
+        camera.focal_length,
         camera_o.getColumn(0),
         camera_o.getColumn(1),
         camera_o.getColumn(2),
         camera_ot,
-    );
-    render_group.setCameraTransform(
-        camera.focal_length,
-        &camera_c,
         false,
     );
 
