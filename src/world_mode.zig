@@ -103,9 +103,14 @@ pub const GameModeWorld = struct {
     last_used_entity_storage_index: u32,
 
     last_mouse_position: Vector2,
+    use_debug_camera: bool,
     debug_camera_pitch: f32,
     debug_camera_orbit: f32,
     debug_camera_dolly: f32,
+
+    camera_pitch: f32,
+    camera_orbit: f32,
+    camera_dolly: f32,
 };
 
 const WorldSim = struct {
@@ -427,7 +432,6 @@ fn simulate(
     game_entropy: *random.Series,
     delta_time: f32,
     // Optional...
-    background_color: Color,
     assets: ?*asset.Assets,
     opt_state: ?*shared.State,
     opt_input: ?*shared.GameInput,
@@ -455,7 +459,6 @@ fn simulate(
         sim_region,
         delta_time,
         opt_render_group,
-        background_color,
         particle_cache,
         assets,
     );
@@ -493,7 +496,6 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
         &world_sim,
         &work.world_mode.world.game_entropy,
         work.delta_time,
-        .white(),
         null,
         null,
         null,
@@ -530,21 +532,43 @@ pub fn updateAndRenderWorld(
         const zoom_speed: f32 = (camera_offset.z() + world_mode.debug_camera_dolly) * 0.005;
         world_mode.debug_camera_dolly -= zoom_speed * d_mouse_p.y();
     }
+
+    if (input.mouse_buttons[GameInputMouseButton.Right.toInt()].wasPressed()) {
+        world_mode.use_debug_camera = !world_mode.use_debug_camera;
+    }
+
     world_mode.last_mouse_position = mouse_position;
     DebugInterface.debugSetMousePosition(mouse_position);
 
+    world_mode.camera_pitch = 0.05 * math.PI32;
+    world_mode.camera_orbit = 0;
+    world_mode.camera_dolly = 0;
+
     var camera_o: Matrix4x4 =
-        Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
-    _ = camera_offset.setZ(camera_offset.z() + world_mode.debug_camera_dolly);
-    const camera_ot: Vector3 = camera_o.timesV(camera_offset, null);
+        Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
+    var camera_ot: Vector3 = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.camera_dolly)), null);
     render_group.setCameraTransform(
         camera.focal_length,
         camera_o.getColumn(0),
         camera_o.getColumn(1),
         camera_o.getColumn(2),
         camera_ot,
-        false,
+        0,
     );
+
+    if (world_mode.use_debug_camera) {
+        camera_o =
+            Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
+        camera_ot = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.debug_camera_dolly)), null);
+        render_group.setCameraTransform(
+            camera.focal_length,
+            camera_o.getColumn(0),
+            camera_o.getColumn(1),
+            camera_o.getColumn(2),
+            camera_ot,
+            @intFromEnum(rendergroup.CameraTransformFlag.IsDebug),
+        );
+    }
 
     // Clear background.
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
@@ -609,7 +633,6 @@ pub fn updateAndRenderWorld(
             &world_sim,
             &world_mode.world.game_entropy,
             input.frame_delta_time,
-            background_color,
             transient_state.assets,
             state,
             input,
@@ -739,10 +762,10 @@ fn addStandardRoom(
                 null,
             );
 
-            if (false) {
-                _ = world_position.offset.setX(world_position.offset.x() + 0.25 * world_mode.world.game_entropy.randomBilateral());
-                _ = world_position.offset.setY(world_position.offset.y() + 0.25 * world_mode.world.game_entropy.randomBilateral());
-                _ = world_position.offset.setZ(world_position.offset.z() + 0.1 * world_mode.world.game_entropy.randomBilateral());
+            if (true) {
+                _ = world_position.offset.setX(world_position.offset.x() + 0 * world_mode.world.game_entropy.randomBilateral());
+                _ = world_position.offset.setY(world_position.offset.y() + 0 * world_mode.world.game_entropy.randomBilateral());
+                _ = world_position.offset.setZ(world_position.offset.z() + 0.25 * world_mode.world.game_entropy.randomBilateral());
             }
 
             if (left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
@@ -756,6 +779,7 @@ fn addStandardRoom(
                 entity.traversable_count = 1;
                 entity.traversables[0].position = Vector3.zero();
                 entity.traversables[0].occupier = null;
+                entity.addPieceV2(.Grass, .new(0.7, 1), .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.Cube));
                 endEntity(world_mode, entity, world_position);
             }
 

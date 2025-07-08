@@ -71,6 +71,7 @@ pub const EnvironmentMap = extern struct {
 pub const RenderEntryType = enum(u16) {
     RenderEntryClipRect,
     RenderEntryBitmap,
+    RenderEntryCube,
     RenderEntryRectangle,
     RenderEntrySaturation,
     RenderEntryBlendRenderTarget,
@@ -128,6 +129,14 @@ pub const RenderEntryBitmap = extern struct {
     y_axis: Vector3,
 };
 
+pub const RenderEntryCube = extern struct {
+    bitmap: ?*LoadedBitmap,
+    premultiplied_color: Color,
+    position: Vector3, // This is the middle of the top face of the cube.
+    height: f32,
+    radius: f32,
+};
+
 pub const RenderEntryRectangle = extern struct {
     premultiplied_color: Color,
     position: Vector3,
@@ -139,12 +148,15 @@ pub const RenderEntryBlendRenderTarget = extern struct {
     alpha: f32,
 };
 
+pub const CameraTransformFlag = enum(u32) {
+    IsOrthographic = 0x1,
+    IsDebug = 0x2,
+};
+
 pub const ObjectTransform = extern struct {
     upright: bool,
     offset_position: Vector3,
     scale: f32,
-    color_time: Color = .zero(),
-    color: Color = .zero(),
 
     pub fn defaultUpright() ObjectTransform {
         return ObjectTransform{
@@ -182,7 +194,6 @@ pub const RenderGroup = extern struct {
     debug_tag: u32,
 
     missing_resource_count: u32,
-    renders_in_background: bool,
 
     last_clip_x: i32,
     last_clip_y: i32,
@@ -204,7 +215,6 @@ pub const RenderGroup = extern struct {
         assets: *asset.Assets,
         commands: *RenderCommands,
         generation_id: u32,
-        renders_in_background: bool,
         pixel_width: i32,
         pixel_height: i32,
     ) RenderGroup {
@@ -213,7 +223,6 @@ pub const RenderGroup = extern struct {
             .screen_dimensions = .newI(pixel_width, pixel_height),
             .debug_tag = undefined,
             .missing_resource_count = 0,
-            .renders_in_background = renders_in_background,
             .last_clip_x = 0,
             .last_clip_y = 0,
             .last_clip_w = 0,
@@ -408,15 +417,13 @@ pub const RenderGroup = extern struct {
         return dim;
     }
 
-    fn storeColor(transform: *const ObjectTransform, source: Color) Color {
-        var dest: Color = undefined;
-        const time: Color = transform.color_time;
-        const color: Color = transform.color;
+    fn storeColor(source: Color) Color {
+        var dest: Color = .white();
 
-        _ = dest.setA(math.lerpf(source.a(), color.a(), time.a()));
-        _ = dest.setR(dest.a() * math.lerpf(source.r(), color.r(), time.r()));
-        _ = dest.setG(dest.a() * math.lerpf(source.g(), color.g(), time.g()));
-        _ = dest.setB(dest.a() * math.lerpf(source.b(), color.b(), time.b()));
+        _ = dest.setA(source.a());
+        _ = dest.setR(dest.a() * source.r());
+        _ = dest.setG(dest.a() * source.g());
+        _ = dest.setB(dest.a() * source.b());
 
         return dest;
     }
@@ -440,30 +447,15 @@ pub const RenderGroup = extern struct {
         if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
             entry.bitmap = bitmap;
             entry.position = dim.basis_position;
-            entry.premultiplied_color = storeColor(object_transform, color);
+            entry.premultiplied_color = storeColor(color);
             entry.x_axis = x_axis.toVector3(0).scaledTo(size.x());
             entry.y_axis = y_axis.toVector3(0).scaledTo(size.y());
 
             if (object_transform.upright) {
-                if (false) {
-                const camera_position_yz: Vector2 = self.camera_position.yz();
-                const camera_ray_yz: Vector2 =
-                    entry.position.yz().plus(self.camera_y.yz().scaledTo(size.y())).minus(self.camera_position.yz());
-                const card_position_yz: Vector2 = entry.position.yz();
-                const card_ray_yz: Vector2 = .new(0.25, 0.75);
-
-                const intersect_point: Vector2 = Vector2.rayIntersection(
-                    camera_position_yz,
-                    camera_ray_yz,
-                    card_position_yz,
-                    card_ray_yz,
-                );
-                // TODO: Use the input y_axis again.
-                entry.y_axis = Vector3.new(0, card_ray_yz.x(), card_ray_yz.y()).scaledTo(intersect_point.y());
-                } else {
-                    entry.x_axis = self.camera_x.scaledTo(size.x());
-                    entry.y_axis = self.camera_y.scaledTo(size.y());
-                }
+                entry.x_axis =
+                    self.camera_x.scaledTo(x_axis.x()).plus(self.camera_y.scaledTo(x_axis.y())).scaledTo(size.x());
+                entry.y_axis =
+                    self.camera_x.scaledTo(y_axis.x()).plus(self.camera_y.scaledTo(y_axis.y())).scaledTo(size.y());
             }
         }
     }
@@ -481,18 +473,33 @@ pub const RenderGroup = extern struct {
     ) void {
         const align_coefficient: f32 = opt_align_coefficient orelse 1;
         if (opt_id) |id| {
-            var opt_bitmap = self.assets.getBitmap(id, self.generation_id);
-
-            if (self.renders_in_background and opt_bitmap == null) {
-                self.assets.loadBitmap(id, true);
-                opt_bitmap = self.assets.getBitmap(id, self.generation_id);
-            }
-
-            if (opt_bitmap) |bitmap| {
+            if (self.assets.getBitmap(id, self.generation_id)) |bitmap| {
                 self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient, opt_x_axis, opt_y_axis);
             } else {
-                std.debug.assert(!self.renders_in_background);
+                self.assets.loadBitmap(id, false);
+                self.missing_resource_count += 1;
+            }
+        }
+    }
 
+    pub fn pushCube(
+        self: *RenderGroup,
+        opt_id: ?file_formats.BitmapId,
+        position: Vector3,
+        radius: f32,
+        height: f32,
+        color: Color,
+    ) void {
+        if (opt_id) |id| {
+            if (self.assets.getBitmap(id, self.generation_id)) |bitmap| {
+                if (self.pushRenderElement(RenderEntryCube)) |entry| {
+                    entry.bitmap = bitmap;
+                    entry.position = position;
+                    entry.premultiplied_color = storeColor(color);
+                    entry.height = height;
+                    entry.radius = radius;
+                }
+            } else {
                 self.assets.loadBitmap(id, false);
                 self.missing_resource_count += 1;
             }
@@ -509,8 +516,6 @@ pub const RenderGroup = extern struct {
             opt_font = self.assets.getFont(id, self.generation_id);
 
             if (opt_font == null) {
-                std.debug.assert(!self.renders_in_background);
-
                 self.assets.loadFont(id, false);
                 self.missing_resource_count += 1;
             }
@@ -532,7 +537,7 @@ pub const RenderGroup = extern struct {
         if (self.pushRenderElement(RenderEntryRectangle)) |entry| {
             entry.position = basis_position;
             entry.dimension = dimension;
-            entry.premultiplied_color = storeColor(object_transform, color);
+            entry.premultiplied_color = storeColor(color);
         }
     }
 
@@ -690,9 +695,9 @@ pub const RenderGroup = extern struct {
     pub fn setCameraTransformToIdentity(
         self: *RenderGroup,
         focal_length: f32,
-        ortho: bool,
+        flags: u32,
     ) void {
-        self.setCameraTransform(focal_length, .new(1, 0, 0), .new(0, 1, 0), .new(0, 0, 1), .zero(), ortho);
+        self.setCameraTransform(focal_length, .new(1, 0, 0), .new(0, 1, 0), .new(0, 0, 1), .zero(), flags);
     }
 
     pub fn setCameraTransform(
@@ -702,24 +707,28 @@ pub const RenderGroup = extern struct {
         camera_y: Vector3,
         camera_z: Vector3,
         camera_position: Vector3,
-        ortho: bool,
+        flags: u32,
     ) void {
+        const is_ortho: bool = (flags & @intFromEnum(CameraTransformFlag.IsOrthographic)) != 0;
+        const is_debug: bool = (flags & @intFromEnum(CameraTransformFlag.IsDebug)) != 0;
         const b: f32 = math.safeRatio1(
             @as(f32, @floatFromInt(self.commands.width)),
             @as(f32, @floatFromInt(self.commands.height)),
         );
 
         var proj: Matrix4x4 = .{};
-        if (ortho) {
+        if (is_ortho) {
             proj = .orthographicProjection(b);
         } else {
             proj = .perspectiveProjection(b, focal_length);
         }
 
-        self.camera_x = camera_x;
-        self.camera_y = camera_y;
-        self.camera_z = camera_z;
-        self.camera_position = camera_position;
+        if (!is_debug) {
+            self.camera_x = camera_x;
+            self.camera_y = camera_y;
+            self.camera_z = camera_z;
+            self.camera_position = camera_position;
+        }
         const camera_c: Matrix4x4 = .cameraTransform(camera_x, camera_y, camera_z, camera_position);
 
         proj = proj.times(camera_c);

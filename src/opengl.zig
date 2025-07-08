@@ -58,6 +58,7 @@ const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryClear = rendergroup.RenderEntryClear;
 const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
+const RenderEntryCube = rendergroup.RenderEntryCube;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
 const RenderEntryBlendRenderTarget = rendergroup.RenderEntryBlendRenderTarget;
@@ -307,6 +308,7 @@ pub fn renderCommands(
         const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
         const alignment: usize = switch (header.type) {
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
+            .RenderEntryCube => @alignOf(RenderEntryCube),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
             .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
             .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
@@ -417,13 +419,86 @@ pub fn renderCommands(
                         }
                     }
                 },
+                .RenderEntryCube => {
+                    header_at += @sizeOf(RenderEntryCube);
+                    const entry: *RenderEntryCube = @ptrCast(@alignCast(data));
+                    if (entry.bitmap) |bitmap| {
+                        const nx: f32 = entry.position.x() - entry.radius;
+                        const px: f32 = entry.position.x() + entry.radius;
+                        const ny: f32 = entry.position.y() - entry.radius;
+                        const py: f32 = entry.position.y() + entry.radius;
+                        const nz: f32 = entry.position.z() - entry.height;
+                        const pz: f32 = entry.position.z();
+
+                        const p0: Vector3 = .new(nx, ny, pz);
+                        const p1: Vector3 = .new(px, ny, pz);
+                        const p2: Vector3 = .new(px, py, pz);
+                        const p3: Vector3 = .new(nx, py, pz);
+                        const p4: Vector3 = .new(nx, ny, nz);
+                        const p5: Vector3 = .new(px, ny, nz);
+                        const p6: Vector3 = .new(px, py, nz);
+                        const p7: Vector3 = .new(nx, py, nz);
+
+                        const c0: Color = entry.premultiplied_color;
+                        const c1: Color = entry.premultiplied_color;
+                        const c2: Color = entry.premultiplied_color;
+                        const c3: Color = entry.premultiplied_color;
+
+                        const t0: Vector2 = .new(0, 0);
+                        const t1: Vector2 = .new(1, 0);
+                        const t2: Vector2 = .new(1, 1);
+                        const t3: Vector2 = .new(0, 1);
+
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
+                        gl.glBegin(gl.GL_TRIANGLES);
+                        {
+                            drawQuad(
+                                p0, t0, c0,
+                                p1, t1, c1,
+                                p2, t2, c2,
+                                p3, t3, c3,
+                            );
+                            drawQuad(
+                                p7, t0, c0,
+                                p6, t1, c1,
+                                p5, t2, c2,
+                                p4, t3, c3,
+                            );
+                            drawQuad(
+                                p4, t0, c0,
+                                p5, t1, c1,
+                                p1, t2, c2,
+                                p0, t3, c3,
+                            );
+                            drawQuad(
+                                p2, t0, c0,
+                                p6, t1, c1,
+                                p7, t2, c2,
+                                p3, t3, c3,
+                            );
+                            drawQuad(
+                                p1, t0, c0,
+                                p5, t1, c1,
+                                p6, t2, c2,
+                                p2, t3, c3,
+                            );
+                            drawQuad(
+                                p7, t0, c0,
+                                p4, t1, c1,
+                                p0, t2, c2,
+                                p3, t3, c3,
+                            );
+                        }
+                        gl.glEnd();
+                    }
+                },
                 .RenderEntryRectangle => {
                     header_at += @sizeOf(RenderEntryRectangle);
                     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
                     gl.glDisable(gl.GL_TEXTURE_2D);
                     drawRectangle(entry.position, entry.position.plus(entry.dimension.toVector3(0)), entry.premultiplied_color, null, null);
 
-                    if (true) {
+                    if (false) {
                         gl.glBegin(gl.GL_LINES);
                         gl.glColor4f(0, 0, 0, entry.premultiplied_color.a());
                         drawLineVertices(entry.position, entry.position.plus(entry.dimension.toVector3(0)));
@@ -528,6 +603,43 @@ fn drawLineVertices(
 
     gl.glVertex3f(min_position.x(), max_position.y(), z);
     gl.glVertex3f(min_position.x(), min_position.y(), z);
+}
+
+fn drawQuad(
+    p0: Vector3,
+    t0: Vector2,
+    c0: Color,
+    p1: Vector3,
+    t1: Vector2,
+    c1: Color,
+    p2: Vector3,
+    t2: Vector2,
+    c2: Color,
+    p3: Vector3,
+    t3: Vector2,
+    c3: Color,
+) void {
+    // Lower triangle.
+    gl.glColor4fv(c0.toGL());
+    gl.glTexCoord2fv(t0.toGL());
+    gl.glVertex3fv(p0.toGL());
+    gl.glColor4fv(c1.toGL());
+    gl.glTexCoord2fv(t1.toGL());
+    gl.glVertex3fv(p1.toGL());
+    gl.glColor4fv(c2.toGL());
+    gl.glTexCoord2fv(t2.toGL());
+    gl.glVertex3fv(p2.toGL());
+
+    // Upper triangle
+    gl.glColor4fv(c0.toGL());
+    gl.glTexCoord2fv(t0.toGL());
+    gl.glVertex3fv(p0.toGL());
+    gl.glColor4fv(c2.toGL());
+    gl.glTexCoord2fv(t2.toGL());
+    gl.glVertex3fv(p2.toGL());
+    gl.glColor4fv(c3.toGL());
+    gl.glTexCoord2fv(t3.toGL());
+    gl.glVertex3fv(p3.toGL());
 }
 
 fn drawRectangle(

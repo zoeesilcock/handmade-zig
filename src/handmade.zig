@@ -301,7 +301,6 @@ pub export fn updateAndRender(
         transient_state.assets,
         render_commands,
         transient_state.main_generation_id,
-        false,
         @intCast(render_commands.width),
         @intCast(render_commands.height),
     );

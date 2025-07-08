@@ -68,13 +68,14 @@ pub const EntityMovementMode = enum(u32) {
 pub const EntityVisiblePieceFlag = enum(u32) {
     AxesDeform = 0x1,
     BobOffset = 0x2,
+    Cube = 0x4,
 };
 
 pub const EntityVisiblePiece = extern struct {
     offset: Vector3,
     color: Color,
     asset_type: AssetTypeId,
-    height: f32,
+    dimension: Vector2,
     flags: u32,
 };
 
@@ -152,13 +153,24 @@ pub const Entity = extern struct {
         color: Color,
         opt_movement_flags: ?u32,
     ) void {
+        self.addPieceV2(asset_type, .new(0, height), offset, color, opt_movement_flags);
+    }
+
+    pub fn addPieceV2(
+        self: *Entity,
+        asset_type: AssetTypeId,
+        dimension: Vector2,
+        offset: Vector3,
+        color: Color,
+        opt_movement_flags: ?u32,
+    ) void {
         std.debug.assert(self.piece_count < self.pieces.len);
 
         var piece: *EntityVisiblePiece = &self.pieces[self.piece_count];
         self.piece_count += 1;
 
         piece.asset_type = asset_type;
-        piece.height = height;
+        piece.dimension = dimension;
         piece.offset = offset;
         piece.color = color;
         piece.flags = opt_movement_flags orelse 0;
@@ -360,7 +372,6 @@ pub fn updateAndRenderEntities(
     delta_time: f32,
     // Optional...
     opt_render_group: ?*RenderGroup,
-    background_color: Color,
     particle_cache: ?*ParticleCache,
     opt_assets: ?*Assets,
 ) void {
@@ -475,9 +486,6 @@ pub fn updateAndRenderEntities(
                 var entity_transform = ObjectTransform.defaultUpright();
                 entity_transform.offset_position = entity.getGroundPoint();
 
-                entity_transform.color = background_color;
-                entity_transform.color_time = Color.new(1, 1, 1, 0).scaledTo(0);
-
                 var match_vector = asset.AssetVector{};
                 match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
                 var weight_vector = asset.AssetVector{};
@@ -522,16 +530,26 @@ pub fn updateAndRenderEntities(
                         _ = offset.setY(offset.y() + bob_time);
                     }
 
-                    render_group.pushBitmapId(
-                        &entity_transform,
-                        bitmap_id,
-                        piece.height,
-                        piece.offset.plus(offset),
-                        piece.color,
-                        null,
-                        x_axis,
-                        y_axis,
-                    );
+                    if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
+                        render_group.pushCube(
+                            bitmap_id,
+                            entity_transform.offset_position.plus(piece.offset),
+                            piece.dimension.x(),
+                            piece.dimension.y(),
+                            piece.color,
+                        );
+                    } else {
+                        render_group.pushBitmapId(
+                            &entity_transform,
+                            bitmap_id,
+                            piece.dimension.y(),
+                            piece.offset.plus(offset),
+                            piece.color,
+                            null,
+                            x_axis,
+                            y_axis,
+                        );
+                    }
                 }
 
                 drawHitPoints(entity, render_group, &entity_transform);
@@ -552,31 +570,33 @@ pub fn updateAndRenderEntities(
                         }
                     }
 
-                    var traversable_index: u32 = 0;
-                    while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
-                        const traversable = entity.traversables[traversable_index];
-                        var color: Color = .new(0.05, 0.25, 0.05, 1);
-                        if (entity.auto_boost_to.getTraversable() != null) {
-                            color = .new(1, 0, 1, 1);
-                        }
-                        if (traversable.occupier != null) {
-                            color = .new(1, 0.5, 0, 1);
-                        }
+                    if (false) {
+                        var traversable_index: u32 = 0;
+                        while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
+                            const traversable = entity.traversables[traversable_index];
+                            var color: Color = .new(0.05, 0.25, 0.05, 1);
+                            if (entity.auto_boost_to.getTraversable() != null) {
+                                color = .new(1, 0, 1, 1);
+                            }
+                            if (traversable.occupier != null) {
+                                color = .new(1, 0.5, 0, 1);
+                            }
 
-                        render_group.pushRectangle(
-                            &entity_transform,
-                            Vector2.new(1.4, 1.4),
-                            traversable.position,
-                            color,
-                        );
+                            render_group.pushRectangle(
+                                &entity_transform,
+                                Vector2.new(1.4, 1.4),
+                                traversable.position,
+                                color,
+                            );
 
-                        // render_group.pushRectangleOutline(
-                        //     entity_transform,
-                        //     Vector2.new(1.2, 1.2),
-                        //     traversable.position,
-                        //     Color.new(0, 0, 0, 1),
-                        //     0.1,
-                        // );
+                            // render_group.pushRectangleOutline(
+                            //     entity_transform,
+                            //     Vector2.new(1.2, 1.2),
+                            //     traversable.position,
+                            //     Color.new(0, 0, 0, 1),
+                            //     0.1,
+                            // );
+                        }
                     }
                 }
 

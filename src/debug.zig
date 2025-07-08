@@ -2197,7 +2197,7 @@ fn debugStart(
     TimedBlock.beginFunction(@src(), .DebugStart);
     defer TimedBlock.endFunction(@src(), .DebugStart);
 
-    debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id, false, width, height);
+    debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id, width, height);
 
     if (debug_state.render_group.pushFont(debug_state.font_id)) |font| {
         debug_state.debug_font = font;
@@ -2218,7 +2218,7 @@ fn debugStart(
     debug_state.font_scale = 1;
     debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
     debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-    debug_state.render_group.setCameraTransformToIdentity(1, true);
+    debug_state.render_group.setCameraTransformToIdentity(1, @intFromEnum(rendergroup.CameraTransformFlag.IsOrthographic));
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();
     debug_state.shadow_transform = ObjectTransform.defaultFlat();
