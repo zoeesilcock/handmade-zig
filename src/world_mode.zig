@@ -779,7 +779,13 @@ fn addStandardRoom(
                 entity.traversable_count = 1;
                 entity.traversables[0].position = Vector3.zero();
                 entity.traversables[0].occupier = null;
-                entity.addPieceV2(.Grass, .new(0.7, 1), .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.Cube));
+                entity.addPieceV2(
+                    .Grass,
+                    .new(0.7, 1),
+                    .zero(),
+                    .sRGBNew(0.31, 0.49, 0.32, 1),
+                    @intFromEnum(EntityVisiblePieceFlag.Cube),
+                );
                 endEntity(world_mode, entity, world_position);
             }
 

@@ -132,6 +132,8 @@ const GlFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textar
 pub var optGlFrameBufferTexture2DEXT: ?*const GlFrameBufferTexture2DEXT = null;
 const GlCheckFramebufferStatusEXT: type = fn (target: u32) callconv(WINAPI) u32;
 pub var optGlCheckFramebufferStatusEXT: ?*const GlCheckFramebufferStatusEXT = null;
+const GLTextImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(WINAPI) u32;
+pub var optGLTextImage2DMultiSample: ?*const GLTextImage2DMultiSample = null;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -1461,6 +1463,9 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
                 std.debug.assert(optGlFrameBufferTexture2DEXT != null);
                 std.debug.assert(optGlCheckFramebufferStatusEXT != null);
             }
+
+            optGLTextImage2DMultiSample = @ptrCast(win32.wglGetProcAddress("glTexImage2DMultisample"));
+            std.debug.assert(optGLTextImage2DMultiSample != null);
 
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
                 _ = wglSwapIntervalEXT(1);

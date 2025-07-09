@@ -16,6 +16,17 @@ pub const GL_FRAMEBUFFER = 0x8D40;
 pub const GL_COLOR_ATTACHMENT0 = 0x8CE0;
 pub const GL_FRAME_BUFFER_COMPLETE = 0x8CD5;
 
+pub const GL_MULTISAMPLE = 0x809D;
+pub const GL_SAMPLE_ALPHA_TO_COVERAGE = 0x809E;
+pub const GL_SAMPLE_ALPHA_TO_ONE = 0x809F;
+pub const GL_SAMPLE_COVERAGE = 0x80A0;
+pub const GL_SAMPLE_BUFFERS = 0x80A8;
+pub const GL_SAMPLES = 0x80A9;
+pub const GL_SAMPLE_COVERAGE_VALUE = 0x80AA;
+pub const GL_SAMPLE_COVERAGE_INVERT = 0x80AB;
+pub const GL_TEXTURE_2D_MULTISAMPLE = 0x9100;
+pub const GL_MAX_SAMPLES = 0x8D57;
+
 // Windows specific.
 pub const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
 pub const WGL_CONTEXT_MINOR_VERSION_ARB = 0x2092;
@@ -84,7 +95,7 @@ pub const gl = struct {
 };
 
 pub var default_internal_texture_format: i32 = 0;
-var frame_buffer_count: u32 = 1;
+var frame_buffer_count: u32 = 0;
 var frame_buffer_handles: [256]c_uint = [1]c_uint{0} ** 256;
 var frame_buffer_textures: [256]c_uint = [1]c_uint{0} ** 256;
 
@@ -190,12 +201,7 @@ fn bindFrameBuffer(target_index: u32, draw_region: Rectangle2i) void {
         const window_height: i32 = draw_region.getHeight();
 
         glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
-
-        if (target_index > 0) {
-            gl.glViewport(0, 0, window_width, window_height);
-        } else {
-            gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
-        }
+        gl.glViewport(0, 0, window_width, window_height);
     }
 }
 
@@ -206,16 +212,15 @@ pub fn renderCommands(
     window_width: i32,
     window_height: i32,
 ) callconv(.C) void {
-    // TimedBlock.beginFunction(@src(), .RenderCommandsToOpenGL);
-    // defer TimedBlock.endFunction(@src(), .RenderCommandsToOpenGL);
-
     gl.glDepthMask(gl.GL_TRUE);
     gl.glColorMask(gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE);
     gl.glDepthFunc(gl.GL_LEQUAL);
     gl.glEnable(gl.GL_DEPTH_TEST);
     gl.glAlphaFunc(gl.GL_GREATER, 0);
-    // gl.glAlphaFunc(gl.GL_EQUAL, 1);
     gl.glEnable(gl.GL_ALPHA_TEST);
+    gl.glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    gl.glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+    gl.glEnable(GL_MULTISAMPLE);
 
     gl.glEnable(gl.GL_TEXTURE_2D);
     gl.glEnable(gl.GL_SCISSOR_TEST);
@@ -231,7 +236,9 @@ pub fn renderCommands(
     std.debug.assert(commands.max_render_target_index < frame_buffer_handles.len);
 
     const use_render_targets: bool = platform.optGlBindFramebufferEXT != null;
-    const max_render_target_index: u32 = if (use_render_targets) commands.max_render_target_index else 0;
+    std.debug.assert(use_render_targets);
+
+    const max_render_target_index: u32 = commands.max_render_target_index;
     if (max_render_target_index >= frame_buffer_count) {
         const new_frame_buffer_count: u32 = max_render_target_index + 1;
         std.debug.assert(new_frame_buffer_count < frame_buffer_handles.len);
@@ -243,31 +250,78 @@ pub fn renderCommands(
 
         if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
             if (platform.optGlFrameBufferTexture2DEXT) |glBindFrameBufferTexture2D| {
-                var target_index: u32 = frame_buffer_count;
-                while (target_index <= new_frame_buffer_count) : (target_index += 1) {
-                    const texture_handle: u32 = allocateTexture(draw_region.getWidth(), draw_region.getHeight(), null);
-                    frame_buffer_textures[target_index] = texture_handle;
+                if (platform.optGLTextImage2DMultiSample) |glTexImage2DMultisample| {
+                    var target_index: u32 = frame_buffer_count;
+                    while (target_index <= new_frame_buffer_count) : (target_index += 1) {
+                        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
-                    glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
-                    glBindFrameBufferTexture2D(
-                        GL_FRAMEBUFFER,
-                        GL_COLOR_ATTACHMENT0,
-                        gl.GL_TEXTURE_2D,
-                        texture_handle,
-                        0,
-                    );
-                    // TODO: Create a depth buffer for this framebuffer.
-                    // glBindFrameBufferTexture2D(
-                    //     GL_FRAMEBUFFER,
-                    //     GL_DEPTH_ATTACHMENT,
-                    //     gl.GL_TEXTURE_2D,
-                    //     texture_handle,
-                    //     0,
-                    // );
+                        // const slot = gl.GL_TEXTURE_2D;
+                        const slot = GL_TEXTURE_2D_MULTISAMPLE;
+                        var texture_handle: u32 = 0;
+                        gl.glGenTextures(1, &texture_handle);
+                        gl.glBindTexture(slot, texture_handle);
 
-                    if (platform.optGlCheckFramebufferStatusEXT) |checkFramebufferStatus| {
-                        const status: u32 = checkFramebufferStatus(GL_FRAMEBUFFER);
-                        std.debug.assert(status == GL_FRAME_BUFFER_COMPLETE);
+                        var max_sample_count: i32 = 0;
+                        gl.glGetIntegerv(GL_MAX_SAMPLES, &max_sample_count);
+                        if (max_sample_count > 16) {
+                            max_sample_count = 16;
+                        }
+
+                        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+
+                        if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
+                            _ = glTexImage2DMultisample(
+                                slot,
+                                max_sample_count,
+                                gl.GL_RGBA8, //default_internal_texture_format,
+                                draw_region.getWidth(),
+                                draw_region.getHeight(),
+                                false,
+                            );
+                        } else {
+                            gl.glTexImage2D(
+                                slot,
+                                0,
+                                default_internal_texture_format,
+                                draw_region.getWidth(),
+                                draw_region.getHeight(),
+                                0,
+                                gl.GL_BGRA_EXT,
+                                gl.GL_UNSIGNED_BYTE,
+                                null,
+                            );
+                        }
+
+                        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+
+                        gl.glBindTexture(slot, 0);
+
+                        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+
+                        // const texture_handle: u32 = allocateTexture(draw_region.getWidth(), draw_region.getHeight(), null);
+                        frame_buffer_textures[target_index] = texture_handle;
+
+                        glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
+                        glBindFrameBufferTexture2D(
+                            GL_FRAMEBUFFER,
+                            GL_COLOR_ATTACHMENT0,
+                            slot,
+                            texture_handle,
+                            0,
+                        );
+                        // TODO: Create a depth buffer for this framebuffer.
+                        // glBindFrameBufferTexture2D(
+                        //     GL_FRAMEBUFFER,
+                        //     GL_DEPTH_ATTACHMENT,
+                        //     gl.GL_TEXTURE_2D,
+                        //     texture_handle,
+                        //     0,
+                        // );
+
+                        if (platform.optGlCheckFramebufferStatusEXT) |checkFramebufferStatus| {
+                            const status: u32 = checkFramebufferStatus(GL_FRAMEBUFFER);
+                            std.debug.assert(status == GL_FRAME_BUFFER_COMPLETE);
+                        }
                     }
                 }
             }
@@ -439,57 +493,107 @@ pub fn renderCommands(
                         const p6: Vector3 = .new(px, py, nz);
                         const p7: Vector3 = .new(nx, py, nz);
 
-                        const c0: Color = entry.premultiplied_color;
-                        const c1: Color = entry.premultiplied_color;
-                        const c2: Color = entry.premultiplied_color;
-                        const c3: Color = entry.premultiplied_color;
-
                         const t0: Vector2 = .new(0, 0);
                         const t1: Vector2 = .new(1, 0);
                         const t2: Vector2 = .new(1, 1);
                         const t3: Vector2 = .new(0, 1);
 
+                        const top_color: Color = entry.premultiplied_color;
+                        const bottom_color: Color = .new(0, 0, 0, top_color.a());
+                        const ct: Color = top_color.rgb().scaledTo(0.75).toColor(top_color.a());
+                        const cb: Color = top_color.rgb().scaledTo(0.25).toColor(top_color.a());
+
                         gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
+                        gl.glDisable(gl.GL_TEXTURE_2D);
                         gl.glBegin(gl.GL_TRIANGLES);
                         {
                             drawQuad(
-                                p0, t0, c0,
-                                p1, t1, c1,
-                                p2, t2, c2,
-                                p3, t3, c3,
+                                p0,
+                                t0,
+                                top_color,
+                                p1,
+                                t1,
+                                top_color,
+                                p2,
+                                t2,
+                                top_color,
+                                p3,
+                                t3,
+                                top_color,
                             );
                             drawQuad(
-                                p7, t0, c0,
-                                p6, t1, c1,
-                                p5, t2, c2,
-                                p4, t3, c3,
+                                p7,
+                                t0,
+                                bottom_color,
+                                p6,
+                                t1,
+                                bottom_color,
+                                p5,
+                                t2,
+                                bottom_color,
+                                p4,
+                                t3,
+                                bottom_color,
                             );
                             drawQuad(
-                                p4, t0, c0,
-                                p5, t1, c1,
-                                p1, t2, c2,
-                                p0, t3, c3,
+                                p4,
+                                t0,
+                                cb,
+                                p5,
+                                t1,
+                                cb,
+                                p1,
+                                t2,
+                                ct,
+                                p0,
+                                t3,
+                                ct,
                             );
                             drawQuad(
-                                p2, t0, c0,
-                                p6, t1, c1,
-                                p7, t2, c2,
-                                p3, t3, c3,
+                                p2,
+                                t0,
+                                ct,
+                                p6,
+                                t1,
+                                cb,
+                                p7,
+                                t2,
+                                cb,
+                                p3,
+                                t3,
+                                ct,
                             );
                             drawQuad(
-                                p1, t0, c0,
-                                p5, t1, c1,
-                                p6, t2, c2,
-                                p2, t3, c3,
+                                p1,
+                                t0,
+                                ct,
+                                p5,
+                                t1,
+                                cb,
+                                p6,
+                                t2,
+                                cb,
+                                p2,
+                                t3,
+                                ct,
                             );
                             drawQuad(
-                                p7, t0, c0,
-                                p4, t1, c1,
-                                p0, t2, c2,
-                                p3, t3, c3,
+                                p7,
+                                t0,
+                                cb,
+                                p4,
+                                t1,
+                                cb,
+                                p0,
+                                t2,
+                                ct,
+                                p3,
+                                t3,
+                                ct,
                             );
                         }
                         gl.glEnd();
+                        gl.glEnable(gl.GL_TEXTURE_2D);
                     }
                 },
                 .RenderEntryRectangle => {
@@ -535,10 +639,10 @@ pub fn renderCommands(
         }
     }
 
-    if (use_render_targets) {
-        if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        }
+    if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        //gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
+        //gl.glBlitFrameBuffer();
     }
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);

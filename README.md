@@ -44,3 +44,7 @@ llvm-mca .\zig-out\bin\handmade-dll.asm -bottleneck-analysis -o .\zig-out\bin\ha
 ### AMD
 * https://learn.microsoft.com/en-us/cpp/intrinsics/x64-amd64-intrinsics-list?view=msvc-170
 * https://www.amd.com/content/dam/amd/en/documents/processor-tech-docs/programmer-references/24592.pdf
+
+### OpenGL
+* https://docs.gl/
+* https://registry.khronos.org/OpenGL/api/GL/glcorearb.h

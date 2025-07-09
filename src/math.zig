@@ -480,6 +480,15 @@ fn Color4Type(comptime ScalarType: type) type {
             } };
         }
 
+        pub inline fn sRGBNew(x_value: ScalarType, y_value: ScalarType, z_value: ScalarType, w_value: ScalarType) Self {
+            return Self.new(
+                square(x_value),
+                square(y_value),
+                square(z_value),
+                w_value,
+            );
+        }
+
         pub inline fn packColor(self: Self) u32 {
             return ((intrinsics.roundReal32ToUInt32(self.a() * 255.0) << 24) |
                 (intrinsics.roundReal32ToUInt32(self.r() * 255.0) << 16) |
