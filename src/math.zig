@@ -196,8 +196,8 @@ fn Vector3Type(comptime ScalarType: type) type {
             return self;
         }
 
-        pub inline fn toVector4(vector3: Vector3, in_w: ScalarType) Self {
-            return Self.new(vector3.values[0], vector3.values[1], vector3.values[2], in_w);
+        pub inline fn toVector4(vector3: Vector3, in_w: ScalarType) Vector4 {
+            return Vector4.new(vector3.values[0], vector3.values[1], vector3.values[2], in_w);
         }
 
         pub inline fn toColor3(self: Self) Color3 {

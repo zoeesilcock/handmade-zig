@@ -89,6 +89,7 @@ const win32 = struct {
 const gl = @cImport({
     @cInclude("GL/glcorearb.h");
 });
+var open_gl = &@import("opengl.zig").open_gl;
 
 // Manual import of a function that is incorrectly defined in zigwin32.
 // Remove once this is resloved: https://github.com/marlersoft/zigwin32/issues/33
@@ -122,7 +123,6 @@ var optWglChoosePixelFormatARB: ?*const WglChoosePixelFormatARB = null;
 
 const WglGetExtensionsStringEXT: type = fn (hdc: win32.HDC) callconv(WINAPI) ?*u8;
 var optWglGetExtensionsStringEXT: ?*const WglGetExtensionsStringEXT = null;
-var opengl_supports_srgb_frame_buffer: bool = false;
 
 const GlBindFramebufferEXT: type = fn (target: u32, framebuffer: u32) callconv(WINAPI) void;
 pub var optGlBindFramebufferEXT: ?*const GlBindFramebufferEXT = null;
@@ -134,6 +134,28 @@ const GlCheckFramebufferStatusEXT: type = fn (target: u32) callconv(WINAPI) u32;
 pub var optGlCheckFramebufferStatusEXT: ?*const GlCheckFramebufferStatusEXT = null;
 const GLTextImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(WINAPI) u32;
 pub var optGLTextImage2DMultiSample: ?*const GLTextImage2DMultiSample = null;
+const GLBlitFrameBuffer: type = fn (src_x0: i32, src_y0: i32, src_x1: i32, src_y1: i32, dst_x0: i32, dst_y0: i32, dst_x1: i32, dst_y1: i32, mask: u32, filter: u32) callconv(WINAPI) void;
+pub var optGLBlitFrameBuffer: ?*const GLBlitFrameBuffer = null;
+const GLCreateShader: type = fn (shader_type: u32) callconv(WINAPI) u32;
+pub var optGLCreateShader: ?*const GLCreateShader = null;
+const GLShaderSource: type = fn (shader: u32, count: i32, string: [*]const[*:0]const u8, length: ?*i32) callconv(WINAPI) void;
+pub var optGLShaderSource: ?*const GLShaderSource = null;
+const GLCompileShader: type = fn (shader: u32) callconv(WINAPI) void;
+pub var optGLCompileShader: ?*const GLCompileShader = null;
+const GLCreateProgram: type = fn () callconv(WINAPI) u32;
+pub var optGLCreateProgram: ?*const GLCreateProgram = null;
+const GLLinkProgram: type = fn (shader: u32) callconv(WINAPI) void;
+pub var optGLLinkProgram: ?*const GLLinkProgram = null;
+const GLAttachShader: type = fn (program: u32, shader: u32) callconv(WINAPI) void;
+pub var optGLAttachShader: ?*const GLAttachShader = null;
+const GLValidateProgram: type = fn (program: u32) callconv(WINAPI) void;
+pub var optGLValidateProgram: ?*const GLValidateProgram = null;
+const GLGetProgramiv: type = fn (program: u32, pname: u32, params: *i32) callconv(WINAPI) void;
+pub var optGLGetProgramiv: ?*const GLGetProgramiv = null;
+const GLGetShaderInfoLog: type = fn (shader: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(WINAPI) void;
+pub var optGLGetShaderInfoLog: ?*const GLGetShaderInfoLog = null;
+const GLGetProgramInfoLog: type = fn (program: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(WINAPI) void;
+pub var optGLGetProgramInfoLog: ?*const GLGetProgramInfoLog = null;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -149,7 +171,6 @@ var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 var global_debug_table_: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
 var global_debug_table = &global_debug_table_;
-var reserved_blit_texture: u32 = 0;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -1266,17 +1287,12 @@ fn setPixelFormat(window_dc: win32.HDC) void {
             opengl.WGL_SUPPORT_OPENGL_ARB,           win32.GL_TRUE,
             opengl.WGL_DOUBLE_BUFFER_ARB,            win32.GL_TRUE,
             opengl.WGL_PIXEL_TYPE_ARB,               opengl.WGL_TYPE_RGBA_ARB,
-            opengl.WGL_RED_BITS_ARB,                 8,
-            opengl.WGL_GREEN_BITS_ARB,               8,
-            opengl.WGL_BLUE_BITS_ARB,                8,
-            opengl.WGL_ALPHA_BITS_ARB,               8,
-            opengl.WGL_DEPTH_BITS_ARB,               24,
             opengl.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, win32.GL_TRUE,
             0,
         };
 
-        if (!opengl_supports_srgb_frame_buffer) {
-            int_attrib_list[20] = 0;
+        if (!open_gl.supports_srgb_frame_buffer) {
+            int_attrib_list[10] = 0;
         }
 
         if (wglChoosePixelFormatARB(
@@ -1407,7 +1423,7 @@ fn loadWglExtensions() void {
                             if (shared.stringsWithOneLengthAreEqual(at, count, "WGL_EXT_framebuffer_sRGB") or
                                 shared.stringsWithOneLengthAreEqual(at, count, "WGL_ARB_framebuffer_sRGB"))
                             {
-                                opengl_supports_srgb_frame_buffer = true;
+                                open_gl.supports_srgb_frame_buffer = true;
                             }
 
                             at = end;
@@ -1450,7 +1466,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
         }
 
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
-            const info = opengl.init(is_modern_context, opengl_supports_srgb_frame_buffer);
+            const info = opengl.Info.get(is_modern_context);
 
             if (info.gl_arb_framebuffer_object) {
                 optGlBindFramebufferEXT = @ptrCast(win32.wglGetProcAddress("glBindFramebufferEXT"));
@@ -1465,16 +1481,39 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             }
 
             optGLTextImage2DMultiSample = @ptrCast(win32.wglGetProcAddress("glTexImage2DMultisample"));
+            optGLBlitFrameBuffer = @ptrCast(win32.wglGetProcAddress("glBlitFramebuffer"));
+            optGLCreateShader = @ptrCast(win32.wglGetProcAddress("glCreateShader"));
+            optGLShaderSource = @ptrCast(win32.wglGetProcAddress("glShaderSource"));
+            optGLCompileShader = @ptrCast(win32.wglGetProcAddress("glCompileShader"));
+            optGLCreateProgram = @ptrCast(win32.wglGetProcAddress("glCreateProgram"));
+            optGLLinkProgram = @ptrCast(win32.wglGetProcAddress("glLinkProgram"));
+            optGLAttachShader = @ptrCast(win32.wglGetProcAddress("glAttachShader"));
+            optGLValidateProgram = @ptrCast(win32.wglGetProcAddress("glValidateProgram"));
+            optGLGetProgramiv = @ptrCast(win32.wglGetProcAddress("glGetProgramiv"));
+            optGLGetShaderInfoLog = @ptrCast(win32.wglGetProcAddress("glGetShaderInfoLog"));
+            optGLGetProgramInfoLog = @ptrCast(win32.wglGetProcAddress("glGetProgramInfoLog"));
+
             std.debug.assert(optGLTextImage2DMultiSample != null);
+            std.debug.assert(optGLBlitFrameBuffer != null);
+            std.debug.assert(optGLCreateShader != null);
+            std.debug.assert(optGLShaderSource != null);
+            std.debug.assert(optGLCompileShader != null);
+            std.debug.assert(optGLCreateProgram != null);
+            std.debug.assert(optGLLinkProgram != null);
+            std.debug.assert(optGLAttachShader != null);
+            std.debug.assert(optGLValidateProgram != null);
+            std.debug.assert(optGLGetProgramiv != null);
+            std.debug.assert(optGLGetShaderInfoLog != null);
+            std.debug.assert(optGLGetProgramInfoLog != null);
 
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
                 _ = wglSwapIntervalEXT(1);
             }
+
+            opengl.init(info, open_gl.supports_srgb_frame_buffer);
         } else {
             outputLastGLError("Failed to make modern context current");
         }
-
-        win32.glGenTextures(1, &reserved_blit_texture);
     }
 
     return opengl_rc;
@@ -1569,7 +1608,7 @@ fn displayBufferInWindow(
             output_target.pitch,
             back_buffer.memory,
             commands.clear_color,
-            reserved_blit_texture,
+            open_gl.reserved_blit_texture,
         );
         _ = win32.SwapBuffers(device_context.?);
     } else {

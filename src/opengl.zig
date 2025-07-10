@@ -11,10 +11,23 @@ const std = @import("std");
 
 pub const GL_FRAMEBUFFER_SRGB = 0x8DB9;
 pub const GL_SRGB8_ALPHA8 = 0x8C43;
+
 pub const GL_SHADING_LANGUAGE_VERSION = 0x8B8C;
+pub const GL_FRAGMENT_SHADER = 0x8B30;
+pub const GL_VERTEX_SHADER = 0x8B31;
+pub const GL_VALIDATE_STATUS = 0x8B83;
+
 pub const GL_FRAMEBUFFER = 0x8D40;
+pub const GL_READ_FRAMEBUFFER = 0x8CA8;
+pub const GL_DRAW_FRAMEBUFFER = 0x8CA9;
 pub const GL_COLOR_ATTACHMENT0 = 0x8CE0;
+pub const GL_DEPTH_ATTACHMENT = 0x8D00;
 pub const GL_FRAME_BUFFER_COMPLETE = 0x8CD5;
+
+pub const GL_DEPTH_COMPONENT16 = 0x81A5;
+pub const GL_DEPTH_COMPONENT24 = 0x81A6;
+pub const GL_DEPTH_COMPONENT32 = 0x81A7;
+pub const GL_DEPTH_COMPONENT32F = 0x8CAC;
 
 pub const GL_MULTISAMPLE = 0x809D;
 pub const GL_SAMPLE_ALPHA_TO_COVERAGE = 0x809E;
@@ -26,6 +39,8 @@ pub const GL_SAMPLE_COVERAGE_VALUE = 0x80AA;
 pub const GL_SAMPLE_COVERAGE_INVERT = 0x80AB;
 pub const GL_TEXTURE_2D_MULTISAMPLE = 0x9100;
 pub const GL_MAX_SAMPLES = 0x8D57;
+pub const GL_MAX_COLOR_TEXTURE_SAMPLES = 0x910E;
+pub const GL_MAX_DEPTH_TEXTURE_SAMPLES = 0x910F;
 
 // Windows specific.
 pub const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
@@ -76,6 +91,7 @@ const RenderEntryBlendRenderTarget = rendergroup.RenderEntryBlendRenderTarget;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
+const Vector4 = math.Vector4;
 const Color = math.Color;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
@@ -94,7 +110,15 @@ pub const gl = struct {
     usingnamespace @import("win32").graphics.open_gl;
 };
 
-pub var default_internal_texture_format: i32 = 0;
+const OpenGL = struct {
+    supports_srgb_frame_buffer: bool = false,
+    default_internal_texture_format: i32 = 0,
+    reserved_blit_texture: u32 = 0,
+    basic_z_bias_program: u32 = 0,
+};
+
+pub var open_gl: OpenGL = .{};
+
 var frame_buffer_count: u32 = 0;
 var frame_buffer_handles: [256]c_uint = [1]c_uint{0} ** 256;
 var frame_buffer_textures: [256]c_uint = [1]c_uint{0} ** 256;
@@ -180,19 +204,37 @@ pub const Info = struct {
     }
 };
 
-pub fn init(is_modern_context: bool, framebuffer_supports_sRGB: bool) Info {
-    const info = Info.get(is_modern_context);
+pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
+    gl.glGenTextures(1, &open_gl.reserved_blit_texture);
 
-    default_internal_texture_format = gl.GL_RGBA8;
+    open_gl.default_internal_texture_format = gl.GL_RGBA8;
 
     if (framebuffer_supports_sRGB and info.gl_ext_texture_srgb and info.gl_ext_framebuffer_srgb) {
-        default_internal_texture_format = GL_SRGB8_ALPHA8;
+        open_gl.default_internal_texture_format = GL_SRGB8_ALPHA8;
         gl.glEnable(GL_FRAMEBUFFER_SRGB);
     }
 
     gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
 
-    return info;
+    const header_code =
+        \\// Header code
+        \\
+        \\
+        \\
+    ;
+    const vertex_code =
+        \\// Vertex code
+        \\
+        \\
+        \\
+    ;
+    const fragment_code =
+        \\// Fragment code
+        \\
+        \\
+        \\
+    ;
+    open_gl.basic_z_bias_program = createProgram(header_code, vertex_code, fragment_code);
 }
 
 fn bindFrameBuffer(target_index: u32, draw_region: Rectangle2i) void {
@@ -252,20 +294,20 @@ pub fn renderCommands(
             if (platform.optGlFrameBufferTexture2DEXT) |glBindFrameBufferTexture2D| {
                 if (platform.optGLTextImage2DMultiSample) |glTexImage2DMultisample| {
                     var target_index: u32 = frame_buffer_count;
-                    while (target_index <= new_frame_buffer_count) : (target_index += 1) {
+                    while (target_index <= commands.max_render_target_index) : (target_index += 1) {
                         std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
-                        // const slot = gl.GL_TEXTURE_2D;
-                        const slot = GL_TEXTURE_2D_MULTISAMPLE;
-                        var texture_handle: u32 = 0;
-                        gl.glGenTextures(1, &texture_handle);
-                        gl.glBindTexture(slot, texture_handle);
-
                         var max_sample_count: i32 = 0;
-                        gl.glGetIntegerv(GL_MAX_SAMPLES, &max_sample_count);
+                        gl.glGetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count);
                         if (max_sample_count > 16) {
                             max_sample_count = 16;
                         }
+
+                        // const slot = gl.GL_TEXTURE_2D;
+                        const slot = GL_TEXTURE_2D_MULTISAMPLE;
+                        var texture_handle: [2]u32 = undefined;
+                        gl.glGenTextures(2, @ptrCast(&texture_handle));
+                        gl.glBindTexture(slot, texture_handle[0]);
 
                         std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
@@ -273,7 +315,8 @@ pub fn renderCommands(
                             _ = glTexImage2DMultisample(
                                 slot,
                                 max_sample_count,
-                                gl.GL_RGBA8, //default_internal_texture_format,
+                                //gl.GL_RGBA8,
+                                open_gl.default_internal_texture_format,
                                 draw_region.getWidth(),
                                 draw_region.getHeight(),
                                 false,
@@ -282,7 +325,7 @@ pub fn renderCommands(
                             gl.glTexImage2D(
                                 slot,
                                 0,
-                                default_internal_texture_format,
+                                open_gl.default_internal_texture_format,
                                 draw_region.getWidth(),
                                 draw_region.getHeight(),
                                 0,
@@ -294,29 +337,40 @@ pub fn renderCommands(
 
                         std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
-                        gl.glBindTexture(slot, 0);
+                        gl.glBindTexture(slot, texture_handle[1]);
+                        _ = glTexImage2DMultisample(
+                            slot,
+                            max_sample_count,
+                            // TODO: Check if going with a 16-bit depth buffer would be faster and still have enough
+                            // quality (it should, wer don't have long draw distances).
+                            GL_DEPTH_COMPONENT32F,
+                            draw_region.getWidth(),
+                            draw_region.getHeight(),
+                            false,
+                        );
 
                         std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
+                        gl.glBindTexture(slot, 0);
+
                         // const texture_handle: u32 = allocateTexture(draw_region.getWidth(), draw_region.getHeight(), null);
-                        frame_buffer_textures[target_index] = texture_handle;
+                        frame_buffer_textures[target_index] = texture_handle[0];
 
                         glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer_handles[target_index]);
                         glBindFrameBufferTexture2D(
                             GL_FRAMEBUFFER,
                             GL_COLOR_ATTACHMENT0,
                             slot,
-                            texture_handle,
+                            texture_handle[0],
                             0,
                         );
-                        // TODO: Create a depth buffer for this framebuffer.
-                        // glBindFrameBufferTexture2D(
-                        //     GL_FRAMEBUFFER,
-                        //     GL_DEPTH_ATTACHMENT,
-                        //     gl.GL_TEXTURE_2D,
-                        //     texture_handle,
-                        //     0,
-                        // );
+                        glBindFrameBufferTexture2D(
+                            GL_FRAMEBUFFER,
+                            GL_DEPTH_ATTACHMENT,
+                            slot,
+                            texture_handle[1],
+                            0,
+                        );
 
                         if (platform.optGlCheckFramebufferStatusEXT) |checkFramebufferStatus| {
                             const status: u32 = checkFramebufferStatus(GL_FRAMEBUFFER);
@@ -432,6 +486,7 @@ pub fn renderCommands(
                         if (bitmap.width > 0 and bitmap.height > 0) {
                             const x_axis: Vector3 = entry.x_axis;
                             const y_axis: Vector3 = entry.y_axis;
+                            const z_bias: f32 = entry.z_bias;
                             const min_position: Vector3 = entry.position;
 
                             if (bitmap.texture_handle > 0) {
@@ -448,26 +503,26 @@ pub fn renderCommands(
                                 // This value is not gamma corrected by OpenGL.
                                 gl.glColor4fv(entry.premultiplied_color.toGL());
 
-                                const min_x_min_y: Vector3 = min_position;
-                                const min_x_max_y: Vector3 = min_position.plus(y_axis);
-                                const max_x_min_y: Vector3 = min_position.plus(x_axis);
-                                const max_x_max_y: Vector3 = min_position.plus(x_axis).plus(y_axis);
+                                const min_x_min_y: Vector4 = min_position.toVector4(0);
+                                const min_x_max_y: Vector4 = min_position.plus(y_axis).toVector4(z_bias);
+                                const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
+                                const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(z_bias);
 
                                 // Lower triangle.
                                 gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                                gl.glVertex3fv(min_x_min_y.toGL());
+                                gl.glVertex4fv(min_x_min_y.toGL());
                                 gl.glTexCoord2f(max_uv.x(), min_uv.y());
-                                gl.glVertex3fv(max_x_min_y.toGL());
+                                gl.glVertex4fv(max_x_min_y.toGL());
                                 gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                                gl.glVertex3fv(max_x_max_y.toGL());
+                                gl.glVertex4fv(max_x_max_y.toGL());
 
                                 // Upper triangle
                                 gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                                gl.glVertex3fv(min_x_min_y.toGL());
+                                gl.glVertex4fv(min_x_min_y.toGL());
                                 gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                                gl.glVertex3fv(max_x_max_y.toGL());
+                                gl.glVertex4fv(max_x_max_y.toGL());
                                 gl.glTexCoord2f(min_uv.x(), max_uv.y());
-                                gl.glVertex3fv(min_x_max_y.toGL());
+                                gl.glVertex4fv(min_x_max_y.toGL());
                             }
                             gl.glEnd();
                         }
@@ -640,9 +695,23 @@ pub fn renderCommands(
     }
 
     if (platform.optGlBindFramebufferEXT) |glBindFramebuffer| {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        //gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
-        //gl.glBlitFrameBuffer();
+        if (platform.optGLBlitFrameBuffer) |glBlitFramebuffer| {
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, frame_buffer_handles[0]);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
+            glBlitFramebuffer(
+                0,
+                0,
+                draw_region.getWidth(),
+                draw_region.getHeight(),
+                draw_region.min.x(),
+                draw_region.min.y(),
+                draw_region.max.x(),
+                draw_region.max.y(),
+                gl.GL_COLOR_BUFFER_BIT,
+                gl.GL_LINEAR,
+            );
+        }
     }
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
@@ -672,7 +741,7 @@ fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.C) u32 
     gl.glTexImage2D(
         gl.GL_TEXTURE_2D,
         0,
-        default_internal_texture_format,
+        open_gl.default_internal_texture_format,
         width,
         height,
         0,
@@ -855,4 +924,62 @@ pub fn displayBitmap(
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
     gl.glEnable(gl.GL_BLEND);
+}
+
+fn createProgram(header: [*:0]const u8, vertex_code: [*:0]const u8, fragment_code: [*:0]const u8) u32 {
+    const glShaderSource = platform.optGLShaderSource.?;
+    const glCreateShader = platform.optGLCreateShader.?;
+    const glCompileShader = platform.optGLCompileShader.?;
+    const glCreateProgram = platform.optGLCreateProgram.?;
+    const glLinkProgram = platform.optGLLinkProgram.?;
+    const glAttachShader = platform.optGLAttachShader.?;
+    const glValidateProgram = platform.optGLValidateProgram.?;
+    const glGetProgramiv = platform.optGLGetProgramiv.?;
+    const glGetShaderInfoLog = platform.optGLGetShaderInfoLog.?;
+    const glGetProgramInfoLog = platform.optGLGetProgramInfoLog.?;
+
+    const vertex_shader_id: u32 = glCreateShader(GL_VERTEX_SHADER);
+    var vertex_shader_code = [_][*:0]const u8{
+        header,
+        vertex_code,
+    };
+    glShaderSource(vertex_shader_id, vertex_shader_code.len, &vertex_shader_code, null);
+    glCompileShader(vertex_shader_id);
+
+    const fragment_shader_id: u32 = glCreateShader(GL_FRAGMENT_SHADER);
+    var fragment_shader_code = [_][*:0]const u8{
+        header,
+        fragment_code,
+    };
+    glShaderSource(fragment_shader_id, fragment_shader_code.len, &fragment_shader_code, null);
+    glCompileShader(fragment_shader_id);
+
+    const program_id: u32 = glCreateProgram();
+    glAttachShader(program_id, vertex_shader_id);
+    glAttachShader(program_id, fragment_shader_id);
+    glLinkProgram(program_id);
+
+    glValidateProgram(program_id);
+    var validated: i32 = 0;
+    glGetProgramiv(program_id, GL_VALIDATE_STATUS, &validated);
+    if (validated == 0) {
+        var vertex_errors: [4096:0]u8 = undefined;
+        var fragment_errors: [4096:0]u8 = undefined;
+        var program_errors: [4096:0]u8 = undefined;
+
+        var vertex_length: i32 = 0;
+        glGetShaderInfoLog(vertex_shader_id, vertex_errors.len, &vertex_length, &vertex_errors);
+        var fragment_length: i32 = 0;
+        glGetShaderInfoLog(fragment_shader_id, fragment_errors.len, &fragment_length, &fragment_errors);
+        var program_length: i32 = 0;
+        glGetProgramInfoLog(program_id, program_errors.len, &program_length, &program_errors);
+
+        std.log.err("Vertex error log:\n{s}", .{vertex_errors[0..@intCast(vertex_length)]});
+        std.log.err("Fragment error log:\n{s}", .{fragment_errors[0..@intCast(fragment_length)]});
+        std.log.err("Program error log:\n{s}", .{program_errors[0..@intCast(program_length)]});
+
+        @panic("Shader validation failed.");
+    }
+
+    return program_id;
 }

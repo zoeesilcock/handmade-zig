@@ -127,6 +127,7 @@ pub const RenderEntryBitmap = extern struct {
     // These are already scaled by the half dimension.
     x_axis: Vector3,
     y_axis: Vector3,
+    z_bias: f32,
 };
 
 pub const RenderEntryCube = extern struct {
@@ -447,6 +448,7 @@ pub const RenderGroup = extern struct {
         if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
             entry.bitmap = bitmap;
             entry.position = dim.basis_position;
+            entry.z_bias = height;
             entry.premultiplied_color = storeColor(color);
             entry.x_axis = x_axis.toVector3(0).scaledTo(size.x());
             entry.y_axis = y_axis.toVector3(0).scaledTo(size.y());
