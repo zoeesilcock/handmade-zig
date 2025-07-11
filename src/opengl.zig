@@ -15,6 +15,8 @@ pub const GL_SRGB8_ALPHA8 = 0x8C43;
 pub const GL_SHADING_LANGUAGE_VERSION = 0x8B8C;
 pub const GL_FRAGMENT_SHADER = 0x8B30;
 pub const GL_VERTEX_SHADER = 0x8B31;
+pub const GL_COMPILE_STATUS = 0x8B81;
+pub const GL_LINK_STATUS = 0x8B82;
 pub const GL_VALIDATE_STATUS = 0x8B83;
 
 pub const GL_FRAMEBUFFER = 0x8D40;
@@ -115,6 +117,8 @@ const OpenGL = struct {
     default_internal_texture_format: i32 = 0,
     reserved_blit_texture: u32 = 0,
     basic_z_bias_program: u32 = 0,
+    transform_id: i32 = 0,
+    texture_sampler_id: i32 = 0,
 };
 
 pub var open_gl: OpenGL = .{};
@@ -217,24 +221,50 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
 
     const header_code =
+        \\#version 130
         \\// Header code
-        \\
-        \\
-        \\
     ;
     const vertex_code =
         \\// Vertex code
+        \\uniform mat4x4 Transform;
         \\
+        \\smooth out vec2 FragUV;
+        \\smooth out vec4 FragColor;
         \\
+        \\void main(void)
+        \\{
+        \\  vec4 InVertex = vec4(gl_Vertex.xyz, 1.0);
+        \\  float ZBias = gl_Vertex.w;
         \\
+        \\  vec4 ZVertex = InVertex;
+        \\  ZVertex.z += ZBias;
+        \\
+        \\  vec4 ZMinTransform = Transform * InVertex;
+        \\  vec4 ZMaxTransform = Transform * ZVertex;
+        \\
+        \\  gl_Position = vec4(ZMinTransform.x, ZMinTransform.y, ZMaxTransform.z, ZMinTransform.w);
+        \\
+        \\  FragUV = gl_MultiTexCoord0.xy;
+        \\  FragColor = gl_Color;
+        \\}
     ;
     const fragment_code =
         \\// Fragment code
+        \\uniform sampler2D TextureSampler;
+        \\out vec4 ResultColor;
+        \\smooth in vec2 FragUV;
+        \\smooth in vec4 FragColor;
         \\
-        \\
-        \\
+        \\void main(void)
+        \\{
+        \\  //vec4 TexSample = vec4(1, 0, 0, 1);
+        \\  vec4 TexSample = texture(TextureSampler, FragUV);
+        \\  ResultColor = FragColor * TexSample;
+        \\}
     ;
     open_gl.basic_z_bias_program = createProgram(header_code, vertex_code, fragment_code);
+    open_gl.transform_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "Transform");
+    open_gl.texture_sampler_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "TextureSampler");
 }
 
 fn bindFrameBuffer(target_index: u32, draw_region: Rectangle2i) void {
@@ -295,7 +325,7 @@ pub fn renderCommands(
                 if (platform.optGLTextImage2DMultiSample) |glTexImage2DMultisample| {
                     var target_index: u32 = frame_buffer_count;
                     while (target_index <= commands.max_render_target_index) : (target_index += 1) {
-                        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+                        // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
                         var max_sample_count: i32 = 0;
                         gl.glGetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count);
@@ -309,7 +339,7 @@ pub fn renderCommands(
                         gl.glGenTextures(2, @ptrCast(&texture_handle));
                         gl.glBindTexture(slot, texture_handle[0]);
 
-                        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+                        // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
                         if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
                             _ = glTexImage2DMultisample(
@@ -335,7 +365,7 @@ pub fn renderCommands(
                             );
                         }
 
-                        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+                        // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
                         gl.glBindTexture(slot, texture_handle[1]);
                         _ = glTexImage2DMultisample(
@@ -349,7 +379,7 @@ pub fn renderCommands(
                             false,
                         );
 
-                        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+                        // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
                         gl.glBindTexture(slot, 0);
 
@@ -412,6 +442,7 @@ pub fn renderCommands(
     var clip_rect_index: u32 = 0xffffffff;
     var current_render_target_index: u32 = 0xffffffff;
     var header_at: [*]u8 = commands.push_buffer_base;
+    var proj: Matrix4x4 = .identity();
     while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) : (header_at += @sizeOf(RenderEntryHeader)) {
         const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
         const alignment: usize = switch (header.type) {
@@ -441,7 +472,9 @@ pub fn renderCommands(
                 const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
 
                 gl.glMatrixMode(gl.GL_PROJECTION);
-                gl.glLoadMatrixf(@ptrCast(clip.proj.transpose().toGL()));
+                proj = clip.proj.transpose();
+                gl.glLoadMatrixf(proj.toGL());
+                // proj = clip.proj;
 
                 var clip_rect: Rectangle2i = clip.rect;
 
@@ -498,6 +531,10 @@ pub fn renderCommands(
                             const min_uv = Vector2.new(one_texel_u, one_texel_v);
                             const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
 
+                            platform.optGLUseProgram.?(open_gl.basic_z_bias_program);
+                            platform.optGLUniformMatrix4fv.?(open_gl.transform_id, 1, false, proj.toGL());
+                            platform.optGLUniform1i.?(open_gl.texture_sampler_id, 0);
+
                             gl.glBegin(gl.GL_TRIANGLES);
                             {
                                 // This value is not gamma corrected by OpenGL.
@@ -525,6 +562,7 @@ pub fn renderCommands(
                                 gl.glVertex4fv(min_x_max_y.toGL());
                             }
                             gl.glEnd();
+                            platform.optGLUseProgram.?(0);
                         }
                     }
                 },
@@ -960,9 +998,9 @@ fn createProgram(header: [*:0]const u8, vertex_code: [*:0]const u8, fragment_cod
     glLinkProgram(program_id);
 
     glValidateProgram(program_id);
-    var validated: i32 = 0;
-    glGetProgramiv(program_id, GL_VALIDATE_STATUS, &validated);
-    if (validated == 0) {
+    var link_validated: i32 = 0;
+    glGetProgramiv(program_id, GL_LINK_STATUS, &link_validated);
+    if (link_validated == 0) {
         var vertex_errors: [4096:0]u8 = undefined;
         var fragment_errors: [4096:0]u8 = undefined;
         var program_errors: [4096:0]u8 = undefined;

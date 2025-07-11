@@ -156,6 +156,16 @@ const GLGetShaderInfoLog: type = fn (shader: u32, bufSize: i32, length: *i32, in
 pub var optGLGetShaderInfoLog: ?*const GLGetShaderInfoLog = null;
 const GLGetProgramInfoLog: type = fn (program: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(WINAPI) void;
 pub var optGLGetProgramInfoLog: ?*const GLGetProgramInfoLog = null;
+const GLUseProgram: type = fn (program: u32) callconv(WINAPI) void;
+pub var optGLUseProgram: ?*const GLUseProgram = null;
+const GLUniformMatrix4fv: type = fn (location: i32, count: i32, transpose: bool, value: *const f32) callconv(WINAPI) void;
+pub var optGLUniformMatrix4fv: ?*const GLUniformMatrix4fv = null;
+const GLUniform4fv: type = fn (location: i32, count: i32, value: *const f32) callconv(WINAPI) void;
+pub var optGLUniform4fv: ?*const GLUniform4fv = null;
+const GLUniform1i: type = fn (location: i32, value: i32) callconv(WINAPI) void;
+pub var optGLUniform1i: ?*const GLUniform1i = null;
+const GLGetUniformLocation: type = fn (program: u32, [*]const u8) callconv(WINAPI) i32;
+pub var optGLGetUniformLocation: ?*const GLGetUniformLocation = null;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -1492,6 +1502,11 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLGetProgramiv = @ptrCast(win32.wglGetProcAddress("glGetProgramiv"));
             optGLGetShaderInfoLog = @ptrCast(win32.wglGetProcAddress("glGetShaderInfoLog"));
             optGLGetProgramInfoLog = @ptrCast(win32.wglGetProcAddress("glGetProgramInfoLog"));
+            optGLUseProgram = @ptrCast(win32.wglGetProcAddress("glUseProgram"));
+            optGLUniformMatrix4fv = @ptrCast(win32.wglGetProcAddress("glUniformMatrix4fv"));
+            optGLUniform4fv = @ptrCast(win32.wglGetProcAddress("glUniform4fv"));
+            optGLUniform1i = @ptrCast(win32.wglGetProcAddress("glUniform1i"));
+            optGLGetUniformLocation = @ptrCast(win32.wglGetProcAddress("glGetUniformLocation"));
 
             std.debug.assert(optGLTextImage2DMultiSample != null);
             std.debug.assert(optGLBlitFrameBuffer != null);
@@ -1505,6 +1520,11 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLGetProgramiv != null);
             std.debug.assert(optGLGetShaderInfoLog != null);
             std.debug.assert(optGLGetProgramInfoLog != null);
+            std.debug.assert(optGLUseProgram != null);
+            std.debug.assert(optGLUniformMatrix4fv != null);
+            std.debug.assert(optGLUniform4fv != null);
+            std.debug.assert(optGLUniform1i != null);
+            std.debug.assert(optGLGetUniformLocation != null);
 
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
                 _ = wglSwapIntervalEXT(1);
