@@ -1,6 +1,6 @@
 # Handmade Zig
 
-Learning Zig by following along with the [Handmade Hero](https://handmadehero.org/) series of videos by Casey Muratori.
+Learning Zig by following along with the [Handmade Hero](https://handmadehero.org/) series of videos by Casey Muratori. This implementation follows Casey's approach as closely as Zig allows with some minor departures when I want to explore some specific Zig feature (like using `@Vector` to get SIMD vector math for example).
 
 
 ## Assets
@@ -12,13 +12,19 @@ The asset files need to be packed using the asset packer before running the game
 zig build build-assets
 ```
 
+## Hot reloading
+The game is split up into an executable for the runtime and a DLL that contains the actual game. This allows hot reloading for most of the game code. When the DLL is rebuilt, the game will automatically reload it.
+
+To make this even more automatic you can run a separate terminal which automatically rebuilds the DLL when you save a file:
+```
+zig build --watch -Dpackage=Library
+```
+
 ## Debugging
-The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [C/C++ extension](https://github.com/Microsoft/vscode-cpptools) in VS Code. Using Visual Studio with C/C++ tooling appears to give the most reliable results. Another alternative that works almost as well as Visual Studio is [Rad Debugger](https://github.com/EpicGamesExt/raddebugger).
+The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [C/C++ extension](https://github.com/Microsoft/vscode-cpptools) in VS Code. Using regular Visual Studio with C/C++ tooling appears to give the most reliable results. Another alternative that works almost as well as Visual Studio is [Rad Debugger](https://github.com/EpicGamesExt/raddebugger).
 
 When running outside of an IDE, `OutputDebugString` messages can be viewed using [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview).
 
-## Build options
-* Timing: use the `-Dtiming` flag when building to enable printing timing (ms/frame, fps and cycles/frame) to the debug output.
 
 ## Analyzing generated assembly
 The build is setup to emit the generated assembly code which can be used to analyze the code for bottlenecks using `llvm-mca` which is bundled with LLVM version 18+.
@@ -34,6 +40,7 @@ Analyze the emitted assembly code:
 ```
 llvm-mca .\zig-out\bin\handmade-dll.asm -bottleneck-analysis -o .\zig-out\bin\handmade-dll-mca.txt
 ```
+
 
 ## Reference
 
