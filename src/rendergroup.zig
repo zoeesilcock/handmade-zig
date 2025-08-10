@@ -49,6 +49,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const RenderCommands = shared.RenderCommands;
 const ArenaPushParams = shared.ArenaPushParams;
+const TexturedVertex = shared.TexturedVertex;
 const ManualSortKey = render.ManualSortKey;
 const SpriteFlag = render.SpriteFlag;
 
@@ -69,6 +70,7 @@ pub const EnvironmentMap = extern struct {
 };
 
 pub const RenderEntryType = enum(u16) {
+    RenderEntryTexturedQuads,
     RenderEntryClipRect,
     RenderEntryBitmap,
     RenderEntryCube,
@@ -81,6 +83,12 @@ pub const RenderEntryHeader = extern struct {
     type: RenderEntryType,
     clip_rect_index: u16,
     debug_tag: u32,
+};
+
+pub const RenderEntryTexturedQuads = extern struct {
+    bitmap_array: *[*]LoadedBitmap,
+    quad_count: u32,
+    vertex_array_offset: u32, // Uses 4 vertices per quad.
 };
 
 pub const RenderEntryClipRect = extern struct {
@@ -212,6 +220,8 @@ pub const RenderGroup = extern struct {
     generation_id: u32,
     commands: *RenderCommands,
 
+    current_quads: *RenderEntryTexturedQuads,
+
     pub fn begin(
         assets: *asset.Assets,
         commands: *RenderCommands,
@@ -237,6 +247,7 @@ pub const RenderGroup = extern struct {
             .current_clip_rect_index = 0,
             .generation_id = generation_id,
             .commands = commands,
+            .current_quads = undefined,
         };
 
         var i: Matrix4x4 = .identity();
@@ -258,6 +269,10 @@ pub const RenderGroup = extern struct {
         // TODO:
         // self.commands.missing_resource_count += self.missing_resource_count
     }
+
+    // pub fn beginQuads(self: *RenderGroup) void {}
+
+    // pub fn endQuads(self: *RenderGroup) void {}
 
     pub fn allResourcesPresent(self: *RenderGroup) bool {
         return self.missing_resource_count == 0;
@@ -440,24 +455,72 @@ pub const RenderGroup = extern struct {
         opt_x_axis: ?Vector2,
         opt_y_axis: ?Vector2,
     ) void {
-        const x_axis: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
-        const y_axis: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
-        const dim = self.getBitmapDim(object_transform, bitmap, height, offset, align_coefficient, x_axis, y_axis);
+        if (bitmap.width > 0 and bitmap.height > 0) {
+            const x_axis2: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
+            const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
+            const dim = self.getBitmapDim(
+                object_transform,
+                bitmap,
+                height,
+                offset,
+                align_coefficient,
+                x_axis2,
+                y_axis2,
+            );
 
-        const size: Vector2 = dim.size;
-        if (self.pushRenderElement(RenderEntryBitmap)) |entry| {
-            entry.bitmap = bitmap;
-            entry.position = dim.basis_position;
-            entry.z_bias = height;
-            entry.premultiplied_color = storeColor(color);
-            entry.x_axis = x_axis.toVector3(0).scaledTo(size.x());
-            entry.y_axis = y_axis.toVector3(0).scaledTo(size.y());
+            const size: Vector2 = dim.size;
+            if (self.pushRenderElement_(@sizeOf(RenderEntryTexturedQuads) + @sizeOf(*LoadedBitmap), .RenderEntryTexturedQuads, @alignOf(RenderEntryTexturedQuads))) |entry_| {
+                var entry: [*]RenderEntryTexturedQuads = @ptrCast(@alignCast(entry_));
+                entry[0].bitmap_array = @ptrCast(entry + 1);
+                entry[0].quad_count = 1;
+                entry[0].vertex_array_offset = self.commands.vertex_count;
 
-            if (object_transform.upright) {
-                entry.x_axis =
-                    self.camera_x.scaledTo(x_axis.x()).plus(self.camera_y.scaledTo(x_axis.y())).scaledTo(size.x());
-                entry.y_axis =
-                    self.camera_x.scaledTo(y_axis.x()).plus(self.camera_y.scaledTo(y_axis.y())).scaledTo(size.y());
+                const min_position: Vector3 = dim.basis_position;
+                const z_bias: f32 = height;
+                const premultiplied_color: Color = storeColor(color);
+                var x_axis: Vector3 = x_axis2.toVector3(0).scaledTo(size.x());
+                var y_axis: Vector3 = y_axis2.toVector3(0).scaledTo(size.y());
+
+                if (object_transform.upright) {
+                    x_axis =
+                        self.camera_x.scaledTo(x_axis2.x()).plus(self.camera_y.scaledTo(x_axis2.y())).scaledTo(size.x());
+                    y_axis =
+                        self.camera_x.scaledTo(y_axis2.x()).plus(self.camera_y.scaledTo(y_axis2.y())).scaledTo(size.y());
+                }
+
+                const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
+                const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
+                const min_uv = Vector2.new(one_texel_u, one_texel_v);
+                const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
+
+                const vertex_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+
+                const min_x_min_y: Vector4 = min_position.toVector4(0);
+                const min_x_max_y: Vector4 = min_position.plus(y_axis).toVector4(z_bias);
+                const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
+                const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(z_bias);
+
+                entry[0].bitmap_array.* = @ptrCast(bitmap);
+
+                var vert: [*]TexturedVertex = self.commands.vertex_array + self.commands.vertex_count;
+                self.commands.vertex_count += 4;
+                std.debug.assert(self.commands.vertex_count < self.commands.max_vertex_count);
+
+                vert[0].position = min_x_min_y;
+                vert[0].uv = .new(min_uv.x(), min_uv.y());
+                vert[0].color = vertex_color;
+
+                vert[1].position = max_x_min_y;
+                vert[1].uv = .new(max_uv.x(), min_uv.y());
+                vert[1].color = vertex_color;
+
+                vert[2].position = max_x_max_y;
+                vert[2].uv = .new(max_uv.x(), max_uv.y());
+                vert[2].color = vertex_color;
+
+                vert[3].position = min_x_max_y;
+                vert[3].uv = .new(min_uv.x(), max_uv.y());
+                vert[3].color = vertex_color;
             }
         }
     }

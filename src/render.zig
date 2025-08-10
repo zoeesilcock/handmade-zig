@@ -437,12 +437,12 @@ fn blendRenderTarget(
 
             var x = rect.min.x();
             while (x < rect.max.x()) : (x += 1) {
-                var dest_color: Color = math.sRGB255ToLinear1(Color.unpackColor(dest_pixel[0]));
-                var source_color: Color = math.sRGB255ToLinear1(Color.unpackColor(source_pixel[0]));
+                var dest_color: Color = math.sRGB255ToLinear1(Color.unpackClorBGRA(dest_pixel[0]));
+                var source_color: Color = math.sRGB255ToLinear1(Color.unpackClorBGRA(source_pixel[0]));
                 const pixel_alpha: f32 = alpha * source_color.a();
                 const result = dest_color.scaledTo(1 - pixel_alpha).plus(source_color.scaledTo(pixel_alpha));
 
-                dest_pixel[0] = math.linear1ToSRGB255(result).packColor1();
+                dest_pixel[0] = math.linear1ToSRGB255(result).packColorBGRA();
 
                 dest_pixel += 1;
                 source_pixel += 1;
@@ -628,7 +628,7 @@ pub fn drawRectangle(
 
             var x = fill_rect.min.x();
             while (x < fill_rect.max.x()) : (x += 1) {
-                pixel[0] = color_in.packColor();
+                pixel[0] = color_in.packColorBGRA255();
                 pixel += 1;
             }
 
@@ -796,12 +796,12 @@ fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
 
         var x: u32 = 0;
         while (x < draw_buffer.width) : (x += 1) {
-            const d = Color.unpackColor(dest[0]);
+            const d = Color.unpackClorBGRA(dest[0]);
             const average: f32 = (1.0 / 3.0) * (d.r() + d.g() + d.b());
             const delta = Color3.new(d.r() - average, d.g() - average, d.b() - average);
             var result = Color3.splat(average).plus(delta.scaledTo(level)).toColor(d.a());
 
-            dest[0] = result.packColor1();
+            dest[0] = result.packColorBGRA();
 
             dest += 1;
         }
@@ -1263,10 +1263,10 @@ pub fn drawRectangleSlowly(
 
                 if (opt_normal_map) |normal_map| {
                     const normal_sample = bilinearSample(normal_map, texel_rounded_x, texel_rounded_y);
-                    const normal_a = Color.unpackColor(normal_sample.a);
-                    const normal_b = Color.unpackColor(normal_sample.b);
-                    const normal_c = Color.unpackColor(normal_sample.c);
-                    const normal_d = Color.unpackColor(normal_sample.d);
+                    const normal_a = Color.unpackClorBGRA(normal_sample.a);
+                    const normal_b = Color.unpackClorBGRA(normal_sample.b);
+                    const normal_c = Color.unpackClorBGRA(normal_sample.c);
+                    const normal_d = Color.unpackClorBGRA(normal_sample.d);
                     var normal = normal_a.lerp(normal_b, texel_fraction_x).lerp(
                         normal_c.lerp(normal_d, texel_fraction_x),
                         texel_fraction_y,
@@ -1332,13 +1332,13 @@ pub fn drawRectangleSlowly(
                 texel = texel.hadamardProduct(color);
                 _ = texel.setRGB(texel.rgb().clamp01());
 
-                var dest = Color.unpackColor(pixel[0]);
+                var dest = Color.unpackClorBGRA(pixel[0]);
                 dest = math.sRGB255ToLinear1(dest);
 
                 const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
                 const blended255 = math.linear1ToSRGB255(blended);
 
-                pixel[0] = blended255.packColor1();
+                pixel[0] = blended255.packColorBGRA();
             }
 
             pixel += 1;
@@ -1447,19 +1447,19 @@ pub fn drawBitmap(
 
         var x = min_x;
         while (x < max_x) : (x += 1) {
-            var texel = Color.unpackColor(source[0]);
+            var texel = Color.unpackClorBGRA(source[0]);
 
             texel = math.sRGB255ToLinear1(texel);
             texel = texel.scaledTo(alpha);
 
-            var d = Color.unpackColor(dest[0]);
+            var d = Color.unpackClorBGRA(dest[0]);
 
             d = math.sRGB255ToLinear1(d);
 
             var result = d.scaledTo(1.0 - texel.a()).plus(texel);
             result = math.linear1ToSRGB255(result);
 
-            dest[0] = result.packColor1();
+            dest[0] = result.packColorBGRA();
 
             source += 1;
             dest += 1;
@@ -1543,7 +1543,7 @@ pub fn drawBitmapMatte(
                 inv_rsa * db,
             );
 
-            dest[0] = color.packColor1();
+            dest[0] = color.packColorBGRA();
 
             source += 1;
             dest += 1;
@@ -1555,10 +1555,10 @@ pub fn drawBitmapMatte(
 }
 
 inline fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color {
-    var texel_a = Color.unpackColor(texel_sample.a);
-    var texel_b = Color.unpackColor(texel_sample.b);
-    var texel_c = Color.unpackColor(texel_sample.c);
-    var texel_d = Color.unpackColor(texel_sample.d);
+    var texel_a = Color.unpackClorBGRA(texel_sample.a);
+    var texel_b = Color.unpackClorBGRA(texel_sample.b);
+    var texel_c = Color.unpackClorBGRA(texel_sample.c);
+    var texel_d = Color.unpackClorBGRA(texel_sample.d);
 
     texel_a = math.sRGB255ToLinear1(texel_a);
     texel_b = math.sRGB255ToLinear1(texel_b);
@@ -1626,7 +1626,7 @@ inline fn sampleEnvironmentMap(
         const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
         const texture_base = shared.incrementPointer(lod.memory.?, test_offset);
         const texel_pointer: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));
-        texel_pointer[0] = Color.new(255, 255, 255, 255).packColor();
+        texel_pointer[0] = Color.new(255, 255, 255, 255).packColorBGRA255();
     }
 
     const sample = bilinearSample(&lod, rounded_x, rounded_y);

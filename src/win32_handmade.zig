@@ -54,6 +54,7 @@ const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const GameRenderPrep = shared.GameRenderPrep;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
+const TexturedVertex = shared.TexturedVertex;
 const Rectangle2i = math.Rectangle2i;
 const TicketMutex = shared.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
@@ -1283,6 +1284,7 @@ const opengl_attribs = [_:0]c_int{
     opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 0,
     opengl.WGL_CONTEXT_FLAGS_ARB,         opengl_flags,
     opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+    // opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
     0,
 };
 
@@ -2385,6 +2387,10 @@ pub export fn wWinMain(
                 const push_buffer_block: ?*PlatformMemoryBlock = allocateMemory(push_buffer_size, @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
                 const push_buffer = push_buffer_block.?.base;
 
+                const max_vertex_count: u32 = 65536;
+                const vertex_array_block: ?*PlatformMemoryBlock = allocateMemory(max_vertex_count * @sizeOf(TexturedVertex), @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
+                const vertex_array: [*]TexturedVertex = @ptrCast(@alignCast(vertex_array_block.?.base));
+
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
                 while (running) {
@@ -2411,6 +2417,8 @@ pub export fn wWinMain(
                         push_buffer,
                         @intCast(back_buffer.width),
                         @intCast(back_buffer.height),
+                        max_vertex_count,
+                        vertex_array,
                     );
                     const window_dimension = getWindowDimension(window_handle);
                     const draw_region = render.aspectRatioFit(

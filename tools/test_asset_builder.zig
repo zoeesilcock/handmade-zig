@@ -151,7 +151,7 @@ fn loadBMP(
 
                 texel = math.linear1ToSRGB255(texel);
 
-                source_dest[0] = texel.packColor1();
+                source_dest[0] = texel.packColorBGRA();
 
                 source_dest += 1;
             }
@@ -412,7 +412,7 @@ fn loadGlyphBMP(
                         _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
                         texel = math.linear1ToSRGB255(texel);
 
-                        dest[0] = texel.packColor1();
+                        dest[0] = texel.packColorBGRA();
 
                         dest += 1;
                         source += 1;

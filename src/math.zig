@@ -266,29 +266,6 @@ fn Vector4Type(comptime ScalarType: type) type {
             } };
         }
 
-        pub inline fn packColor(self: Self) u32 {
-            return ((intrinsics.roundReal32ToUInt32(self.a() * 255.0) << 24) |
-                (intrinsics.roundReal32ToUInt32(self.r() * 255.0) << 16) |
-                (intrinsics.roundReal32ToUInt32(self.g() * 255.0) << 8) |
-                (intrinsics.roundReal32ToUInt32(self.b() * 255.0) << 0));
-        }
-
-        pub inline fn packColor1(self: Self) u32 {
-            return ((@as(u32, @intFromFloat(self.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(self.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(self.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(self.b() + 0.5)) << 0));
-        }
-
-        pub inline fn unpackColor(value: u32) Self {
-            return Self.newU(
-                (value >> 16) & 0xFF,
-                (value >> 8) & 0xFF,
-                (value >> 0) & 0xFF,
-                (value >> 24) & 0xFF,
-            );
-        }
-
         pub inline fn x(self: *const Self) ScalarType {
             return self.values[0];
         }
@@ -365,6 +342,10 @@ fn Vector4Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeOrZero = Shared.normalizeOrZero;
+        pub const packColorBGRA255 = Shared.packColorBGRA255;
+        pub const packColorBGRA = Shared.packColorBGRA;
+        pub const packColorRGBA = Shared.packColorRGBA;
+        pub const unpackColorRGBA = Shared.unpackColorRGBA;
         pub const toGL = Shared.toGL;
     };
 }
@@ -489,29 +470,6 @@ fn Color4Type(comptime ScalarType: type) type {
             );
         }
 
-        pub inline fn packColor(self: Self) u32 {
-            return ((intrinsics.roundReal32ToUInt32(self.a() * 255.0) << 24) |
-                (intrinsics.roundReal32ToUInt32(self.r() * 255.0) << 16) |
-                (intrinsics.roundReal32ToUInt32(self.g() * 255.0) << 8) |
-                (intrinsics.roundReal32ToUInt32(self.b() * 255.0) << 0));
-        }
-
-        pub inline fn packColor1(self: Self) u32 {
-            return ((@as(u32, @intFromFloat(self.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(self.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(self.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(self.b() + 0.5)) << 0));
-        }
-
-        pub inline fn unpackColor(value: u32) Self {
-            return Self.newU(
-                (value >> 16) & 0xFF,
-                (value >> 8) & 0xFF,
-                (value >> 0) & 0xFF,
-                (value >> 24) & 0xFF,
-            );
-        }
-
         pub inline fn r(self: *const Self) ScalarType {
             return self.values[0];
         }
@@ -590,6 +548,10 @@ fn Color4Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeOrZero = Shared.normalizeOrZero;
+        pub const packColorBGRA255 = Shared.packColorBGRA255;
+        pub const packColorBGRA = Shared.packColorBGRA;
+        pub const packColorRGBA = Shared.packColorRGBA;
+        pub const unpackColorRGBA = Shared.unpackColorRGBA;
         pub const toGL = Shared.toGL;
     };
 }
@@ -677,6 +639,45 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
                 result = self.scaledTo(1 / @sqrt(length_squared));
             }
             return result;
+        }
+
+        pub inline fn packColorBGRA255(self: Self) u32 {
+            return ((intrinsics.roundReal32ToUInt32(self.a() * 255.0) << 24) |
+                (intrinsics.roundReal32ToUInt32(self.r() * 255.0) << 16) |
+                (intrinsics.roundReal32ToUInt32(self.g() * 255.0) << 8) |
+                (intrinsics.roundReal32ToUInt32(self.b() * 255.0) << 0));
+        }
+
+        pub inline fn packColorBGRA(self: Self) u32 {
+            return ((@as(u32, @intFromFloat(self.a() + 0.5)) << 24) |
+                (@as(u32, @intFromFloat(self.r() + 0.5)) << 16) |
+                (@as(u32, @intFromFloat(self.g() + 0.5)) << 8) |
+                (@as(u32, @intFromFloat(self.b() + 0.5)) << 0));
+        }
+
+        pub inline fn unpackColorBGRA(value: u32) Self {
+            return Self.newU(
+                (value >> 16) & 0xFF,
+                (value >> 8) & 0xFF,
+                (value >> 0) & 0xFF,
+                (value >> 24) & 0xFF,
+            );
+        }
+
+        pub inline fn packColorRGBA(self: Self) u32 {
+            return ((@as(u32, @intFromFloat(self.a() + 0.5)) << 24) |
+                (@as(u32, @intFromFloat(self.b() + 0.5)) << 16) |
+                (@as(u32, @intFromFloat(self.g() + 0.5)) << 8) |
+                (@as(u32, @intFromFloat(self.r() + 0.5)) << 0));
+        }
+
+        pub inline fn unpackColorRGBA(value: u32) Self {
+            return Self.newU(
+                (value >> 0) & 0xFF,
+                (value >> 8) & 0xFF,
+                (value >> 16) & 0xFF,
+                (value >> 24) & 0xFF,
+            );
         }
 
         pub inline fn toGL(self: Self) *const f32 {

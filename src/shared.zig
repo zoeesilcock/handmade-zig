@@ -878,6 +878,12 @@ pub const debug_color_table: [11]Color3 = .{
     Color3.new(0.5, 0, 1),
 };
 
+pub const TexturedVertex = extern struct {
+    position: Vector4,
+    uv: Vector2,
+    color: u32, // Packed RGBA in memory order (ABGR in little endian).
+};
+
 pub const RenderCommands = extern struct {
     width: u32 = 0,
     height: u32 = 0,
@@ -885,6 +891,10 @@ pub const RenderCommands = extern struct {
     max_push_buffer_size: u32,
     push_buffer_base: [*]u8,
     push_buffer_data_at: [*]u8,
+
+    max_vertex_count: u32,
+    vertex_count: u32,
+    vertex_array: [*]TexturedVertex,
 
     clear_color: Color,
 
@@ -904,6 +914,8 @@ pub fn initializeRenderCommands(
     push_buffer: *anyopaque,
     width: u32,
     height: u32,
+    max_vertex_count: u32,
+    vertex_array: [*]TexturedVertex,
 ) RenderCommands {
     return RenderCommands{
         .width = width,
@@ -912,6 +924,10 @@ pub fn initializeRenderCommands(
         .max_push_buffer_size = max_push_buffer_size,
         .push_buffer_base = @ptrCast(push_buffer),
         .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer)),
+
+        .max_vertex_count = max_vertex_count,
+        .vertex_count = 0,
+        .vertex_array = vertex_array,
 
         .clear_color = .black(),
     };

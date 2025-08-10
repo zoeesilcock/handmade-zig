@@ -81,8 +81,10 @@ const INTERNAL = shared.INTERNAL;
 
 const RenderCommands = shared.RenderCommands;
 const GameRenderPrep = shared.GameRenderPrep;
+const TexturedVertex = shared.TexturedVertex;
 const RenderGroup = rendergroup.RenderGroup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
+const RenderEntryTexturedQuads = rendergroup.RenderEntryTexturedQuads;
 const RenderEntryClear = rendergroup.RenderEntryClear;
 const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
@@ -113,10 +115,15 @@ pub const gl = struct {
 };
 
 const OpenGL = struct {
+    max_multi_sample_count: i32 = 0,
     supports_srgb_frame_buffer: bool = false,
-    default_internal_texture_format: i32 = 0,
+
+    default_sprite_texture_format: i32 = 0,
+    default_framebuffer_texture_format: i32 = 0,
+
     reserved_blit_texture: u32 = 0,
     basic_z_bias_program: u32 = 0,
+
     transform_id: i32 = 0,
     texture_sampler_id: i32 = 0,
 };
@@ -208,14 +215,59 @@ pub const Info = struct {
     }
 };
 
+fn colorUB(color: u32) void {
+    gl.glColor4ub(
+       @intCast((color >> 0) & 0xFF),
+       @intCast((color >> 8) & 0xFF),
+       @intCast((color >> 16) & 0xFF),
+       @intCast((color >> 24) & 0xFF),
+    );
+}
+
 pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
+    var shader_sim_tex_read_srgb = true;
+    var shader_sim_tex_write_srgb = true;
+
     gl.glGenTextures(1, &open_gl.reserved_blit_texture);
 
-    open_gl.default_internal_texture_format = gl.GL_RGBA8;
+    gl.glGetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &open_gl.max_multi_sample_count);
+    if (open_gl.max_multi_sample_count > 16) {
+        open_gl.max_multi_sample_count = 16;
+    }
 
-    if (framebuffer_supports_sRGB and info.gl_ext_texture_srgb and info.gl_ext_framebuffer_srgb) {
-        open_gl.default_internal_texture_format = GL_SRGB8_ALPHA8;
-        gl.glEnable(GL_FRAMEBUFFER_SRGB);
+    open_gl.default_sprite_texture_format = gl.GL_RGBA8;
+    open_gl.default_framebuffer_texture_format = gl.GL_RGBA8;
+
+    if (info.gl_ext_texture_srgb) {
+        open_gl.default_sprite_texture_format = GL_SRGB8_ALPHA8;
+        shader_sim_tex_read_srgb = false;
+    }
+
+    if (framebuffer_supports_sRGB and info.gl_ext_framebuffer_srgb) {
+        if (platform.optGLTextImage2DMultiSample) |glTexImage2DMultisample| {
+            var test_texture: u32 = undefined;
+            gl.glGenTextures(1, &test_texture);
+            gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, test_texture);
+
+            _ = gl.glGetError();
+            _ = glTexImage2DMultisample(
+                GL_TEXTURE_2D_MULTISAMPLE,
+                open_gl.max_multi_sample_count,
+                GL_SRGB8_ALPHA8,
+                1920,
+                1080,
+                false,
+            );
+
+            if (gl.glGetError() == gl.GL_NO_ERROR) {
+                open_gl.default_framebuffer_texture_format = GL_SRGB8_ALPHA8;
+                gl.glEnable(GL_FRAMEBUFFER_SRGB);
+                shader_sim_tex_write_srgb = false;
+            }
+
+            gl.glDeleteTextures(1, &test_texture);
+            gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, test_texture);
+        }
     }
 
     gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
@@ -224,6 +276,18 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\#version 130
         \\// Header code
     ;
+    var defines: [1024]u8 = undefined;
+    const defines_length = shared.formatString(
+        defines.len,
+        &defines,
+        \\#define ShaderSimTexReadSRGB %d
+        \\#define ShaderSimTexWriteSRGB %d
+    ,
+        .{
+            @as(i32, @intCast(@intFromBool(shader_sim_tex_read_srgb))),
+            @as(i32, @intCast(@intFromBool(shader_sim_tex_write_srgb))),
+        },
+    );
     const vertex_code =
         \\// Vertex code
         \\uniform mat4x4 Transform;
@@ -259,10 +323,19 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\{
         \\  //vec4 TexSample = vec4(1, 0, 0, 1);
         \\  vec4 TexSample = texture(TextureSampler, FragUV);
+        \\
+        \\#if ShaderSimTexReadSRGB
+        \\  TexSample.rgb *= TexSample.rgb;
+        \\#endif
+        \\
         \\  ResultColor = FragColor * TexSample;
+        \\
+        \\#if ShaderSimTexWriteSRGB
+        \\  ResultColor.rgb = sqrt(ResultColor.rgb);
+        \\#endif
         \\}
     ;
-    open_gl.basic_z_bias_program = createProgram(header_code, vertex_code, fragment_code);
+    open_gl.basic_z_bias_program = createProgram(@ptrCast(defines[0..defines_length]), header_code, vertex_code, fragment_code);
     open_gl.transform_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "Transform");
     open_gl.texture_sampler_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "TextureSampler");
 }
@@ -327,12 +400,6 @@ pub fn renderCommands(
                     while (target_index <= commands.max_render_target_index) : (target_index += 1) {
                         // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
-                        var max_sample_count: i32 = 0;
-                        gl.glGetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count);
-                        if (max_sample_count > 16) {
-                            max_sample_count = 16;
-                        }
-
                         // const slot = gl.GL_TEXTURE_2D;
                         const slot = GL_TEXTURE_2D_MULTISAMPLE;
                         var texture_handle: [2]u32 = undefined;
@@ -344,9 +411,8 @@ pub fn renderCommands(
                         if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
                             _ = glTexImage2DMultisample(
                                 slot,
-                                max_sample_count,
-                                //gl.GL_RGBA8,
-                                open_gl.default_internal_texture_format,
+                                open_gl.max_multi_sample_count,
+                                open_gl.default_framebuffer_texture_format,
                                 draw_region.getWidth(),
                                 draw_region.getHeight(),
                                 false,
@@ -355,7 +421,7 @@ pub fn renderCommands(
                             gl.glTexImage2D(
                                 slot,
                                 0,
-                                open_gl.default_internal_texture_format,
+                                open_gl.default_framebuffer_texture_format,
                                 draw_region.getWidth(),
                                 draw_region.getHeight(),
                                 0,
@@ -370,10 +436,10 @@ pub fn renderCommands(
                         gl.glBindTexture(slot, texture_handle[1]);
                         _ = glTexImage2DMultisample(
                             slot,
-                            max_sample_count,
+                            open_gl.max_multi_sample_count,
                             // TODO: Check if going with a 16-bit depth buffer would be faster and still have enough
                             // quality (it should, wer don't have long draw distances).
-                            GL_DEPTH_COMPONENT32F,
+                            GL_DEPTH_COMPONENT32,
                             draw_region.getWidth(),
                             draw_region.getHeight(),
                             false,
@@ -446,6 +512,7 @@ pub fn renderCommands(
     while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) : (header_at += @sizeOf(RenderEntryHeader)) {
         const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
         const alignment: usize = switch (header.type) {
+            .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
             .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
             .RenderEntryCube => @alignOf(RenderEntryCube),
             .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
@@ -512,9 +579,59 @@ pub fn renderCommands(
             }
 
             switch (header.type) {
+                .RenderEntryTexturedQuads => {
+                    const entry: *RenderEntryTexturedQuads = @ptrCast(@alignCast(data));
+                    header_at += @sizeOf(RenderEntryTexturedQuads);
+                    header_at += entry.quad_count * @sizeOf(*LoadedBitmap);
+
+                    platform.optGLUseProgram.?(open_gl.basic_z_bias_program);
+                    platform.optGLUniformMatrix4fv.?(open_gl.transform_id, 1, false, proj.toGL());
+                    platform.optGLUniform1i.?(open_gl.texture_sampler_id, 0);
+
+                    const bitmap_at: *[*]LoadedBitmap = entry.bitmap_array;
+                    var vertex_at: [*]TexturedVertex = commands.vertex_array + entry.vertex_array_offset;
+                    var quad_index: u32 = 0;
+                    while (quad_index < entry.quad_count) : (quad_index += 1) {
+                        const bitmap: *LoadedBitmap = @ptrCast(bitmap_at.*);
+                        bitmap_at.* += 1;
+
+                        const vert0: *TexturedVertex = @ptrCast(vertex_at + 0);
+                        const vert1: *TexturedVertex = @ptrCast(vertex_at + 1);
+                        const vert2: *TexturedVertex = @ptrCast(vertex_at + 2);
+                        const vert3: *TexturedVertex = @ptrCast(vertex_at + 3);
+                        vertex_at += 4;
+
+                        if (bitmap.texture_handle > 0) {
+                            gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
+                        }
+
+                        gl.glBegin(gl.GL_QUADS);
+                        {
+                            // This value is not gamma corrected by OpenGL.
+                            colorUB(vert0.color);
+                            gl.glTexCoord2fv(vert0.uv.toGL());
+                            gl.glVertex4fv(vert0.position.toGL());
+
+                            colorUB(vert1.color);
+                            gl.glTexCoord2fv(vert1.uv.toGL());
+                            gl.glVertex4fv(vert1.position.toGL());
+
+                            colorUB(vert2.color);
+                            gl.glTexCoord2fv(vert2.uv.toGL());
+                            gl.glVertex4fv(vert2.position.toGL());
+
+                            colorUB(vert3.color);
+                            gl.glTexCoord2fv(vert3.uv.toGL());
+                            gl.glVertex4fv(vert3.position.toGL());
+                        }
+                        gl.glEnd();
+                    }
+
+                    platform.optGLUseProgram.?(0);
+                },
                 .RenderEntryBitmap => {
                     header_at += @sizeOf(RenderEntryBitmap);
-                    var entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+                    const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
                     if (entry.bitmap) |bitmap| {
                         if (bitmap.width > 0 and bitmap.height > 0) {
                             const x_axis: Vector3 = entry.x_axis;
@@ -535,7 +652,7 @@ pub fn renderCommands(
                             platform.optGLUniformMatrix4fv.?(open_gl.transform_id, 1, false, proj.toGL());
                             platform.optGLUniform1i.?(open_gl.texture_sampler_id, 0);
 
-                            gl.glBegin(gl.GL_TRIANGLES);
+                            gl.glBegin(gl.GL_QUADS);
                             {
                                 // This value is not gamma corrected by OpenGL.
                                 gl.glColor4fv(entry.premultiplied_color.toGL());
@@ -545,19 +662,15 @@ pub fn renderCommands(
                                 const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
                                 const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(z_bias);
 
-                                // Lower triangle.
                                 gl.glTexCoord2f(min_uv.x(), min_uv.y());
                                 gl.glVertex4fv(min_x_min_y.toGL());
+
                                 gl.glTexCoord2f(max_uv.x(), min_uv.y());
                                 gl.glVertex4fv(max_x_min_y.toGL());
+
                                 gl.glTexCoord2f(max_uv.x(), max_uv.y());
                                 gl.glVertex4fv(max_x_max_y.toGL());
 
-                                // Upper triangle
-                                gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                                gl.glVertex4fv(min_x_min_y.toGL());
-                                gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                                gl.glVertex4fv(max_x_max_y.toGL());
                                 gl.glTexCoord2f(min_uv.x(), max_uv.y());
                                 gl.glVertex4fv(min_x_max_y.toGL());
                             }
@@ -779,7 +892,7 @@ fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.C) u32 
     gl.glTexImage2D(
         gl.GL_TEXTURE_2D,
         0,
-        open_gl.default_internal_texture_format,
+        open_gl.default_sprite_texture_format,
         width,
         height,
         0,
@@ -964,7 +1077,12 @@ pub fn displayBitmap(
     gl.glEnable(gl.GL_BLEND);
 }
 
-fn createProgram(header: [*:0]const u8, vertex_code: [*:0]const u8, fragment_code: [*:0]const u8) u32 {
+fn createProgram(
+    defines: [*:0]const u8,
+    header: [*:0]const u8,
+    vertex_code: [*:0]const u8,
+    fragment_code: [*:0]const u8,
+) u32 {
     const glShaderSource = platform.optGLShaderSource.?;
     const glCreateShader = platform.optGLCreateShader.?;
     const glCompileShader = platform.optGLCompileShader.?;
@@ -979,6 +1097,7 @@ fn createProgram(header: [*:0]const u8, vertex_code: [*:0]const u8, fragment_cod
     const vertex_shader_id: u32 = glCreateShader(GL_VERTEX_SHADER);
     var vertex_shader_code = [_][*:0]const u8{
         header,
+        defines,
         vertex_code,
     };
     glShaderSource(vertex_shader_id, vertex_shader_code.len, &vertex_shader_code, null);
@@ -987,6 +1106,7 @@ fn createProgram(header: [*:0]const u8, vertex_code: [*:0]const u8, fragment_cod
     const fragment_shader_id: u32 = glCreateShader(GL_FRAGMENT_SHADER);
     var fragment_shader_code = [_][*:0]const u8{
         header,
+        defines,
         fragment_code,
     };
     glShaderSource(fragment_shader_id, fragment_shader_code.len, &fragment_shader_code, null);

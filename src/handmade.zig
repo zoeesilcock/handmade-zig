@@ -465,7 +465,7 @@ fn makeSphereNormalMap(bitmap: *LoadedBitmap, roughness: f32, cx: f32, cy: f32) 
                 255.0 * roughness,
             );
 
-            pixel[0] = color.packColor1();
+            pixel[0] = color.packColorBGRA();
 
             pixel += 1;
         }
@@ -509,7 +509,7 @@ fn makeSphereDiffuseMap(bitmap: *LoadedBitmap, cx: f32, cy: f32) void {
                 alpha,
             );
 
-            pixel[0] = color.packColor1();
+            pixel[0] = color.packColorBGRA();
 
             pixel += 1;
         }
@@ -550,7 +550,7 @@ fn makePyramidNormalMap(bitmap: *LoadedBitmap, roughness: f32) void {
                 255.0 * roughness,
             );
 
-            pixel[0] = color.packColor1();
+            pixel[0] = color.packColorBGRA();
 
             pixel += 1;
         }
