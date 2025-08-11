@@ -245,54 +245,55 @@ pub fn renderCommandsToBitmap(
             output_target = @ptrCast(render_targets + clip.render_target_index);
         }
 
+        _ = null_pixels_to_meters;
         switch (header.type) {
-            .RenderEntrySaturation => {
-                const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
-
-                changeSaturation(output_target, entry.level);
-            },
-            .RenderEntryBitmap => {
-                const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                if (entry.bitmap) |bitmap| {
-                    if (false) {
-                        drawRectangleSlowly(
-                            output_target,
-                            entry.position.xy(),
-                            entry.x_axis.xy(),
-                            entry.y_axis.xy(),
-                            entry.color,
-                            @constCast(bitmap),
-                            null,
-                            undefined,
-                            undefined,
-                            undefined,
-                            null_pixels_to_meters,
-                        );
-                    } else {
-                        drawRectangleQuickly(
-                            output_target,
-                            entry.position.xy(),
-                            entry.x_axis.xy(),
-                            entry.y_axis.xy(),
-                            entry.premultiplied_color,
-                            @constCast(bitmap),
-                            null_pixels_to_meters,
-                            clip_rect,
-                        );
-                    }
-                }
-            },
-            .RenderEntryRectangle => {
-                const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
-
-                drawRectangle(
-                    output_target,
-                    entry.position.xy(),
-                    entry.position.xy().plus(entry.dimension),
-                    entry.premultiplied_color,
-                    clip_rect,
-                );
-            },
+            // .RenderEntrySaturation => {
+            //     const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
+            //
+            //     changeSaturation(output_target, entry.level);
+            // },
+            // .RenderEntryBitmap => {
+            //     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+            //     if (entry.bitmap) |bitmap| {
+            //         if (false) {
+            //             drawRectangleSlowly(
+            //                 output_target,
+            //                 entry.position.xy(),
+            //                 entry.x_axis.xy(),
+            //                 entry.y_axis.xy(),
+            //                 entry.color,
+            //                 @constCast(bitmap),
+            //                 null,
+            //                 undefined,
+            //                 undefined,
+            //                 undefined,
+            //                 null_pixels_to_meters,
+            //             );
+            //         } else {
+            //             drawRectangleQuickly(
+            //                 output_target,
+            //                 entry.position.xy(),
+            //                 entry.x_axis.xy(),
+            //                 entry.y_axis.xy(),
+            //                 entry.premultiplied_color,
+            //                 @constCast(bitmap),
+            //                 null_pixels_to_meters,
+            //                 clip_rect,
+            //             );
+            //         }
+            //     }
+            // },
+            // .RenderEntryRectangle => {
+            //     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
+            //
+            //     drawRectangle(
+            //         output_target,
+            //         entry.position.xy(),
+            //         entry.position.xy().plus(entry.dimension),
+            //         entry.premultiplied_color,
+            //         clip_rect,
+            //     );
+            // },
             .RenderEntryBlendRenderTarget => {
                 const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
                 const source_target: *LoadedBitmap = &render_targets[entry.source_target_index];

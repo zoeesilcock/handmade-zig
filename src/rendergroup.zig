@@ -72,10 +72,6 @@ pub const EnvironmentMap = extern struct {
 pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
     RenderEntryClipRect,
-    RenderEntryBitmap,
-    RenderEntryCube,
-    RenderEntryRectangle,
-    RenderEntrySaturation,
     RenderEntryBlendRenderTarget,
 };
 
@@ -86,7 +82,6 @@ pub const RenderEntryHeader = extern struct {
 };
 
 pub const RenderEntryTexturedQuads = extern struct {
-    bitmap_array: *[*]LoadedBitmap,
     quad_count: u32,
     vertex_array_offset: u32, // Uses 4 vertices per quad.
 };
@@ -126,30 +121,6 @@ pub const TransientClipRect = extern struct {
 
 pub const RenderEntrySaturation = extern struct {
     level: f32,
-};
-
-pub const RenderEntryBitmap = extern struct {
-    bitmap: ?*LoadedBitmap,
-    premultiplied_color: Color,
-    position: Vector3,
-    // These are already scaled by the half dimension.
-    x_axis: Vector3,
-    y_axis: Vector3,
-    z_bias: f32,
-};
-
-pub const RenderEntryCube = extern struct {
-    bitmap: ?*LoadedBitmap,
-    premultiplied_color: Color,
-    position: Vector3, // This is the middle of the top face of the cube.
-    height: f32,
-    radius: f32,
-};
-
-pub const RenderEntryRectangle = extern struct {
-    premultiplied_color: Color,
-    position: Vector3,
-    dimension: Vector2 = Vector2.zero(),
 };
 
 pub const RenderEntryBlendRenderTarget = extern struct {
@@ -220,7 +191,7 @@ pub const RenderGroup = extern struct {
     generation_id: u32,
     commands: *RenderCommands,
 
-    current_quads: *RenderEntryTexturedQuads,
+    current_quads: ?*RenderEntryTexturedQuads,
 
     pub fn begin(
         assets: *asset.Assets,
@@ -269,10 +240,6 @@ pub const RenderGroup = extern struct {
         // TODO:
         // self.commands.missing_resource_count += self.missing_resource_count
     }
-
-    // pub fn beginQuads(self: *RenderGroup) void {}
-
-    // pub fn endQuads(self: *RenderGroup) void {}
 
     pub fn allResourcesPresent(self: *RenderGroup) bool {
         return self.missing_resource_count == 0;
@@ -335,6 +302,8 @@ pub const RenderGroup = extern struct {
         } else {
             unreachable;
         }
+
+        self.current_quads = null;
 
         return result;
     }
@@ -444,6 +413,103 @@ pub const RenderGroup = extern struct {
         return dest;
     }
 
+    fn getCurrentQuads(self: *RenderGroup, quad_count: u32) ?*RenderEntryTexturedQuads {
+        if (self.current_quads == null) {
+            self.current_quads = @ptrCast(@alignCast(
+                self.pushRenderElement_(
+                    @sizeOf(RenderEntryTexturedQuads),
+                    .RenderEntryTexturedQuads,
+                    @alignOf(RenderEntryTexturedQuads),
+                ),
+            ));
+            self.current_quads.?.quad_count = 0;
+            self.current_quads.?.vertex_array_offset = self.commands.vertex_count;
+        }
+
+        var result = self.current_quads;
+        if ((self.commands.vertex_count + 4 * quad_count) > self.commands.max_vertex_count) {
+            result = null;
+        }
+
+        return result;
+    }
+
+    fn pushQuad(
+        self: *RenderGroup,
+        bitmap: ?*LoadedBitmap,
+        p0: Vector4,
+        uv0: Vector2,
+        c0: u32,
+        p1: Vector4,
+        uv1: Vector2,
+        c1: u32,
+        p2: Vector4,
+        uv2: Vector2,
+        c2: u32,
+        p3: Vector4,
+        uv3: Vector2,
+        c3: u32,
+    ) void {
+        const entry: ?*RenderEntryTexturedQuads = self.current_quads;
+        std.debug.assert(self.current_quads != null);
+        std.debug.assert(bitmap != null);
+
+        entry.?.quad_count += 1;
+
+        self.commands.quad_bitmaps[self.commands.vertex_count >> 2] = bitmap;
+        var vert: [*]TexturedVertex = self.commands.vertex_array + self.commands.vertex_count;
+        self.commands.vertex_count += 4;
+
+        vert[0].position = p0;
+        vert[0].uv = uv0;
+        vert[0].color = c0;
+
+        vert[1].position = p1;
+        vert[1].uv = uv1;
+        vert[1].color = c1;
+
+        vert[2].position = p2;
+        vert[2].uv = uv2;
+        vert[2].color = c2;
+
+        vert[3].position = p3;
+        vert[3].uv = uv3;
+        vert[3].color = c3;
+    }
+
+    fn pushQuadUnpackedColors(
+        self: *RenderGroup,
+        bitmap: ?*LoadedBitmap,
+        p0: Vector4,
+        uv0: Vector2,
+        c0: Color,
+        p1: Vector4,
+        uv1: Vector2,
+        c1: Color,
+        p2: Vector4,
+        uv2: Vector2,
+        c2: Color,
+        p3: Vector4,
+        uv3: Vector2,
+        c3: Color,
+    ) void {
+        self.pushQuad(
+            bitmap,
+            p0,
+            uv0,
+            c0.scaledTo(255).packColorRGBA(),
+            p1,
+            uv1,
+            c1.scaledTo(255).packColorRGBA(),
+            p2,
+            uv2,
+            c2.scaledTo(255).packColorRGBA(),
+            p3,
+            uv3,
+            c3.scaledTo(255).packColorRGBA(),
+        );
+    }
+
     pub fn pushBitmap(
         self: *RenderGroup,
         object_transform: *ObjectTransform,
@@ -469,11 +535,8 @@ pub const RenderGroup = extern struct {
             );
 
             const size: Vector2 = dim.size;
-            if (self.pushRenderElement_(@sizeOf(RenderEntryTexturedQuads) + @sizeOf(*LoadedBitmap), .RenderEntryTexturedQuads, @alignOf(RenderEntryTexturedQuads))) |entry_| {
-                var entry: [*]RenderEntryTexturedQuads = @ptrCast(@alignCast(entry_));
-                entry[0].bitmap_array = @ptrCast(entry + 1);
-                entry[0].quad_count = 1;
-                entry[0].vertex_array_offset = self.commands.vertex_count;
+            if (self.getCurrentQuads(1)) |entry| {
+                entry.quad_count += 1;
 
                 const min_position: Vector3 = dim.basis_position;
                 const z_bias: f32 = height;
@@ -500,27 +563,21 @@ pub const RenderGroup = extern struct {
                 const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
                 const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(z_bias);
 
-                entry[0].bitmap_array.* = @ptrCast(bitmap);
-
-                var vert: [*]TexturedVertex = self.commands.vertex_array + self.commands.vertex_count;
-                self.commands.vertex_count += 4;
-                std.debug.assert(self.commands.vertex_count < self.commands.max_vertex_count);
-
-                vert[0].position = min_x_min_y;
-                vert[0].uv = .new(min_uv.x(), min_uv.y());
-                vert[0].color = vertex_color;
-
-                vert[1].position = max_x_min_y;
-                vert[1].uv = .new(max_uv.x(), min_uv.y());
-                vert[1].color = vertex_color;
-
-                vert[2].position = max_x_max_y;
-                vert[2].uv = .new(max_uv.x(), max_uv.y());
-                vert[2].color = vertex_color;
-
-                vert[3].position = min_x_max_y;
-                vert[3].uv = .new(min_uv.x(), max_uv.y());
-                vert[3].color = vertex_color;
+                self.pushQuad(
+                    bitmap,
+                    min_x_min_y,
+                    .new(min_uv.x(), min_uv.y()),
+                    vertex_color,
+                    max_x_min_y,
+                    .new(max_uv.x(), min_uv.y()),
+                    vertex_color,
+                    max_x_max_y,
+                    .new(max_uv.x(), max_uv.y()),
+                    vertex_color,
+                    min_x_max_y,
+                    .new(min_uv.x(), max_uv.y()),
+                    vertex_color,
+                );
             }
         }
     }
@@ -547,7 +604,7 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn pushCube(
+    pub fn pushCubeBitmapId(
         self: *RenderGroup,
         opt_id: ?file_formats.BitmapId,
         position: Vector3,
@@ -557,17 +614,145 @@ pub const RenderGroup = extern struct {
     ) void {
         if (opt_id) |id| {
             if (self.assets.getBitmap(id, self.generation_id)) |bitmap| {
-                if (self.pushRenderElement(RenderEntryCube)) |entry| {
-                    entry.bitmap = bitmap;
-                    entry.position = position;
-                    entry.premultiplied_color = storeColor(color);
-                    entry.height = height;
-                    entry.radius = radius;
-                }
+                self.pushCube(
+                    bitmap,
+                    position,
+                    radius,
+                    height,
+                    color,
+                );
             } else {
                 self.assets.loadBitmap(id, false);
                 self.missing_resource_count += 1;
             }
+        }
+    }
+
+    pub fn pushCube(
+        self: *RenderGroup,
+        bitmap: ?*LoadedBitmap,
+        position: Vector3,
+        radius: f32,
+        height: f32,
+        color: Color,
+    ) void {
+        if (self.getCurrentQuads(6) != null) {
+            const nx: f32 = position.x() - radius;
+            const px: f32 = position.x() + radius;
+            const ny: f32 = position.y() - radius;
+            const py: f32 = position.y() + radius;
+            const nz: f32 = position.z() - height;
+            const pz: f32 = position.z();
+
+            const p0: Vector4 = .new(nx, ny, pz, 0);
+            const p1: Vector4 = .new(px, ny, pz, 0);
+            const p2: Vector4 = .new(px, py, pz, 0);
+            const p3: Vector4 = .new(nx, py, pz, 0);
+            const p4: Vector4 = .new(nx, ny, nz, 0);
+            const p5: Vector4 = .new(px, ny, nz, 0);
+            const p6: Vector4 = .new(px, py, nz, 0);
+            const p7: Vector4 = .new(nx, py, nz, 0);
+
+            const t0: Vector2 = .new(0, 0);
+            const t1: Vector2 = .new(1, 0);
+            const t2: Vector2 = .new(1, 1);
+            const t3: Vector2 = .new(0, 1);
+
+            const top_color: Color = storeColor(color);
+            const bottom_color: Color = .new(0, 0, 0, top_color.a());
+            const ct: Color = top_color.rgb().scaledTo(0.75).toColor(top_color.a());
+            const cb: Color = top_color.rgb().scaledTo(0.25).toColor(top_color.a());
+
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p0,
+                t0,
+                top_color,
+                p1,
+                t1,
+                top_color,
+                p2,
+                t2,
+                top_color,
+                p3,
+                t3,
+                top_color,
+            );
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p7,
+                t0,
+                bottom_color,
+                p6,
+                t1,
+                bottom_color,
+                p5,
+                t2,
+                bottom_color,
+                p4,
+                t3,
+                bottom_color,
+            );
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p4,
+                t0,
+                cb,
+                p5,
+                t1,
+                cb,
+                p1,
+                t2,
+                ct,
+                p0,
+                t3,
+                ct,
+            );
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p2,
+                t0,
+                ct,
+                p6,
+                t1,
+                cb,
+                p7,
+                t2,
+                cb,
+                p3,
+                t3,
+                ct,
+            );
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p1,
+                t0,
+                ct,
+                p5,
+                t1,
+                cb,
+                p6,
+                t2,
+                cb,
+                p2,
+                t3,
+                ct,
+            );
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p7,
+                t0,
+                cb,
+                p4,
+                t1,
+                cb,
+                p0,
+                t2,
+                ct,
+                p3,
+                t3,
+                ct,
+            );
         }
     }
 
@@ -597,12 +782,34 @@ pub const RenderGroup = extern struct {
         color: Color,
     ) void {
         const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
-
         const basis_position = getRenderEntityBasisPosition(object_transform, position);
-        if (self.pushRenderElement(RenderEntryRectangle)) |entry| {
-            entry.position = basis_position;
-            entry.dimension = dimension;
-            entry.premultiplied_color = storeColor(color);
+
+        if (self.getCurrentQuads(6) != null) {
+            const premultiplied_color: Color = storeColor(color);
+            const packed_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+
+            const min_position: Vector3 = basis_position;
+            const max_position: Vector3 = basis_position.plus(dimension.toVector3(0));
+
+            const z: f32 = min_position.z();
+            const min_uv: Vector2 = .splat(0);
+            const max_uv: Vector2 = .splat(1);
+
+            self.pushQuad(
+                self.commands.white_bitmap,
+                .new(min_position.x(), min_position.y(), z, 0),
+                .new(min_uv.x(), min_uv.y()),
+                packed_color,
+                .new(max_position.x(), min_position.y(), z, 0),
+                .new(max_uv.x(), min_uv.y()),
+                packed_color,
+                .new(max_position.x(), max_position.y(), z, 0),
+                .new(max_uv.x(), max_uv.y()),
+                packed_color,
+                .new(min_position.x(), max_position.y(), z, 0),
+                .new(min_uv.x(), max_uv.y()),
+                packed_color,
+            );
         }
     }
 

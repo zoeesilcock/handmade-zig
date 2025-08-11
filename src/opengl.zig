@@ -9,6 +9,8 @@ const debug_interface = @import("debug_interface.zig");
 const platform = @import("win32_handmade.zig");
 const std = @import("std");
 
+pub const GL_CLAMP_TO_EDGE = 0x812F;
+
 pub const GL_FRAMEBUFFER_SRGB = 0x8DB9;
 pub const GL_SRGB8_ALPHA8 = 0x8C43;
 
@@ -126,6 +128,13 @@ const OpenGL = struct {
 
     transform_id: i32 = 0,
     texture_sampler_id: i32 = 0,
+
+    white_bitmap: LoadedBitmap = undefined,
+    white: [4][4]u32 = undefined,
+
+    vert_position_id: i32 = 0,
+    vert_uv_id: i32 = 0,
+    vert_color_id: i32 = 0,
 };
 
 pub var open_gl: OpenGL = .{};
@@ -217,10 +226,10 @@ pub const Info = struct {
 
 fn colorUB(color: u32) void {
     gl.glColor4ub(
-       @intCast((color >> 0) & 0xFF),
-       @intCast((color >> 8) & 0xFF),
-       @intCast((color >> 16) & 0xFF),
-       @intCast((color >> 24) & 0xFF),
+        @intCast((color >> 0) & 0xFF),
+        @intCast((color >> 8) & 0xFF),
+        @intCast((color >> 16) & 0xFF),
+        @intCast((color >> 24) & 0xFF),
     );
 }
 
@@ -291,14 +300,17 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     const vertex_code =
         \\// Vertex code
         \\uniform mat4x4 Transform;
+        \\in vec4 VertP;
+        \\in vec2 VertUV;
+        \\in vec4 VertColor;
         \\
         \\smooth out vec2 FragUV;
         \\smooth out vec4 FragColor;
         \\
         \\void main(void)
         \\{
-        \\  vec4 InVertex = vec4(gl_Vertex.xyz, 1.0);
-        \\  float ZBias = gl_Vertex.w;
+        \\  vec4 InVertex = vec4(VertP.xyz, 1.0);
+        \\  float ZBias = VertP.w;
         \\
         \\  vec4 ZVertex = InVertex;
         \\  ZVertex.z += ZBias;
@@ -308,8 +320,8 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\
         \\  gl_Position = vec4(ZMinTransform.x, ZMinTransform.y, ZMaxTransform.z, ZMinTransform.w);
         \\
-        \\  FragUV = gl_MultiTexCoord0.xy;
-        \\  FragColor = gl_Color;
+        \\  FragUV = VertUV.xy;
+        \\  FragColor = VertColor;
         \\}
     ;
     const fragment_code =
@@ -338,6 +350,22 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     open_gl.basic_z_bias_program = createProgram(@ptrCast(defines[0..defines_length]), header_code, vertex_code, fragment_code);
     open_gl.transform_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "Transform");
     open_gl.texture_sampler_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "TextureSampler");
+    open_gl.vert_position_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertP");
+    open_gl.vert_uv_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertUV");
+    open_gl.vert_color_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertColor");
+
+    open_gl.white = [1][4]u32{
+        [1]u32{0xffffffff} ** 4,
+    } ** 4;
+    open_gl.white_bitmap = .{
+        .memory = @ptrCast(&open_gl.white),
+        .alignment_percentage = .new(0.5, 0.5),
+        .width_over_height = 1,
+        .width = 4,
+        .height = 4,
+        .pitch = 16,
+        .texture_handle = allocateTexture(1, 1, &open_gl.white),
+    };
 }
 
 fn bindFrameBuffer(target_index: u32, draw_region: Rectangle2i) void {
@@ -513,10 +541,6 @@ pub fn renderCommands(
         const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
         const alignment: usize = switch (header.type) {
             .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
-            .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
-            .RenderEntryCube => @alignOf(RenderEntryCube),
-            .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
-            .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
             .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
             .RenderEntryClipRect => @alignOf(RenderEntryClipRect),
         };
@@ -582,244 +606,64 @@ pub fn renderCommands(
                 .RenderEntryTexturedQuads => {
                     const entry: *RenderEntryTexturedQuads = @ptrCast(@alignCast(data));
                     header_at += @sizeOf(RenderEntryTexturedQuads);
-                    header_at += entry.quad_count * @sizeOf(*LoadedBitmap);
+
+                    const uv_array_index: u32 = @intCast(open_gl.vert_uv_id);
+                    const color_array_index: u32 = @intCast(open_gl.vert_color_id);
+                    const position_array_index: u32 = @intCast(open_gl.vert_position_id);
+
+                    platform.optGLEnableVertexAttribArray.?(uv_array_index);
+                    platform.optGLEnableVertexAttribArray.?(color_array_index);
+                    platform.optGLEnableVertexAttribArray.?(position_array_index);
+
+                    const vertex_base: [*]u8 = @ptrCast(commands.vertex_array);
+                    platform.optGLVertexAttribPointer.?(
+                        uv_array_index,
+                        2,
+                        gl.GL_FLOAT,
+                        false,
+                        @sizeOf(TexturedVertex),
+                        vertex_base + @offsetOf(TexturedVertex, "uv"),
+                    );
+                    platform.optGLVertexAttribPointer.?(
+                        color_array_index,
+                        4,
+                        gl.GL_UNSIGNED_BYTE,
+                        true,
+                        @sizeOf(TexturedVertex),
+                        vertex_base + @offsetOf(TexturedVertex, "color"),
+                    );
+                    platform.optGLVertexAttribPointer.?(
+                        position_array_index,
+                        4,
+                        gl.GL_FLOAT,
+                        false,
+                        @sizeOf(TexturedVertex),
+                        vertex_base + @offsetOf(TexturedVertex, "position"),
+                    );
 
                     platform.optGLUseProgram.?(open_gl.basic_z_bias_program);
                     platform.optGLUniformMatrix4fv.?(open_gl.transform_id, 1, false, proj.toGL());
                     platform.optGLUniform1i.?(open_gl.texture_sampler_id, 0);
 
-                    const bitmap_at: *[*]LoadedBitmap = entry.bitmap_array;
-                    var vertex_at: [*]TexturedVertex = commands.vertex_array + entry.vertex_array_offset;
-                    var quad_index: u32 = 0;
-                    while (quad_index < entry.quad_count) : (quad_index += 1) {
-                        const bitmap: *LoadedBitmap = @ptrCast(bitmap_at.*);
-                        bitmap_at.* += 1;
+                    var vertex_index: u32 = entry.vertex_array_offset;
+                    while (vertex_index < (entry.vertex_array_offset + 4 * entry.quad_count)) : (vertex_index += 4) {
+                        const opt_bitmap: ?*LoadedBitmap = commands.quad_bitmaps[vertex_index >> 2];
 
-                        const vert0: *TexturedVertex = @ptrCast(vertex_at + 0);
-                        const vert1: *TexturedVertex = @ptrCast(vertex_at + 1);
-                        const vert2: *TexturedVertex = @ptrCast(vertex_at + 2);
-                        const vert3: *TexturedVertex = @ptrCast(vertex_at + 3);
-                        vertex_at += 4;
+                        // TODO: This assertion shouldn't fire, but it does.
+                        // std.debug.assert(opt_bitmap != null);
 
-                        if (bitmap.texture_handle > 0) {
+                        if (opt_bitmap) |bitmap| {
                             gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
                         }
 
-                        gl.glBegin(gl.GL_QUADS);
-                        {
-                            // This value is not gamma corrected by OpenGL.
-                            colorUB(vert0.color);
-                            gl.glTexCoord2fv(vert0.uv.toGL());
-                            gl.glVertex4fv(vert0.position.toGL());
-
-                            colorUB(vert1.color);
-                            gl.glTexCoord2fv(vert1.uv.toGL());
-                            gl.glVertex4fv(vert1.position.toGL());
-
-                            colorUB(vert2.color);
-                            gl.glTexCoord2fv(vert2.uv.toGL());
-                            gl.glVertex4fv(vert2.position.toGL());
-
-                            colorUB(vert3.color);
-                            gl.glTexCoord2fv(vert3.uv.toGL());
-                            gl.glVertex4fv(vert3.position.toGL());
-                        }
-                        gl.glEnd();
+                        platform.optGLDrawArrays.?(gl.GL_QUADS, @intCast(vertex_index), 4);
                     }
 
                     platform.optGLUseProgram.?(0);
-                },
-                .RenderEntryBitmap => {
-                    header_at += @sizeOf(RenderEntryBitmap);
-                    const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-                    if (entry.bitmap) |bitmap| {
-                        if (bitmap.width > 0 and bitmap.height > 0) {
-                            const x_axis: Vector3 = entry.x_axis;
-                            const y_axis: Vector3 = entry.y_axis;
-                            const z_bias: f32 = entry.z_bias;
-                            const min_position: Vector3 = entry.position;
 
-                            if (bitmap.texture_handle > 0) {
-                                gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
-                            }
-
-                            const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
-                            const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
-                            const min_uv = Vector2.new(one_texel_u, one_texel_v);
-                            const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
-
-                            platform.optGLUseProgram.?(open_gl.basic_z_bias_program);
-                            platform.optGLUniformMatrix4fv.?(open_gl.transform_id, 1, false, proj.toGL());
-                            platform.optGLUniform1i.?(open_gl.texture_sampler_id, 0);
-
-                            gl.glBegin(gl.GL_QUADS);
-                            {
-                                // This value is not gamma corrected by OpenGL.
-                                gl.glColor4fv(entry.premultiplied_color.toGL());
-
-                                const min_x_min_y: Vector4 = min_position.toVector4(0);
-                                const min_x_max_y: Vector4 = min_position.plus(y_axis).toVector4(z_bias);
-                                const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
-                                const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(z_bias);
-
-                                gl.glTexCoord2f(min_uv.x(), min_uv.y());
-                                gl.glVertex4fv(min_x_min_y.toGL());
-
-                                gl.glTexCoord2f(max_uv.x(), min_uv.y());
-                                gl.glVertex4fv(max_x_min_y.toGL());
-
-                                gl.glTexCoord2f(max_uv.x(), max_uv.y());
-                                gl.glVertex4fv(max_x_max_y.toGL());
-
-                                gl.glTexCoord2f(min_uv.x(), max_uv.y());
-                                gl.glVertex4fv(min_x_max_y.toGL());
-                            }
-                            gl.glEnd();
-                            platform.optGLUseProgram.?(0);
-                        }
-                    }
-                },
-                .RenderEntryCube => {
-                    header_at += @sizeOf(RenderEntryCube);
-                    const entry: *RenderEntryCube = @ptrCast(@alignCast(data));
-                    if (entry.bitmap) |bitmap| {
-                        const nx: f32 = entry.position.x() - entry.radius;
-                        const px: f32 = entry.position.x() + entry.radius;
-                        const ny: f32 = entry.position.y() - entry.radius;
-                        const py: f32 = entry.position.y() + entry.radius;
-                        const nz: f32 = entry.position.z() - entry.height;
-                        const pz: f32 = entry.position.z();
-
-                        const p0: Vector3 = .new(nx, ny, pz);
-                        const p1: Vector3 = .new(px, ny, pz);
-                        const p2: Vector3 = .new(px, py, pz);
-                        const p3: Vector3 = .new(nx, py, pz);
-                        const p4: Vector3 = .new(nx, ny, nz);
-                        const p5: Vector3 = .new(px, ny, nz);
-                        const p6: Vector3 = .new(px, py, nz);
-                        const p7: Vector3 = .new(nx, py, nz);
-
-                        const t0: Vector2 = .new(0, 0);
-                        const t1: Vector2 = .new(1, 0);
-                        const t2: Vector2 = .new(1, 1);
-                        const t3: Vector2 = .new(0, 1);
-
-                        const top_color: Color = entry.premultiplied_color;
-                        const bottom_color: Color = .new(0, 0, 0, top_color.a());
-                        const ct: Color = top_color.rgb().scaledTo(0.75).toColor(top_color.a());
-                        const cb: Color = top_color.rgb().scaledTo(0.25).toColor(top_color.a());
-
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
-                        gl.glDisable(gl.GL_TEXTURE_2D);
-                        gl.glBegin(gl.GL_TRIANGLES);
-                        {
-                            drawQuad(
-                                p0,
-                                t0,
-                                top_color,
-                                p1,
-                                t1,
-                                top_color,
-                                p2,
-                                t2,
-                                top_color,
-                                p3,
-                                t3,
-                                top_color,
-                            );
-                            drawQuad(
-                                p7,
-                                t0,
-                                bottom_color,
-                                p6,
-                                t1,
-                                bottom_color,
-                                p5,
-                                t2,
-                                bottom_color,
-                                p4,
-                                t3,
-                                bottom_color,
-                            );
-                            drawQuad(
-                                p4,
-                                t0,
-                                cb,
-                                p5,
-                                t1,
-                                cb,
-                                p1,
-                                t2,
-                                ct,
-                                p0,
-                                t3,
-                                ct,
-                            );
-                            drawQuad(
-                                p2,
-                                t0,
-                                ct,
-                                p6,
-                                t1,
-                                cb,
-                                p7,
-                                t2,
-                                cb,
-                                p3,
-                                t3,
-                                ct,
-                            );
-                            drawQuad(
-                                p1,
-                                t0,
-                                ct,
-                                p5,
-                                t1,
-                                cb,
-                                p6,
-                                t2,
-                                cb,
-                                p2,
-                                t3,
-                                ct,
-                            );
-                            drawQuad(
-                                p7,
-                                t0,
-                                cb,
-                                p4,
-                                t1,
-                                cb,
-                                p0,
-                                t2,
-                                ct,
-                                p3,
-                                t3,
-                                ct,
-                            );
-                        }
-                        gl.glEnd();
-                        gl.glEnable(gl.GL_TEXTURE_2D);
-                    }
-                },
-                .RenderEntryRectangle => {
-                    header_at += @sizeOf(RenderEntryRectangle);
-                    const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
-                    gl.glDisable(gl.GL_TEXTURE_2D);
-                    drawRectangle(entry.position, entry.position.plus(entry.dimension.toVector3(0)), entry.premultiplied_color, null, null);
-
-                    if (false) {
-                        gl.glBegin(gl.GL_LINES);
-                        gl.glColor4f(0, 0, 0, entry.premultiplied_color.a());
-                        drawLineVertices(entry.position, entry.position.plus(entry.dimension.toVector3(0)));
-                        gl.glEnd();
-                    }
-
-                    gl.glEnable(gl.GL_TEXTURE_2D);
-                },
-                .RenderEntrySaturation => {
-                    header_at += @sizeOf(RenderEntrySaturation);
-                    // const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
+                    platform.optGLDisableVertexAttribArray.?(uv_array_index);
+                    platform.optGLDisableVertexAttribArray.?(color_array_index);
+                    platform.optGLDisableVertexAttribArray.?(position_array_index);
                 },
                 .RenderEntryBlendRenderTarget => {
                     header_at += @sizeOf(RenderEntryBlendRenderTarget);
@@ -902,8 +746,8 @@ fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.C) u32 
     );
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 

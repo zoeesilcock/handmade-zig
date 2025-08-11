@@ -59,6 +59,7 @@ const Rectangle2i = math.Rectangle2i;
 const TicketMutex = shared.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
+const LoadedBitmap = asset.LoadedBitmap;
 const WINAPI = @import("std").os.windows.WINAPI;
 
 const std = @import("std");
@@ -167,6 +168,16 @@ const GLUniform1i: type = fn (location: i32, value: i32) callconv(WINAPI) void;
 pub var optGLUniform1i: ?*const GLUniform1i = null;
 const GLGetUniformLocation: type = fn (program: u32, [*]const u8) callconv(WINAPI) i32;
 pub var optGLGetUniformLocation: ?*const GLGetUniformLocation = null;
+const GLGetAttribLocation: type = fn (program: u32, name: [*]const u8) callconv(WINAPI) i32;
+pub var optGLGetAttribLocation: ?*const GLGetAttribLocation = null;
+const GLEnableVertexAttribArray: type = fn (index: u32) callconv(WINAPI) void;
+pub var optGLEnableVertexAttribArray: ?*const GLEnableVertexAttribArray = null;
+const GLDisableVertexAttribArray: type = fn (index: u32) callconv(WINAPI) void;
+pub var optGLDisableVertexAttribArray: ?*const GLDisableVertexAttribArray = null;
+const GLVertexAttribPointer: type = fn (index: u32, size: i32, data_type: u32, normalized: bool, stride: isize, pointer: *anyopaque) callconv(WINAPI) void;
+pub var optGLVertexAttribPointer: ?*const GLVertexAttribPointer = null;
+const GLDrawArrays: type = fn (mode: u32, first: i32, count: i32) callconv(WINAPI) void;
+pub var optGLDrawArrays: ?*const GLDrawArrays = null;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -1509,6 +1520,11 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLUniform4fv = @ptrCast(win32.wglGetProcAddress("glUniform4fv"));
             optGLUniform1i = @ptrCast(win32.wglGetProcAddress("glUniform1i"));
             optGLGetUniformLocation = @ptrCast(win32.wglGetProcAddress("glGetUniformLocation"));
+            optGLGetAttribLocation = @ptrCast(win32.wglGetProcAddress("glGetAttribLocation"));
+            optGLEnableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glEnableVertexAttribArray"));
+            optGLDisableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glDisableVertexAttribArray"));
+            optGLVertexAttribPointer = @ptrCast(win32.wglGetProcAddress("glVertexAttribPointer"));
+            optGLDrawArrays = @ptrCast(win32.wglGetProcAddress("glDrawArrays"));
 
             std.debug.assert(optGLTextImage2DMultiSample != null);
             std.debug.assert(optGLBlitFrameBuffer != null);
@@ -1527,6 +1543,11 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLUniform4fv != null);
             std.debug.assert(optGLUniform1i != null);
             std.debug.assert(optGLGetUniformLocation != null);
+            std.debug.assert(optGLGetAttribLocation != null);
+            std.debug.assert(optGLEnableVertexAttribArray != null);
+            std.debug.assert(optGLDisableVertexAttribArray != null);
+            std.debug.assert(optGLVertexAttribPointer != null);
+            std.debug.assert(optGLDrawArrays != null);
 
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
                 _ = wglSwapIntervalEXT(1);
@@ -2390,6 +2411,8 @@ pub export fn wWinMain(
                 const max_vertex_count: u32 = 65536;
                 const vertex_array_block: ?*PlatformMemoryBlock = allocateMemory(max_vertex_count * @sizeOf(TexturedVertex), @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
                 const vertex_array: [*]TexturedVertex = @ptrCast(@alignCast(vertex_array_block.?.base));
+                const bitmap_array_block: ?*PlatformMemoryBlock = allocateMemory(max_vertex_count * @sizeOf(LoadedBitmap), @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
+                const bitmap_array: [*]?*LoadedBitmap = @ptrCast(@alignCast(bitmap_array_block.?.base));
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
@@ -2419,6 +2442,8 @@ pub export fn wWinMain(
                         @intCast(back_buffer.height),
                         max_vertex_count,
                         vertex_array,
+                        bitmap_array,
+                        &open_gl.white_bitmap,
                     );
                     const window_dimension = getWindowDimension(window_handle);
                     const draw_region = render.aspectRatioFit(

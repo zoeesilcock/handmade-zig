@@ -895,6 +895,8 @@ pub const RenderCommands = extern struct {
     max_vertex_count: u32,
     vertex_count: u32,
     vertex_array: [*]TexturedVertex,
+    quad_bitmaps: [*]?*LoadedBitmap,
+    white_bitmap: ?*LoadedBitmap,
 
     clear_color: Color,
 
@@ -916,6 +918,8 @@ pub fn initializeRenderCommands(
     height: u32,
     max_vertex_count: u32,
     vertex_array: [*]TexturedVertex,
+    bitmap_array: [*]?*LoadedBitmap,
+    white_bitmap: *LoadedBitmap,
 ) RenderCommands {
     return RenderCommands{
         .width = width,
@@ -928,6 +932,8 @@ pub fn initializeRenderCommands(
         .max_vertex_count = max_vertex_count,
         .vertex_count = 0,
         .vertex_array = vertex_array,
+        .quad_bitmaps = bitmap_array,
+        .white_bitmap = white_bitmap,
 
         .clear_color = .black(),
     };

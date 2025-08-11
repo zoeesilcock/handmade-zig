@@ -532,7 +532,7 @@ pub fn updateAndRenderEntities(
 
                     if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
                         render_group.pushCube(
-                            bitmap_id,
+                            render_group.commands.white_bitmap,
                             entity_transform.offset_position.plus(piece.offset),
                             piece.dimension.x(),
                             piece.dimension.y(),

@@ -461,7 +461,7 @@ fn Color4Type(comptime ScalarType: type) type {
             } };
         }
 
-        pub inline fn sRGBNew(x_value: ScalarType, y_value: ScalarType, z_value: ScalarType, w_value: ScalarType) Self {
+        pub inline fn newFromSRGB(x_value: ScalarType, y_value: ScalarType, z_value: ScalarType, w_value: ScalarType) Self {
             return Self.new(
                 square(x_value),
                 square(y_value),

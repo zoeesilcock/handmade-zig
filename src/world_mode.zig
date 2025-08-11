@@ -783,7 +783,7 @@ fn addStandardRoom(
                     .Grass,
                     .new(0.7, 1),
                     .zero(),
-                    .sRGBNew(0.31, 0.49, 0.32, 1),
+                    .newFromSRGB(0.31, 0.49, 0.32, 1),
                     @intFromEnum(EntityVisiblePieceFlag.Cube),
                 );
                 endEntity(world_mode, entity, world_position);
