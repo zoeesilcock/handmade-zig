@@ -962,7 +962,7 @@ pub const DebugElement = struct {
     guid: [*:0]const u8,
     file_name_count: u32,
     line_number: u32,
-    name: [*:0] const u8,
+    name: [*:0]const u8,
 
     type: DebugType,
 
@@ -2218,18 +2218,25 @@ fn debugStart(
     debug_state.font_scale = 1;
     debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
     debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-    debug_state.render_group.setCameraTransformToIdentity(1, @intFromEnum(rendergroup.CameraTransformFlag.IsOrthographic));
+    debug_state.render_group.setCameraTransform(
+        1,
+        .new(2 / @as(f32, @floatFromInt(width)), 0, 0),
+        .new(0, 2 / @as(f32, @floatFromInt(width)), 0),
+        .new(0, 0, 1),
+        .zero(),
+        @intFromEnum(rendergroup.CameraTransformFlag.IsOrthographic),
+    );
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();
     debug_state.shadow_transform = ObjectTransform.defaultFlat();
     debug_state.ui_transform = ObjectTransform.defaultFlat();
     debug_state.text_transform = ObjectTransform.defaultFlat();
     debug_state.tooltip_transform = ObjectTransform.defaultFlat();
-    _ = debug_state.backing_transform.offset_position.setZ(100000);
-    _ = debug_state.shadow_transform.offset_position.setZ(200000);
-    _ = debug_state.ui_transform.offset_position.setZ(300000);
-    _ = debug_state.text_transform.offset_position.setZ(400000);
-    _ = debug_state.tooltip_transform.offset_position.setZ(500000);
+    _ = debug_state.backing_transform.offset_position.setZ(0);
+    _ = debug_state.shadow_transform.offset_position.setZ(0);
+    _ = debug_state.ui_transform.offset_position.setZ(0);
+    _ = debug_state.text_transform.offset_position.setZ(0);
+    _ = debug_state.tooltip_transform.offset_position.setZ(0);
 
     debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
     debug_state.tooltip_count = 0;

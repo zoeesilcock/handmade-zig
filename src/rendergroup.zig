@@ -464,17 +464,17 @@ pub const RenderGroup = extern struct {
         vert[0].uv = uv0;
         vert[0].color = c0;
 
-        vert[1].position = p1;
-        vert[1].uv = uv1;
-        vert[1].color = c1;
+        vert[1].position = p3;
+        vert[1].uv = uv3;
+        vert[1].color = c3;
 
-        vert[2].position = p2;
-        vert[2].uv = uv2;
-        vert[2].color = c2;
+        vert[2].position = p1;
+        vert[2].uv = uv1;
+        vert[2].color = c1;
 
-        vert[3].position = p3;
-        vert[3].uv = uv3;
-        vert[3].color = c3;
+        vert[3].position = p2;
+        vert[3].uv = uv2;
+        vert[3].color = c2;
     }
 
     fn pushQuadUnpackedColors(

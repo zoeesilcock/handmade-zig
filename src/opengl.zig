@@ -9,10 +9,30 @@ const debug_interface = @import("debug_interface.zig");
 const platform = @import("win32_handmade.zig");
 const std = @import("std");
 
-pub const GL_CLAMP_TO_EDGE = 0x812F;
+pub const GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB = 0x8242;
+pub const GL_DEBUG_LOGGED_MESSAGES = 0x9145;
+pub const GL_DEBUG_SEVERITY_HIGH = 0x9146;
+pub const GL_DEBUG_SEVERITY_MEDIUM = 0x9147;
+pub const GL_DEBUG_SEVERITY_LOW = 0x9148;
+pub const GL_DEBUG_TYPE_MARKER = 0x8268;
+pub const GL_DEBUG_TYPE_PUSH_GROUP = 0x8269;
+pub const GL_DEBUG_TYPE_POP_GROUP = 0x826A;
+pub const GL_DEBUG_SEVERITY_NOTIFICATION = 0x826B;
+
+pub const GL_ARRAY_BUFFER = 0x8892;
+pub const GL_STREAM_DRAW = 0x88E0;
+pub const GL_STREAM_READ = 0x88E1;
+pub const GL_STREAM_COPY = 0x88E2;
+pub const GL_STATIC_DRAW = 0x88E4;
+pub const GL_STATIC_READ = 0x88E5;
+pub const GL_STATIC_COPY = 0x88E6;
+pub const GL_DYNAMIC_DRAW = 0x88E8;
+pub const GL_DYNAMIC_READ = 0x88E9;
+pub const GL_DYNAMIC_COPY = 0x88EA;
 
 pub const GL_FRAMEBUFFER_SRGB = 0x8DB9;
 pub const GL_SRGB8_ALPHA8 = 0x8C43;
+pub const GL_CLAMP_TO_EDGE = 0x812F;
 
 pub const GL_SHADING_LANGUAGE_VERSION = 0x8B8C;
 pub const GL_FRAGMENT_SHADER = 0x8B30;
@@ -111,6 +131,32 @@ const SpriteEdge = render.SpriteEdge;
 const debug_color_table = shared.debug_color_table;
 var global_config = &@import("config.zig").global_config;
 
+// TODO: How do we avoid having this import here?
+const WINAPI = @import("std").os.windows.WINAPI;
+fn glDebugProc(
+    source: u32,
+    message_type: u32,
+    id: u32,
+    severity: u32,
+    length: i32,
+    message: [*]const u8,
+    user_param: ?*const anyopaque,
+) callconv(WINAPI) void {
+    _ = message_type;
+    _ = id;
+    _ = source;
+    _ = user_param;
+
+    if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) {
+        // std.log.info("GLDebugMessage: {s}", .{ message[0..@intCast(length)] });
+    } else {
+        std.debug.panic("GLDebugMessage, severity: {d}, message: {s}", .{
+            severity,
+            message[0..@intCast(length)],
+        });
+    }
+}
+
 pub const gl = struct {
     // TODO: How do we import OpenGL on other platforms here?
     usingnamespace @import("win32").graphics.open_gl;
@@ -122,6 +168,8 @@ const OpenGL = struct {
 
     default_sprite_texture_format: i32 = 0,
     default_framebuffer_texture_format: i32 = 0,
+
+    vertex_buffer: u32 = 0,
 
     reserved_blit_texture: u32 = 0,
     basic_z_bias_program: u32 = 0,
@@ -194,6 +242,27 @@ pub const Info = struct {
                 }
 
                 at = end;
+            }
+        } else {
+            _ = gl.glGetError();
+            var index: u32 = 0;
+            while (gl.glGetError() == gl.GL_NO_ERROR) : (index += 1) {
+                if (platform.optGLGetStringi.?(gl.GL_EXTENSIONS, index)) |extension| {
+                    const count = shared.stringLength(@ptrCast(extension));
+                    const at: [*]const u8 = @ptrCast(extension);
+
+                    if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_texture_sRGB")) {
+                        result.gl_ext_texture_srgb = true;
+                    } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_framebuffer_sRGB")) {
+                        result.gl_ext_framebuffer_srgb = true;
+                    } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_sRGB")) {
+                        result.gl_ext_framebuffer_srgb = true;
+                    } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_object")) {
+                        result.gl_arb_framebuffer_object = true;
+                    }
+                } else {
+                    break;
+                }
             }
         }
 
@@ -279,7 +348,17 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         }
     }
 
-    gl.glTexEnvi(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE);
+    if (platform.optGLDebugMessageCallbackARB) |glDebugMessageCallbackARB| {
+        gl.glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
+        glDebugMessageCallbackARB(&glDebugProc, null);
+    }
+
+    var dummy_vertex_array: u32 = 0;
+    platform.optGLGenVertexArrays.?(1, &dummy_vertex_array);
+    platform.optGLBindVertexArray.?(dummy_vertex_array);
+
+    platform.optGLGenBuffers.?(1, &open_gl.vertex_buffer);
+    platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
 
     const header_code =
         \\#version 130
@@ -336,15 +415,19 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\  //vec4 TexSample = vec4(1, 0, 0, 1);
         \\  vec4 TexSample = texture(TextureSampler, FragUV);
         \\
+        \\  if (TexSample.a > 0) {
         \\#if ShaderSimTexReadSRGB
-        \\  TexSample.rgb *= TexSample.rgb;
+        \\    TexSample.rgb *= TexSample.rgb;
         \\#endif
         \\
-        \\  ResultColor = FragColor * TexSample;
+        \\    ResultColor = FragColor * TexSample;
         \\
         \\#if ShaderSimTexWriteSRGB
-        \\  ResultColor.rgb = sqrt(ResultColor.rgb);
+        \\    ResultColor.rgb = sqrt(ResultColor.rgb);
         \\#endif
+        \\  } else {
+        \\    discard;
+        \\  }
         \\}
     ;
     open_gl.basic_z_bias_program = createProgram(@ptrCast(defines[0..defines_length]), header_code, vertex_code, fragment_code);
@@ -389,22 +472,13 @@ pub fn renderCommands(
     gl.glColorMask(gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE);
     gl.glDepthFunc(gl.GL_LEQUAL);
     gl.glEnable(gl.GL_DEPTH_TEST);
-    gl.glAlphaFunc(gl.GL_GREATER, 0);
-    gl.glEnable(gl.GL_ALPHA_TEST);
     gl.glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     gl.glEnable(GL_SAMPLE_ALPHA_TO_ONE);
     gl.glEnable(GL_MULTISAMPLE);
 
-    gl.glEnable(gl.GL_TEXTURE_2D);
     gl.glEnable(gl.GL_SCISSOR_TEST);
     gl.glEnable(gl.GL_BLEND);
     gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
-
-    gl.glMatrixMode(gl.GL_TEXTURE);
-    gl.glLoadIdentity();
-
-    gl.glMatrixMode(gl.GL_MODELVIEW);
-    gl.glLoadIdentity();
 
     std.debug.assert(commands.max_render_target_index < frame_buffer_handles.len);
 
@@ -428,7 +502,6 @@ pub fn renderCommands(
                     while (target_index <= commands.max_render_target_index) : (target_index += 1) {
                         // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
-                        // const slot = gl.GL_TEXTURE_2D;
                         const slot = GL_TEXTURE_2D_MULTISAMPLE;
                         var texture_handle: [2]u32 = undefined;
                         gl.glGenTextures(2, @ptrCast(&texture_handle));
@@ -561,12 +634,7 @@ pub fn renderCommands(
                 std.debug.assert(clip_rect_index < commands.clip_rect_count);
 
                 const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
-
-                gl.glMatrixMode(gl.GL_PROJECTION);
                 proj = clip.proj.transpose();
-                gl.glLoadMatrixf(proj.toGL());
-                // proj = clip.proj;
-
                 var clip_rect: Rectangle2i = clip.rect;
 
                 if (current_render_target_index != clip.render_target_index) {
@@ -611,18 +679,24 @@ pub fn renderCommands(
                     const color_array_index: u32 = @intCast(open_gl.vert_color_id);
                     const position_array_index: u32 = @intCast(open_gl.vert_position_id);
 
+                    platform.optGLBufferData.?(
+                        GL_ARRAY_BUFFER,
+                        commands.vertex_count * @sizeOf(TexturedVertex),
+                        commands.vertex_array,
+                        GL_STREAM_DRAW,
+                    );
+
                     platform.optGLEnableVertexAttribArray.?(uv_array_index);
                     platform.optGLEnableVertexAttribArray.?(color_array_index);
                     platform.optGLEnableVertexAttribArray.?(position_array_index);
 
-                    const vertex_base: [*]u8 = @ptrCast(commands.vertex_array);
                     platform.optGLVertexAttribPointer.?(
                         uv_array_index,
                         2,
                         gl.GL_FLOAT,
                         false,
                         @sizeOf(TexturedVertex),
-                        vertex_base + @offsetOf(TexturedVertex, "uv"),
+                        @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
                     );
                     platform.optGLVertexAttribPointer.?(
                         color_array_index,
@@ -630,7 +704,7 @@ pub fn renderCommands(
                         gl.GL_UNSIGNED_BYTE,
                         true,
                         @sizeOf(TexturedVertex),
-                        vertex_base + @offsetOf(TexturedVertex, "color"),
+                        @ptrFromInt(@offsetOf(TexturedVertex, "color")),
                     );
                     platform.optGLVertexAttribPointer.?(
                         position_array_index,
@@ -638,7 +712,7 @@ pub fn renderCommands(
                         gl.GL_FLOAT,
                         false,
                         @sizeOf(TexturedVertex),
-                        vertex_base + @offsetOf(TexturedVertex, "position"),
+                        @ptrFromInt(@offsetOf(TexturedVertex, "position")),
                     );
 
                     platform.optGLUseProgram.?(open_gl.basic_z_bias_program);
@@ -656,7 +730,7 @@ pub fn renderCommands(
                             gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
                         }
 
-                        platform.optGLDrawArrays.?(gl.GL_QUADS, @intCast(vertex_index), 4);
+                        platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, @intCast(vertex_index), 4);
                     }
 
                     platform.optGLUseProgram.?(0);
@@ -710,7 +784,6 @@ pub fn renderCommands(
     }
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
-    gl.glDisable(gl.GL_TEXTURE_2D);
 }
 
 pub fn manageTextures(first_op: ?*TextureOp) void {

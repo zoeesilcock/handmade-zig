@@ -140,7 +140,7 @@ const GLBlitFrameBuffer: type = fn (src_x0: i32, src_y0: i32, src_x1: i32, src_y
 pub var optGLBlitFrameBuffer: ?*const GLBlitFrameBuffer = null;
 const GLCreateShader: type = fn (shader_type: u32) callconv(WINAPI) u32;
 pub var optGLCreateShader: ?*const GLCreateShader = null;
-const GLShaderSource: type = fn (shader: u32, count: i32, string: [*]const[*:0]const u8, length: ?*i32) callconv(WINAPI) void;
+const GLShaderSource: type = fn (shader: u32, count: i32, string: [*]const [*:0]const u8, length: ?*i32) callconv(WINAPI) void;
 pub var optGLShaderSource: ?*const GLShaderSource = null;
 const GLCompileShader: type = fn (shader: u32) callconv(WINAPI) void;
 pub var optGLCompileShader: ?*const GLCompileShader = null;
@@ -174,10 +174,29 @@ const GLEnableVertexAttribArray: type = fn (index: u32) callconv(WINAPI) void;
 pub var optGLEnableVertexAttribArray: ?*const GLEnableVertexAttribArray = null;
 const GLDisableVertexAttribArray: type = fn (index: u32) callconv(WINAPI) void;
 pub var optGLDisableVertexAttribArray: ?*const GLDisableVertexAttribArray = null;
-const GLVertexAttribPointer: type = fn (index: u32, size: i32, data_type: u32, normalized: bool, stride: isize, pointer: *anyopaque) callconv(WINAPI) void;
+const GLVertexAttribPointer: type = fn (index: u32, size: i32, data_type: u32, normalized: bool, stride: isize, pointer: ?*anyopaque) callconv(WINAPI) void;
 pub var optGLVertexAttribPointer: ?*const GLVertexAttribPointer = null;
+const GLGenVertexArrays: type = fn (size: i32, arrays: ?*u32) callconv(WINAPI) void;
+pub var optGLGenVertexArrays: ?*const GLGenVertexArrays = null;
+const GLBindVertexArray: type = fn (array: u32) callconv(WINAPI) void;
+pub var optGLBindVertexArray: ?*const GLBindVertexArray = null;
 const GLDrawArrays: type = fn (mode: u32, first: i32, count: i32) callconv(WINAPI) void;
 pub var optGLDrawArrays: ?*const GLDrawArrays = null;
+const GLDebugProcArb = ?*const fn (source: u32, message_type: u32, id: u32, severity: u32, length: i32, message: [*]const u8, user_param: ?*const anyopaque) callconv(WINAPI) void;
+const GLDebugMessageCallbackARB: type = fn (callback: GLDebugProcArb, user_param: ?*const anyopaque) callconv(WINAPI) void;
+pub var optGLDebugMessageCallbackARB: ?*const GLDebugMessageCallbackARB = null;
+const GLDebugMessageControlARB: type = fn (source: u32, message_type: u32, severity: u32, count: i32, ids: [*]const i32, enabled: bool) callconv(WINAPI) void;
+pub var optGLDebugMessageControlARB: ?*const GLDebugMessageControlARB = null;
+const GLGetStringi: type = fn (name: u32, index: u32) callconv(WINAPI) ?*u8;
+pub var optGLGetStringi: ?*const GLGetStringi = null;
+const GLGenBuffers: type = fn (count: i32, buffers: *u32) callconv(WINAPI) void;
+pub var optGLGenBuffers: ?*const GLGenBuffers = null;
+const GLBindBuffer: type = fn (target: u32, buffer: u32) callconv(WINAPI) void;
+pub var optGLBindBuffer: ?*const GLBindBuffer = null;
+const GLBufferData: type = fn (target: u32, size: isize, data: *anyopaque, usage: u32) callconv(WINAPI) void;
+pub var optGLBufferData: ?*const GLBufferData = null;
+
+//GLAPI void APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage);
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -1287,15 +1306,16 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
 }
 
 const opengl_flags: c_int = if (INTERNAL)
-    0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
+    // 0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
+    opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
 else
-    0;
+    opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB;
 const opengl_attribs = [_:0]c_int{
     opengl.WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-    opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 0,
+    opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 2,
     opengl.WGL_CONTEXT_FLAGS_ARB,         opengl_flags,
-    opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
-    // opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+    // opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+    opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
     0,
 };
 
@@ -1489,6 +1509,9 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
         }
 
         if (win32.wglMakeCurrent(window_dc, opengl_rc) != 0) {
+            optGLGetStringi = @ptrCast(win32.wglGetProcAddress("glGetStringi"));
+            std.debug.assert(optGLGetStringi != null);
+
             const info = opengl.Info.get(is_modern_context);
 
             if (info.gl_arb_framebuffer_object) {
@@ -1524,7 +1547,14 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLEnableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glEnableVertexAttribArray"));
             optGLDisableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glDisableVertexAttribArray"));
             optGLVertexAttribPointer = @ptrCast(win32.wglGetProcAddress("glVertexAttribPointer"));
+            optGLGenVertexArrays = @ptrCast(win32.wglGetProcAddress("glGenVertexArrays"));
+            optGLBindVertexArray = @ptrCast(win32.wglGetProcAddress("glBindVertexArray"));
             optGLDrawArrays = @ptrCast(win32.wglGetProcAddress("glDrawArrays"));
+            optGLDebugMessageCallbackARB = @ptrCast(win32.wglGetProcAddress("glDebugMessageCallbackARB"));
+            optGLDebugMessageControlARB = @ptrCast(win32.wglGetProcAddress("glDebugMessageControlARB"));
+            optGLGenBuffers = @ptrCast(win32.wglGetProcAddress("glGenBuffers"));
+            optGLBindBuffer = @ptrCast(win32.wglGetProcAddress("glBindBuffer"));
+            optGLBufferData = @ptrCast(win32.wglGetProcAddress("glBufferData"));
 
             std.debug.assert(optGLTextImage2DMultiSample != null);
             std.debug.assert(optGLBlitFrameBuffer != null);
@@ -1547,7 +1577,14 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLEnableVertexAttribArray != null);
             std.debug.assert(optGLDisableVertexAttribArray != null);
             std.debug.assert(optGLVertexAttribPointer != null);
+            std.debug.assert(optGLGenVertexArrays != null);
+            std.debug.assert(optGLBindVertexArray != null);
             std.debug.assert(optGLDrawArrays != null);
+            std.debug.assert(optGLDebugMessageCallbackARB != null);
+            std.debug.assert(optGLDebugMessageControlARB != null);
+            std.debug.assert(optGLGenBuffers != null);
+            std.debug.assert(optGLBindBuffer != null);
+            std.debug.assert(optGLBufferData != null);
 
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
                 _ = wglSwapIntervalEXT(1);

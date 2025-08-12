@@ -1099,10 +1099,6 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             const d: f32 = (n * f) / (n - f);
             const e: f32 = (2 * f * n) / (n - f);
 
-            // These are non-perspective corrected terms, for orthographic.
-            // const d: f32 = 2 / (n - f);
-            // const e: f32 = (n + f) / (n - f);
-
             return .{
                 .values = .{
                     .new(a * c, 0, 0, 0),
@@ -1116,11 +1112,19 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
         pub inline fn orthographicProjection(aspect_width_over_height: f32) Matrix4x4 {
             const a: f32 = 1;
             const b: f32 = aspect_width_over_height;
+
+            const n: f32 = 0.1; // Near clip plane distance.
+            const f: f32 = 100; // Far clip plane distance.
+
+            // These are non-perspective corrected terms, for orthographic.
+            const d: f32 = 2 / (n - f);
+            const e: f32 = (n + f) / (n - f);
+
             return .{
                 .values = .{
                     .new(a, 0, 0, 0),
                     .new(0, b, 0, 0),
-                    .new(0, 0, 1, 0),
+                    .new(0, 0, d, e),
                     .new(0, 0, 0, 1),
                 },
             };
