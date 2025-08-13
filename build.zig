@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 const FORCE_RELEASE_MODE = false;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
+const SLOW_DEFAULT = false;
 const BACKEND_DEFAULT = .Win32;
 
 const Package = enum {
@@ -26,12 +27,14 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const package = b.option(Package, "package", "which part to build") orelse PACKAGE_DEFAULT;
-    const internal = b.option(bool, "internal", "use this for internal builds") orelse INTERNAL_DEFAULT;
+    const internal = b.option(bool, "internal", "wether to include internal testing features") orelse INTERNAL_DEFAULT;
+    const slow = b.option(bool, "slow", "wether to include slow testing features") orelse SLOW_DEFAULT;
 
     // Add build options.
     const build_options = b.addOptions();
     build_options.addOption(Package, "package", package);
     build_options.addOption(bool, "internal", internal);
+    build_options.addOption(bool, "slow", slow);
 
     // Add the packages.
     if (package == .All or package == .Game or package == .Executable) {

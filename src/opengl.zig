@@ -147,13 +147,13 @@ fn glDebugProc(
     _ = source;
     _ = user_param;
 
-    if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) {
-        // std.log.info("GLDebugMessage: {s}", .{ message[0..@intCast(length)] });
-    } else {
+    if (severity == GL_DEBUG_SEVERITY_HIGH) {
         std.debug.panic("GLDebugMessage, severity: {d}, message: {s}", .{
             severity,
             message[0..@intCast(length)],
         });
+    } else {
+        // std.log.info("GLDebugMessage: {s}", .{ message[0..@intCast(length)] });
     }
 }
 
@@ -348,9 +348,11 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         }
     }
 
-    if (platform.optGLDebugMessageCallbackARB) |glDebugMessageCallbackARB| {
-        gl.glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
-        glDebugMessageCallbackARB(&glDebugProc, null);
+    if (INTERNAL) {
+        if (platform.optGLDebugMessageCallbackARB) |glDebugMessageCallbackARB| {
+            gl.glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
+            glDebugMessageCallbackARB(&glDebugProc, null);
+        }
     }
 
     var dummy_vertex_array: u32 = 0;

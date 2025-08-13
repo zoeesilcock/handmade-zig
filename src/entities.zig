@@ -327,9 +327,11 @@ fn debugPickEntity(
         var volume_index: u32 = 0;
         while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
             const volume = entity.collision.volumes[volume_index];
+            // TODO: This needs to do raycasting now, if we want to reenable it.
             const local_mouse_position = render_group.unproject(
                 entity_transform,
                 DebugInterface.debugGetMousePosition(),
+                1,
             );
 
             if (local_mouse_position.x() > -0.5 * volume.dimension.x() and

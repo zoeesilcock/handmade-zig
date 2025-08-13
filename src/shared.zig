@@ -50,6 +50,7 @@ const TimedBlock = debug_interface.TimedBlock;
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
+pub const SLOW = @import("build_options").slow;
 
 // Helper functions.
 pub fn notImplemented() void {

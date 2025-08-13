@@ -1,8 +1,10 @@
 const intrinsics = @import("intrinsics.zig");
+const shared = @import("shared.zig");
 const std = @import("std");
 
 pub const PI32: f32 = 3.14159265359;
 pub const TAU32: f32 = 6.28318530717958647692;
+pub const SLOW = shared.SLOW;
 
 pub const Vector2 = Vector2Type(f32);
 pub const Vector2i = Vector2Type(i32);
@@ -18,6 +20,7 @@ pub const Rectangle3 = Rectangle3Type(f32);
 pub const Matrix2x2 = MatrixType(2, 2);
 pub const Matrix3x3 = MatrixType(3, 3);
 pub const Matrix4x4 = MatrixType(4, 4);
+pub const MatrixInverse4x4 = MatrixInverseType(Matrix4x4);
 
 fn Vector2Type(comptime ScalarType: type) type {
     return extern struct {
@@ -108,6 +111,7 @@ fn Vector2Type(comptime ScalarType: type) type {
         pub const minus = Shared.minus;
         pub const times = Shared.times;
         pub const dividedBy = Shared.dividedBy;
+        pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
@@ -223,6 +227,7 @@ fn Vector3Type(comptime ScalarType: type) type {
         pub const minus = Shared.minus;
         pub const times = Shared.times;
         pub const dividedBy = Shared.dividedBy;
+        pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
@@ -331,6 +336,7 @@ fn Vector4Type(comptime ScalarType: type) type {
         pub const minus = Shared.minus;
         pub const times = Shared.times;
         pub const dividedBy = Shared.dividedBy;
+        pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
@@ -419,6 +425,7 @@ fn Color3Type(comptime ScalarType: type) type {
         pub const minus = Shared.minus;
         pub const times = Shared.times;
         pub const dividedBy = Shared.dividedBy;
+        pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
@@ -537,6 +544,7 @@ fn Color4Type(comptime ScalarType: type) type {
         pub const minus = Shared.minus;
         pub const times = Shared.times;
         pub const dividedBy = Shared.dividedBy;
+        pub const dividedByF = Shared.dividedByF;
         pub const scaledTo = Shared.scaledTo;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
@@ -584,6 +592,10 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
 
         pub inline fn dividedBy(self: *const Self, b: Self) Self {
             return Self{ .values = self.values / b.values };
+        }
+
+        pub inline fn dividedByF(self: *const Self, scalar: ScalarType) Self {
+            return self.scaledTo(1 / scalar);
         }
 
         pub inline fn scaledTo(self: *const Self, scalar: ScalarType) Self {
@@ -944,6 +956,130 @@ fn RectangleShared(
     };
 }
 
+fn MatrixInverseType(comptime InnerType: type) type {
+    return extern struct {
+        const Self = @This();
+
+        forward: InnerType = .{},
+        inverse: InnerType = .{},
+
+        pub fn identity() Self {
+            return .{
+                .forward = .identity(),
+                .inverse = .identity(),
+            };
+        }
+
+        pub fn cameraTransform(x: Vector3, y: Vector3, z: Vector3, p: Vector3) Self {
+            var result: Self = .{};
+
+            var a: Matrix4x4 = .rows3x3(x, y, z);
+            const ap: Vector3 = a.timesV(p).negated();
+            a = a.translate(ap);
+            result.forward = a;
+
+            const ix: Vector3 = x.dividedByF(x.lengthSquared());
+            const iy: Vector3 = y.dividedByF(y.lengthSquared());
+            const iz: Vector3 = z.dividedByF(z.lengthSquared());
+            const ip: Vector3 = .new(
+                ap.x() * ix.x() + ap.y() * iy.x() + ap.z() * iz.x(),
+                ap.x() * ix.y() + ap.y() * iy.y() + ap.z() * iz.y(),
+                ap.x() * ix.z() + ap.y() * iy.z() + ap.z() * iz.z(),
+            );
+
+            var b: Matrix4x4 = .columns3x3(ix, iy, iz);
+            b = b.translate(ip.negated());
+            result.inverse = b;
+
+            if (SLOW) {
+                const ident: Matrix4x4 = result.inverse.times(result.forward);
+                _ = ident;
+            }
+
+            return result;
+        }
+
+        pub fn perspectiveProjection(aspect_width_over_height: f32, focal_length: f32) Self {
+            const a: f32 = 1;
+            const b: f32 = aspect_width_over_height;
+            const c: f32 = focal_length;
+
+            const n: f32 = 0.1; // Near clip plane distance.
+            const f: f32 = 100; // Far clip plane distance.
+
+            // These are perspective corrected terms, for when you divide by -z.
+            const d: f32 = (n * f) / (n - f);
+            const e: f32 = (2 * f * n) / (n - f);
+
+            const result: Self = .{ .forward = .{
+                .values = .{
+                    .new(a * c, 0, 0, 0),
+                    .new(0, b * c, 0, 0),
+                    .new(0, 0, d, e),
+                    .new(0, 0, -1, 0),
+                },
+            }, .inverse = .{
+                .values = .{
+                    .new(1 / a * c, 0, 0, 0),
+                    .new(0, 1 / b * c, 0, 0),
+                    .new(0, 0, 0, -1),
+                    .new(0, 0, 1 / e, d / e),
+                },
+            } };
+
+            if (SLOW) {
+                const ident: Matrix4x4 = result.inverse.times(result.forward);
+                const test0: Vector3 = result.forward.timesV(.new(0, 0, -n));
+                const test1: Vector3 = result.forward.timesV(.new(0, 0, -f));
+                _ = ident;
+                _ = test0;
+                _ = test1;
+            }
+
+            return result;
+        }
+
+        pub fn orthographicProjection(aspect_width_over_height: f32) Self {
+            const a: f32 = 1;
+            const b: f32 = aspect_width_over_height;
+
+            const n: f32 = -100; // Near clip plane distance.
+            const f: f32 = 100; // Far clip plane distance.
+
+            // These are non-perspective corrected terms, for orthographic.
+            const d: f32 = 2 / (n - f);
+            const e: f32 = (n + f) / (n - f);
+
+            const result: Self = .{ .forward = .{
+                .values = .{
+                    .new(a, 0, 0, 0),
+                    .new(0, b, 0, 0),
+                    .new(0, 0, d, e),
+                    .new(0, 0, 0, 1),
+                },
+            }, .inverse = .{
+                .values = .{
+                    .new(1 / a, 0, 0, 0),
+                    .new(0, 1 / b, 0, 0),
+                    .new(0, 0, 1 / d, e / d),
+                    .new(0, 0, 0, 1),
+                },
+            } };
+
+            if (SLOW) {
+                const ident: Matrix4x4 = result.inverse.times(result.forward);
+                const test0: Vector3 = result.forward.timesV(.new(0, 0, -n));
+                const test1: Vector3 = result.forward.timesV(.new(0, 0, -f));
+                _ = ident;
+                _ = test0;
+                _ = test1;
+            }
+
+            return result;
+        }
+    };
+}
+
 fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int) type {
     return extern struct {
         const VectorType =
@@ -976,12 +1112,6 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             };
         }
 
-        pub fn cameraTransform(x: Vector3, y: Vector3, z: Vector3, p: Vector3) Matrix4x4 {
-            var r: Matrix4x4 = .rows3x3(x, y, z);
-            r = r.translate(r.timesV(p, null).negated());
-            return r;
-        }
-
         pub inline fn plus(self: Self, b: Self) Self {
             var result = self;
 
@@ -1006,22 +1136,29 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             return result;
         }
 
-        pub inline fn timesV(self: Matrix4x4, w: Vector3, opt_pw: ?f32) Vector3 {
-            var r: Vector3 = .zero();
-            const pw: f32 = opt_pw orelse 1;
+        pub inline fn timesV(self: Matrix4x4, p: Vector3) Vector3 {
+            return self.timesV4(p.toVector4(1)).xyz();
+        }
 
-            _ = r.setX(w.x() * self.values[0].values[0] +
-                w.y() * self.values[0].values[1] +
-                w.z() * self.values[0].values[2] +
-                pw * self.values[0].values[3]);
-            _ = r.setY(w.x() * self.values[1].values[0] +
-                w.y() * self.values[1].values[1] +
-                w.z() * self.values[1].values[2] +
-                pw * self.values[1].values[3]);
-            _ = r.setZ(w.x() * self.values[2].values[0] +
-                w.y() * self.values[2].values[1] +
-                w.z() * self.values[2].values[2] +
-                pw * self.values[2].values[3]);
+        pub inline fn timesV4(self: Matrix4x4, p: Vector4) Vector4 {
+            var r: Vector4 = .zero();
+
+            _ = r.setX(p.x() * self.values[0].values[0] +
+                p.y() * self.values[0].values[1] +
+                p.z() * self.values[0].values[2] +
+                p.w() * self.values[0].values[3]);
+            _ = r.setY(p.x() * self.values[1].values[0] +
+                p.y() * self.values[1].values[1] +
+                p.z() * self.values[1].values[2] +
+                p.w() * self.values[1].values[3]);
+            _ = r.setZ(p.x() * self.values[2].values[0] +
+                p.y() * self.values[2].values[1] +
+                p.z() * self.values[2].values[2] +
+                p.w() * self.values[2].values[3]);
+            _ = r.setW(p.x() * self.values[2].values[0] +
+                p.y() * self.values[3].values[1] +
+                p.z() * self.values[3].values[2] +
+                p.w() * self.values[3].values[3]);
 
             return r;
         }
@@ -1085,49 +1222,6 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             }
 
             return result;
-        }
-
-        pub inline fn perspectiveProjection(aspect_width_over_height: f32, focal_length: f32) Matrix4x4 {
-            const a: f32 = 1;
-            const b: f32 = aspect_width_over_height;
-            const c: f32 = focal_length;
-
-            const n: f32 = 0.1; // Near clip plane distance.
-            const f: f32 = 100; // Far clip plane distance.
-
-            // These are perspective corrected terms, for when you divide by -z.
-            const d: f32 = (n * f) / (n - f);
-            const e: f32 = (2 * f * n) / (n - f);
-
-            return .{
-                .values = .{
-                    .new(a * c, 0, 0, 0),
-                    .new(0, b * c, 0, 0),
-                    .new(0, 0, d, e),
-                    .new(0, 0, -1, 0),
-                },
-            };
-        }
-
-        pub inline fn orthographicProjection(aspect_width_over_height: f32) Matrix4x4 {
-            const a: f32 = 1;
-            const b: f32 = aspect_width_over_height;
-
-            const n: f32 = 0.1; // Near clip plane distance.
-            const f: f32 = 100; // Far clip plane distance.
-
-            // These are non-perspective corrected terms, for orthographic.
-            const d: f32 = 2 / (n - f);
-            const e: f32 = (n + f) / (n - f);
-
-            return .{
-                .values = .{
-                    .new(a, 0, 0, 0),
-                    .new(0, b, 0, 0),
-                    .new(0, 0, d, e),
-                    .new(0, 0, 0, 1),
-                },
-            };
         }
 
         pub inline fn translate(self: Matrix4x4, t: Vector3) Matrix4x4 {

@@ -18,28 +18,25 @@ const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
 ///
+/// * Graphics upgrade
+///     * Fix unproject! (getCameraRectangleAtTarget)
+///         * Handle divide-by-z in unproject.
+///         * Fix clip rectangles for debug UI.
+///         * Fix Z settings for debug UI.
+///     * Re-enable alpha fading.
+///     * Re-enable fog.
+///     * Particle systems.
+///         * Bug with sliding relative to the grid during camera offset?
+///     * Transition to real artwork.
+///         * Clean up our notion of multi-part-entities and how they are animated.
+///     * Lighting.
+///
 /// * Implement multiple sim regions per frame.
 ///     * Fix has table routines in SimRegion to not have to do clears on returns (just have them return a bool
 ///     as to wheter they found the entry or not).
 ///     * Eliminate world mode from sim step entirely.
 ///     * Per-entity clocking.
 ///     * Sim region merging? For multiple players?
-///
-/// * Graphics upgrade
-///     * Freely rotatable world (for debug).
-///     * Fix unproject! (getCameraRectangleAtTarget)
-///     * Look at orthographic.
-///     * Turn on z-buffer.
-///     * Draw the world in a logical way.
-///         * Stand-up cards for some things.
-///         * Cubes for other things.
-///     * Re-enable fog.
-///     * Particle systems.
-///         * Bug with sliding relative to the grid during camera offset?
-///         * How will floor Z's be handled?
-///     * Transition to real artwork.
-///         * Clean up our notion of multi-part-entities and how they are animated.
-///     * Lighting.
 ///
 /// * Collision detection?
 ///     * Clean up predicate proliferation! Can we make a nice clean set of flag rules so that it's easy to understnad

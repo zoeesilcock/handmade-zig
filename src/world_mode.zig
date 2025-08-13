@@ -546,7 +546,7 @@ pub fn updateAndRenderWorld(
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
-    var camera_ot: Vector3 = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.camera_dolly)), null);
+    var camera_ot: Vector3 = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.camera_dolly)));
     render_group.setCameraTransform(
         camera.focal_length,
         camera_o.getColumn(0),
@@ -559,7 +559,7 @@ pub fn updateAndRenderWorld(
     if (world_mode.use_debug_camera) {
         camera_o =
             Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
-        camera_ot = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.debug_camera_dolly)), null);
+        camera_ot = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.debug_camera_dolly)));
         render_group.setCameraTransform(
             camera.focal_length,
             camera_o.getColumn(0),

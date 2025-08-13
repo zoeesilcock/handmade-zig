@@ -2259,7 +2259,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     _ = shared.formatString(
         debug_state.root_info_size,
         debug_state.root_info,
-        "%.02fms %de %dp %dd - Mem: %lu blocks, %lu used / %lu size",
+        "%.02fms %de %dp %dd - Mem: %lu blocks, %lu used / %lu size %f %f",
         .{
             most_recent_frame.wall_seconds_elapsed * 1000,
             most_recent_frame.stored_event_count,
@@ -2268,6 +2268,8 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
             mem_stats.block_count,
             mem_stats.total_used,
             mem_stats.total_size,
+            input.mouse_x,
+            input.mouse_y,
         },
     );
 
@@ -2276,6 +2278,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     const mouse_position: Vector2 = group.unproject(
         &ObjectTransform.defaultFlat(),
         Vector2.new(input.mouse_x, input.mouse_y),
+        0,
     ).xy();
 
     debug_state.mouse_text_layout = Layout.begin(debug_state, mouse_position, mouse_position);

@@ -55,5 +55,6 @@ llvm-mca .\zig-out\bin\handmade-dll.asm -bottleneck-analysis -o .\zig-out\bin\ha
 ### OpenGL
 * https://docs.gl/
 * https://registry.khronos.org/OpenGL/api/GL/glcorearb.h
+* https://www.khronos.org/opengl/wiki/OpenGL_Type
 * https://www.khronos.org/files/opengl-quick-reference-card.pdf
 * https://www.khronos.org/opengl/wiki/Core_Language_(GLSL)

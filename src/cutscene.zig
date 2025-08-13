@@ -7,6 +7,7 @@ const world_mode = @import("world_mode.zig");
 const file_formats = @import("file_formats");
 const std = @import("std");
 
+const INTERNAL = shared.INTERNAL;
 const CUTSCENE_WARMUP_SECONDS: f32 = 2;
 
 const TransientState = shared.TransientState;
@@ -422,7 +423,9 @@ fn renderLayeredScene(
 
                 _ = transform.offset_position.setZ(camera_offset.z());
 
-                render_group.debug_tag = layer_index;
+                if (INTERNAL) {
+                    render_group.debug_tag = layer_index;
+                }
                 render_group.pushBitmapId(&transform, layer_image, layer.height, Vector3.zero(), color, null, null, null);
             } else {
                 assets.prefetchBitmap(layer_image);

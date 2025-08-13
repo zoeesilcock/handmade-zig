@@ -28,6 +28,7 @@ const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 const INTERNAL = shared.INTERNAL;
+const SLOW = shared.SLOW;
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 
 var global_config = &@import("config.zig").global_config;
@@ -43,6 +44,7 @@ const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
+const MatrixInverse4x4 = math.MatrixInverse4x4;
 const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
 const TimedBlock = debug_interface.TimedBlock;
@@ -186,7 +188,7 @@ pub const RenderGroup = extern struct {
     camera_x: Vector3,
     camera_y: Vector3,
     camera_z: Vector3,
-    last_proj: Matrix4x4,
+    last_proj: MatrixInverse4x4,
 
     generation_id: u32,
     commands: *RenderCommands,
@@ -221,7 +223,7 @@ pub const RenderGroup = extern struct {
             .current_quads = undefined,
         };
 
-        var i: Matrix4x4 = .identity();
+        var i: MatrixInverse4x4 = .identity();
         result.current_clip_rect_index = result.pushSetup(
             0,
             0,
@@ -309,32 +311,36 @@ pub const RenderGroup = extern struct {
     }
 
     // Renderer API.
-    pub fn unproject(self: *RenderGroup, object_transform: *const ObjectTransform, pixels_xy: Vector2) Vector3 {
+    pub fn unproject(
+        self: *RenderGroup,
+        object_transform: *const ObjectTransform,
+        pixels_xy: Vector2,
+        world_distance_from_camera_z: f32,
+    ) Vector3 {
+        var probe_z: Vector4 = .new(0, 0, world_distance_from_camera_z, 1);
+        probe_z = self.last_proj.forward.timesV4(probe_z);
+        const clip_z: f32 = probe_z.z() / probe_z.w();
+
         const screen_center: Vector2 = self.screen_dimensions.scaledTo(0.5);
 
-        var unprojected_xy: Vector2 = pixels_xy.minus(screen_center);
-        const aspect: f32 = self.screen_dimensions.x() / self.screen_dimensions.y();
-        _ = unprojected_xy.setX(unprojected_xy.x() * 0.5 / self.screen_dimensions.x());
-        _ = unprojected_xy.setY(unprojected_xy.y() * 0.5 / (self.screen_dimensions.y() * aspect));
+        var clip_space_xy: Vector2 = pixels_xy.minus(screen_center);
+        _ = clip_space_xy.setX(clip_space_xy.x() * 2 / self.screen_dimensions.x());
+        _ = clip_space_xy.setY(clip_space_xy.y() * 2 / self.screen_dimensions.y());
 
-        // if (!camera_transform.orthographic)
-        {
-            unprojected_xy =
-                unprojected_xy.scaledTo(object_transform.offset_position.z());
-        }
+        const clip: Vector3 = clip_space_xy.toVector3(clip_z);
 
-        var result: Vector3 = unprojected_xy.toVector3(object_transform.offset_position.z());
-        result = result.minus(object_transform.offset_position);
+        const world_position: Vector3 = self.last_proj.inverse.timesV(clip);
+        const object_position: Vector3 = world_position.minus(object_transform.offset_position);
 
-        return result;
+        return object_position;
     }
 
     pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle3 {
         var transform: ObjectTransform = .defaultFlat();
         _ = transform.offset_position.setZ(-distance_from_camera);
 
-        const min_corner = self.unproject(&transform, .zero());
-        const max_corner = self.unproject(&transform, self.screen_dimensions);
+        const min_corner = self.unproject(&transform, .zero(), distance_from_camera);
+        const max_corner = self.unproject(&transform, self.screen_dimensions, distance_from_camera);
 
         return Rectangle3.fromMinMax(min_corner, max_corner);
     }
@@ -887,7 +893,7 @@ pub const RenderGroup = extern struct {
         w: i32,
         h: i32,
         render_target_index: u32,
-        proj: *Matrix4x4,
+        proj: *MatrixInverse4x4,
     ) u32 {
         var result: u32 = 0;
 
@@ -912,7 +918,7 @@ pub const RenderGroup = extern struct {
             rect.next = null;
 
             rect.rect = Rectangle2i.new(x, y, x + w, y + h);
-            rect.proj = proj.*;
+            rect.proj = proj.forward;
 
             rect.render_target_index = render_target_index;
             if (self.commands.max_render_target_index < render_target_index) {
@@ -960,7 +966,14 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushRenderTarget(self: *RenderGroup, render_target_index: u31) u32 {
-        self.current_clip_rect_index = self.pushSetup(self.last_clip_x, self.last_clip_y, self.last_clip_w, self.last_clip_h, render_target_index, &self.last_proj);
+        self.current_clip_rect_index = self.pushSetup(
+            self.last_clip_x,
+            self.last_clip_y,
+            self.last_clip_w,
+            self.last_clip_h,
+            render_target_index,
+            &self.last_proj,
+        );
         return 0;
     }
 
@@ -988,7 +1001,7 @@ pub const RenderGroup = extern struct {
             @as(f32, @floatFromInt(self.commands.height)),
         );
 
-        var proj: Matrix4x4 = .{};
+        var proj: MatrixInverse4x4 = .{};
         if (is_ortho) {
             proj = .orthographicProjection(b);
         } else {
@@ -1001,11 +1014,25 @@ pub const RenderGroup = extern struct {
             self.camera_z = camera_z;
             self.camera_position = camera_position;
         }
-        const camera_c: Matrix4x4 = .cameraTransform(camera_x, camera_y, camera_z, camera_position);
+        const camera_c: MatrixInverse4x4 = .cameraTransform(camera_x, camera_y, camera_z, camera_position);
+        var composite: MatrixInverse4x4 = .{
+            .forward = proj.forward.times(camera_c.forward),
+            .inverse = camera_c.inverse.times(proj.inverse),
+        };
 
-        proj = proj.times(camera_c);
+        if (SLOW) {
+            const identity: Matrix4x4 = composite.inverse.times(composite.forward);
+            _ = identity;
+        }
 
-        self.current_clip_rect_index = self.pushSetup(self.last_clip_x, self.last_clip_y, self.last_clip_w, self.last_clip_h, self.last_render_target, &proj);
+        self.current_clip_rect_index = self.pushSetup(
+            self.last_clip_x,
+            self.last_clip_y,
+            self.last_clip_w,
+            self.last_clip_h,
+            self.last_render_target,
+            &composite,
+        );
     }
 
     pub fn pushBlendRenderTarget(self: *RenderGroup, alpha: f32, source_render_target_index: u32) void {
