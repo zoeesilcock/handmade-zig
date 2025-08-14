@@ -169,6 +169,14 @@ fn getRenderEntityBasisPosition(
     return position;
 }
 
+const RenderTransform = extern struct {
+    position: Vector3 = .zero(),
+    x: Vector3 = .zero(),
+    y: Vector3 = .zero(),
+    z: Vector3 = .zero(),
+    projection: MatrixInverse4x4 = .{},
+};
+
 pub const RenderGroup = extern struct {
     assets: *asset.Assets,
 
@@ -184,11 +192,9 @@ pub const RenderGroup = extern struct {
     current_clip_rect_index: u32,
     last_render_target: u32,
 
-    camera_position: Vector3,
-    camera_x: Vector3,
-    camera_y: Vector3,
-    camera_z: Vector3,
-    last_proj: MatrixInverse4x4,
+    game_transform: RenderTransform = .{},
+    debug_transform: RenderTransform = .{},
+    last_projection: Matrix4x4 = .{},
 
     generation_id: u32,
     commands: *RenderCommands,
@@ -211,11 +217,6 @@ pub const RenderGroup = extern struct {
             .last_clip_y = 0,
             .last_clip_w = 0,
             .last_clip_h = 0,
-            .camera_position = .zero(),
-            .camera_x = .zero(),
-            .camera_y = .zero(),
-            .camera_z = .zero(),
-            .last_proj = .{},
             .last_render_target = 0,
             .current_clip_rect_index = 0,
             .generation_id = generation_id,
@@ -223,7 +224,7 @@ pub const RenderGroup = extern struct {
             .current_quads = undefined,
         };
 
-        var i: MatrixInverse4x4 = .identity();
+        var i: Matrix4x4 = .identity();
         result.current_clip_rect_index = result.pushSetup(
             0,
             0,
@@ -313,12 +314,13 @@ pub const RenderGroup = extern struct {
     // Renderer API.
     pub fn unproject(
         self: *RenderGroup,
-        object_transform: *const ObjectTransform,
+        render_transform: *RenderTransform,
         pixels_xy: Vector2,
         world_distance_from_camera_z: f32,
     ) Vector3 {
-        var probe_z: Vector4 = .new(0, 0, world_distance_from_camera_z, 1);
-        probe_z = self.last_proj.forward.timesV4(probe_z);
+        var probe_z: Vector4 =
+            render_transform.position.minus(render_transform.z.scaledTo(world_distance_from_camera_z)).toVector4(1);
+        probe_z = render_transform.projection.forward.timesV4(probe_z);
         const clip_z: f32 = probe_z.z() / probe_z.w();
 
         const screen_center: Vector2 = self.screen_dimensions.scaledTo(0.5);
@@ -328,19 +330,19 @@ pub const RenderGroup = extern struct {
         _ = clip_space_xy.setY(clip_space_xy.y() * 2 / self.screen_dimensions.y());
 
         const clip: Vector3 = clip_space_xy.toVector3(clip_z);
+        const world_position: Vector3 = render_transform.projection.inverse.timesV(clip);
 
-        const world_position: Vector3 = self.last_proj.inverse.timesV(clip);
-        const object_position: Vector3 = world_position.minus(object_transform.offset_position);
-
-        return object_position;
+        return world_position;
     }
+
+        // const object_position: Vector3 = world_position.minus(object_transform.offset_position);
 
     pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle3 {
         var transform: ObjectTransform = .defaultFlat();
         _ = transform.offset_position.setZ(-distance_from_camera);
 
-        const min_corner = self.unproject(&transform, .zero(), distance_from_camera);
-        const max_corner = self.unproject(&transform, self.screen_dimensions, distance_from_camera);
+        const min_corner = self.unproject(&self.game_transform, .zero(), distance_from_camera);
+        const max_corner = self.unproject(&self.game_transform, self.screen_dimensions, distance_from_camera);
 
         return Rectangle3.fromMinMax(min_corner, max_corner);
     }
@@ -545,16 +547,27 @@ pub const RenderGroup = extern struct {
                 entry.quad_count += 1;
 
                 const min_position: Vector3 = dim.basis_position;
-                const z_bias: f32 = height;
+                const z_bias: f32 = 0.5 * height;
                 const premultiplied_color: Color = storeColor(color);
                 var x_axis: Vector3 = x_axis2.toVector3(0).scaledTo(size.x());
                 var y_axis: Vector3 = y_axis2.toVector3(0).scaledTo(size.y());
 
                 if (object_transform.upright) {
-                    x_axis =
-                        self.camera_x.scaledTo(x_axis2.x()).plus(self.camera_y.scaledTo(x_axis2.y())).scaledTo(size.x());
-                    y_axis =
-                        self.camera_x.scaledTo(y_axis2.x()).plus(self.camera_y.scaledTo(y_axis2.y())).scaledTo(size.y());
+                    // const x_axis0 = Vector3.new(x_axis2.x(), 0, x_axis2.y()).scaledTo(size.x());
+                    const y_axis0 = Vector3.new(y_axis2.x(), 0, y_axis2.y()).scaledTo(size.y());
+                    const x_axis1 =
+                        self.game_transform.x.scaledTo(x_axis2.x())
+                        .plus(self.game_transform.y.scaledTo(x_axis2.y())).scaledTo(size.x());
+                    const y_axis1 =
+                        self.game_transform.x.scaledTo(y_axis2.x())
+                        .plus(self.game_transform.y.scaledTo(y_axis2.y())).scaledTo(size.y());
+
+                    // x_axis = x_axis0.lerp(x_axis1, 0.8);
+                    // y_axis = y_axis0.lerp(y_axis1, 0.8);
+
+                    x_axis = x_axis1;
+                    y_axis = y_axis1;
+                    _ = y_axis.setZ(math.lerpf(y_axis0.z(), y_axis1.z(), 0.8));
                 }
 
                 const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
@@ -893,7 +906,7 @@ pub const RenderGroup = extern struct {
         w: i32,
         h: i32,
         render_target_index: u32,
-        proj: *MatrixInverse4x4,
+        projection: *Matrix4x4,
     ) u32 {
         var result: u32 = 0;
 
@@ -902,7 +915,7 @@ pub const RenderGroup = extern struct {
         self.last_clip_w = w;
         self.last_clip_h = h;
         self.last_render_target = render_target_index;
-        self.last_proj = proj.*;
+        self.last_projection = projection.*;
 
         if (self.pushRenderElement(RenderEntryClipRect)) |rect| {
             result = self.commands.clip_rect_count;
@@ -918,7 +931,7 @@ pub const RenderGroup = extern struct {
             rect.next = null;
 
             rect.rect = Rectangle2i.new(x, y, x + w, y + h);
-            rect.proj = proj.forward;
+            rect.proj = projection.*;
 
             rect.render_target_index = render_target_index;
             if (self.commands.max_render_target_index < render_target_index) {
@@ -946,7 +959,7 @@ pub const RenderGroup = extern struct {
             intrinsics.roundReal32ToInt32(basis_dimension.x()),
             intrinsics.roundReal32ToInt32(basis_dimension.y()),
             self.last_render_target,
-            &self.last_proj,
+            &self.last_projection,
         );
 
         return result;
@@ -972,7 +985,7 @@ pub const RenderGroup = extern struct {
             self.last_clip_w,
             self.last_clip_h,
             render_target_index,
-            &self.last_proj,
+            &self.last_projection,
         );
         return 0;
     }
@@ -1001,6 +1014,7 @@ pub const RenderGroup = extern struct {
             @as(f32, @floatFromInt(self.commands.height)),
         );
 
+        var render_transform: *RenderTransform = if (is_debug) &self.debug_transform else &self.game_transform;
         var proj: MatrixInverse4x4 = .{};
         if (is_ortho) {
             proj = .orthographicProjection(b);
@@ -1008,20 +1022,19 @@ pub const RenderGroup = extern struct {
             proj = .perspectiveProjection(b, focal_length);
         }
 
-        if (!is_debug) {
-            self.camera_x = camera_x;
-            self.camera_y = camera_y;
-            self.camera_z = camera_z;
-            self.camera_position = camera_position;
-        }
+        render_transform.x = camera_x;
+        render_transform.y = camera_y;
+        render_transform.z = camera_z;
+        render_transform.position = camera_position;
+
         const camera_c: MatrixInverse4x4 = .cameraTransform(camera_x, camera_y, camera_z, camera_position);
-        var composite: MatrixInverse4x4 = .{
+        render_transform.projection = .{
             .forward = proj.forward.times(camera_c.forward),
             .inverse = camera_c.inverse.times(proj.inverse),
         };
 
         if (SLOW) {
-            const identity: Matrix4x4 = composite.inverse.times(composite.forward);
+            const identity: Matrix4x4 = render_transform.projection.inverse.times(render_transform.projection.forward);
             _ = identity;
         }
 
@@ -1031,7 +1044,7 @@ pub const RenderGroup = extern struct {
             self.last_clip_w,
             self.last_clip_h,
             self.last_render_target,
-            &composite,
+            &render_transform.projection.forward,
         );
     }
 

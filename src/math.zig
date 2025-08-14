@@ -1008,7 +1008,7 @@ fn MatrixInverseType(comptime InnerType: type) type {
             const f: f32 = 100; // Far clip plane distance.
 
             // These are perspective corrected terms, for when you divide by -z.
-            const d: f32 = (n * f) / (n - f);
+            const d: f32 = (n + f) / (n - f);
             const e: f32 = (2 * f * n) / (n - f);
 
             const result: Self = .{ .forward = .{
@@ -1029,11 +1029,13 @@ fn MatrixInverseType(comptime InnerType: type) type {
 
             if (SLOW) {
                 const ident: Matrix4x4 = result.inverse.times(result.forward);
-                const test0: Vector3 = result.forward.timesV(.new(0, 0, -n));
-                const test1: Vector3 = result.forward.timesV(.new(0, 0, -f));
                 _ = ident;
-                _ = test0;
-                _ = test1;
+
+                var test0: Vector4 = result.forward.timesV4(.new(0, 0, -n, 1));
+                var test1: Vector4 = result.forward.timesV4(.new(0, 0, -f, 1));
+                _ = test0.setXYZ(test0.xyz().dividedByF(test0.w()));
+                _ = test1.setXYZ(test1.xyz().dividedByF(test1.w()));
+                // std.log.info("Near: {d}, far: {d}", .{ test0.z(), test1.z() });
             }
 
             return result;

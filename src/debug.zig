@@ -2276,7 +2276,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
     const mouse_position: Vector2 = group.unproject(
-        &ObjectTransform.defaultFlat(),
+        &group.game_transform,
         Vector2.new(input.mouse_x, input.mouse_y),
         0,
     ).xy();

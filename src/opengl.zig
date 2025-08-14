@@ -9,6 +9,7 @@ const debug_interface = @import("debug_interface.zig");
 const platform = @import("win32_handmade.zig");
 const std = @import("std");
 
+pub const GL_NUM_EXTENSIONS = 0x821D;
 pub const GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB = 0x8242;
 pub const GL_DEBUG_LOGGED_MESSAGES = 0x9145;
 pub const GL_DEBUG_SEVERITY_HIGH = 0x9146;
@@ -197,7 +198,6 @@ pub const Info = struct {
     renderer: ?*const u8,
     version: ?*const u8,
     shader_language_version: ?*const u8 = undefined,
-    extensions: ?*const u8,
 
     gl_ext_texture_srgb: bool = false,
     gl_ext_framebuffer_srgb: bool = false,
@@ -209,7 +209,6 @@ pub const Info = struct {
             .vendor = gl.glGetString(gl.GL_VENDOR),
             .renderer = gl.glGetString(gl.GL_RENDERER),
             .version = gl.glGetString(gl.GL_VERSION),
-            .extensions = gl.glGetString(gl.GL_EXTENSIONS),
         };
 
         if (is_modern_context) {
@@ -218,50 +217,20 @@ pub const Info = struct {
             result.shader_language_version = @ptrCast("(none)");
         }
 
-        if (result.extensions) |extensions| {
-            var at: [*]const u8 = @ptrCast(extensions);
-            while (at[0] != 0) {
-                while (shared.isWhitespace(at[0])) {
-                    at += 1;
-                }
-                var end = at;
-                while (end[0] != 0 and !shared.isWhitespace(end[0])) {
-                    end += 1;
-                }
+        var extension_count: i32 = 0;
+        gl.glGetIntegerv(GL_NUM_EXTENSIONS, &extension_count);
 
-                const count = @intFromPtr(end) - @intFromPtr(at);
-
-                if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_texture_sRGB")) {
+        var extension_index: u32 = 0;
+        while (extension_index < extension_count) : (extension_index += 1) {
+            if (platform.optGLGetStringi.?(gl.GL_EXTENSIONS, extension_index)) |extension_name| {
+                if (shared.stringsAreEqual(@ptrCast(extension_name), "GL_EXT_texture_sRGB")) {
                     result.gl_ext_texture_srgb = true;
-                } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_framebuffer_sRGB")) {
+                } else if (shared.stringsAreEqual(@ptrCast(extension_name), "GL_EXT_framebuffer_sRGB")) {
                     result.gl_ext_framebuffer_srgb = true;
-                } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_sRGB")) {
+                } else if (shared.stringsAreEqual(@ptrCast(extension_name), "GL_ARB_framebuffer_sRGB")) {
                     result.gl_ext_framebuffer_srgb = true;
-                } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_object")) {
+                } else if (shared.stringsAreEqual(@ptrCast(extension_name), "GL_ARB_framebuffer_object")) {
                     result.gl_arb_framebuffer_object = true;
-                }
-
-                at = end;
-            }
-        } else {
-            _ = gl.glGetError();
-            var index: u32 = 0;
-            while (gl.glGetError() == gl.GL_NO_ERROR) : (index += 1) {
-                if (platform.optGLGetStringi.?(gl.GL_EXTENSIONS, index)) |extension| {
-                    const count = shared.stringLength(@ptrCast(extension));
-                    const at: [*]const u8 = @ptrCast(extension);
-
-                    if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_texture_sRGB")) {
-                        result.gl_ext_texture_srgb = true;
-                    } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_EXT_framebuffer_sRGB")) {
-                        result.gl_ext_framebuffer_srgb = true;
-                    } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_sRGB")) {
-                        result.gl_ext_framebuffer_srgb = true;
-                    } else if (shared.stringsWithOneLengthAreEqual(at, count, "GL_ARB_framebuffer_object")) {
-                        result.gl_arb_framebuffer_object = true;
-                    }
-                } else {
-                    break;
                 }
             }
         }
@@ -399,7 +368,9 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\  vec4 ZMinTransform = Transform * InVertex;
         \\  vec4 ZMaxTransform = Transform * ZVertex;
         \\
-        \\  gl_Position = vec4(ZMinTransform.x, ZMinTransform.y, ZMaxTransform.z, ZMinTransform.w);
+        \\  float ModifiedZ = (ZMinTransform.w / ZMaxTransform.w) * ZMaxTransform.z;
+        \\
+        \\  gl_Position = vec4(ZMinTransform.x, ZMinTransform.y, ModifiedZ, ZMinTransform.w);
         \\
         \\  FragUV = VertUV.xy;
         \\  FragColor = VertColor;

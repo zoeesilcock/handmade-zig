@@ -323,37 +323,39 @@ fn debugPickEntity(
         DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
     }
 
-    if (shared.DEBUG) {
-        var volume_index: u32 = 0;
-        while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-            const volume = entity.collision.volumes[volume_index];
-            // TODO: This needs to do raycasting now, if we want to reenable it.
-            const local_mouse_position = render_group.unproject(
-                entity_transform,
-                DebugInterface.debugGetMousePosition(),
-                1,
-            );
-
-            if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
-                local_mouse_position.x() < 0.5 * volume.dimension.x() and
-                local_mouse_position.y() > -0.5 * volume.dimension.y() and
-                local_mouse_position.y() < 0.5 * volume.dimension.y())
-            {
-                debug_interface.hit(entity_debug_id, local_mouse_position.z());
-            }
-
-            var outline_color: Color = undefined;
-            if (debug_interface.highlighted(entity_debug_id, &outline_color)) {
-                render_group.pushRectangleOutline(
-                    entity_transform,
-                    volume.dimension.xy(),
-                    volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                    outline_color,
-                    0.05,
-                );
-            }
-        }
-    }
+    // TODO: This needs to do raycasting now, if we want to reenable it.
+    _ = render_group;
+    _ = entity_transform;
+    // if (shared.DEBUG) {
+    //     var volume_index: u32 = 0;
+    //     while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
+    //         const volume = entity.collision.volumes[volume_index];
+    //         const local_mouse_position = render_group.unproject(
+    //             entity_transform,
+    //             DebugInterface.debugGetMousePosition(),
+    //             1,
+    //         );
+    //
+    //         if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
+    //             local_mouse_position.x() < 0.5 * volume.dimension.x() and
+    //             local_mouse_position.y() > -0.5 * volume.dimension.y() and
+    //             local_mouse_position.y() < 0.5 * volume.dimension.y())
+    //         {
+    //             debug_interface.hit(entity_debug_id, local_mouse_position.z());
+    //         }
+    //
+    //         var outline_color: Color = undefined;
+    //         if (debug_interface.highlighted(entity_debug_id, &outline_color)) {
+    //             render_group.pushRectangleOutline(
+    //                 entity_transform,
+    //                 volume.dimension.xy(),
+    //                 volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
+    //                 outline_color,
+    //                 0.05,
+    //             );
+    //         }
+    //     }
+    // }
 
     if (global_config.Simulation_InspectSelectedEntity) {
         if (debug_interface.requested(entity_debug_id)) {

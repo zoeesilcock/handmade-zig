@@ -23,6 +23,7 @@ const std = @import("std");
 ///         * Handle divide-by-z in unproject.
 ///         * Fix clip rectangles for debug UI.
 ///         * Fix Z settings for debug UI.
+///     * Fix Z buffer to be better resolution - what's the best plan here?
 ///     * Re-enable alpha fading.
 ///     * Re-enable fog.
 ///     * Particle systems.
