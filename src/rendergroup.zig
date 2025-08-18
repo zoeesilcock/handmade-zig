@@ -73,56 +73,59 @@ pub const EnvironmentMap = extern struct {
 
 pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
-    RenderEntryClipRect,
     RenderEntryBlendRenderTarget,
 };
 
 pub const RenderEntryHeader = extern struct {
     type: RenderEntryType,
-    clip_rect_index: u16,
     debug_tag: u32,
 };
 
 pub const RenderEntryTexturedQuads = extern struct {
+    setup: RenderSetup,
     quad_count: u32,
     vertex_array_offset: u32, // Uses 4 vertices per quad.
 };
 
-pub const RenderEntryClipRect = extern struct {
-    next: ?*RenderEntryClipRect,
-    rect: Rectangle2i,
-    render_target_index: u32,
-    proj: Matrix4x4,
+pub const RenderSetup = extern struct {
+    clip_rect: Rectangle2i = .zero(),
+    render_target_index: u32 = 0,
+    projection: Matrix4x4 = .identity(),
+    camera_position: Vector3 = .zero(),
+    fog_direction: Vector3 = .zero(),
+    fog_color: Color3 = .white(),
+    fog_start_distance: f32 = 0,
+    fog_end_distance: f32 = 0,
 };
 
 pub const TransientClipRect = extern struct {
     render_group: *RenderGroup,
-    old_clip_rect: u32,
+    old_clip_rect: Rectangle2i,
 
     pub fn init(render_group: *RenderGroup) TransientClipRect {
         const result: TransientClipRect = .{
             .render_group = render_group,
-            .old_clip_rect = render_group.current_clip_rect_index,
+            .old_clip_rect = render_group.last_setup.clip_rect,
         };
         return result;
     }
 
-    pub fn initWith(render_group: *RenderGroup, new_clip_rect_index: u32) TransientClipRect {
+    pub fn initWith(render_group: *RenderGroup, new_clip_rect: Rectangle2i) TransientClipRect {
         const result: TransientClipRect = .{
             .render_group = render_group,
-            .old_clip_rect = render_group.current_clip_rect_index,
+            .old_clip_rect = render_group.last_setup.clip_rect,
         };
-        result.render_group.current_clip_rect_index = new_clip_rect_index;
+        var new_setup: RenderSetup = render_group.last_setup;
+        new_setup.clip_rect = new_clip_rect;
+        render_group.pushSetup(&new_setup);
         return result;
     }
 
     pub fn restore(self: *const TransientClipRect) void {
-        self.render_group.current_clip_rect_index = self.old_clip_rect;
+        var new_setup: RenderSetup = self.render_group.last_setup;
+        new_setup.clip_rect = self.old_clip_rect;
+        self.render_group.pushSetup(&new_setup);
     }
-};
-
-pub const RenderEntrySaturation = extern struct {
-    level: f32,
 };
 
 pub const RenderEntryBlendRenderTarget = extern struct {
@@ -185,16 +188,9 @@ pub const RenderGroup = extern struct {
 
     missing_resource_count: u32,
 
-    last_clip_x: i32,
-    last_clip_y: i32,
-    last_clip_w: i32,
-    last_clip_h: i32,
-    current_clip_rect_index: u32,
-    last_render_target: u32,
-
+    last_setup: RenderSetup = .{},
     game_transform: RenderTransform = .{},
     debug_transform: RenderTransform = .{},
-    last_projection: Matrix4x4 = .{},
 
     generation_id: u32,
     commands: *RenderCommands,
@@ -213,26 +209,18 @@ pub const RenderGroup = extern struct {
             .screen_dimensions = .newI(pixel_width, pixel_height),
             .debug_tag = undefined,
             .missing_resource_count = 0,
-            .last_clip_x = 0,
-            .last_clip_y = 0,
-            .last_clip_w = 0,
-            .last_clip_h = 0,
-            .last_render_target = 0,
-            .current_clip_rect_index = 0,
             .generation_id = generation_id,
             .commands = commands,
             .current_quads = undefined,
         };
 
-        var i: Matrix4x4 = .identity();
-        result.current_clip_rect_index = result.pushSetup(
-            0,
-            0,
-            @intCast(pixel_width),
-            @intCast(pixel_height),
-            0,
-            &i,
-        );
+        var initial_setup: RenderSetup = .{
+            .fog_start_distance = 0,
+            .fog_end_distance = 15,
+            .fog_color = .new(math.square(0.15), math.square(0.15), math.square(0.15)),
+            .clip_rect = .fromMinDimension(.zero(), .new(pixel_width, pixel_height)),
+        };
+        result.pushSetup(&initial_setup);
 
         return result;
     }
@@ -296,7 +284,6 @@ pub const RenderGroup = extern struct {
 
         if (push.header) |header| {
             header.type = entry_type;
-            header.clip_rect_index = shared.safeTruncateUInt32ToUInt16(self.current_clip_rect_index);
             result = @ptrFromInt(@intFromPtr(header) + @sizeOf(RenderEntryHeader) + aligned_offset);
 
             if (INTERNAL) {
@@ -335,7 +322,7 @@ pub const RenderGroup = extern struct {
         return world_position;
     }
 
-        // const object_position: Vector3 = world_position.minus(object_transform.offset_position);
+    // const object_position: Vector3 = world_position.minus(object_transform.offset_position);
 
     pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle3 {
         var transform: ObjectTransform = .defaultFlat();
@@ -374,12 +361,17 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn pushClear(self: *RenderGroup, color: Color) void {
-        self.commands.clear_color = color;
-    }
-
-    pub fn pushSaturation(self: *RenderGroup, level: f32) void {
-        if (self.pushRenderElement(RenderEntrySaturation)) |entry| {
-            entry.level = level;
+        if (true) {
+            self.commands.clear_color = .new(
+                math.square(color.r()),
+                math.square(color.g()),
+                math.square(color.b()),
+                color.a(),
+            );
+            self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
+        } else {
+            self.commands.clear_color = color;
+            self.last_setup.fog_color = .new(color.r(), color.g(), color.b());
         }
     }
 
@@ -432,6 +424,7 @@ pub const RenderGroup = extern struct {
             ));
             self.current_quads.?.quad_count = 0;
             self.current_quads.?.vertex_array_offset = self.commands.vertex_count;
+            self.current_quads.?.setup = self.last_setup;
         }
 
         var result = self.current_quads;
@@ -557,10 +550,10 @@ pub const RenderGroup = extern struct {
                     const y_axis0 = Vector3.new(y_axis2.x(), 0, y_axis2.y()).scaledTo(size.y());
                     const x_axis1 =
                         self.game_transform.x.scaledTo(x_axis2.x())
-                        .plus(self.game_transform.y.scaledTo(x_axis2.y())).scaledTo(size.x());
+                            .plus(self.game_transform.y.scaledTo(x_axis2.y())).scaledTo(size.x());
                     const y_axis1 =
                         self.game_transform.x.scaledTo(y_axis2.x())
-                        .plus(self.game_transform.y.scaledTo(y_axis2.y())).scaledTo(size.y());
+                            .plus(self.game_transform.y.scaledTo(y_axis2.y())).scaledTo(size.y());
 
                     // x_axis = x_axis0.lerp(x_axis1, 0.8);
                     // y_axis = y_axis0.lerp(y_axis1, 0.8);
@@ -901,92 +894,58 @@ pub const RenderGroup = extern struct {
 
     pub fn pushSetup(
         self: *RenderGroup,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
-        render_target_index: u32,
-        projection: *Matrix4x4,
-    ) u32 {
-        var result: u32 = 0;
-
-        self.last_clip_x = x;
-        self.last_clip_y = y;
-        self.last_clip_w = w;
-        self.last_clip_h = h;
-        self.last_render_target = render_target_index;
-        self.last_projection = projection.*;
-
-        if (self.pushRenderElement(RenderEntryClipRect)) |rect| {
-            result = self.commands.clip_rect_count;
-            self.commands.clip_rect_count += 1;
-
-            if (self.commands.last_clip_rect != null) {
-                self.commands.last_clip_rect.?.next = rect;
-                self.commands.last_clip_rect = rect;
-            } else {
-                self.commands.last_clip_rect = rect;
-                self.commands.first_clip_rect = rect;
-            }
-            rect.next = null;
-
-            rect.rect = Rectangle2i.new(x, y, x + w, y + h);
-            rect.proj = projection.*;
-
-            rect.render_target_index = render_target_index;
-            if (self.commands.max_render_target_index < render_target_index) {
-                self.commands.max_render_target_index = render_target_index;
-            }
+        new_setup: *RenderSetup,
+    ) void {
+        if (self.commands.max_render_target_index < new_setup.render_target_index) {
+            self.commands.max_render_target_index = new_setup.render_target_index;
         }
 
-        return result;
+        self.last_setup = new_setup.*;
+        self.current_quads = null;
     }
 
-    pub fn pushClipRectByTransform(
+    pub fn getClipRectByTransform(
         self: *RenderGroup,
         object_transform: *ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
-    ) u32 {
-        var result: u32 = 0;
+    ) Rectangle2i {
+        _ = self;
         const modified_position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
 
         const position = getRenderEntityBasisPosition(object_transform, modified_position);
         const basis_dimension: Vector2 = dimension;
-        result = self.pushSetup(
-            intrinsics.roundReal32ToInt32(position.x()),
-            intrinsics.roundReal32ToInt32(position.y()),
-            intrinsics.roundReal32ToInt32(basis_dimension.x()),
-            intrinsics.roundReal32ToInt32(basis_dimension.y()),
-            self.last_render_target,
-            &self.last_projection,
-        );
 
+        const result: Rectangle2i = .fromMinDimension(
+            .new(
+                intrinsics.roundReal32ToInt32(position.x()),
+                intrinsics.roundReal32ToInt32(position.y()),
+            ),
+            .new(
+                intrinsics.roundReal32ToInt32(basis_dimension.x()),
+                intrinsics.roundReal32ToInt32(basis_dimension.y()),
+            ),
+        );
         return result;
     }
 
-    pub fn pushClipRectByRectangle(
+    pub fn getClipRectByRectangle(
         self: *RenderGroup,
         object_transform: *ObjectTransform,
         rectangle: Rectangle2,
         z: f32,
-    ) u32 {
-        return self.pushClipRectByTransform(
+    ) Rectangle2i {
+        return self.getClipRectByTransform(
             object_transform,
             rectangle.getDimension(),
             rectangle.getCenter().toVector3(z),
         );
     }
 
-    pub fn pushRenderTarget(self: *RenderGroup, render_target_index: u31) u32 {
-        self.current_clip_rect_index = self.pushSetup(
-            self.last_clip_x,
-            self.last_clip_y,
-            self.last_clip_w,
-            self.last_clip_h,
-            render_target_index,
-            &self.last_projection,
-        );
+    pub fn pushRenderTarget(self: *RenderGroup, render_target_index: u32) u32 {
+        var new_setup: RenderSetup = self.last_setup;
+        new_setup.render_target_index = render_target_index;
+        self.pushSetup(&new_setup);
         return 0;
     }
 
@@ -1014,18 +973,24 @@ pub const RenderGroup = extern struct {
             @as(f32, @floatFromInt(self.commands.height)),
         );
 
+        var new_setup: RenderSetup = self.last_setup;
         var render_transform: *RenderTransform = if (is_debug) &self.debug_transform else &self.game_transform;
         var proj: MatrixInverse4x4 = .{};
         if (is_ortho) {
             proj = .orthographicProjection(b);
+            new_setup.fog_direction = .zero();
         } else {
             proj = .perspectiveProjection(b, focal_length);
+            new_setup.fog_direction = camera_z.negated();
+            new_setup.fog_start_distance = 8;
+            new_setup.fog_end_distance = 20;
         }
 
         render_transform.x = camera_x;
         render_transform.y = camera_y;
         render_transform.z = camera_z;
         render_transform.position = camera_position;
+        new_setup.camera_position = camera_position;
 
         const camera_c: MatrixInverse4x4 = .cameraTransform(camera_x, camera_y, camera_z, camera_position);
         render_transform.projection = .{
@@ -1038,14 +1003,8 @@ pub const RenderGroup = extern struct {
             _ = identity;
         }
 
-        self.current_clip_rect_index = self.pushSetup(
-            self.last_clip_x,
-            self.last_clip_y,
-            self.last_clip_w,
-            self.last_clip_h,
-            self.last_render_target,
-            &render_transform.projection.forward,
-        );
+        new_setup.projection = render_transform.projection.forward;
+        self.pushSetup(&new_setup);
     }
 
     pub fn pushBlendRenderTarget(self: *RenderGroup, alpha: f32, source_render_target_index: u32) void {

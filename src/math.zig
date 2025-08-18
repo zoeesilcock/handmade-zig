@@ -413,13 +413,11 @@ fn Color3Type(comptime ScalarType: type) type {
             return Color.new(self.r(), self.g(), self.b(), in_a);
         }
 
-        pub inline fn toGL(self: Self, in_a: ScalarType) *const f32 {
-            return @ptrCast(&self.toColor(in_a).values);
-        }
-
         const Shared = VectorShared(3, ScalarType, Self);
         pub const zero = Shared.zero;
         pub const one = Shared.one;
+        pub const white = Shared.white;
+        pub const black = Shared.black;
         pub const splat = Shared.splat;
         pub const plus = Shared.plus;
         pub const minus = Shared.minus;
@@ -437,6 +435,7 @@ fn Color3Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeOrZero = Shared.normalizeOrZero;
+        pub const toGL = Shared.toGL;
     };
 }
 
@@ -528,17 +527,11 @@ fn Color4Type(comptime ScalarType: type) type {
             return Vector4.new(self.r(), self.g(), self.b(), self.a());
         }
 
-        pub inline fn white() Self {
-            return Self.one();
-        }
-
-        pub inline fn black() Self {
-            return Self.new(0, 0, 0, 1);
-        }
-
         const Shared = VectorShared(4, ScalarType, Self);
         pub const zero = Shared.zero;
         pub const one = Shared.one;
+        pub const white = Shared.white;
+        pub const black = Shared.black;
         pub const splat = Shared.splat;
         pub const plus = Shared.plus;
         pub const minus = Shared.minus;
@@ -572,6 +565,14 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
 
         pub inline fn one() Self {
             return Self{ .values = @splat(1) };
+        }
+
+        pub inline fn white() Self {
+            return Self.one();
+        }
+
+        pub inline fn black() Self {
+            return Self.new(0, 0, 0, 1);
         }
 
         pub inline fn splat(value: ScalarType) Self {
@@ -1378,6 +1379,15 @@ pub inline fn sRGB255ToLinear1(color: Color) Color {
         square(inverse_255 * color.g()),
         square(inverse_255 * color.b()),
         inverse_255 * color.a(),
+    );
+}
+
+pub inline fn linearToSRGB(color: Color) Color {
+    return Color.new(
+        square(color.r()),
+        square(color.g()),
+        square(color.b()),
+        color.a(),
     );
 }
 

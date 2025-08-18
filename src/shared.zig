@@ -450,8 +450,8 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                     }
                     at += 1;
                 } else if (at[0] >= '0' and at[0] <= '9') {
-                     width = i32FromZInternal(&at);
-                     width_specified = true;
+                    width = i32FromZInternal(&at);
+                    width_specified = true;
                 }
 
                 // Handle precision.
@@ -831,7 +831,7 @@ pub const Platform = if (INTERNAL) extern struct {
     debugReadEntireFile: *const debugReadEntireFileType = undefined,
     debugExecuteSystemCommand: *const debugExecuteSystemCommandType = undefined,
     debugGetProcessState: *const debugGetProcessStateType = undefined,
-    debugGetMemoryStats: * const debugGetMemoryStatsType = undefined,
+    debugGetMemoryStats: *const debugGetMemoryStatsType = undefined,
 } else extern struct {
     addQueueEntry: *const addQueueEntryType = undefined,
     completeAllQueuedWork: *const completeAllQueuedWorkType = undefined,
@@ -899,17 +899,9 @@ pub const RenderCommands = extern struct {
     quad_bitmaps: [*]?*LoadedBitmap,
     white_bitmap: ?*LoadedBitmap,
 
-    clear_color: Color,
+    clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
 
     max_render_target_index: u32 = 0,
-
-    clip_rect_count: u32 = 0,
-    first_clip_rect: ?*rendergroup.RenderEntryClipRect = null,
-    last_clip_rect: ?*rendergroup.RenderEntryClipRect = null,
-};
-
-pub const GameRenderPrep = extern struct {
-    clip_rects: [*]rendergroup.RenderEntryClipRect = undefined,
 };
 
 pub fn initializeRenderCommands(

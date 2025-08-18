@@ -27,6 +27,7 @@ const Vector4 = math.Vector4;
 const Color = math.Color;
 const Color3 = math.Color3;
 const Matrix4x4 = math.Matrix4x4;
+const Rectangle2i = math.Rectangle2i;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const MemoryArena = memory.MemoryArena;
@@ -35,6 +36,7 @@ const ArenaPushParams = memory.ArenaPushParams;
 const SortEntry = sort.SortEntry;
 const ObjectTransform = rendergroup.ObjectTransform;
 const RenderGroup = rendergroup.RenderGroup;
+const TransientClipRect = rendergroup.TransientClipRect;
 
 const textOutAt = debug_ui.textOutAt;
 const basicTextElement = debug_ui.basicTextElement;
@@ -142,7 +144,7 @@ pub const DebugState = struct {
     debug_arena: MemoryArena,
     per_frame_arena: MemoryArena,
 
-    default_clip_rect: u32,
+    default_clip_rect: Rectangle2i,
     render_group: RenderGroup,
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
@@ -1672,14 +1674,15 @@ fn drawDebugElement(
                 Color.new(0, 0, 0, 0.75),
             );
 
-            const old_clip_rect: u32 = render_group.current_clip_rect_index;
-            defer render_group.current_clip_rect_index = old_clip_rect;
-
-            render_group.current_clip_rect_index = render_group.pushClipRectByRectangle(
-                &debug_state.backing_transform,
-                layout_element.bounds,
-                0,
+            const transient_clip_rect: TransientClipRect = .initWith(
+                render_group,
+                render_group.getClipRectByRectangle(
+                    &debug_state.backing_transform,
+                    layout_element.bounds,
+                    0,
+                ),
             );
+            defer transient_clip_rect.restore();
 
             switch (element.type) {
                 .ArenaOccupancy => {
@@ -1735,14 +1738,15 @@ fn drawDebugElement(
                 Color.new(0, 0, 0, 0.75),
             );
 
-            const old_clip_rect: u32 = render_group.current_clip_rect_index;
-            defer render_group.current_clip_rect_index = old_clip_rect;
-
-            render_group.current_clip_rect_index = render_group.pushClipRectByRectangle(
-                &debug_state.backing_transform,
-                layout_element.bounds,
-                0,
+            const transient_clip_rect: TransientClipRect = .initWith(
+                render_group,
+                render_group.getClipRectByRectangle(
+                    &debug_state.backing_transform,
+                    layout_element.bounds,
+                    0,
+                ),
             );
+            defer transient_clip_rect.restore();
 
             var opt_viewing_element: ?*DebugElement =
                 debug_state.getElementFromGuid(view.data.profile_graph.guid);
@@ -2238,7 +2242,7 @@ fn debugStart(
     _ = debug_state.text_transform.offset_position.setZ(0);
     _ = debug_state.tooltip_transform.offset_position.setZ(0);
 
-    debug_state.default_clip_rect = debug_state.render_group.current_clip_rect_index;
+    debug_state.default_clip_rect = debug_state.render_group.last_setup.clip_rect;
     debug_state.tooltip_count = 0;
 
     if (!debug_state.paused) {

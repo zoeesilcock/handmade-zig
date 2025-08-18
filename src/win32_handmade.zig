@@ -54,7 +54,6 @@ const DebugInterface = debug_interface.DebugInterface;
 const DebugId = debug_interface.DebugId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
-const GameRenderPrep = shared.GameRenderPrep;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
 const TexturedVertex = shared.TexturedVertex;
 const Rectangle2i = math.Rectangle2i;
@@ -164,6 +163,12 @@ const GLUseProgram: type = fn (program: u32) callconv(WINAPI) void;
 pub var optGLUseProgram: ?*const GLUseProgram = null;
 const GLUniformMatrix4fv: type = fn (location: i32, count: i32, transpose: bool, value: *const f32) callconv(WINAPI) void;
 pub var optGLUniformMatrix4fv: ?*const GLUniformMatrix4fv = null;
+const GLUniform1f: type = fn (location: i32, value: f32) callconv(WINAPI) void;
+pub var optGLUniform1f: ?*const GLUniform1f = null;
+const GLUniform2fv: type = fn (location: i32, count: i32, value: *const f32) callconv(WINAPI) void;
+pub var optGLUniform2fv: ?*const GLUniform2fv = null;
+const GLUniform3fv: type = fn (location: i32, count: i32, value: *const f32) callconv(WINAPI) void;
+pub var optGLUniform3fv: ?*const GLUniform3fv = null;
 const GLUniform4fv: type = fn (location: i32, count: i32, value: *const f32) callconv(WINAPI) void;
 pub var optGLUniform4fv: ?*const GLUniform4fv = null;
 const GLUniform1i: type = fn (location: i32, value: i32) callconv(WINAPI) void;
@@ -1542,6 +1547,9 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLGetProgramInfoLog = @ptrCast(win32.wglGetProcAddress("glGetProgramInfoLog"));
             optGLUseProgram = @ptrCast(win32.wglGetProcAddress("glUseProgram"));
             optGLUniformMatrix4fv = @ptrCast(win32.wglGetProcAddress("glUniformMatrix4fv"));
+            optGLUniform1f = @ptrCast(win32.wglGetProcAddress("glUniform1f"));
+            optGLUniform2fv = @ptrCast(win32.wglGetProcAddress("glUniform2fv"));
+            optGLUniform3fv = @ptrCast(win32.wglGetProcAddress("glUniform3fv"));
             optGLUniform4fv = @ptrCast(win32.wglGetProcAddress("glUniform4fv"));
             optGLUniform1i = @ptrCast(win32.wglGetProcAddress("glUniform1i"));
             optGLGetUniformLocation = @ptrCast(win32.wglGetProcAddress("glGetUniformLocation"));
@@ -1572,6 +1580,9 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLGetProgramInfoLog != null);
             std.debug.assert(optGLUseProgram != null);
             std.debug.assert(optGLUniformMatrix4fv != null);
+            std.debug.assert(optGLUniform1f != null);
+            std.debug.assert(optGLUniform2fv != null);
+            std.debug.assert(optGLUniform3fv != null);
             std.debug.assert(optGLUniform4fv != null);
             std.debug.assert(optGLUniform1i != null);
             std.debug.assert(optGLGetUniformLocation != null);
@@ -1667,8 +1678,6 @@ fn displayBufferInWindow(
     const temporary_memory = temp_arena.beginTemporaryMemory();
     defer temp_arena.endTemporaryMemory(temporary_memory);
 
-    var prep: GameRenderPrep = render.prepForRender(commands, temp_arena);
-
     // TODO: Do we want to check for resources like before?
     // if (render_group.allResourcesPresent()) {
     //     render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
@@ -1681,7 +1690,7 @@ fn displayBufferInWindow(
             .height = @intCast(back_buffer.height),
             .pitch = @intCast(back_buffer.pitch),
         };
-        render.softwareRenderCommands(render_queue, commands, &prep, &output_target, temp_arena);
+        render.softwareRenderCommands(render_queue, commands, &output_target, temp_arena);
 
         opengl.displayBitmap(
             back_buffer.width,
@@ -1695,7 +1704,7 @@ fn displayBufferInWindow(
         _ = win32.SwapBuffers(device_context.?);
     } else {
         TimedBlock.beginBlock(@src(), .OpenGLRenderCommands);
-        opengl.renderCommands(commands, &prep, draw_region, window_width, window_height);
+        opengl.renderCommands(commands, draw_region, window_width, window_height);
         TimedBlock.endBlock(@src(), .OpenGLRenderCommands);
 
         TimedBlock.beginBlock(@src(), .SwapBuffers);

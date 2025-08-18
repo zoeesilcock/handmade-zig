@@ -29,10 +29,8 @@ const Color3 = math.Color3;
 const MemoryArena = memory.MemoryArena;
 const ArenaPushParams = memory.ArenaPushParams;
 const RenderCommands = shared.RenderCommands;
-const GameRenderPrep = shared.GameRenderPrep;
 const RenderGroup = rendergroup.RenderGroup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
-const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
@@ -51,7 +49,6 @@ const BilinearSample = struct {
 
 pub const TileRenderWork = struct {
     commands: *RenderCommands,
-    prep: *GameRenderPrep,
     render_targets: [*]LoadedBitmap,
     clip_rect: Rectangle2i,
 };
@@ -98,7 +95,6 @@ pub const CameraParams = struct {
 pub fn softwareRenderCommands(
     render_queue: *shared.PlatformWorkQueue,
     commands: *RenderCommands,
-    prep: *GameRenderPrep,
     final_output_target: *LoadedBitmap,
     temp_arena: *MemoryArena,
 ) void {
@@ -137,7 +133,6 @@ pub fn softwareRenderCommands(
     const work_count = tile_count_x * tile_count_y;
     var work_array: [work_count]TileRenderWork = [1]TileRenderWork{TileRenderWork{
         .commands = commands,
-        .prep = prep,
         .render_targets = render_targets,
         .clip_rect = undefined,
     }} ** work_count;
@@ -191,119 +186,122 @@ pub fn doTileRenderWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) ca
 
     const work: *TileRenderWork = @ptrCast(@alignCast(data));
 
-    renderCommandsToBitmap(work.commands, work.prep, work.render_targets, work.clip_rect);
+    renderCommandsToBitmap(work.commands, work.render_targets, work.clip_rect);
 }
 
 pub fn renderCommandsToBitmap(
     commands: *RenderCommands,
-    prep: *GameRenderPrep,
     render_targets: [*]LoadedBitmap,
     base_clip_rect: Rectangle2i,
 ) void {
+    _ = commands;
+    _ = render_targets;
+    _ = base_clip_rect;
+
     // TimedBlock.beginFunction(@src(), .RenderCommandsToBitmap);
     // defer TimedBlock.endFunction(@src(), .RenderCommandsToBitmap);
 
-    const null_pixels_to_meters: f32 = 1.0;
-
-    var clip_rect_index: u32 = 0xffffffff;
-    var clip_rect: Rectangle2i = base_clip_rect;
-    var output_target: *LoadedBitmap = @ptrCast(render_targets);
-
-    // Clear.
-    var target_index: u32 = 0;
-    while (target_index <= commands.max_render_target_index) : (target_index += 1) {
-        clearRectangle(clip_rect, output_target, commands.clear_color);
-    }
-
-    // TODO: Make the loop work like it did before (need to have the headers push in order again!)
-    if (false) {
-        const header_offset: u32 = 0;
-        const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + header_offset[0]));
-        const alignment: usize = switch (header.type) {
-            .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
-            .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
-            .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
-            .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
-            else => {
-                unreachable;
-            },
-        };
-
-        const header_address = @intFromPtr(header);
-        const data_address = header_address + @sizeOf(RenderEntryHeader);
-        const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-        const data: *anyopaque = @ptrFromInt(aligned_address);
-
-        if (clip_rect_index != header.clip_rect_index) {
-            clip_rect_index = header.clip_rect_index;
-
-            std.debug.assert(clip_rect_index < commands.clip_rect_count);
-
-            const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
-            clip_rect = base_clip_rect.getIntersectionWith(clip.rect);
-
-            output_target = @ptrCast(render_targets + clip.render_target_index);
-        }
-
-        _ = null_pixels_to_meters;
-        switch (header.type) {
-            // .RenderEntrySaturation => {
-            //     const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
-            //
-            //     changeSaturation(output_target, entry.level);
-            // },
-            // .RenderEntryBitmap => {
-            //     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
-            //     if (entry.bitmap) |bitmap| {
-            //         if (false) {
-            //             drawRectangleSlowly(
-            //                 output_target,
-            //                 entry.position.xy(),
-            //                 entry.x_axis.xy(),
-            //                 entry.y_axis.xy(),
-            //                 entry.color,
-            //                 @constCast(bitmap),
-            //                 null,
-            //                 undefined,
-            //                 undefined,
-            //                 undefined,
-            //                 null_pixels_to_meters,
-            //             );
-            //         } else {
-            //             drawRectangleQuickly(
-            //                 output_target,
-            //                 entry.position.xy(),
-            //                 entry.x_axis.xy(),
-            //                 entry.y_axis.xy(),
-            //                 entry.premultiplied_color,
-            //                 @constCast(bitmap),
-            //                 null_pixels_to_meters,
-            //                 clip_rect,
-            //             );
-            //         }
-            //     }
-            // },
-            // .RenderEntryRectangle => {
-            //     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
-            //
-            //     drawRectangle(
-            //         output_target,
-            //         entry.position.xy(),
-            //         entry.position.xy().plus(entry.dimension),
-            //         entry.premultiplied_color,
-            //         clip_rect,
-            //     );
-            // },
-            .RenderEntryBlendRenderTarget => {
-                const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
-                const source_target: *LoadedBitmap = &render_targets[entry.source_target_index];
-                blendRenderTarget(clip_rect, output_target, entry.alpha, source_target);
-            },
-            else => {
-                unreachable;
-            },
-        }
-    }
+    // const null_pixels_to_meters: f32 = 1.0;
+    //
+    // var clip_rect_index: u32 = 0xffffffff;
+    // var clip_rect: Rectangle2i = base_clip_rect;
+    // var output_target: *LoadedBitmap = @ptrCast(render_targets);
+    //
+    // // Clear.
+    // var target_index: u32 = 0;
+    // while (target_index <= commands.max_render_target_index) : (target_index += 1) {
+    //     clearRectangle(clip_rect, output_target, commands.clear_color);
+    // }
+    //
+    // // TODO: Make the loop work like it did before (need to have the headers push in order again!)
+    // if (false) {
+    //     const header_offset: u32 = 0;
+    //     const header: *RenderEntryHeader = @ptrCast(@alignCast(commands.push_buffer_base + header_offset[0]));
+    //     const alignment: usize = switch (header.type) {
+    //         .RenderEntryBitmap => @alignOf(RenderEntryBitmap),
+    //         .RenderEntryRectangle => @alignOf(RenderEntryRectangle),
+    //         .RenderEntrySaturation => @alignOf(RenderEntrySaturation),
+    //         .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
+    //         else => {
+    //             unreachable;
+    //         },
+    //     };
+    //
+    //     const header_address = @intFromPtr(header);
+    //     const data_address = header_address + @sizeOf(RenderEntryHeader);
+    //     const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+    //     const data: *anyopaque = @ptrFromInt(aligned_address);
+    //
+    //     if (clip_rect_index != header.clip_rect_index) {
+    //         clip_rect_index = header.clip_rect_index;
+    //
+    //         std.debug.assert(clip_rect_index < commands.clip_rect_count);
+    //
+    //         const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
+    //         clip_rect = base_clip_rect.getIntersectionWith(clip.rect);
+    //
+    //         output_target = @ptrCast(render_targets + clip.render_target_index);
+    //     }
+    //
+    //     _ = null_pixels_to_meters;
+    //     switch (header.type) {
+    // .RenderEntrySaturation => {
+    //     const entry: *RenderEntrySaturation = @ptrCast(@alignCast(data));
+    //
+    //     changeSaturation(output_target, entry.level);
+    // },
+    // .RenderEntryBitmap => {
+    //     const entry: *RenderEntryBitmap = @ptrCast(@alignCast(data));
+    //     if (entry.bitmap) |bitmap| {
+    //         if (false) {
+    //             drawRectangleSlowly(
+    //                 output_target,
+    //                 entry.position.xy(),
+    //                 entry.x_axis.xy(),
+    //                 entry.y_axis.xy(),
+    //                 entry.color,
+    //                 @constCast(bitmap),
+    //                 null,
+    //                 undefined,
+    //                 undefined,
+    //                 undefined,
+    //                 null_pixels_to_meters,
+    //             );
+    //         } else {
+    //             drawRectangleQuickly(
+    //                 output_target,
+    //                 entry.position.xy(),
+    //                 entry.x_axis.xy(),
+    //                 entry.y_axis.xy(),
+    //                 entry.premultiplied_color,
+    //                 @constCast(bitmap),
+    //                 null_pixels_to_meters,
+    //                 clip_rect,
+    //             );
+    //         }
+    //     }
+    // },
+    // .RenderEntryRectangle => {
+    //     const entry: *RenderEntryRectangle = @ptrCast(@alignCast(data));
+    //
+    //     drawRectangle(
+    //         output_target,
+    //         entry.position.xy(),
+    //         entry.position.xy().plus(entry.dimension),
+    //         entry.premultiplied_color,
+    //         clip_rect,
+    //     );
+    // },
+    //         .RenderEntryBlendRenderTarget => {
+    //             const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
+    //             const source_target: *LoadedBitmap = &render_targets[entry.source_target_index];
+    //             blendRenderTarget(clip_rect, output_target, entry.alpha, source_target);
+    //         },
+    //         else => {
+    //             unreachable;
+    //         },
+    //     }
+    // }
 }
 
 fn clearRectangle(
@@ -1656,31 +1654,6 @@ inline fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample 
         .c = texel_pointer_c[0],
         .d = texel_pointer_d[0],
     };
-}
-
-pub fn prepForRender(commands: *RenderCommands, temp_arena: *MemoryArena) GameRenderPrep {
-    var prep: GameRenderPrep = .{};
-
-    prep.clip_rects = linearizeClipRects(commands, temp_arena);
-
-    return prep;
-}
-
-pub fn linearizeClipRects(commands: *RenderCommands, temp_arena: *MemoryArena) [*]RenderEntryClipRect {
-    const result: [*]RenderEntryClipRect = temp_arena.pushArray(
-        commands.clip_rect_count,
-        RenderEntryClipRect,
-        .aligned(@alignOf(RenderEntryClipRect), true),
-    );
-
-    var out: [*]RenderEntryClipRect = result;
-    var opt_rect: ?*RenderEntryClipRect = commands.first_clip_rect;
-    while (opt_rect) |rect| : (opt_rect = @ptrCast(rect.next)) {
-        out[0] = rect.*;
-        out += 1;
-    }
-
-    return result;
 }
 
 pub fn aspectRatioFit(render_width: u32, render_height: u32, window_width: u32, window_height: u32) Rectangle2i {

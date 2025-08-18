@@ -21,6 +21,7 @@ const DebugId = debug_interface.DebugId;
 const DebugType = debug_interface.DebugType;
 const ObjectTransform = rendergroup.ObjectTransform;
 const RenderGroup = rendergroup.RenderGroup;
+const TransientClipRect = rendergroup.TransientClipRect;
 
 const DebugTextOp = enum {
     DrawText,
@@ -445,9 +446,8 @@ pub fn drawTooltips(debug_state: *DebugState) void {
 
     if (layout.debug_state.debug_font_info) |font_info| {
         const render_group: *RenderGroup = &debug_state.render_group;
-        const old_clip_rect: u32 = render_group.current_clip_rect_index;
-        render_group.current_clip_rect_index = debug_state.default_clip_rect;
-        defer render_group.current_clip_rect_index = old_clip_rect;
+        const transient_clip_rect: TransientClipRect = .initWith(render_group, debug_state.default_clip_rect);
+        defer transient_clip_rect.restore();
 
         var tooltip_index: u32 = 0;
         while (tooltip_index < debug_state.tooltip_count) : (tooltip_index += 1) {

@@ -103,13 +103,12 @@ pub const WGL_DEPTH_BITS_ARB = 0x2022;
 const INTERNAL = shared.INTERNAL;
 
 const RenderCommands = shared.RenderCommands;
-const GameRenderPrep = shared.GameRenderPrep;
 const TexturedVertex = shared.TexturedVertex;
 const RenderGroup = rendergroup.RenderGroup;
+const RenderSetup = rendergroup.RenderSetup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryTexturedQuads = rendergroup.RenderEntryTexturedQuads;
 const RenderEntryClear = rendergroup.RenderEntryClear;
-const RenderEntryClipRect = rendergroup.RenderEntryClipRect;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryCube = rendergroup.RenderEntryCube;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
@@ -125,7 +124,6 @@ const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
-const SortSpriteBound = render.SortSpriteBound;
 const SpriteFlag = render.SpriteFlag;
 const SpriteEdge = render.SpriteEdge;
 
@@ -180,6 +178,12 @@ const OpenGL = struct {
 
     white_bitmap: LoadedBitmap = undefined,
     white: [4][4]u32 = undefined,
+
+    camera_position_id: i32 = 0,
+    fog_direction_id: i32 = 0,
+    fog_color_id: i32 = 0,
+    fog_start_distance_id: i32 = 0,
+    fog_end_distance_id: i32 = 0,
 
     vert_position_id: i32 = 0,
     vert_uv_id: i32 = 0,
@@ -341,6 +345,12 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         &defines,
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
+        \\
+        \\float clamp01MapToRange(float min, float max, float value) {
+        \\  float range = max - min;
+        \\  float result = clamp((value - min) / range, 0, 1);
+        \\  return result;
+        \\}
     ,
         .{
             @as(i32, @intCast(@intFromBool(shader_sim_tex_read_srgb))),
@@ -350,12 +360,19 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     const vertex_code =
         \\// Vertex code
         \\uniform mat4x4 Transform;
+        \\
+        \\uniform vec3 CameraPosition;
+        \\uniform vec3 FogDirection;
+        \\uniform float FogStartDistance;
+        \\uniform float FogEndDistance;
+        \\
         \\in vec4 VertP;
         \\in vec2 VertUV;
         \\in vec4 VertColor;
         \\
         \\smooth out vec2 FragUV;
         \\smooth out vec4 FragColor;
+        \\smooth out float FogAmount;
         \\
         \\void main(void)
         \\{
@@ -374,14 +391,21 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\
         \\  FragUV = VertUV.xy;
         \\  FragColor = VertColor;
+        \\
+        \\  float FogDistance = dot(ZVertex.xyz - CameraPosition, FogDirection);
+        \\
+        \\  FogAmount = clamp01MapToRange(FogStartDistance, FogEndDistance, FogDistance);
         \\}
     ;
     const fragment_code =
         \\// Fragment code
         \\uniform sampler2D TextureSampler;
+        \\uniform vec3 FogColor;
+        \\
         \\out vec4 ResultColor;
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
+        \\smooth in float FogAmount;
         \\
         \\void main(void)
         \\{
@@ -393,7 +417,10 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\    TexSample.rgb *= TexSample.rgb;
         \\#endif
         \\
-        \\    ResultColor = FragColor * TexSample;
+        \\    vec4 ModColor = FragColor * TexSample;
+        \\
+        \\    ResultColor.rgb = mix(ModColor.rgb, FogColor.rgb, FogAmount);
+        \\    ResultColor.a = ModColor.a;
         \\
         \\#if ShaderSimTexWriteSRGB
         \\    ResultColor.rgb = sqrt(ResultColor.rgb);
@@ -406,6 +433,13 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     open_gl.basic_z_bias_program = createProgram(@ptrCast(defines[0..defines_length]), header_code, vertex_code, fragment_code);
     open_gl.transform_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "Transform");
     open_gl.texture_sampler_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "TextureSampler");
+
+    open_gl.camera_position_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "CameraPosition");
+    open_gl.fog_direction_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "FogDirection");
+    open_gl.fog_color_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "FogColor");
+    open_gl.fog_start_distance_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "FogStartDistance");
+    open_gl.fog_end_distance_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "FogEndDistance");
+
     open_gl.vert_position_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertP");
     open_gl.vert_uv_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertUV");
     open_gl.vert_color_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertColor");
@@ -436,7 +470,6 @@ fn bindFrameBuffer(target_index: u32, draw_region: Rectangle2i) void {
 
 pub fn renderCommands(
     commands: *RenderCommands,
-    prep: *GameRenderPrep,
     draw_region: Rectangle2i,
     window_width: i32,
     window_height: i32,
@@ -579,16 +612,13 @@ pub fn renderCommands(
     const clip_scale_x: f32 = math.safeRatio0(@floatFromInt(draw_region.getWidth()), @floatFromInt(commands.width));
     const clip_scale_y: f32 = math.safeRatio0(@floatFromInt(draw_region.getHeight()), @floatFromInt(commands.height));
 
-    var clip_rect_index: u32 = 0xffffffff;
     var current_render_target_index: u32 = 0xffffffff;
     var header_at: [*]u8 = commands.push_buffer_base;
-    var proj: Matrix4x4 = .identity();
     while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) : (header_at += @sizeOf(RenderEntryHeader)) {
         const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
         const alignment: usize = switch (header.type) {
             .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
             .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
-            .RenderEntryClipRect => @alignOf(RenderEntryClipRect),
         };
 
         const header_address = @intFromPtr(header);
@@ -598,26 +628,37 @@ pub fn renderCommands(
 
         header_at += aligned_address - data_address;
 
-        if (use_render_targets or
-            prep.clip_rects[header.clip_rect_index].render_target_index <= max_render_target_index)
-        {
-            if (header.type != .RenderEntryClipRect and clip_rect_index != header.clip_rect_index) {
-                clip_rect_index = header.clip_rect_index;
+        switch (header.type) {
+            .RenderEntryBlendRenderTarget => {
+                header_at += @sizeOf(RenderEntryBlendRenderTarget);
+                const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
+                if (use_render_targets) {
+                    gl.glBindTexture(gl.GL_TEXTURE_2D, frame_buffer_textures[entry.source_target_index]);
+                    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA);
+                    drawRectangle(
+                        .zero(),
+                        .new(@floatFromInt(commands.width), @floatFromInt(commands.height), 0),
+                        .new(1, 1, 1, entry.alpha),
+                        null,
+                        null,
+                    );
+                    gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
+                }
+            },
+            .RenderEntryTexturedQuads => {
+                const entry: *RenderEntryTexturedQuads = @ptrCast(@alignCast(data));
+                header_at += @sizeOf(RenderEntryTexturedQuads);
 
-                std.debug.assert(clip_rect_index < commands.clip_rect_count);
-
-                const clip: RenderEntryClipRect = prep.clip_rects[clip_rect_index];
-                proj = clip.proj.transpose();
-                var clip_rect: Rectangle2i = clip.rect;
-
-                if (current_render_target_index != clip.render_target_index) {
-                    current_render_target_index = clip.render_target_index;
-                    std.debug.assert(current_render_target_index <= max_render_target_index);
-                    if (use_render_targets) {
+                var setup: *RenderSetup = &entry.setup;
+                if (use_render_targets or setup.render_target_index <= max_render_target_index) {
+                    if (current_render_target_index != setup.render_target_index) {
+                        current_render_target_index = setup.render_target_index;
+                        std.debug.assert(current_render_target_index <= max_render_target_index);
                         bindFrameBuffer(current_render_target_index, draw_region);
                     }
                 }
 
+                var clip_rect: Rectangle2i = setup.clip_rect;
                 _ = clip_rect.min.setX(
                     intrinsics.roundReal32ToInt32(@as(f32, @floatFromInt(clip_rect.min.x())) * clip_scale_x),
                 );
@@ -631,7 +672,7 @@ pub fn renderCommands(
                     intrinsics.roundReal32ToInt32(@as(f32, @floatFromInt(clip_rect.max.y())) * clip_scale_y),
                 );
 
-                if (!use_render_targets or clip.render_target_index == 0) {
+                if (!use_render_targets or setup.render_target_index == 0) {
                     clip_rect = clip_rect.offsetBy(draw_region.min);
                 }
 
@@ -641,98 +682,76 @@ pub fn renderCommands(
                     clip_rect.max.x() - clip_rect.min.x(),
                     clip_rect.max.y() - clip_rect.min.y(),
                 );
-            }
 
-            switch (header.type) {
-                .RenderEntryTexturedQuads => {
-                    const entry: *RenderEntryTexturedQuads = @ptrCast(@alignCast(data));
-                    header_at += @sizeOf(RenderEntryTexturedQuads);
+                platform.optGLUseProgram.?(open_gl.basic_z_bias_program);
+                platform.optGLUniformMatrix4fv.?(open_gl.transform_id, 1, true, setup.projection.toGL());
+                platform.optGLUniform1i.?(open_gl.texture_sampler_id, 0);
+                platform.optGLUniform3fv.?(open_gl.camera_position_id, 1, setup.camera_position.toGL());
+                platform.optGLUniform3fv.?(open_gl.fog_direction_id, 1, setup.fog_direction.toGL());
+                platform.optGLUniform3fv.?(open_gl.fog_color_id, 1, setup.fog_color.toGL());
+                platform.optGLUniform1f.?(open_gl.fog_start_distance_id, setup.fog_start_distance);
+                platform.optGLUniform1f.?(open_gl.fog_end_distance_id, setup.fog_end_distance);
 
-                    const uv_array_index: u32 = @intCast(open_gl.vert_uv_id);
-                    const color_array_index: u32 = @intCast(open_gl.vert_color_id);
-                    const position_array_index: u32 = @intCast(open_gl.vert_position_id);
+                const uv_array_index: u32 = @intCast(open_gl.vert_uv_id);
+                const color_array_index: u32 = @intCast(open_gl.vert_color_id);
+                const position_array_index: u32 = @intCast(open_gl.vert_position_id);
 
-                    platform.optGLBufferData.?(
-                        GL_ARRAY_BUFFER,
-                        commands.vertex_count * @sizeOf(TexturedVertex),
-                        commands.vertex_array,
-                        GL_STREAM_DRAW,
-                    );
+                platform.optGLBufferData.?(
+                    GL_ARRAY_BUFFER,
+                    commands.vertex_count * @sizeOf(TexturedVertex),
+                    commands.vertex_array,
+                    GL_STREAM_DRAW,
+                );
 
-                    platform.optGLEnableVertexAttribArray.?(uv_array_index);
-                    platform.optGLEnableVertexAttribArray.?(color_array_index);
-                    platform.optGLEnableVertexAttribArray.?(position_array_index);
+                platform.optGLEnableVertexAttribArray.?(uv_array_index);
+                platform.optGLEnableVertexAttribArray.?(color_array_index);
+                platform.optGLEnableVertexAttribArray.?(position_array_index);
 
-                    platform.optGLVertexAttribPointer.?(
-                        uv_array_index,
-                        2,
-                        gl.GL_FLOAT,
-                        false,
-                        @sizeOf(TexturedVertex),
-                        @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
-                    );
-                    platform.optGLVertexAttribPointer.?(
-                        color_array_index,
-                        4,
-                        gl.GL_UNSIGNED_BYTE,
-                        true,
-                        @sizeOf(TexturedVertex),
-                        @ptrFromInt(@offsetOf(TexturedVertex, "color")),
-                    );
-                    platform.optGLVertexAttribPointer.?(
-                        position_array_index,
-                        4,
-                        gl.GL_FLOAT,
-                        false,
-                        @sizeOf(TexturedVertex),
-                        @ptrFromInt(@offsetOf(TexturedVertex, "position")),
-                    );
+                platform.optGLVertexAttribPointer.?(
+                    uv_array_index,
+                    2,
+                    gl.GL_FLOAT,
+                    false,
+                    @sizeOf(TexturedVertex),
+                    @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
+                );
+                platform.optGLVertexAttribPointer.?(
+                    color_array_index,
+                    4,
+                    gl.GL_UNSIGNED_BYTE,
+                    true,
+                    @sizeOf(TexturedVertex),
+                    @ptrFromInt(@offsetOf(TexturedVertex, "color")),
+                );
+                platform.optGLVertexAttribPointer.?(
+                    position_array_index,
+                    4,
+                    gl.GL_FLOAT,
+                    false,
+                    @sizeOf(TexturedVertex),
+                    @ptrFromInt(@offsetOf(TexturedVertex, "position")),
+                );
 
-                    platform.optGLUseProgram.?(open_gl.basic_z_bias_program);
-                    platform.optGLUniformMatrix4fv.?(open_gl.transform_id, 1, false, proj.toGL());
-                    platform.optGLUniform1i.?(open_gl.texture_sampler_id, 0);
+                var vertex_index: u32 = entry.vertex_array_offset;
+                while (vertex_index < (entry.vertex_array_offset + 4 * entry.quad_count)) : (vertex_index += 4) {
+                    const opt_bitmap: ?*LoadedBitmap = commands.quad_bitmaps[vertex_index >> 2];
 
-                    var vertex_index: u32 = entry.vertex_array_offset;
-                    while (vertex_index < (entry.vertex_array_offset + 4 * entry.quad_count)) : (vertex_index += 4) {
-                        const opt_bitmap: ?*LoadedBitmap = commands.quad_bitmaps[vertex_index >> 2];
+                    // TODO: This assertion shouldn't fire, but it does.
+                    // std.debug.assert(opt_bitmap != null);
 
-                        // TODO: This assertion shouldn't fire, but it does.
-                        // std.debug.assert(opt_bitmap != null);
-
-                        if (opt_bitmap) |bitmap| {
-                            gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
-                        }
-
-                        platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, @intCast(vertex_index), 4);
+                    if (opt_bitmap) |bitmap| {
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
                     }
 
-                    platform.optGLUseProgram.?(0);
+                    platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, @intCast(vertex_index), 4);
+                }
 
-                    platform.optGLDisableVertexAttribArray.?(uv_array_index);
-                    platform.optGLDisableVertexAttribArray.?(color_array_index);
-                    platform.optGLDisableVertexAttribArray.?(position_array_index);
-                },
-                .RenderEntryBlendRenderTarget => {
-                    header_at += @sizeOf(RenderEntryBlendRenderTarget);
-                    const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
-                    if (use_render_targets) {
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, frame_buffer_textures[entry.source_target_index]);
-                        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA);
-                        drawRectangle(
-                            .zero(),
-                            .new(@floatFromInt(commands.width), @floatFromInt(commands.height), 0),
-                            .new(1, 1, 1, entry.alpha),
-                            null,
-                            null,
-                        );
-                        gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
-                    }
-                },
-                .RenderEntryClipRect => {
-                    // These are being handled elsewhere currently.
-                    header_at += @sizeOf(RenderEntryClipRect);
-                },
-            }
+                platform.optGLUseProgram.?(0);
+
+                platform.optGLDisableVertexAttribArray.?(uv_array_index);
+                platform.optGLDisableVertexAttribArray.?(color_array_index);
+                platform.optGLDisableVertexAttribArray.?(position_array_index);
+            },
         }
     }
 

@@ -544,6 +544,10 @@ pub fn updateAndRenderWorld(
     world_mode.camera_orbit = 0;
     world_mode.camera_dolly = 0;
 
+    // Clear background.
+    const background_color: Color = .new(0.15, 0.15, 0.15, 0);
+    render_group.pushClear(background_color);
+
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
     var camera_ot: Vector3 = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.camera_dolly)));
@@ -569,10 +573,6 @@ pub fn updateAndRenderWorld(
             @intFromEnum(rendergroup.CameraTransformFlag.IsDebug),
         );
     }
-
-    // Clear background.
-    const background_color: Color = .new(0.15, 0.15, 0.15, 0);
-    render_group.pushClear(background_color);
 
     const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget();
     const screen_bounds: Rectangle2 = .fromCenterDimension(.zero(), .new(
@@ -750,6 +750,14 @@ fn addStandardRoom(
 ) StandardRoom {
     var result: StandardRoom = .{};
     var offset_y: i32 = -radius_y;
+
+    // const has_left_hole = left_hole;
+    // const has_right_hole = right_hole;
+    _ = left_hole;
+    _ = right_hole;
+    const has_left_hole = true;
+    const has_right_hole = true;
+
     while (offset_y <= radius_y) : (offset_y += 1) {
         var offset_x: i32 = -radius_x;
         while (offset_x <= radius_x) : (offset_x += 1) {
@@ -768,11 +776,16 @@ fn addStandardRoom(
                 _ = world_position.offset.setZ(world_position.offset.z() + 0.25 * world_mode.world.game_entropy.randomBilateral());
             }
 
-            if (left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
-                // Hole down to the floor below.
-            } else if (right_hole and offset_x == 3 and offset_y >= -2 and offset_y <= 2) {
+            if (has_left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
                 // Hole down to the floor below.
             } else {
+                // Hole down to the floor below.
+                if (has_right_hole and offset_x == 3 and offset_y >= -2 and offset_y <= 2) {
+                    _ = world_position.offset.setZ(
+                        world_position.offset.z() - (@as(f32, @floatFromInt(offset_y + 2)) * 0.75),
+                    );
+                }
+
                 const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
                 standing_on.entity.ptr = entity;
                 standing_on.entity.index = entity.id;
@@ -781,7 +794,7 @@ fn addStandardRoom(
                 entity.traversables[0].occupier = null;
                 entity.addPieceV2(
                     .Grass,
-                    .new(0.7, 1),
+                    .new(0.7, 0.5),
                     .zero(),
                     .newFromSRGB(0.31, 0.49, 0.32, 1),
                     @intFromEnum(EntityVisiblePieceFlag.Cube),
