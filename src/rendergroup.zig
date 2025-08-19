@@ -452,8 +452,7 @@ pub const RenderGroup = extern struct {
         c3: u32,
     ) void {
         const entry: ?*RenderEntryTexturedQuads = self.current_quads;
-        std.debug.assert(self.current_quads != null);
-        std.debug.assert(bitmap != null);
+        std.debug.assert(entry != null);
 
         entry.?.quad_count += 1;
 
@@ -508,6 +507,63 @@ pub const RenderGroup = extern struct {
             p3,
             uv3,
             c3.scaledTo(255).packColorRGBA(),
+        );
+    }
+
+    pub fn pushLineSegment(
+        self: *RenderGroup,
+        bitmap: ?*LoadedBitmap,
+        from_position: Vector3,
+        from_color: Color,
+        to_position: Vector3,
+        to_color: Color,
+        thickness: f32,
+    ) void {
+        const from_color_packed: u32 = from_color.scaledTo(255).packColorRGBA();
+        const to_color_packed: u32 = to_color.scaledTo(255).packColorRGBA();
+
+        var line: Vector3 = to_position.minus(from_position);
+        const camera_z: Vector3 = self.debug_transform.z;
+        line = line.minus(camera_z.scaledTo(camera_z.dotProduct(line)));
+        var line_perp: Vector3 = camera_z.crossProduct(line);
+        const line_perp_length: f32 = line_perp.length();
+
+        // if (line_perp_length < thickness) {
+        //     line_perp = self.debug_transform.y;
+        // } else {
+        //     line_perp = line_perp.dividedByF(line_perp_length);
+        // }
+
+        line_perp = line_perp.dividedByF(line_perp_length);
+        line_perp = line_perp.scaledTo(thickness);
+
+        const p0: Vector4 = from_position.minus(line_perp).toVector4(0);
+        const uv0: Vector2 = .new(0, 0);
+        const c0: u32 = from_color_packed;
+        const p1: Vector4 = to_position.minus(line_perp).toVector4(0);
+        const uv1: Vector2 = .new(1, 0);
+        const c1: u32 = to_color_packed;
+        const p2: Vector4 = to_position.plus(line_perp).toVector4(0);
+        const uv2: Vector2 = .new(1, 1);
+        const c2: u32 = to_color_packed;
+        const p3: Vector4 = from_position.plus(line_perp).toVector4(0);
+        const uv3: Vector2 = .new(0, 1);
+        const c3: u32 = from_color_packed;
+
+        self.pushQuad(
+            bitmap,
+            p0,
+            uv0,
+            c0,
+            p1,
+            uv1,
+            c1,
+            p2,
+            uv2,
+            c2,
+            p3,
+            uv3,
+            c3,
         );
     }
 
@@ -892,6 +948,53 @@ pub const RenderGroup = extern struct {
         );
     }
 
+    pub fn pushVolumeOutline(
+        self: *RenderGroup,
+        object_transform: *const ObjectTransform,
+        rectangle: Rectangle3,
+        color: Color,
+        thickness: f32,
+    ) void {
+        if (self.getCurrentQuads(6) != null) {
+            const bitmap: ?*LoadedBitmap = self.commands.white_bitmap;
+            const offset_position: Vector3 = object_transform.offset_position;
+
+            const nx: f32 = offset_position.x() + rectangle.min.x();
+            const px: f32 = offset_position.x() + rectangle.max.x();
+            const ny: f32 = offset_position.y() + rectangle.min.y();
+            const py: f32 = offset_position.y() + rectangle.max.y();
+            const nz: f32 = offset_position.z() + rectangle.min.z();
+            const pz: f32 = offset_position.z() + rectangle.max.z();
+
+            const p0: Vector3 = .new(nx, ny, pz);
+            const p1: Vector3 = .new(px, ny, pz);
+            const p2: Vector3 = .new(px, py, pz);
+            const p3: Vector3 = .new(nx, py, pz);
+            const p4: Vector3 = .new(nx, ny, nz);
+            const p5: Vector3 = .new(px, ny, nz);
+            const p6: Vector3 = .new(px, py, nz);
+            const p7: Vector3 = .new(nx, py, nz);
+
+            const line_color: Color = storeColor(color);
+
+            self.pushLineSegment(bitmap, p0, line_color, p1, line_color, thickness);
+            self.pushLineSegment(bitmap, p0, line_color, p3, line_color, thickness);
+            self.pushLineSegment(bitmap, p0, line_color, p4, line_color, thickness);
+
+            self.pushLineSegment(bitmap, p2, line_color, p1, line_color, thickness);
+            self.pushLineSegment(bitmap, p2, line_color, p3, line_color, thickness);
+            self.pushLineSegment(bitmap, p2, line_color, p6, line_color, thickness);
+
+            self.pushLineSegment(bitmap, p5, line_color, p1, line_color, thickness);
+            self.pushLineSegment(bitmap, p5, line_color, p4, line_color, thickness);
+            self.pushLineSegment(bitmap, p5, line_color, p6, line_color, thickness);
+
+            self.pushLineSegment(bitmap, p7, line_color, p3, line_color, thickness);
+            self.pushLineSegment(bitmap, p7, line_color, p4, line_color, thickness);
+            self.pushLineSegment(bitmap, p7, line_color, p6, line_color, thickness);
+        }
+    }
+
     pub fn pushSetup(
         self: *RenderGroup,
         new_setup: *RenderSetup,
@@ -981,7 +1084,7 @@ pub const RenderGroup = extern struct {
             new_setup.fog_direction = .zero();
         } else {
             proj = .perspectiveProjection(b, focal_length);
-            new_setup.fog_direction = camera_z.negated();
+            new_setup.fog_direction = if (is_debug) .zero() else camera_z.negated();
             new_setup.fog_start_distance = 8;
             new_setup.fog_end_distance = 20;
         }
@@ -1005,6 +1108,10 @@ pub const RenderGroup = extern struct {
 
         new_setup.projection = render_transform.projection.forward;
         self.pushSetup(&new_setup);
+
+        if (!is_debug) {
+            self.debug_transform = self.game_transform;
+        }
     }
 
     pub fn pushBlendRenderTarget(self: *RenderGroup, alpha: f32, source_render_target_index: u32) void {

@@ -564,12 +564,14 @@ pub fn updateAndRenderEntities(
                         var volume_index: u32 = 0;
                         while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
                             const volume = entity.collision.volumes[volume_index];
-                            render_group.pushRectangleOutline(
+                            render_group.pushVolumeOutline(
                                 &entity_transform,
-                                volume.dimension.xy(),
-                                volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-                                Color.new(0, 0.5, 1, 1),
-                                0.1,
+                                .fromCenterDimension(
+                                    volume.offset_position,
+                                    volume.dimension,
+                                ),
+                                .new(0, 0.5, 1, 1),
+                                0.01,
                             );
                         }
                     }

@@ -231,7 +231,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
     var prev_room: StandardRoom = .{};
 
-    for (0..2) |screen_index| {
+    for (0..3) |screen_index| {
         last_screen_z = abs_tile_z;
 
         const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
@@ -650,6 +650,13 @@ pub fn updateAndRenderWorld(
             frame_to_frame_camera_delta_position.negated(),
         );
         var world_transform = ObjectTransform.defaultUpright();
+
+        render_group.pushVolumeOutline(
+            &world_transform,
+            .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
+            .new(1, 1, 0, 1),
+            0.01,
+        );
 
         if (true) {
             render_group.pushRectangleOutline(

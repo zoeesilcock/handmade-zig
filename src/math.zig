@@ -219,6 +219,14 @@ fn Vector3Type(comptime ScalarType: type) type {
             return result;
         }
 
+        pub fn crossProduct(self: Self, b: Self) Self {
+            return .new(
+                self.y() * b.z() - self.z() * b.y(),
+                self.z() * b.x() - self.x() * b.z(),
+                self.x() * b.y() - self.y() * b.x(),
+            );
+        }
+
         const Shared = VectorShared(3, ScalarType, Self);
         pub const zero = Shared.zero;
         pub const one = Shared.one;
