@@ -6,11 +6,11 @@
     .dependencies = .{
         .zigwin32 = .{
             .url = "https://github.com/marlersoft/zigwin32/archive/e8739b32a33ce48a3286aba31918b26a9dfc6ef0.tar.gz",
-            .hash = "1220219ca4acfa5804ca39945f92554e93507b077c03605b7a4c1c0401f0c7121339",
+            .hash = "zigwin32-25.0.28-preview-AAAAAEEl_AMhnKSs-lgEyjmUX5JVTpNQewd8A2Bbekwc",
         },
         .stb = .{
             .url = "git+https://github.com/nothings/stb#f75e8d1cad7d90d72ef7a4661f1b994ef78b4e31",
-            .hash = "1220c4fe5a4c4ebec402f5cdef08bc264b56fb07f259107d2b01ba8d416d88624b50",
+            .hash = "N-V-__8AAEcaTgDE_lpMTr7EAvXN7wi8JktW-wfyWRB9KwG6",
         },
     },
     .paths = .{
