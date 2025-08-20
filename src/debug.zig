@@ -2237,10 +2237,10 @@ fn debugStart(
     debug_state.text_transform = ObjectTransform.defaultFlat();
     debug_state.tooltip_transform = ObjectTransform.defaultFlat();
     _ = debug_state.backing_transform.offset_position.setZ(0);
-    _ = debug_state.shadow_transform.offset_position.setZ(0);
-    _ = debug_state.ui_transform.offset_position.setZ(0);
-    _ = debug_state.text_transform.offset_position.setZ(0);
-    _ = debug_state.tooltip_transform.offset_position.setZ(0);
+    _ = debug_state.shadow_transform.offset_position.setZ(10);
+    _ = debug_state.ui_transform.offset_position.setZ(20);
+    _ = debug_state.text_transform.offset_position.setZ(30);
+    _ = debug_state.tooltip_transform.offset_position.setZ(40);
 
     debug_state.default_clip_rect = debug_state.render_group.last_setup.clip_rect;
     debug_state.tooltip_count = 0;

@@ -53,8 +53,6 @@ const EntityId = entities.EntityId;
 const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const EntityFlags = entities.EntityFlags;
-const EntityCollisionVolume = entities.EntityCollisionVolume;
-const EntityCollisionVolumeGroup = entities.EntityCollisionVolumeGroup;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityVisiblePiece = entities.EntityVisiblePiece;
 const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
@@ -72,7 +70,8 @@ pub const GameCamera = struct {
     following_entity_index: EntityId = .{},
     position: WorldPosition,
     last_position: WorldPosition,
-    offset: Vector3,
+    simulation_center: WorldPosition,
+    offset_z: f32,
 };
 
 pub const GameModeWorld = struct {
@@ -81,16 +80,6 @@ pub const GameModeWorld = struct {
 
     standard_room_dimension: Vector3 = .zero(),
     typical_floor_height: f32 = 0,
-
-    null_collision: *EntityCollisionVolumeGroup = undefined,
-    floor_collision: *EntityCollisionVolumeGroup = undefined,
-    wall_collision: *EntityCollisionVolumeGroup = undefined,
-    stair_collsion: *EntityCollisionVolumeGroup = undefined,
-    hero_body_collision: *EntityCollisionVolumeGroup = undefined,
-    hero_head_collision: *EntityCollisionVolumeGroup = undefined,
-    hero_glove_collision: *EntityCollisionVolumeGroup = undefined,
-    familiar_collsion: *EntityCollisionVolumeGroup = undefined,
-    monster_collsion: *EntityCollisionVolumeGroup = undefined,
 
     effects_entropy: random.Series,
 
@@ -166,7 +155,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
     world_mode.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
     world_mode.effects_entropy = .seed(1234);
-    world_mode.typical_floor_height = 3;
+    world_mode.typical_floor_height = 5;
 
     // TODO: Replace this with a value received from the renderer.
     // const pixels_to_meters = 1.0 / 42.0;
@@ -174,34 +163,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
     world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
     world_mode.standard_room_dimension = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
-
-    const tile_depth_in_meters = world_mode.typical_floor_height;
-    world_mode.null_collision = makeNullCollision(world_mode);
-    world_mode.floor_collision = makeSimpleFloorCollision(
-        world_mode,
-        tile_side_in_meters,
-        tile_side_in_meters,
-        tile_depth_in_meters,
-    );
-    world_mode.wall_collision = makeSimpleGroundedCollision(
-        world_mode,
-        tile_side_in_meters,
-        tile_side_in_meters,
-        tile_depth_in_meters - 0.1,
-        0,
-    );
-    world_mode.stair_collsion = makeSimpleGroundedCollision(
-        world_mode,
-        tile_side_in_meters,
-        tile_side_in_meters * 2.0,
-        tile_depth_in_meters * 1.1,
-        0,
-    );
-    world_mode.hero_body_collision = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
-    world_mode.hero_head_collision = makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
-    world_mode.hero_glove_collision = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.6, 0.7);
-    world_mode.monster_collsion = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
-    world_mode.familiar_collsion = makeNullCollision(world_mode); //makeSimpleGroundedCollision(world_mode, 1, 0.5, 0.5, 0);
 
     const sim_memory = transient_state.arena.beginTemporaryMemory();
     const null_origin: WorldPosition = .zero();
@@ -362,14 +323,16 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     const camera_tile_x = room_center_tile_x;
     const camera_tile_y = room_center_tile_y;
     const camera_tile_z = last_screen_z;
-    world_mode.camera.position = chunkPositionFromTilePosition(
+    const new_camera_position: WorldPosition = chunkPositionFromTilePosition(
         world_mode.world,
         camera_tile_x,
         camera_tile_y,
         camera_tile_z,
         null,
     );
-    world_mode.camera.last_position = world_mode.camera.position;
+    world_mode.camera.position = new_camera_position;
+    world_mode.camera.last_position = new_camera_position;
+    world_mode.camera.simulation_center = new_camera_position;
 
     sim.endWorldChange(world_mode.world, world_mode.creation_region.?);
     world_mode.creation_region = null;
@@ -520,7 +483,7 @@ pub fn updateAndRenderWorld(
 
     const result = false;
 
-    var camera_offset: Vector3 = world_mode.camera.offset;
+    var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
     const camera: CameraParams = .get(draw_buffer.width, 0.6);
     const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
     const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
@@ -550,7 +513,13 @@ pub fn updateAndRenderWorld(
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
-    var camera_ot: Vector3 = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.camera_dolly)));
+    const delta_from_sim: Vector3 = world.subtractPositions(
+        world_mode.world,
+        &world_mode.camera.position,
+        &world_mode.camera.simulation_center,
+    );
+    var camera_ot: Vector3 =
+        camera_o.timesV(camera_offset.plus(delta_from_sim).plus(.new(0, 0, world_mode.camera_dolly)));
     render_group.setCameraTransform(
         camera.focal_length,
         camera_o.getColumn(0),
@@ -587,7 +556,7 @@ pub fn updateAndRenderWorld(
     _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
 
     const sim_bounds: Rectangle3 = .fromCenterDimension(
-        screen_bounds.getCenter().toVector3(0),
+        .zero(),
         world_mode.standard_room_dimension.scaledTo(3),
     );
 
@@ -622,7 +591,7 @@ pub fn updateAndRenderWorld(
     var world_sim: WorldSim = beginSim(
         &transient_state.arena,
         world_mode.world,
-        world_mode.camera.position,
+        world_mode.camera.simulation_center,
         sim_bounds,
         input.frame_delta_time,
     );
@@ -722,8 +691,6 @@ fn beginEntity(world_mode: *GameModeWorld) *Entity {
     entity.x_axis = .new(1, 0);
     entity.y_axis = .new(0, 1);
 
-    entity.collision = world_mode.null_collision;
-
     return entity;
 }
 
@@ -733,10 +700,8 @@ fn endEntity(world_mode: *GameModeWorld, entity: *Entity, chunk_position: WorldP
 
 fn beginGroundedEntity(
     world_mode: *GameModeWorld,
-    collision: *EntityCollisionVolumeGroup,
 ) *Entity {
     const entity = beginEntity(world_mode);
-    entity.collision = collision;
     return entity;
 }
 
@@ -780,7 +745,7 @@ fn addStandardRoom(
             if (true) {
                 _ = world_position.offset.setX(world_position.offset.x() + 0 * world_mode.world.game_entropy.randomBilateral());
                 _ = world_position.offset.setY(world_position.offset.y() + 0 * world_mode.world.game_entropy.randomBilateral());
-                _ = world_position.offset.setZ(world_position.offset.z() + 0.25 * world_mode.world.game_entropy.randomBilateral());
+                _ = world_position.offset.setZ(world_position.offset.z() + 0.5 + 0.5 * world_mode.world.game_entropy.randomUnilateral());
             }
 
             if (has_left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
@@ -793,7 +758,7 @@ fn addStandardRoom(
                     );
                 }
 
-                const entity: *Entity = beginGroundedEntity(world_mode, world_mode.floor_collision);
+                const entity: *Entity = beginGroundedEntity(world_mode);
                 standing_on.entity.ptr = entity;
                 standing_on.entity.index = entity.id;
                 entity.traversable_count = 1;
@@ -816,6 +781,16 @@ fn addStandardRoom(
         }
     }
 
+    const entity: *Entity = beginGroundedEntity(world_mode);
+    entity.addFlags(EntityFlags.ControlsCamera.toInt());
+    const x_dim: f32 = 0.2 * tile_side_in_meters;
+    const y_dim: f32 = 2 * tile_side_in_meters;
+    entity.collision_volume = .fromMinMax(
+        .new(-x_dim, -y_dim, -0.8 * world_mode.typical_floor_height),
+        .new(x_dim, y_dim, 0.8 * world_mode.typical_floor_height),
+    );
+    endEntity(world_mode, entity, result.position[@intCast(3 + radius_x)][@intCast(0 + radius_y)]);
+
     const room_position = chunkPositionFromTilePosition(
         world_mode.world,
         abs_tile_x,
@@ -824,17 +799,15 @@ fn addStandardRoom(
         null,
     );
 
-    const room_collision: *EntityCollisionVolumeGroup = makeSimpleGroundedCollision(
-        world_mode,
+    const room: *Entity = beginGroundedEntity(world_mode);
+    room.collision_volume = makeSimpleGroundedCollision(
         @as(f32, @floatFromInt((2 * radius_x + 1))) * tile_side_in_meters,
         @as(f32, @floatFromInt((2 * radius_y + 1))) * tile_side_in_meters,
         world_mode.typical_floor_height,
         0,
     );
-    const room: *Entity = beginGroundedEntity(world_mode, room_collision);
+
     room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
-    const diff: f32 = @max(0, @max(@as(f32, @floatFromInt(radius_x)) - 8, @as(f32, @floatFromInt(radius_y)) - 4));
-    room.camera_height = 6 + diff;
     endEntity(world_mode, room, room_position);
 
     return result;
@@ -860,13 +833,12 @@ pub fn addPlayer(
         sim_region.origin,
         standing_on.getSimSpaceTraversable().position,
     );
-    var body = beginGroundedEntity(world_mode, world_mode.hero_body_collision);
-    body.addFlags(EntityFlags.Collides.toInt());
-
-    const head = beginGroundedEntity(world_mode, world_mode.hero_head_collision);
+    var body = beginGroundedEntity(world_mode);
+    const head = beginGroundedEntity(world_mode);
+    head.collision_volume = makeSimpleGroundedCollision(1, 0.5, 0.6, 0.7);
     head.addFlags(EntityFlags.Collides.toInt());
 
-    const glove = beginGroundedEntity(world_mode, world_mode.hero_glove_collision);
+    const glove = beginGroundedEntity(world_mode);
     glove.addFlags(EntityFlags.Collides.toInt());
     glove.movement_mode = .AngleOffset;
     glove.angle_current = -0.25 * math.TAU32;
@@ -919,7 +891,14 @@ pub fn addPlayer(
 }
 
 fn addWall(world_mode: *GameModeWorld, world_position: WorldPosition, standing_on: TraversableReference) void {
-    const entity = beginGroundedEntity(world_mode, world_mode.wall_collision);
+    const entity = beginGroundedEntity(world_mode);
+
+    entity.collision_volume = makeSimpleGroundedCollision(
+        tile_side_in_meters,
+        tile_side_in_meters,
+        world_mode.typical_floor_height - 0.1,
+        0,
+    );
 
     entity.addFlags(EntityFlags.Collides.toInt());
     entity.occupying = standing_on;
@@ -930,9 +909,15 @@ fn addWall(world_mode: *GameModeWorld, world_position: WorldPosition, standing_o
 
 fn addStairs(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
     const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode, world_mode.stair_collsion);
+    const entity = beginGroundedEntity(world_mode);
 
-    entity.walkable_dimension = entity.collision.total_volume.dimension.xy();
+    entity.collision_volume = makeSimpleGroundedCollision(
+        tile_side_in_meters,
+        tile_side_in_meters * 2.0,
+        world_mode.typical_floor_height * 1.1,
+        0,
+    );
+    entity.walkable_dimension = entity.collision_volume.getDimension().xy();
     entity.walkable_height = world_mode.typical_floor_height;
     entity.addFlags(EntityFlags.Collides.toInt());
 
@@ -940,9 +925,8 @@ fn addStairs(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_t
 }
 
 fn addMonster(world_mode: *GameModeWorld, world_position: WorldPosition, standing_on: TraversableReference) void {
-    var entity = beginGroundedEntity(world_mode, world_mode.monster_collsion);
+    var entity = beginGroundedEntity(world_mode);
 
-    entity.collision = world_mode.monster_collsion;
     entity.addFlags(EntityFlags.Collides.toInt());
 
     entity.brain_slot = BrainSlot.forField(BrainMonster, "body");
@@ -964,9 +948,8 @@ fn addSnakeSegment(
     brain_id: BrainId,
     segment_index: u32,
 ) void {
-    var entity = beginGroundedEntity(world_mode, world_mode.monster_collsion);
+    var entity = beginGroundedEntity(world_mode);
 
-    entity.collision = world_mode.monster_collsion;
     entity.addFlags(EntityFlags.Collides.toInt());
 
     entity.brain_slot = BrainSlot.forIndexedField(BrainSnake, "segments", segment_index);
@@ -982,7 +965,7 @@ fn addSnakeSegment(
 }
 
 fn addFamiliar(world_mode: *GameModeWorld, world_position: WorldPosition, standing_on: TraversableReference) void {
-    const entity = beginGroundedEntity(world_mode, world_mode.familiar_collsion);
+    const entity = beginGroundedEntity(world_mode);
 
     entity.addFlags(EntityFlags.Collides.toInt());
 
@@ -1012,56 +995,18 @@ fn initHitPoints(entity: *Entity, count: u32) void {
 }
 
 fn makeSimpleGroundedCollision(
-    world_mode: *GameModeWorld,
     x_dimension: f32,
     y_dimension: f32,
     z_dimension: f32,
     opt_z_offset: ?f32,
-) *EntityCollisionVolumeGroup {
+) Rectangle3 {
     const z_offset: f32 = opt_z_offset orelse 0;
-    const group = world_mode.world.arena.pushStruct(EntityCollisionVolumeGroup, null);
+    const result: Rectangle3 = .fromCenterDimension(
+        Vector3.new(0, 0, 0.5 * z_dimension + z_offset),
+        Vector3.new(x_dimension, y_dimension, z_dimension),
+    );
 
-    group.volume_count = 1;
-    group.volumes = world_mode.world.arena.pushArray(group.volume_count, EntityCollisionVolume, null);
-    group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension + z_offset);
-    group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
-    group.volumes[0] = group.total_volume;
-
-    return group;
-}
-
-fn makeSimpleFloorCollision(
-    world_mode: *GameModeWorld,
-    x_dimension: f32,
-    y_dimension: f32,
-    z_dimension: f32,
-) *EntityCollisionVolumeGroup {
-    const group = world_mode.world.arena.pushStruct(EntityCollisionVolumeGroup, null);
-
-    group.volume_count = 0;
-    group.total_volume.offset_position = Vector3.new(0, 0, 0);
-    group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
-
-    if (false) {
-        group.volume_count = 1;
-        group.volumes = world_mode.world.arena.pushArray(group.volume_count, EntityCollisionVolume, null);
-        group.total_volume.offset_position = Vector3.new(0, 0, 0.5 * z_dimension);
-        group.total_volume.dimension = Vector3.new(x_dimension, y_dimension, z_dimension);
-        group.volumes[0] = group.total_volume;
-    }
-
-    return group;
-}
-
-fn makeNullCollision(world_mode: *GameModeWorld) *EntityCollisionVolumeGroup {
-    const group = world_mode.world.arena.pushStruct(EntityCollisionVolumeGroup, null);
-
-    group.volume_count = 0;
-    group.volumes = undefined;
-    group.total_volume.offset_position = Vector3.zero();
-    group.total_volume.dimension = Vector3.zero();
-
-    return group;
+    return result;
 }
 
 pub fn chunkPositionFromTilePosition(

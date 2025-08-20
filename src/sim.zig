@@ -28,8 +28,6 @@ const Entity = entities.Entity;
 const EntityId = entities.EntityId;
 const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
-const EntityCollisionVolume = entities.EntityCollisionVolume;
-const EntityCollisionVolumeGroup = entities.EntityCollisionVolumeGroup;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityFlags = entities.EntityFlags;
 const Brain = brains.Brain;
@@ -196,9 +194,12 @@ pub fn loadTraversableReference(sim_region: *SimRegion, reference: *TraversableR
     loadEntityReference(sim_region, &reference.entity);
 }
 
-pub fn entityOverlapsRectangle(position: Vector3, volume: EntityCollisionVolume, rectangle: Rectangle3) bool {
-    const grown = rectangle.addRadius(volume.dimension.scaledTo(0.5));
-    return position.plus(volume.offset_position).isInRectangle(grown);
+pub fn entityOverlapsRectangle(position: Vector3, entity_volume: Rectangle3, rectangle: Rectangle3) bool {
+    return entity_volume.offsetBy(position).intersects(&rectangle);
+}
+
+pub fn entityOverlapsEntity(a: *Entity, b: *Entity) bool {
+    return a.collision_volume.offsetBy(a.position).intersects(&b.collision_volume.offsetBy(b.position));
 }
 
 fn getOrAddBrain(sim_region: *SimRegion, brain_id: BrainId, brain_type: BrainType) *Brain {
@@ -403,7 +404,7 @@ pub fn beginWorldChange(
 
                                 if (entityOverlapsRectangle(
                                     dest.position,
-                                    dest.collision.total_volume,
+                                    dest.collision_volume,
                                     sim_region.updatable_bounds,
                                 )) {
                                     dest.flags |= EntityFlags.Active.toInt();
@@ -491,33 +492,6 @@ fn speculativeCollide(mover: *Entity, region: *Entity, test_position: Vector3) b
     return result;
 }
 
-fn entitiesOverlap(entity: *Entity, test_entity: *Entity, epsilon: Vector3) bool {
-    var overlapped = false;
-
-    var entity_volume_index: u32 = 0;
-    while (!overlapped and entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
-        const entity_volume = entity.collision.volumes[entity_volume_index];
-
-        var test_volume_index: u32 = 0;
-        while (!overlapped and test_volume_index < test_entity.collision.volume_count) : (test_volume_index += 1) {
-            const test_volume = test_entity.collision.volumes[test_volume_index];
-
-            const entity_rectangle = Rectangle3.fromCenterDimension(
-                entity.position.plus(entity_volume.offset_position),
-                entity_volume.dimension.plus(epsilon),
-            );
-            const test_entity_rectangle = Rectangle3.fromCenterDimension(
-                test_entity.position.plus(test_volume.offset_position),
-                test_volume.dimension,
-            );
-
-            overlapped = entity_rectangle.intersects(&test_entity_rectangle);
-        }
-    }
-
-    return overlapped;
-}
-
 fn canCollide(entity: *Entity, hit_entity: *Entity) bool {
     var result = false;
 
@@ -536,7 +510,9 @@ fn canCollide(entity: *Entity, hit_entity: *Entity) bool {
         if (a.hasFlag(EntityFlags.Collides.toInt()) and
             b.hasFlag(EntityFlags.Collides.toInt()))
         {
-            result = true;
+            if (a.collision_volume.hasArea() and b.collision_volume.hasArea()) {
+                result = true;
+            }
         }
     }
 
@@ -623,95 +599,93 @@ pub fn moveEntity(
                 const test_entity = &sim_region.entities[test_entity_index];
 
                 if (canCollide(entity, test_entity)) {
-                    var entity_volume_index: u32 = 0;
-                    while (entity_volume_index < entity.collision.volume_count) : (entity_volume_index += 1) {
-                        const entity_volume = entity.collision.volumes[entity_volume_index];
-                        var test_volume_index: u32 = 0;
-                        while (test_volume_index < test_entity.collision.volume_count) : (test_volume_index += 1) {
-                            const test_volume = test_entity.collision.volumes[test_volume_index];
-                            const minkowski_diameter = Vector3.new(
-                                test_volume.dimension.x() + entity_volume.dimension.x(),
-                                test_volume.dimension.y() + entity_volume.dimension.y(),
-                                test_volume.dimension.z() + entity_volume.dimension.z(),
-                            );
-                            const min_corner = minkowski_diameter.scaledTo(-0.5);
-                            const max_corner = minkowski_diameter.scaledTo(0.5);
-                            const relative = entity.position.plus(entity_volume.offset_position)
-                                .minus(test_entity.position.plus(test_volume.offset_position));
+                    const volume_dimension: Vector3 = entity.collision_volume.getDimension();
+                    const volume_position: Vector3 = entity.collision_volume.getCenter();
 
-                            if ((relative.z() >= min_corner.z()) and (relative.z() < max_corner.z())) {
-                                const walls: [4]WallTestData = .{
-                                    .{
-                                        .x = min_corner.x(),
-                                        .rel_x = relative.x(),
-                                        .rel_y = relative.y(),
-                                        .delta_x = entity_delta.x(),
-                                        .delta_y = entity_delta.y(),
-                                        .min_y = min_corner.y(),
-                                        .max_y = max_corner.y(),
-                                        .normal = Vector3.new(-1, 0, 0),
-                                    },
-                                    .{
-                                        .x = max_corner.x(),
-                                        .rel_x = relative.x(),
-                                        .rel_y = relative.y(),
-                                        .delta_x = entity_delta.x(),
-                                        .delta_y = entity_delta.y(),
-                                        .min_y = min_corner.y(),
-                                        .max_y = max_corner.y(),
-                                        .normal = Vector3.new(1, 0, 0),
-                                    },
-                                    .{
-                                        .x = min_corner.y(),
-                                        .rel_x = relative.y(),
-                                        .rel_y = relative.x(),
-                                        .delta_x = entity_delta.y(),
-                                        .delta_y = entity_delta.x(),
-                                        .min_y = min_corner.x(),
-                                        .max_y = max_corner.x(),
-                                        .normal = Vector3.new(0, -1, 0),
-                                    },
-                                    .{
-                                        .x = max_corner.y(),
-                                        .rel_x = relative.y(),
-                                        .rel_y = relative.x(),
-                                        .delta_x = entity_delta.y(),
-                                        .delta_y = entity_delta.x(),
-                                        .min_y = min_corner.x(),
-                                        .max_y = max_corner.x(),
-                                        .normal = Vector3.new(0, 1, 0),
-                                    },
-                                };
+                    const test_volume_dimension: Vector3 = test_entity.collision_volume.getDimension();
+                    const test_volume_position: Vector3 = test_entity.collision_volume.getCenter();
 
-                                var test_min_time = min_time;
-                                var hit_this = false;
-                                var test_wall_normal = Vector3.zero();
-                                var wall_index: u32 = 0;
+                    const minkowski_diameter = Vector3.new(
+                        test_volume_dimension.x() + volume_dimension.x(),
+                        test_volume_dimension.y() + volume_dimension.y(),
+                        test_volume_dimension.z() + volume_dimension.z(),
+                    );
+                    const min_corner = minkowski_diameter.scaledTo(-0.5);
+                    const max_corner = minkowski_diameter.scaledTo(0.5);
+                    const relative = entity.position.plus(volume_position)
+                        .minus(test_entity.position.plus(test_volume_position));
 
-                                while (wall_index < walls.len) : (wall_index += 1) {
-                                    const wall = &walls[wall_index];
+                    if ((relative.z() >= min_corner.z()) and (relative.z() < max_corner.z())) {
+                        const walls: [4]WallTestData = .{
+                            .{
+                                .x = min_corner.x(),
+                                .rel_x = relative.x(),
+                                .rel_y = relative.y(),
+                                .delta_x = entity_delta.x(),
+                                .delta_y = entity_delta.y(),
+                                .min_y = min_corner.y(),
+                                .max_y = max_corner.y(),
+                                .normal = Vector3.new(-1, 0, 0),
+                            },
+                            .{
+                                .x = max_corner.x(),
+                                .rel_x = relative.x(),
+                                .rel_y = relative.y(),
+                                .delta_x = entity_delta.x(),
+                                .delta_y = entity_delta.y(),
+                                .min_y = min_corner.y(),
+                                .max_y = max_corner.y(),
+                                .normal = Vector3.new(1, 0, 0),
+                            },
+                            .{
+                                .x = min_corner.y(),
+                                .rel_x = relative.y(),
+                                .rel_y = relative.x(),
+                                .delta_x = entity_delta.y(),
+                                .delta_y = entity_delta.x(),
+                                .min_y = min_corner.x(),
+                                .max_y = max_corner.x(),
+                                .normal = Vector3.new(0, -1, 0),
+                            },
+                            .{
+                                .x = max_corner.y(),
+                                .rel_x = relative.y(),
+                                .rel_y = relative.x(),
+                                .delta_x = entity_delta.y(),
+                                .delta_y = entity_delta.x(),
+                                .min_y = min_corner.x(),
+                                .max_y = max_corner.x(),
+                                .normal = Vector3.new(0, 1, 0),
+                            },
+                        };
 
-                                    if (wall.delta_x != 0.0) {
-                                        const result_time = (wall.x - wall.rel_x) / wall.delta_x;
-                                        const y = wall.rel_y + (result_time * wall.delta_y);
-                                        if (result_time >= 0 and test_min_time > result_time) {
-                                            if (y >= wall.min_y and y <= wall.max_y) {
-                                                test_min_time = @max(0.0, result_time - time_epsilon);
-                                                test_wall_normal = wall.normal;
-                                                hit_this = true;
-                                            }
-                                        }
+                        var test_min_time = min_time;
+                        var hit_this = false;
+                        var test_wall_normal = Vector3.zero();
+                        var wall_index: u32 = 0;
+
+                        while (wall_index < walls.len) : (wall_index += 1) {
+                            const wall = &walls[wall_index];
+
+                            if (wall.delta_x != 0.0) {
+                                const result_time = (wall.x - wall.rel_x) / wall.delta_x;
+                                const y = wall.rel_y + (result_time * wall.delta_y);
+                                if (result_time >= 0 and test_min_time > result_time) {
+                                    if (y >= wall.min_y and y <= wall.max_y) {
+                                        test_min_time = @max(0.0, result_time - time_epsilon);
+                                        test_wall_normal = wall.normal;
+                                        hit_this = true;
                                     }
                                 }
+                            }
+                        }
 
-                                if (hit_this) {
-                                    const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
-                                    if (speculativeCollide(entity, test_entity, test_position)) {
-                                        min_time = test_min_time;
-                                        wall_normal_min = test_wall_normal;
-                                        opt_hit_entity_min = test_entity;
-                                    }
-                                }
+                        if (hit_this) {
+                            const test_position = entity.position.plus(entity_delta.scaledTo(test_min_time));
+                            if (speculativeCollide(entity, test_entity, test_position)) {
+                                min_time = test_min_time;
+                                wall_normal_min = test_wall_normal;
+                                opt_hit_entity_min = test_entity;
                             }
                         }
                     }
@@ -759,7 +733,7 @@ pub fn moveEntity(
     }
 }
 
-/// It is mandatory fthat the camera "center" be tehe sim region center for this code to work properl, because it
+/// It is mandatory that the camera "center" be the sim region center for this code to work properly, because it
 /// cannot add the offset from the sim center to the camera as a displacement or it will fail when moving between
 /// rooms at the changeover point.
 pub fn updateCameraForEntityMovement(
@@ -770,72 +744,40 @@ pub fn updateCameraForEntityMovement(
 ) void {
     std.debug.assert(entity.id.value == camera.following_entity_index.value);
 
-    var room_delta: Vector3 = .zero();
-    var room_rel_position: Vector3 = .zero();
-    var room_cam_position: Vector3 = .zero();
-
     var opt_in_room: ?*Entity = null;
+    var special_camera: ?*Entity = null;
     var test_index: u32 = 0;
     while (test_index < sim_region.entity_count) : (test_index += 1) {
         const test_entity: *Entity = &sim_region.entities[test_index];
-        if (test_entity.brain_slot.type == @intFromEnum(BrainType.BrainRoom)) {
-            const volume_position: Vector3 =
-                test_entity.position.plus(test_entity.collision.total_volume.offset_position);
-            const volume_rect: Rectangle3 = .fromCenterDimension(
-                volume_position,
-                test_entity.collision.total_volume.dimension,
-            );
 
-            if (entity.position.isInRectangle(volume_rect)) {
-                room_delta = test_entity.collision.total_volume.dimension;
-                room_rel_position = entity.position.minus(test_entity.position);
-                room_cam_position = test_entity.position;
+        if (test_entity.brain_slot.type == @intFromEnum(BrainType.BrainRoom)) {
+            if (entityOverlapsEntity(entity, test_entity)) {
                 opt_in_room = test_entity;
-                break;
+            }
+        }
+
+        if (test_entity.hasFlag(EntityFlags.ControlsCamera.toInt())) {
+            if (entityOverlapsEntity(entity, test_entity)) {
+                // TODO: Make entity parameters that control velocity direction measurement?
+                if (@abs(entity.velocity.y()) > 0.1) {
+                    special_camera = test_entity;
+                }
             }
         }
     }
 
     if (opt_in_room) |in_room| {
-        const h_room_delta: Vector3 = room_delta.scaledTo(0.5);
-        const apron_size: f32 = 0.7;
-        const bounce_height: f32 = 0.5;
-        const h_room_apron: Vector3 = .new(
-            h_room_delta.x() - apron_size,
-            h_room_delta.y() - apron_size,
-            h_room_delta.z() - apron_size,
-        );
+        const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
+        const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
+        var target_position: Vector3 = simulation_center;
 
-        camera.offset = .zero();
-        camera.position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, room_cam_position);
-
-        const new_entity_position: Vector3 = room_rel_position;
-        if (new_entity_position.x() > h_room_apron.x()) {
-            const t: f32 = math.clamp01MapToRange(h_room_apron.x(), h_room_delta.x(), new_entity_position.x());
-            camera.offset = .new(t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
-        }
-        if (new_entity_position.x() < -h_room_apron.x()) {
-            const t: f32 = math.clamp01MapToRange(-h_room_apron.x(), -h_room_delta.x(), new_entity_position.x());
-            camera.offset = .new(-t * h_room_delta.x(), 0, (-(t * t) + 2 * t) * bounce_height);
-        }
-        if (new_entity_position.y() > h_room_apron.y()) {
-            const t: f32 = math.clamp01MapToRange(h_room_apron.y(), h_room_delta.y(), new_entity_position.y());
-            camera.offset = .new(0, t * h_room_delta.y(), (-(t * t) + 2 * t) * bounce_height);
-        }
-        if (new_entity_position.y() < -h_room_apron.y()) {
-            const t: f32 = math.clamp01MapToRange(-h_room_apron.y(), -h_room_delta.y(), new_entity_position.y());
-            camera.offset = .new(0, -t * h_room_delta.y(), (-(t * t) + 2 * t) * bounce_height);
-        }
-        if (new_entity_position.z() > h_room_apron.z()) {
-            const t: f32 = math.clamp01MapToRange(h_room_apron.z(), h_room_delta.z(), new_entity_position.z());
-            camera.offset = .new(0, 0, t * h_room_delta.z());
-        }
-        if (new_entity_position.z() < -h_room_apron.z()) {
-            const t: f32 = math.clamp01MapToRange(-h_room_apron.z(), -h_room_delta.z(), new_entity_position.z());
-            camera.offset = .new(0, 0, -t * h_room_delta.z());
+        if (special_camera != null) {
+            target_position = entity.position;
         }
 
-        _ = camera.offset.setZ(camera.offset.z() + in_room.camera_height);
+        camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
+        camera.position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
+        camera.offset_z = 8;
     }
 }
 

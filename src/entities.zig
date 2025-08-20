@@ -16,6 +16,7 @@ const Color = math.Color;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
+const Rectangle3 = math.Rectangle3;
 const BrainId = brains.BrainId;
 const BrainType = brains.BrainType;
 const BrainSlot = brains.BrainSlot;
@@ -51,6 +52,7 @@ pub const EntityFlags = enum(u32) {
     Collides = (1 << 0),
     Deleted = (1 << 1),
     Active = (1 << 2),
+    ControlsCamera = (1 << 3),
 
     pub fn toInt(self: EntityFlags) u32 {
         return @intFromEnum(self);
@@ -101,7 +103,7 @@ pub const Entity = extern struct {
     velocity: Vector3 = Vector3.zero(),
     acceleration: Vector3 = Vector3.zero(), // Do not pack this.
 
-    collision: *EntityCollisionVolumeGroup,
+    collision_volume: Rectangle3,
 
     distance_limit: f32 = 0,
 
@@ -142,8 +144,6 @@ pub const Entity = extern struct {
 
     piece_count: u32,
     pieces: [4]EntityVisiblePiece, // 0 is the "on top" piece.
-
-    camera_height: f32,
 
     pub fn addPiece(
         self: *Entity,
@@ -291,25 +291,9 @@ pub const HitPoint = extern struct {
     filled_amount: u8,
 };
 
-pub const EntityCollisionVolume = extern struct {
-    offset_position: Vector3,
-    dimension: Vector3,
-};
-
 pub const EntityTraversablePoint = extern struct {
     position: Vector3,
     occupier: ?*Entity,
-};
-
-pub const EntityCollisionVolumeGroup = extern struct {
-    total_volume: EntityCollisionVolume,
-
-    volume_count: u32,
-    volumes: [*]EntityCollisionVolume,
-
-    pub fn getSpaceVolume(self: *const EntityCollisionVolumeGroup, index: u32) EntityCollisionVolume {
-        return self.volumes[index];
-    }
 };
 
 fn debugPickEntity(
@@ -561,18 +545,14 @@ pub fn updateAndRenderEntities(
                 entity_transform.upright = false;
                 {
                     if (global_config.Simulation_VisualizeCollisionVolumes) {
-                        var volume_index: u32 = 0;
-                        while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-                            const volume = entity.collision.volumes[volume_index];
-                            render_group.pushVolumeOutline(
-                                &entity_transform,
-                                .fromCenterDimension(
-                                    volume.offset_position,
-                                    volume.dimension,
-                                ),
-                                .new(0, 0.5, 1, 1),
-                                0.01,
-                            );
+                        if (entity.collision_volume.hasArea()) {
+                            var color: Color = .new(0, 0.5, 1, 1);
+
+                            if (entity.hasFlag(EntityFlags.Collides.toInt())) {
+                                color = .new(1, 0, 1, 1);
+                            }
+
+                            render_group.pushVolumeOutline(&entity_transform, entity.collision_volume, color, 0.01);
                         }
                     }
 

@@ -596,7 +596,7 @@ pub const RenderGroup = extern struct {
                 entry.quad_count += 1;
 
                 const min_position: Vector3 = dim.basis_position;
-                const z_bias: f32 = 0.5 * height;
+                const z_bias: f32 = 0.25 * height;
                 const premultiplied_color: Color = storeColor(color);
                 var x_axis: Vector3 = x_axis2.toVector3(0).scaledTo(size.x());
                 var y_axis: Vector3 = y_axis2.toVector3(0).scaledTo(size.y());
