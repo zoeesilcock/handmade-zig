@@ -30,6 +30,7 @@ const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityFlags = entities.EntityFlags;
+const CameraBehavior = entities.CameraBehavior;
 const Brain = brains.Brain;
 const BrainId = brains.BrainId;
 const BrainType = brains.BrainType;
@@ -397,8 +398,6 @@ pub fn beginWorldChange(
 
                                 dest.id = id;
 
-                                dest.manual_sort = .{};
-
                                 addEntityToHash(sim_region, dest);
                                 dest.position = dest.position.plus(chunk_delta);
 
@@ -456,7 +455,6 @@ pub fn endWorldChange(world_ptr: *World, sim_region: *SimRegion) void {
 
             const chunk_delta: Vector3 = entity_position.offset.minus(entity.position);
 
-            // const old_entity_position: Vector3 = entity.position;
             entity.position = entity.position.plus(chunk_delta);
             var dest_e: *Entity = world.useChunkSpaceAt(world_ptr, @sizeOf(Entity), chunk_position);
 
@@ -741,11 +739,12 @@ pub fn updateCameraForEntityMovement(
     sim_region: *SimRegion,
     camera: *GameCamera,
     entity: *Entity,
+    delta_time: f32,
 ) void {
     std.debug.assert(entity.id.value == camera.following_entity_index.value);
 
     var opt_in_room: ?*Entity = null;
-    var special_camera: ?*Entity = null;
+    var opt_special_camera: ?*Entity = null;
     var test_index: u32 = 0;
     while (test_index < sim_region.entity_count) : (test_index += 1) {
         const test_entity: *Entity = &sim_region.entities[test_index];
@@ -756,29 +755,92 @@ pub fn updateCameraForEntityMovement(
             }
         }
 
-        if (test_entity.hasFlag(EntityFlags.ControlsCamera.toInt())) {
-            if (entityOverlapsEntity(entity, test_entity)) {
-                // TODO: Make entity parameters that control velocity direction measurement?
-                if (@abs(entity.velocity.y()) > 0.1) {
-                    special_camera = test_entity;
-                }
+        if (test_entity.camera_behavior > 0) {
+            var pass: bool = entityOverlapsEntity(entity, test_entity);
+
+            if (test_entity.camera_behavior & @intFromEnum(CameraBehavior.GeneralVelocityConstraint) != 0) {
+                pass = pass and math.isInRange(
+                    test_entity.camera_min_velocity,
+                    entity.velocity.length(),
+                    test_entity.camera_max_velocity,
+                );
+            }
+
+            if (test_entity.camera_behavior & @intFromEnum(CameraBehavior.DirectionalVelocityConstraint) != 0) {
+                pass = pass and math.isInRange(
+                    test_entity.camera_min_velocity,
+                    test_entity.camera_velocity_direction.dotProduct(entity.velocity),
+                    test_entity.camera_max_velocity,
+                );
+            }
+
+            if (pass) {
+                opt_special_camera = test_entity;
             }
         }
+    }
+
+    if (opt_special_camera) |special_camera| {
+        if (camera.in_special.equals(special_camera.id)) {
+            camera.time_in_special += delta_time;
+        } else {
+            camera.in_special = special_camera.id;
+            camera.time_in_special = 0;
+        }
+    } else {
+        camera.in_special.clear();
     }
 
     if (opt_in_room) |in_room| {
         const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
         const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
         var target_position: Vector3 = simulation_center;
+        var target_offset_z: f32 = 8;
 
-        if (special_camera != null) {
-            target_position = entity.position;
+        if (opt_special_camera) |special_camera| {
+            if (camera.time_in_special > special_camera.camera_min_time) {
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Inspect)) != 0) {
+                    target_position = special_camera.position;
+                }
+
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayer)) != 0) {
+                    target_position = entity.position;
+                }
+
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Offset)) != 0) {
+                    target_offset_z = special_camera.camera_offset.z();
+                    _ = target_position.setXY(target_position.xy().plus(special_camera.camera_offset.xy()));
+                }
+            }
         }
 
         camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
-        camera.position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
-        camera.offset_z = 8;
+        camera.target_position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
+        camera.target_offset_z = target_offset_z;
     }
+
+    var position: Vector3 = world.subtractPositions(
+        world_ptr,
+        &camera.position,
+        &camera.simulation_center,
+    );
+    const target_position: Vector3 = world.subtractPositions(
+        world_ptr,
+        &camera.target_position,
+        &camera.simulation_center,
+    );
+
+    var offset_z: f32 = camera.offset_z;
+    const target_offset_z: f32 = camera.target_offset_z;
+
+    const delta_position: Vector3 = target_position.minus(position);
+    position = position.plus(delta_position.scaledTo(delta_time));
+
+    const delta_offset_z: f32 = target_offset_z - offset_z;
+    offset_z += delta_time * delta_offset_z;
+
+    camera.position = world.mapIntoChunkSpace(world_ptr, camera.simulation_center, position);
+    camera.offset_z = offset_z;
 }
 
 pub const TraversableSearchFlag = enum(u8) {

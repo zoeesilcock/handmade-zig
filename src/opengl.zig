@@ -659,6 +659,8 @@ pub fn renderCommands(
                 }
 
                 var clip_rect: Rectangle2i = setup.clip_rect;
+
+                // TODO: This is probably not needed anymore since we are always rendering to an off-screen target now.
                 _ = clip_rect.min.setX(
                     intrinsics.roundReal32ToInt32(@as(f32, @floatFromInt(clip_rect.min.x())) * clip_scale_x),
                 );

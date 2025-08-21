@@ -1007,29 +1007,40 @@ pub const RenderGroup = extern struct {
         self.current_quads = null;
     }
 
+    fn getScreenPoint(
+        self: *RenderGroup,
+        object_transform: *ObjectTransform,
+        world_position: Vector3,
+    ) Vector2 {
+        var position: Vector4 =
+            self.last_setup.projection.timesV(world_position.plus(object_transform.offset_position)).toVector4(1);
+        _ = position.setXYZ(position.xyz().dividedByF(position.w()));
+
+        _ = position.setX(self.screen_dimensions.x() * 0.5 * (position.x() + 1));
+        _ = position.setY(self.screen_dimensions.y() * 0.5 * (position.y() + 1));
+
+        return position.xy();
+    }
+
     pub fn getClipRectByTransform(
         self: *RenderGroup,
         object_transform: *ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
     ) Rectangle2i {
-        _ = self;
-        const modified_position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
+        const min_corner: Vector2 = self.getScreenPoint(object_transform, offset);
+        const max_corner: Vector2 = self.getScreenPoint(object_transform, offset.plus(dimension.toVector3(0)));
 
-        const position = getRenderEntityBasisPosition(object_transform, modified_position);
-        const basis_dimension: Vector2 = dimension;
-
-        const result: Rectangle2i = .fromMinDimension(
+        return .fromMinMax(
             .new(
-                intrinsics.roundReal32ToInt32(position.x()),
-                intrinsics.roundReal32ToInt32(position.y()),
+                intrinsics.roundReal32ToInt32(min_corner.x()),
+                intrinsics.roundReal32ToInt32(min_corner.y()),
             ),
             .new(
-                intrinsics.roundReal32ToInt32(basis_dimension.x()),
-                intrinsics.roundReal32ToInt32(basis_dimension.y()),
+                intrinsics.roundReal32ToInt32(max_corner.x()),
+                intrinsics.roundReal32ToInt32(max_corner.y()),
             ),
         );
-        return result;
     }
 
     pub fn getClipRectByRectangle(

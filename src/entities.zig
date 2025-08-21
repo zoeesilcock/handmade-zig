@@ -46,13 +46,16 @@ pub const EntityId = packed struct {
     pub fn equals(self: EntityId, other: EntityId) bool {
         return self.value == other.value;
     }
+
+    pub fn clear(self: *EntityId) void {
+        self.value = 0;
+    }
 };
 
 pub const EntityFlags = enum(u32) {
     Collides = (1 << 0),
     Deleted = (1 << 1),
     Active = (1 << 2),
-    ControlsCamera = (1 << 3),
 
     pub fn toInt(self: EntityFlags) u32 {
         return @intFromEnum(self);
@@ -81,6 +84,14 @@ pub const EntityVisiblePiece = extern struct {
     flags: u32,
 };
 
+pub const CameraBehavior = enum(u32) {
+    Inspect = 0x1,
+    Offset = 0x2,
+    ViewPlayer = 0x4,
+    GeneralVelocityConstraint = 0x8,
+    DirectionalVelocityConstraint = 0x10,
+};
+
 pub const Entity = extern struct {
     id: EntityId = .{},
 
@@ -88,11 +99,12 @@ pub const Entity = extern struct {
     brain_slot: BrainSlot = .{},
     brain_id: BrainId = .{},
 
-    //
-    // Transient
-    //
-    //
-    manual_sort: ManualSortKey,
+    camera_behavior: u32,
+    camera_offset: Vector3,
+    camera_min_velocity: f32,
+    camera_max_velocity: f32,
+    camera_min_time: f32,
+    camera_velocity_direction: Vector3,
 
     //
     // Everything below here is not worked out yet.
@@ -613,7 +625,7 @@ fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, object_transform: 
             render_group.pushRectangle(
                 object_transform,
                 hit_point_dimension,
-                hit_position.toVector3(0),
+                hit_position.toVector3(0.1),
                 hit_point_color,
             );
             hit_position = hit_position.plus(hit_position_delta);

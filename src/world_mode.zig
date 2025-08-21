@@ -56,6 +56,7 @@ const EntityFlags = entities.EntityFlags;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityVisiblePiece = entities.EntityVisiblePiece;
 const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
+const CameraBehavior = entities.CameraBehavior;
 const Brain = brains.Brain;
 const BrainId = brains.BrainId;
 const BrainSlot = brains.BrainSlot;
@@ -69,9 +70,14 @@ const SimRegion = sim.SimRegion;
 pub const GameCamera = struct {
     following_entity_index: EntityId = .{},
     position: WorldPosition,
-    last_position: WorldPosition,
     simulation_center: WorldPosition,
     offset_z: f32,
+
+    target_position: WorldPosition,
+    target_offset_z: f32,
+
+    in_special: EntityId,
+    time_in_special: f32,
 };
 
 pub const GameModeWorld = struct {
@@ -331,7 +337,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         null,
     );
     world_mode.camera.position = new_camera_position;
-    world_mode.camera.last_position = new_camera_position;
     world_mode.camera.simulation_center = new_camera_position;
 
     sim.endWorldChange(world_mode.world, world_mode.creation_region.?);
@@ -609,9 +614,24 @@ pub fn updateAndRenderWorld(
             world_mode.particle_cache,
         );
 
+        // Can we merge the camera update down into the simulation so that we correctly update the camera for the current frame?
+
+        const last_camera_position: WorldPosition = world_mode.camera.position;
+        if (sim.getEntityByStorageIndex(
+            world_sim.sim_region,
+            world_mode.camera.following_entity_index,
+        )) |camera_following_entity| {
+            sim.updateCameraForEntityMovement(
+                world_mode.world,
+                world_sim.sim_region,
+                &world_mode.camera,
+                camera_following_entity,
+                input.frame_delta_time,
+            );
+        }
+
         const frame_to_frame_camera_delta_position: Vector3 =
-            world.subtractPositions(world_mode.world, &world_mode.camera.position, &world_mode.camera.last_position);
-        world_mode.camera.last_position = world_mode.camera.position;
+            world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
         particles.updateAndRenderParticleSystem(
             world_mode.particle_cache,
             input.frame_delta_time,
@@ -655,10 +675,6 @@ pub fn updateAndRenderWorld(
                 Color.new(1, 0, 1, 1),
                 0.1,
             );
-        }
-
-        if (sim.getEntityByStorageIndex(world_sim.sim_region, world_mode.camera.following_entity_index)) |camera_following_entity| {
-            sim.updateCameraForEntityMovement(world_mode.world, world_sim.sim_region, &world_mode.camera, camera_following_entity);
         }
     }
     endSim(&transient_state.arena, &world_sim, world_mode.world);
@@ -742,21 +758,14 @@ fn addStandardRoom(
                 null,
             );
 
-            if (true) {
+            if (has_left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
+                // Hole down to the floor below.
+            } else if (has_right_hole and offset_x >= 3 and offset_x <= 4 and offset_y >= -1 and offset_y <= 2) {
+                // Hole down to the floor below.
+            } else {
                 _ = world_position.offset.setX(world_position.offset.x() + 0 * world_mode.world.game_entropy.randomBilateral());
                 _ = world_position.offset.setY(world_position.offset.y() + 0 * world_mode.world.game_entropy.randomBilateral());
                 _ = world_position.offset.setZ(world_position.offset.z() + 0.5 + 0.5 * world_mode.world.game_entropy.randomUnilateral());
-            }
-
-            if (has_left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
-                // Hole down to the floor below.
-            } else {
-                // Hole down to the floor below.
-                if (has_right_hole and offset_x == 3 and offset_y >= -2 and offset_y <= 2) {
-                    _ = world_position.offset.setZ(
-                        world_position.offset.z() - (@as(f32, @floatFromInt(offset_y + 2)) * 0.75),
-                    );
-                }
 
                 const entity: *Entity = beginGroundedEntity(world_mode);
                 standing_on.entity.ptr = entity;
@@ -781,15 +790,93 @@ fn addStandardRoom(
         }
     }
 
-    const entity: *Entity = beginGroundedEntity(world_mode);
-    entity.addFlags(EntityFlags.ControlsCamera.toInt());
-    const x_dim: f32 = 0.2 * tile_side_in_meters;
-    const y_dim: f32 = 2 * tile_side_in_meters;
-    entity.collision_volume = .fromMinMax(
-        .new(-x_dim, -y_dim, -0.8 * world_mode.typical_floor_height),
-        .new(x_dim, y_dim, 0.8 * world_mode.typical_floor_height),
-    );
-    endEntity(world_mode, entity, result.position[@intCast(3 + radius_x)][@intCast(0 + radius_y)]);
+    var stair_positions: [4]WorldPosition = [1]WorldPosition{undefined} ** 4;
+    offset_y = -1;
+    while (offset_y <= 2) : (offset_y += 1) {
+        const offset_x: i32 = 3;
+        var standing_on: TraversableReference = .{};
+        var world_position = chunkPositionFromTilePosition(
+            world_mode.world,
+            abs_tile_x + offset_x,
+            abs_tile_y + offset_y,
+            abs_tile_z,
+            .new(0.5 * tile_side_in_meters, 0, 0),
+        );
+        stair_positions[@intCast(offset_y + 1)] = world_position;
+
+        _ = world_position.offset.setZ(
+            world_position.offset.z() + 0.3 - (@as(f32, @floatFromInt(offset_y + 2)) * 0.8),
+        );
+
+        const entity: *Entity = beginGroundedEntity(world_mode);
+        standing_on.entity.ptr = entity;
+        standing_on.entity.index = entity.id;
+        entity.traversable_count = 1;
+        entity.traversables[0].position = Vector3.zero();
+        entity.traversables[0].occupier = null;
+        entity.addPieceV2(
+            .Grass,
+            .new(1.4, 0.5),
+            .zero(),
+            .newFromSRGB(0.31, 0.49, 0.32, 1),
+            @intFromEnum(EntityVisiblePieceFlag.Cube),
+        );
+        endEntity(world_mode, entity, world_position);
+
+        const array_x: usize = @intCast(offset_x + radius_x);
+        const array_y: usize = @intCast(offset_y + radius_y);
+        result.position[array_x][array_y] = world_position;
+        result.ground[array_x][array_y] = standing_on;
+    }
+
+    {
+        // Hole camera.
+        const entity: *Entity = beginGroundedEntity(world_mode);
+        entity.camera_behavior =
+            @intFromEnum(CameraBehavior.Inspect) |
+            @intFromEnum(CameraBehavior.Offset) |
+            @intFromEnum(CameraBehavior.GeneralVelocityConstraint);
+        entity.camera_offset = .new(0, 2, 3);
+        entity.camera_min_time = 1;
+        entity.camera_min_velocity = 0;
+        entity.camera_max_velocity = 0.1;
+        const x_dim: f32 = 1.5 * tile_side_in_meters;
+        const y_dim: f32 = 0.5 * tile_side_in_meters;
+        entity.collision_volume = .fromMinMax(
+            .new(-x_dim, -y_dim, 0),
+            .new(x_dim, y_dim, 0.5 * world_mode.typical_floor_height),
+        );
+        endEntity(world_mode, entity, result.position[@intCast(-4 + radius_x)][@intCast(-1 + radius_y)]);
+    }
+
+    {
+        // Stairs camera, on stairs.
+        var entity: *Entity = beginGroundedEntity(world_mode);
+        entity.camera_behavior = @intFromEnum(CameraBehavior.ViewPlayer);
+        var x_dim: f32 = 0.5 * tile_side_in_meters;
+        var y_dim: f32 = 1.5 * tile_side_in_meters;
+        entity.collision_volume = .fromMinMax(
+            .new(-x_dim, -y_dim, -0.5 * world_mode.typical_floor_height),
+            .new(x_dim, y_dim, 0.3 * world_mode.typical_floor_height),
+        );
+        endEntity(world_mode, entity, stair_positions[2]);
+
+        // Stairs camera, at top of stairs.
+        entity = beginGroundedEntity(world_mode);
+        entity.camera_behavior =
+            @intFromEnum(CameraBehavior.ViewPlayer) |
+            @intFromEnum(CameraBehavior.DirectionalVelocityConstraint);
+        entity.camera_velocity_direction = .new(0, 1, 0);
+        entity.camera_min_velocity = 0.2;
+        entity.camera_max_velocity = std.math.floatMax(f32);
+        x_dim = 1 * tile_side_in_meters;
+        y_dim = 1.5 * tile_side_in_meters;
+        entity.collision_volume = .fromMinMax(
+            .new(-x_dim, -y_dim, -0.2 * world_mode.typical_floor_height),
+            .new(x_dim, y_dim, 0.5 * world_mode.typical_floor_height),
+        );
+        endEntity(world_mode, entity, stair_positions[0]);
+    }
 
     const room_position = chunkPositionFromTilePosition(
         world_mode.world,

@@ -295,6 +295,14 @@ fn Vector4Type(comptime ScalarType: type) type {
             return self.values[3];
         }
 
+        pub inline fn xy(self: *const Self) Vector2 {
+            return Vector2.new(self.x(), self.y());
+        }
+
+        pub inline fn yz(self: *const Self) Vector2 {
+            return Vector2.new(self.y(), self.z());
+        }
+
         pub inline fn xyz(self: *const Self) Vector3 {
             return Vector3.new(self.x(), self.y(), self.z());
         }
@@ -1406,4 +1414,8 @@ pub inline fn linear1ToSRGB255(color: Color) Color {
         255.0 * @sqrt(color.b()),
         255.0 * color.a(),
     );
+}
+
+pub inline fn isInRange(min: f32, value: f32, max: f32) bool {
+    return min <= value and value <= max;
 }
