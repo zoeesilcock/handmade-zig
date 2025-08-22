@@ -72,9 +72,11 @@ fn addExecutable(
 
     const exe = b.addExecutable(.{
         .name = "handmade-zig",
-        .root_source_file = b.path("src/win32_handmade.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/win32_handmade.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     exe.root_module.addOptions("build_options", build_options);
     exe.root_module.addImport("file_formats", file_formats_module);
@@ -113,21 +115,27 @@ fn addLibrary(
         .root_source_file = b.path("src/file_formats.zig"),
     });
 
-    const lib_handmade = b.addSharedLibrary(.{
+    const lib_handmade = b.addLibrary(.{
         .name = "handmade",
-        .root_source_file = b.path("src/handmade.zig"),
-        .target = target,
-        .optimize = optimize,
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/handmade.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
     lib_handmade.root_module.addOptions("build_options", build_options);
     lib_handmade.root_module.addImport("file_formats", file_formats_module);
 
-    const lib_check = b.addSharedLibrary(.{
+    const lib_check = b.addLibrary(.{
         .name = "handmade",
-        .root_source_file = b.path("src/handmade.zig"),
-        .target = target,
-        .optimize = optimize,
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/handmade.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
     lib_check.root_module.addOptions("build_options", build_options);
@@ -167,9 +175,11 @@ fn addAssetBuilder(
 
     const asset_builder_exe = b.addExecutable(.{
         .name = "test-asset-builder",
-        .root_source_file = b.path("tools/test_asset_builder.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/test_asset_builder.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     asset_builder_exe.root_module.addOptions("build_options", build_options);
     asset_builder_exe.root_module.addImport("shared", shared_module);
@@ -180,7 +190,7 @@ fn addAssetBuilder(
     asset_builder_exe.addIncludePath(stb_dep.path(""));
     asset_builder_exe.addCSourceFiles(.{ .files = &[_][]const u8{"tools/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
 
-    const zigwin32 = b.dependency("zigwin32", .{}).module("zigwin32");
+    const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     asset_builder_exe.root_module.addImport("win32", zigwin32);
 
     b.installArtifact(asset_builder_exe);
@@ -200,9 +210,11 @@ fn addSimplePreprocessor(
 ) void {
     const simple_preprocessor_exe = b.addExecutable(.{
         .name = "simple-preprocessor",
-        .root_source_file = b.path("tools/simple_preprocessor.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/simple_preprocessor.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     simple_preprocessor_exe.root_module.addOptions("build_options", build_options);
 
@@ -226,9 +238,11 @@ fn addSimpleCompressor(
 ) void {
     const simple_compressor_exe = b.addExecutable(.{
         .name = "simple-compressor",
-        .root_source_file = b.path("tools/simple_compressor.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/simple_compressor.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     simple_compressor_exe.root_module.addOptions("build_options", build_options);
 

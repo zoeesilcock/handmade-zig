@@ -12,17 +12,13 @@ const ONE_PAST_MAX_FONT_CODE_POINT: u33 = 0x10FFFF + 1;
 const MAX_FONT_WIDTH: u32 = 1024;
 const MAX_FONT_HEIGHT: u32 = 1024;
 
-var global_font_device_context: ?win32.CreatedHDC = null;
+var global_font_device_context: ?win32.graphics.gdi.CreatedHDC = null;
 var opt_global_bits: ?*anyopaque = null;
 
 const c = @cImport({
     @cInclude("stb_truetype.h");
 });
-
-const win32 = struct {
-    usingnamespace @import("win32").graphics.gdi;
-    usingnamespace @import("win32").foundation;
-};
+const win32 = @import("win32");
 
 // Types.
 const AssetTypeId = file_formats.AssetTypeId;
@@ -112,7 +108,7 @@ fn loadBMP(
 
         result = LoadedBitmap{
             .free = @constCast(read_result.contents),
-            .memory = @as([*]void, @ptrCast(@constCast(read_result.contents))) + header.bitmap_offset,
+            .memory = @ptrFromInt(@intFromPtr(read_result.contents.ptr) + header.bitmap_offset),
             .width = header.width,
             .height = header.height,
         };
@@ -170,8 +166,8 @@ fn loadBMP(
 }
 
 const LoadedFont = struct {
-    win32_handle: win32.HFONT = undefined,
-    text_metrics: win32.TEXTMETRICW = undefined,
+    win32_handle: win32.graphics.gdi.HFONT = undefined,
+    text_metrics: win32.graphics.gdi.TEXTMETRICW = undefined,
 
     glyphs: []HHAFontGlyph,
     horizontal_advance: []f32,
@@ -187,33 +183,40 @@ const LoadedFont = struct {
 };
 
 fn initializeFontDC() void {
-    global_font_device_context = win32.CreateCompatibleDC(win32.GetDC(null));
+    global_font_device_context = win32.graphics.gdi.CreateCompatibleDC(win32.graphics.gdi.GetDC(null));
 
-    const info = win32.BITMAPINFO{ .bmiHeader = .{
-        .biSize = @sizeOf(win32.BITMAPINFOHEADER),
+    const info = win32.graphics.gdi.BITMAPINFO{ .bmiHeader = .{
+        .biSize = @sizeOf(win32.graphics.gdi.BITMAPINFOHEADER),
         .biWidth = MAX_FONT_WIDTH,
         .biHeight = MAX_FONT_HEIGHT,
         .biPlanes = 1,
         .biBitCount = 32,
-        .biCompression = win32.BI_RGB,
+        .biCompression = win32.graphics.gdi.BI_RGB,
         .biSizeImage = 0,
         .biXPelsPerMeter = 0,
         .biYPelsPerMeter = 0,
         .biClrUsed = 0,
         .biClrImportant = 0,
     }, .bmiColors = .{
-        win32.RGBQUAD{
+        win32.graphics.gdi.RGBQUAD{
             .rgbBlue = 0,
             .rgbGreen = 0,
             .rgbRed = 0,
             .rgbReserved = 0,
         },
     } };
-    const bitmap = win32.CreateDIBSection(global_font_device_context, &info, win32.DIB_RGB_COLORS, &opt_global_bits, null, 0);
+    const bitmap = win32.graphics.gdi.CreateDIBSection(
+        global_font_device_context,
+        &info,
+        win32.graphics.gdi.DIB_RGB_COLORS,
+        &opt_global_bits,
+        null,
+        0,
+    );
 
-    // const bitmap = win32.CreateCompatibleBitmap(global_font_device_context, 1024, 1024);
-    _ = win32.SelectObject(global_font_device_context, bitmap);
-    _ = win32.SetBkColor(global_font_device_context, 0x000000);
+    // const bitmap = win32.foundation.CreateCompatibleBitmap(global_font_device_context, 1024, 1024);
+    _ = win32.graphics.gdi.SelectObject(global_font_device_context, bitmap);
+    _ = win32.graphics.gdi.SetBkColor(global_font_device_context, 0x000000);
 }
 
 fn loadFont(
@@ -224,26 +227,26 @@ fn loadFont(
 ) *LoadedFont {
     var font: *LoadedFont = allocator.create(LoadedFont) catch unreachable;
 
-    _ = win32.AddFontResourceExA(@ptrCast(file_name), .PRIVATE, null);
-    font.win32_handle = win32.CreateFontA(
+    _ = win32.graphics.gdi.AddFontResourceExA(@ptrCast(file_name), .PRIVATE, null);
+    font.win32_handle = win32.graphics.gdi.CreateFontA(
         pixel_height,
         0,
         0,
         0,
-        win32.FW_NORMAL,
+        win32.graphics.gdi.FW_NORMAL,
         0,
         0,
         0,
-        win32.DEFAULT_CHARSET,
+        win32.graphics.gdi.DEFAULT_CHARSET,
         .DEFAULT_PRECIS,
-        win32.CLIP_DEFAULT_PRECIS,
+        win32.graphics.gdi.CLIP_DEFAULT_PRECIS,
         .ANTIALIASED_QUALITY,
-        win32.FF_DONTCARE,
+        win32.graphics.gdi.FF_DONTCARE,
         @ptrCast(font_name),
     ).?;
 
-    _ = win32.SelectObject(global_font_device_context, font.win32_handle);
-    _ = win32.GetTextMetricsW(global_font_device_context, &font.text_metrics);
+    _ = win32.graphics.gdi.SelectObject(global_font_device_context, font.win32_handle);
+    _ = win32.graphics.gdi.GetTextMetricsW(global_font_device_context, &font.text_metrics);
 
     font.min_code_point = std.math.maxInt(u32);
     font.max_code_point = 0;
@@ -270,12 +273,12 @@ fn loadFont(
 }
 
 fn finalizeFontKerning(allocator: std.mem.Allocator, font: *LoadedFont) void {
-    _ = win32.SelectObject(global_font_device_context, font.win32_handle);
+    _ = win32.graphics.gdi.SelectObject(global_font_device_context, font.win32_handle);
 
-    const kerning_pair_count = win32.GetKerningPairsW(global_font_device_context, 0, null);
-    const kerning_pairs = allocator.alloc(win32.KERNINGPAIR, kerning_pair_count) catch unreachable;
+    const kerning_pair_count = win32.graphics.gdi.GetKerningPairsW(global_font_device_context, 0, null);
+    const kerning_pairs = allocator.alloc(win32.graphics.gdi.KERNINGPAIR, kerning_pair_count) catch unreachable;
     defer allocator.free(kerning_pairs);
-    _ = win32.GetKerningPairsW(global_font_device_context, kerning_pair_count, kerning_pairs.ptr);
+    _ = win32.graphics.gdi.GetKerningPairsW(global_font_device_context, kerning_pair_count, kerning_pairs.ptr);
 
     var kerning_pair_index: u32 = 0;
     while (kerning_pair_index < kerning_pair_count) : (kerning_pair_index += 1) {
@@ -293,7 +296,7 @@ fn finalizeFontKerning(allocator: std.mem.Allocator, font: *LoadedFont) void {
 }
 
 fn freeFont(allocator: std.mem.Allocator, font: *LoadedFont) void {
-    _ = win32.DeleteObject(font.win32_handle);
+    _ = win32.graphics.gdi.DeleteObject(font.win32_handle);
     allocator.free(font.glyphs);
     allocator.free(font.horizontal_advance);
     allocator.free(font.glyph_index_from_code_point);
@@ -310,7 +313,7 @@ fn loadGlyphBMP(
     const glyph_index: u32 = font.glyph_index_from_code_point[code_point];
 
     if (USE_FONTS_FROM_WINDOWS) {
-        _ = win32.SelectObject(global_font_device_context, font.win32_handle);
+        _ = win32.graphics.gdi.SelectObject(global_font_device_context, font.win32_handle);
 
         if (opt_global_bits) |bits| {
             // Clear bits to black.
@@ -320,8 +323,8 @@ fn loadGlyphBMP(
 
         const cheese_point: []const u16 = &[_]u16{@intCast(code_point)};
 
-        var size: win32.SIZE = undefined;
-        _ = win32.GetTextExtentPoint32W(global_font_device_context, @ptrCast(cheese_point), 1, &size);
+        var size: win32.foundation.SIZE = undefined;
+        _ = win32.graphics.gdi.GetTextExtentPoint32W(global_font_device_context, @ptrCast(cheese_point), 1, &size);
 
         const pre_step_x: i32 = 128;
 
@@ -334,10 +337,10 @@ fn loadGlyphBMP(
             bound_height = MAX_FONT_HEIGHT;
         }
 
-        // _ = win32.PatBlt(global_font_device_context, 0, 0, width, height, win32.BLACKNESS);
-        // _ = win32.SetBkMode(global_font_device_context, .TRANSPARENT);
-        _ = win32.SetTextColor(global_font_device_context, 0xffffff);
-        _ = win32.TextOutW(global_font_device_context, pre_step_x, 0, @ptrCast(cheese_point), 1);
+        // _ = win32.foundation.PatBlt(global_font_device_context, 0, 0, width, height, win32.foundation.BLACKNESS);
+        // _ = win32.foundation.SetBkMode(global_font_device_context, .TRANSPARENT);
+        _ = win32.graphics.gdi.SetTextColor(global_font_device_context, 0xffffff);
+        _ = win32.graphics.gdi.TextOutW(global_font_device_context, pre_step_x, 0, @ptrCast(cheese_point), 1);
 
         var min_x: i32 = 10000;
         var min_y: i32 = 10000;
@@ -352,7 +355,7 @@ fn loadGlyphBMP(
                     var pixel = row;
                     var x: i32 = 0;
                     while (x < bound_width) : (x += 1) {
-                        // const ref_pixel = win32.GetPixel(global_font_device_context, x, y);
+                        // const ref_pixel = win32.foundation.GetPixel(global_font_device_context, x, y);
                         // std.debug.assert(pixel[0] == ref_pixel);
 
                         if (pixel[0] != 0) {
@@ -403,7 +406,7 @@ fn loadGlyphBMP(
 
                     var x: i32 = min_x;
                     while (x <= max_x) : (x += 1) {
-                        // const pixel = win32.GetPixel(global_font_device_context, @intCast(x), @intCast(y));
+                        // const pixel = win32.foundation.GetPixel(global_font_device_context, @intCast(x), @intCast(y));
                         // std.debug.assert(pixel == source[0]);
 
                         const gray: f32 = @as(f32, @floatFromInt(source[0] & 0xff));
@@ -432,12 +435,12 @@ fn loadGlyphBMP(
 
             var char_advance: f32 = 0;
             if (false) {
-                var this_abc: win32.ABC = undefined;
-                _ = win32.GetCharABCWidthsW(global_font_device_context, code_point, code_point, &this_abc);
+                var this_abc: win32.foundation.ABC = undefined;
+                _ = win32.graphics.gdi.GetCharABCWidthsW(global_font_device_context, code_point, code_point, &this_abc);
                 char_advance = @floatFromInt(this_abc.abcA + @as(i32, @intCast(this_abc.abcB)) + this_abc.abcC);
             } else {
                 var this_width: i32 = undefined;
-                _ = win32.GetCharWidth32W(global_font_device_context, code_point, code_point, &this_width);
+                _ = win32.graphics.gdi.GetCharWidth32W(global_font_device_context, code_point, code_point, &this_width);
                 char_advance = @floatFromInt(this_width);
             }
 

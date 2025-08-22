@@ -131,7 +131,6 @@ const debug_color_table = shared.debug_color_table;
 var global_config = &@import("config.zig").global_config;
 
 // TODO: How do we avoid having this import here?
-const WINAPI = @import("std").os.windows.WINAPI;
 fn glDebugProc(
     source: u32,
     message_type: u32,
@@ -140,7 +139,7 @@ fn glDebugProc(
     length: i32,
     message: [*]const u8,
     user_param: ?*const anyopaque,
-) callconv(WINAPI) void {
+) callconv(.winapi) void {
     _ = message_type;
     _ = id;
     _ = source;
@@ -156,10 +155,8 @@ fn glDebugProc(
     }
 }
 
-pub const gl = struct {
-    // TODO: How do we import OpenGL on other platforms here?
-    usingnamespace @import("win32").graphics.open_gl;
-};
+// TODO: How do we import OpenGL on other platforms here?
+pub const gl = @import("win32").graphics.open_gl;
 
 const OpenGL = struct {
     max_multi_sample_count: i32 = 0,
@@ -473,7 +470,7 @@ pub fn renderCommands(
     draw_region: Rectangle2i,
     window_width: i32,
     window_height: i32,
-) callconv(.C) void {
+) callconv(.c) void {
     gl.glDepthMask(gl.GL_TRUE);
     gl.glColorMask(gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE);
     gl.glDepthFunc(gl.GL_LEQUAL);
@@ -795,7 +792,7 @@ pub fn manageTextures(first_op: ?*TextureOp) void {
     }
 }
 
-fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.C) u32 {
+fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.c) u32 {
     var handle: u32 = 0;
 
     gl.glGenTextures(1, &handle);

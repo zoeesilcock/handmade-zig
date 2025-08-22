@@ -720,7 +720,7 @@ pub const DebugReadFileResult = extern struct {
 };
 
 pub const PlatformWorkQueuePtr = *anyopaque;
-pub const PlatformWorkQueueCallback = *const fn (queue: PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void;
+pub const PlatformWorkQueueCallback = *const fn (queue: PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void;
 
 pub const WorkQueueEntry = extern struct {
     callback: PlatformWorkQueueCallback = undefined,
@@ -788,27 +788,27 @@ pub const DebugPlatformMemoryStats = extern struct {
     total_used: MemoryIndex = 0,
 };
 
-const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.C) void;
-const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.C) void;
+const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.c) void;
+const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.c) void;
 
-const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.C) PlatformFileGroup;
-const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.C) void;
-const openNextFileType: type = fn (file_group: *PlatformFileGroup) callconv(.C) PlatformFileHandle;
-const readDataFromFileType: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void;
-const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.C) bool;
-const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.C) void;
+const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.c) PlatformFileGroup;
+const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.c) void;
+const openNextFileType: type = fn (file_group: *PlatformFileGroup) callconv(.c) PlatformFileHandle;
+const readDataFromFileType: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
+const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) bool;
+const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.c) void;
 
-const allocateMemoryType: type = fn (size: MemoryIndex, flags: u64) callconv(.C) ?*PlatformMemoryBlock;
-const deallocateMemoryType: type = fn (memory: ?*PlatformMemoryBlock) callconv(.C) void;
+const allocateMemoryType: type = fn (size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBlock;
+const deallocateMemoryType: type = fn (memory: ?*PlatformMemoryBlock) callconv(.c) void;
 
-const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.C) void;
-const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.C) bool;
-const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.C) DebugReadFileResult;
-const debugExecuteSystemCommandType: type = fn (path: [*:0]const u8, command: [*:0]const u8, command_line: [*:0]const u8) callconv(.C) DebugExecutingProcess;
-const debugGetProcessStateType: type = fn (process: DebugExecutingProcess) callconv(.C) DebugExecutingProcessState;
-const debugGetMemoryStatsType = fn () callconv(.C) DebugPlatformMemoryStats;
+const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.c) void;
+const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.c) bool;
+const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.c) DebugReadFileResult;
+const debugExecuteSystemCommandType: type = fn (path: [*:0]const u8, command: [*:0]const u8, command_line: [*:0]const u8) callconv(.c) DebugExecutingProcess;
+const debugGetProcessStateType: type = fn (process: DebugExecutingProcess) callconv(.c) DebugExecutingProcessState;
+const debugGetMemoryStatsType = fn () callconv(.c) DebugPlatformMemoryStats;
 
-pub fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.C) bool {
+pub fn defaultNoFileErrors(file_handle: *PlatformFileHandle) callconv(.c) bool {
     return file_handle.no_errors;
 }
 
@@ -850,15 +850,15 @@ pub const Platform = if (INTERNAL) extern struct {
 pub var platform: Platform = undefined;
 
 // Data from platform.
-pub fn updateAndRenderStub(_: Platform, _: *Memory, _: *GameInput, _: *RenderCommands) callconv(.C) void {
+pub fn updateAndRenderStub(_: Platform, _: *Memory, _: *GameInput, _: *RenderCommands) callconv(.c) void {
     return;
 }
 
-pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.C) void {
+pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.c) void {
     return;
 }
 
-pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *RenderCommands) callconv(.C) void {
+pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *RenderCommands) callconv(.c) void {
     return undefined;
 }
 

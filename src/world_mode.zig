@@ -441,7 +441,7 @@ fn endSim(
     arena.endTemporaryMemory(world_sim.sim_memory);
 }
 
-pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void {
+pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
     _ = queue;
 
     TimedBlock.beginFunction(@src(), .DoWorldSim);

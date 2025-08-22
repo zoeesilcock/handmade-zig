@@ -178,7 +178,7 @@ pub fn softwareRenderCommands(
     platform.platform.completeAllQueuedWork(render_queue);
 }
 
-pub fn doTileRenderWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void {
+pub fn doTileRenderWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
     _ = queue;
 
     TimedBlock.beginFunction(@src(), .DoTiledRenderWork);

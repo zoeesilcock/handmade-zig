@@ -61,33 +61,10 @@ const TicketMutex = shared.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const LoadedBitmap = asset.LoadedBitmap;
-const WINAPI = @import("std").os.windows.WINAPI;
 
 const std = @import("std");
 const math = @import("math.zig");
-const win32 = struct {
-    usingnamespace @import("win32").foundation;
-    usingnamespace @import("win32").graphics.gdi;
-    usingnamespace @import("win32").graphics.open_gl;
-    usingnamespace @import("win32").media;
-    usingnamespace @import("win32").media.audio;
-    usingnamespace @import("win32").media.audio.direct_sound;
-    usingnamespace @import("win32").storage.file_system;
-    usingnamespace @import("win32").system.com;
-    usingnamespace @import("win32").system.environment;
-    usingnamespace @import("win32").system.io;
-    usingnamespace @import("win32").system.diagnostics.debug;
-    usingnamespace @import("win32").system.library_loader;
-    usingnamespace @import("win32").system.memory;
-    usingnamespace @import("win32").system.performance;
-    usingnamespace @import("win32").system.threading;
-    usingnamespace @import("win32").ui.input;
-    usingnamespace @import("win32").ui.input.keyboard_and_mouse;
-    usingnamespace @import("win32").ui.input.xbox_controller;
-    usingnamespace @import("win32").ui.shell;
-    usingnamespace @import("win32").ui.windows_and_messaging;
-    usingnamespace @import("win32").zig;
-};
+const win32 = @import("win32").everything;
 
 const gl = @cImport({
     @cInclude("GL/glcorearb.h");
@@ -101,17 +78,17 @@ pub extern "gdi32" fn DescribePixelFormat(
     iPixelFormat: c_int, // The field that is wrong in zigwin32.
     nBytes: u32,
     ppfd: ?*win32.PIXELFORMATDESCRIPTOR,
-) callconv(WINAPI) i32;
+) callconv(.winapi) i32;
 
 // OpenGL
-const WglSwapIntervalEXT: type = fn (interval: i32) callconv(WINAPI) bool;
+const WglSwapIntervalEXT: type = fn (interval: i32) callconv(.winapi) bool;
 var optWglSwapIntervalEXT: ?*const WglSwapIntervalEXT = null;
 
 const WglCreateContextAttribsARB: type = fn (
     hdc: win32.HDC,
     share_context: ?win32.HGLRC,
     attrib_list: ?[*:0]const c_int,
-) callconv(WINAPI) ?win32.HGLRC;
+) callconv(.winapi) ?win32.HGLRC;
 var optWglCreateContextAttribsARB: ?*const WglCreateContextAttribsARB = null;
 
 const WglChoosePixelFormatARB: type = fn (
@@ -121,86 +98,86 @@ const WglChoosePixelFormatARB: type = fn (
     nMaxFormats: c_uint,
     piFormats: *c_int,
     nNumFormats: *c_uint,
-) callconv(WINAPI) win32.BOOL;
+) callconv(.winapi) win32.BOOL;
 var optWglChoosePixelFormatARB: ?*const WglChoosePixelFormatARB = null;
 
-const WglGetExtensionsStringEXT: type = fn (hdc: win32.HDC) callconv(WINAPI) ?*u8;
+const WglGetExtensionsStringEXT: type = fn (hdc: win32.HDC) callconv(.winapi) ?*u8;
 var optWglGetExtensionsStringEXT: ?*const WglGetExtensionsStringEXT = null;
 
-const GlBindFramebufferEXT: type = fn (target: u32, framebuffer: u32) callconv(WINAPI) void;
+const GlBindFramebufferEXT: type = fn (target: u32, framebuffer: u32) callconv(.winapi) void;
 pub var optGlBindFramebufferEXT: ?*const GlBindFramebufferEXT = null;
-const GlGenFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(WINAPI) void;
+const GlGenFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(.winapi) void;
 pub var optGlGenFramebuffersEXT: ?*const GlGenFramebuffersEXT = null;
-const GlFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textarget: u32, texture: u32, level: i32) callconv(WINAPI) void;
+const GlFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textarget: u32, texture: u32, level: i32) callconv(.winapi) void;
 pub var optGlFrameBufferTexture2DEXT: ?*const GlFrameBufferTexture2DEXT = null;
-const GlCheckFramebufferStatusEXT: type = fn (target: u32) callconv(WINAPI) u32;
+const GlCheckFramebufferStatusEXT: type = fn (target: u32) callconv(.winapi) u32;
 pub var optGlCheckFramebufferStatusEXT: ?*const GlCheckFramebufferStatusEXT = null;
-const GLTextImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(WINAPI) u32;
+const GLTextImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(.winapi) u32;
 pub var optGLTextImage2DMultiSample: ?*const GLTextImage2DMultiSample = null;
-const GLBlitFrameBuffer: type = fn (src_x0: i32, src_y0: i32, src_x1: i32, src_y1: i32, dst_x0: i32, dst_y0: i32, dst_x1: i32, dst_y1: i32, mask: u32, filter: u32) callconv(WINAPI) void;
+const GLBlitFrameBuffer: type = fn (src_x0: i32, src_y0: i32, src_x1: i32, src_y1: i32, dst_x0: i32, dst_y0: i32, dst_x1: i32, dst_y1: i32, mask: u32, filter: u32) callconv(.winapi) void;
 pub var optGLBlitFrameBuffer: ?*const GLBlitFrameBuffer = null;
-const GLCreateShader: type = fn (shader_type: u32) callconv(WINAPI) u32;
+const GLCreateShader: type = fn (shader_type: u32) callconv(.winapi) u32;
 pub var optGLCreateShader: ?*const GLCreateShader = null;
-const GLShaderSource: type = fn (shader: u32, count: i32, string: [*]const [*:0]const u8, length: ?*i32) callconv(WINAPI) void;
+const GLShaderSource: type = fn (shader: u32, count: i32, string: [*]const [*:0]const u8, length: ?*i32) callconv(.winapi) void;
 pub var optGLShaderSource: ?*const GLShaderSource = null;
-const GLCompileShader: type = fn (shader: u32) callconv(WINAPI) void;
+const GLCompileShader: type = fn (shader: u32) callconv(.winapi) void;
 pub var optGLCompileShader: ?*const GLCompileShader = null;
-const GLCreateProgram: type = fn () callconv(WINAPI) u32;
+const GLCreateProgram: type = fn () callconv(.winapi) u32;
 pub var optGLCreateProgram: ?*const GLCreateProgram = null;
-const GLLinkProgram: type = fn (shader: u32) callconv(WINAPI) void;
+const GLLinkProgram: type = fn (shader: u32) callconv(.winapi) void;
 pub var optGLLinkProgram: ?*const GLLinkProgram = null;
-const GLAttachShader: type = fn (program: u32, shader: u32) callconv(WINAPI) void;
+const GLAttachShader: type = fn (program: u32, shader: u32) callconv(.winapi) void;
 pub var optGLAttachShader: ?*const GLAttachShader = null;
-const GLValidateProgram: type = fn (program: u32) callconv(WINAPI) void;
+const GLValidateProgram: type = fn (program: u32) callconv(.winapi) void;
 pub var optGLValidateProgram: ?*const GLValidateProgram = null;
-const GLGetProgramiv: type = fn (program: u32, pname: u32, params: *i32) callconv(WINAPI) void;
+const GLGetProgramiv: type = fn (program: u32, pname: u32, params: *i32) callconv(.winapi) void;
 pub var optGLGetProgramiv: ?*const GLGetProgramiv = null;
-const GLGetShaderInfoLog: type = fn (shader: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(WINAPI) void;
+const GLGetShaderInfoLog: type = fn (shader: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(.winapi) void;
 pub var optGLGetShaderInfoLog: ?*const GLGetShaderInfoLog = null;
-const GLGetProgramInfoLog: type = fn (program: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(WINAPI) void;
+const GLGetProgramInfoLog: type = fn (program: u32, bufSize: i32, length: *i32, infoLog: [*]u8) callconv(.winapi) void;
 pub var optGLGetProgramInfoLog: ?*const GLGetProgramInfoLog = null;
-const GLUseProgram: type = fn (program: u32) callconv(WINAPI) void;
+const GLUseProgram: type = fn (program: u32) callconv(.winapi) void;
 pub var optGLUseProgram: ?*const GLUseProgram = null;
-const GLUniformMatrix4fv: type = fn (location: i32, count: i32, transpose: bool, value: *const f32) callconv(WINAPI) void;
+const GLUniformMatrix4fv: type = fn (location: i32, count: i32, transpose: bool, value: *const f32) callconv(.winapi) void;
 pub var optGLUniformMatrix4fv: ?*const GLUniformMatrix4fv = null;
-const GLUniform1f: type = fn (location: i32, value: f32) callconv(WINAPI) void;
+const GLUniform1f: type = fn (location: i32, value: f32) callconv(.winapi) void;
 pub var optGLUniform1f: ?*const GLUniform1f = null;
-const GLUniform2fv: type = fn (location: i32, count: i32, value: *const f32) callconv(WINAPI) void;
+const GLUniform2fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
 pub var optGLUniform2fv: ?*const GLUniform2fv = null;
-const GLUniform3fv: type = fn (location: i32, count: i32, value: *const f32) callconv(WINAPI) void;
+const GLUniform3fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
 pub var optGLUniform3fv: ?*const GLUniform3fv = null;
-const GLUniform4fv: type = fn (location: i32, count: i32, value: *const f32) callconv(WINAPI) void;
+const GLUniform4fv: type = fn (location: i32, count: i32, value: *const f32) callconv(.winapi) void;
 pub var optGLUniform4fv: ?*const GLUniform4fv = null;
-const GLUniform1i: type = fn (location: i32, value: i32) callconv(WINAPI) void;
+const GLUniform1i: type = fn (location: i32, value: i32) callconv(.winapi) void;
 pub var optGLUniform1i: ?*const GLUniform1i = null;
-const GLGetUniformLocation: type = fn (program: u32, [*]const u8) callconv(WINAPI) i32;
+const GLGetUniformLocation: type = fn (program: u32, [*]const u8) callconv(.winapi) i32;
 pub var optGLGetUniformLocation: ?*const GLGetUniformLocation = null;
-const GLGetAttribLocation: type = fn (program: u32, name: [*]const u8) callconv(WINAPI) i32;
+const GLGetAttribLocation: type = fn (program: u32, name: [*]const u8) callconv(.winapi) i32;
 pub var optGLGetAttribLocation: ?*const GLGetAttribLocation = null;
-const GLEnableVertexAttribArray: type = fn (index: u32) callconv(WINAPI) void;
+const GLEnableVertexAttribArray: type = fn (index: u32) callconv(.winapi) void;
 pub var optGLEnableVertexAttribArray: ?*const GLEnableVertexAttribArray = null;
-const GLDisableVertexAttribArray: type = fn (index: u32) callconv(WINAPI) void;
+const GLDisableVertexAttribArray: type = fn (index: u32) callconv(.winapi) void;
 pub var optGLDisableVertexAttribArray: ?*const GLDisableVertexAttribArray = null;
-const GLVertexAttribPointer: type = fn (index: u32, size: i32, data_type: u32, normalized: bool, stride: isize, pointer: ?*anyopaque) callconv(WINAPI) void;
+const GLVertexAttribPointer: type = fn (index: u32, size: i32, data_type: u32, normalized: bool, stride: isize, pointer: ?*anyopaque) callconv(.winapi) void;
 pub var optGLVertexAttribPointer: ?*const GLVertexAttribPointer = null;
-const GLGenVertexArrays: type = fn (size: i32, arrays: ?*u32) callconv(WINAPI) void;
+const GLGenVertexArrays: type = fn (size: i32, arrays: ?*u32) callconv(.winapi) void;
 pub var optGLGenVertexArrays: ?*const GLGenVertexArrays = null;
-const GLBindVertexArray: type = fn (array: u32) callconv(WINAPI) void;
+const GLBindVertexArray: type = fn (array: u32) callconv(.winapi) void;
 pub var optGLBindVertexArray: ?*const GLBindVertexArray = null;
-const GLDrawArrays: type = fn (mode: u32, first: i32, count: i32) callconv(WINAPI) void;
+const GLDrawArrays: type = fn (mode: u32, first: i32, count: i32) callconv(.winapi) void;
 pub var optGLDrawArrays: ?*const GLDrawArrays = null;
-const GLDebugProcArb = ?*const fn (source: u32, message_type: u32, id: u32, severity: u32, length: i32, message: [*]const u8, user_param: ?*const anyopaque) callconv(WINAPI) void;
-const GLDebugMessageCallbackARB: type = fn (callback: GLDebugProcArb, user_param: ?*const anyopaque) callconv(WINAPI) void;
+const GLDebugProcArb = ?*const fn (source: u32, message_type: u32, id: u32, severity: u32, length: i32, message: [*]const u8, user_param: ?*const anyopaque) callconv(.winapi) void;
+const GLDebugMessageCallbackARB: type = fn (callback: GLDebugProcArb, user_param: ?*const anyopaque) callconv(.winapi) void;
 pub var optGLDebugMessageCallbackARB: ?*const GLDebugMessageCallbackARB = null;
-const GLDebugMessageControlARB: type = fn (source: u32, message_type: u32, severity: u32, count: i32, ids: [*]const i32, enabled: bool) callconv(WINAPI) void;
+const GLDebugMessageControlARB: type = fn (source: u32, message_type: u32, severity: u32, count: i32, ids: [*]const i32, enabled: bool) callconv(.winapi) void;
 pub var optGLDebugMessageControlARB: ?*const GLDebugMessageControlARB = null;
-const GLGetStringi: type = fn (name: u32, index: u32) callconv(WINAPI) ?*u8;
+const GLGetStringi: type = fn (name: u32, index: u32) callconv(.winapi) ?*u8;
 pub var optGLGetStringi: ?*const GLGetStringi = null;
-const GLGenBuffers: type = fn (count: i32, buffers: *u32) callconv(WINAPI) void;
+const GLGenBuffers: type = fn (count: i32, buffers: *u32) callconv(.winapi) void;
 pub var optGLGenBuffers: ?*const GLGenBuffers = null;
-const GLBindBuffer: type = fn (target: u32, buffer: u32) callconv(WINAPI) void;
+const GLBindBuffer: type = fn (target: u32, buffer: u32) callconv(.winapi) void;
 pub var optGLBindBuffer: ?*const GLBindBuffer = null;
-const GLBufferData: type = fn (target: u32, size: isize, data: *anyopaque, usage: u32) callconv(WINAPI) void;
+const GLBufferData: type = fn (target: u32, size: isize, data: *anyopaque, usage: u32) callconv(.winapi) void;
 pub var optGLBufferData: ?*const GLBufferData = null;
 
 //GLAPI void APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage);
@@ -318,7 +295,7 @@ const Win32PlatformFileHandle = extern struct {
     win32_handle: win32.HANDLE,
 };
 
-fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.C) shared.PlatformFileGroup {
+fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shared.PlatformFileGroup {
     var result = shared.PlatformFileGroup{};
     var win32_file_group: *Win32PlatformFileGroup = undefined;
 
@@ -355,14 +332,14 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.C) shar
     return result;
 }
 
-fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.C) void {
+fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.c) void {
     const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
 
     _ = win32.FindClose(win32_file_group.find_handle);
     _ = win32.VirtualFree(win32_file_group, 0, win32.MEM_RELEASE);
 }
 
-fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.C) shared.PlatformFileHandle {
+fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.c) shared.PlatformFileHandle {
     var result = shared.PlatformFileHandle{};
     const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
 
@@ -398,7 +375,7 @@ fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.C) shared.Platf
     return result;
 }
 
-fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.C) void {
+fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void {
     if (shared.defaultNoFileErrors(source)) {
         const handle: *Win32PlatformFileHandle = @ptrCast(@alignCast(source.platform));
 
@@ -435,7 +412,7 @@ fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, 
     }
 }
 
-fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) callconv(.C) void {
+fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) callconv(.c) void {
     if (INTERNAL) {
         win32.OutputDebugStringA("WIN32 FILE ERROR: ");
         win32.OutputDebugStringA(message);
@@ -450,7 +427,7 @@ fn isInLoop() bool {
     return result;
 }
 
-fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.C) ?*PlatformMemoryBlock {
+fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBlock {
     // We require memory block headers not to change the cache line alignment of an allocation.
     std.debug.assert(@sizeOf(MemoryBlock) == 64);
 
@@ -524,7 +501,7 @@ fn freeMemoryBlock(block: *MemoryBlock) void {
     std.debug.assert(result != 0);
 }
 
-fn deallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.C) void {
+fn deallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.c) void {
     if (opt_platform_block) |platform_block| {
         var block: *MemoryBlock = @ptrCast(platform_block);
         if (isInLoop()) {
@@ -536,11 +513,11 @@ fn deallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.C) void
 }
 
 const DebugFunctions = if (INTERNAL) struct {
-    pub fn debugFreeFileMemory(mem: *anyopaque) callconv(.C) void {
+    pub fn debugFreeFileMemory(mem: *anyopaque) callconv(.c) void {
         _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
     }
 
-    pub fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
+    pub fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.c) shared.DebugReadFileResult {
         var result = shared.DebugReadFileResult{};
 
         const file_handle: win32.HANDLE = win32.CreateFileA(
@@ -590,7 +567,7 @@ const DebugFunctions = if (INTERNAL) struct {
         return result;
     }
 
-    pub fn debugWriteEntireFile(file_name: [*:0]const u8, content_size: u32, contents: *anyopaque) callconv(.C) bool {
+    pub fn debugWriteEntireFile(file_name: [*:0]const u8, content_size: u32, contents: *anyopaque) callconv(.c) bool {
         var result: bool = false;
 
         const file_handle: win32.HANDLE = win32.CreateFileA(
@@ -621,7 +598,7 @@ const DebugFunctions = if (INTERNAL) struct {
         path: [*:0]const u8,
         command: [*:0]const u8,
         command_line: [*:0]const u8,
-    ) callconv(.C) shared.DebugExecutingProcess {
+    ) callconv(.c) shared.DebugExecutingProcess {
         var result: shared.DebugExecutingProcess = .{};
         const h_process: *win32.HANDLE = @ptrCast(@alignCast(&result.os_handle));
 
@@ -677,7 +654,7 @@ const DebugFunctions = if (INTERNAL) struct {
         return result;
     }
 
-    pub fn debugGetProcessState(process: shared.DebugExecutingProcess) callconv(.C) shared.DebugExecutingProcessState {
+    pub fn debugGetProcessState(process: shared.DebugExecutingProcess) callconv(.c) shared.DebugExecutingProcessState {
         var result: shared.DebugExecutingProcessState = .{};
         const h_process: *const win32.HANDLE = @ptrCast(&process.os_handle);
 
@@ -696,7 +673,7 @@ const DebugFunctions = if (INTERNAL) struct {
         return result;
     }
 
-    pub fn debugGetMemoryStats() callconv(.C) DebugPlatformMemoryStats {
+    pub fn debugGetMemoryStats() callconv(.c) DebugPlatformMemoryStats {
         global_state.memory_mutex.begin();
         defer global_state.memory_mutex.end();
 
@@ -714,24 +691,24 @@ const DebugFunctions = if (INTERNAL) struct {
         return stats;
     }
 } else struct {
-    pub fn debugFreeFileMemory(_: *anyopaque) callconv(.C) void {}
-    pub fn debugReadEntireFile(_: [*:0]const u8) callconv(.C) shared.DebugReadFileResult {
+    pub fn debugFreeFileMemory(_: *anyopaque) callconv(.c) void {}
+    pub fn debugReadEntireFile(_: [*:0]const u8) callconv(.c) shared.DebugReadFileResult {
         return undefined;
     }
-    pub fn debugWriteEntireFile(_: [*:0]const u8, _: u32, _: *anyopaque) callconv(.C) bool {
+    pub fn debugWriteEntireFile(_: [*:0]const u8, _: u32, _: *anyopaque) callconv(.c) bool {
         return false;
     }
     pub fn debugExecuteSystemCommand(
         _: [*:0]const u8,
         _: [*:0]const u8,
         _: [*:0]const u8,
-    ) callconv(.C) shared.DebugExecutingProcess {
+    ) callconv(.c) shared.DebugExecutingProcess {
         return undefined;
     }
-    pub fn debugGetProcessState(_: shared.DebugExecutingProcess) callconv(.C) shared.DebugExecutingProcessState {
+    pub fn debugGetProcessState(_: shared.DebugExecutingProcess) callconv(.c) shared.DebugExecutingProcessState {
         return undefined;
     }
-    pub fn debugGetMemoryStats() callconv(.C) DebugPlatformMemoryStats {}
+    pub fn debugGetMemoryStats() callconv(.c) DebugPlatformMemoryStats {}
 };
 
 inline fn getLastWriteTime(file_name: [*:0]const u8) win32.FILETIME {
@@ -800,14 +777,14 @@ fn unloadGameCode(game: *Game) void {
     game.debugFrameEnd = null;
 }
 
-fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(WINAPI) isize {
+fn XInputGetStateStub(_: u32, _: ?*win32.XINPUT_STATE) callconv(.winapi) isize {
     return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
-fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(WINAPI) isize {
+fn XInputSetStateStub(_: u32, _: ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize {
     return @intFromEnum(win32.ERROR_DEVICE_NOT_CONNECTED);
 }
-var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(WINAPI) isize = XInputGetStateStub;
-var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(WINAPI) isize = XInputSetStateStub;
+var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(.winapi) isize = XInputGetStateStub;
+var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize = XInputSetStateStub;
 
 fn loadXInput() void {
     const x_input_library = win32.LoadLibraryA("xinput1_4.dll") orelse win32.LoadLibraryA("xinput1_3.dll") orelse win32.LoadLibraryA("xinput9_1_0.dll");
@@ -1417,10 +1394,10 @@ fn setPixelFormat(window_dc: win32.HDC) void {
 fn loadWglExtensions() void {
     const window_class: win32.WNDCLASSW = .{
         .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
-        .lpfnWndProc = win32.DefWindowProc,
+        .lpfnWndProc = win32.DefWindowProcW,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
-        .hInstance = win32.GetModuleHandle(null),
+        .hInstance = win32.GetModuleHandleW(null),
         .hIcon = null,
         .hbrBackground = win32.GetStockObject(win32.BLACK_BRUSH),
         .hCursor = null,
@@ -1718,7 +1695,7 @@ fn windowProcedure(
     message: u32,
     w_param: win32.WPARAM,
     l_param: win32.LPARAM,
-) callconv(WINAPI) win32.LRESULT {
+) callconv(.winapi) win32.LRESULT {
     var result: win32.LRESULT = 0;
 
     switch (message) {
@@ -1758,11 +1735,11 @@ fn windowProcedure(
                 std.log.info("l_param changed", .{});
             }
 
-            result = win32.DefWindowProc(window, message, w_param, mutable_l_param);
+            result = win32.DefWindowProcW(window, message, w_param, mutable_l_param);
         },
         win32.WM_SETCURSOR => {
             if (show_debug_cursor) {
-                result = win32.DefWindowProc(window, message, w_param, l_param);
+                result = win32.DefWindowProcW(window, message, w_param, l_param);
             } else {
                 _ = win32.SetCursor(null);
             }
@@ -1790,7 +1767,7 @@ fn windowProcedure(
             std.debug.assert(false);
         },
         else => {
-            result = win32.DefWindowProc(window, message, w_param, l_param);
+            result = win32.DefWindowProcW(window, message, w_param, l_param);
         },
     }
 
@@ -1798,17 +1775,17 @@ fn windowProcedure(
 }
 
 fn toggleFullscreen(window: win32.HWND) void {
-    const style = win32.GetWindowLong(window, win32.GWL_STYLE);
+    const style = win32.GetWindowLongW(window, win32.GWL_STYLE);
 
     if ((style & @as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW))) != 0) {
         var monitor_info: win32.MONITORINFO = undefined;
         monitor_info.cbSize = @sizeOf(win32.MONITORINFO);
 
         if (win32.GetWindowPlacement(window, &window_placement) != 0 and
-            win32.GetMonitorInfo(win32.MonitorFromWindow(window, win32.MONITOR_DEFAULTTOPRIMARY), &monitor_info) != 0)
+            win32.GetMonitorInfoW(win32.MonitorFromWindow(window, win32.MONITOR_DEFAULTTOPRIMARY), &monitor_info) != 0)
         {
             // Set fullscreen.
-            _ = win32.SetWindowLong(window, win32.GWL_STYLE, style & ~@as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
+            _ = win32.SetWindowLongW(window, win32.GWL_STYLE, style & ~@as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
             _ = win32.SetWindowPos(
                 window,
                 if (INTERNAL or DEBUG) win32.HWND_NOTOPMOST else win32.HWND_TOPMOST,
@@ -1821,7 +1798,7 @@ fn toggleFullscreen(window: win32.HWND) void {
         }
     } else {
         // Set windowed.
-        _ = win32.SetWindowLong(window, win32.GWL_STYLE, style | @as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
+        _ = win32.SetWindowLongW(window, win32.GWL_STYLE, style | @as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
         _ = win32.SetWindowPlacement(window, &window_placement);
         _ = win32.SetWindowPos(
             window,
@@ -2056,7 +2033,7 @@ fn endInputPlayback(state: *Win32State) void {
 
 fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: i32, startups: [*]ThreadStartup) void {
     const initial_count = 0;
-    const opt_semaphore_handle = win32.CreateSemaphoreEx(
+    const opt_semaphore_handle = win32.CreateSemaphoreExA(
         null,
         initial_count,
         thread_count,
@@ -2092,7 +2069,7 @@ pub fn addQueueEntry(
     queue: *shared.PlatformWorkQueue,
     callback: shared.PlatformWorkQueueCallback,
     data: *anyopaque,
-) callconv(.C) void {
+) callconv(.c) void {
     const original_next_entry_to_write = @atomicLoad(u32, &queue.next_entry_to_write, .acquire);
     const original_next_entry_to_read = @atomicLoad(u32, &queue.next_entry_to_read, .acquire);
     const new_next_entry_to_write: u32 = @mod(original_next_entry_to_write + 1, @as(u32, @intCast(queue.entries.len)));
@@ -2107,7 +2084,7 @@ pub fn addQueueEntry(
     _ = win32.ReleaseSemaphore(queue.semaphore_handle, 1, null);
 }
 
-pub fn completeAllQueuedWork(queue: *shared.PlatformWorkQueue) callconv(.C) void {
+pub fn completeAllQueuedWork(queue: *shared.PlatformWorkQueue) callconv(.c) void {
     while (@atomicLoad(u32, &queue.completion_goal, .acquire) != @atomicLoad(u32, &queue.completion_count, .acquire)) {
         _ = doNextWorkQueueEntry(queue);
     }
@@ -2141,7 +2118,7 @@ pub fn doNextWorkQueueEntry(queue: *shared.PlatformWorkQueue) bool {
     return should_wait;
 }
 
-fn threadProc(lp_parameter: ?*anyopaque) callconv(.C) u32 {
+fn threadProc(lp_parameter: ?*anyopaque) callconv(.c) u32 {
     if (lp_parameter) |parameter| {
         const thread: *ThreadStartup = @ptrCast(@alignCast(parameter));
         const queue: *shared.PlatformWorkQueue = thread.queue;

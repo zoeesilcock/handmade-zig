@@ -1166,7 +1166,7 @@ fn addOp(queue: *shared.PlatformTextureOpQueue, source: *const TextureOp) void {
 
 fn doLoadAssetWorkDirectly(
     work: *LoadAssetWork,
-) callconv(.C) void {
+) callconv(.c) void {
     TimedBlock.beginFunction(@src(), .LoadAssetWorkDirectly);
     defer TimedBlock.endFunction(@src(), .LoadAssetWorkDirectly);
 
@@ -1216,7 +1216,7 @@ fn doLoadAssetWorkDirectly(
     work.asset.state = work.final_state;
 }
 
-fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.C) void {
+fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
     _ = queue;
 
     const work: *LoadAssetWork = @ptrCast(@alignCast(data));

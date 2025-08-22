@@ -2321,7 +2321,7 @@ pub fn frameEnd(
     game_memory: *shared.Memory,
     input: shared.GameInput,
     commands: *shared.RenderCommands,
-) callconv(.C) void {
+) callconv(.c) void {
     memory.zeroStruct(DebugEvent, &shared.global_debug_table.edit_event);
 
     shared.global_debug_table.current_event_array_index = if (shared.global_debug_table.current_event_array_index == 0) 1 else 0;
