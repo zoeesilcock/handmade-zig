@@ -1646,7 +1646,8 @@ fn drawDebugElement(
         .MemoryArena, .ArenaOccupancy => {
             if (view.view_type != .ArenaGraph) {
                 view.view_type = .ArenaGraph;
-                view.data = .{ .arena_graph = .{ .block = view.data.inline_block } };
+                const inline_block = view.data.inline_block;
+                view.data = .{ .arena_graph = .{ .block = inline_block } };
             }
 
             const graph: *DebugViewArenaGraph = &view.data.arena_graph;
@@ -1700,7 +1701,8 @@ fn drawDebugElement(
         .ThreadIntervalGraph, .FrameBarGraph, .TopClocksList => {
             if (view.view_type != .ProfileGraph) {
                 view.view_type = .ProfileGraph;
-                view.data = .{ .profile_graph = .{ .guid = null, .block = view.data.inline_block } };
+                const inline_block = view.data.inline_block;
+                view.data = .{ .profile_graph = .{ .guid = null, .block = inline_block } };
             }
 
             const graph: *DebugViewProfileGraph = &view.data.profile_graph;
@@ -2236,11 +2238,11 @@ fn debugStart(
     debug_state.ui_transform = ObjectTransform.defaultFlat();
     debug_state.text_transform = ObjectTransform.defaultFlat();
     debug_state.tooltip_transform = ObjectTransform.defaultFlat();
-    _ = debug_state.backing_transform.offset_position.setZ(0);
-    _ = debug_state.shadow_transform.offset_position.setZ(10);
-    _ = debug_state.ui_transform.offset_position.setZ(20);
-    _ = debug_state.text_transform.offset_position.setZ(30);
-    _ = debug_state.tooltip_transform.offset_position.setZ(40);
+    _ = debug_state.backing_transform.offset_position.setZ(-5000);
+    _ = debug_state.shadow_transform.offset_position.setZ(-4000);
+    _ = debug_state.ui_transform.offset_position.setZ(-3000);
+    _ = debug_state.text_transform.offset_position.setZ(-2000);
+    _ = debug_state.tooltip_transform.offset_position.setZ(-1000);
 
     debug_state.default_clip_rect = debug_state.render_group.last_setup.clip_rect;
     debug_state.tooltip_count = 0;
