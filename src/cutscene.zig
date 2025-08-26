@@ -75,6 +75,20 @@ const intro_cutscene: []const LayeredScene = &.{
         .layers = &.{},
     },
     LayeredScene{
+        .shot_index = 4,
+        .duration = 20,
+        .asset_type = .OpeningCutscene,
+        .camera_start = Vector3.new(0, 0, 0),
+        .camera_end = Vector3.new(0, 0, -0.5),
+        .layers = &.{
+            SceneLayer{ .position = Vector3.new(0, 0, -4.1), .height = 6 }, // Background.
+            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0, 0.5), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 1.
+            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 2.
+            SceneLayer{ .position = Vector3.new(2.25, -1.5, -3), .height = 2 }, // Foreground 1.
+            SceneLayer{ .position = Vector3.new(0, 0.35, -1), .height = 1 }, // Tinsel.
+        },
+    },
+    LayeredScene{
         .shot_index = 1,
         .asset_type = .OpeningCutscene,
         .duration = 20,
@@ -115,20 +129,6 @@ const intro_cutscene: []const LayeredScene = &.{
             SceneLayer{ .position = Vector3.new(0, 0, -20), .height = 45, .flags = @intFromEnum(SceneLayerFlags.CounterCameraY) }, // Trees.
             SceneLayer{ .position = Vector3.new(0, -2, -4), .height = 15, .flags = @intFromEnum(SceneLayerFlags.CounterCameraY) }, // Window.
             SceneLayer{ .position = Vector3.new(0, 0.35, -0.5), .height = 1 }, // Hero.
-        },
-    },
-    LayeredScene{
-        .shot_index = 4,
-        .duration = 20,
-        .asset_type = .OpeningCutscene,
-        .camera_start = Vector3.new(0, 0, 0),
-        .camera_end = Vector3.new(0, 0, -0.5),
-        .layers = &.{
-            SceneLayer{ .position = Vector3.new(0, 0, -4.1), .height = 6 }, // Background.
-            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0, 0.5), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 1.
-            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 2.
-            SceneLayer{ .position = Vector3.new(2.25, -1.5, -3), .height = 2 }, // Foreground 1.
-            SceneLayer{ .position = Vector3.new(0, 0.35, -1), .height = 1 }, // Tinsel.
         },
     },
     LayeredScene{
@@ -235,7 +235,7 @@ const intro_cutscene: []const LayeredScene = &.{
     },
 };
 
-const cutscenes = [_]Cutscene {
+const cutscenes = [_]Cutscene{
     Cutscene{ .scene_count = intro_cutscene.len, .scenes = @ptrCast(intro_cutscene) },
 };
 
@@ -361,7 +361,9 @@ fn renderLayeredScene(
     scene: *const LayeredScene,
     normal_time: f32,
 ) void {
-    const camera: CameraParams = .get(draw_buffer.width, 0.25);
+    _ = draw_buffer;
+
+    const focal_length: f32 = 0.78;
     const camera_offset: Vector3 = scene.camera_start.lerp(scene.camera_end, normal_time);
     var scene_fade_value: f32 = 1;
 
@@ -371,7 +373,17 @@ fn renderLayeredScene(
     const color = Color.new(scene_fade_value, scene_fade_value, scene_fade_value, 1);
 
     if (opt_render_group) |render_group| {
-        render_group.setCameraTransformToIdentity(camera.focal_length, 0);
+        render_group.setCameraTransform(
+            focal_length,
+            .new(1, 0, 0),
+            .new(0, 1, 0),
+            .new(0, 0, 1),
+            .zero(),
+            0,
+            -0.1,
+            1000,
+            null,
+        );
 
         if (scene.layers.len == 0) {
             render_group.pushClear(Color.new(0, 0, 0, 0));
@@ -388,7 +400,6 @@ fn renderLayeredScene(
     while (layer_index <= scene.layers.len) : (layer_index += 1) {
         const layer: SceneLayer = scene.layers[layer_index - 1];
         var active = true;
-        var position: Vector3 = layer.position;
 
         if (layer.flags & @intFromEnum(SceneLayerFlags.Transient) != 0) {
             active = normal_time >= layer.params.x() and normal_time < layer.params.y();
@@ -400,6 +411,7 @@ fn renderLayeredScene(
 
             if (opt_render_group) |render_group| {
                 var transform = ObjectTransform.defaultFlat();
+                var position: Vector3 = layer.position;
 
                 if (layer.flags & @intFromEnum(SceneLayerFlags.AtInfinity) != 0) {
                     _ = position.setZ(position.z() + camera_offset.z());

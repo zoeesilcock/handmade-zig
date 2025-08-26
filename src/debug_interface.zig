@@ -147,12 +147,12 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     ) *DebugEvent {
         const event_array_index_event_index =
             @atomicRmw(
-            u64,
-            &shared.global_debug_table.event_array_index_event_index,
-            .Add,
-            shared.global_debug_table.record_increment,
-            .seq_cst,
-        );
+                u64,
+                &shared.global_debug_table.event_array_index_event_index,
+                .Add,
+                shared.global_debug_table.record_increment,
+                .seq_cst,
+            );
         const array_index = event_array_index_event_index >> 32;
         const event_index = event_array_index_event_index & 0xffffffff;
         std.debug.assert(event_index < shared.global_debug_table.events[0].len);
@@ -308,7 +308,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
 
 pub const TimedBlock = if (INTERNAL) struct {
     pub fn beginBlock(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        begin(DebugEvent.debugName(source, counter, @tagName(counter)), source.fn_name);
+        begin(DebugEvent.debugName(source, counter, @tagName(counter)), @tagName(counter));
     }
 
     pub fn endBlock(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
@@ -336,7 +336,11 @@ pub const TimedBlock = if (INTERNAL) struct {
         comptime counter: @TypeOf(.EnumLiteral),
         seconds_elapsed: f32,
     ) void {
-        var event = DebugEvent.record(.FrameMarker, DebugEvent.debugName(source, counter, "Frame Marker"), "Frame Marker",);
+        var event = DebugEvent.record(
+            .FrameMarker,
+            DebugEvent.debugName(source, counter, "Frame Marker"),
+            "Frame Marker",
+        );
         event.data = .{ .f32 = seconds_elapsed };
     }
 

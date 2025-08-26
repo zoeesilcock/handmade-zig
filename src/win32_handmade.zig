@@ -755,6 +755,9 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
 
         result.is_valid =
             result.updateAndRender != null and result.getSoundSamples != null and result.debugFrameEnd != null;
+    } else {
+        outputLastError("LoadLibraryA error");
+        @panic("Failed to load game library.");
     }
 
     if (!result.is_valid) {
@@ -1652,8 +1655,11 @@ fn displayBufferInWindow(
     window_width: i32,
     window_height: i32,
 ) void {
-    const temporary_memory = temp_arena.beginTemporaryMemory();
-    defer temp_arena.endTemporaryMemory(temporary_memory);
+    var temporary_memory: memory.TemporaryMemory = undefined;
+    if (DEBUG) {
+        // TODO: Unclear why this has to be avoided in release mode.
+        temporary_memory = temp_arena.beginTemporaryMemory();
+    }
 
     // TODO: Do we want to check for resources like before?
     // if (render_group.allResourcesPresent()) {
@@ -1687,6 +1693,10 @@ fn displayBufferInWindow(
         TimedBlock.beginBlock(@src(), .SwapBuffers);
         _ = win32.SwapBuffers(device_context.?);
         TimedBlock.endBlock(@src(), .SwapBuffers);
+    }
+
+    if (DEBUG) {
+        temp_arena.endTemporaryMemory(temporary_memory);
     }
 }
 

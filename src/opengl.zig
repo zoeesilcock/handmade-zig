@@ -735,7 +735,7 @@ pub fn renderCommands(
                 while (vertex_index < (entry.vertex_array_offset + 4 * entry.quad_count)) : (vertex_index += 4) {
                     const opt_bitmap: ?*LoadedBitmap = commands.quad_bitmaps[vertex_index >> 2];
 
-                    // TODO: This assertion shouldn't fire, but it does.
+                    // TODO: This assertion shouldn't fire, but it does. The issue originates in debug_ui.textOp.
                     // std.debug.assert(opt_bitmap != null);
 
                     if (opt_bitmap) |bitmap| {

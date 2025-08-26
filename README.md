@@ -2,6 +2,13 @@
 
 Learning Zig by following along with the [Handmade Hero](https://handmadehero.org/) series of videos by Casey Muratori. This implementation follows Casey's approach as closely as Zig allows with some minor departures when I want to explore some specific Zig feature (like using `@Vector` to get SIMD vector math for example).
 
+## Running
+Since the executable looks for the library in the same directory as the executable the regular `zig build run` approach doesn't work. The easiest solution is to build it first and then launch the built executable (so that it can find the library) with the correct working directory (so that it can find the assets).
+
+PowerShell:
+```
+zig build ; Start-Process -NoNewWindow -FilePath ./zig-out/bin/handmade-zig.exe -WorkingDirectory ./data
+```
 
 ## Assets
 Graphical assets are not included as they are not created by me. They need to be added to the `data/` directory manually. We currently expect the assets found in this location of the pre-order data: `handmade_hero_legacy_art.zip/v0_hhas`.

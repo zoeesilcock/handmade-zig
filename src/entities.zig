@@ -383,6 +383,8 @@ pub fn updateAndRenderEntities(
         const entity = &sim_region.entities[entity_index];
 
         if (entity.hasFlag(EntityFlags.Active.toInt())) {
+            TimedBlock.beginBlock(@src(), .EntityBoost);
+
             if (entity.auto_boost_to.getTraversable() != null) {
                 var traversable_index: u32 = 0;
                 while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
@@ -398,6 +400,10 @@ pub fn updateAndRenderEntities(
                     }
                 }
             }
+
+            TimedBlock.endBlock(@src(), .EntityBoost);
+
+            TimedBlock.beginBlock(@src(), .EntityPhysics);
 
             switch (entity.movement_mode) {
                 .Planted => {},
@@ -482,6 +488,9 @@ pub fn updateAndRenderEntities(
                 sim.moveEntity(sim_region, entity, delta_time, entity.acceleration);
             }
 
+            TimedBlock.endBlock(@src(), .EntityPhysics);
+
+            TimedBlock.beginBlock(@src(), .EntityRender);
             if (opt_render_group) |render_group| {
                 var entity_transform = ObjectTransform.defaultUpright();
                 entity_transform.offset_position = entity.getGroundPoint();
@@ -507,6 +516,7 @@ pub fn updateAndRenderEntities(
                 // * And probably, we will want the sort keys to be u32's now, so we'll convert from float at this
                 // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
 
+                TimedBlock.beginBlock(@src(), .EntityRenderPieces);
                 var piece_index: u32 = 0;
                 while (piece_index < entity.piece_count) : (piece_index += 1) {
                     const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
@@ -551,9 +561,13 @@ pub fn updateAndRenderEntities(
                         );
                     }
                 }
+                TimedBlock.endBlock(@src(), .EntityRenderPieces);
 
+                TimedBlock.beginBlock(@src(), .EntityRenderHitpoints);
                 drawHitPoints(entity, render_group, &entity_transform);
+                TimedBlock.endBlock(@src(), .EntityRenderHitpoints);
 
+                TimedBlock.beginBlock(@src(), .EntityRenderVolume);
                 entity_transform.upright = false;
                 {
                     if (global_config.Simulation_VisualizeCollisionVolumes) {
@@ -597,10 +611,15 @@ pub fn updateAndRenderEntities(
                         }
                     }
                 }
+                TimedBlock.endBlock(@src(), .EntityRenderVolume);
 
+                TimedBlock.endBlock(@src(), .EntityRender);
+
+                TimedBlock.beginBlock(@src(), .EntityDebug);
                 if (INTERNAL) {
                     debugPickEntity(entity, render_group, &entity_transform);
                 }
+                TimedBlock.endBlock(@src(), .EntityDebug);
             }
         }
     }

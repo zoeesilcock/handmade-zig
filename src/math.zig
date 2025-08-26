@@ -678,10 +678,10 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         }
 
         pub inline fn packColorBGRA(self: Self) u32 {
-            return ((@as(u32, @intFromFloat(self.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(self.r() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(self.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(self.b() + 0.5)) << 0));
+            return ((intrinsics.roundReal32ToUInt32(self.a() + 0.5) << 24) |
+                (intrinsics.roundReal32ToUInt32(self.r()) << 16) |
+                (intrinsics.roundReal32ToUInt32(self.g()) << 8) |
+                (intrinsics.roundReal32ToUInt32(self.b()) << 0));
         }
 
         pub inline fn unpackColorBGRA(value: u32) Self {
@@ -694,10 +694,10 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         }
 
         pub inline fn packColorRGBA(self: Self) u32 {
-            return ((@as(u32, @intFromFloat(self.a() + 0.5)) << 24) |
-                (@as(u32, @intFromFloat(self.b() + 0.5)) << 16) |
-                (@as(u32, @intFromFloat(self.g() + 0.5)) << 8) |
-                (@as(u32, @intFromFloat(self.r() + 0.5)) << 0));
+            return ((intrinsics.roundReal32ToUInt32(self.a()) << 24) |
+                (intrinsics.roundReal32ToUInt32(self.b()) << 16) |
+                (intrinsics.roundReal32ToUInt32(self.g()) << 8) |
+                (intrinsics.roundReal32ToUInt32(self.r()) << 0));
         }
 
         pub inline fn unpackColorRGBA(value: u32) Self {
@@ -1016,33 +1016,41 @@ fn MatrixInverseType(comptime InnerType: type) type {
             return result;
         }
 
-        pub fn perspectiveProjection(aspect_width_over_height: f32, focal_length: f32) Self {
+        pub fn perspectiveProjection(
+            aspect_width_over_height: f32,
+            focal_length: f32,
+            near_clip_plane: f32,
+            far_clip_plane: f32,
+        ) Self {
             const a: f32 = 1;
             const b: f32 = aspect_width_over_height;
             const c: f32 = focal_length;
 
-            const n: f32 = 0.1; // Near clip plane distance.
-            const f: f32 = 100; // Far clip plane distance.
+            const n: f32 = near_clip_plane; // Near clip plane distance.
+            const f: f32 = far_clip_plane; // Far clip plane distance.
 
             // These are perspective corrected terms, for when you divide by -z.
             const d: f32 = (n + f) / (n - f);
             const e: f32 = (2 * f * n) / (n - f);
 
-            const result: Self = .{ .forward = .{
-                .values = .{
-                    .new(a * c, 0, 0, 0),
-                    .new(0, b * c, 0, 0),
-                    .new(0, 0, d, e),
-                    .new(0, 0, -1, 0),
+            const result: Self = .{
+                .forward = .{
+                    .values = .{
+                        .new(a * c, 0, 0, 0),
+                        .new(0, b * c, 0, 0),
+                        .new(0, 0, d, e),
+                        .new(0, 0, -1, 0),
+                    },
                 },
-            }, .inverse = .{
-                .values = .{
-                    .new(1 / a * c, 0, 0, 0),
-                    .new(0, 1 / b * c, 0, 0),
-                    .new(0, 0, 0, -1),
-                    .new(0, 0, 1 / e, d / e),
+                .inverse = .{
+                    .values = .{
+                        .new(1 / a * c, 0, 0, 0),
+                        .new(0, 1 / b * c, 0, 0),
+                        .new(0, 0, 0, -1),
+                        .new(0, 0, 1 / e, d / e),
+                    },
                 },
-            } };
+            };
 
             if (SLOW) {
                 const ident: Matrix4x4 = result.inverse.times(result.forward);
@@ -1058,32 +1066,39 @@ fn MatrixInverseType(comptime InnerType: type) type {
             return result;
         }
 
-        pub fn orthographicProjection(aspect_width_over_height: f32) Self {
+        pub fn orthographicProjection(
+            aspect_width_over_height: f32,
+            near_clip_plane: f32,
+            far_clip_plane: f32,
+        ) Self {
             const a: f32 = 1;
             const b: f32 = aspect_width_over_height;
 
-            const n: f32 = -100; // Near clip plane distance.
-            const f: f32 = 100; // Far clip plane distance.
+            const n: f32 = near_clip_plane; // Near clip plane distance.
+            const f: f32 = far_clip_plane; // Far clip plane distance.
 
             // These are non-perspective corrected terms, for orthographic.
             const d: f32 = 2 / (n - f);
             const e: f32 = (n + f) / (n - f);
 
-            const result: Self = .{ .forward = .{
-                .values = .{
-                    .new(a, 0, 0, 0),
-                    .new(0, b, 0, 0),
-                    .new(0, 0, d, e),
-                    .new(0, 0, 0, 1),
+            const result: Self = .{
+                .forward = .{
+                    .values = .{
+                        .new(a, 0, 0, 0),
+                        .new(0, b, 0, 0),
+                        .new(0, 0, d, e),
+                        .new(0, 0, 0, 1),
+                    },
                 },
-            }, .inverse = .{
-                .values = .{
-                    .new(1 / a, 0, 0, 0),
-                    .new(0, 1 / b, 0, 0),
-                    .new(0, 0, 1 / d, e / d),
-                    .new(0, 0, 0, 1),
+                .inverse = .{
+                    .values = .{
+                        .new(1 / a, 0, 0, 0),
+                        .new(0, 1 / b, 0, 0),
+                        .new(0, 0, 1 / d, e / d),
+                        .new(0, 0, 0, 1),
+                    },
                 },
-            } };
+            };
 
             if (SLOW) {
                 const ident: Matrix4x4 = result.inverse.times(result.forward);

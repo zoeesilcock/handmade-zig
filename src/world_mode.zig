@@ -532,6 +532,9 @@ pub fn updateAndRenderWorld(
         camera_o.getColumn(2),
         camera_ot,
         0,
+        null,
+        null,
+        true,
     );
 
     if (world_mode.use_debug_camera) {
@@ -545,6 +548,9 @@ pub fn updateAndRenderWorld(
             camera_o.getColumn(2),
             camera_ot,
             @intFromEnum(rendergroup.CameraTransformFlag.IsDebug),
+            null,
+            null,
+            false,
         );
     }
 

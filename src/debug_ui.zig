@@ -469,7 +469,8 @@ pub fn drawTooltips(debug_state: *DebugState) void {
                 layout_element.bounds.min.x(),
                 layout_element.bounds.max.y() - layout.debug_state.font_scale * font_info.getStartingBaselineY(),
             );
-            textOutAt(layout.debug_state, @ptrCast(&text), text_position, Color.white(), 110000);
+            // TODO: It's probably the right thing to do to make z flow through the debug system sensibly.
+            textOutAt(layout.debug_state, @ptrCast(&text), text_position, Color.white(), 4000);
         }
     }
 }

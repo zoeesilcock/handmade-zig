@@ -391,13 +391,34 @@ pub const RenderGroup = extern struct {
         const y_axis: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
         var dim = UsedBitmapDim{};
 
-        dim.size = Vector2.new(height * bitmap.width_over_height, height);
-        dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size).scaledTo(align_coefficient);
-        _ = dim.position.setZ(offset.z());
-        _ = dim.position.setXY(
-            offset.xy().minus(x_axis.scaledTo(dim.alignment.x())).minus(y_axis.scaledTo(dim.alignment.y())),
-        );
-        dim.basis_position = getRenderEntityBasisPosition(object_transform, dim.position);
+        if (false) {
+            dim.size = Vector2.new(height * bitmap.width_over_height, height);
+            dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size).scaledTo(align_coefficient);
+            _ = dim.position.setZ(offset.z());
+            _ = dim.position.setXY(
+                offset.xy().minus(x_axis.scaledTo(dim.alignment.x())).minus(y_axis.scaledTo(dim.alignment.y())),
+            );
+            dim.basis_position = getRenderEntityBasisPosition(object_transform, dim.position);
+        } else {
+            dim.size = .new(
+                height * bitmap.width_over_height,
+                height,
+            );
+            dim.alignment = .new(
+                align_coefficient * bitmap.alignment_percentage.x() * dim.size.x(),
+                align_coefficient * bitmap.alignment_percentage.y() * dim.size.y(),
+            );
+            dim.position = .new(
+                offset.x() - dim.alignment.x() * x_axis.x() - dim.alignment.y() * y_axis.x(),
+                offset.y() - dim.alignment.y() * x_axis.y() - dim.alignment.y() * y_axis.y(),
+                offset.z(),
+            );
+            dim.basis_position = .new(
+                object_transform.offset_position.x() + dim.position.x(),
+                object_transform.offset_position.y() + dim.position.y(),
+                object_transform.offset_position.z() + dim.position.z(),
+            );
+        }
 
         return dim;
     }
@@ -596,12 +617,13 @@ pub const RenderGroup = extern struct {
                 entry.quad_count += 1;
 
                 const min_position: Vector3 = dim.basis_position;
-                const z_bias: f32 = 0.25 * height;
+                var z_bias: f32 = 0;
                 const premultiplied_color: Color = storeColor(color);
                 var x_axis: Vector3 = x_axis2.toVector3(0).scaledTo(size.x());
                 var y_axis: Vector3 = y_axis2.toVector3(0).scaledTo(size.y());
 
                 if (object_transform.upright) {
+                    z_bias = 0.25 * height;
                     // const x_axis0 = Vector3.new(x_axis2.x(), 0, x_axis2.y()).scaledTo(size.x());
                     const y_axis0 = Vector3.new(y_axis2.x(), 0, y_axis2.y()).scaledTo(size.y());
                     const x_axis1 =
@@ -1025,8 +1047,8 @@ pub const RenderGroup = extern struct {
     pub fn getClipRectByTransform(
         self: *RenderGroup,
         object_transform: *ObjectTransform,
-        dimension: Vector2,
         offset: Vector3,
+        dimension: Vector2,
     ) Rectangle2i {
         const min_corner: Vector2 = self.getScreenPoint(object_transform, offset);
         const max_corner: Vector2 = self.getScreenPoint(object_transform, offset.plus(dimension.toVector3(0)));
@@ -1051,8 +1073,8 @@ pub const RenderGroup = extern struct {
     ) Rectangle2i {
         return self.getClipRectByTransform(
             object_transform,
+            rectangle.min.toVector3(z),
             rectangle.getDimension(),
-            rectangle.getCenter().toVector3(z),
         );
     }
 
@@ -1068,7 +1090,17 @@ pub const RenderGroup = extern struct {
         focal_length: f32,
         flags: u32,
     ) void {
-        self.setCameraTransform(focal_length, .new(1, 0, 0), .new(0, 1, 0), .new(0, 0, 1), .zero(), flags);
+        self.setCameraTransform(
+            focal_length,
+            .new(1, 0, 0),
+            .new(0, 1, 0),
+            .new(0, 0, 1),
+            .zero(),
+            flags,
+            null,
+            null,
+            null,
+        );
     }
 
     pub fn setCameraTransform(
@@ -1079,7 +1111,13 @@ pub const RenderGroup = extern struct {
         camera_z: Vector3,
         camera_position: Vector3,
         flags: u32,
+        opt_near_clip_plane: ?f32,
+        opt_far_clip_plane: ?f32,
+        opt_fog: ?bool,
     ) void {
+        const fog: bool = opt_fog orelse false;
+        const near_clip_plane: f32 = opt_near_clip_plane orelse 0.1;
+        const far_clip_plane: f32 = opt_far_clip_plane orelse 100;
         const is_ortho: bool = (flags & @intFromEnum(CameraTransformFlag.IsOrthographic)) != 0;
         const is_debug: bool = (flags & @intFromEnum(CameraTransformFlag.IsDebug)) != 0;
         const b: f32 = math.safeRatio1(
@@ -1091,26 +1129,29 @@ pub const RenderGroup = extern struct {
         var render_transform: *RenderTransform = if (is_debug) &self.debug_transform else &self.game_transform;
         var proj: MatrixInverse4x4 = .{};
         if (is_ortho) {
-            proj = .orthographicProjection(b);
-            new_setup.fog_direction = .zero();
+            proj = .orthographicProjection(b, near_clip_plane, far_clip_plane);
         } else {
-            proj = .perspectiveProjection(b, focal_length);
-            new_setup.fog_direction = if (is_debug) .zero() else camera_z.negated();
+            proj = .perspectiveProjection(b, focal_length, near_clip_plane, far_clip_plane);
+        }
+
+        if (fog) {
+            new_setup.fog_direction = camera_z.negated();
             new_setup.fog_start_distance = 8;
             new_setup.fog_end_distance = 20;
+        } else {
+            new_setup.fog_direction = .zero();
         }
 
         render_transform.x = camera_x;
         render_transform.y = camera_y;
         render_transform.z = camera_z;
         render_transform.position = camera_position;
+
         new_setup.camera_position = camera_position;
 
         const camera_c: MatrixInverse4x4 = .cameraTransform(camera_x, camera_y, camera_z, camera_position);
-        render_transform.projection = .{
-            .forward = proj.forward.times(camera_c.forward),
-            .inverse = camera_c.inverse.times(proj.inverse),
-        };
+        render_transform.projection.forward = proj.forward.times(camera_c.forward);
+        render_transform.projection.inverse = camera_c.inverse.times(proj.inverse);
 
         if (SLOW) {
             const identity: Matrix4x4 = render_transform.projection.inverse.times(render_transform.projection.forward);

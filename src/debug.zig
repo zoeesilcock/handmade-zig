@@ -2231,6 +2231,9 @@ fn debugStart(
         .new(0, 0, 1),
         .zero(),
         @intFromEnum(rendergroup.CameraTransformFlag.IsOrthographic),
+        -10000,
+        10000,
+        null,
     );
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();
