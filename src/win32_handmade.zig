@@ -64,6 +64,7 @@ const LoadedBitmap = asset.LoadedBitmap;
 
 const std = @import("std");
 const math = @import("math.zig");
+const intrinsics = @import("intrinsics.zig");
 const win32 = @import("win32").everything;
 
 const gl = @cImport({
@@ -1432,7 +1433,6 @@ fn loadWglExtensions() void {
                 if (win32.wglMakeCurrent(dummy_window_dc, opengl_rc) != 0) {
                     optWglCreateContextAttribsARB = @ptrCast(win32.wglGetProcAddress("wglCreateContextAttribsARB"));
                     optWglChoosePixelFormatARB = @ptrCast(win32.wglGetProcAddress("wglChoosePixelFormatARB"));
-                    optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
                     optWglGetExtensionsStringEXT = @ptrCast(win32.wglGetProcAddress("wglGetExtensionsStringEXT"));
 
                     if (optWglGetExtensionsStringEXT) |wglGetExtensionsStringEXT| {
@@ -1579,6 +1579,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLBindBuffer != null);
             std.debug.assert(optGLBufferData != null);
 
+            optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
                 _ = wglSwapIntervalEXT(1);
             }
@@ -2360,7 +2361,6 @@ pub export fn wWinMain(
             }
 
             const game_update_hz: f32 = @floatFromInt(monitor_refresh_hz);
-            const target_seconds_per_frame: f32 = 1.0 / game_update_hz;
 
             var sound_output = SoundOutput{
                 .samples_per_second = 48000,
@@ -2417,14 +2417,7 @@ pub export fn wWinMain(
             if (samples != null) {
                 // TODO: This currently doesn't support connecting controllers after the game has started.
                 var xbox_controller_present: [win32.XUSER_MAX_COUNT]bool = [1]bool{true} ** win32.XUSER_MAX_COUNT;
-                var game_input = [2]shared.GameInput{
-                    shared.GameInput{
-                        .frame_delta_time = target_seconds_per_frame,
-                    },
-                    shared.GameInput{
-                        .frame_delta_time = target_seconds_per_frame,
-                    },
-                };
+                var game_input = [1]shared.GameInput{shared.GameInput{}} ** 2;
                 var new_input = &game_input[0];
                 var old_input = &game_input[1];
 
@@ -2451,7 +2444,16 @@ pub export fn wWinMain(
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
+                var expected_frames_per_update: u32 = 1;
+                var target_seconds_per_frame: f32 =
+                    @as(f32, @floatFromInt(expected_frames_per_update)) / game_update_hz;
                 while (running) {
+                    DebugInterface.debugBeginDataBlock(@src(), "Platform");
+                    {
+                        DebugInterface.debugValue(@src(), &expected_frames_per_update, "expected_frames_per_update");
+                    }
+                    DebugInterface.debugEndDataBlock(@src());
+
                     DebugInterface.debugBeginDataBlock(@src(), "Platform/Controls");
                     {
                         DebugInterface.debugValue(@src(), &paused, "paused");
@@ -2827,10 +2829,17 @@ pub export fn wWinMain(
 
                     const end_counter = getWallClock();
 
+                    const measured_seconds_per_frame: f32 = getSecondsElapsed(last_counter, end_counter);
+                    const exact_target_frames_per_update: f32 = measured_seconds_per_frame * @as(f32, @floatFromInt(monitor_refresh_hz));
+                    const new_expected_frames_per_update: u32 = intrinsics.roundReal32ToUInt32(exact_target_frames_per_update);
+                    expected_frames_per_update = new_expected_frames_per_update;
+
+                    target_seconds_per_frame = measured_seconds_per_frame;
+
                     TimedBlock.frameMarker(
                         @src(),
                         .TotalPlatformLoop,
-                        getSecondsElapsed(last_counter, end_counter),
+                        measured_seconds_per_frame,
                     );
                     TimedBlock.endBlock(@src(), .TotalPlatformLoop);
                     last_counter = end_counter;

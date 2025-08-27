@@ -2235,6 +2235,7 @@ fn debugStart(
         10000,
         null,
     );
+    debug_state.render_group.pushDepthClear();
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();
     debug_state.shadow_transform = ObjectTransform.defaultFlat();

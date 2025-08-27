@@ -516,6 +516,9 @@ pub fn updateAndRenderWorld(
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
     render_group.pushClear(background_color);
 
+    const near_clip_plane: f32 = 5;
+    const far_clip_plane: f32 = 100;
+
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
     const delta_from_sim: Vector3 = world.subtractPositions(
@@ -532,8 +535,8 @@ pub fn updateAndRenderWorld(
         camera_o.getColumn(2),
         camera_ot,
         0,
-        null,
-        null,
+        near_clip_plane,
+        far_clip_plane,
         true,
     );
 
@@ -548,8 +551,8 @@ pub fn updateAndRenderWorld(
             camera_o.getColumn(2),
             camera_ot,
             @intFromEnum(rendergroup.CameraTransformFlag.IsDebug),
-            null,
-            null,
+            near_clip_plane,
+            far_clip_plane,
             false,
         );
     }
@@ -822,7 +825,7 @@ fn addStandardRoom(
         entity.traversables[0].occupier = null;
         entity.addPieceV2(
             .Grass,
-            .new(1.4, 0.5),
+            .new(0.7, 0.5),
             .zero(),
             .newFromSRGB(0.31, 0.49, 0.32, 1),
             @intFromEnum(EntityVisiblePieceFlag.Cube),

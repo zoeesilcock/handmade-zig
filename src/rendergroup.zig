@@ -74,6 +74,7 @@ pub const EnvironmentMap = extern struct {
 pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
     RenderEntryBlendRenderTarget,
+    RenderEntryDepthClear,
 };
 
 pub const RenderEntryHeader = extern struct {
@@ -360,6 +361,14 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
+    pub fn pushDepthClear(self: *RenderGroup) void {
+        _ = self.pushRenderElement_(
+            0,
+            .RenderEntryDepthClear,
+            @alignOf(u32),
+        );
+    }
+
     pub fn pushClear(self: *RenderGroup, color: Color) void {
         if (true) {
             self.commands.clear_color = .new(
@@ -558,16 +567,17 @@ pub const RenderGroup = extern struct {
         line_perp = line_perp.dividedByF(line_perp_length);
         line_perp = line_perp.scaledTo(thickness);
 
-        const p0: Vector4 = from_position.minus(line_perp).toVector4(0);
+        const z_bias: f32 = 0.01;
+        const p0: Vector4 = from_position.minus(line_perp).toVector4(z_bias);
         const uv0: Vector2 = .new(0, 0);
         const c0: u32 = from_color_packed;
-        const p1: Vector4 = to_position.minus(line_perp).toVector4(0);
+        const p1: Vector4 = to_position.minus(line_perp).toVector4(z_bias);
         const uv1: Vector2 = .new(1, 0);
         const c1: u32 = to_color_packed;
-        const p2: Vector4 = to_position.plus(line_perp).toVector4(0);
+        const p2: Vector4 = to_position.plus(line_perp).toVector4(z_bias);
         const uv2: Vector2 = .new(1, 1);
         const c2: u32 = to_color_packed;
-        const p3: Vector4 = from_position.plus(line_perp).toVector4(0);
+        const p3: Vector4 = from_position.plus(line_perp).toVector4(z_bias);
         const uv3: Vector2 = .new(0, 1);
         const c3: u32 = from_color_packed;
 

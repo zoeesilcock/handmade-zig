@@ -75,20 +75,6 @@ const intro_cutscene: []const LayeredScene = &.{
         .layers = &.{},
     },
     LayeredScene{
-        .shot_index = 4,
-        .duration = 20,
-        .asset_type = .OpeningCutscene,
-        .camera_start = Vector3.new(0, 0, 0),
-        .camera_end = Vector3.new(0, 0, -0.5),
-        .layers = &.{
-            SceneLayer{ .position = Vector3.new(0, 0, -4.1), .height = 6 }, // Background.
-            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0, 0.5), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 1.
-            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 2.
-            SceneLayer{ .position = Vector3.new(2.25, -1.5, -3), .height = 2 }, // Foreground 1.
-            SceneLayer{ .position = Vector3.new(0, 0.35, -1), .height = 1 }, // Tinsel.
-        },
-    },
-    LayeredScene{
         .shot_index = 1,
         .asset_type = .OpeningCutscene,
         .duration = 20,
@@ -129,6 +115,20 @@ const intro_cutscene: []const LayeredScene = &.{
             SceneLayer{ .position = Vector3.new(0, 0, -20), .height = 45, .flags = @intFromEnum(SceneLayerFlags.CounterCameraY) }, // Trees.
             SceneLayer{ .position = Vector3.new(0, -2, -4), .height = 15, .flags = @intFromEnum(SceneLayerFlags.CounterCameraY) }, // Window.
             SceneLayer{ .position = Vector3.new(0, 0.35, -0.5), .height = 1 }, // Hero.
+        },
+    },
+    LayeredScene{
+        .shot_index = 4,
+        .duration = 20,
+        .asset_type = .OpeningCutscene,
+        .camera_start = Vector3.new(0, 0, 0),
+        .camera_end = Vector3.new(0, 0, -0.5),
+        .layers = &.{
+            SceneLayer{ .position = Vector3.new(0, 0, -4.1), .height = 6 }, // Background.
+            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0, 0.5), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 1.
+            SceneLayer{ .position = Vector3.new(-1.2, -0.2, -4), .height = 4, .params = Vector2.new(0.5, 1), .flags = @intFromEnum(SceneLayerFlags.Transient) }, // Santa 2.
+            SceneLayer{ .position = Vector3.new(2.25, -1.5, -3), .height = 2 }, // Foreground 1.
+            SceneLayer{ .position = Vector3.new(0, 0.35, -1), .height = 1 }, // Tinsel.
         },
     },
     LayeredScene{

@@ -158,24 +158,12 @@ fn glDebugProc(
 // TODO: How do we import OpenGL on other platforms here?
 pub const gl = @import("win32").graphics.open_gl;
 
-const OpenGL = struct {
-    max_multi_sample_count: i32 = 0,
-    supports_srgb_frame_buffer: bool = false,
-
-    default_sprite_texture_format: i32 = 0,
-    default_framebuffer_texture_format: i32 = 0,
-
-    vertex_buffer: u32 = 0,
-
-    reserved_blit_texture: u32 = 0,
-    basic_z_bias_program: u32 = 0,
+const OpenGLProgram = struct {
+    program_handle: u32 = 0,
 
     transform_id: i32 = 0,
     texture_sampler_id: i32 = 0,
-
-    white_bitmap: LoadedBitmap = undefined,
-    white: [4][4]u32 = undefined,
-
+    depth_sampler_id: i32 = 0,
     camera_position_id: i32 = 0,
     fog_direction_id: i32 = 0,
     fog_color_id: i32 = 0,
@@ -185,6 +173,27 @@ const OpenGL = struct {
     vert_position_id: i32 = 0,
     vert_uv_id: i32 = 0,
     vert_color_id: i32 = 0,
+};
+
+const OpenGL = struct {
+    shader_sim_tex_read_srgb: bool = true,
+    shader_sim_tex_write_srgb: bool = true,
+
+    max_multi_sample_count: i32 = 0,
+    supports_srgb_frame_buffer: bool = false,
+
+    default_sprite_texture_format: i32 = 0,
+    default_framebuffer_texture_format: i32 = 0,
+
+    vertex_buffer: u32 = 0,
+
+    z_bias_no_depth_peel: OpenGLProgram = undefined, // Pass 0.
+    z_bias_depth_peel: OpenGLProgram = undefined, // Pass 1.
+
+    reserved_blit_texture: u32 = 0,
+
+    white_bitmap: LoadedBitmap = undefined,
+    white: [4][4]u32 = undefined,
 };
 
 pub var open_gl: OpenGL = .{};
@@ -273,9 +282,6 @@ fn colorUB(color: u32) void {
 }
 
 pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
-    var shader_sim_tex_read_srgb = true;
-    var shader_sim_tex_write_srgb = true;
-
     gl.glGenTextures(1, &open_gl.reserved_blit_texture);
 
     gl.glGetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &open_gl.max_multi_sample_count);
@@ -288,7 +294,7 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
 
     if (info.gl_ext_texture_srgb) {
         open_gl.default_sprite_texture_format = GL_SRGB8_ALPHA8;
-        shader_sim_tex_read_srgb = false;
+        open_gl.shader_sim_tex_read_srgb = false;
     }
 
     if (framebuffer_supports_sRGB and info.gl_ext_framebuffer_srgb) {
@@ -310,7 +316,7 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
             if (gl.glGetError() == gl.GL_NO_ERROR) {
                 open_gl.default_framebuffer_texture_format = GL_SRGB8_ALPHA8;
                 gl.glEnable(GL_FRAMEBUFFER_SRGB);
-                shader_sim_tex_write_srgb = false;
+                open_gl.shader_sim_tex_write_srgb = false;
             }
 
             gl.glDeleteTextures(1, &test_texture);
@@ -332,6 +338,24 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     platform.optGLGenBuffers.?(1, &open_gl.vertex_buffer);
     platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
 
+    open_gl.white = [1][4]u32{
+        [1]u32{0xffffffff} ** 4,
+    } ** 4;
+    open_gl.white_bitmap = .{
+        .memory = @ptrCast(&open_gl.white),
+        .alignment_percentage = .new(0.5, 0.5),
+        .width_over_height = 1,
+        .width = 4,
+        .height = 4,
+        .pitch = 16,
+        .texture_handle = allocateTexture(1, 1, &open_gl.white),
+    };
+
+    compileZBiasProgram(&open_gl.z_bias_no_depth_peel, false);
+    compileZBiasProgram(&open_gl.z_bias_depth_peel, true);
+}
+
+fn compileZBiasProgram(program: *OpenGLProgram, depth_peel: bool) void {
     const header_code =
         \\#version 130
         \\// Header code
@@ -342,6 +366,7 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         &defines,
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
+        \\#define DepthPeel %d
         \\
         \\float clamp01MapToRange(float min, float max, float value) {
         \\  float range = max - min;
@@ -350,8 +375,9 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\}
     ,
         .{
-            @as(i32, @intCast(@intFromBool(shader_sim_tex_read_srgb))),
-            @as(i32, @intCast(@intFromBool(shader_sim_tex_write_srgb))),
+            @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
+            @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
+            @as(i32, @intCast(@intFromBool(depth_peel))),
         },
     );
     const vertex_code =
@@ -392,11 +418,16 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\  float FogDistance = dot(ZVertex.xyz - CameraPosition, FogDirection);
         \\
         \\  FogAmount = clamp01MapToRange(FogStartDistance, FogEndDistance, FogDistance);
+        \\  //float AlphaAmount = clamp01MapToRange(5.0, 5.25, FogDistance);
+        \\  //FragColor.a *= AlphaAmount;
         \\}
     ;
     const fragment_code =
         \\// Fragment code
         \\uniform sampler2D TextureSampler;
+        \\#if DepthPeel
+        \\uniform sampler2D DepthSampler;
+        \\#endif
         \\uniform vec3 FogColor;
         \\
         \\out vec4 ResultColor;
@@ -406,10 +437,19 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\
         \\void main(void)
         \\{
-        \\  //vec4 TexSample = vec4(1, 0, 0, 1);
+        \\#if DepthPeel
+        \\  float ClipDepth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
+        \\  float FragZ = gl_FragCoord.z;
+        \\  if (FragZ <= ClipDepth)
+        \\  {
+        \\    discard;
+        \\  }
+        \\#endif
+        \\
         \\  vec4 TexSample = texture(TextureSampler, FragUV);
         \\
-        \\  if (TexSample.a > 0) {
+        \\  if (TexSample.a > 0)
+        \\  {
         \\#if ShaderSimTexReadSRGB
         \\    TexSample.rgb *= TexSample.rgb;
         \\#endif
@@ -422,37 +462,83 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         \\#if ShaderSimTexWriteSRGB
         \\    ResultColor.rgb = sqrt(ResultColor.rgb);
         \\#endif
-        \\  } else {
+        \\  }
+        \\  else
+        \\  {
         \\    discard;
         \\  }
         \\}
     ;
-    open_gl.basic_z_bias_program = createProgram(@ptrCast(defines[0..defines_length]), header_code, vertex_code, fragment_code);
-    open_gl.transform_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "Transform");
-    open_gl.texture_sampler_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "TextureSampler");
 
-    open_gl.camera_position_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "CameraPosition");
-    open_gl.fog_direction_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "FogDirection");
-    open_gl.fog_color_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "FogColor");
-    open_gl.fog_start_distance_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "FogStartDistance");
-    open_gl.fog_end_distance_id = platform.optGLGetUniformLocation.?(open_gl.basic_z_bias_program, "FogEndDistance");
+    program.program_handle = createProgram(@ptrCast(defines[0..defines_length]), header_code, vertex_code, fragment_code);
+    program.transform_id = platform.optGLGetUniformLocation.?(program.program_handle, "Transform");
+    program.texture_sampler_id = platform.optGLGetUniformLocation.?(program.program_handle, "TextureSampler");
 
-    open_gl.vert_position_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertP");
-    open_gl.vert_uv_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertUV");
-    open_gl.vert_color_id = platform.optGLGetAttribLocation.?(open_gl.basic_z_bias_program, "VertColor");
+    program.camera_position_id = platform.optGLGetUniformLocation.?(program.program_handle, "CameraPosition");
+    program.fog_direction_id = platform.optGLGetUniformLocation.?(program.program_handle, "FogDirection");
+    program.fog_color_id = platform.optGLGetUniformLocation.?(program.program_handle, "FogColor");
+    program.fog_start_distance_id = platform.optGLGetUniformLocation.?(program.program_handle, "FogStartDistance");
+    program.fog_end_distance_id = platform.optGLGetUniformLocation.?(program.program_handle, "FogEndDistance");
 
-    open_gl.white = [1][4]u32{
-        [1]u32{0xffffffff} ** 4,
-    } ** 4;
-    open_gl.white_bitmap = .{
-        .memory = @ptrCast(&open_gl.white),
-        .alignment_percentage = .new(0.5, 0.5),
-        .width_over_height = 1,
-        .width = 4,
-        .height = 4,
-        .pitch = 16,
-        .texture_handle = allocateTexture(1, 1, &open_gl.white),
-    };
+    program.vert_position_id = platform.optGLGetAttribLocation.?(program.program_handle, "VertP");
+    program.vert_uv_id = platform.optGLGetAttribLocation.?(program.program_handle, "VertUV");
+    program.vert_color_id = platform.optGLGetAttribLocation.?(program.program_handle, "VertColor");
+}
+
+fn useProgramBegin(program: *OpenGLProgram, setup: *RenderSetup) void {
+    platform.optGLUseProgram.?(program.program_handle);
+    platform.optGLUniformMatrix4fv.?(program.transform_id, 1, true, setup.projection.toGL());
+    platform.optGLUniform1i.?(program.texture_sampler_id, 0);
+    platform.optGLUniform3fv.?(program.camera_position_id, 1, setup.camera_position.toGL());
+    platform.optGLUniform3fv.?(program.fog_direction_id, 1, setup.fog_direction.toGL());
+    platform.optGLUniform3fv.?(program.fog_color_id, 1, setup.fog_color.toGL());
+    platform.optGLUniform1f.?(program.fog_start_distance_id, setup.fog_start_distance);
+    platform.optGLUniform1f.?(program.fog_end_distance_id, setup.fog_end_distance);
+
+    const uv_array_index: u32 = @intCast(program.vert_uv_id);
+    const color_array_index: u32 = @intCast(program.vert_color_id);
+    const position_array_index: u32 = @intCast(program.vert_position_id);
+
+    platform.optGLEnableVertexAttribArray.?(uv_array_index);
+    platform.optGLEnableVertexAttribArray.?(color_array_index);
+    platform.optGLEnableVertexAttribArray.?(position_array_index);
+
+    platform.optGLVertexAttribPointer.?(
+        uv_array_index,
+        2,
+        gl.GL_FLOAT,
+        false,
+        @sizeOf(TexturedVertex),
+        @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
+    );
+    platform.optGLVertexAttribPointer.?(
+        color_array_index,
+        4,
+        gl.GL_UNSIGNED_BYTE,
+        true,
+        @sizeOf(TexturedVertex),
+        @ptrFromInt(@offsetOf(TexturedVertex, "color")),
+    );
+    platform.optGLVertexAttribPointer.?(
+        position_array_index,
+        4,
+        gl.GL_FLOAT,
+        false,
+        @sizeOf(TexturedVertex),
+        @ptrFromInt(@offsetOf(TexturedVertex, "position")),
+    );
+}
+
+fn useProgramEnd(program: *OpenGLProgram) void {
+    platform.optGLUseProgram.?(0);
+
+    const uv_array_index: u32 = @intCast(program.vert_uv_id);
+    const color_array_index: u32 = @intCast(program.vert_color_id);
+    const position_array_index: u32 = @intCast(program.vert_position_id);
+
+    platform.optGLDisableVertexAttribArray.?(uv_array_index);
+    platform.optGLDisableVertexAttribArray.?(color_array_index);
+    platform.optGLDisableVertexAttribArray.?(position_array_index);
 }
 
 fn bindFrameBuffer(target_index: u32, draw_region: Rectangle2i) void {
@@ -506,6 +592,8 @@ pub fn renderCommands(
                         // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
                         const slot = GL_TEXTURE_2D_MULTISAMPLE;
+                        // const slot = gl.GL_TEXTURE_2D;
+
                         var texture_handle: [2]u32 = undefined;
                         gl.glGenTextures(2, @ptrCast(&texture_handle));
                         gl.glBindTexture(slot, texture_handle[0]);
@@ -538,16 +626,32 @@ pub fn renderCommands(
                         // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
                         gl.glBindTexture(slot, texture_handle[1]);
-                        _ = glTexImage2DMultisample(
-                            slot,
-                            open_gl.max_multi_sample_count,
-                            // TODO: Check if going with a 16-bit depth buffer would be faster and still have enough
-                            // quality (it should, wer don't have long draw distances).
-                            GL_DEPTH_COMPONENT32,
-                            draw_region.getWidth(),
-                            draw_region.getHeight(),
-                            false,
-                        );
+                        if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
+                            _ = glTexImage2DMultisample(
+                                slot,
+                                open_gl.max_multi_sample_count,
+                                // TODO: Check if going with a 16-bit depth buffer would be faster and still have enough
+                                // quality (it should, wer don't have long draw distances).
+                                GL_DEPTH_COMPONENT24,
+                                draw_region.getWidth(),
+                                draw_region.getHeight(),
+                                false,
+                            );
+                        } else {
+                            _ = gl.glTexImage2D(
+                                slot,
+                                0,
+                                // TODO: Check if going with a 16-bit depth buffer would be faster and still have enough
+                                // quality (it should, wer don't have long draw distances).
+                                GL_DEPTH_COMPONENT24,
+                                draw_region.getWidth(),
+                                draw_region.getHeight(),
+                                0,
+                                gl.GL_DEPTH_COMPONENT,
+                                gl.GL_UNSIGNED_BYTE,
+                                null,
+                            );
+                        }
 
                         // std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
@@ -616,6 +720,7 @@ pub fn renderCommands(
         const alignment: usize = switch (header.type) {
             .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
             .RenderEntryBlendRenderTarget => @alignOf(RenderEntryBlendRenderTarget),
+            .RenderEntryDepthClear => @alignOf(u32),
         };
 
         const header_address = @intFromPtr(header);
@@ -642,11 +747,14 @@ pub fn renderCommands(
                     gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
                 }
             },
+            .RenderEntryDepthClear => {
+                gl.glClear(gl.GL_DEPTH_BUFFER_BIT);
+            },
             .RenderEntryTexturedQuads => {
                 const entry: *RenderEntryTexturedQuads = @ptrCast(@alignCast(data));
                 header_at += @sizeOf(RenderEntryTexturedQuads);
 
-                var setup: *RenderSetup = &entry.setup;
+                const setup: *RenderSetup = &entry.setup;
                 if (use_render_targets or setup.render_target_index <= max_render_target_index) {
                     if (current_render_target_index != setup.render_target_index) {
                         current_render_target_index = setup.render_target_index;
@@ -682,19 +790,6 @@ pub fn renderCommands(
                     clip_rect.max.y() - clip_rect.min.y(),
                 );
 
-                platform.optGLUseProgram.?(open_gl.basic_z_bias_program);
-                platform.optGLUniformMatrix4fv.?(open_gl.transform_id, 1, true, setup.projection.toGL());
-                platform.optGLUniform1i.?(open_gl.texture_sampler_id, 0);
-                platform.optGLUniform3fv.?(open_gl.camera_position_id, 1, setup.camera_position.toGL());
-                platform.optGLUniform3fv.?(open_gl.fog_direction_id, 1, setup.fog_direction.toGL());
-                platform.optGLUniform3fv.?(open_gl.fog_color_id, 1, setup.fog_color.toGL());
-                platform.optGLUniform1f.?(open_gl.fog_start_distance_id, setup.fog_start_distance);
-                platform.optGLUniform1f.?(open_gl.fog_end_distance_id, setup.fog_end_distance);
-
-                const uv_array_index: u32 = @intCast(open_gl.vert_uv_id);
-                const color_array_index: u32 = @intCast(open_gl.vert_color_id);
-                const position_array_index: u32 = @intCast(open_gl.vert_position_id);
-
                 platform.optGLBufferData.?(
                     GL_ARRAY_BUFFER,
                     commands.vertex_count * @sizeOf(TexturedVertex),
@@ -702,34 +797,7 @@ pub fn renderCommands(
                     GL_STREAM_DRAW,
                 );
 
-                platform.optGLEnableVertexAttribArray.?(uv_array_index);
-                platform.optGLEnableVertexAttribArray.?(color_array_index);
-                platform.optGLEnableVertexAttribArray.?(position_array_index);
-
-                platform.optGLVertexAttribPointer.?(
-                    uv_array_index,
-                    2,
-                    gl.GL_FLOAT,
-                    false,
-                    @sizeOf(TexturedVertex),
-                    @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
-                );
-                platform.optGLVertexAttribPointer.?(
-                    color_array_index,
-                    4,
-                    gl.GL_UNSIGNED_BYTE,
-                    true,
-                    @sizeOf(TexturedVertex),
-                    @ptrFromInt(@offsetOf(TexturedVertex, "color")),
-                );
-                platform.optGLVertexAttribPointer.?(
-                    position_array_index,
-                    4,
-                    gl.GL_FLOAT,
-                    false,
-                    @sizeOf(TexturedVertex),
-                    @ptrFromInt(@offsetOf(TexturedVertex, "position")),
-                );
+                useProgramBegin(&open_gl.z_bias_no_depth_peel, setup);
 
                 var vertex_index: u32 = entry.vertex_array_offset;
                 while (vertex_index < (entry.vertex_array_offset + 4 * entry.quad_count)) : (vertex_index += 4) {
@@ -745,11 +813,7 @@ pub fn renderCommands(
                     platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, @intCast(vertex_index), 4);
                 }
 
-                platform.optGLUseProgram.?(0);
-
-                platform.optGLDisableVertexAttribArray.?(uv_array_index);
-                platform.optGLDisableVertexAttribArray.?(color_array_index);
-                platform.optGLDisableVertexAttribArray.?(position_array_index);
+                useProgramEnd(&open_gl.z_bias_no_depth_peel);
             },
         }
     }
