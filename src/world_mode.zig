@@ -512,6 +512,8 @@ pub fn updateAndRenderWorld(
     world_mode.camera_orbit = 0;
     world_mode.camera_dolly = 0;
 
+    render_group.beginDepthPeel();
+
     // Clear background.
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
     render_group.pushClear(background_color);
@@ -687,6 +689,8 @@ pub fn updateAndRenderWorld(
         }
     }
     endSim(&transient_state.arena, &world_sim, world_mode.world);
+
+    render_group.endDepthPeel();
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;

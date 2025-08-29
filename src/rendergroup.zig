@@ -75,6 +75,8 @@ pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
     RenderEntryBlendRenderTarget,
     RenderEntryDepthClear,
+    RenderEntryBeginPeels,
+    RenderEntryEndPeels,
 };
 
 pub const RenderEntryHeader = extern struct {
@@ -361,6 +363,22 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
+    pub fn beginDepthPeel(self: *RenderGroup) void {
+        _ = self.pushRenderElement_(
+            0,
+            .RenderEntryBeginPeels,
+            @alignOf(u32),
+        );
+    }
+
+    pub fn endDepthPeel(self: *RenderGroup) void {
+        _ = self.pushRenderElement_(
+            0,
+            .RenderEntryEndPeels,
+            @alignOf(u32),
+        );
+    }
+
     pub fn pushDepthClear(self: *RenderGroup) void {
         _ = self.pushRenderElement_(
             0,
@@ -490,21 +508,21 @@ pub const RenderGroup = extern struct {
         var vert: [*]TexturedVertex = self.commands.vertex_array + self.commands.vertex_count;
         self.commands.vertex_count += 4;
 
-        vert[0].position = p0;
-        vert[0].uv = uv0;
-        vert[0].color = c0;
+        vert[0].position = p3;
+        vert[0].uv = uv3;
+        vert[0].color = c3;
 
-        vert[1].position = p3;
-        vert[1].uv = uv3;
-        vert[1].color = c3;
+        vert[1].position = p0;
+        vert[1].uv = uv0;
+        vert[1].color = c0;
 
-        vert[2].position = p1;
-        vert[2].uv = uv1;
-        vert[2].color = c1;
+        vert[2].position = p2;
+        vert[2].uv = uv2;
+        vert[2].color = c2;
 
-        vert[3].position = p2;
-        vert[3].uv = uv2;
-        vert[3].color = c2;
+        vert[3].position = p1;
+        vert[3].uv = uv1;
+        vert[3].color = c1;
     }
 
     fn pushQuadUnpackedColors(

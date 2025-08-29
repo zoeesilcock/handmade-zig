@@ -180,8 +180,8 @@ const GLBindBuffer: type = fn (target: u32, buffer: u32) callconv(.winapi) void;
 pub var optGLBindBuffer: ?*const GLBindBuffer = null;
 const GLBufferData: type = fn (target: u32, size: isize, data: *anyopaque, usage: u32) callconv(.winapi) void;
 pub var optGLBufferData: ?*const GLBufferData = null;
-
-//GLAPI void APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage);
+const GLActiveTexture: type = fn (texture: u32) callconv(.winapi) void;
+pub var optGLActiveTexture: ?*const GLActiveTexture = null;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -1545,6 +1545,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLGenBuffers = @ptrCast(win32.wglGetProcAddress("glGenBuffers"));
             optGLBindBuffer = @ptrCast(win32.wglGetProcAddress("glBindBuffer"));
             optGLBufferData = @ptrCast(win32.wglGetProcAddress("glBufferData"));
+            optGLActiveTexture = @ptrCast(win32.wglGetProcAddress("glActiveTexture"));
 
             std.debug.assert(optGLTextImage2DMultiSample != null);
             std.debug.assert(optGLBlitFrameBuffer != null);
@@ -1578,6 +1579,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLGenBuffers != null);
             std.debug.assert(optGLBindBuffer != null);
             std.debug.assert(optGLBufferData != null);
+            std.debug.assert(optGLActiveTexture != null);
 
             optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
@@ -2159,7 +2161,7 @@ fn outputLastError(title: []const u8) void {
     }
 }
 
-fn outputLastGLError(title: []const u8) void {
+pub fn outputLastGLError(title: []const u8) void {
     const last_error = win32.glGetError();
 
     if (INTERNAL) {
