@@ -518,7 +518,7 @@ pub fn updateAndRenderWorld(
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
     render_group.pushClear(background_color);
 
-    const near_clip_plane: f32 = 5;
+    const near_clip_plane: f32 = 3;
     const far_clip_plane: f32 = 100;
 
     var camera_o: Matrix4x4 =

@@ -10,6 +10,6 @@ pub const Config = struct {
     Particles_ShowGrid: bool = false,
     Game_SkipIntro: bool = true,
     Simulation_TimestepPercentage: f32 = 100,
-    Simulation_VisualizeCollisionVolumes: bool = true,
+    Simulation_VisualizeCollisionVolumes: bool = false,
     Simulation_InspectSelectedEntity: bool = true,
 };

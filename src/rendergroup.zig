@@ -99,6 +99,8 @@ pub const RenderSetup = extern struct {
     fog_color: Color3 = .white(),
     fog_start_distance: f32 = 0,
     fog_end_distance: f32 = 0,
+    clip_alpha_start_distance: f32 = 0,
+    clip_alpha_end_distance: f32 = 0,
 };
 
 pub const TransientClipRect = extern struct {
@@ -219,7 +221,9 @@ pub const RenderGroup = extern struct {
 
         var initial_setup: RenderSetup = .{
             .fog_start_distance = 0,
-            .fog_end_distance = 15,
+            .fog_end_distance = 1,
+            .clip_alpha_start_distance = 0,
+            .clip_alpha_end_distance = 1,
             .fog_color = .new(math.square(0.15), math.square(0.15), math.square(0.15)),
             .clip_rect = .fromMinDimension(.zero(), .new(pixel_width, pixel_height)),
         };
@@ -1166,8 +1170,12 @@ pub const RenderGroup = extern struct {
             new_setup.fog_direction = camera_z.negated();
             new_setup.fog_start_distance = 8;
             new_setup.fog_end_distance = 20;
+            new_setup.clip_alpha_start_distance = near_clip_plane + 2;
+            new_setup.clip_alpha_end_distance = near_clip_plane + 2.25;
         } else {
             new_setup.fog_direction = .zero();
+            new_setup.clip_alpha_start_distance = near_clip_plane - 100;
+            new_setup.clip_alpha_end_distance = near_clip_plane - 99;
         }
 
         render_transform.x = camera_x;

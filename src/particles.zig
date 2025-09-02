@@ -97,14 +97,14 @@ pub fn spawnFire(opt_cache: ?*ParticleCache, at_position_in: Vector3) void {
 
         const a: *Particle4x = &system.particles[particle_index];
 
-        a.p.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.05, 0.05 });
-        a.p.y = @splat(0);
+        a.p.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.3, 0.3 });
+        a.p.y = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.3, 0.3 });
         a.p.z = @splat(0);
         a.p = a.p.plus(at_position);
 
-        a.dp.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.01, 0.01 });
-        a.dp.y = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.7, 1 }) * @as(Vec4f, @splat(7));
-        a.dp.z = @splat(0);
+        a.dp.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.5, 0.5 });
+        a.dp.y = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.5, 0.5 });
+        a.dp.z = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 1, 3 });
 
         a.ddp.x = @splat(0);
         a.ddp.y = @splat(-9.8);
