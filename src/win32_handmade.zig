@@ -14,6 +14,8 @@ pub const UNICODE = true;
 const MIDDLE_C: u32 = 261;
 const TREBLE_C: u32 = 523;
 
+// const WIDTH = 1920 / 10;
+// const HEIGHT = 1080 / 10;
 // const WIDTH = 960;
 // const HEIGHT = 540;
 // const WIDTH = 960 / 2;
@@ -1404,7 +1406,7 @@ fn loadWglExtensions() void {
         .hInstance = win32.GetModuleHandleW(null),
         .hIcon = null,
         .hbrBackground = win32.GetStockObject(win32.BLACK_BRUSH),
-        .hCursor = null,
+        .hCursor = win32.LoadCursorW(null, win32.IDC_ARROW),
         .lpszMenuName = null,
         .lpszClassName = win32.L("HandmadeZigWglLoaderWindowClass"),
     };
@@ -1752,7 +1754,8 @@ fn windowProcedure(
         },
         win32.WM_SETCURSOR => {
             if (show_debug_cursor) {
-                result = win32.DefWindowProcW(window, message, w_param, l_param);
+                _ = win32.SetCursor(win32.LoadCursorW(null, win32.IDC_ARROW));
+                // result = win32.DefWindowProcW(window, message, w_param, l_param);
             } else {
                 _ = win32.SetCursor(null);
             }
@@ -1764,6 +1767,7 @@ fn windowProcedure(
                 _ = win32.SetLayeredWindowAttributes(window, 0, if (active) DEBUG_WINDOW_ACTIVE_OPACITY else DEBUG_WINDOW_INACTIVE_OPACITY, win32.LWA_ALPHA);
             }
             win32.OutputDebugStringA("WM_ACTIVATEAPP\n");
+            result = 1;
         },
         win32.WM_PAINT => {
             var paint: win32.PAINTSTRUCT = undefined;
@@ -2339,7 +2343,7 @@ pub export fn wWinMain(
         );
 
         if (opt_window_handle) |window_handle| {
-            // toggleFullscreen(window_handle);
+            toggleFullscreen(window_handle);
             const window_dc = win32.GetDC(window_handle);
             _ = initOpenGL(window_dc);
 
