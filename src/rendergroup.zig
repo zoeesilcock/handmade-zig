@@ -73,7 +73,6 @@ pub const EnvironmentMap = extern struct {
 
 pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
-    RenderEntryBlendRenderTarget,
     RenderEntryDepthClear,
     RenderEntryBeginPeels,
     RenderEntryEndPeels,
@@ -131,11 +130,6 @@ pub const TransientClipRect = extern struct {
         new_setup.clip_rect = self.old_clip_rect;
         self.render_group.pushSetup(&new_setup);
     }
-};
-
-pub const RenderEntryBlendRenderTarget = extern struct {
-    source_target_index: u32,
-    alpha: f32,
 };
 
 pub const CameraTransformFlag = enum(u32) {
@@ -1053,10 +1047,6 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         new_setup: *RenderSetup,
     ) void {
-        if (self.commands.max_render_target_index < new_setup.render_target_index) {
-            self.commands.max_render_target_index = new_setup.render_target_index;
-        }
-
         self.last_setup = new_setup.*;
         self.current_quads = null;
     }
@@ -1153,8 +1143,8 @@ pub const RenderGroup = extern struct {
         const is_ortho: bool = (flags & @intFromEnum(CameraTransformFlag.IsOrthographic)) != 0;
         const is_debug: bool = (flags & @intFromEnum(CameraTransformFlag.IsDebug)) != 0;
         const b: f32 = math.safeRatio1(
-            @as(f32, @floatFromInt(self.commands.width)),
-            @as(f32, @floatFromInt(self.commands.height)),
+            @as(f32, @floatFromInt(self.commands.settings.width)),
+            @as(f32, @floatFromInt(self.commands.settings.height)),
         );
 
         var new_setup: RenderSetup = self.last_setup;
@@ -1200,14 +1190,5 @@ pub const RenderGroup = extern struct {
         if (!is_debug) {
             self.debug_transform = self.game_transform;
         }
-    }
-
-    pub fn pushBlendRenderTarget(self: *RenderGroup, alpha: f32, source_render_target_index: u32) void {
-        self.pushSortBarrier(false);
-        if (self.pushRenderElement(RenderEntryBlendRenderTarget)) |blend| {
-            blend.alpha = alpha;
-            blend.source_target_index = source_render_target_index;
-        }
-        self.pushSortBarrier(false);
     }
 };

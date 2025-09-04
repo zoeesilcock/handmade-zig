@@ -107,26 +107,32 @@ var optWglChoosePixelFormatARB: ?*const WglChoosePixelFormatARB = null;
 const WglGetExtensionsStringEXT: type = fn (hdc: win32.HDC) callconv(.winapi) ?*u8;
 var optWglGetExtensionsStringEXT: ?*const WglGetExtensionsStringEXT = null;
 
-const GlBindFramebufferEXT: type = fn (target: u32, framebuffer: u32) callconv(.winapi) void;
-pub var optGlBindFramebufferEXT: ?*const GlBindFramebufferEXT = null;
-const GlGenFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(.winapi) void;
-pub var optGlGenFramebuffersEXT: ?*const GlGenFramebuffersEXT = null;
-const GlFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textarget: u32, texture: u32, level: i32) callconv(.winapi) void;
-pub var optGlFrameBufferTexture2DEXT: ?*const GlFrameBufferTexture2DEXT = null;
-const GlCheckFramebufferStatusEXT: type = fn (target: u32) callconv(.winapi) u32;
-pub var optGlCheckFramebufferStatusEXT: ?*const GlCheckFramebufferStatusEXT = null;
+const GLBindFramebufferEXT: type = fn (target: u32, framebuffer: u32) callconv(.winapi) void;
+pub var optGLBindFramebufferEXT: ?*const GLBindFramebufferEXT = null;
+const GLGenFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(.winapi) void;
+pub var optGLGenFramebuffersEXT: ?*const GLGenFramebuffersEXT = null;
+const GLDeleteFramebuffersEXT: type = fn (n: u32, framebuffer: [*]u32) callconv(.winapi) void;
+pub var optGLDeleteFramebuffersEXT: ?*const GLDeleteFramebuffersEXT = null;
+const GLFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textarget: u32, texture: u32, level: i32) callconv(.winapi) void;
+pub var optGLFrameBufferTexture2DEXT: ?*const GLFrameBufferTexture2DEXT = null;
+const GLCheckFramebufferStatusEXT: type = fn (target: u32) callconv(.winapi) u32;
+pub var optGLCheckFramebufferStatusEXT: ?*const GLCheckFramebufferStatusEXT = null;
 const GLTextImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(.winapi) u32;
 pub var optGLTextImage2DMultiSample: ?*const GLTextImage2DMultiSample = null;
 const GLBlitFrameBuffer: type = fn (src_x0: i32, src_y0: i32, src_x1: i32, src_y1: i32, dst_x0: i32, dst_y0: i32, dst_x1: i32, dst_y1: i32, mask: u32, filter: u32) callconv(.winapi) void;
 pub var optGLBlitFrameBuffer: ?*const GLBlitFrameBuffer = null;
 const GLCreateShader: type = fn (shader_type: u32) callconv(.winapi) u32;
 pub var optGLCreateShader: ?*const GLCreateShader = null;
+const GLDeleteShader: type = fn (shader: u32) callconv(.winapi) void;
+pub var optGLDeleteShader: ?*const GLDeleteShader = null;
 const GLShaderSource: type = fn (shader: u32, count: i32, string: [*]const [*:0]const u8, length: ?*i32) callconv(.winapi) void;
 pub var optGLShaderSource: ?*const GLShaderSource = null;
 const GLCompileShader: type = fn (shader: u32) callconv(.winapi) void;
 pub var optGLCompileShader: ?*const GLCompileShader = null;
 const GLCreateProgram: type = fn () callconv(.winapi) u32;
 pub var optGLCreateProgram: ?*const GLCreateProgram = null;
+const GLDeleteProgram: type = fn (program: u32) callconv(.winapi) void;
+pub var optGLDeleteProgram: ?*const GLDeleteProgram = null;
 const GLLinkProgram: type = fn (shader: u32) callconv(.winapi) void;
 pub var optGLLinkProgram: ?*const GLLinkProgram = null;
 const GLAttachShader: type = fn (program: u32, shader: u32) callconv(.winapi) void;
@@ -833,8 +839,8 @@ fn processMouseInput(
             mouse_y,
         );
 
-        new_input.mouse_x = @as(f32, @floatFromInt(render_commands.width)) * mouse_u;
-        new_input.mouse_y = @as(f32, @floatFromInt(render_commands.height)) * mouse_v;
+        new_input.mouse_x = @as(f32, @floatFromInt(render_commands.settings.width)) * mouse_u;
+        new_input.mouse_y = @as(f32, @floatFromInt(render_commands.settings.height)) * mouse_v;
 
         new_input.mouse_z = 0; // TODO: Add mouse wheel support.
 
@@ -1504,23 +1510,27 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             const info = opengl.Info.get(is_modern_context);
 
             if (info.gl_arb_framebuffer_object) {
-                optGlBindFramebufferEXT = @ptrCast(win32.wglGetProcAddress("glBindFramebufferEXT"));
-                optGlGenFramebuffersEXT = @ptrCast(win32.wglGetProcAddress("glGenFramebuffersEXT"));
-                optGlFrameBufferTexture2DEXT = @ptrCast(win32.wglGetProcAddress("glFramebufferTexture2D"));
-                optGlCheckFramebufferStatusEXT = @ptrCast(win32.wglGetProcAddress("glCheckFramebufferStatusEXT"));
+                optGLBindFramebufferEXT = @ptrCast(win32.wglGetProcAddress("glBindFramebufferEXT"));
+                optGLGenFramebuffersEXT = @ptrCast(win32.wglGetProcAddress("glGenFramebuffersEXT"));
+                optGLDeleteFramebuffersEXT = @ptrCast(win32.wglGetProcAddress("glDeleteFramebuffersEXT"));
+                optGLFrameBufferTexture2DEXT = @ptrCast(win32.wglGetProcAddress("glFramebufferTexture2D"));
+                optGLCheckFramebufferStatusEXT = @ptrCast(win32.wglGetProcAddress("glCheckFramebufferStatusEXT"));
 
-                std.debug.assert(optGlBindFramebufferEXT != null);
-                std.debug.assert(optGlGenFramebuffersEXT != null);
-                std.debug.assert(optGlFrameBufferTexture2DEXT != null);
-                std.debug.assert(optGlCheckFramebufferStatusEXT != null);
+                std.debug.assert(optGLBindFramebufferEXT != null);
+                std.debug.assert(optGLGenFramebuffersEXT != null);
+                std.debug.assert(optGLDeleteFramebuffersEXT != null);
+                std.debug.assert(optGLFrameBufferTexture2DEXT != null);
+                std.debug.assert(optGLCheckFramebufferStatusEXT != null);
             }
 
             optGLTextImage2DMultiSample = @ptrCast(win32.wglGetProcAddress("glTexImage2DMultisample"));
             optGLBlitFrameBuffer = @ptrCast(win32.wglGetProcAddress("glBlitFramebuffer"));
             optGLCreateShader = @ptrCast(win32.wglGetProcAddress("glCreateShader"));
+            optGLDeleteShader = @ptrCast(win32.wglGetProcAddress("glDeleteShader"));
             optGLShaderSource = @ptrCast(win32.wglGetProcAddress("glShaderSource"));
             optGLCompileShader = @ptrCast(win32.wglGetProcAddress("glCompileShader"));
             optGLCreateProgram = @ptrCast(win32.wglGetProcAddress("glCreateProgram"));
+            optGLDeleteProgram = @ptrCast(win32.wglGetProcAddress("glDeleteProgram"));
             optGLLinkProgram = @ptrCast(win32.wglGetProcAddress("glLinkProgram"));
             optGLAttachShader = @ptrCast(win32.wglGetProcAddress("glAttachShader"));
             optGLValidateProgram = @ptrCast(win32.wglGetProcAddress("glValidateProgram"));
@@ -1552,9 +1562,11 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLTextImage2DMultiSample != null);
             std.debug.assert(optGLBlitFrameBuffer != null);
             std.debug.assert(optGLCreateShader != null);
+            std.debug.assert(optGLDeleteShader != null);
             std.debug.assert(optGLShaderSource != null);
             std.debug.assert(optGLCompileShader != null);
             std.debug.assert(optGLCreateProgram != null);
+            std.debug.assert(optGLDeleteProgram != null);
             std.debug.assert(optGLLinkProgram != null);
             std.debug.assert(optGLAttachShader != null);
             std.debug.assert(optGLValidateProgram != null);
@@ -2448,6 +2460,17 @@ pub export fn wWinMain(
                 const bitmap_array_block: ?*PlatformMemoryBlock = allocateMemory(max_vertex_count * @sizeOf(LoadedBitmap), @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
                 const bitmap_array: [*]?*LoadedBitmap = @ptrCast(@alignCast(bitmap_array_block.?.base));
 
+                var render_commands: shared.RenderCommands = shared.RenderCommands.default(
+                    push_buffer_size,
+                    push_buffer,
+                    @intCast(back_buffer.width),
+                    @intCast(back_buffer.height),
+                    max_vertex_count,
+                    vertex_array,
+                    bitmap_array,
+                    &open_gl.white_bitmap,
+                );
+
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
                 var expected_frames_per_update: u32 = 1;
@@ -2478,20 +2501,10 @@ pub export fn wWinMain(
                     //
 
                     // TimedBlock.beginBlock(@src(), .InputProcessing);
-                    var render_commands: shared.RenderCommands = shared.initializeRenderCommands(
-                        push_buffer_size,
-                        push_buffer,
-                        @intCast(back_buffer.width),
-                        @intCast(back_buffer.height),
-                        max_vertex_count,
-                        vertex_array,
-                        bitmap_array,
-                        &open_gl.white_bitmap,
-                    );
                     const window_dimension = getWindowDimension(window_handle);
                     const draw_region = render.aspectRatioFit(
-                        @intCast(render_commands.width),
-                        @intCast(render_commands.height),
+                        @intCast(render_commands.settings.width),
+                        @intCast(render_commands.settings.height),
                         @intCast(window_dimension.width),
                         @intCast(window_dimension.height),
                     );
@@ -2819,6 +2832,7 @@ pub export fn wWinMain(
                         window_dimension.width,
                         window_dimension.height,
                     );
+                    render_commands.reset();
 
                     flip_wall_clock = getWallClock();
 

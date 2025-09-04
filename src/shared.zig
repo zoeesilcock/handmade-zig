@@ -885,9 +885,32 @@ pub const TexturedVertex = extern struct {
     color: u32, // Packed RGBA in memory order (ABGR in little endian).
 };
 
-pub const RenderCommands = extern struct {
+pub const RenderSettings = extern struct {
     width: u32 = 0,
     height: u32 = 0,
+    depth_peel_count_hint: u32 = 0,
+    multisampling_hint: bool = false,
+    pixelation_hint: bool = false,
+
+    pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
+        const type_info = @typeInfo(@TypeOf(self.*));
+        inline for (type_info.@"struct".fields) |struct_field| {
+            if (@field(self, struct_field.name) != @field(b, struct_field.name)) {
+                return false;
+            }
+        }
+        return true;
+
+        // return self.width == b.width and
+        //     self.height == b.height and
+        //     self.depth_peel_count_hint == b.depth_peel_count_hint and
+        //     self.multisampling_hint == b.multisampling_hint and
+        //     self.pixelation_hint == b.pixelation_hint;
+    }
+};
+
+pub const RenderCommands = extern struct {
+    settings: RenderSettings = .{},
 
     max_push_buffer_size: u32,
     push_buffer_base: [*]u8,
@@ -901,36 +924,44 @@ pub const RenderCommands = extern struct {
 
     clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
 
-    max_render_target_index: u32 = 0,
+    pub fn default(
+        max_push_buffer_size: u32,
+        push_buffer: *anyopaque,
+        width: u32,
+        height: u32,
+        max_vertex_count: u32,
+        vertex_array: [*]TexturedVertex,
+        bitmap_array: [*]?*LoadedBitmap,
+        white_bitmap: *LoadedBitmap,
+    ) RenderCommands {
+        return RenderCommands{
+            .settings = .{
+                .width = width,
+                .height = height,
+                .depth_peel_count_hint = 4,
+                .multisampling_hint = true,
+                .pixelation_hint = false,
+            },
+
+            .max_push_buffer_size = max_push_buffer_size,
+            .push_buffer_base = @ptrCast(push_buffer),
+            .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer)),
+
+            .max_vertex_count = max_vertex_count,
+            .vertex_count = 0,
+            .vertex_array = vertex_array,
+            .quad_bitmaps = bitmap_array,
+            .white_bitmap = white_bitmap,
+
+            .clear_color = .black(),
+        };
+    }
+
+    pub fn reset(self: *RenderCommands) void {
+        self.push_buffer_data_at = self.push_buffer_base;
+        self.vertex_count = 0;
+    }
 };
-
-pub fn initializeRenderCommands(
-    max_push_buffer_size: u32,
-    push_buffer: *anyopaque,
-    width: u32,
-    height: u32,
-    max_vertex_count: u32,
-    vertex_array: [*]TexturedVertex,
-    bitmap_array: [*]?*LoadedBitmap,
-    white_bitmap: *LoadedBitmap,
-) RenderCommands {
-    return RenderCommands{
-        .width = width,
-        .height = height,
-
-        .max_push_buffer_size = max_push_buffer_size,
-        .push_buffer_base = @ptrCast(push_buffer),
-        .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer)),
-
-        .max_vertex_count = max_vertex_count,
-        .vertex_count = 0,
-        .vertex_array = vertex_array,
-        .quad_bitmaps = bitmap_array,
-        .white_bitmap = white_bitmap,
-
-        .clear_color = .black(),
-    };
-}
 
 pub const OffscreenBuffer = extern struct {
     memory: ?*anyopaque = undefined,

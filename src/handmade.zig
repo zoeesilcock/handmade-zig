@@ -134,7 +134,8 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
-            DebugInterface.debugValue(@src(), &global_config.Renderer_TestWeirdDrawBufferSize, "Renderer_TestWeirdDrawBufferSize");
+            DebugInterface.debugValue(@src(), &render_commands.settings.multisampling_hint, "Renderer_Multisampling");
+            DebugInterface.debugValue(@src(), &render_commands.settings.pixelation_hint, "Renderer_Pixelation");
             DebugInterface.debugBeginDataBlock(@src(), "Camera");
             {
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_UseDebug, "Renderer_Camera_UseDebug");
@@ -287,27 +288,21 @@ pub export fn updateAndRender(
     //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
     // }
 
-    // if (global_config.Renderer_TestWeirdDrawBufferSize) {
-    //     // Enable this to test weird buffer sizes in the renderer.
-    //     draw_buffer.width = 1279;
-    //     draw_buffer.height = 719;
-    // }
-
     // Create the piece group.
     const render_memory = transient_state.arena.beginTemporaryMemory();
     var render_group_ = RenderGroup.begin(
         transient_state.assets,
         render_commands,
         transient_state.main_generation_id,
-        @intCast(render_commands.width),
-        @intCast(render_commands.height),
+        @intCast(render_commands.settings.width),
+        @intCast(render_commands.settings.height),
     );
     var render_group = &render_group_;
 
     // TODO: Replace this with a specification of the size of the render area.
     var draw_buffer: LoadedBitmap = .{
-        .width = @intCast(render_commands.width),
-        .height = @intCast(render_commands.height),
+        .width = @intCast(render_commands.settings.width),
+        .height = @intCast(render_commands.settings.height),
         .memory = undefined,
     };
 

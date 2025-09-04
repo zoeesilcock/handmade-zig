@@ -34,7 +34,6 @@ const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
-const RenderEntryBlendRenderTarget = rendergroup.RenderEntryBlendRenderTarget;
 const EnvironmentMap = rendergroup.EnvironmentMap;
 const LoadedBitmap = asset.LoadedBitmap;
 const TimedBlock = debug_interface.TimedBlock;
@@ -108,72 +107,76 @@ pub fn softwareRenderCommands(
     // * Actually ballpark the memory bandwith for drawRectangleQuickly.
     // * Re-test some of our instruction choices.
 
-    const render_target_count: u32 = commands.max_render_target_index + 1;
-    const render_targets: [*]LoadedBitmap = temp_arena.pushArray(
-        render_target_count,
-        LoadedBitmap,
-        .alignedNoClear(@alignOf(LoadedBitmap)),
-    );
-    render_targets[0] = final_output_target.*;
+    _ = commands;
+    _ = final_output_target;
+    _ = temp_arena;
 
-    std.debug.assert(final_output_target.pitch > 0);
-
-    var target_index: u32 = 1;
-    while (target_index <= render_target_count) : (target_index += 1) {
-        const target: *LoadedBitmap = @ptrCast(render_targets + target_index);
-        target.* = final_output_target.*;
-        const buffer_size: memory.MemoryIndex =
-            @as(memory.MemoryIndex, @intCast(target.pitch)) *
-            @as(memory.MemoryIndex, @intCast(target.height));
-        target.memory = temp_arena.pushSize(buffer_size, .alignedNoClear(16));
-    }
-
-    const tile_count_x = 4;
-    const tile_count_y = 4;
-    const work_count = tile_count_x * tile_count_y;
-    var work_array: [work_count]TileRenderWork = [1]TileRenderWork{TileRenderWork{
-        .commands = commands,
-        .render_targets = render_targets,
-        .clip_rect = undefined,
-    }} ** work_count;
-
-    std.debug.assert((@intFromPtr(final_output_target.memory) & 15) == 0);
-
-    var tile_width = @divFloor(final_output_target.width, tile_count_x);
-    const tile_height = @divFloor(final_output_target.height, tile_count_y);
-
-    tile_width = @divFloor(tile_width + 3, 4) * 4;
-
-    var work_index: u32 = 0;
-    var tile_y: i32 = 0;
-    while (tile_y < tile_count_y) : (tile_y += 1) {
-        var tile_x: i32 = 0;
-        while (tile_x < tile_count_x) : (tile_x += 1) {
-            var work = &work_array[work_index];
-            work_index += 1;
-
-            var clip_rect = Rectangle2i.zero();
-            _ = clip_rect.min.setX(tile_x * tile_width);
-            _ = clip_rect.min.setY(tile_y * tile_height);
-            _ = clip_rect.max.setX(clip_rect.min.x() + tile_width);
-            _ = clip_rect.max.setY(clip_rect.min.y() + tile_height);
-
-            if (tile_x == (tile_count_x - 1)) {
-                _ = clip_rect.max.setX(final_output_target.width);
-            }
-            if (tile_y == (tile_count_y - 1)) {
-                _ = clip_rect.max.setY(final_output_target.height);
-            }
-
-            work.clip_rect = clip_rect;
-
-            if (true) {
-                platform.platform.addQueueEntry(render_queue, &doTileRenderWork, work);
-            } else {
-                doTileRenderWork(render_queue, work);
-            }
-        }
-    }
+    // const render_target_count: u32 = commands.max_render_target_index + 1;
+    // const render_targets: [*]LoadedBitmap = temp_arena.pushArray(
+    //     render_target_count,
+    //     LoadedBitmap,
+    //     .alignedNoClear(@alignOf(LoadedBitmap)),
+    // );
+    // render_targets[0] = final_output_target.*;
+    //
+    // std.debug.assert(final_output_target.pitch > 0);
+    //
+    // var target_index: u32 = 1;
+    // while (target_index <= render_target_count) : (target_index += 1) {
+    //     const target: *LoadedBitmap = @ptrCast(render_targets + target_index);
+    //     target.* = final_output_target.*;
+    //     const buffer_size: memory.MemoryIndex =
+    //         @as(memory.MemoryIndex, @intCast(target.pitch)) *
+    //         @as(memory.MemoryIndex, @intCast(target.height));
+    //     target.memory = temp_arena.pushSize(buffer_size, .alignedNoClear(16));
+    // }
+    //
+    // const tile_count_x = 4;
+    // const tile_count_y = 4;
+    // const work_count = tile_count_x * tile_count_y;
+    // var work_array: [work_count]TileRenderWork = [1]TileRenderWork{TileRenderWork{
+    //     .commands = commands,
+    //     .render_targets = render_targets,
+    //     .clip_rect = undefined,
+    // }} ** work_count;
+    //
+    // std.debug.assert((@intFromPtr(final_output_target.memory) & 15) == 0);
+    //
+    // var tile_width = @divFloor(final_output_target.width, tile_count_x);
+    // const tile_height = @divFloor(final_output_target.height, tile_count_y);
+    //
+    // tile_width = @divFloor(tile_width + 3, 4) * 4;
+    //
+    // var work_index: u32 = 0;
+    // var tile_y: i32 = 0;
+    // while (tile_y < tile_count_y) : (tile_y += 1) {
+    //     var tile_x: i32 = 0;
+    //     while (tile_x < tile_count_x) : (tile_x += 1) {
+    //         var work = &work_array[work_index];
+    //         work_index += 1;
+    //
+    //         var clip_rect = Rectangle2i.zero();
+    //         _ = clip_rect.min.setX(tile_x * tile_width);
+    //         _ = clip_rect.min.setY(tile_y * tile_height);
+    //         _ = clip_rect.max.setX(clip_rect.min.x() + tile_width);
+    //         _ = clip_rect.max.setY(clip_rect.min.y() + tile_height);
+    //
+    //         if (tile_x == (tile_count_x - 1)) {
+    //             _ = clip_rect.max.setX(final_output_target.width);
+    //         }
+    //         if (tile_y == (tile_count_y - 1)) {
+    //             _ = clip_rect.max.setY(final_output_target.height);
+    //         }
+    //
+    //         work.clip_rect = clip_rect;
+    //
+    //         if (true) {
+    //             platform.platform.addQueueEntry(render_queue, &doTileRenderWork, work);
+    //         } else {
+    //             doTileRenderWork(render_queue, work);
+    //         }
+    //     }
+    // }
 
     platform.platform.completeAllQueuedWork(render_queue);
 }

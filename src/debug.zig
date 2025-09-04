@@ -2342,7 +2342,7 @@ pub fn frameEnd(
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
 
     if (game_memory.debug_state == null) {
-        game_memory.debug_state = debugInit(@intCast(commands.width), @intCast(commands.height));
+        game_memory.debug_state = debugInit(@intCast(commands.settings.width), @intCast(commands.settings.height));
     }
 
     if (game_memory.debug_state) |debug_state| {
@@ -2352,8 +2352,8 @@ pub fn frameEnd(
                 commands,
                 assets,
                 getMainGenerationID(game_memory),
-                @intCast(commands.width),
-                @intCast(commands.height),
+                @intCast(commands.settings.width),
+                @intCast(commands.settings.height),
             );
             debug_state.collateDebugRecords(event_count, &shared.global_debug_table.events[event_array_index]);
             debugEnd(debug_state, &input);
