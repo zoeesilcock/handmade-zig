@@ -195,6 +195,13 @@ const PeelCompositeProgram = struct {
     peel_sampler_id: [4]i32 = [1]i32{0} ** 4,
 };
 
+const ResolveMultisampleProgram = struct {
+    common: OpenGLProgramCommon,
+
+    color_sampler_id: i32 = 0,
+    depth_sampler_id: i32 = 0,
+};
+
 const FinalStretchProgram = struct {
     common: OpenGLProgramCommon,
 
@@ -239,10 +246,12 @@ const OpenGL = struct {
     // Dynamic resources that get recreated when settings change.
     resolve_frame_buffer: Framebuffer = .{},
     depth_peel_buffers: [16]Framebuffer = [1]Framebuffer{.{}} ** 16,
+    depth_peel_resolve_buffers: [16]Framebuffer = [1]Framebuffer{.{}} ** 16,
     z_bias_no_depth_peel: ZBiasProgram = undefined, // Pass 0.
     z_bias_depth_peel: ZBiasProgram = undefined, // Passes 1 through n.
     peel_composite: PeelCompositeProgram = undefined, // Composite all passes.
     final_stretch: FinalStretchProgram = undefined,
+    resolve_multisample: ResolveMultisampleProgram = undefined,
 };
 
 pub var open_gl: OpenGL = .{};
@@ -628,6 +637,73 @@ fn compilePeelComposite(program: *PeelCompositeProgram) void {
     program.peel_sampler_id[3] = platform.optGLGetUniformLocation.?(program_handle, "Peel3Sampler");
 }
 
+fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
+    var defines: [1024]u8 = undefined;
+    const defines_length = shared.formatString(
+        defines.len,
+        &defines,
+        \\#version 130
+        \\#define ShaderSimTexReadSRGB %d
+        \\#define ShaderSimTexWriteSRGB %d
+        \\#define DepthPeel %d
+    ,
+        .{
+            @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
+            @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
+            @as(i32, @intCast(@intFromBool(false))),
+        },
+    );
+    const vertex_code =
+        \\// Vertex code
+        \\in vec4 VertP;
+        \\
+        \\void main(void)
+        \\{
+        \\  gl_Position = VertP;
+        \\}
+    ;
+    const fragment_code =
+        \\// Fragment code
+        \\uniform sampler2DMS ColorSampler;
+        \\uniform sampler2DMS DepthSampler;
+        \\uniform int SampleCount;
+        \\
+        \\out vec4 ResultColor;
+        \\
+        \\void main(void)
+        \\{
+        \\  float ClosestDepth = 1.0;
+        \\  for (int SampleIdex = 0;
+        \\  SampleIndex < SampleCount;
+        \\  ++SampleIndex)
+        \\  {
+        \\    vec4 Color = texelFetch(ColorSampler, ivec2(gl_FragCoord.xy), SampleIndex);
+        \\#if ShaderSimTexReadSRGB
+        \\    Color.rgb *= Color.rgb;
+        \\#endif
+        \\
+        \\    float Depth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r;
+        \\    if (ClosestDepth > Depth)
+        \\    {
+        \\      ClosestDepth = Depth;
+        \\    }
+        \\  }
+        \\
+        \\  gl_FragCoord.z = ClosestDepth;
+        \\
+        \\#if ShaderSimTexWriteSRGB
+        \\  ResultColor.rgb = sqrt(ResultColor.rgb);
+        \\#endif
+        \\}
+    ;
+
+    const program_handle = createProgram(@ptrCast(defines[0..defines_length]), shader_header_code, vertex_code, fragment_code);
+    program.common.program_handle = program_handle;
+
+    program.color_sampler_id = platform.optGLGetUniformLocation.?(program_handle, "ColorSampler");
+    program.depth_sampler_id = platform.optGLGetUniformLocation.?(program_handle, "DepthSampler");
+}
+
 fn compileFinalStretch(program: *FinalStretchProgram) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
@@ -703,6 +779,13 @@ fn useCompositeProgramBegin(program: *PeelCompositeProgram) void {
     }
 }
 
+fn useResolveMultisampleProgramBegin(program: *PeelCompositeProgram) void {
+    useProgramBegin(&program.common);
+
+    platform.optGLUniform1i.?(program.color_sampler_id, 0);
+    platform.optGLUniform1i.?(program.depth_sampler_id, 1);
+}
+
 fn useFinalStretchProgramBegin(program: *FinalStretchProgram) void {
     useProgramBegin(&program.common);
 
@@ -775,6 +858,42 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     }
 }
 
+fn framebufferTextImage(slot: u32, format: i32, filter_type: i32, width: i32, height: i32) u32 {
+    var result: u32 = 0;
+    gl.glGenTextures(1, @ptrCast(&result));
+    gl.glBindTexture(slot, result);
+
+    if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
+        _ = platform.optGLTextImage2DMultiSample.?(
+            slot,
+            open_gl.max_multi_sample_count,
+            format,
+            width,
+            height,
+            false,
+        );
+    } else {
+        gl.glTexImage2D(
+            slot,
+            0,
+            format,
+            width,
+            height,
+            0,
+            if (format == GL_DEPTH_COMPONENT24) gl.GL_DEPTH_COMPONENT else gl.GL_BGRA_EXT,
+            gl.GL_UNSIGNED_BYTE,
+            null,
+        );
+    }
+
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, filter_type);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, filter_type);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    return result;
+}
+
 fn createFrameBuffer(width: i32, height: i32, flags: u32) Framebuffer {
     var result: Framebuffer = .{};
     const multisampled: bool = (flags & @intFromEnum(FramebufferFlags.Multisampled)) != 0;
@@ -789,36 +908,13 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32) Framebuffer {
     const filter_type: i32 = if (filtered) gl.GL_LINEAR else gl.GL_NEAREST;
 
     if (has_color) {
-        gl.glGenTextures(1, @ptrCast(&result.color_handle));
-        gl.glBindTexture(slot, result.color_handle);
-
-        if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
-            _ = platform.optGLTextImage2DMultiSample.?(
-                slot,
-                open_gl.max_multi_sample_count,
-                open_gl.default_framebuffer_texture_format,
-                width,
-                height,
-                false,
-            );
-        } else {
-            gl.glTexImage2D(
-                slot,
-                0,
-                open_gl.default_framebuffer_texture_format,
-                width,
-                height,
-                0,
-                gl.GL_BGRA_EXT,
-                gl.GL_UNSIGNED_BYTE,
-                null,
-            );
-        }
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, filter_type);
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, filter_type);
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
+        result.color_handle = framebufferTextImage(
+            slot,
+            open_gl.default_framebuffer_texture_format,
+            filter_type,
+            width,
+            height,
+        );
         platform.optGLFrameBufferTexture2DEXT.?(
             GL_FRAMEBUFFER,
             GL_COLOR_ATTACHMENT0,
@@ -830,40 +926,7 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32) Framebuffer {
     std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
     if (has_depth) {
-        gl.glGenTextures(1, @ptrCast(&result.depth_handle));
-        gl.glBindTexture(slot, result.depth_handle);
-
-        if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
-            _ = platform.optGLTextImage2DMultiSample.?(
-                slot,
-                open_gl.max_multi_sample_count,
-                // TODO: Check if going with a 16-bit depth buffer would be faster and still have enough
-                // quality (it should, wer don't have long draw distances).
-                GL_DEPTH_COMPONENT24,
-                width,
-                height,
-                false,
-            );
-        } else {
-            _ = gl.glTexImage2D(
-                slot,
-                0,
-                // TODO: Check if going with a 16-bit depth buffer would be faster and still have enough
-                // quality (it should, wer don't have long draw distances).
-                GL_DEPTH_COMPONENT24,
-                width,
-                height,
-                0,
-                gl.GL_DEPTH_COMPONENT,
-                gl.GL_UNSIGNED_BYTE,
-                null,
-            );
-        }
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, filter_type);
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, filter_type);
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
+        result.depth_handle = framebufferTextImage(slot, GL_DEPTH_COMPONENT24, filter_type, width, height);
         platform.optGLFrameBufferTexture2DEXT.?(
             GL_FRAMEBUFFER,
             GL_DEPTH_ATTACHMENT,
@@ -874,10 +937,11 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32) Framebuffer {
     }
     std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
-    gl.glBindTexture(slot, 0);
-
     const status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
     std.debug.assert(status == GL_FRAME_BUFFER_COMPLETE);
+
+    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
+    gl.glBindTexture(slot, 0);
 
     return result;
 }
@@ -890,6 +954,14 @@ fn bindFrameBuffer(framebuffer: ?*Framebuffer, render_width: i32, render_height:
         const status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
         std.debug.assert(status == GL_FRAME_BUFFER_COMPLETE);
     }
+}
+
+fn getDepthPeelReadBuffer(index: u32) *Framebuffer {
+    var peel_buffer: *Framebuffer = &open_gl.depth_peel_buffers[index];
+    if (open_gl.multisampling) {
+        peel_buffer = &open_gl.depth_peel_resolve_buffers[index];
+    }
+    return peel_buffer;
 }
 
 fn freeFramebuffer(framebuffer: *Framebuffer) void {
@@ -920,11 +992,13 @@ fn changeToSettings(settings: *RenderSettings) void {
     var depth_peel_index: u32 = 0;
     while (depth_peel_index < open_gl.depth_peel_count) : (depth_peel_index += 1) {
         freeFramebuffer(&open_gl.depth_peel_buffers[depth_peel_index]);
+        freeFramebuffer(&open_gl.depth_peel_resolve_buffers[depth_peel_index]);
     }
     freeProgram(&open_gl.z_bias_no_depth_peel.common);
     freeProgram(&open_gl.z_bias_depth_peel.common);
     freeProgram(&open_gl.peel_composite.common);
     freeProgram(&open_gl.final_stretch.common);
+    // freeProgram(&open_gl.resolve_multisample.common);
 
     // Create new dynamic resources.
     open_gl.current_settings = settings.*;
@@ -933,13 +1007,13 @@ fn changeToSettings(settings: *RenderSettings) void {
         resolve_flags |= @intFromEnum(FramebufferFlags.Filtered);
     }
 
-    // TODO: Implement multisampling.
     open_gl.multisampling = false; //settings.multisampling_hint;
 
     const render_width: i32 = @intCast(settings.width);
     const render_height: i32 = @intCast(settings.height);
 
     var depth_peel_flags: u32 = @intFromEnum(FramebufferFlags.Color) | @intFromEnum(FramebufferFlags.Depth);
+    const multisampled_resolve_flags = depth_peel_flags;
     if (open_gl.multisampling) {
         depth_peel_flags |= @intFromEnum(FramebufferFlags.Multisampled);
     }
@@ -953,6 +1027,7 @@ fn changeToSettings(settings: *RenderSettings) void {
     compileZBiasProgram(&open_gl.z_bias_depth_peel, true);
     compilePeelComposite(&open_gl.peel_composite);
     compileFinalStretch(&open_gl.final_stretch);
+    // compileResolveMultisampleProgram(&open_gl.resolve_multisample);
 
     open_gl.resolve_frame_buffer = createFrameBuffer(render_width, render_height, resolve_flags);
 
@@ -963,7 +1038,52 @@ fn changeToSettings(settings: *RenderSettings) void {
             render_height,
             depth_peel_flags,
         );
+
+        if (open_gl.multisampling) {
+            open_gl.depth_peel_resolve_buffers[depth_peel_index] = createFrameBuffer(
+                render_width,
+                render_height,
+                multisampled_resolve_flags,
+            );
+        }
     }
+}
+
+fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
+    platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, to.framebuffer_handle);
+    gl.glViewport(0, 0, width, height);
+    gl.glScissor(0, 0, width, height);
+
+    var vertices: [4]TexturedVertex = [_]TexturedVertex{
+        .{ .position = .new(-1, 1, 0, 1), .uv = .new(0, 1), .color = 0xffffffff },
+        .{ .position = .new(-1, -1, 0, 1), .uv = .new(0, 0), .color = 0xffffffff },
+        .{ .position = .new(1, 1, 0, 1), .uv = .new(1, 1), .color = 0xffffffff },
+        .{ .position = .new(1, -1, 0, 1), .uv = .new(1, 0), .color = 0xffffffff },
+    };
+    platform.optGLBufferData.?(
+        GL_ARRAY_BUFFER,
+        vertices.len * @sizeOf(TexturedVertex),
+        &vertices,
+        GL_STREAM_DRAW,
+    );
+
+    useCompositeProgramBegin(&open_gl.resolve_multisample);
+
+    platform.optGLActiveTexture.?(GL_TEXTURE0);
+    gl.glBindTexture(gl.GL_TEXTURE_2D, from.color_handle);
+    platform.optGLActiveTexture.?(GL_TEXTURE1);
+    gl.glBindTexture(gl.GL_TEXTURE_2D, from.depth_handle);
+
+    platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
+
+    platform.optGLActiveTexture.?(GL_TEXTURE0);
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+    platform.optGLActiveTexture.?(GL_TEXTURE1);
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+
+    useProgramEnd(&open_gl.peel_composite.common);
+
+    platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, 0);
 }
 
 fn settingsHaveChanged(a: *RenderSettings, b: *RenderSettings) bool {
@@ -1051,6 +1171,30 @@ pub fn renderCommands(
                 peel_header_restore = header_at;
             },
             .RenderEntryEndPeels => {
+                if (open_gl.multisampling) {
+                    platform.optGLBindFramebufferEXT.?(
+                        GL_READ_FRAMEBUFFER,
+                        open_gl.depth_peel_buffers[peel_index].framebuffer_handle,
+                    );
+                    platform.optGLBindFramebufferEXT.?(
+                        GL_DRAW_FRAMEBUFFER,
+                        open_gl.depth_peel_resolve_buffers[peel_index].framebuffer_handle,
+                    );
+                    gl.glViewport(0, 0, window_width, window_height);
+                    platform.optGLBlitFrameBuffer.?(
+                        0,
+                        0,
+                        render_width,
+                        render_height,
+                        0,
+                        0,
+                        render_width,
+                        render_height,
+                        gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT,
+                        gl.GL_NEAREST,
+                    );
+                }
+
                 if (peel_index < max_render_target_index) {
                     header_at = peel_header_restore;
                     peel_index += 1;
@@ -1060,7 +1204,8 @@ pub fn renderCommands(
                 } else {
                     std.debug.assert(peel_index == max_render_target_index);
 
-                    bindFrameBuffer(&open_gl.depth_peel_buffers[0], render_width, render_height);
+                    const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(0);
+                    bindFrameBuffer(peel_buffer, render_width, render_height);
                     peeling = false;
                     peel_index = 0;
                 }
@@ -1092,9 +1237,11 @@ pub fn renderCommands(
                 var program: *ZBiasProgram = &open_gl.z_bias_no_depth_peel;
                 var alpha_threshold: f32 = 0;
                 if (peeling) {
+                    const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(peel_index - 1);
+
                     program = &open_gl.z_bias_depth_peel;
                     platform.optGLActiveTexture.?(GL_TEXTURE1);
-                    gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.depth_peel_buffers[peel_index - 1].depth_handle);
+                    gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.depth_handle);
                     platform.optGLActiveTexture.?(GL_TEXTURE0);
 
                     if (peel_index == max_render_target_index) {
@@ -1153,7 +1300,8 @@ pub fn renderCommands(
     peel_index = 0;
     while (peel_index <= max_render_target_index) : (peel_index += 1) {
         platform.optGLActiveTexture.?(GL_TEXTURE0 + peel_index);
-        gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.depth_peel_buffers[peel_index].color_handle);
+        const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(peel_index);
+        gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle);
     }
     platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
     peel_index = 0;
