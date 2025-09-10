@@ -450,6 +450,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\smooth out vec2 FragUV;
         \\smooth out vec4 FragColor;
         \\smooth out float FogDistance;
+        \\centroid out float InputZ;
         \\
         \\void main(void)
         \\{
@@ -470,6 +471,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\  FragColor = VertColor;
         \\
         \\  FogDistance = dot(ZVertex.xyz - CameraPosition, FogDirection);
+        \\
+        \\  InputZ = 0.5 + 0.5 * (ModifiedZ / ZMinTransform.w);
         \\}
     ;
     const fragment_code =
@@ -489,12 +492,20 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
         \\smooth in float FogDistance;
+        \\centroid in float InputZ;
         \\
         \\void main(void)
         \\{
+        \\  float FragZ = gl_FragCoord.z;
+        \\
+        \\#if 1
+        \\  // Force all samples from this primitive to have the same Z value.
+        \\  gl_FragDepth = InputZ;
+        \\  FragZ = InputZ;
+        \\#endif
+        \\
         \\#if DepthPeel
         \\  float ClipDepth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
-        \\  float FragZ = gl_FragCoord.z;
         \\  if (FragZ <= ClipDepth)
         \\  {
         \\    discard;
@@ -647,11 +658,13 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
         \\#define DepthPeel %d
+        \\#define MultisampleDebug %d
     ,
         .{
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
             @as(i32, @intCast(@intFromBool(false))),
+            @as(i32, @intCast(@intFromBool(open_gl.current_settings.multisample_debug))),
         },
     );
     const vertex_code =
@@ -665,6 +678,7 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
     ;
     const fragment_code =
         \\// Fragment code
+        \\#define DepthThreshold 0.1f
         \\uniform sampler2DMS ColorSampler;
         \\uniform sampler2DMS DepthSampler;
         \\uniform int SampleCount;
@@ -673,32 +687,75 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
         \\
         \\void main(void)
         \\{
-        \\  vec4 CombinedColor = vec4(0, 0, 0, 0);
-        \\  float ClosestDepth = 1.0;
+        \\#if !MultisampleDebug
+        \\  float DepthMin = 1.0;
         \\  for (int SampleIndex = 0;
         \\       SampleIndex < SampleCount;
         \\       ++SampleIndex)
         \\  {
-        \\    vec4 Color = texelFetch(ColorSampler, ivec2(gl_FragCoord.xy), SampleIndex);
-        \\#if ShaderSimTexReadSRGB
-        \\    Color.rgb *= Color.rgb;
-        \\#endif
+        \\    DepthMin = min(DepthMin, texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r);
+        \\  }
         \\
-        \\    CombinedColor += Color;
+        \\  gl_FragDepth = DepthMin;
         \\
+        \\  vec4 CombinedColor = vec4(0, 0, 0, 0);
+        \\  for (int SampleIndex = 0;
+        \\       SampleIndex < SampleCount;
+        \\       ++SampleIndex)
+        \\  {
         \\    float Depth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r;
-        \\    if (ClosestDepth > Depth)
-        \\    {
-        \\      ClosestDepth = Depth;
+        \\    if (Depth == DepthMin) {
+        \\      vec4 Color = texelFetch(ColorSampler, ivec2(gl_FragCoord.xy), SampleIndex);
+        \\#if ShaderSimTexReadSRGB
+        \\      Color.rgb *= Color.rgb;
+        \\#endif
+        \\      CombinedColor += Color;
         \\    }
         \\  }
         \\
-        \\  gl_FragDepth = ClosestDepth;
         \\  float InvSampleCount = 1.0 / float(SampleCount);
         \\  ResultColor = InvSampleCount * CombinedColor;
         \\
         \\#if ShaderSimTexWriteSRGB
         \\  ResultColor.rgb = sqrt(ResultColor.rgb);
+        \\#endif
+        \\
+        \\#else
+        \\  int UniqueCount = 1;
+        \\  for (int IndexA = 1;
+        \\       IndexA < SampleCount;
+        \\       ++IndexA)
+        \\  {
+        \\    int Unique = 1;
+        \\    float DepthA = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), IndexA).r;
+        \\    for (int IndexB = 0;
+        \\         IndexB < IndexA;
+        \\         ++IndexB)
+        \\    {
+        \\      float DepthB = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), IndexB).r;
+        \\      if (DepthA == 1.0 || DepthB == 1.0 || DepthA == DepthB)
+        \\      {
+        \\        Unique = 0;
+        \\        break;
+        \\      }
+        \\    }
+        \\    if (Unique == 1) {
+        \\      UniqueCount += 1;
+        \\    }
+        \\  }
+        \\  ResultColor.a = 1;
+        \\  if (UniqueCount == 1) {
+        \\    ResultColor.rgb = vec3(0, 0, 0);
+        \\  }
+        \\  if (UniqueCount == 2) {
+        \\    ResultColor.rgb = vec3(0, 1, 0);
+        \\  }
+        \\  if (UniqueCount == 3) {
+        \\    ResultColor.rgb = vec3(1, 1, 0);
+        \\  }
+        \\  if (UniqueCount >= 4) {
+        \\    ResultColor.rgb = vec3(1, 0, 0);
+        \\  }
         \\#endif
         \\}
     ;

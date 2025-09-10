@@ -134,6 +134,7 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
+            DebugInterface.debugValue(@src(), &render_commands.settings.multisample_debug, "Renderer_MultisampleDebug");
             DebugInterface.debugValue(@src(), &render_commands.settings.multisampling_hint, "Renderer_Multisampling");
             DebugInterface.debugValue(@src(), &render_commands.settings.pixelation_hint, "Renderer_Pixelation");
             DebugInterface.debugBeginDataBlock(@src(), "Camera");

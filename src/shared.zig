@@ -891,6 +891,7 @@ pub const RenderSettings = extern struct {
     depth_peel_count_hint: u32 = 0,
     multisampling_hint: bool = false,
     pixelation_hint: bool = false,
+    multisample_debug: bool = false,
 
     pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
         const type_info = @typeInfo(@TypeOf(self.*));
@@ -939,7 +940,7 @@ pub const RenderCommands = extern struct {
                 .width = width,
                 .height = height,
                 .depth_peel_count_hint = 4,
-                .multisampling_hint = true,
+                .multisampling_hint = false,
                 .pixelation_hint = false,
             },
 
