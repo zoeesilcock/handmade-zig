@@ -940,7 +940,7 @@ pub const RenderCommands = extern struct {
                 .width = width,
                 .height = height,
                 .depth_peel_count_hint = 4,
-                .multisampling_hint = false,
+                .multisampling_hint = true,
                 .pixelation_hint = false,
             },
 

@@ -107,7 +107,9 @@ pub const WGL_DEPTH_BITS_ARB = 0x2022;
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
+
 const ALLOW_GPU_SRGB = false;
+const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 
 const RenderCommands = shared.RenderCommands;
 const RenderSettings = shared.RenderSettings;
@@ -450,7 +452,6 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\smooth out vec2 FragUV;
         \\smooth out vec4 FragColor;
         \\smooth out float FogDistance;
-        \\centroid out float InputZ;
         \\
         \\void main(void)
         \\{
@@ -471,8 +472,6 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\  FragColor = VertColor;
         \\
         \\  FogDistance = dot(ZVertex.xyz - CameraPosition, FogDirection);
-        \\
-        \\  InputZ = 0.5 + 0.5 * (ModifiedZ / ZMinTransform.w);
         \\}
     ;
     const fragment_code =
@@ -492,17 +491,10 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
         \\smooth in float FogDistance;
-        \\centroid in float InputZ;
         \\
         \\void main(void)
         \\{
         \\  float FragZ = gl_FragCoord.z;
-        \\
-        \\#if 1
-        \\  // Force all samples from this primitive to have the same Z value.
-        \\  gl_FragDepth = InputZ;
-        \\  FragZ = InputZ;
-        \\#endif
         \\
         \\#if DepthPeel
         \\  float ClipDepth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
@@ -678,7 +670,7 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
     ;
     const fragment_code =
         \\// Fragment code
-        \\#define DepthThreshold 0.1f
+        \\#define DepthThreshold 0.001f
         \\uniform sampler2DMS ColorSampler;
         \\uniform sampler2DMS DepthSampler;
         \\uniform int SampleCount;
@@ -688,15 +680,18 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
         \\void main(void)
         \\{
         \\#if !MultisampleDebug
-        \\  float DepthMin = 1.0;
+        \\  float DepthMax = 0.0f;
+        \\  float DepthMin = 1.0f;
         \\  for (int SampleIndex = 0;
         \\       SampleIndex < SampleCount;
         \\       ++SampleIndex)
         \\  {
-        \\    DepthMin = min(DepthMin, texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r);
+        \\    float Depth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r;
+        \\    DepthMin = min(DepthMin, Depth);
+        \\    DepthMax = max(DepthMax, Depth);
         \\  }
         \\
-        \\  gl_FragDepth = DepthMin;
+        \\  gl_FragDepth = 0.5 * (DepthMin + DepthMax);
         \\
         \\  vec4 CombinedColor = vec4(0, 0, 0, 0);
         \\  for (int SampleIndex = 0;
@@ -704,7 +699,8 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
         \\       ++SampleIndex)
         \\  {
         \\    float Depth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), SampleIndex).r;
-        \\    if (Depth == DepthMin) {
+        \\    //if (Depth == DepthMin)
+        \\    {
         \\      vec4 Color = texelFetch(ColorSampler, ivec2(gl_FragCoord.xy), SampleIndex);
         \\#if ShaderSimTexReadSRGB
         \\      Color.rgb *= Color.rgb;
@@ -948,7 +944,7 @@ fn framebufferTextImage(slot: u32, format: i32, filter_type: i32, width: i32, he
             width,
             height,
             0,
-            if (format == GL_DEPTH_COMPONENT24) gl.GL_DEPTH_COMPONENT else gl.GL_BGRA_EXT,
+            if (format == DEPTH_COMPONENT_TYPE) gl.GL_DEPTH_COMPONENT else gl.GL_BGRA_EXT,
             gl.GL_UNSIGNED_BYTE,
             null,
         );
@@ -994,7 +990,7 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32) Framebuffer {
     std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
     if (has_depth) {
-        result.depth_handle = framebufferTextImage(slot, GL_DEPTH_COMPONENT24, filter_type, width, height);
+        result.depth_handle = framebufferTextImage(slot, DEPTH_COMPONENT_TYPE, filter_type, width, height);
         platform.optGLFrameBufferTexture2DEXT.?(
             GL_FRAMEBUFFER,
             GL_DEPTH_ATTACHMENT,
@@ -1118,11 +1114,10 @@ fn changeToSettings(settings: *RenderSettings) void {
 }
 
 fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
-    gl.glDisable(gl.GL_DEPTH_TEST);
-
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, to.framebuffer_handle);
     gl.glViewport(0, 0, width, height);
     gl.glScissor(0, 0, width, height);
+    gl.glDepthFunc(gl.GL_ALWAYS);
 
     var vertices: [4]TexturedVertex = [_]TexturedVertex{
         .{ .position = .new(-1, 1, 0, 1), .uv = .new(0, 1), .color = 0xffffffff },
@@ -1154,7 +1149,7 @@ fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: 
     useProgramEnd(&open_gl.resolve_multisample.common);
 
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
-    gl.glEnable(gl.GL_DEPTH_TEST);
+    gl.glDepthFunc(gl.GL_LEQUAL);
 }
 
 fn settingsHaveChanged(a: *RenderSettings, b: *RenderSettings) bool {
@@ -1178,9 +1173,7 @@ pub fn renderCommands(
     gl.glFrontFace(gl.GL_CCW);
     // gl.glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     // gl.glEnable(GL_SAMPLE_ALPHA_TO_ONE);
-    if (open_gl.multisampling) {
-        gl.glEnable(GL_MULTISAMPLE);
-    }
+    gl.glEnable(GL_MULTISAMPLE);
 
     gl.glEnable(gl.GL_SCISSOR_TEST);
     gl.glDisable(gl.GL_BLEND);
@@ -1222,7 +1215,7 @@ pub fn renderCommands(
     bindFrameBuffer(&open_gl.depth_peel_buffers[0], render_width, render_height);
 
     var peeling: bool = false;
-    var peel_index: u32 = 0;
+    var on_peel_index: u32 = 0;
     var peel_header_restore: [*]u8 = undefined;
     var header_at: [*]u8 = commands.push_buffer_base;
     while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) : (header_at += @sizeOf(RenderEntryHeader)) {
@@ -1245,8 +1238,8 @@ pub fn renderCommands(
             },
             .RenderEntryEndPeels => {
                 if (open_gl.multisampling) {
-                    const from: *Framebuffer = &open_gl.depth_peel_buffers[peel_index];
-                    const to: *Framebuffer = &open_gl.depth_peel_resolve_buffers[peel_index];
+                    const from: *Framebuffer = &open_gl.depth_peel_buffers[on_peel_index];
+                    const to: *Framebuffer = &open_gl.depth_peel_resolve_buffers[on_peel_index];
 
                     if (true) {
                         resolveMultisample(from, to, render_width, render_height);
@@ -1269,19 +1262,19 @@ pub fn renderCommands(
                     }
                 }
 
-                if (peel_index < max_render_target_index) {
+                if (on_peel_index < max_render_target_index) {
                     header_at = peel_header_restore;
-                    peel_index += 1;
+                    on_peel_index += 1;
 
-                    bindFrameBuffer(&open_gl.depth_peel_buffers[peel_index], render_width, render_height);
-                    peeling = peel_index > 0;
+                    bindFrameBuffer(&open_gl.depth_peel_buffers[on_peel_index], render_width, render_height);
+                    peeling = on_peel_index > 0;
                 } else {
-                    std.debug.assert(peel_index == max_render_target_index);
+                    std.debug.assert(on_peel_index == max_render_target_index);
 
                     const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(0);
                     bindFrameBuffer(peel_buffer, render_width, render_height);
                     peeling = false;
-                    peel_index = 0;
+                    on_peel_index = 0;
                 }
             },
             .RenderEntryDepthClear => {
@@ -1309,16 +1302,16 @@ pub fn renderCommands(
                 );
 
                 var program: *ZBiasProgram = &open_gl.z_bias_no_depth_peel;
-                var alpha_threshold: f32 = 0;
+                var alpha_threshold: f32 = 0.01;
                 if (peeling) {
-                    const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(peel_index - 1);
+                    const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(on_peel_index - 1);
 
                     program = &open_gl.z_bias_depth_peel;
                     platform.optGLActiveTexture.?(GL_TEXTURE1);
                     gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.depth_handle);
                     platform.optGLActiveTexture.?(GL_TEXTURE0);
 
-                    if (peel_index == max_render_target_index) {
+                    if (on_peel_index == max_render_target_index) {
                         alpha_threshold = 0.9;
                     }
                 }
@@ -1371,7 +1364,7 @@ pub fn renderCommands(
     );
 
     useCompositeProgramBegin(&open_gl.peel_composite);
-    peel_index = 0;
+    var peel_index: u32 = 0;
     while (peel_index <= max_render_target_index) : (peel_index += 1) {
         platform.optGLActiveTexture.?(GL_TEXTURE0 + peel_index);
         const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(peel_index);
