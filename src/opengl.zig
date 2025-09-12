@@ -59,6 +59,10 @@ pub const GL_DEPTH_COMPONENT16 = 0x81A5;
 pub const GL_DEPTH_COMPONENT24 = 0x81A6;
 pub const GL_DEPTH_COMPONENT32 = 0x81A7;
 pub const GL_DEPTH_COMPONENT32F = 0x8CAC;
+pub const GL_RGBA32F = 0x8814;
+pub const GL_RGB32F = 0x8815;
+pub const GL_RGBA16F = 0x881A;
+pub const GL_RGB16F = 0x881B;
 
 pub const GL_MULTISAMPLE = 0x809D;
 pub const GL_SAMPLE_ALPHA_TO_COVERAGE = 0x809E;
@@ -171,6 +175,7 @@ const OpenGLProgramCommon = struct {
     program_handle: u32 = 0,
 
     vert_position_id: i32 = 0,
+    vert_normal_id: i32 = 0,
     vert_uv_id: i32 = 0,
     vert_color_id: i32 = 0,
 };
@@ -347,7 +352,7 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     }
 
     open_gl.default_sprite_texture_format = gl.GL_RGBA8;
-    open_gl.default_framebuffer_texture_format = gl.GL_RGBA8;
+    open_gl.default_framebuffer_texture_format = gl.GL_RGBA16;
 
     if (ALLOW_GPU_SRGB) {
         if (info.gl_ext_texture_srgb) {
@@ -446,12 +451,14 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\uniform vec3 FogDirection;
         \\
         \\in vec4 VertP;
+        \\in vec4 VertN;
         \\in vec2 VertUV;
         \\in vec4 VertColor;
         \\
         \\smooth out vec2 FragUV;
         \\smooth out vec4 FragColor;
         \\smooth out float FogDistance;
+        \\smooth out vec3 WorldPosition;
         \\
         \\void main(void)
         \\{
@@ -472,6 +479,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\  FragColor = VertColor;
         \\
         \\  FogDistance = dot(ZVertex.xyz - CameraPosition, FogDirection);
+        \\  WorldPosition = ZVertex.xyz;
         \\}
     ;
     const fragment_code =
@@ -491,9 +499,15 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
         \\smooth in float FogDistance;
+        \\smooth in vec3 WorldPosition;
         \\
         \\void main(void)
         \\{
+        \\  vec3 LightPosition = vec3(0, 0, 0);
+        \\  float LightStrength = 1.0f;
+        \\  vec3 LightPosition2 = vec3(8, 0, 0);
+        \\  float LightStrength2 = 2.0f;
+        \\
         \\  float FragZ = gl_FragCoord.z;
         \\
         \\#if DepthPeel
@@ -515,7 +529,13 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\
         \\  if (ModColor.a > AlphaThreshold)
         \\  {
-        \\    ResultColor.rgb = mix(ModColor.rgb, FogColor.rgb, FogAmount);
+        \\    float LightDistance = distance(WorldPosition, LightPosition);
+        \\    float LightHere = LightStrength / (LightDistance * LightDistance);
+        \\    float LightDistance2 = distance(WorldPosition, LightPosition2);
+        \\    float LightHere2 = LightStrength2 / (LightDistance2 * LightDistance2);
+        \\    float TotalLight = LightHere + LightHere2;
+        \\
+        \\    ResultColor.rgb = TotalLight * mix(ModColor.rgb, FogColor.rgb, FogAmount);
         \\    ResultColor.a = ModColor.a;
         \\
         \\#if ShaderSimTexWriteSRGB
@@ -529,11 +549,13 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\}
     ;
 
-    const program_handle = createProgram(@ptrCast(defines[0..defines_length]), shader_header_code, vertex_code, fragment_code);
-    program.common.program_handle = program_handle;
-    program.common.vert_position_id = platform.optGLGetAttribLocation.?(program_handle, "VertP");
-    program.common.vert_uv_id = platform.optGLGetAttribLocation.?(program_handle, "VertUV");
-    program.common.vert_color_id = platform.optGLGetAttribLocation.?(program_handle, "VertColor");
+    const program_handle = createProgram(
+        @ptrCast(defines[0..defines_length]),
+        shader_header_code,
+        vertex_code,
+        fragment_code,
+        &program.common,
+    );
 
     program.transform_id = platform.optGLGetUniformLocation.?(program_handle, "Transform");
     program.texture_sampler_id = platform.optGLGetUniformLocation.?(program_handle, "TextureSampler");
@@ -568,6 +590,7 @@ fn compilePeelComposite(program: *PeelCompositeProgram) void {
     const vertex_code =
         \\// Vertex code
         \\in vec4 VertP;
+        \\in vec4 VertN;
         \\in vec4 VertColor;
         \\in vec2 VertUV;
         \\
@@ -629,12 +652,13 @@ fn compilePeelComposite(program: *PeelCompositeProgram) void {
         \\}
     ;
 
-    const program_handle = createProgram(@ptrCast(defines[0..defines_length]), shader_header_code, vertex_code, fragment_code);
-    program.common.program_handle = program_handle;
-    program.common.vert_position_id = platform.optGLGetAttribLocation.?(program_handle, "VertP");
-    program.common.vert_uv_id = platform.optGLGetAttribLocation.?(program_handle, "VertUV");
-    program.common.vert_color_id = platform.optGLGetAttribLocation.?(program_handle, "VertColor");
-
+    const program_handle = createProgram(
+        @ptrCast(defines[0..defines_length]),
+        shader_header_code,
+        vertex_code,
+        fragment_code,
+        &program.common,
+    );
     program.peel_sampler_id[0] = platform.optGLGetUniformLocation.?(program_handle, "Peel0Sampler");
     program.peel_sampler_id[1] = platform.optGLGetUniformLocation.?(program_handle, "Peel1Sampler");
     program.peel_sampler_id[2] = platform.optGLGetUniformLocation.?(program_handle, "Peel2Sampler");
@@ -756,12 +780,13 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
         \\}
     ;
 
-    const program_handle = createProgram(@ptrCast(defines[0..defines_length]), shader_header_code, vertex_code, fragment_code);
-    program.common.program_handle = program_handle;
-    program.common.vert_position_id = platform.optGLGetAttribLocation.?(program_handle, "VertP");
-    program.common.vert_uv_id = platform.optGLGetAttribLocation.?(program_handle, "VertUV");
-    program.common.vert_color_id = platform.optGLGetAttribLocation.?(program_handle, "VertColor");
-
+    const program_handle = createProgram(
+        @ptrCast(defines[0..defines_length]),
+        shader_header_code,
+        vertex_code,
+        fragment_code,
+        &program.common,
+    );
     program.color_sampler_id = platform.optGLGetUniformLocation.?(program_handle, "ColorSampler");
     program.depth_sampler_id = platform.optGLGetUniformLocation.?(program_handle, "DepthSampler");
     program.sample_count_id = platform.optGLGetUniformLocation.?(program_handle, "SampleCount");
@@ -808,12 +833,13 @@ fn compileFinalStretch(program: *FinalStretchProgram) void {
         \\}
     ;
 
-    const program_handle = createProgram(@ptrCast(defines[0..defines_length]), shader_header_code, vertex_code, fragment_code);
-    program.common.program_handle = program_handle;
-    program.common.vert_position_id = platform.optGLGetAttribLocation.?(program_handle, "VertP");
-    program.common.vert_uv_id = platform.optGLGetAttribLocation.?(program_handle, "VertUV");
-    program.common.vert_color_id = platform.optGLGetAttribLocation.?(program_handle, "VertColor");
-
+    const program_handle = createProgram(
+        @ptrCast(defines[0..defines_length]),
+        shader_header_code,
+        vertex_code,
+        fragment_code,
+        &program.common,
+    );
     program.image_id = platform.optGLGetUniformLocation.?(program_handle, "ImageSampler");
 }
 
@@ -863,33 +889,10 @@ fn isValidArray(index: i32) bool {
 fn useProgramBegin(program: *OpenGLProgramCommon) void {
     platform.optGLUseProgram.?(program.program_handle);
 
+    const position_array_index: i32 = program.vert_position_id;
+    const normal_array_index: i32 = program.vert_normal_id;
     const uv_array_index: i32 = program.vert_uv_id;
     const color_array_index: i32 = program.vert_color_id;
-    const position_array_index: i32 = program.vert_position_id;
-
-    if (isValidArray(uv_array_index)) {
-        platform.optGLEnableVertexAttribArray.?(@intCast(uv_array_index));
-        platform.optGLVertexAttribPointer.?(
-            @intCast(uv_array_index),
-            2,
-            gl.GL_FLOAT,
-            false,
-            @sizeOf(TexturedVertex),
-            @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
-        );
-    }
-
-    if (isValidArray(color_array_index)) {
-        platform.optGLEnableVertexAttribArray.?(@intCast(color_array_index));
-        platform.optGLVertexAttribPointer.?(
-            @intCast(color_array_index),
-            4,
-            gl.GL_UNSIGNED_BYTE,
-            true,
-            @sizeOf(TexturedVertex),
-            @ptrFromInt(@offsetOf(TexturedVertex, "color")),
-        );
-    }
 
     if (isValidArray(position_array_index)) {
         platform.optGLEnableVertexAttribArray.?(@intCast(position_array_index));
@@ -902,23 +905,60 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
             @ptrFromInt(@offsetOf(TexturedVertex, "position")),
         );
     }
+    if (isValidArray(normal_array_index)) {
+        platform.optGLEnableVertexAttribArray.?(@intCast(normal_array_index));
+        platform.optGLVertexAttribPointer.?(
+            @intCast(normal_array_index),
+            3,
+            gl.GL_FLOAT,
+            false,
+            @sizeOf(TexturedVertex),
+            @ptrFromInt(@offsetOf(TexturedVertex, "normal")),
+        );
+    }
+    if (isValidArray(color_array_index)) {
+        platform.optGLEnableVertexAttribArray.?(@intCast(color_array_index));
+        platform.optGLVertexAttribPointer.?(
+            @intCast(color_array_index),
+            4,
+            gl.GL_UNSIGNED_BYTE,
+            true,
+            @sizeOf(TexturedVertex),
+            @ptrFromInt(@offsetOf(TexturedVertex, "color")),
+        );
+    }
+    if (isValidArray(uv_array_index)) {
+        platform.optGLEnableVertexAttribArray.?(@intCast(uv_array_index));
+        platform.optGLVertexAttribPointer.?(
+            @intCast(uv_array_index),
+            2,
+            gl.GL_FLOAT,
+            false,
+            @sizeOf(TexturedVertex),
+            @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
+        );
+    }
 }
 
 fn useProgramEnd(program: *OpenGLProgramCommon) void {
     platform.optGLUseProgram.?(0);
 
-    const uv_array_index: i32 = program.vert_uv_id;
-    const color_array_index: i32 = program.vert_color_id;
     const position_array_index: i32 = program.vert_position_id;
+    const normal_array_index: i32 = program.vert_normal_id;
+    const color_array_index: i32 = program.vert_color_id;
+    const uv_array_index: i32 = program.vert_uv_id;
 
-    if (isValidArray(uv_array_index)) {
-        platform.optGLDisableVertexAttribArray.?(@intCast(uv_array_index));
+    if (isValidArray(position_array_index)) {
+        platform.optGLDisableVertexAttribArray.?(@intCast(position_array_index));
+    }
+    if (isValidArray(normal_array_index)) {
+        platform.optGLDisableVertexAttribArray.?(@intCast(normal_array_index));
     }
     if (isValidArray(color_array_index)) {
         platform.optGLDisableVertexAttribArray.?(@intCast(color_array_index));
     }
-    if (isValidArray(position_array_index)) {
-        platform.optGLDisableVertexAttribArray.?(@intCast(position_array_index));
+    if (isValidArray(uv_array_index)) {
+        platform.optGLDisableVertexAttribArray.?(@intCast(uv_array_index));
     }
 }
 
@@ -1120,10 +1160,10 @@ fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: 
     gl.glDepthFunc(gl.GL_ALWAYS);
 
     var vertices: [4]TexturedVertex = [_]TexturedVertex{
-        .{ .position = .new(-1, 1, 0, 1), .uv = .new(0, 1), .color = 0xffffffff },
-        .{ .position = .new(-1, -1, 0, 1), .uv = .new(0, 0), .color = 0xffffffff },
-        .{ .position = .new(1, 1, 0, 1), .uv = .new(1, 1), .color = 0xffffffff },
-        .{ .position = .new(1, -1, 0, 1), .uv = .new(1, 0), .color = 0xffffffff },
+        .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .color = 0xffffffff },
+        .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .color = 0xffffffff },
+        .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .color = 0xffffffff },
+        .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .color = 0xffffffff },
     };
     platform.optGLBufferData.?(
         GL_ARRAY_BUFFER,
@@ -1351,10 +1391,10 @@ pub fn renderCommands(
     gl.glScissor(0, 0, render_width, render_height);
 
     var vertices: [4]TexturedVertex = [_]TexturedVertex{
-        .{ .position = .new(-1, 1, 0, 1), .uv = .new(0, 1), .color = 0xffffffff },
-        .{ .position = .new(-1, -1, 0, 1), .uv = .new(0, 0), .color = 0xffffffff },
-        .{ .position = .new(1, 1, 0, 1), .uv = .new(1, 1), .color = 0xffffffff },
-        .{ .position = .new(1, -1, 0, 1), .uv = .new(1, 0), .color = 0xffffffff },
+        .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .color = 0xffffffff },
+        .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .color = 0xffffffff },
+        .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .color = 0xffffffff },
+        .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .color = 0xffffffff },
     };
     platform.optGLBufferData.?(
         GL_ARRAY_BUFFER,
@@ -1648,6 +1688,7 @@ fn createProgram(
     header: [*:0]const u8,
     vertex_code: [*:0]const u8,
     fragment_code: [*:0]const u8,
+    program: *OpenGLProgramCommon,
 ) u32 {
     const glShaderSource = platform.optGLShaderSource.?;
     const glCreateShader = platform.optGLCreateShader.?;
@@ -1708,6 +1749,12 @@ fn createProgram(
 
     glDeleteShader(vertex_shader_id);
     glDeleteShader(fragment_shader_id);
+
+    program.program_handle = program_id;
+    program.vert_position_id = platform.optGLGetAttribLocation.?(program_id, "VertP");
+    program.vert_normal_id = platform.optGLGetAttribLocation.?(program_id, "VertN");
+    program.vert_uv_id = platform.optGLGetAttribLocation.?(program_id, "VertUV");
+    program.vert_color_id = platform.optGLGetAttribLocation.?(program_id, "VertColor");
 
     return program_id;
 }

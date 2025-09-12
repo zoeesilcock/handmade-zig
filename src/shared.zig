@@ -881,6 +881,7 @@ pub const debug_color_table: [11]Color3 = .{
 
 pub const TexturedVertex = extern struct {
     position: Vector4,
+    normal: Vector3,
     uv: Vector2,
     color: u32, // Packed RGBA in memory order (ABGR in little endian).
 };

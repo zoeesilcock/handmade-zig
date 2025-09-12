@@ -651,12 +651,12 @@ pub fn updateAndRenderWorld(
         );
         var world_transform = ObjectTransform.defaultUpright();
 
-        render_group.pushVolumeOutline(
-            &world_transform,
-            .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
-            .new(1, 1, 0, 1),
-            0.01,
-        );
+        // render_group.pushVolumeOutline(
+        //     &world_transform,
+        //     .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
+        //     .new(1, 1, 0, 1),
+        //     0.01,
+        // );
 
         if (true) {
             render_group.pushRectangleOutline(
