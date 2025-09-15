@@ -2234,6 +2234,7 @@ fn debugStart(
         -10000,
         10000,
         null,
+        null,
     );
     debug_state.render_group.pushDepthClear();
 

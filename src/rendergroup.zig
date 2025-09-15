@@ -100,6 +100,7 @@ pub const RenderSetup = extern struct {
     fog_end_distance: f32 = 0,
     clip_alpha_start_distance: f32 = 0,
     clip_alpha_end_distance: f32 = 0,
+    debug_light_position: Vector3 = .zero(),
 };
 
 pub const TransientClipRect = extern struct {
@@ -511,7 +512,7 @@ pub const RenderGroup = extern struct {
         var e20 = p2.minus(p0);
         _ = e20.setZ(e20.z() + e20.w());
 
-        const normal_direction: Vector3 = e10.xyz().hadamardProduct(e20.xyz());
+        const normal_direction: Vector3 = e10.xyz().crossProduct(e20.xyz());
         const normal = normal_direction.normalizeOrZero();
         const n0: Vector3 = normal;
         const n1: Vector3 = normal;
@@ -790,10 +791,15 @@ pub const RenderGroup = extern struct {
             const t2: Vector2 = .new(1, 1);
             const t3: Vector2 = .new(0, 1);
 
-            const top_color: Color = storeColor(color);
-            const bottom_color: Color = .new(0, 0, 0, top_color.a());
-            const ct: Color = top_color.rgb().scaledTo(0.75).toColor(top_color.a());
-            const cb: Color = top_color.rgb().scaledTo(0.25).toColor(top_color.a());
+            // const top_color: Color = storeColor(color);
+            // const bottom_color: Color = .new(0, 0, 0, top_color.a());
+            // const ct: Color = top_color.rgb().scaledTo(0.75).toColor(top_color.a());
+            // const cb: Color = top_color.rgb().scaledTo(0.25).toColor(top_color.a());
+
+            const top_color = storeColor(color);
+            const bottom_color = top_color;
+            const ct = top_color;
+            const cb = top_color;
 
             self.pushQuadUnpackedColors(
                 bitmap,
@@ -1138,6 +1144,7 @@ pub const RenderGroup = extern struct {
             null,
             null,
             null,
+            null,
         );
     }
 
@@ -1152,7 +1159,9 @@ pub const RenderGroup = extern struct {
         opt_near_clip_plane: ?f32,
         opt_far_clip_plane: ?f32,
         opt_fog: ?bool,
+        opt_debug_light_position: ?Vector3,
     ) void {
+        const debug_light_position: Vector3 = opt_debug_light_position orelse .zero();
         const fog: bool = opt_fog orelse false;
         const near_clip_plane: f32 = opt_near_clip_plane orelse 0.1;
         const far_clip_plane: f32 = opt_far_clip_plane orelse 100;
@@ -1190,6 +1199,7 @@ pub const RenderGroup = extern struct {
         render_transform.position = camera_position;
 
         new_setup.camera_position = camera_position;
+        new_setup.debug_light_position = debug_light_position;
 
         const camera_c: MatrixInverse4x4 = .cameraTransform(camera_x, camera_y, camera_z, camera_position);
         render_transform.projection.forward = proj.forward.times(camera_c.forward);

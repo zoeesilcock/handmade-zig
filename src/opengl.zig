@@ -194,6 +194,8 @@ const ZBiasProgram = struct {
     clip_alpha_start_distance_id: i32 = 0,
     clip_alpha_end_distance_id: i32 = 0,
     alpha_threshold_id: i32 = 0,
+
+    debug_light_position_id: i32 = 0,
 };
 
 const PeelCompositeProgram = struct {
@@ -451,7 +453,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\uniform vec3 FogDirection;
         \\
         \\in vec4 VertP;
-        \\in vec4 VertN;
+        \\in vec3 VertN;
         \\in vec2 VertUV;
         \\in vec4 VertColor;
         \\
@@ -459,6 +461,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\smooth out vec4 FragColor;
         \\smooth out float FogDistance;
         \\smooth out vec3 WorldPosition;
+        \\smooth out vec3 WorldNormal;
         \\
         \\void main(void)
         \\{
@@ -480,6 +483,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\
         \\  FogDistance = dot(ZVertex.xyz - CameraPosition, FogDirection);
         \\  WorldPosition = ZVertex.xyz;
+        \\  WorldNormal = VertN;
         \\}
     ;
     const fragment_code =
@@ -494,19 +498,19 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\uniform float FogEndDistance;
         \\uniform float ClipAlphaStartDistance;
         \\uniform float ClipAlphaEndDistance;
+        \\uniform vec3 CameraPosition;
+        \\uniform vec3 LightPosition;
         \\
         \\out vec4 ResultColor;
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
         \\smooth in float FogDistance;
         \\smooth in vec3 WorldPosition;
+        \\smooth in vec3 WorldNormal;
         \\
         \\void main(void)
         \\{
-        \\  vec3 LightPosition = vec3(0, 0, 0);
-        \\  float LightStrength = 1.0f;
-        \\  vec3 LightPosition2 = vec3(8, 0, 0);
-        \\  float LightStrength2 = 2.0f;
+        \\  float LightStrength = 5.0f;
         \\
         \\  float FragZ = gl_FragCoord.z;
         \\
@@ -529,11 +533,38 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\
         \\  if (ModColor.a > AlphaThreshold)
         \\  {
-        \\    float LightDistance = distance(WorldPosition, LightPosition);
-        \\    float LightHere = LightStrength / (LightDistance * LightDistance);
-        \\    float LightDistance2 = distance(WorldPosition, LightPosition2);
-        \\    float LightHere2 = LightStrength2 / (LightDistance2 * LightDistance2);
-        \\    float TotalLight = LightHere + LightHere2;
+        \\    vec3 ToCamera = CameraPosition - WorldPosition;
+        \\    float CameraDistance = length(ToCamera);
+        \\    ToCamera *= (1.0 / CameraDistance);
+        \\
+        \\    vec3 ToLight = LightPosition - WorldPosition;
+        \\    float LightDistance = length(ToLight);
+        \\    ToLight *= (1.0 / LightDistance);
+        \\    float CosAngle = dot(ToLight, WorldNormal);
+        \\    CosAngle = clamp(CosAngle, 0, 1);
+        \\
+        \\    vec3 ReflectionVector = -ToCamera + 2 * dot(WorldNormal, ToCamera) * WorldNormal;
+        \\    float CosReflectedAngle = dot(ToLight, ReflectionVector);
+        \\    CosReflectedAngle = clamp(CosReflectedAngle, 0, 1);
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\    CosReflectedAngle *= CosReflectedAngle;
+        \\
+        \\    float LightS = (LightStrength / (LightDistance * LightDistance));
+        \\
+        \\    float DiffuseCoefficient = 0.1f;
+        \\    float DiffuseLight = DiffuseCoefficient * CosAngle * LightS;
+        \\
+        \\    float SpecularCoefficient = 2.0f;
+        \\    float SpecularLight = SpecularCoefficient * CosReflectedAngle * LightS;
+        \\
+        \\    float TotalLight = DiffuseLight + SpecularLight;
         \\
         \\    ResultColor.rgb = TotalLight * mix(ModColor.rgb, FogColor.rgb, FogAmount);
         \\    ResultColor.a = ModColor.a;
@@ -569,6 +600,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
     program.clip_alpha_start_distance_id = platform.optGLGetUniformLocation.?(program_handle, "ClipAlphaStartDistance");
     program.clip_alpha_end_distance_id = platform.optGLGetUniformLocation.?(program_handle, "ClipAlphaEndDistance");
     program.alpha_threshold_id = platform.optGLGetUniformLocation.?(program_handle, "AlphaThreshold");
+
+    program.debug_light_position_id = platform.optGLGetUniformLocation.?(program_handle, "LightPosition");
 }
 
 fn compilePeelComposite(program: *PeelCompositeProgram) void {
@@ -590,7 +623,7 @@ fn compilePeelComposite(program: *PeelCompositeProgram) void {
     const vertex_code =
         \\// Vertex code
         \\in vec4 VertP;
-        \\in vec4 VertN;
+        \\in vec3 VertN;
         \\in vec4 VertColor;
         \\in vec2 VertUV;
         \\
@@ -857,6 +890,8 @@ fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *RenderSetup, alpha_thres
     platform.optGLUniform1f.?(program.clip_alpha_start_distance_id, setup.clip_alpha_start_distance);
     platform.optGLUniform1f.?(program.clip_alpha_end_distance_id, setup.clip_alpha_end_distance);
     platform.optGLUniform1f.?(program.alpha_threshold_id, alpha_threshold);
+
+    platform.optGLUniform3fv.?(program.debug_light_position_id, 1, setup.debug_light_position.toGL());
 }
 
 fn useCompositeProgramBegin(program: *PeelCompositeProgram) void {

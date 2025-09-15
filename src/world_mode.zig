@@ -102,6 +102,7 @@ pub const GameModeWorld = struct {
     debug_camera_pitch: f32,
     debug_camera_orbit: f32,
     debug_camera_dolly: f32,
+    debug_light_position: Vector3,
 
     camera_pitch: f32,
     camera_orbit: f32,
@@ -520,6 +521,7 @@ pub fn updateAndRenderWorld(
 
     const near_clip_plane: f32 = 3;
     const far_clip_plane: f32 = 100;
+    const debug_light_position: Vector3 = world_mode.debug_light_position;
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
@@ -540,6 +542,7 @@ pub fn updateAndRenderWorld(
         near_clip_plane,
         far_clip_plane,
         true,
+        debug_light_position,
     );
 
     if (world_mode.use_debug_camera) {
@@ -556,6 +559,7 @@ pub fn updateAndRenderWorld(
             near_clip_plane,
             far_clip_plane,
             false,
+            debug_light_position,
         );
     }
 
@@ -639,6 +643,7 @@ pub fn updateAndRenderWorld(
                 camera_following_entity,
                 input.frame_delta_time,
             );
+            world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
         }
 
         const frame_to_frame_camera_delta_position: Vector3 =
