@@ -894,6 +894,10 @@ pub const RenderSettings = extern struct {
     pixelation_hint: bool = false,
     multisample_debug: bool = false,
 
+    light_texture_width_pow2: i32 = 0,
+    light_texture_height_pow2: i32 = 0,
+    light_texture_depth_pow2: i32 = 0,
+
     pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
         const type_info = @typeInfo(@TypeOf(self.*));
         inline for (type_info.@"struct".fields) |struct_field| {
@@ -943,6 +947,10 @@ pub const RenderCommands = extern struct {
                 .depth_peel_count_hint = 4,
                 .multisampling_hint = true,
                 .pixelation_hint = false,
+
+                .light_texture_width_pow2 = 9,
+                .light_texture_height_pow2 = 8,
+                .light_texture_depth_pow2 = 1,
             },
 
             .max_push_buffer_size = max_push_buffer_size,

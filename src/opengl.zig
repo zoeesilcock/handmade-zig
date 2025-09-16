@@ -229,6 +229,7 @@ const FramebufferFlags = enum(u32) {
     Filtered = 0x2,
     Color = 0x4,
     Depth = 0x8,
+    Float = 0x10,
 };
 
 const OpenGL = struct {
@@ -262,6 +263,11 @@ const OpenGL = struct {
     peel_composite: PeelCompositeProgram = undefined, // Composite all passes.
     final_stretch: FinalStretchProgram = undefined,
     resolve_multisample: ResolveMultisampleProgram = undefined,
+
+    light_mip_count: i32 = 0,
+    light_texture_count: u32 = 0,
+    light_texture_channel_count: u32 = 0,
+    light_textures: [8]Framebuffer = undefined,
 };
 
 pub var open_gl: OpenGL = .{};
@@ -510,9 +516,10 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\
         \\void main(void)
         \\{
-        \\  float LightStrength = 5.0f;
-        \\
         \\  float FragZ = gl_FragCoord.z;
+        \\  float LightStrengthR = 1.0f;
+        \\  float LightStrengthG = 1.0f;
+        \\  float LightStrengthB = 1.0f;
         \\
         \\#if DepthPeel
         \\  float ClipDepth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
@@ -540,11 +547,17 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\    vec3 ToLight = LightPosition - WorldPosition;
         \\    float LightDistance = length(ToLight);
         \\    ToLight *= (1.0 / LightDistance);
-        \\    float CosAngle = dot(ToLight, WorldNormal);
+        \\    vec3 LightS = vec3((LightStrengthR / (LightDistance * LightDistance)),
+        \\                       (LightStrengthG / (LightDistance * LightDistance)),
+        \\                       (LightStrengthB / (LightDistance * LightDistance)));
+        \\
+        \\    vec3 CosAngle = vec3(dot(ToLight, WorldNormal), dot(ToLight, WorldNormal), dot(ToLight, WorldNormal));
         \\    CosAngle = clamp(CosAngle, 0, 1);
         \\
         \\    vec3 ReflectionVector = -ToCamera + 2 * dot(WorldNormal, ToCamera) * WorldNormal;
-        \\    float CosReflectedAngle = dot(ToLight, ReflectionVector);
+        \\    vec3 CosReflectedAngle = vec3(dot(ToLight, ReflectionVector),
+        \\                                  dot(ToLight, ReflectionVector),
+        \\                                  dot(ToLight, ReflectionVector));
         \\    CosReflectedAngle = clamp(CosReflectedAngle, 0, 1);
         \\    CosReflectedAngle *= CosReflectedAngle;
         \\    CosReflectedAngle *= CosReflectedAngle;
@@ -556,15 +569,13 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\    CosReflectedAngle *= CosReflectedAngle;
         \\    CosReflectedAngle *= CosReflectedAngle;
         \\
-        \\    float LightS = (LightStrength / (LightDistance * LightDistance));
+        \\    float DiffuseCoefficient = 1.0f;
+        \\    vec3 DiffuseLight = DiffuseCoefficient * CosAngle * LightS;
         \\
-        \\    float DiffuseCoefficient = 0.1f;
-        \\    float DiffuseLight = DiffuseCoefficient * CosAngle * LightS;
+        \\    float SpecularCoefficient = 0.0f;
+        \\    vec3 SpecularLight = SpecularCoefficient * CosReflectedAngle * LightS;
         \\
-        \\    float SpecularCoefficient = 2.0f;
-        \\    float SpecularLight = SpecularCoefficient * CosReflectedAngle * LightS;
-        \\
-        \\    float TotalLight = DiffuseLight + SpecularLight;
+        \\    vec3 TotalLight = DiffuseLight + SpecularLight;
         \\
         \\    ResultColor.rgb = TotalLight * mix(ModColor.rgb, FogColor.rgb, FogAmount);
         \\    ResultColor.a = ModColor.a;
@@ -1039,6 +1050,7 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32) Framebuffer {
     const filtered: bool = (flags & @intFromEnum(FramebufferFlags.Filtered)) != 0;
     const has_color: bool = (flags & @intFromEnum(FramebufferFlags.Color)) != 0;
     const has_depth: bool = (flags & @intFromEnum(FramebufferFlags.Depth)) != 0;
+    // const is_float: bool = (flags & @intFromEnum(FramebufferFlags.Float)) != 0;
 
     platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&result.framebuffer_handle));
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, result.framebuffer_handle);
@@ -1133,6 +1145,10 @@ fn changeToSettings(settings: *RenderSettings) void {
         freeFramebuffer(&open_gl.depth_peel_buffers[depth_peel_index]);
         freeFramebuffer(&open_gl.depth_peel_resolve_buffers[depth_peel_index]);
     }
+    var light_index: u32 = 0;
+    while (light_index < open_gl.light_texture_count) : (light_index += 1) {
+        freeFramebuffer(&open_gl.light_textures[light_index]);
+    }
     freeProgram(&open_gl.z_bias_no_depth_peel.common);
     freeProgram(&open_gl.z_bias_depth_peel.common);
     freeProgram(&open_gl.peel_composite.common);
@@ -1185,6 +1201,26 @@ fn changeToSettings(settings: *RenderSettings) void {
                 multisampled_resolve_flags,
             );
         }
+    }
+
+    const light_texture_width: i32 = @shlExact(@as(i32, 1), @intCast(settings.light_texture_width_pow2));
+    const light_texture_height: i32 = @shlExact(@as(i32, 1), @intCast(settings.light_texture_height_pow2));
+    // const light_texture_depth: i32 = @shlExact(@as(i32, 1), @intCast(settings.light_texture_depth_pow2));
+
+    open_gl.light_mip_count = @max(
+        settings.light_texture_height_pow2,
+        settings.light_texture_width_pow2,
+        settings.light_texture_depth_pow2,
+    );
+    open_gl.light_texture_count = 3;
+    open_gl.light_texture_channel_count = 4;
+    light_index = 0;
+    while (light_index < open_gl.light_texture_count) : (light_index += 1) {
+        open_gl.light_textures[light_index] = createFrameBuffer(
+            light_texture_width,
+            light_texture_height,
+            resolve_flags,
+        );
     }
 }
 
