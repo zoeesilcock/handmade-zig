@@ -52,6 +52,37 @@ pub const GL_FRAMEBUFFER = 0x8D40;
 pub const GL_READ_FRAMEBUFFER = 0x8CA8;
 pub const GL_DRAW_FRAMEBUFFER = 0x8CA9;
 pub const GL_COLOR_ATTACHMENT0 = 0x8CE0;
+pub const GL_COLOR_ATTACHMENT1 = 0x8CE1;
+pub const GL_COLOR_ATTACHMENT2 = 0x8CE2;
+pub const GL_COLOR_ATTACHMENT3 = 0x8CE3;
+pub const GL_COLOR_ATTACHMENT4 = 0x8CE4;
+pub const GL_COLOR_ATTACHMENT5 = 0x8CE5;
+pub const GL_COLOR_ATTACHMENT6 = 0x8CE6;
+pub const GL_COLOR_ATTACHMENT7 = 0x8CE7;
+pub const GL_COLOR_ATTACHMENT8 = 0x8CE8;
+pub const GL_COLOR_ATTACHMENT9 = 0x8CE9;
+pub const GL_COLOR_ATTACHMENT10 = 0x8CEA;
+pub const GL_COLOR_ATTACHMENT11 = 0x8CEB;
+pub const GL_COLOR_ATTACHMENT12 = 0x8CEC;
+pub const GL_COLOR_ATTACHMENT13 = 0x8CED;
+pub const GL_COLOR_ATTACHMENT14 = 0x8CEE;
+pub const GL_COLOR_ATTACHMENT15 = 0x8CEF;
+pub const GL_COLOR_ATTACHMENT16 = 0x8CF0;
+pub const GL_COLOR_ATTACHMENT17 = 0x8CF1;
+pub const GL_COLOR_ATTACHMENT18 = 0x8CF2;
+pub const GL_COLOR_ATTACHMENT19 = 0x8CF3;
+pub const GL_COLOR_ATTACHMENT20 = 0x8CF4;
+pub const GL_COLOR_ATTACHMENT21 = 0x8CF5;
+pub const GL_COLOR_ATTACHMENT22 = 0x8CF6;
+pub const GL_COLOR_ATTACHMENT23 = 0x8CF7;
+pub const GL_COLOR_ATTACHMENT24 = 0x8CF8;
+pub const GL_COLOR_ATTACHMENT25 = 0x8CF9;
+pub const GL_COLOR_ATTACHMENT26 = 0x8CFA;
+pub const GL_COLOR_ATTACHMENT27 = 0x8CFB;
+pub const GL_COLOR_ATTACHMENT28 = 0x8CFC;
+pub const GL_COLOR_ATTACHMENT29 = 0x8CFD;
+pub const GL_COLOR_ATTACHMENT30 = 0x8CFE;
+pub const GL_COLOR_ATTACHMENT31 = 0x8CFF;
 pub const GL_DEPTH_ATTACHMENT = 0x8D00;
 pub const GL_FRAME_BUFFER_COMPLETE = 0x8CD5;
 
@@ -76,6 +107,8 @@ pub const GL_TEXTURE_2D_MULTISAMPLE = 0x9100;
 pub const GL_MAX_SAMPLES = 0x8D57;
 pub const GL_MAX_COLOR_TEXTURE_SAMPLES = 0x910E;
 pub const GL_MAX_DEPTH_TEXTURE_SAMPLES = 0x910F;
+pub const GL_MAX_COLOR_ATTACHMENTS = 0x8CDF;
+pub const GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS = 0x8B4D;
 
 // Windows specific.
 pub const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
@@ -139,6 +172,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
 const SpriteFlag = render.SpriteFlag;
 const SpriteEdge = render.SpriteEdge;
+const zeroStruct = @import("memory.zig").zeroStruct;
 
 const debug_color_table = shared.debug_color_table;
 var global_config = &@import("config.zig").global_config;
@@ -232,8 +266,22 @@ const FramebufferFlags = enum(u32) {
     Float = 0x10,
 };
 
+const LightBuffer = struct {
+    write_all_framebuffer: u32 = 0,
+    write_emission_framebuffer: u32 = 0,
+
+    // These are all 3-element textures.
+    front_emission_texture: u32 = 0,
+    back_emission_texture: u32 = 0,
+    surface_color_texture: u32 = 0,
+    normal_location_texture: u32 = 0, // This is Normal.x, Normal.z, Depth.
+};
+
 const OpenGL = struct {
     current_settings: RenderSettings = .{},
+
+    max_color_attachments: i32 = 0,
+    max_samplers_per_shader: i32 = 0,
 
     shader_sim_tex_read_srgb: bool = true,
     shader_sim_tex_write_srgb: bool = true,
@@ -264,10 +312,8 @@ const OpenGL = struct {
     final_stretch: FinalStretchProgram = undefined,
     resolve_multisample: ResolveMultisampleProgram = undefined,
 
-    light_mip_count: i32 = 0,
-    light_texture_count: u32 = 0,
-    light_texture_channel_count: u32 = 0,
-    light_textures: [8]Framebuffer = undefined,
+    light_buffer_count: u32 = 0,
+    light_buffers: [12]LightBuffer = undefined,
 };
 
 pub var open_gl: OpenGL = .{};
@@ -353,6 +399,9 @@ fn colorUB(color: u32) void {
 
 pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     gl.glGenTextures(1, &open_gl.reserved_blit_texture);
+
+    gl.glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &open_gl.max_color_attachments);
+    gl.glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &open_gl.max_samplers_per_shader);
 
     gl.glGetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &open_gl.max_multi_sample_count);
     if (open_gl.max_multi_sample_count > 16) {
@@ -1008,7 +1057,7 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     }
 }
 
-fn framebufferTextImage(slot: u32, format: i32, filter_type: i32, width: i32, height: i32) u32 {
+fn framebufferTexImage(slot: u32, format: i32, filter_type: i32, width: i32, height: i32) u32 {
     var result: u32 = 0;
     gl.glGenTextures(1, @ptrCast(&result));
     gl.glBindTexture(slot, result);
@@ -1059,7 +1108,7 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32) Framebuffer {
     const filter_type: i32 = if (filtered) gl.GL_LINEAR else gl.GL_NEAREST;
 
     if (has_color) {
-        result.color_handle = framebufferTextImage(
+        result.color_handle = framebufferTexImage(
             slot,
             open_gl.default_framebuffer_texture_format,
             filter_type,
@@ -1077,7 +1126,7 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32) Framebuffer {
     std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
     if (has_depth) {
-        result.depth_handle = framebufferTextImage(slot, DEPTH_COMPONENT_TYPE, filter_type, width, height);
+        result.depth_handle = framebufferTexImage(slot, DEPTH_COMPONENT_TYPE, filter_type, width, height);
         platform.optGLFrameBufferTexture2DEXT.?(
             GL_FRAMEBUFFER,
             GL_DEPTH_ATTACHMENT,
@@ -1146,8 +1195,15 @@ fn changeToSettings(settings: *RenderSettings) void {
         freeFramebuffer(&open_gl.depth_peel_resolve_buffers[depth_peel_index]);
     }
     var light_index: u32 = 0;
-    while (light_index < open_gl.light_texture_count) : (light_index += 1) {
-        freeFramebuffer(&open_gl.light_textures[light_index]);
+    while (light_index < open_gl.light_buffer_count) : (light_index += 1) {
+        const light_buffer: *LightBuffer = &open_gl.light_buffers[light_index];
+        platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
+        platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
+        gl.glDeleteTextures(1, &light_buffer.front_emission_texture);
+        gl.glDeleteTextures(1, &light_buffer.back_emission_texture);
+        gl.glDeleteTextures(1, &light_buffer.surface_color_texture);
+        gl.glDeleteTextures(1, &light_buffer.normal_location_texture);
+        zeroStruct(LightBuffer, light_buffer);
     }
     freeProgram(&open_gl.z_bias_no_depth_peel.common);
     freeProgram(&open_gl.z_bias_depth_peel.common);
@@ -1203,24 +1259,103 @@ fn changeToSettings(settings: *RenderSettings) void {
         }
     }
 
-    const light_texture_width: i32 = @shlExact(@as(i32, 1), @intCast(settings.light_texture_width_pow2));
-    const light_texture_height: i32 = @shlExact(@as(i32, 1), @intCast(settings.light_texture_height_pow2));
-    // const light_texture_depth: i32 = @shlExact(@as(i32, 1), @intCast(settings.light_texture_depth_pow2));
+    open_gl.light_buffer_count = 10;
+    var tex_width: i32 = render_width;
+    var tex_height: i32 = render_height;
 
-    open_gl.light_mip_count = @max(
-        settings.light_texture_height_pow2,
-        settings.light_texture_width_pow2,
-        settings.light_texture_depth_pow2,
-    );
-    open_gl.light_texture_count = 3;
-    open_gl.light_texture_channel_count = 4;
     light_index = 0;
-    while (light_index < open_gl.light_texture_count) : (light_index += 1) {
-        open_gl.light_textures[light_index] = createFrameBuffer(
-            light_texture_width,
-            light_texture_height,
-            resolve_flags,
+    while (light_index < open_gl.light_buffer_count) : (light_index += 1) {
+        const light_buffer: *LightBuffer = &open_gl.light_buffers[light_index];
+        const filter_type: i32 = gl.GL_LINEAR;
+
+        light_buffer.front_emission_texture = framebufferTexImage(
+            gl.GL_TEXTURE_2D,
+            GL_RGB32F,
+            filter_type,
+            tex_width,
+            tex_height,
         );
+        light_buffer.back_emission_texture = framebufferTexImage(
+            gl.GL_TEXTURE_2D,
+            GL_RGB32F,
+            filter_type,
+            tex_width,
+            tex_height,
+        );
+        light_buffer.surface_color_texture = framebufferTexImage(
+            gl.GL_TEXTURE_2D,
+            GL_RGB32F,
+            filter_type,
+            tex_width,
+            tex_height,
+        );
+        light_buffer.normal_location_texture = framebufferTexImage(
+            gl.GL_TEXTURE_2D,
+            GL_RGB32F,
+            filter_type,
+            tex_width,
+            tex_height,
+        );
+
+        // Up framebuffer.
+        platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
+        platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_all_framebuffer);
+        platform.optGLFrameBufferTexture2DEXT.?(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            gl.GL_TEXTURE_2D,
+            light_buffer.front_emission_texture,
+            0,
+        );
+        platform.optGLFrameBufferTexture2DEXT.?(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT1,
+            gl.GL_TEXTURE_2D,
+            light_buffer.back_emission_texture,
+            0,
+        );
+        platform.optGLFrameBufferTexture2DEXT.?(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT2,
+            gl.GL_TEXTURE_2D,
+            light_buffer.surface_color_texture,
+            0,
+        );
+        platform.optGLFrameBufferTexture2DEXT.?(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT3,
+            gl.GL_TEXTURE_2D,
+            light_buffer.normal_location_texture,
+            0,
+        );
+
+        // Down framebuffer.
+        platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
+        platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_emission_framebuffer);
+        platform.optGLFrameBufferTexture2DEXT.?(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            gl.GL_TEXTURE_2D,
+            light_buffer.front_emission_texture,
+            0,
+        );
+        platform.optGLFrameBufferTexture2DEXT.?(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT1,
+            gl.GL_TEXTURE_2D,
+            light_buffer.back_emission_texture,
+            0,
+        );
+
+        tex_width = @divFloor(tex_width, 2);
+        tex_height = @divFloor(tex_height, 2);
+
+        if (tex_width < 1) {
+            tex_width = 1;
+        }
+        if (tex_height < 1) {
+            tex_height = 1;
+        }
     }
 }
 
