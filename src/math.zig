@@ -1333,6 +1333,20 @@ pub inline fn triangle01(time: f32) f32 {
     return result;
 }
 
+pub inline fn clampi32(min: i32, value: i32, max: i32) i32 {
+    var result = value;
+
+    if (result < min) {
+        result = min;
+    }
+
+    if (result > max) {
+        result = max;
+    }
+
+    return result;
+}
+
 pub inline fn clampf(min: f32, value: f32, max: f32) f32 {
     var result = value;
 

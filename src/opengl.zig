@@ -252,6 +252,25 @@ const FinalStretchProgram = struct {
     image_id: i32,
 };
 
+const FakeSeedLightingProgram = struct {
+    common: OpenGLProgramCommon,
+
+    debug_light_position_id: i32 = 0,
+};
+
+const MultiGridLightUpProgram = struct {
+    common: OpenGLProgramCommon,
+
+    source_front_emission_texture: i32 = 0,
+    source_back_emission_texture: i32 = 0,
+    source_surface_color_texture: i32 = 0,
+    source_normal_location_texture: i32 = 0,
+};
+
+const MultiGridLightDownProgram = struct {
+    common: OpenGLProgramCommon,
+};
+
 const Framebuffer = struct {
     framebuffer_handle: u32 = 0,
     color_handle: u32 = 0,
@@ -267,6 +286,9 @@ const FramebufferFlags = enum(u32) {
 };
 
 const LightBuffer = struct {
+    width: i32,
+    height: i32,
+
     write_all_framebuffer: u32 = 0,
     write_emission_framebuffer: u32 = 0,
 
@@ -311,9 +333,15 @@ const OpenGL = struct {
     peel_composite: PeelCompositeProgram = undefined, // Composite all passes.
     final_stretch: FinalStretchProgram = undefined,
     resolve_multisample: ResolveMultisampleProgram = undefined,
+    fake_seed_lighting: FakeSeedLightingProgram = undefined,
+    multi_grid_light_up: MultiGridLightUpProgram = undefined,
+    multi_grid_light_down: MultiGridLightDownProgram = undefined,
 
     light_buffer_count: u32 = 0,
     light_buffers: [12]LightBuffer = undefined,
+
+    debug_light_buffer_index: i32 = 0,
+    debug_light_buffer_texture_index: i32 = 0,
 };
 
 pub var open_gl: OpenGL = .{};
@@ -664,7 +692,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
     program.debug_light_position_id = platform.optGLGetUniformLocation.?(program_handle, "LightPosition");
 }
 
-fn compilePeelComposite(program: *PeelCompositeProgram) void {
+fn compilePeelCompositeProgram(program: *PeelCompositeProgram) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -885,7 +913,7 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
     program.sample_count_id = platform.optGLGetUniformLocation.?(program_handle, "SampleCount");
 }
 
-fn compileFinalStretch(program: *FinalStretchProgram) void {
+fn compileFinalStretchProgram(program: *FinalStretchProgram) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -936,6 +964,154 @@ fn compileFinalStretch(program: *FinalStretchProgram) void {
     program.image_id = platform.optGLGetUniformLocation.?(program_handle, "ImageSampler");
 }
 
+fn compileFakeSeedLightingProgram(program: *FakeSeedLightingProgram) void {
+    var defines: [1024]u8 = undefined;
+    const defines_length = shared.formatString(defines.len, &defines,
+        \\#version 150
+    , .{});
+    const vertex_code =
+        \\// Vertex code
+        \\in vec4 VertP;
+        \\
+        \\void main(void)
+        \\{
+        \\  gl_Position = VertP;
+        \\}
+    ;
+    const fragment_code =
+        \\// Fragment code
+        \\uniform vec3 LightPosition;
+        \\
+        \\out vec4 out_0;
+        \\out vec4 out_1;
+        \\out vec4 out_2;
+        \\out vec4 out_3;
+        \\
+        \\void main(void)
+        \\{
+        \\  vec3 FrontEmission = vec3(0, 0, 0);
+        \\  vec3 BackEmission = vec3(0, 0, 0);
+        \\  vec3 SurfaceColor = vec3(0.7f, 0.7f, 0.7f);
+        \\  vec3 NormalLocation = vec3(0, 1, 10);
+        \\
+        \\  vec2 ThisPosition = gl_FragCoord.xy;
+        \\  vec2 LP = LightPosition.xy * 0.025f * vec2(1920.0f, 1080.0f) + 0.5f * vec2(1920.0f, 1080.0f);
+        \\
+        \\  vec2 DeltaToLight = ThisPosition - LP;
+        \\  float DistanceToLight = length(DeltaToLight);
+        \\  float LightRadius = 10.0f;
+        \\  if (DistanceToLight < LightRadius)
+        \\  {
+        \\     FrontEmission = vec3(1, 0, 0);
+        \\     BackEmission = vec3(0, 1, 0);
+        \\     SurfaceColor = vec3(0, 0, 0);
+        \\     NormalLocation = vec3(1, 0, 0);
+        \\  }
+        \\
+        \\  out_0.rgb = FrontEmission;
+        \\  out_1.rgb = BackEmission;
+        \\  out_2.rgb = SurfaceColor;
+        \\  out_3.rgb = NormalLocation;
+        \\}
+    ;
+
+    const program_handle = createProgram(
+        @ptrCast(defines[0..defines_length]),
+        shader_header_code,
+        vertex_code,
+        fragment_code,
+        &program.common,
+    );
+    program.debug_light_position_id = platform.optGLGetUniformLocation.?(program_handle, "LightPosition");
+
+    platform.optGLBindFragDataLocation.?(program_handle, 0, "out_0");
+    platform.optGLBindFragDataLocation.?(program_handle, 1, "out_1");
+    platform.optGLBindFragDataLocation.?(program_handle, 2, "out_2");
+    platform.optGLBindFragDataLocation.?(program_handle, 3, "out_3");
+}
+
+fn compileMultiGridLightUpProgram(program: *MultiGridLightUpProgram) void {
+    var defines: [1024]u8 = undefined;
+    const defines_length = shared.formatString(
+        defines.len,
+        &defines,
+        \\#version 150
+    ,
+        .{},
+    );
+    const vertex_code =
+        \\// Vertex code
+        \\in vec4 VertP;
+        \\in vec2 VertUV;
+        \\
+        \\smooth out vec2 FragUV;
+        \\
+        \\void main(void)
+        \\{
+        \\  gl_Position = VertP;
+        \\  FragUV = VertUV;
+        \\}
+    ;
+    const fragment_code =
+        \\// Fragment code
+        \\uniform sampler2D SourceFrontEmissionTexture;
+        \\uniform sampler2D SourceBackEmissionTexture;
+        \\uniform sampler2D SourceSurfaceColorTexture;
+        \\uniform sampler2D SourceNormalLocationTexture;
+        \\
+        \\smooth in vec2 FragUV;
+        \\
+        \\out vec4 out_0;
+        \\out vec4 out_1;
+        \\out vec4 out_2;
+        \\out vec4 out_3;
+        \\
+        \\void main(void)
+        \\{
+        \\  vec3 SourceFrontEmission = texture(SourceFrontEmissionTexture, FragUV).rgb;
+        \\  vec3 SourceBackEmission = texture(SourceBackEmissionTexture, FragUV).rgb;
+        \\  vec3 SourceSurfaceColor = texture(SourceSurfaceColorTexture, FragUV).rgb;
+        \\  vec3 SourceNormalLocation = texture(SourceNormalLocationTexture, FragUV).rgb;
+        \\
+        \\  vec3 FrontEmission = SourceFrontEmission;
+        \\  vec3 BackEmission = SourceBackEmission;
+        \\  vec3 SurfaceColor = SourceSurfaceColor;
+        \\  vec3 NormalLocation = SourceNormalLocation;
+        \\
+        \\  out_0.rgb = FrontEmission;
+        \\  out_1.rgb = BackEmission;
+        \\  out_2.rgb = SurfaceColor;
+        \\  out_3.rgb = NormalLocation;
+        \\}
+    ;
+
+    const program_handle = createProgram(
+        @ptrCast(defines[0..defines_length]),
+        shader_header_code,
+        vertex_code,
+        fragment_code,
+        &program.common,
+    );
+    program.source_front_emission_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "SourceFrontEmissionTexture");
+    program.source_back_emission_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "SourceBackEmissionTexture");
+    program.source_surface_color_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "SourceSurfaceColorTexture");
+    program.source_normal_location_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "SourceNormalLocationTexture");
+
+    platform.optGLBindFragDataLocation.?(program_handle, 0, "out_0");
+    platform.optGLBindFragDataLocation.?(program_handle, 1, "out_1");
+    platform.optGLBindFragDataLocation.?(program_handle, 2, "out_2");
+    platform.optGLBindFragDataLocation.?(program_handle, 3, "out_3");
+}
+
+fn compileMultiGridLightDownProgram(program: *MultiGridLightDownProgram) void {
+    // TODO: Multigrid down.
+    _ = program;
+}
+
 fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *RenderSetup, alpha_threshold: f32) void {
     useProgramBegin(&program.common);
 
@@ -975,6 +1151,25 @@ fn useFinalStretchProgramBegin(program: *FinalStretchProgram) void {
     useProgramBegin(&program.common);
 
     platform.optGLUniform1i.?(program.image_id, 0);
+}
+
+fn useFakeSeedLightingProgramBegin(program: *FakeSeedLightingProgram, setup: *RenderSetup) void {
+    useProgramBegin(&program.common);
+
+    platform.optGLUniform3fv.?(program.debug_light_position_id, 1, setup.debug_light_position.toGL());
+}
+
+fn useMultiGridLightUpProgramBegin(program: *MultiGridLightUpProgram) void {
+    useProgramBegin(&program.common);
+
+    platform.optGLUniform1i.?(program.source_front_emission_texture, 0);
+    platform.optGLUniform1i.?(program.source_back_emission_texture, 1);
+    platform.optGLUniform1i.?(program.source_surface_color_texture, 2);
+    platform.optGLUniform1i.?(program.source_normal_location_texture, 3);
+}
+
+fn useMultiGridLightDownProgramBegin(program: *MultiGridLightDownProgram) void {
+    useProgramBegin(&program.common);
 }
 
 fn isValidArray(index: i32) bool {
@@ -1210,6 +1405,9 @@ fn changeToSettings(settings: *RenderSettings) void {
     freeProgram(&open_gl.peel_composite.common);
     freeProgram(&open_gl.final_stretch.common);
     freeProgram(&open_gl.resolve_multisample.common);
+    freeProgram(&open_gl.fake_seed_lighting.common);
+    freeProgram(&open_gl.multi_grid_light_up.common);
+    freeProgram(&open_gl.multi_grid_light_down.common);
 
     // Create new dynamic resources.
     open_gl.current_settings = settings.*;
@@ -1236,9 +1434,12 @@ fn changeToSettings(settings: *RenderSettings) void {
 
     compileZBiasProgram(&open_gl.z_bias_no_depth_peel, false);
     compileZBiasProgram(&open_gl.z_bias_depth_peel, true);
-    compilePeelComposite(&open_gl.peel_composite);
-    compileFinalStretch(&open_gl.final_stretch);
+    compilePeelCompositeProgram(&open_gl.peel_composite);
+    compileFinalStretchProgram(&open_gl.final_stretch);
     compileResolveMultisampleProgram(&open_gl.resolve_multisample);
+    compileFakeSeedLightingProgram(&open_gl.fake_seed_lighting);
+    compileMultiGridLightUpProgram(&open_gl.multi_grid_light_up);
+    compileMultiGridLightDownProgram(&open_gl.multi_grid_light_down);
 
     open_gl.resolve_frame_buffer = createFrameBuffer(render_width, render_height, resolve_flags);
 
@@ -1260,41 +1461,51 @@ fn changeToSettings(settings: *RenderSettings) void {
     }
 
     open_gl.light_buffer_count = 10;
-    var tex_width: i32 = render_width;
-    var tex_height: i32 = render_height;
+    var texture_width: i32 = render_width;
+    var texture_height: i32 = render_height;
+
+    const attachments = [_]u32{
+        GL_COLOR_ATTACHMENT0,
+        GL_COLOR_ATTACHMENT1,
+        GL_COLOR_ATTACHMENT2,
+        GL_COLOR_ATTACHMENT3,
+    };
 
     light_index = 0;
     while (light_index < open_gl.light_buffer_count) : (light_index += 1) {
         const light_buffer: *LightBuffer = &open_gl.light_buffers[light_index];
         const filter_type: i32 = gl.GL_LINEAR;
 
+        light_buffer.width = texture_width;
+        light_buffer.height = texture_height;
+
         light_buffer.front_emission_texture = framebufferTexImage(
             gl.GL_TEXTURE_2D,
             GL_RGB32F,
             filter_type,
-            tex_width,
-            tex_height,
+            texture_width,
+            texture_height,
         );
         light_buffer.back_emission_texture = framebufferTexImage(
             gl.GL_TEXTURE_2D,
             GL_RGB32F,
             filter_type,
-            tex_width,
-            tex_height,
+            texture_width,
+            texture_height,
         );
         light_buffer.surface_color_texture = framebufferTexImage(
             gl.GL_TEXTURE_2D,
             GL_RGB32F,
             filter_type,
-            tex_width,
-            tex_height,
+            texture_width,
+            texture_height,
         );
         light_buffer.normal_location_texture = framebufferTexImage(
             gl.GL_TEXTURE_2D,
             GL_RGB32F,
             filter_type,
-            tex_width,
-            tex_height,
+            texture_width,
+            texture_height,
         );
 
         // Up framebuffer.
@@ -1328,6 +1539,7 @@ fn changeToSettings(settings: *RenderSettings) void {
             light_buffer.normal_location_texture,
             0,
         );
+        platform.optGLDrawBuffers.?(4, @ptrCast(&attachments));
 
         // Down framebuffer.
         platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
@@ -1346,21 +1558,22 @@ fn changeToSettings(settings: *RenderSettings) void {
             light_buffer.back_emission_texture,
             0,
         );
+        platform.optGLDrawBuffers.?(2, @ptrCast(&attachments));
 
-        tex_width = @divFloor(tex_width, 2);
-        tex_height = @divFloor(tex_height, 2);
+        texture_width = @divFloor(texture_width, 2);
+        texture_height = @divFloor(texture_height, 2);
 
-        if (tex_width < 1) {
-            tex_width = 1;
+        if (texture_width < 1) {
+            texture_width = 1;
         }
-        if (tex_height < 1) {
-            tex_height = 1;
+        if (texture_height < 1) {
+            texture_height = 1;
         }
     }
 }
 
-fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
-    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, to.framebuffer_handle);
+fn beginScreenFill(framebuffer_handle: u32, width: i32, height: i32) void {
+    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, framebuffer_handle);
     gl.glViewport(0, 0, width, height);
     gl.glScissor(0, 0, width, height);
     gl.glDepthFunc(gl.GL_ALWAYS);
@@ -1377,6 +1590,15 @@ fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: 
         &vertices,
         GL_STREAM_DRAW,
     );
+}
+
+fn endScreenFill() void {
+    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
+    gl.glDepthFunc(gl.GL_LEQUAL);
+}
+
+fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
+    beginScreenFill(to.framebuffer_handle, width, height);
 
     useResolveMultisampleProgramBegin(&open_gl.resolve_multisample);
 
@@ -1394,8 +1616,50 @@ fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: 
 
     useProgramEnd(&open_gl.resolve_multisample.common);
 
-    platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
-    gl.glDepthFunc(gl.GL_LEQUAL);
+    endScreenFill();
+}
+
+fn bindTexture(slot: u32, target: u32, handle: u32) void {
+    platform.optGLActiveTexture.?(slot);
+    gl.glBindTexture(target, handle);
+}
+
+fn fakeSeedLighting(setup: *RenderSetup) void {
+    const light_buffer: *LightBuffer = &open_gl.light_buffers[0];
+    beginScreenFill(light_buffer.write_all_framebuffer, light_buffer.width, light_buffer.height);
+
+    useFakeSeedLightingProgramBegin(&open_gl.fake_seed_lighting, setup);
+    platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
+    useProgramEnd(&open_gl.fake_seed_lighting.common);
+
+    endScreenFill();
+}
+
+fn computeLightTransport() void {
+    // Upward phase - build succesively less detailed light buffers.
+    var dest_light_buffer_index: u32 = 1;
+    while (dest_light_buffer_index < open_gl.light_buffer_count) : (dest_light_buffer_index += 1) {
+        const source_light_buffer_index: u32 = dest_light_buffer_index - 1;
+
+        const source: *LightBuffer = &open_gl.light_buffers[source_light_buffer_index];
+        const dest: *LightBuffer = &open_gl.light_buffers[dest_light_buffer_index];
+
+        beginScreenFill(dest.write_all_framebuffer, dest.width, dest.height);
+
+        useMultiGridLightUpProgramBegin(&open_gl.multi_grid_light_up);
+        bindTexture(GL_TEXTURE0, gl.GL_TEXTURE_2D, source.front_emission_texture);
+        bindTexture(GL_TEXTURE1, gl.GL_TEXTURE_2D, source.back_emission_texture);
+        bindTexture(GL_TEXTURE2, gl.GL_TEXTURE_2D, source.surface_color_texture);
+        bindTexture(GL_TEXTURE3, gl.GL_TEXTURE_2D, source.normal_location_texture);
+
+        platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
+        useProgramEnd(&open_gl.multi_grid_light_up.common);
+
+        endScreenFill();
+    }
+    platform.optGLActiveTexture.?(GL_TEXTURE0);
+
+    // Downward phase - compute and distribute lighting calculations.
 }
 
 fn settingsHaveChanged(a: *RenderSettings, b: *RenderSettings) bool {
@@ -1425,15 +1689,16 @@ pub fn renderCommands(
     gl.glDisable(gl.GL_BLEND);
     gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
 
-    if (!commands.settings.equals(&open_gl.current_settings)) {
-        changeToSettings(&commands.settings);
+    const settings: *RenderSettings = &commands.settings;
+    if (!settings.equals(&open_gl.current_settings)) {
+        changeToSettings(settings);
     }
 
     const use_render_targets: bool = platform.optGLBindFramebufferEXT != null;
     std.debug.assert(use_render_targets);
 
-    const render_width: i32 = @intCast(commands.settings.width);
-    const render_height: i32 = @intCast(commands.settings.height);
+    const render_width: i32 = @intCast(settings.width);
+    const render_height: i32 = @intCast(settings.height);
 
     std.debug.assert(open_gl.depth_peel_count > 0);
     const max_render_target_index: u32 = open_gl.depth_peel_count - 1;
@@ -1460,6 +1725,7 @@ pub fn renderCommands(
 
     bindFrameBuffer(&open_gl.depth_peel_buffers[0], render_width, render_height);
 
+    var debug_setup: ?*RenderSetup = null;
     var peeling: bool = false;
     var on_peel_index: u32 = 0;
     var peel_header_restore: [*]u8 = undefined;
@@ -1531,6 +1797,11 @@ pub fn renderCommands(
                 header_at += @sizeOf(RenderEntryTexturedQuads);
 
                 const setup: *RenderSetup = &entry.setup;
+
+                if (debug_setup == null) {
+                    // TODO: Remove this eventually.
+                    debug_setup = setup;
+                }
 
                 var clip_rect: Rectangle2i = setup.clip_rect;
                 gl.glScissor(
@@ -1662,22 +1933,41 @@ pub fn renderCommands(
     platform.optGLActiveTexture.?(GL_TEXTURE0);
     useProgramEnd(&open_gl.final_stretch.common);
 
-    if (false) {
-        platform.optGLBindFramebufferEXT.?(GL_READ_FRAMEBUFFER, open_gl.depth_peel_buffers[0].framebuffer_handle);
-        platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, 0);
-        gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
-        platform.optGLBlitFrameBuffer.?(
-            0,
-            0,
-            render_width,
-            render_height,
-            draw_region.min.x(),
-            draw_region.min.y(),
-            draw_region.max.x(),
-            draw_region.max.y(),
-            gl.GL_COLOR_BUFFER_BIT,
-            gl.GL_LINEAR,
-        );
+    if (true) {
+        if (debug_setup) |setup| {
+            fakeSeedLighting(setup);
+            computeLightTransport();
+
+            gl.glDisable(gl.GL_SCISSOR_TEST);
+            open_gl.debug_light_buffer_index = math.clampi32(
+                0,
+                open_gl.debug_light_buffer_index,
+                @intCast(open_gl.light_buffer_count - 1),
+            );
+            open_gl.debug_light_buffer_texture_index = math.clampi32(0, open_gl.debug_light_buffer_texture_index, 3);
+
+            const light_buffer: *LightBuffer = &open_gl.light_buffers[@intCast(open_gl.debug_light_buffer_index)];
+            platform.optGLBindFramebufferEXT.?(
+                GL_READ_FRAMEBUFFER,
+                light_buffer.write_all_framebuffer,
+            );
+            platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_COLOR_ATTACHMENT0 + @as(u32, @intCast(open_gl.debug_light_buffer_texture_index)));
+            gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
+            platform.optGLBlitFrameBuffer.?(
+                0,
+                0,
+                light_buffer.width,
+                light_buffer.height,
+                draw_region.min.x(),
+                draw_region.min.y(),
+                draw_region.max.x(),
+                draw_region.max.y(),
+                gl.GL_COLOR_BUFFER_BIT,
+                gl.GL_NEAREST,
+            );
+        }
+        gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
     }
 }
 

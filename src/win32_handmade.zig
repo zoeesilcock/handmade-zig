@@ -194,6 +194,10 @@ const GLBufferData: type = fn (target: u32, size: isize, data: *anyopaque, usage
 pub var optGLBufferData: ?*const GLBufferData = null;
 const GLActiveTexture: type = fn (texture: u32) callconv(.winapi) void;
 pub var optGLActiveTexture: ?*const GLActiveTexture = null;
+const GLDrawBuffers: type = fn (n: u32, buffers: [*]const u32) callconv(.winapi) void;
+pub var optGLDrawBuffers: ?*const GLDrawBuffers = null;
+const GLBindFragDataLocation: type = fn (program: u32, color: u32, name: [*]const u8) callconv(.winapi) void;
+pub var optGLBindFragDataLocation: ?*const GLBindFragDataLocation = null;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -1047,6 +1051,7 @@ fn processXInputStick(value: i16, dead_zone: i16) f32 {
 fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.ControllerInput, state: *Win32State) void {
     const vk_code = message.wParam;
     const alt_was_down: bool = if ((message.lParam & (1 << 29) != 0)) true else false;
+    const shift_was_down: bool = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
     const was_down: bool = if ((message.lParam & (1 << 30) != 0)) true else false;
     const is_down: bool = if ((message.lParam & (1 << 31) == 0)) true else false;
 
@@ -1118,6 +1123,24 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
                         } else if (state.input_playing_index > 0) {
                             endInputPlayback(state);
                         }
+                    }
+                }
+            },
+            @intFromEnum(win32.VK_OEM_PLUS) => {
+                if (INTERNAL and is_down) {
+                    if (shift_was_down) {
+                        open_gl.debug_light_buffer_texture_index += 1;
+                    } else {
+                        open_gl.debug_light_buffer_index += 1;
+                    }
+                }
+            },
+            @intFromEnum(win32.VK_OEM_MINUS) => {
+                if (INTERNAL and is_down) {
+                    if (shift_was_down) {
+                        open_gl.debug_light_buffer_texture_index -= 1;
+                    } else {
+                        open_gl.debug_light_buffer_index -= 1;
                     }
                 }
             },
@@ -1562,6 +1585,8 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLBindBuffer = @ptrCast(win32.wglGetProcAddress("glBindBuffer"));
             optGLBufferData = @ptrCast(win32.wglGetProcAddress("glBufferData"));
             optGLActiveTexture = @ptrCast(win32.wglGetProcAddress("glActiveTexture"));
+            optGLDrawBuffers = @ptrCast(win32.wglGetProcAddress("glDrawBuffers"));
+            optGLBindFragDataLocation = @ptrCast(win32.wglGetProcAddress("glBindFragDataLocation"));
 
             std.debug.assert(optGLTextImage2DMultiSample != null);
             std.debug.assert(optGLBlitFrameBuffer != null);
@@ -1598,6 +1623,8 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLBindBuffer != null);
             std.debug.assert(optGLBufferData != null);
             std.debug.assert(optGLActiveTexture != null);
+            std.debug.assert(optGLDrawBuffers != null);
+            std.debug.assert(optGLBindFragDataLocation != null);
 
             optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
