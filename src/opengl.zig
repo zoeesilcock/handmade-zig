@@ -15,6 +15,34 @@ pub const GL_TEXTURE0 = 0x84C0;
 pub const GL_TEXTURE1 = 0x84C1;
 pub const GL_TEXTURE2 = 0x84C2;
 pub const GL_TEXTURE3 = 0x84C3;
+pub const GL_TEXTURE4 = 0x84C4;
+pub const GL_TEXTURE5 = 0x84C5;
+pub const GL_TEXTURE6 = 0x84C6;
+pub const GL_TEXTURE7 = 0x84C7;
+pub const GL_TEXTURE8 = 0x84C8;
+pub const GL_TEXTURE9 = 0x84C9;
+pub const GL_TEXTURE10 = 0x84CA;
+pub const GL_TEXTURE11 = 0x84CB;
+pub const GL_TEXTURE12 = 0x84CC;
+pub const GL_TEXTURE13 = 0x84CD;
+pub const GL_TEXTURE14 = 0x84CE;
+pub const GL_TEXTURE15 = 0x84CF;
+pub const GL_TEXTURE16 = 0x84D0;
+pub const GL_TEXTURE17 = 0x84D1;
+pub const GL_TEXTURE18 = 0x84D2;
+pub const GL_TEXTURE19 = 0x84D3;
+pub const GL_TEXTURE20 = 0x84D4;
+pub const GL_TEXTURE21 = 0x84D5;
+pub const GL_TEXTURE22 = 0x84D6;
+pub const GL_TEXTURE23 = 0x84D7;
+pub const GL_TEXTURE24 = 0x84D8;
+pub const GL_TEXTURE25 = 0x84D9;
+pub const GL_TEXTURE26 = 0x84DA;
+pub const GL_TEXTURE27 = 0x84DB;
+pub const GL_TEXTURE28 = 0x84DC;
+pub const GL_TEXTURE29 = 0x84DD;
+pub const GL_TEXTURE30 = 0x84DE;
+pub const GL_TEXTURE31 = 0x84DF;
 
 pub const GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB = 0x8242;
 pub const GL_DEBUG_LOGGED_MESSAGES = 0x9145;
@@ -269,6 +297,15 @@ const MultiGridLightUpProgram = struct {
 
 const MultiGridLightDownProgram = struct {
     common: OpenGLProgramCommon,
+
+    parent_front_emission_texture: i32 = 0,
+    parent_back_emission_texture: i32 = 0,
+    parent_normal_location_texture: i32 = 0,
+
+    our_surface_color_texture: i32 = 0,
+    our_normal_location_texture: i32 = 0,
+
+    uv_step: i32 = 0,
 };
 
 const Framebuffer = struct {
@@ -987,26 +1024,36 @@ fn compileFakeSeedLightingProgram(program: *FakeSeedLightingProgram) void {
         \\out vec4 out_2;
         \\out vec4 out_3;
         \\
-        \\void main(void)
-        \\{
-        \\  vec3 FrontEmission = vec3(0, 0, 0);
-        \\  vec3 BackEmission = vec3(0, 0, 0);
-        \\  vec3 SurfaceColor = vec3(0.7f, 0.7f, 0.7f);
-        \\  vec3 NormalLocation = vec3(0, 1, 10);
+        \\vec3 FrontEmission = vec3(0, 0, 0);
+        \\vec3 BackEmission = vec3(0, 0, 0);
+        \\vec3 SurfaceColor = vec3(0.7f, 0.7f, 0.7f);
+        \\vec3 NormalLocation = vec3(0, 1, -10);
         \\
+        \\void Light(vec2 LightPosition,
+        \\           float LightRadius,
+        \\           vec3 LightFrontEmission,
+        \\           vec3 LightBackEmission,
+        \\           vec3 LightNormalLocation
+        \\)
+        \\{
         \\  vec2 ThisPosition = gl_FragCoord.xy;
-        \\  vec2 LP = LightPosition.xy * 0.025f * vec2(1920.0f, 1080.0f) + 0.5f * vec2(1920.0f, 1080.0f);
+        \\  vec2 LP = LightPosition * 0.025f * vec2(1920.0f, 1080.0f) + 0.25f * vec2(1920.0f, 1080.0f);
         \\
         \\  vec2 DeltaToLight = ThisPosition - LP;
         \\  float DistanceToLight = length(DeltaToLight);
-        \\  float LightRadius = 10.0f;
         \\  if (DistanceToLight < LightRadius)
         \\  {
-        \\     FrontEmission = vec3(1, 0, 0);
-        \\     BackEmission = vec3(0, 1, 0);
+        \\     FrontEmission = LightFrontEmission;
+        \\     BackEmission = LightBackEmission;
         \\     SurfaceColor = vec3(0, 0, 0);
-        \\     NormalLocation = vec3(1, 0, 0);
+        \\     NormalLocation = LightNormalLocation;
         \\  }
+        \\}
+        \\
+        \\void main(void)
+        \\{
+        \\  Light(LightPosition.xy,                10.0f, vec3(100, 0, 0), vec3(0, 100, 0), vec3(1, 0, 0));
+        \\  Light(LightPosition.xy + vec2(0.5, 0), 10.0f, vec3(0, 10, 0),  vec3(0, 0, 10),  vec3(0, 1, 1));
         \\
         \\  out_0.rgb = FrontEmission;
         \\  out_1.rgb = BackEmission;
@@ -1066,12 +1113,18 @@ fn compileMultiGridLightUpProgram(program: *MultiGridLightUpProgram) void {
         \\out vec4 out_2;
         \\out vec4 out_3;
         \\
+        \\vec3 ManualSample(sampler2D Sampler)
+        \\{
+        \\  vec3 Result = texture(Sampler, FragUV).rgb;
+        \\  return Result;
+        \\}
+        \\
         \\void main(void)
         \\{
-        \\  vec3 SourceFrontEmission = texture(SourceFrontEmissionTexture, FragUV).rgb;
-        \\  vec3 SourceBackEmission = texture(SourceBackEmissionTexture, FragUV).rgb;
-        \\  vec3 SourceSurfaceColor = texture(SourceSurfaceColorTexture, FragUV).rgb;
-        \\  vec3 SourceNormalLocation = texture(SourceNormalLocationTexture, FragUV).rgb;
+        \\  vec3 SourceFrontEmission = ManualSample(SourceFrontEmissionTexture).rgb;
+        \\  vec3 SourceBackEmission = ManualSample(SourceBackEmissionTexture).rgb;
+        \\  vec3 SourceSurfaceColor = ManualSample(SourceSurfaceColorTexture).rgb;
+        \\  vec3 SourceNormalLocation = ManualSample(SourceNormalLocationTexture).rgb;
         \\
         \\  vec3 FrontEmission = SourceFrontEmission;
         \\  vec3 BackEmission = SourceBackEmission;
@@ -1108,8 +1161,139 @@ fn compileMultiGridLightUpProgram(program: *MultiGridLightUpProgram) void {
 }
 
 fn compileMultiGridLightDownProgram(program: *MultiGridLightDownProgram) void {
-    // TODO: Multigrid down.
-    _ = program;
+    var defines: [1024]u8 = undefined;
+    const defines_length = shared.formatString(
+        defines.len,
+        &defines,
+        \\#version 150
+    ,
+        .{},
+    );
+    const vertex_code =
+        \\// Vertex code
+        \\in vec4 VertP;
+        \\in vec2 VertUV;
+        \\
+        \\smooth out vec2 FragUV;
+        \\
+        \\void main(void)
+        \\{
+        \\  gl_Position = VertP;
+        \\  FragUV = VertUV;
+        \\}
+    ;
+    const fragment_code =
+        \\// Fragment code
+        \\
+        \\uniform sampler2D ParentFrontEmissionTexture;
+        \\uniform sampler2D ParentBackEmissionTexture;
+        \\uniform sampler2D ParentNormalLocationTexture;
+        \\
+        \\uniform sampler2D OurSurfaceColorTexture;
+        \\uniform sampler2D OurNormalLocationTexture;
+        \\
+        \\uniform vec2 UVStep;
+        \\
+        \\smooth in vec2 FragUV;
+        \\
+        \\out vec4 out_0;
+        \\out vec4 out_1;
+        \\
+        \\struct light_value
+        \\{
+        \\  vec3 FrontEmission;
+        \\  vec3 BackEmission;
+        \\  vec3 Position;
+        \\  vec3 Normal;
+        \\};
+        \\
+        \\vec3 ReconstructPosition(vec3 NormalLocation, vec2 UV)
+        \\{
+        \\  vec3 Result = vec3(0, 0, NormalLocation.z); // TODO: Compute the X and Y from the fragment coordinate.
+        \\  return Result;
+        \\}
+        \\
+        \\vec3 ReconstructNormal(vec3 NormalLocation)
+        \\{
+        \\  float NormalZ = sqrt(1 - NormalLocation.x * NormalLocation.x - NormalLocation.y * NormalLocation.y);
+        \\  vec3 Result = vec3(NormalLocation.x, NormalLocation.y, NormalZ);
+        \\  return Result;
+        \\}
+        \\
+        \\light_value ParentSample(vec2 UV)
+        \\{
+        \\  light_value Result;
+        \\  Result.FrontEmission = texture(ParentFrontEmissionTexture, UV).rgb;
+        \\  Result.BackEmission = texture(ParentBackEmissionTexture, UV).rgb;
+        \\  vec3 NormalLocation = texture(ParentNormalLocationTexture, UV).rgb;
+        \\  Result.Position = ReconstructPosition(NormalLocation, UV);
+        \\  Result.Normal = ReconstructNormal(NormalLocation);
+        \\  return Result;
+        \\}
+        \\
+        \\vec3 TransferLight(vec3 LightPosition,
+        \\                   vec3 LightNormal,
+        \\                   vec3 LightEmission,
+        \\                   vec3 ReflectorPosition,
+        \\                   vec3 ReflectorNormal,
+        \\                   vec3 ReflectorColor)
+        \\{
+        \\  vec3 Result = LightEmission;
+        \\  return Result;
+        \\}
+        \\
+        \\void main(void)
+        \\{
+        \\  light_value Left = ParentSample(FragUV + vec2(-UVStep.x, 0));
+        \\  light_value Right = ParentSample(FragUV + vec2(UVStep.x, 0));
+        \\  light_value Up = ParentSample(FragUV + vec2(0, -UVStep.y));
+        \\  light_value Down = ParentSample(FragUV + vec2(0, UVStep.y));
+        \\
+        \\  vec3 RefC = texture(OurSurfaceColorTexture, FragUV).rgb;
+        \\  vec3 OurNormalLocation = texture(OurNormalLocationTexture, FragUV).rgb;
+        \\  vec3 RefP = ReconstructPosition(OurNormalLocation, FragUV);
+        \\  vec3 RefN = ReconstructNormal(OurNormalLocation);
+        \\
+        \\  vec3 DestFrontEmission = (
+        \\      TransferLight(Left.Position, Left.Normal, Left.FrontEmission, RefP, RefN, RefC) +
+        \\      TransferLight(Right.Position, Right.Normal, Right.FrontEmission, RefP, RefN, RefC) +
+        \\      TransferLight(Up.Position, Up.Normal, Up.FrontEmission, RefP, RefN, RefC) +
+        \\      TransferLight(Down.Position, Down.Normal, Down.FrontEmission, RefP, RefN, RefC));
+        \\  vec3 DestBackEmission = (
+        \\      TransferLight(Left.Position, Left.Normal, Left.BackEmission, RefP, RefN, RefC) +
+        \\      TransferLight(Right.Position, Right.Normal, Right.BackEmission, RefP, RefN, RefC) +
+        \\      TransferLight(Up.Position, Up.Normal, Up.BackEmission, RefP, RefN, RefC) +
+        \\      TransferLight(Down.Position, Down.Normal, Down.BackEmission, RefP, RefN, RefC));
+        \\
+        \\  out_0.rgb = DestFrontEmission;
+        \\  out_1.rgb = DestBackEmission;
+        \\}
+    ;
+
+    const program_handle = createProgram(
+        @ptrCast(defines[0..defines_length]),
+        shader_header_code,
+        vertex_code,
+        fragment_code,
+        &program.common,
+    );
+    program.parent_front_emission_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "ParentFrontEmissionTexture");
+    program.parent_back_emission_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "ParentBackEmissionTexture");
+    program.parent_normal_location_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "ParentNormalLocationTexture");
+
+    program.our_surface_color_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "OurSurfaceColorTexture");
+    program.our_normal_location_texture =
+        platform.optGLGetUniformLocation.?(program_handle, "OurNormalLocationTexture");
+
+    program.uv_step =
+        platform.optGLGetUniformLocation.?(program_handle, "UVStep");
+
+    platform.optGLBindFragDataLocation.?(program_handle, 0, "out_0");
+    platform.optGLBindFragDataLocation.?(program_handle, 1, "out_1");
 }
 
 fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *RenderSetup, alpha_threshold: f32) void {
@@ -1168,8 +1352,17 @@ fn useMultiGridLightUpProgramBegin(program: *MultiGridLightUpProgram) void {
     platform.optGLUniform1i.?(program.source_normal_location_texture, 3);
 }
 
-fn useMultiGridLightDownProgramBegin(program: *MultiGridLightDownProgram) void {
+fn useMultiGridLightDownProgramBegin(program: *MultiGridLightDownProgram, uv_step: Vector2) void {
     useProgramBegin(&program.common);
+
+    platform.optGLUniform1i.?(program.parent_front_emission_texture, 0);
+    platform.optGLUniform1i.?(program.parent_back_emission_texture, 1);
+    platform.optGLUniform1i.?(program.parent_normal_location_texture, 2);
+
+    platform.optGLUniform1i.?(program.our_surface_color_texture, 3);
+    platform.optGLUniform1i.?(program.our_normal_location_texture, 4);
+
+    platform.optGLUniform2fv.?(program.uv_step, 1, uv_step.toGL());
 }
 
 fn isValidArray(index: i32) bool {
@@ -1560,8 +1753,8 @@ fn changeToSettings(settings: *RenderSettings) void {
         );
         platform.optGLDrawBuffers.?(2, @ptrCast(&attachments));
 
-        texture_width = @divFloor(texture_width, 2);
-        texture_height = @divFloor(texture_height, 2);
+        texture_width = @divFloor(texture_width + 1, 2);
+        texture_height = @divFloor(texture_height + 1, 2);
 
         if (texture_width < 1) {
             texture_width = 1;
@@ -1637,29 +1830,57 @@ fn fakeSeedLighting(setup: *RenderSetup) void {
 
 fn computeLightTransport() void {
     // Upward phase - build succesively less detailed light buffers.
-    var dest_light_buffer_index: u32 = 1;
-    while (dest_light_buffer_index < open_gl.light_buffer_count) : (dest_light_buffer_index += 1) {
-        const source_light_buffer_index: u32 = dest_light_buffer_index - 1;
+    {
+        var dest_light_buffer_index: u32 = 1;
+        while (dest_light_buffer_index < open_gl.light_buffer_count) : (dest_light_buffer_index += 1) {
+            const source_light_buffer_index: u32 = dest_light_buffer_index - 1;
 
-        const source: *LightBuffer = &open_gl.light_buffers[source_light_buffer_index];
-        const dest: *LightBuffer = &open_gl.light_buffers[dest_light_buffer_index];
+            const source: *LightBuffer = &open_gl.light_buffers[source_light_buffer_index];
+            const dest: *LightBuffer = &open_gl.light_buffers[dest_light_buffer_index];
 
-        beginScreenFill(dest.write_all_framebuffer, dest.width, dest.height);
+            beginScreenFill(dest.write_all_framebuffer, dest.width, dest.height);
 
-        useMultiGridLightUpProgramBegin(&open_gl.multi_grid_light_up);
-        bindTexture(GL_TEXTURE0, gl.GL_TEXTURE_2D, source.front_emission_texture);
-        bindTexture(GL_TEXTURE1, gl.GL_TEXTURE_2D, source.back_emission_texture);
-        bindTexture(GL_TEXTURE2, gl.GL_TEXTURE_2D, source.surface_color_texture);
-        bindTexture(GL_TEXTURE3, gl.GL_TEXTURE_2D, source.normal_location_texture);
+            useMultiGridLightUpProgramBegin(&open_gl.multi_grid_light_up);
+            bindTexture(GL_TEXTURE0, gl.GL_TEXTURE_2D, source.front_emission_texture);
+            bindTexture(GL_TEXTURE1, gl.GL_TEXTURE_2D, source.back_emission_texture);
+            bindTexture(GL_TEXTURE2, gl.GL_TEXTURE_2D, source.surface_color_texture);
+            bindTexture(GL_TEXTURE3, gl.GL_TEXTURE_2D, source.normal_location_texture);
 
-        platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
-        useProgramEnd(&open_gl.multi_grid_light_up.common);
+            platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
+            useProgramEnd(&open_gl.multi_grid_light_up.common);
 
-        endScreenFill();
+            endScreenFill();
+        }
+        platform.optGLActiveTexture.?(GL_TEXTURE0);
     }
-    platform.optGLActiveTexture.?(GL_TEXTURE0);
 
-    // Downward phase - compute and distribute lighting calculations.
+    // Downward phase - transfer light from less-detailed light buffers to higher-detailed ones.
+    {
+        var source_light_buffer_index: u32 = open_gl.light_buffer_count - 1;
+        while (source_light_buffer_index > 0) : (source_light_buffer_index -= 1) {
+            const dest_light_buffer_index: u32 = source_light_buffer_index - 1;
+
+            const source: *LightBuffer = &open_gl.light_buffers[source_light_buffer_index];
+            const dest: *LightBuffer = &open_gl.light_buffers[dest_light_buffer_index];
+
+            const source_uv_step = Vector2.newI(@divFloor(1, source.width), @divFloor(1, source.height));
+
+            beginScreenFill(dest.write_emission_framebuffer, dest.width, dest.height);
+
+            useMultiGridLightDownProgramBegin(&open_gl.multi_grid_light_down, source_uv_step);
+            bindTexture(GL_TEXTURE0, gl.GL_TEXTURE_2D, source.front_emission_texture);
+            bindTexture(GL_TEXTURE1, gl.GL_TEXTURE_2D, source.back_emission_texture);
+            bindTexture(GL_TEXTURE3, gl.GL_TEXTURE_2D, source.normal_location_texture);
+            bindTexture(GL_TEXTURE4, gl.GL_TEXTURE_2D, dest.surface_color_texture);
+            bindTexture(GL_TEXTURE5, gl.GL_TEXTURE_2D, dest.normal_location_texture);
+
+            platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
+            useProgramEnd(&open_gl.multi_grid_light_down.common);
+
+            endScreenFill();
+        }
+        platform.optGLActiveTexture.?(GL_TEXTURE0);
+    }
 }
 
 fn settingsHaveChanged(a: *RenderSettings, b: *RenderSettings) bool {

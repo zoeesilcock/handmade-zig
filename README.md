@@ -65,3 +65,8 @@ llvm-mca .\zig-out\bin\handmade-dll.asm -bottleneck-analysis -o .\zig-out\bin\ha
 * https://www.khronos.org/opengl/wiki/OpenGL_Type
 * https://www.khronos.org/files/opengl-quick-reference-card.pdf
 * https://www.khronos.org/opengl/wiki/Core_Language_(GLSL)
+
+### General graphics
+* https://developer.nvidia.com/gpugems/gpugems3
+* https://developer.nvidia.com/gpugems/gpugems2
+* https://developer.nvidia.com/gpugems/gpugems
