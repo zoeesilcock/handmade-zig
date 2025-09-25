@@ -85,3 +85,24 @@ pub fn findLeastSignificantSetBit(value: u32) BitScanResult {
 
     return result;
 }
+
+pub fn findMostSignificantSetBit(value: u32) BitScanResult {
+    var result = BitScanResult{};
+
+    // for (32..1) |shift_index| {
+    //     if ((value & (@as(u64, @intCast(1)) << @as(u6, @intCast(shift_index - 1)))) != 0) {
+    //         result.index = @intCast(shift_index - 1);
+    //         result.found = true;
+    //         break;
+    //     }
+    // }
+
+    result.index = asm (
+        \\bsr %[value], %[index]
+        : [index] "={eax}" (-> u32),
+        : [value] "{eax}" (value),
+    );
+    result.found = true;
+
+    return result;
+}

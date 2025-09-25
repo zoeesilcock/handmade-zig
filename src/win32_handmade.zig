@@ -1129,18 +1129,18 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
             @intFromEnum(win32.VK_OEM_PLUS) => {
                 if (INTERNAL and is_down) {
                     if (shift_was_down) {
-                        open_gl.debug_light_buffer_texture_index += 1;
-                    } else {
                         open_gl.debug_light_buffer_index += 1;
+                    } else {
+                        open_gl.debug_light_buffer_texture_index += 1;
                     }
                 }
             },
             @intFromEnum(win32.VK_OEM_MINUS) => {
                 if (INTERNAL and is_down) {
                     if (shift_was_down) {
-                        open_gl.debug_light_buffer_texture_index -= 1;
-                    } else {
                         open_gl.debug_light_buffer_index -= 1;
+                    } else {
+                        open_gl.debug_light_buffer_texture_index -= 1;
                     }
                 }
             },

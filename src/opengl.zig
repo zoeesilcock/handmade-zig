@@ -555,11 +555,40 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
 
 const shader_header_code =
     \\// Header code
+    \\#define MaxLightIntensity 10
     \\
     \\float clamp01MapToRange(float min, float max, float value) {
     \\  float range = max - min;
     \\  float result = clamp((value - min) / range, 0, 1);
     \\  return result;
+    \\}
+    \\
+    \\vec2 PackNormal2(vec2 Normal)
+    \\{
+    \\  vec2 Result;
+    \\  Result.x = 0.5f + 0.5f * Normal.x;
+    \\  Result.y = 0.5f + 0.5f * Normal.y;
+    \\  return Result;
+    \\}
+    \\
+    \\vec2 UnpackNormal2(vec2 Normal)
+    \\{
+    \\  vec2 Result;
+    \\  Result.x = -1f + 2.0f * Normal.x;
+    \\  Result.y = -1f + 2.0f * Normal.y;
+    \\  return Result;
+    \\}
+    \\
+    \\vec3 ExtendNormalZ(vec2 Normal)
+    \\{
+    \\  vec3 Result = vec3(Normal, sqrt(1 - Normal.x * Normal.x - Normal.y * Normal.y));
+    \\  return Result;
+    \\}
+    \\
+    \\vec3 UnpackNormal3(vec2 Normal)
+    \\{
+    \\  vec3 Result = ExtendNormalZ(UnpackNormal2(Normal));
+    \\  return Result;
     \\}
 ;
 
@@ -684,12 +713,11 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\      Emission = vec3(1, 1, 1);
         \\    }
         \\
-        \\    float Nx = 0.5f + 0.5f * WorldNormal.x;
-        \\    float Ny = 0.5f + 0.5f * WorldNormal.y;
+        \\    vec2 Normal = PackNormal2(WorldNormal.xy);
         \\
         \\    BlendUnitColor[0] = SurfaceReflection;
         \\    BlendUnitColor[1] = vec4(Emission.r, Emission.g, Emission.b, EmissionSpread);
-        \\    BlendUnitColor[2] = vec4(Nx, Ny, Lp0, Lp1);
+        \\    BlendUnitColor[2] = vec4(Normal.x, Normal.y, Lp0, Lp1);
         \\  }
         \\  else
         \\  {
@@ -756,21 +784,68 @@ fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
     const fragment_code =
         \\// Fragment code
         \\uniform sampler2D Peel0Sampler;
+        \\uniform sampler2D NormalPosition0Sampler;
         \\uniform sampler2D Peel1Sampler;
+        \\uniform sampler2D NormalPosition1Sampler;
         \\uniform sampler2D Peel2Sampler;
+        \\uniform sampler2D NormalPosition2Sampler;
         \\uniform sampler2D Peel3Sampler;
+        \\uniform sampler2D NormalPosition3Sampler;
+        \\
+        \\uniform sampler2D LightEmissionSampler;
+        \\uniform sampler2D LightNormalPositionSampler;
         \\
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
         \\
         \\out vec4 BlendUnitColor;
         \\
+        \\vec3 LightPeel(vec3 Peel, vec4 NormalPosition, vec3 LightNormal, vec3 LightColor, vec3 ToCamera)
+        \\{
+        \\  LightNormal = vec3(0, 0, -1);
+        \\
+        \\  vec3 ToLight = -LightNormal;
+        \\  vec3 ReflectionNormal = UnpackNormal3(NormalPosition.xy);
+        \\  float DiffuseCoefficient = NormalPosition.z;
+        \\  float SpecularCoefficient = 1.0f - DiffuseCoefficient; // TODO: How should this really be encoded?
+        \\  float SpecularPower = 1.0f + (15.0f * NormalPosition.w);
+        \\
+        \\  float DiffuseDot = clamp(dot(ToLight, ReflectionNormal), 0, 1);
+        \\  vec3 CosAngle = vec3(DiffuseDot, DiffuseDot, DiffuseDot);
+        \\  vec3 DiffuseLight = DiffuseCoefficient * CosAngle * LightColor;
+        \\
+        \\  vec3 ReflectionVector = -ToCamera + 2 * dot(ReflectionNormal, ToCamera) * ReflectionNormal;
+        \\  float SpecularDot = clamp(dot(ToLight, ReflectionVector), 0, 1);
+        \\  SpecularDot = pow(SpecularDot, SpecularPower);
+        \\  vec3 CosReflectedAngle = vec3(SpecularDot, SpecularDot, SpecularDot);
+        \\  vec3 SpecularLight = SpecularCoefficient * CosReflectedAngle * LightColor;
+        \\
+        \\  vec3 TotalLight = DiffuseLight + SpecularLight;
+        \\
+        \\  vec3 Result = Peel * TotalLight;
+        \\
+        \\  return Result;
+        \\}
+        \\
         \\void main(void)
         \\{
         \\  vec4 Peel0 = texture(Peel0Sampler, FragUV);
+        \\  vec4 NormalPosition0 = texture(NormalPosition0Sampler, FragUV);
         \\  vec4 Peel1 = texture(Peel1Sampler, FragUV);
+        \\  vec4 NormalPosition1 = texture(NormalPosition1Sampler, FragUV);
         \\  vec4 Peel2 = texture(Peel2Sampler, FragUV);
+        \\  vec4 NormalPosition2 = texture(NormalPosition2Sampler, FragUV);
         \\  vec4 Peel3 = texture(Peel3Sampler, FragUV);
+        \\  vec4 NormalPosition3 = texture(NormalPosition3Sampler, FragUV);
+        \\
+        \\  vec3 LightColor = texture(LightEmissionSampler, FragUV).rgb;
+        \\  vec3 LightNormalPosition = texture(LightNormalPositionSampler, FragUV).rgb;
+        \\  vec3 LightNormal = ExtendNormalZ(LightNormalPosition.xy);
+        \\
+        \\  vec3 ToCamera = vec3(0, 0, 1); // TODO: Actually compute this!
+        \\
+        \\  LightColor = clamp(LightColor / MaxLightIntensity, 0, 1);
+        \\  LightColor = sqrt(sqrt(LightColor));
         \\
         \\#if ShaderSimTexReadSRGB
         \\  Peel0.rgb *= Peel0.rgb;
@@ -788,6 +863,13 @@ fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
         \\  Peel1.rgb = Peel1.a * vec3(0, 1, 0);
         \\  Peel2.rgb = Peel2.a * vec3(1, 0, 0);
         \\  Peel3.rgb = Peel3.a * vec3(0, 0, 0);
+        \\#endif
+        \\
+        \\#if 0
+        \\  Peel0.rgb = LightPeel(Peel0.rgb, NormalPosition0, LightNormal, LightColor, ToCamera);
+        \\  Peel1.rgb = LightPeel(Peel1.rgb, NormalPosition1, LightNormal, LightColor, ToCamera);
+        \\  Peel2.rgb = LightPeel(Peel2.rgb, NormalPosition2, LightNormal, LightColor, ToCamera);
+        \\  Peel3.rgb = LightPeel(Peel3.rgb, NormalPosition3, LightNormal, LightColor, ToCamera);
         \\#endif
         \\
         \\  BlendUnitColor.rgb = Peel3.rgb;
@@ -808,7 +890,18 @@ fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
         fragment_code,
         program,
     );
-    linkSamplers(program, &.{ "Peel0Sampler", "Peel1Sampler", "Peel2Sampler", "Peel3Sampler" });
+    linkSamplers(program, &.{
+        "Peel0Sampler",
+        "NormalPosition0Sampler",
+        "Peel1Sampler",
+        "NormalPosition1Sampler",
+        "Peel2Sampler",
+        "NormalPosition2Sampler",
+        "Peel3Sampler",
+        "NormalPosition3Sampler",
+        "LightEmissionSampler",
+        "LightNormalPositionSampler",
+    });
 }
 
 fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
@@ -1079,45 +1172,56 @@ fn compileDepthPeelToLightingProgram(program: *OpenGLProgramCommon) void {
     const vertex_code =
         \\// Vertex code
         \\in vec4 VertP;
+        \\in vec2 VertUV;
+        \\
+        \\smooth out vec2 FragUV;
         \\
         \\void main(void)
         \\{
         \\  gl_Position = VertP;
+        \\  FragUV = VertUV;
         \\}
     ;
     const fragment_code =
         \\// Fragment code
-        \\#define MaxLightPower 10
         \\uniform sampler2D DepthSampler;
         \\uniform sampler2D SurfaceReflectionSampler;
         \\uniform sampler2D EmissionSampler;
         \\uniform sampler2D NormalPositionSampler;
+        \\
+        \\smooth in vec2 FragUV;
         \\
         \\layout(location = 0) out vec4 BlendUnitColor[4];
         \\
         \\void main(void)
         \\{
         \\  ivec2 TexelXY = ivec2(gl_FragCoord.xy);
+        \\#if 0
         \\  float Depth = texelFetch(DepthSampler, TexelXY, 0).r;
-        \\
         \\  vec4 SurfaceReflection = texelFetch(SurfaceReflectionSampler, TexelXY, 0);
+        \\  vec4 Emission = texelFetch(EmissionSampler, TexelXY, 0);
+        \\  vec4 NormalPositionLight = texelFetch(NormalPositionSampler, TexelXY, 0);
+        \\#else
+        \\  float Depth = texture(DepthSampler, FragUV).r;
+        \\  vec4 SurfaceReflection = texture(SurfaceReflectionSampler, FragUV);
+        \\  vec4 Emission = texture(EmissionSampler, FragUV);
+        \\  vec4 NormalPositionLight = texture(NormalPositionSampler, FragUV);
+        \\#endif
+        \\
         \\  vec3 SurfaceReflectionRGB = SurfaceReflection.rgb;
         \\  float Coverage = SurfaceReflection.a;
         \\
-        \\  vec4 Emission = texelFetch(EmissionSampler, TexelXY, 0);
         \\  vec3 EmissionRGB = Emission.rgb;
         \\  float EmitSpreat = Emission.a; // TODO: Use this to seed back emitters?
         \\
-        \\  vec4 NormalPositionLight = texelFetch(NormalPositionSampler, TexelXY, 0);
-        \\  float Nx = -1f + 2.0f * NormalPositionLight.x;
-        \\  float Ny = -1f + 2.0f * NormalPositionLight.y;
+        \\  vec2 Normal = UnpackNormal2(NormalPositionLight.xy);
         \\  float Lp0 = NormalPositionLight.z;
         \\  float Lp1 = NormalPositionLight.w;
         \\
-        \\  vec3 FrontEmission = MaxLightPower * EmissionRGB;
+        \\  vec3 FrontEmission = MaxLightIntensity * EmissionRGB;
         \\  vec3 BackEmission = vec3(0, 0, 0);
         \\  vec3 SurfaceColor = SurfaceReflectionRGB;
-        \\  vec3 NormalPosition = vec3(Nx, Ny, Depth);
+        \\  vec3 NormalPosition = vec3(Normal.x, Normal.y, Depth);
         \\
         \\  BlendUnitColor[0].rgb = FrontEmission;
         \\  BlendUnitColor[1].rgb = BackEmission;
@@ -1220,47 +1324,6 @@ fn compileMultiGridLightDownProgram(program: *MultiGridLightDownProgram) void {
     ,
         .{},
     );
-    if (false) {
-        const lighting_code =
-            \\    vec3 ToCamera = CameraPosition - WorldPosition;
-            \\    float CameraDistance = length(ToCamera);
-            \\    ToCamera *= (1.0 / CameraDistance);
-            \\
-            \\    vec3 ToLight = LightPosition - WorldPosition;
-            \\    float LightDistance = length(ToLight);
-            \\    ToLight *= (1.0 / LightDistance);
-            \\    vec3 LightS = vec3((LightStrengthR / (LightDistance * LightDistance)),
-            \\                       (LightStrengthG / (LightDistance * LightDistance)),
-            \\                       (LightStrengthB / (LightDistance * LightDistance)));
-            \\
-            \\    vec3 CosAngle = vec3(dot(ToLight, WorldNormal), dot(ToLight, WorldNormal), dot(ToLight, WorldNormal));
-            \\    CosAngle = clamp(CosAngle, 0, 1);
-            \\
-            \\    vec3 ReflectionVector = -ToCamera + 2 * dot(WorldNormal, ToCamera) * WorldNormal;
-            \\    vec3 CosReflectedAngle = vec3(dot(ToLight, ReflectionVector),
-            \\                                  dot(ToLight, ReflectionVector),
-            \\                                  dot(ToLight, ReflectionVector));
-            \\    CosReflectedAngle = clamp(CosReflectedAngle, 0, 1);
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\    CosReflectedAngle *= CosReflectedAngle;
-            \\
-            \\    float DiffuseCoefficient = 1.0f;
-            \\    vec3 DiffuseLight = DiffuseCoefficient * CosAngle * LightS;
-            \\
-            \\    float SpecularCoefficient = 0.0f;
-            \\    vec3 SpecularLight = SpecularCoefficient * CosReflectedAngle * LightS;
-            \\
-            \\    vec3 TotalLight = DiffuseLight + SpecularLight;
-        ;
-        _ = lighting_code;
-    }
     const vertex_code =
         \\// Vertex code
         \\in vec4 VertP;
@@ -1306,8 +1369,7 @@ fn compileMultiGridLightDownProgram(program: *MultiGridLightDownProgram) void {
         \\
         \\vec3 ReconstructNormal(vec3 NormalPosition)
         \\{
-        \\  float NormalZ = sqrt(1 - NormalPosition.x * NormalPosition.x - NormalPosition.y * NormalPosition.y);
-        \\  vec3 Result = vec3(NormalPosition.x, NormalPosition.y, NormalZ);
+        \\  vec3 Result = ExtendNormalZ(NormalPosition.xy);
         \\  return Result;
         \\}
         \\
@@ -1329,7 +1391,7 @@ fn compileMultiGridLightDownProgram(program: *MultiGridLightDownProgram) void {
         \\                   vec3 ReflectorNormal,
         \\                   vec3 ReflectorColor)
         \\{
-        \\  float Facing = clamp(-dot(LightNormal, ReflectorNormal), 0, 1);
+        \\  float Facing = 1.0f; // clamp(-dot(LightNormal, ReflectorNormal), 0, 1);
         \\  vec3 Distance = LightPosition - ReflectorPosition;
         \\  float DistanceSq = dot(Distance, Distance);
         \\  float Falloff = 1.0f / (1.0f + 100.0f * DistanceSq);
@@ -1724,13 +1786,16 @@ fn changeToSettings(settings: *RenderSettings) void {
         }
     }
 
-    open_gl.light_buffer_count = 10;
-    var texture_width: i32 = render_width;
-    var texture_height: i32 = render_height;
+    var texture_width: i32 =
+        (@as(i32, 1) << @as(u5, @intCast(intrinsics.findMostSignificantSetBit(@intCast(render_width)).index)));
+    var texture_height: i32 =
+        (@as(i32, 1) << @as(u5, @intCast(intrinsics.findMostSignificantSetBit(@intCast(render_height)).index)));
 
+    open_gl.light_buffer_count = 0;
     light_index = 0;
-    while (light_index < open_gl.light_buffer_count) : (light_index += 1) {
-        const light_buffer: *LightBuffer = &open_gl.light_buffers[light_index];
+    while (texture_width > 1 and texture_height > 1) : (light_index += 1) {
+        const light_buffer: *LightBuffer = &open_gl.light_buffers[open_gl.light_buffer_count];
+        open_gl.light_buffer_count += 1;
         const filter_type: i32 = gl.GL_LINEAR;
 
         light_buffer.width = texture_width;
@@ -2172,6 +2237,8 @@ pub fn renderCommands(
     gl.glDisable(gl.GL_DEPTH_TEST);
     gl.glDisable(gl.GL_BLEND);
 
+    computeLightTransport();
+
     platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, open_gl.resolve_frame_buffer.framebuffer_handle);
     gl.glViewport(0, 0, render_width, render_height);
     gl.glScissor(0, 0, render_width, render_height);
@@ -2190,18 +2257,25 @@ pub fn renderCommands(
     );
 
     useProgramBegin(&open_gl.peel_composite);
+    var texture_bind_index: u32 = GL_TEXTURE0;
     var peel_index: u32 = 0;
     while (peel_index <= max_render_target_index) : (peel_index += 1) {
-        platform.optGLActiveTexture.?(GL_TEXTURE0 + peel_index);
         const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(peel_index);
-        gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle[0]);
+        platform.optGLActiveTexture.?(texture_bind_index);
+        texture_bind_index += 1;
+        gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle[@intFromEnum(ColorHandleType.SurfaceReflection)]);
+        platform.optGLActiveTexture.?(texture_bind_index);
+        texture_bind_index += 1;
+        gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle[@intFromEnum(ColorHandleType.NormalPositionLight)]);
     }
+    platform.optGLActiveTexture.?(texture_bind_index);
+    texture_bind_index += 1;
+    gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.light_buffers[0].front_emission_texture);
+    platform.optGLActiveTexture.?(texture_bind_index);
+    texture_bind_index += 1;
+    gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.light_buffers[0].normal_position_texture);
+
     platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
-    peel_index = 0;
-    while (peel_index <= max_render_target_index) : (peel_index += 1) {
-        platform.optGLActiveTexture.?(GL_TEXTURE0 + peel_index);
-        gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
-    }
     platform.optGLActiveTexture.?(GL_TEXTURE0);
     useProgramEnd(&open_gl.peel_composite);
 
@@ -2242,40 +2316,33 @@ pub fn renderCommands(
     platform.optGLActiveTexture.?(GL_TEXTURE0);
     useProgramEnd(&open_gl.final_stretch);
 
-    if (true) {
-        if (debug_setup) |setup| {
-            fakeSeedLighting(setup);
-            computeLightTransport();
-
-            gl.glDisable(gl.GL_SCISSOR_TEST);
-            open_gl.debug_light_buffer_index = math.clampi32(
-                0,
-                open_gl.debug_light_buffer_index,
-                @intCast(open_gl.light_buffer_count - 1),
-            );
-            open_gl.debug_light_buffer_texture_index = math.clampi32(0, open_gl.debug_light_buffer_texture_index, 3);
-
-            const light_buffer: *LightBuffer = &open_gl.light_buffers[@intCast(open_gl.debug_light_buffer_index)];
-            platform.optGLBindFramebufferEXT.?(
-                GL_READ_FRAMEBUFFER,
-                light_buffer.write_all_framebuffer,
-            );
-            platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, 0);
-            gl.glReadBuffer(GL_COLOR_ATTACHMENT0 + @as(u32, @intCast(open_gl.debug_light_buffer_texture_index)));
-            gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
-            platform.optGLBlitFrameBuffer.?(
-                0,
-                0,
-                light_buffer.width,
-                light_buffer.height,
-                draw_region.min.x(),
-                draw_region.min.y(),
-                draw_region.max.x(),
-                draw_region.max.y(),
-                gl.GL_COLOR_BUFFER_BIT,
-                gl.GL_NEAREST,
-            );
-        }
+    open_gl.debug_light_buffer_index = math.clampi32(
+        0,
+        open_gl.debug_light_buffer_index,
+        @intCast(open_gl.light_buffer_count - 1),
+    );
+    open_gl.debug_light_buffer_texture_index = math.clampi32(0, open_gl.debug_light_buffer_texture_index, 4);
+    if (open_gl.debug_light_buffer_texture_index > 0) {
+        const light_buffer: *LightBuffer = &open_gl.light_buffers[@intCast(open_gl.debug_light_buffer_index)];
+        platform.optGLBindFramebufferEXT.?(
+            GL_READ_FRAMEBUFFER,
+            light_buffer.write_all_framebuffer,
+        );
+        platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, 0);
+        gl.glReadBuffer(GL_COLOR_ATTACHMENT0 + @as(u32, @intCast(open_gl.debug_light_buffer_texture_index - 1)));
+        gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
+        platform.optGLBlitFrameBuffer.?(
+            0,
+            0,
+            light_buffer.width,
+            light_buffer.height,
+            draw_region.min.x(),
+            draw_region.min.y(),
+            draw_region.max.x(),
+            draw_region.max.y(),
+            gl.GL_COLOR_BUFFER_BIT,
+            gl.GL_NEAREST,
+        );
         gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
     }
 }
