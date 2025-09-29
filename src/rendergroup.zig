@@ -1217,4 +1217,199 @@ pub const RenderGroup = extern struct {
             self.debug_transform = self.game_transform;
         }
     }
+
+    const LightingElement = struct {
+        position: Vector3,
+        normal: Vector3,
+        front_emission_color: Color3,
+        back_emission_color: Color3,
+        accumulated_color: Color3,
+        reflection_color: Color3,
+        transparency: f32,
+        radius: f32,
+    };
+
+    pub fn lightingTest(self: *RenderGroup) void {
+        var elements: [6144]LightingElement = [1]LightingElement{undefined} ** 6144;
+
+        const debug_light_position: Vector3 = self.last_setup.debug_light_position;
+        const camera_position: Vector3 = self.last_setup.camera_position;
+
+        const commands: *RenderCommands = self.commands;
+        std.debug.assert(self.current_quads != null);
+        const quads: *RenderEntryTexturedQuads = self.current_quads.?;
+
+        // Copy ligthing in.
+        {
+            var verts: [*]TexturedVertex = commands.vertex_array + quads.vertex_array_offset;
+
+            var quad_index: u32 = 0;
+            while (quad_index < quads.quad_count) : (quad_index += 1) {
+                var element: *LightingElement = &elements[quad_index];
+                var vert0: *TexturedVertex = @ptrCast(verts + 0);
+                var vert1: *TexturedVertex = @ptrCast(verts + 1);
+                var vert2: *TexturedVertex = @ptrCast(verts + 3);
+                var vert3: *TexturedVertex = @ptrCast(verts + 2);
+
+                var vert0_position: Vector3 = vert0.position.xyz();
+                _ = vert0_position.setZ(vert0_position.z() + vert0.position.w());
+
+                var vert1_position: Vector3 = vert1.position.xyz();
+                _ = vert1_position.setZ(vert1_position.z() + vert1.position.w());
+
+                var vert2_position: Vector3 = vert2.position.xyz();
+                _ = vert2_position.setZ(vert2_position.z() + vert2.position.w());
+
+                var vert3_position: Vector3 = vert3.position.xyz();
+                _ = vert3_position.setZ(vert3_position.z() + vert3.position.w());
+
+                const span30: Vector3 = vert3_position.minus(vert0_position);
+                const span20: Vector3 = vert2_position.minus(vert0_position);
+                const span10: Vector3 = vert1_position.minus(vert0_position);
+
+                element.position = vert0_position.plus(span20.scaledTo(0.5));
+                element.radius = 0.5 * @min(span30.length(), span10.length());
+
+                // TODO: Remove the premultiplied alpha here?
+                const color: Color = Color.unpackColorRGBA(vert0.color).scaledTo(1.0 / 255.0);
+
+                element.normal = vert0.normal;
+                element.front_emission_color = .zero();
+                element.back_emission_color = .zero();
+                element.accumulated_color = .zero();
+                element.reflection_color = color.rgb();
+                element.transparency = color.a();
+
+                if (element.position.minus(debug_light_position).lengthSquared() < math.square(2)) {
+                    element.front_emission_color = .new(1, 1, 1);
+                }
+
+                verts += 4;
+            }
+        }
+
+        // Compute lighting.
+        for (0..1) |_| {
+            var dest_index: u32 = 0;
+            while (dest_index < quads.quad_count) : (dest_index += 1) {
+                var dest: *LightingElement = &elements[dest_index];
+                const to_camera: Vector3 = camera_position.minus(dest.position).normalizeOrZero();
+
+                var source_index: u32 = 0;
+                while (source_index < quads.quad_count) : (source_index += 1) {
+                    var source: *LightingElement = &elements[source_index];
+
+                    const light_color: Vector3 = source.front_emission_color.toVector3();
+                    var to_light: Vector3 = source.position.minus(dest.position);
+                    const light_distance: f32 = to_light.length();
+                    if (light_distance > 0) {
+                        to_light = to_light.scaledTo(1.0 / light_distance);
+
+                        const reflection_normal: Vector3 = dest.normal;
+                        const diffuse_coefficient: f32 = 1;
+                        const specular_coefficent: f32 = 1 - diffuse_coefficient;
+                        // const specular_power = 1.0 + (15.0);
+                        const distance_falloff: f32 = 1.0; // / math.square(light_distance);
+
+                        const diffuse_dot: f32 = math.clampf01(to_light.dotProduct(reflection_normal));
+                        const cos_angle: Vector3 = .splat(diffuse_dot);
+                        const diffuse_light: Vector3 =
+                            cos_angle.scaledTo(distance_falloff * diffuse_coefficient).hadamardProduct(light_color);
+
+                        const reflection_vector: Vector3 =
+                            to_camera.negated().plus(reflection_normal.scaledTo(2 * reflection_normal.dotProduct(to_camera)));
+                        const specular_dot: f32 = math.clampf01(to_light.dotProduct(reflection_vector));
+                        // specular_dot = pow(specular_dot, specular_power);
+                        const cos_reflected_angle: Vector3 = .splat(specular_dot);
+                        const specular_light: Vector3 =
+                            cos_reflected_angle.scaledTo(specular_coefficent).hadamardProduct(light_color);
+
+                        const total_light: Vector3 = diffuse_light.plus(specular_light);
+                        const result: Vector3 = dest.reflection_color.toVector3().hadamardProduct(total_light);
+
+                        dest.accumulated_color = dest.accumulated_color.toVector3().plus(result).toColor3();
+                    }
+                }
+            }
+
+            var quad_index: u32 = 0;
+            while (quad_index < quads.quad_count) : (quad_index += 1) {
+                var dest: *LightingElement = &elements[quad_index];
+                dest.front_emission_color = dest.accumulated_color;
+            }
+        }
+
+        // Copy ligthing out.
+        {
+            var bitmap: [*]?*LoadedBitmap = @ptrCast(&commands.quad_bitmaps[quads.vertex_array_offset >> 2]);
+            var verts: [*]TexturedVertex = commands.vertex_array + quads.vertex_array_offset;
+
+            var quad_index: u32 = 0;
+            while (quad_index < quads.quad_count) : (quad_index += 1) {
+                var element: *LightingElement = &elements[quad_index];
+                bitmap[0] = commands.white_bitmap;
+
+                var vert0: *TexturedVertex = @ptrCast(verts + 0);
+                var vert1: *TexturedVertex = @ptrCast(verts + 1);
+                var vert2: *TexturedVertex = @ptrCast(verts + 2);
+                var vert3: *TexturedVertex = @ptrCast(verts + 3);
+
+                var base: Vector3 = .zero();
+                {
+                    var normal = vert0.normal;
+                    _ = normal.setX(@abs(normal.x()));
+                    _ = normal.setY(@abs(normal.y()));
+                    _ = normal.setZ(@abs(normal.z()));
+
+                    var min_el: u32 = 0;
+                    if (normal.x() < normal.y()) {
+                        if (normal.z() < normal.y()) {
+                            min_el = 2;
+                        } else {
+                            min_el = 0;
+                        }
+                    } else {
+                        if (normal.z() < normal.y()) {
+                            min_el = 2;
+                        } else {
+                            min_el = 1;
+                        }
+                    }
+                    base.values[min_el] = 1;
+                }
+
+                var x: Vector3 = base.crossProduct(vert0.normal);
+                var y: Vector3 = x.crossProduct(vert0.normal).negated();
+
+                x = x.normalizeOrZero().scaledTo(element.radius);
+                y = y.normalizeOrZero().scaledTo(element.radius);
+
+                _ = vert0.position.setXYZ(element.position.minus(y));
+                _ = vert1.position.setXYZ(element.position.plus(x));
+                _ = vert2.position.setXYZ(element.position.minus(x));
+                _ = vert3.position.setXYZ(element.position.plus(y));
+
+                _ = vert0.position.setW(0);
+                _ = vert1.position.setW(0);
+                _ = vert2.position.setW(0);
+                _ = vert3.position.setW(0);
+
+                vert0.normal = element.normal;
+                vert1.normal = element.normal;
+                vert2.normal = element.normal;
+                vert3.normal = element.normal;
+
+                const front_emission_color = element.accumulated_color.clamp01();
+                const front_emission_color32 =
+                    front_emission_color.toColor(element.transparency).scaledTo(255.0).packColorRGBA();
+                vert0.color = front_emission_color32;
+                vert1.color = front_emission_color32;
+                vert2.color = front_emission_color32;
+                vert3.color = front_emission_color32;
+
+                bitmap += 1;
+                verts += 4;
+            }
+        }
+    }
 };

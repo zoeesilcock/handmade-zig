@@ -429,6 +429,10 @@ fn Color3Type(comptime ScalarType: type) type {
             return Color.new(self.r(), self.g(), self.b(), in_a);
         }
 
+        pub inline fn toVector3(self: Self) Vector3 {
+            return Vector3.new(self.r(), self.g(), self.b());
+        }
+
         const Shared = VectorShared(3, ScalarType, Self);
         pub const zero = Shared.zero;
         pub const one = Shared.one;

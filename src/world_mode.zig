@@ -199,11 +199,14 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
     var prev_room: StandardRoom = .{};
 
-    for (0..3) |screen_index| {
+    for (0..1) |screen_index| {
         last_screen_z = abs_tile_z;
 
-        const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
-        const room_radius_y: i32 = 4 + @as(i32, @intCast(series.randomChoice(4)));
+        // const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
+        // const room_radius_y: i32 = 4 + @as(i32, @intCast(series.randomChoice(4)));
+        _ = series.randomChoice(4);
+        const room_radius_x: i32 = 4;
+        const room_radius_y: i32 = 4;
         if (door_direction == 1) {
             room_center_tile_x += room_radius_x;
         } else if (door_direction == 0) {
@@ -249,7 +252,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             room_radius_y,
         );
 
-        if (true) {
+        if (false) {
             _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
             _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
@@ -646,14 +649,18 @@ pub fn updateAndRenderWorld(
             world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
         }
 
-        const frame_to_frame_camera_delta_position: Vector3 =
-            world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
-        particles.updateAndRenderParticleSystem(
-            world_mode.particle_cache,
-            input.frame_delta_time,
-            render_group,
-            frame_to_frame_camera_delta_position.negated(),
-        );
+        // TODO: Re-enable particles.
+        if (false) {
+            const frame_to_frame_camera_delta_position: Vector3 =
+                world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
+            particles.updateAndRenderParticleSystem(
+                world_mode.particle_cache,
+                input.frame_delta_time,
+                render_group,
+                frame_to_frame_camera_delta_position.negated(),
+            );
+        }
+
         var world_transform = ObjectTransform.defaultUpright();
 
         // render_group.pushVolumeOutline(
@@ -695,6 +702,7 @@ pub fn updateAndRenderWorld(
     }
     endSim(&transient_state.arena, &world_sim, world_mode.world);
 
+    render_group.lightingTest();
     render_group.endDepthPeel();
 
     var heores_exist: bool = false;
