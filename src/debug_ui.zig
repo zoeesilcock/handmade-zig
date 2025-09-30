@@ -56,7 +56,7 @@ const DebugInteractionTargetType = enum(u32) {
 };
 
 pub const DebugInteraction = struct {
-    id: DebugId = undefined,
+    id: DebugId = .empty(),
     interaction_type: DebugInteractionType = .None,
 
     target: ?*anyopaque = null,
@@ -108,13 +108,13 @@ pub const DebugInteraction = struct {
         return DebugInteraction{
             .id = id,
             .interaction_type = interaction_type,
-            .data = undefined,
+            .data = .{ .bool = false },
         };
     }
 
     pub fn fromLink(link: *DebugVariableLink, interaction_type: DebugInteractionType) DebugInteraction {
         return DebugInteraction{
-            .id = undefined,
+            .id = .empty(),
             .interaction_type = interaction_type,
             .data = .{ .link = link },
         };

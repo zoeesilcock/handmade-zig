@@ -49,7 +49,11 @@ pub const DebugTable = extern struct {
 };
 
 pub const DebugId = extern struct {
-    value: [2]*anyopaque,
+    value: [2]?*anyopaque,
+
+    pub fn empty() DebugId {
+        return .{ .value = .{ null, null } };
+    }
 
     pub fn fromLink(tree: *debug.DebugTree, link: *debug.DebugVariableLink) DebugId {
         return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };

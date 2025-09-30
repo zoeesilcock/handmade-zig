@@ -497,7 +497,9 @@ pub const RenderGroup = extern struct {
         p3: Vector4,
         uv3: Vector2,
         c3: u32,
+        opt_emission: ?f32,
     ) void {
+        const emission = opt_emission orelse 0;
         const entry: ?*RenderEntryTexturedQuads = self.current_quads;
         std.debug.assert(entry != null);
 
@@ -523,21 +525,25 @@ pub const RenderGroup = extern struct {
         vert[0].normal = n3;
         vert[0].uv = uv3;
         vert[0].color = c3;
+        vert[0].emission = emission;
 
         vert[1].position = p0;
         vert[1].normal = n0;
         vert[1].uv = uv0;
         vert[1].color = c0;
+        vert[1].emission = emission;
 
         vert[2].position = p2;
         vert[2].normal = n2;
         vert[2].uv = uv2;
         vert[2].color = c2;
+        vert[2].emission = emission;
 
         vert[3].position = p1;
         vert[3].normal = n1;
         vert[3].uv = uv1;
         vert[3].color = c1;
+        vert[3].emission = emission;
     }
 
     fn pushQuadUnpackedColors(
@@ -555,6 +561,7 @@ pub const RenderGroup = extern struct {
         p3: Vector4,
         uv3: Vector2,
         c3: Color,
+        opt_emission: ?f32,
     ) void {
         self.pushQuad(
             bitmap,
@@ -570,6 +577,7 @@ pub const RenderGroup = extern struct {
             p3,
             uv3,
             c3.scaledTo(255).packColorRGBA(),
+            opt_emission,
         );
     }
 
@@ -628,6 +636,7 @@ pub const RenderGroup = extern struct {
             p3,
             uv3,
             c3,
+            null,
         );
     }
 
@@ -710,6 +719,7 @@ pub const RenderGroup = extern struct {
                     min_x_max_y,
                     .new(min_uv.x(), max_uv.y()),
                     vertex_color,
+                    null,
                 );
             }
         }
@@ -761,6 +771,23 @@ pub const RenderGroup = extern struct {
         }
     }
 
+    pub fn pushCubeLight(
+        self: *RenderGroup,
+        position: Vector3,
+        radius: f32,
+        color: Color3,
+        emission: f32,
+    ) void {
+        self.pushCube(
+            self.commands.white_bitmap,
+            position.plus(.new(0, 0, 0.5 * radius)),
+            radius,
+            radius,
+            color.toColor(1),
+            emission,
+        );
+    }
+
     pub fn pushCube(
         self: *RenderGroup,
         bitmap: ?*LoadedBitmap,
@@ -768,6 +795,7 @@ pub const RenderGroup = extern struct {
         radius: f32,
         height: f32,
         color: Color,
+        opt_emission: ?f32,
     ) void {
         if (self.getCurrentQuads(6) != null) {
             const nx: f32 = position.x() - radius;
@@ -815,6 +843,7 @@ pub const RenderGroup = extern struct {
                 p3,
                 t3,
                 top_color,
+                opt_emission,
             );
             self.pushQuadUnpackedColors(
                 bitmap,
@@ -830,6 +859,7 @@ pub const RenderGroup = extern struct {
                 p4,
                 t3,
                 bottom_color,
+                opt_emission,
             );
             self.pushQuadUnpackedColors(
                 bitmap,
@@ -845,6 +875,7 @@ pub const RenderGroup = extern struct {
                 p0,
                 t3,
                 ct,
+                opt_emission,
             );
             self.pushQuadUnpackedColors(
                 bitmap,
@@ -860,6 +891,7 @@ pub const RenderGroup = extern struct {
                 p3,
                 t3,
                 ct,
+                opt_emission,
             );
             self.pushQuadUnpackedColors(
                 bitmap,
@@ -875,6 +907,7 @@ pub const RenderGroup = extern struct {
                 p2,
                 t3,
                 ct,
+                opt_emission,
             );
             self.pushQuadUnpackedColors(
                 bitmap,
@@ -890,6 +923,7 @@ pub const RenderGroup = extern struct {
                 p3,
                 t3,
                 ct,
+                opt_emission,
             );
         }
     }
@@ -947,6 +981,7 @@ pub const RenderGroup = extern struct {
                 .new(min_position.x(), max_position.y(), z, 0),
                 .new(min_uv.x(), max_uv.y()),
                 packed_color,
+                null,
             );
         }
     }
@@ -1227,12 +1262,13 @@ pub const RenderGroup = extern struct {
         reflection_color: Color3,
         transparency: f32,
         radius: f32,
+        visibility: f32,
+        shadow: f32,
     };
 
     pub fn lightingTest(self: *RenderGroup) void {
         var elements: [6144]LightingElement = [1]LightingElement{undefined} ** 6144;
 
-        const debug_light_position: Vector3 = self.last_setup.debug_light_position;
         const camera_position: Vector3 = self.last_setup.camera_position;
 
         const commands: *RenderCommands = self.commands;
@@ -1279,21 +1315,21 @@ pub const RenderGroup = extern struct {
                 element.accumulated_color = .zero();
                 element.reflection_color = color.rgb();
                 element.transparency = color.a();
-
-                if (element.position.minus(debug_light_position).lengthSquared() < math.square(2)) {
-                    element.front_emission_color = .new(1, 1, 1);
-                }
+                element.front_emission_color = color.rgb().scaledTo(vert0.emission);
+                element.visibility = 1;
+                element.shadow = 0;
 
                 verts += 4;
             }
         }
 
         // Compute lighting.
-        for (0..1) |_| {
+        for (0..global_config.Renderer_Lighting_IterationCount) |_| {
             var dest_index: u32 = 0;
             while (dest_index < quads.quad_count) : (dest_index += 1) {
                 var dest: *LightingElement = &elements[dest_index];
                 const to_camera: Vector3 = camera_position.minus(dest.position).normalizeOrZero();
+                var accumulated_color: Vector3 = .zero();
 
                 var source_index: u32 = 0;
                 while (source_index < quads.quad_count) : (source_index += 1) {
@@ -1309,7 +1345,7 @@ pub const RenderGroup = extern struct {
                         const diffuse_coefficient: f32 = 1;
                         const specular_coefficent: f32 = 1 - diffuse_coefficient;
                         // const specular_power = 1.0 + (15.0);
-                        const distance_falloff: f32 = 1.0; // / math.square(light_distance);
+                        const distance_falloff: f32 = 1.0 / math.square(light_distance);
 
                         const diffuse_dot: f32 = math.clampf01(to_light.dotProduct(reflection_normal));
                         const cos_angle: Vector3 = .splat(diffuse_dot);
@@ -1327,15 +1363,70 @@ pub const RenderGroup = extern struct {
                         const total_light: Vector3 = diffuse_light.plus(specular_light);
                         const result: Vector3 = dest.reflection_color.toVector3().hadamardProduct(total_light);
 
-                        dest.accumulated_color = dest.accumulated_color.toVector3().plus(result).toColor3();
+                        accumulated_color = accumulated_color.plus(result);
                     }
                 }
+
+                dest.accumulated_color = accumulated_color.toColor3().scaledTo(dest.visibility);
             }
 
             var quad_index: u32 = 0;
             while (quad_index < quads.quad_count) : (quad_index += 1) {
                 var dest: *LightingElement = &elements[quad_index];
-                dest.front_emission_color = dest.accumulated_color;
+                dest.front_emission_color = dest.front_emission_color.plus(dest.accumulated_color);
+            }
+        }
+
+        // Calculate shadows.
+        for (0..2) |i| {
+            var dest_index: u32 = 0;
+            while (dest_index < quads.quad_count) : (dest_index += 1) {
+                var dest: *LightingElement = &elements[dest_index];
+                var shadow: f32 = 0;
+
+                var source_index: u32 = 0;
+                while (source_index < quads.quad_count) : (source_index += 1) {
+                    var source: *LightingElement = &elements[source_index];
+
+                    std.debug.assert(source.visibility >= 0);
+                    std.debug.assert(source.visibility <= 1);
+
+                    var v: Vector3 = source.position.minus(dest.position);
+                    const vsq = v.lengthSquared();
+                    const v_len = @sqrt(vsq);
+
+                    if (v_len > 0.0001) {
+                        std.debug.assert(dest_index != source_index);
+
+                        v = v.scaledTo(1.0 / v_len);
+
+                        const apparent_source_amount: f32 = intrinsics.absoluteValue(source.normal.dotProduct(v));
+                        const apparent_dest_amount: f32 = math.clampf01(4 * dest.normal.dotProduct(v));
+                        const apparent_source_area: f32 = (math.PI32 * math.square(source.radius)) / vsq;
+
+                        const s: f32 = (1 - intrinsics.reciprocalSquareRoot(apparent_source_area + 1.0)) *
+                            apparent_source_amount * apparent_dest_amount;
+
+                        std.debug.assert(s >= 0);
+                        std.debug.assert(s <= 1);
+
+                        shadow += source.visibility * s;
+                    }
+                }
+
+                shadow = math.clampf01(shadow);
+
+                if (i == 1) {
+                    std.debug.assert(shadow <= dest.shadow);
+                }
+
+                dest.shadow = shadow;
+            }
+
+            var quad_index: u32 = 0;
+            while (quad_index < quads.quad_count) : (quad_index += 1) {
+                var dest: *LightingElement = &elements[quad_index];
+                dest.visibility = 1.0 - dest.shadow;
             }
         }
 
@@ -1347,65 +1438,81 @@ pub const RenderGroup = extern struct {
             var quad_index: u32 = 0;
             while (quad_index < quads.quad_count) : (quad_index += 1) {
                 var element: *LightingElement = &elements[quad_index];
-                bitmap[0] = commands.white_bitmap;
 
                 var vert0: *TexturedVertex = @ptrCast(verts + 0);
                 var vert1: *TexturedVertex = @ptrCast(verts + 1);
                 var vert2: *TexturedVertex = @ptrCast(verts + 2);
                 var vert3: *TexturedVertex = @ptrCast(verts + 3);
 
-                var base: Vector3 = .zero();
-                {
-                    var normal = vert0.normal;
-                    _ = normal.setX(@abs(normal.x()));
-                    _ = normal.setY(@abs(normal.y()));
-                    _ = normal.setZ(@abs(normal.z()));
-
-                    var min_el: u32 = 0;
-                    if (normal.x() < normal.y()) {
-                        if (normal.z() < normal.y()) {
-                            min_el = 2;
-                        } else {
-                            min_el = 0;
-                        }
-                    } else {
-                        if (normal.z() < normal.y()) {
-                            min_el = 2;
-                        } else {
-                            min_el = 1;
-                        }
-                    }
-                    base.values[min_el] = 1;
+                var front_emission_color: Color = element.front_emission_color.clamp01().toColor(1);
+                if (global_config.Renderer_Lighting_ShowVisibility) {
+                    front_emission_color = Color3.white().scaledTo(element.visibility).toColor(1);
                 }
 
-                var x: Vector3 = base.crossProduct(vert0.normal);
-                var y: Vector3 = x.crossProduct(vert0.normal).negated();
+                if (global_config.Renderer_Lighting_ShowReflectors) {
+                    bitmap[0] = commands.white_bitmap;
 
-                x = x.normalizeOrZero().scaledTo(element.radius);
-                y = y.normalizeOrZero().scaledTo(element.radius);
+                    var base: Vector3 = .zero();
+                    {
+                        var normal = vert0.normal;
+                        _ = normal.setX(@abs(normal.x()));
+                        _ = normal.setY(@abs(normal.y()));
+                        _ = normal.setZ(@abs(normal.z()));
 
-                _ = vert0.position.setXYZ(element.position.minus(y));
-                _ = vert1.position.setXYZ(element.position.plus(x));
-                _ = vert2.position.setXYZ(element.position.minus(x));
-                _ = vert3.position.setXYZ(element.position.plus(y));
+                        var min_el: u32 = 0;
+                        if (normal.x() < normal.y()) {
+                            if (normal.z() < normal.y()) {
+                                min_el = 2;
+                            } else {
+                                min_el = 0;
+                            }
+                        } else {
+                            if (normal.z() < normal.y()) {
+                                min_el = 2;
+                            } else {
+                                min_el = 1;
+                            }
+                        }
+                        base.values[min_el] = 1;
+                    }
 
-                _ = vert0.position.setW(0);
-                _ = vert1.position.setW(0);
-                _ = vert2.position.setW(0);
-                _ = vert3.position.setW(0);
+                    var x: Vector3 = base.crossProduct(vert0.normal);
+                    var y: Vector3 = x.crossProduct(vert0.normal).negated();
 
-                vert0.normal = element.normal;
-                vert1.normal = element.normal;
-                vert2.normal = element.normal;
-                vert3.normal = element.normal;
+                    x = x.normalizeOrZero().scaledTo(element.radius);
+                    y = y.normalizeOrZero().scaledTo(element.radius);
 
-                const front_emission_color = element.accumulated_color.clamp01();
-                const front_emission_color32 =
-                    front_emission_color.toColor(element.transparency).scaledTo(255.0).packColorRGBA();
-                vert0.color = front_emission_color32;
-                vert1.color = front_emission_color32;
-                vert2.color = front_emission_color32;
-                vert3.color = front_emission_color32;
+                    _ = vert0.position.setXYZ(element.position.minus(y));
+                    _ = vert1.position.setXYZ(element.position.plus(x));
+                    _ = vert2.position.setXYZ(element.position.minus(x));
+                    _ = vert3.position.setXYZ(element.position.plus(y));
+
+                    _ = vert0.position.setW(0);
+                    _ = vert1.position.setW(0);
+                    _ = vert2.position.setW(0);
+                    _ = vert3.position.setW(0);
+
+                    vert0.normal = element.normal;
+                    vert1.normal = element.normal;
+                    vert2.normal = element.normal;
+                    vert3.normal = element.normal;
+
+                    const front_emission_color32 =
+                        front_emission_color.rgb().toColor(element.transparency).scaledTo(255.0).packColorRGBA();
+                    vert0.color = front_emission_color32;
+                    vert1.color = front_emission_color32;
+                    vert2.color = front_emission_color32;
+                    vert3.color = front_emission_color32;
+                } else {
+                    vert0.color =
+                        front_emission_color.hadamardProduct(Color.unpackColorRGBA(vert0.color)).packColorRGBA();
+                    vert1.color =
+                        front_emission_color.hadamardProduct(Color.unpackColorRGBA(vert1.color)).packColorRGBA();
+                    vert2.color =
+                        front_emission_color.hadamardProduct(Color.unpackColorRGBA(vert2.color)).packColorRGBA();
+                    vert3.color =
+                        front_emission_color.hadamardProduct(Color.unpackColorRGBA(vert3.color)).packColorRGBA();
+                }
 
                 bitmap += 1;
                 verts += 4;

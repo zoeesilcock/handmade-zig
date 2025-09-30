@@ -2237,7 +2237,7 @@ pub fn renderCommands(
     gl.glDisable(gl.GL_DEPTH_TEST);
     gl.glDisable(gl.GL_BLEND);
 
-    computeLightTransport();
+    // computeLightTransport();
 
     platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, open_gl.resolve_frame_buffer.framebuffer_handle);
     gl.glViewport(0, 0, render_width, render_height);

@@ -144,6 +144,13 @@ pub export fn updateAndRender(
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_RoomBased, "Renderer_Camera_RoomBased");
             }
             DebugInterface.debugEndDataBlock(@src());
+            DebugInterface.debugBeginDataBlock(@src(), "Lighting");
+            {
+                DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_ShowReflectors, "Renderer_Lighting_ShowReflectors");
+                DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_ShowVisibility, "Renderer_Lighting_ShowVisibility");
+                DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_IterationCount, "Renderer_Lighting_IterationCount");
+            }
+            DebugInterface.debugEndDataBlock(@src());
         }
         DebugInterface.debugEndDataBlock(@src());
 

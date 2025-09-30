@@ -649,6 +649,8 @@ pub fn updateAndRenderWorld(
             world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
         }
 
+        render_group.pushCubeLight(world_mode.debug_light_position, 0.1, .new(1, 1, 1), 1);
+
         // TODO: Re-enable particles.
         if (false) {
             const frame_to_frame_camera_delta_position: Vector3 =
@@ -789,9 +791,14 @@ fn addStandardRoom(
             } else if (has_right_hole and offset_x >= 3 and offset_x <= 4 and offset_y >= -1 and offset_y <= 2) {
                 // Hole down to the floor below.
             } else {
+                var wall_height: f32 = 0.5;
+                if (offset_x >= -2 and offset_x <= 1 and offset_y == 2) {
+                    wall_height = 3;
+                }
+
                 _ = world_position.offset.setX(world_position.offset.x() + 0 * world_mode.world.game_entropy.randomBilateral());
                 _ = world_position.offset.setY(world_position.offset.y() + 0 * world_mode.world.game_entropy.randomBilateral());
-                _ = world_position.offset.setZ(world_position.offset.z() + 0.5 + 0.5 * world_mode.world.game_entropy.randomUnilateral());
+                _ = world_position.offset.setZ(world_position.offset.z() + wall_height + 0.5 * world_mode.world.game_entropy.randomUnilateral());
 
                 const entity: *Entity = beginGroundedEntity(world_mode);
                 standing_on.entity.ptr = entity;
@@ -801,7 +808,7 @@ fn addStandardRoom(
                 entity.traversables[0].occupier = null;
                 entity.addPieceV2(
                     .Grass,
-                    .new(0.7, 0.5),
+                    .new(0.7, wall_height),
                     .zero(),
                     .newFromSRGB(0.31, 0.49, 0.32, 1),
                     @intFromEnum(EntityVisiblePieceFlag.Cube),

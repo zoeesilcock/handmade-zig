@@ -547,6 +547,7 @@ pub fn updateAndRenderEntities(
                             piece.dimension.x(),
                             piece.dimension.y(),
                             piece.color,
+                            null,
                         );
                     } else {
                         render_group.pushBitmapId(

@@ -12,6 +12,10 @@ pub inline fn squareRoot(value: f32) f32 {
     return @sqrt(value);
 }
 
+pub inline fn reciprocalSquareRoot(value: f32) f32 {
+    return 1.0 / squareRoot(value);
+}
+
 pub inline fn absoluteValue(value: f32) f32 {
     return @abs(value);
 }

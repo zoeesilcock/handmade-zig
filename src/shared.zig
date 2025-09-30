@@ -884,6 +884,7 @@ pub const TexturedVertex = extern struct {
     normal: Vector3,
     uv: Vector2,
     color: u32, // Packed RGBA in memory order (ABGR in little endian).
+    emission: f32 = 0,
 };
 
 pub const RenderSettings = extern struct {

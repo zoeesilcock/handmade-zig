@@ -205,7 +205,6 @@ pub var running: bool = false;
 pub var paused: bool = false;
 pub var software_rendering: bool = false;
 var global_state: Win32State = .{};
-var global_config = &@import("config.zig").global_config;
 var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
