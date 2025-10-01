@@ -1254,16 +1254,21 @@ pub const RenderGroup = extern struct {
     }
 
     const LightingElement = struct {
+        // Static information.
         position: Vector3,
         normal: Vector3,
-        front_emission_color: Color3,
-        back_emission_color: Color3,
-        accumulated_color: Color3,
-        reflection_color: Color3,
         transparency: f32,
         radius: f32,
+        reflection_color: Color3,
+
+        // Ambient occlusion.
         visibility: f32,
-        shadow: f32,
+        shadow: f32, // Transient.
+
+        // Lighting.
+        front_emission_color: Color3,
+        back_emission_color: Color3,
+        accumulated_color: Color3, // Transient.
     };
 
     pub fn lightingTest(self: *RenderGroup) void {
@@ -1313,7 +1318,7 @@ pub const RenderGroup = extern struct {
                 element.front_emission_color = .zero();
                 element.back_emission_color = .zero();
                 element.accumulated_color = .zero();
-                element.reflection_color = color.rgb();
+                element.reflection_color = color.rgb().scaledTo(0.95);
                 element.transparency = color.a();
                 element.front_emission_color = color.rgb().scaledTo(vert0.emission);
                 element.visibility = 1;
@@ -1345,20 +1350,20 @@ pub const RenderGroup = extern struct {
                         const diffuse_coefficient: f32 = 1;
                         const specular_coefficent: f32 = 1 - diffuse_coefficient;
                         // const specular_power = 1.0 + (15.0);
-                        const distance_falloff: f32 = 1.0 / math.square(light_distance);
+                        const distance_falloff: f32 = 1.0 / (1.0 + math.square(light_distance));
 
                         const diffuse_dot: f32 = math.clampf01(to_light.dotProduct(reflection_normal));
-                        const cos_angle: Vector3 = .splat(diffuse_dot);
-                        const diffuse_light: Vector3 =
-                            cos_angle.scaledTo(distance_falloff * diffuse_coefficient).hadamardProduct(light_color);
+                        const diffuse_contrib: f32 = distance_falloff * diffuse_coefficient * diffuse_dot;
+                        const diffuse_contrib3: Vector3 = .splat(diffuse_contrib);
+                        const diffuse_light: Vector3 = diffuse_contrib3.hadamardProduct(light_color);
 
                         const reflection_vector: Vector3 =
                             to_camera.negated().plus(reflection_normal.scaledTo(2 * reflection_normal.dotProduct(to_camera)));
                         const specular_dot: f32 = math.clampf01(to_light.dotProduct(reflection_vector));
                         // specular_dot = pow(specular_dot, specular_power);
-                        const cos_reflected_angle: Vector3 = .splat(specular_dot);
-                        const specular_light: Vector3 =
-                            cos_reflected_angle.scaledTo(specular_coefficent).hadamardProduct(light_color);
+                        const specular_contrib: f32 = specular_coefficent * specular_dot;
+                        const specular_contrib3: Vector3 = .splat(specular_contrib);
+                        const specular_light: Vector3 = specular_contrib3.hadamardProduct(light_color);
 
                         const total_light: Vector3 = diffuse_light.plus(specular_light);
                         const result: Vector3 = dest.reflection_color.toVector3().hadamardProduct(total_light);
@@ -1373,12 +1378,14 @@ pub const RenderGroup = extern struct {
             var quad_index: u32 = 0;
             while (quad_index < quads.quad_count) : (quad_index += 1) {
                 var dest: *LightingElement = &elements[quad_index];
-                dest.front_emission_color = dest.front_emission_color.plus(dest.accumulated_color);
+                const iteration_count: f32 = @as(f32, @floatFromInt(global_config.Renderer_Lighting_IterationCount));
+                dest.front_emission_color =
+                    dest.front_emission_color.plus(dest.accumulated_color.scaledTo(1.0 / iteration_count));
             }
         }
 
-        // Calculate shadows.
-        for (0..2) |i| {
+        // Calculate ambient occlusion.
+        for (0..global_config.Renderer_Lighting_OcclusionIterationCount) |i| {
             var dest_index: u32 = 0;
             while (dest_index < quads.quad_count) : (dest_index += 1) {
                 var dest: *LightingElement = &elements[dest_index];

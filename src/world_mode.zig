@@ -777,6 +777,9 @@ fn addStandardRoom(
     while (offset_y <= radius_y) : (offset_y += 1) {
         var offset_x: i32 = -radius_x;
         while (offset_x <= radius_x) : (offset_x += 1) {
+            var color: Color = .newFromSRGB(0.31, 0.49, 0.32, 1);
+            color = .newFromSRGB(1, 1, 1, 1);
+
             var standing_on: TraversableReference = .{};
             var world_position = chunkPositionFromTilePosition(
                 world_mode.world,
@@ -793,6 +796,7 @@ fn addStandardRoom(
             } else {
                 var wall_height: f32 = 0.5;
                 if (offset_x >= -2 and offset_x <= 1 and offset_y == 2) {
+                    color = .newFromSRGB(1, 0, 0, 1);
                     wall_height = 3;
                 }
 
@@ -810,7 +814,7 @@ fn addStandardRoom(
                     .Grass,
                     .new(0.7, wall_height),
                     .zero(),
-                    .newFromSRGB(0.31, 0.49, 0.32, 1),
+                    color,
                     @intFromEnum(EntityVisiblePieceFlag.Cube),
                 );
                 endEntity(world_mode, entity, world_position);
@@ -966,7 +970,7 @@ pub fn addPlayer(
     glove.angle_swipe_distance = 1;
     glove.angle_current_distance = 0.3;
 
-    initHitPoints(body, 3);
+    // initHitPoints(body, 3);
 
     head.brain_slot = BrainSlot.forField(BrainHero, "head");
     head.brain_id = brain_id;
