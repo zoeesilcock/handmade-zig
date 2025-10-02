@@ -338,6 +338,10 @@ pub fn executeBrain(
                     controlled_hero.recenter_timer = math.clampAboveZero(controlled_hero.recenter_timer - delta_time);
 
                     // Apply the calculated acceleration to entity.
+                    const acceleration_length: f32 = acceleration.length();
+                    if (acceleration_length > 10) {
+                        acceleration = acceleration.scaledTo(10 / acceleration_length);
+                    }
                     head.acceleration = acceleration;
                 }
             }

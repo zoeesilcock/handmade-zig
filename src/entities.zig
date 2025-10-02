@@ -13,6 +13,7 @@ const std = @import("std");
 
 // Types.
 const Color = math.Color;
+const Color3 = math.Color3;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
@@ -74,6 +75,7 @@ pub const EntityVisiblePieceFlag = enum(u32) {
     AxesDeform = 0x1,
     BobOffset = 0x2,
     Cube = 0x4,
+    Light = 0x8,
 };
 
 pub const EntityVisiblePiece = extern struct {
@@ -166,6 +168,22 @@ pub const Entity = extern struct {
         opt_movement_flags: ?u32,
     ) void {
         self.addPieceV2(asset_type, .new(0, height), offset, color, opt_movement_flags);
+    }
+
+    pub fn addPieceLight(
+        self: *Entity,
+        radius: f32,
+        offset: Vector3,
+        emission: f32,
+        color: Color3,
+    ) void {
+        self.addPieceV2(
+            .None,
+            .new(radius, emission),
+            offset,
+            color.toColor(1),
+            @intFromEnum(EntityVisiblePieceFlag.Light),
+        );
     }
 
     pub fn addPieceV2(
@@ -540,7 +558,14 @@ pub fn updateAndRenderEntities(
                         _ = offset.setY(offset.y() + bob_time);
                     }
 
-                    if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
+                    if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Light) != 0) {
+                        render_group.pushCubeLight(
+                            entity_transform.offset_position.plus(piece.offset),
+                            piece.dimension.x(),
+                            piece.color.rgb(),
+                            piece.dimension.y(),
+                        );
+                    } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
                         render_group.pushCube(
                             render_group.commands.white_bitmap,
                             entity_transform.offset_position.plus(piece.offset),

@@ -407,6 +407,8 @@ pub fn beginWorldChange(
                                     sim_region.updatable_bounds,
                                 )) {
                                     dest.flags |= EntityFlags.Active.toInt();
+                                } else {
+                                    dest.flags &= ~EntityFlags.Active.toInt();
                                 }
 
                                 if (dest.brain_id.value != 0) {

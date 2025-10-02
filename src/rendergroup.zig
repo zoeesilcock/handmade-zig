@@ -24,6 +24,7 @@ const intrinsics = @import("intrinsics.zig");
 const config = @import("config.zig");
 const file_formats = @import("file_formats");
 const sort = @import("sort.zig");
+const random = @import("random.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
@@ -1280,9 +1281,14 @@ pub const RenderGroup = extern struct {
         std.debug.assert(self.current_quads != null);
         const quads: *RenderEntryTexturedQuads = self.current_quads.?;
 
+        const reflector_pick: Vector3 = .new(0, 4.5, 1.5);
+        var close_pick_index: u32 = 0;
+        const max_emission: f32 = 10;
+
         // Copy ligthing in.
         {
             var verts: [*]TexturedVertex = commands.vertex_array + quads.vertex_array_offset;
+            var close_pick_distance_squared: f32 = std.math.floatMax(f32);
 
             var quad_index: u32 = 0;
             while (quad_index < quads.quad_count) : (quad_index += 1) {
@@ -1309,7 +1315,7 @@ pub const RenderGroup = extern struct {
                 const span10: Vector3 = vert1_position.minus(vert0_position);
 
                 element.position = vert0_position.plus(span20.scaledTo(0.5));
-                element.radius = 0.5 * @min(span30.length(), span10.length());
+                element.radius = 0.75 * @min(span30.length(), span10.length());
 
                 // TODO: Remove the premultiplied alpha here?
                 const color: Color = Color.unpackColorRGBA(vert0.color).scaledTo(1.0 / 255.0);
@@ -1320,19 +1326,41 @@ pub const RenderGroup = extern struct {
                 element.accumulated_color = .zero();
                 element.reflection_color = color.rgb().scaledTo(0.95);
                 element.transparency = color.a();
-                element.front_emission_color = color.rgb().scaledTo(vert0.emission);
+                element.front_emission_color = color.rgb().scaledTo(vert0.emission * max_emission);
                 element.visibility = 1;
                 element.shadow = 0;
+
+                const this_pick_distance_squared = element.position.minus(reflector_pick).lengthSquared();
+                if (close_pick_distance_squared > this_pick_distance_squared) {
+                    close_pick_distance_squared = this_pick_distance_squared;
+                    close_pick_index = quad_index;
+                }
 
                 verts += 4;
             }
         }
 
         // Compute lighting.
+        var series: random.Series = .seed(1234);
+        var offsets: [16]Vector3 = undefined;
+        for (&offsets) |*offset| {
+            offset.* = Vector3.new(
+                series.randomBilateral(),
+                series.randomBilateral(),
+                series.randomBilateral(),
+            );
+        }
         for (0..global_config.Renderer_Lighting_IterationCount) |_| {
             var dest_index: u32 = 0;
             while (dest_index < quads.quad_count) : (dest_index += 1) {
                 var dest: *LightingElement = &elements[dest_index];
+
+                var rays: [16]Vector3 = undefined;
+                for (&rays, 0..) |*ray, i| {
+                    ray.* = dest.normal.plus(offsets[i]).normalizeOrZero();
+                }
+
+                var closest_hit: [rays.len]f32 = [1]f32{std.math.floatMax(f32)} ** rays.len;
                 const to_camera: Vector3 = camera_position.minus(dest.position).normalizeOrZero();
                 var accumulated_color: Vector3 = .zero();
 
@@ -1368,7 +1396,31 @@ pub const RenderGroup = extern struct {
                         const total_light: Vector3 = diffuse_light.plus(specular_light);
                         const result: Vector3 = dest.reflection_color.toVector3().hadamardProduct(total_light);
 
-                        accumulated_color = accumulated_color.plus(result);
+                        if (true) {
+                            var ray_index: u32 = 0;
+                            while (ray_index < rays.len) : (ray_index += 1) {
+                                const ray: Vector3 = rays[ray_index];
+                                const ray_source_normal = ray.dotProduct(source.normal);
+                                if (ray_source_normal < -0.001) {
+                                    const relative_source_position: Vector3 = source.position.minus(dest.position);
+                                    const d: f32 = -source.normal.dotProduct(relative_source_position);
+                                    const t_ray: f32 = -d / ray_source_normal;
+
+                                    if (t_ray > 0 and t_ray < closest_hit[ray_index]) {
+                                        const ray_position: Vector3 = ray.scaledTo(t_ray);
+                                        const cone_radius: f32 = 0.25 * t_ray;
+                                        const distance_squared: f32 =
+                                            ray_position.minus(relative_source_position).lengthSquared();
+                                        if (distance_squared < math.square(source.radius + cone_radius)) {
+                                            closest_hit[ray_index] = t_ray;
+                                            accumulated_color = result;
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            accumulated_color = accumulated_color.plus(result);
+                        }
                     }
                 }
 
@@ -1454,6 +1506,12 @@ pub const RenderGroup = extern struct {
                 var front_emission_color: Color = element.front_emission_color.clamp01().toColor(1);
                 if (global_config.Renderer_Lighting_ShowVisibility) {
                     front_emission_color = Color3.white().scaledTo(element.visibility).toColor(1);
+                }
+
+                if (false) {
+                    if (quad_index == close_pick_index) {
+                        front_emission_color = Color3.new(1, 1, 0).scaledTo(element.visibility).toColor(1);
+                    }
                 }
 
                 if (global_config.Renderer_Lighting_ShowReflectors) {

@@ -252,15 +252,15 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             room_radius_y,
         );
 
-        if (false) {
-            _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
-            _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
+        if (true) {
+            // _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
+            // _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
             const snake_brain_id = addBrain(world_mode);
             var segment_index: u32 = 0;
-            while (segment_index < 5) : (segment_index += 1) {
+            while (segment_index < 3) : (segment_index += 1) {
                 const x: u32 = 2 + segment_index;
-                _ = addSnakeSegment(world_mode, room.position[x][2], room.ground[x][2], snake_brain_id, segment_index);
+                _ = addSnakeSegment(world_mode, room.position[x][1], room.ground[x][1], snake_brain_id, segment_index);
             }
         }
 
@@ -649,7 +649,7 @@ pub fn updateAndRenderWorld(
             world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
         }
 
-        render_group.pushCubeLight(world_mode.debug_light_position, 0.1, .new(1, 1, 1), 1);
+        render_group.pushCubeLight(world_mode.debug_light_position, 0.5, .new(1, 1, 1), 1);
 
         // TODO: Re-enable particles.
         if (false) {
@@ -795,8 +795,8 @@ fn addStandardRoom(
                 // Hole down to the floor below.
             } else {
                 var wall_height: f32 = 0.5;
-                if (offset_x >= -2 and offset_x <= 1 and offset_y == 2) {
-                    color = .newFromSRGB(1, 0, 0, 1);
+                if (offset_x >= -2 and offset_x <= 1 and (offset_y == 2 or offset_y == -2)) {
+                    color = if (offset_y == -2) .newFromSRGB(1, 0, 0, 1) else .newFromSRGB(0, 0, 1, 1);
                     wall_height = 3;
                 }
 
@@ -989,25 +989,27 @@ pub fn addPlayer(
     const hero_scale = 3;
     const shadow_alpha = 0.5;
     const color: Color = .white();
-    body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
-    body.addPiece(
-        .Torso,
-        hero_scale * 1.2,
-        .new(0, 0, 0),
-        color,
-        @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
-    );
-    body.addPiece(
-        .Cape,
-        hero_scale * 1.2,
-        .new(0, -0.1, 0),
-        color,
-        @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
-    );
+    if (false) {
+        body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
+        body.addPiece(
+            .Torso,
+            hero_scale * 1.2,
+            .new(0, 0, 0),
+            color,
+            @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
+        );
+        body.addPiece(
+            .Cape,
+            hero_scale * 1.2,
+            .new(0, -0.1, 0),
+            color,
+            @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
+        );
 
-    head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
+        head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
 
-    glove.addPiece(.Sword, hero_scale * 0.25, .new(0, 0, 0), color, null);
+        glove.addPiece(.Sword, hero_scale * 0.25, .new(0, 0, 0), color, null);
+    }
 
     endEntity(world_mode, glove, position);
     endEntity(world_mode, head, position);
@@ -1084,6 +1086,7 @@ fn addSnakeSegment(
 
     entity.addPiece(.Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
     entity.addPiece(if (segment_index != 0) .Torso else .Head, 1.5, .zero(), .white(), null);
+    entity.addPieceLight(0.1, .new(0, 0, 0.5), 0.3, .new(1, 1, 0));
 
     endEntity(world_mode, entity, world_position);
 }
