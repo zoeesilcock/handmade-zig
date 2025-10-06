@@ -1008,6 +1008,7 @@ pub const GameInput = extern struct {
     shift_down: bool = false,
     alt_down: bool = false,
     control_down: bool = false,
+    f_key_pressed: [13]bool = [1]bool{false} ** 13, // Index 1 is F1, etc. Index 0 is not used.
 
     pub fn getController(self: *GameInput, controller_index: u32) *ControllerInput {
         std.debug.assert(controller_index < self.controllers.len);

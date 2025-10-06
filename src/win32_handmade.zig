@@ -1047,7 +1047,12 @@ fn processXInputStick(value: i16, dead_zone: i16) f32 {
     return result;
 }
 
-fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.ControllerInput, state: *Win32State) void {
+fn processKeyboardInput(
+    message: win32.MSG,
+    keyboard_controller: *shared.ControllerInput,
+    input: *shared.GameInput,
+    state: *Win32State,
+) void {
     const vk_code = message.wParam;
     const alt_was_down: bool = if ((message.lParam & (1 << 29) != 0)) true else false;
     const shift_was_down: bool = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
@@ -1092,11 +1097,6 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
             @intFromEnum(win32.VK_ESCAPE) => {
                 processKeyboardInputMessage(&keyboard_controller.back_button, is_down);
             },
-            @intFromEnum(win32.VK_F4) => {
-                if (is_down and alt_was_down) {
-                    running = false;
-                }
-            },
             @intFromEnum(win32.VK_RETURN) => {
                 if (is_down and alt_was_down) {
                     if (message.hwnd) |window| {
@@ -1140,6 +1140,15 @@ fn processKeyboardInput(message: win32.MSG, keyboard_controller: *shared.Control
                         open_gl.debug_light_buffer_index -= 1;
                     } else {
                         open_gl.debug_light_buffer_texture_index -= 1;
+                    }
+                }
+            },
+            @intFromEnum(win32.VK_F1)...@intFromEnum(win32.VK_F12) => {
+                if (is_down) {
+                    if (alt_was_down and vk_code == @intFromEnum(win32.VK_F4)) {
+                        running = false;
+                    } else {
+                        input.f_key_pressed[vk_code - @intFromEnum(win32.VK_F1) + 1] = true;
                     }
                 }
             },
@@ -2551,6 +2560,7 @@ pub export fn wWinMain(
 
                     TimedBlock.beginBlock(@src(), .MessageProcessing);
                     var message: win32.MSG = undefined;
+                    new_input.f_key_pressed = [1]bool{false} ** 13;
 
                     // Process all messages provided by Windows.
                     while (true) {
@@ -2591,7 +2601,7 @@ pub export fn wWinMain(
 
                         switch (message.message) {
                             win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
-                                processKeyboardInput(message, new_keyboard_controller, state);
+                                processKeyboardInput(message, new_keyboard_controller, new_input, state);
                             },
                             else => {
                                 _ = win32.TranslateMessage(&message);
