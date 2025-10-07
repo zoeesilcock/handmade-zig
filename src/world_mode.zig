@@ -41,6 +41,7 @@ const RenderGroup = rendergroup.RenderGroup;
 const ObjectTransform = rendergroup.ObjectTransform;
 const TransientClipRect = rendergroup.TransientClipRect;
 const LightingSolution = rendergroup.LightingSolution;
+const LightingTextures = rendergroup.LightingTextures;
 const CameraParams = render.CameraParams;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
@@ -111,6 +112,7 @@ pub const GameModeWorld = struct {
 
     show_lighting: bool,
     test_lighting: LightingSolution,
+    test_textures: LightingTextures,
 };
 
 const WorldSim = struct {
@@ -588,7 +590,7 @@ pub fn updateAndRenderWorld(
     );
 
     if (world_mode.show_lighting) {
-        render_group.outputLighting(&world_mode.test_lighting);
+        render_group.outputLighting(&world_mode.test_lighting, &world_mode.test_textures);
 
         if (input.f_key_pressed[1]) {
             world_mode.show_lighting = false;
@@ -717,6 +719,7 @@ pub fn updateAndRenderWorld(
 
         if (input.f_key_pressed[1]) {
             render_group.lightingTest(&world_mode.test_lighting);
+            RenderGroup.outputLightingTextures(&world_mode.test_lighting, &world_mode.test_textures);
             world_mode.show_lighting = true;
         }
     }
@@ -1005,7 +1008,7 @@ pub fn addPlayer(
     const hero_scale = 3;
     const shadow_alpha = 0.5;
     const color: Color = .white();
-    if (false) {
+    if (true) {
         body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
         body.addPiece(
             .Torso,

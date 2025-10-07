@@ -21,6 +21,7 @@ const math = @import("math.zig");
 const render = @import("render.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
+const memory = @import("memory.zig");
 const config = @import("config.zig");
 const file_formats = @import("file_formats");
 const sort = @import("sort.zig");
@@ -181,7 +182,7 @@ const RenderTransform = extern struct {
     projection: MatrixInverse4x4 = .{},
 };
 
-const LightingElement = struct {
+const LightingElement = extern struct {
     // Static information.
     position: Vector3,
     normal: Vector3,
@@ -202,9 +203,34 @@ const LightingElement = struct {
     original_vertices: [4]TexturedVertex = undefined,
 };
 
-pub const LightingSolution = struct {
+pub const LightingTexel = extern struct {
+    position: Vector3,
+    next: u32,
+};
+
+const LIGHT_LOOKUP_X = 256;
+const LIGHT_LOOKUP_Y = 256;
+const LIGHT_LOOKUP_Z = 32;
+
+pub const LightingTextures = extern struct {
+    position_next: [MAX_LIGHTING_ELEMENTS]LightingTexel, // 64Kb
+    color: [MAX_LIGHTING_ELEMENTS]u32, // 16Kb
+    lookup: [LIGHT_LOOKUP_Z][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]u16, // 4Mb
+
+    pub fn clearLookup(self: *LightingTextures) void {
+        self.lookup =
+            [1][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]u16{
+                [1][LIGHT_LOOKUP_X]u16{
+                    [1]u16{0} ** LIGHT_LOOKUP_X,
+                } ** LIGHT_LOOKUP_Y,
+            } ** LIGHT_LOOKUP_Z;
+    }
+};
+
+const MAX_LIGHTING_ELEMENTS = 4096;
+pub const LightingSolution = extern struct {
     element_count: u32 = 0,
-    elements: [6144]LightingElement = [1]LightingElement{undefined} ** 6144,
+    elements: [MAX_LIGHTING_ELEMENTS]LightingElement = [1]LightingElement{undefined} ** MAX_LIGHTING_ELEMENTS,
 };
 
 pub const RenderGroup = extern struct {
@@ -1329,7 +1355,7 @@ pub const RenderGroup = extern struct {
             element.accumulated_color = .zero();
             element.reflection_color = color.rgb().scaledTo(0.95);
             element.transparency = color.a();
-            element.front_emission_color = color.rgb().scaledTo(vert0.emission * max_emission);
+            element.front_emission_color = Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
             element.visibility = 1;
             element.shadow = 0;
 
@@ -1398,7 +1424,8 @@ pub const RenderGroup = extern struct {
                 element[0].accumulated_color = .zero();
                 element[0].reflection_color = color.rgb().scaledTo(0.95);
                 element[0].transparency = color.a();
-                element[0].front_emission_color = color.rgb().scaledTo(verts[vert_index].emission * max_emission);
+                element[0].front_emission_color =
+                    Color3.new(1, 1, 1).scaledTo(verts[vert_index].emission * max_emission);
                 element[0].visibility = 1;
                 element[0].shadow = 0;
 
@@ -1451,7 +1478,8 @@ pub const RenderGroup = extern struct {
                 while (source_index < solution.element_count) : (source_index += 1) {
                     var source: *LightingElement = &elements[source_index];
 
-                    const light_color: Vector3 = source.front_emission_color.toVector3();
+                    const light_color: Vector3 =
+                        source.reflection_color.hadamardProduct(source.front_emission_color).toVector3();
                     var to_light: Vector3 = source.position.minus(dest.position);
                     const light_distance: f32 = to_light.length();
                     if (light_distance > 0) {
@@ -1477,32 +1505,28 @@ pub const RenderGroup = extern struct {
                         const specular_light: Vector3 = specular_contrib3.hadamardProduct(light_color);
 
                         const total_light: Vector3 = diffuse_light.plus(specular_light);
-                        const result: Vector3 = dest.reflection_color.toVector3().hadamardProduct(total_light);
+                        const result: Vector3 = total_light;
 
-                        if (true) {
-                            var ray_index: u32 = 0;
-                            while (ray_index < rays.len) : (ray_index += 1) {
-                                const ray: Vector3 = rays[ray_index];
-                                const ray_source_normal = ray.dotProduct(source.normal);
-                                if (ray_source_normal < -0.001) {
-                                    const relative_source_position: Vector3 = source.position.minus(dest.position);
-                                    const d: f32 = -source.normal.dotProduct(relative_source_position);
-                                    const t_ray: f32 = -d / ray_source_normal;
+                        var ray_index: u32 = 0;
+                        while (ray_index < rays.len) : (ray_index += 1) {
+                            const ray: Vector3 = rays[ray_index];
+                            const ray_source_normal = ray.dotProduct(source.normal);
+                            if (ray_source_normal < -0.001) {
+                                const relative_source_position: Vector3 = source.position.minus(dest.position);
+                                const d: f32 = -source.normal.dotProduct(relative_source_position);
+                                const t_ray: f32 = -d / ray_source_normal;
 
-                                    if (t_ray > 0 and t_ray < closest_hit[ray_index]) {
-                                        const ray_position: Vector3 = ray.scaledTo(t_ray);
-                                        const cone_radius: f32 = 0.25 * t_ray;
-                                        const distance_squared: f32 =
-                                            ray_position.minus(relative_source_position).lengthSquared();
-                                        if (distance_squared < math.square(source.radius + cone_radius)) {
-                                            closest_hit[ray_index] = t_ray;
-                                            accumulated_color = accumulated_color.plus(result);
-                                        }
+                                if (t_ray > 0 and t_ray < closest_hit[ray_index]) {
+                                    const ray_position: Vector3 = ray.scaledTo(t_ray);
+                                    const cone_radius: f32 = 0.25 * t_ray;
+                                    const distance_squared: f32 =
+                                        ray_position.minus(relative_source_position).lengthSquared();
+                                    if (distance_squared < math.square(source.radius + cone_radius)) {
+                                        closest_hit[ray_index] = t_ray;
+                                        accumulated_color = accumulated_color.plus(result);
                                     }
                                 }
                             }
-                        } else {
-                            accumulated_color = accumulated_color.plus(result);
                         }
                     }
                 }
@@ -1574,11 +1598,38 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn outputLighting(self: *RenderGroup, solution: *LightingSolution) void {
-        if (global_config.Renderer_Lighting_ShowReflectors) {
-            self.outputLightingQuads(solution);
+    pub fn outputLighting(self: *RenderGroup, solution: *LightingSolution, opt_textures: ?*LightingTextures) void {
+        if (opt_textures) |textures| {
+            self.outputTexturesDebug(solution, textures);
         } else {
-            self.outputLightingVerts(solution);
+            if (global_config.Renderer_Lighting_ShowReflectors) {
+                self.outputLightingQuads(solution);
+            } else {
+                self.outputLightingVerts(solution);
+            }
+        }
+    }
+
+    fn outputTexturesDebug(self: *RenderGroup, solution: *LightingSolution, textures: *LightingTextures) void {
+        const commands: *RenderCommands = self.commands;
+        _ = self.getCurrentQuads(solution.element_count);
+
+        for (0..LIGHT_LOOKUP_Z) |z| {
+            for (0..LIGHT_LOOKUP_Y) |y| {
+                for (0..LIGHT_LOOKUP_X) |x| {
+                    var index: u16 = textures.lookup[z][y][x];
+                    while (index > 0) {
+                        const position_next: *LightingTexel = &textures.position_next[index];
+
+                        const position: Vector3 = position_next.position;
+                        const color: Color = Color.unpackColorRGBA(textures.color[index]).scaledTo(1.0 / 255.0);
+
+                        self.pushCube(commands.white_bitmap, position, 0.1, 0.1, color, null);
+
+                        index = @truncate(position_next.next);
+                    }
+                }
+            }
         }
     }
 
@@ -1758,6 +1809,59 @@ pub const RenderGroup = extern struct {
                 color3,
                 null,
             );
+        }
+    }
+
+    pub fn outputLightingTextures(solution: *LightingSolution, dest: *LightingTextures) void {
+        dest.clearLookup();
+
+        var min_corner: Vector3 = .splat(std.math.floatMax(f32));
+        var max_corner: Vector3 = .splat(std.math.floatMin(f32));
+        {
+            var element_index: u32 = 0;
+            while (element_index < solution.element_count) : (element_index += 4) {
+                const element: *LightingElement = &solution.elements[element_index];
+
+                for (0..3) |i| {
+                    min_corner.values[i] = @min(element.position.values[i], min_corner.values[i]);
+                    max_corner.values[i] = @max(element.position.values[i], max_corner.values[i]);
+                }
+            }
+        }
+
+        const epsilon: Vector3 = .splat(0.1);
+        min_corner = min_corner.minus(epsilon);
+        max_corner = max_corner.plus(epsilon);
+
+        const dimension: Vector3 = max_corner.minus(min_corner);
+        const inverse_cell_dimension: Vector3 = .new(
+            @as(f32, @floatFromInt(LIGHT_LOOKUP_X)) / dimension.x(),
+            @as(f32, @floatFromInt(LIGHT_LOOKUP_Y)) / dimension.y(),
+            @as(f32, @floatFromInt(LIGHT_LOOKUP_Z)) / dimension.z(),
+        );
+
+        var pack_index: u32 = 0;
+        var element_index: u32 = 0;
+        while (element_index < solution.element_count) : (element_index += 1) {
+            const element: *LightingElement = &solution.elements[element_index];
+
+            const voxel_position: Vector3 = inverse_cell_dimension.hadamardProduct(element.position.minus(min_corner));
+            const voxel_x: u32 = @intFromFloat(voxel_position.x());
+            const voxel_y: u32 = @intFromFloat(voxel_position.y());
+            const voxel_z: u32 = @intFromFloat(voxel_position.z());
+            const lookup_at: *u16 = &dest.lookup[voxel_z][voxel_y][voxel_x];
+
+            const front_emission_color: Color = element.front_emission_color.clamp01().toColor(1);
+            const color: u32 = front_emission_color.scaledTo(255).packColorRGBA();
+
+            pack_index += 1;
+            std.debug.assert(pack_index < dest.position_next.len);
+            const position_next = &dest.position_next[pack_index];
+            position_next.position = element.position;
+            position_next.next = lookup_at.*;
+            lookup_at.* = @intCast(pack_index);
+
+            dest.color[pack_index] = color;
         }
     }
 };
