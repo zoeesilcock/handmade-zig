@@ -54,6 +54,12 @@ const DebugInterface = debug_interface.DebugInterface;
 const RenderCommands = shared.RenderCommands;
 const ArenaPushParams = shared.ArenaPushParams;
 const TexturedVertex = shared.TexturedVertex;
+const LightingTextures = shared.LightingTextures;
+const LightingTexel = shared.LightingTexel;
+const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
+const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
+const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
+const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
 const ManualSortKey = render.ManualSortKey;
 const SpriteFlag = render.SpriteFlag;
 
@@ -78,6 +84,7 @@ pub const RenderEntryType = enum(u16) {
     RenderEntryDepthClear,
     RenderEntryBeginPeels,
     RenderEntryEndPeels,
+    RenderEntryLightingTransfer,
 };
 
 pub const RenderEntryHeader = extern struct {
@@ -89,6 +96,15 @@ pub const RenderEntryTexturedQuads = extern struct {
     setup: RenderSetup,
     quad_count: u32,
     vertex_array_offset: u32, // Uses 4 vertices per quad.
+};
+
+pub const RenderEntryLightingTransfer = extern struct {
+    voxel_min_corner: Vector3,
+    voxel_inverse_cell_dimension: Vector3,
+
+    position_next: [*]f32,
+    color: [*]u32,
+    lookup: [*]u16,
 };
 
 pub const RenderSetup = extern struct {
@@ -203,34 +219,9 @@ const LightingElement = extern struct {
     original_vertices: [4]TexturedVertex = undefined,
 };
 
-pub const LightingTexel = extern struct {
-    position: Vector3,
-    next: u32,
-};
-
-const LIGHT_LOOKUP_X = 256;
-const LIGHT_LOOKUP_Y = 256;
-const LIGHT_LOOKUP_Z = 32;
-
-pub const LightingTextures = extern struct {
-    position_next: [MAX_LIGHTING_ELEMENTS]LightingTexel, // 64Kb
-    color: [MAX_LIGHTING_ELEMENTS]u32, // 16Kb
-    lookup: [LIGHT_LOOKUP_Z][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]u16, // 4Mb
-
-    pub fn clearLookup(self: *LightingTextures) void {
-        self.lookup =
-            [1][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]u16{
-                [1][LIGHT_LOOKUP_X]u16{
-                    [1]u16{0} ** LIGHT_LOOKUP_X,
-                } ** LIGHT_LOOKUP_Y,
-            } ** LIGHT_LOOKUP_Z;
-    }
-};
-
-const MAX_LIGHTING_ELEMENTS = 4096;
 pub const LightingSolution = extern struct {
     element_count: u32 = 0,
-    elements: [MAX_LIGHTING_ELEMENTS]LightingElement = [1]LightingElement{undefined} ** MAX_LIGHTING_ELEMENTS,
+    elements: [LIGHT_DATA_WIDTH]LightingElement = [1]LightingElement{undefined} ** LIGHT_DATA_WIDTH,
 };
 
 pub const RenderGroup = extern struct {
@@ -451,6 +442,21 @@ pub const RenderGroup = extern struct {
         } else {
             self.commands.clear_color = color;
             self.last_setup.fog_color = .new(color.r(), color.g(), color.b());
+        }
+    }
+
+    pub fn pushLighting(
+        self: *RenderGroup,
+        source: *LightingTextures,
+        min_corner: Vector3,
+        inverse_cell_dimension: Vector3,
+    ) void {
+        if (self.pushRenderElement(RenderEntryLightingTransfer)) |dest| {
+            dest.position_next = @ptrCast(&source.position_next);
+            dest.color = @ptrCast(&source.color);
+            dest.lookup = @ptrCast(&source.lookup);
+            dest.voxel_min_corner = min_corner;
+            dest.voxel_inverse_cell_dimension = inverse_cell_dimension;
         }
     }
 
@@ -1812,7 +1818,7 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn outputLightingTextures(solution: *LightingSolution, dest: *LightingTextures) void {
+    pub fn outputLightingTextures(self: *RenderGroup, solution: *LightingSolution, dest: *LightingTextures) void {
         dest.clearLookup();
 
         var min_corner: Vector3 = .splat(std.math.floatMax(f32));
@@ -1863,5 +1869,7 @@ pub const RenderGroup = extern struct {
 
             dest.color[pack_index] = color;
         }
+
+        self.pushLighting(dest, min_corner, inverse_cell_dimension);
     }
 };

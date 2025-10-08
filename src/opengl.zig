@@ -11,6 +11,7 @@ const std = @import("std");
 
 pub const GL_NUM_EXTENSIONS = 0x821D;
 
+pub const GL_TEXTURE_3D = 0x806F;
 pub const GL_TEXTURE0 = 0x84C0;
 pub const GL_TEXTURE1 = 0x84C1;
 pub const GL_TEXTURE2 = 0x84C2;
@@ -122,6 +123,25 @@ pub const GL_RGBA32F = 0x8814;
 pub const GL_RGB32F = 0x8815;
 pub const GL_RGBA16F = 0x881A;
 pub const GL_RGB16F = 0x881B;
+pub const GL_R8 = 0x8229;
+pub const GL_R16 = 0x822A;
+pub const GL_RG8 = 0x822B;
+pub const GL_RG16 = 0x822C;
+pub const GL_R16F = 0x822D;
+pub const GL_R32F = 0x822E;
+pub const GL_RG16F = 0x822F;
+pub const GL_RG32F = 0x8230;
+pub const GL_R8I = 0x8231;
+pub const GL_R8UI = 0x8232;
+pub const GL_R16I = 0x8233;
+pub const GL_R16UI = 0x8234;
+pub const GL_R32I = 0x8235;
+pub const GL_R32UI = 0x8236;
+pub const GL_RG8I = 0x8237;
+pub const GL_RG8UI = 0x8238;
+pub const GL_RG16I = 0x8239;
+pub const GL_RG16UI = 0x823A;
+pub const GL_RG32I = 0x823B;
 
 pub const GL_MULTISAMPLE = 0x809D;
 pub const GL_SAMPLE_ALPHA_TO_COVERAGE = 0x809E;
@@ -218,11 +238,16 @@ const RenderGroup = rendergroup.RenderGroup;
 const RenderSetup = rendergroup.RenderSetup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryTexturedQuads = rendergroup.RenderEntryTexturedQuads;
+const RenderEntryLightingTransfer = rendergroup.RenderEntryLightingTransfer;
 const RenderEntryClear = rendergroup.RenderEntryClear;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryCube = rendergroup.RenderEntryCube;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
+const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
+const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
+const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
+const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -294,6 +319,8 @@ const ZBiasProgram = struct {
     alpha_threshold_id: i32 = 0,
 
     debug_light_position_id: i32 = 0,
+    voxel_min_corner_id: i32 = 0,
+    voxel_inverse_cell_dimension_id: i32 = 0,
 };
 
 const ResolveMultisampleProgram = struct {
@@ -387,6 +414,12 @@ const OpenGL = struct {
     depth_peel_to_lighting: OpenGLProgramCommon = undefined,
     multi_grid_light_up: OpenGLProgramCommon = undefined,
     multi_grid_light_down: MultiGridLightDownProgram = undefined,
+
+    voxel_min_corner: Vector3 = .zero(),
+    voxel_inverse_cell_dimension: Vector3 = .zero(),
+    lighting_position_next: u32 = 0,
+    lighting_color: u32 = 0,
+    lighting_lookup: u32 = 0,
 
     light_buffer_count: u32 = 0,
     light_buffers: [12]LightBuffer = undefined,
@@ -497,7 +530,7 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
         }
 
         if (framebuffer_supports_sRGB and info.gl_ext_framebuffer_srgb) {
-            // if (platform.optGLTextImage2DMultiSample) |glTexImage2DMultisample| {
+            // if (platform.optGLTexImage2DMultiSample) |glTexImage2DMultisample| {
             // var test_texture: u32 = undefined;
             // gl.glGenTextures(1, &test_texture);
             // gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, test_texture);
@@ -597,7 +630,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
     const defines_length = shared.formatString(
         defines.len,
         &defines,
-        \\#version 130
+        \\#version 330
         \\#extension GL_ARB_explicit_attrib_location : enable
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
@@ -665,6 +698,12 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\uniform vec3 CameraPosition;
         \\uniform vec3 LightPosition;
         \\
+        \\uniform sampler1D PositionNextSampler;
+        \\uniform sampler1D ColorSampler;
+        \\uniform sampler3D LookupSampler;
+        \\uniform vec3 VoxelMinCorner;
+        \\uniform vec3 VoxelInverseCellDimension;
+        \\
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
         \\smooth in float FogDistance;
@@ -702,22 +741,23 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\    SurfaceReflection.rgb = sqrt(SurfaceReflection.rgb);
         \\#endif
         \\
-        \\    // TODO: Some way of specifying light params.
-        \\    float Lp0 = 0;
-        \\    float Lp1 = 0;
-        \\    float EmissionSpread = 1.0f;
-        \\
-        \\    vec3 Emission = vec3(0, 0, 0);
-        \\    if (length(LightPosition - WorldPosition) < 2.0f)
+        \\    vec3 VoxelPosition = VoxelInverseCellDimension * (WorldPosition - VoxelMinCorner);
+        \\    ivec3 VoxelIndex = ivec3(floor(VoxelPosition));
+        \\    int LightIndex = int((65535.0f * texelFetch(LookupSampler, VoxelIndex, 0).r) + 0.5f);
+        \\    vec3 UseLightColor = vec3(0, 0, 0);
+        \\    while (LightIndex != 0)
         \\    {
-        \\      Emission = vec3(1, 1, 1);
-        \\    }
+        \\       vec4 LightPositionNext = texelFetch(PositionNextSampler, LightIndex, 0);
+        \\       vec4 LightColor = texelFetch(ColorSampler, LightIndex, 0);
         \\
-        \\    vec2 Normal = PackNormal2(WorldNormal.xy);
+        \\       vec3 LightPosition = LightPositionNext.rgb;
+        \\       LightIndex = int(LightPositionNext.a);
+        \\
+        \\       UseLightColor = vec3(0, 1, 0); //LightColor.rgb;
+        \\    }
+        \\    SurfaceReflection.rgb = UseLightColor;
         \\
         \\    BlendUnitColor[0] = SurfaceReflection;
-        \\    BlendUnitColor[1] = vec4(Emission.r, Emission.g, Emission.b, EmissionSpread);
-        \\    BlendUnitColor[2] = vec4(Normal.x, Normal.y, Lp0, Lp1);
         \\  }
         \\  else
         \\  {
@@ -733,7 +773,10 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         fragment_code,
         &program.common,
     );
-    linkSamplers(&program.common, &.{ "TextureSampler", "DepthSampler" });
+    linkSamplers(
+        &program.common,
+        &.{ "TextureSampler", "DepthSampler", "PositionNextSampler", "ColorSampler", "LookupSampler" },
+    );
 
     program.transform_id = platform.optGLGetUniformLocation.?(program_handle, "Transform");
 
@@ -747,6 +790,9 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
     program.alpha_threshold_id = platform.optGLGetUniformLocation.?(program_handle, "AlphaThreshold");
 
     program.debug_light_position_id = platform.optGLGetUniformLocation.?(program_handle, "LightPosition");
+
+    program.voxel_min_corner_id = platform.optGLGetUniformLocation.?(program_handle, "VoxelMinCorner");
+    program.voxel_inverse_cell_dimension_id = platform.optGLGetUniformLocation.?(program_handle, "VoxelInverseCellDimension");
 }
 
 fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
@@ -754,7 +800,7 @@ fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
     const defines_length = shared.formatString(
         defines.len,
         &defines,
-        \\#version 130
+        \\#version 330
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
         \\#define DepthPeel %d
@@ -909,7 +955,7 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
     const defines_length = shared.formatString(
         defines.len,
         &defines,
-        \\#version 150
+        \\#version 330
         \\#extension GL_ARB_explicit_attrib_location : enable
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
@@ -1044,7 +1090,7 @@ fn compileFinalStretchProgram(program: *OpenGLProgramCommon) void {
     const defines_length = shared.formatString(
         defines.len,
         &defines,
-        \\#version 130
+        \\#version 330
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
     ,
@@ -1093,7 +1139,7 @@ fn compileFinalStretchProgram(program: *OpenGLProgramCommon) void {
 fn compileFakeSeedLightingProgram(program: *FakeSeedLightingProgram) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(defines.len, &defines,
-        \\#version 150
+        \\#version 330
         \\#extension GL_ARB_explicit_attrib_location : enable
     , .{});
     const vertex_code =
@@ -1164,7 +1210,7 @@ fn compileDepthPeelToLightingProgram(program: *OpenGLProgramCommon) void {
     const defines_length = shared.formatString(
         defines.len,
         &defines,
-        \\#version 130
+        \\#version 330
         \\#extension GL_ARB_explicit_attrib_location : enable
     ,
         .{},
@@ -1245,7 +1291,7 @@ fn compileMultiGridLightUpProgram(program: *OpenGLProgramCommon) void {
     const defines_length = shared.formatString(
         defines.len,
         &defines,
-        \\#version 150
+        \\#version 330
         \\#extension GL_ARB_explicit_attrib_location : enable
     ,
         .{},
@@ -1319,7 +1365,7 @@ fn compileMultiGridLightDownProgram(program: *MultiGridLightDownProgram) void {
     const defines_length = shared.formatString(
         defines.len,
         &defines,
-        \\#version 150
+        \\#version 330
         \\#extension GL_ARB_explicit_attrib_location : enable
     ,
         .{},
@@ -1462,6 +1508,8 @@ fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *RenderSetup, alpha_thres
     platform.optGLUniform1f.?(program.alpha_threshold_id, alpha_threshold);
 
     platform.optGLUniform3fv.?(program.debug_light_position_id, 1, setup.debug_light_position.toGL());
+    platform.optGLUniform3fv.?(program.voxel_min_corner_id, 1, open_gl.voxel_min_corner.toGL());
+    platform.optGLUniform3fv.?(program.voxel_inverse_cell_dimension_id, 1, open_gl.voxel_inverse_cell_dimension.toGL());
 }
 
 fn useResolveMultisampleProgramBegin(program: *ResolveMultisampleProgram) void {
@@ -1573,7 +1621,7 @@ fn framebufferTexImage(slot: u32, format: i32, filter_type: i32, width: i32, hei
     gl.glBindTexture(slot, result);
 
     if (slot == GL_TEXTURE_2D_MULTISAMPLE) {
-        _ = platform.optGLTextImage2DMultiSample.?(
+        _ = platform.optGLTexImage2DMultiSample.?(
             slot,
             open_gl.max_multi_sample_count,
             format,
@@ -1731,6 +1779,10 @@ fn changeToSettings(settings: *RenderSettings) void {
     freeProgram(&open_gl.depth_peel_to_lighting);
     freeProgram(&open_gl.multi_grid_light_up);
     freeProgram(&open_gl.multi_grid_light_down.common);
+
+    gl.glDeleteTextures(1, &open_gl.lighting_position_next);
+    gl.glDeleteTextures(1, &open_gl.lighting_color);
+    gl.glDeleteTextures(1, &open_gl.lighting_lookup);
 
     // Create new dynamic resources.
     open_gl.current_settings = settings.*;
@@ -1892,6 +1944,32 @@ fn changeToSettings(settings: *RenderSettings) void {
             texture_height = 1;
         }
     }
+
+    gl.glGenTextures(1, &open_gl.lighting_position_next);
+    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_position_next);
+    gl.glTexImage1D(gl.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, gl.GL_RGBA, gl.GL_FLOAT, null);
+
+    gl.glGenTextures(1, &open_gl.lighting_color);
+    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_color);
+    gl.glTexImage1D(gl.GL_TEXTURE_1D, 0, gl.GL_RGBA8, LIGHT_DATA_WIDTH, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, null);
+
+    gl.glGenTextures(1, &open_gl.lighting_lookup);
+    gl.glBindTexture(GL_TEXTURE_3D, open_gl.lighting_lookup);
+    platform.optGLTexImage3D.?(
+        GL_TEXTURE_3D,
+        0,
+        GL_R8,
+        LIGHT_LOOKUP_X,
+        LIGHT_LOOKUP_Y,
+        LIGHT_LOOKUP_Z,
+        0,
+        gl.GL_RED,
+        gl.GL_UNSIGNED_SHORT,
+        null,
+    );
+
+    gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
+    gl.glBindTexture(GL_TEXTURE_3D, 0);
 }
 
 fn beginScreenFill(framebuffer_handle: u32, width: i32, height: i32) void {
@@ -2108,6 +2186,7 @@ pub fn renderCommands(
         const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
         const alignment: usize = switch (header.type) {
             .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
+            .RenderEntryLightingTransfer => @alignOf(RenderEntryLightingTransfer),
             .RenderEntryDepthClear, .RenderEntryBeginPeels, .RenderEntryEndPeels => @alignOf(u32),
         };
 
@@ -2207,6 +2286,13 @@ pub fn renderCommands(
                     }
                 }
 
+                platform.optGLActiveTexture.?(GL_TEXTURE2);
+                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_position_next);
+                platform.optGLActiveTexture.?(GL_TEXTURE3);
+                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_color);
+                platform.optGLActiveTexture.?(GL_TEXTURE4);
+                gl.glBindTexture(GL_TEXTURE_3D, open_gl.lighting_lookup);
+
                 useZBiasProgramBegin(program, setup, alpha_threshold);
 
                 var vertex_index: u32 = entry.vertex_array_offset;
@@ -2230,6 +2316,35 @@ pub fn renderCommands(
                     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
                     platform.optGLActiveTexture.?(GL_TEXTURE0);
                 }
+            },
+            .RenderEntryLightingTransfer => {
+                const entry: *RenderEntryLightingTransfer = @ptrCast(@alignCast(data));
+                header_at += @sizeOf(RenderEntryLightingTransfer);
+
+                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_position_next);
+                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_FLOAT, entry.position_next);
+                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_color);
+                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, entry.color);
+                gl.glBindTexture(GL_TEXTURE_3D, open_gl.lighting_lookup);
+                platform.optGLTexSubImage3D.?(
+                    GL_TEXTURE_3D,
+                    0,
+                    0,
+                    0,
+                    0,
+                    LIGHT_LOOKUP_X,
+                    LIGHT_LOOKUP_Y,
+                    LIGHT_LOOKUP_Z,
+                    gl.GL_RED,
+                    gl.GL_UNSIGNED_SHORT,
+                    entry.lookup,
+                );
+
+                gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
+                gl.glBindTexture(GL_TEXTURE_3D, 0);
+
+                open_gl.voxel_min_corner = entry.voxel_min_corner;
+                open_gl.voxel_inverse_cell_dimension = entry.voxel_inverse_cell_dimension;
             },
         }
     }

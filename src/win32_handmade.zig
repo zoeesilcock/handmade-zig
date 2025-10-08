@@ -121,8 +121,8 @@ const GLFrameBufferTexture2DEXT: type = fn (target: u32, attachment: u32, textar
 pub var optGLFrameBufferTexture2DEXT: ?*const GLFrameBufferTexture2DEXT = null;
 const GLCheckFramebufferStatusEXT: type = fn (target: u32) callconv(.winapi) u32;
 pub var optGLCheckFramebufferStatusEXT: ?*const GLCheckFramebufferStatusEXT = null;
-const GLTextImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(.winapi) u32;
-pub var optGLTextImage2DMultiSample: ?*const GLTextImage2DMultiSample = null;
+const GLTexImage2DMultiSample: type = fn (target: u32, samples: i32, internal_format: i32, width: i32, height: i32, fixed_sample_locations: bool) callconv(.winapi) u32;
+pub var optGLTexImage2DMultiSample: ?*const GLTexImage2DMultiSample = null;
 const GLBlitFrameBuffer: type = fn (src_x0: i32, src_y0: i32, src_x1: i32, src_y1: i32, dst_x0: i32, dst_y0: i32, dst_x1: i32, dst_y1: i32, mask: u32, filter: u32) callconv(.winapi) void;
 pub var optGLBlitFrameBuffer: ?*const GLBlitFrameBuffer = null;
 const GLCreateShader: type = fn (shader_type: u32) callconv(.winapi) u32;
@@ -198,6 +198,10 @@ const GLDrawBuffers: type = fn (n: u32, buffers: [*]const u32) callconv(.winapi)
 pub var optGLDrawBuffers: ?*const GLDrawBuffers = null;
 const GLBindFragDataLocation: type = fn (program: u32, color: u32, name: [*]const u8) callconv(.winapi) void;
 pub var optGLBindFragDataLocation: ?*const GLBindFragDataLocation = null;
+const GLTexImage3D: type = fn (target: u32, level: i32, internalformat: i32, width: isize, height: isize, depth: isize, border: i32, format: u32, type: u32, pixels: ?*const anyopaque) callconv(.winapi) void;
+pub var optGLTexImage3D: ?*const GLTexImage3D = null;
+const GLTexSubImage3D: type = fn (target: u32, level: i32, xoffset: i32, yoffset: i32, zoffset: i32, width: isize, height: isize, depth: isize, format: u32, type: u32, pixels: ?*const anyopaque) callconv(.winapi) void;
+pub var optGLTexSubImage3D: ?*const GLTexSubImage3D = null;
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -1343,7 +1347,7 @@ else
     opengl.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB;
 const opengl_attribs = [_:0]c_int{
     opengl.WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-    opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 2,
+    opengl.WGL_CONTEXT_MINOR_VERSION_ARB, 3,
     opengl.WGL_CONTEXT_FLAGS_ARB,         opengl_flags,
     // opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
     opengl.WGL_CONTEXT_PROFILE_MASK_ARB,  opengl.WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
@@ -1558,7 +1562,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
                 std.debug.assert(optGLCheckFramebufferStatusEXT != null);
             }
 
-            optGLTextImage2DMultiSample = @ptrCast(win32.wglGetProcAddress("glTexImage2DMultisample"));
+            optGLTexImage2DMultiSample = @ptrCast(win32.wglGetProcAddress("glTexImage2DMultisample"));
             optGLBlitFrameBuffer = @ptrCast(win32.wglGetProcAddress("glBlitFramebuffer"));
             optGLCreateShader = @ptrCast(win32.wglGetProcAddress("glCreateShader"));
             optGLDeleteShader = @ptrCast(win32.wglGetProcAddress("glDeleteShader"));
@@ -1595,8 +1599,10 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLActiveTexture = @ptrCast(win32.wglGetProcAddress("glActiveTexture"));
             optGLDrawBuffers = @ptrCast(win32.wglGetProcAddress("glDrawBuffers"));
             optGLBindFragDataLocation = @ptrCast(win32.wglGetProcAddress("glBindFragDataLocation"));
+            optGLTexImage3D = @ptrCast(win32.wglGetProcAddress("glTexImage3D"));
+            optGLTexSubImage3D = @ptrCast(win32.wglGetProcAddress("glTexSubImage3D"));
 
-            std.debug.assert(optGLTextImage2DMultiSample != null);
+            std.debug.assert(optGLTexImage2DMultiSample != null);
             std.debug.assert(optGLBlitFrameBuffer != null);
             std.debug.assert(optGLCreateShader != null);
             std.debug.assert(optGLDeleteShader != null);
@@ -1633,6 +1639,8 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLActiveTexture != null);
             std.debug.assert(optGLDrawBuffers != null);
             std.debug.assert(optGLBindFragDataLocation != null);
+            std.debug.assert(optGLTexImage3D != null);
+            std.debug.assert(optGLTexSubImage3D != null);
 
             optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {

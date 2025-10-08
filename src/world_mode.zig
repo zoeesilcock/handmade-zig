@@ -41,7 +41,7 @@ const RenderGroup = rendergroup.RenderGroup;
 const ObjectTransform = rendergroup.ObjectTransform;
 const TransientClipRect = rendergroup.TransientClipRect;
 const LightingSolution = rendergroup.LightingSolution;
-const LightingTextures = rendergroup.LightingTextures;
+const LightingTextures = shared.LightingTextures;
 const CameraParams = render.CameraParams;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
@@ -719,7 +719,7 @@ pub fn updateAndRenderWorld(
 
         if (input.f_key_pressed[1]) {
             render_group.lightingTest(&world_mode.test_lighting);
-            RenderGroup.outputLightingTextures(&world_mode.test_lighting, &world_mode.test_textures);
+            render_group.outputLightingTextures(&world_mode.test_lighting, &world_mode.test_textures);
             world_mode.show_lighting = true;
         }
     }
