@@ -1051,6 +1051,62 @@ fn processXInputStick(value: i16, dead_zone: i16) f32 {
     return result;
 }
 
+fn processPendingMessages(
+    state: *Win32State,
+    window_handle: win32.HWND,
+    keyboard_controller: *shared.ControllerInput,
+    input: *shared.GameInput,
+) void {
+    var message: win32.MSG = undefined;
+    _ = window_handle;
+    while (true) {
+        TimedBlock.beginBlock(@src(), .PeekMessage);
+
+        const skip_messages = [_]u32{
+            win32.WM_PAINT,
+            win32.WM_MOUSEMOVE,
+            // Guard against an unknown message which spammed the game on Casey's machine.
+            0x738,
+            0xffffffff,
+        };
+
+        var got_message: bool = false;
+        var last_message: u32 = 0;
+        for (skip_messages) |skip| {
+            got_message = win32.PeekMessageW(
+                &message,
+                null,
+                last_message,
+                skip - 1,
+                win32.PM_REMOVE,
+            ) != 0;
+
+            if (got_message) {
+                break;
+            }
+
+            last_message = skip +% 1;
+        }
+
+        TimedBlock.endBlock(@src(), .PeekMessage);
+
+        if (!got_message) {
+            break;
+        }
+
+        switch (message.message) {
+            win32.WM_QUIT => running = false,
+            win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
+                processKeyboardInput(message, keyboard_controller, input, state);
+            },
+            else => {
+                _ = win32.TranslateMessage(&message);
+                _ = win32.DispatchMessageW(&message);
+            },
+        }
+    }
+}
+
 fn processKeyboardInput(
     message: win32.MSG,
     keyboard_controller: *shared.ControllerInput,
@@ -2567,56 +2623,8 @@ pub export fn wWinMain(
                     TimedBlock.endBlock(@src(), .ControllerClearing);
 
                     TimedBlock.beginBlock(@src(), .MessageProcessing);
-                    var message: win32.MSG = undefined;
                     new_input.f_key_pressed = [1]bool{false} ** 13;
-
-                    // Process all messages provided by Windows.
-                    while (true) {
-                        TimedBlock.beginBlock(@src(), .PeekMessage);
-                        var got_message: bool = win32.PeekMessageW(
-                            &message,
-                            window_handle,
-                            0,
-                            win32.WM_PAINT - 1,
-                            win32.PM_REMOVE,
-                        ) != 0;
-
-                        if (!got_message) {
-                            got_message =
-                                win32.PeekMessageW(
-                                    &message,
-                                    window_handle,
-                                    win32.WM_PAINT + 1,
-                                    win32.WM_MOUSEMOVE - 1,
-                                    win32.PM_REMOVE,
-                                ) != 0;
-                            if (!got_message) {
-                                got_message =
-                                    win32.PeekMessageW(
-                                        &message,
-                                        window_handle,
-                                        win32.WM_MOUSEMOVE + 1,
-                                        0xffffffff,
-                                        win32.PM_REMOVE,
-                                    ) != 0;
-                            }
-                        }
-
-                        if (!got_message) {
-                            break;
-                        }
-                        TimedBlock.endBlock(@src(), .PeekMessage);
-
-                        switch (message.message) {
-                            win32.WM_SYSKEYDOWN, win32.WM_SYSKEYUP, win32.WM_KEYDOWN, win32.WM_KEYUP => {
-                                processKeyboardInput(message, new_keyboard_controller, new_input, state);
-                            },
-                            else => {
-                                _ = win32.TranslateMessage(&message);
-                                _ = win32.DispatchMessageW(&message);
-                            },
-                        }
-                    }
+                    processPendingMessages(state, window_handle, new_keyboard_controller, new_input);
                     TimedBlock.endBlock(@src(), .MessageProcessing);
 
                     if (!paused) {
