@@ -105,6 +105,7 @@ pub const RenderEntryLightingTransfer = extern struct {
     position_next: [*]f32,
     color: [*]u32,
     lookup: [*]u16,
+    lookup_f: [*]f32,
 };
 
 pub const RenderSetup = extern struct {
@@ -455,6 +456,7 @@ pub const RenderGroup = extern struct {
             dest.position_next = @ptrCast(&source.position_next);
             dest.color = @ptrCast(&source.color);
             dest.lookup = @ptrCast(&source.lookup);
+            dest.lookup_f = @ptrCast(&source.lookup_f);
             dest.voxel_min_corner = min_corner;
             dest.voxel_inverse_cell_dimension = inverse_cell_dimension;
         }
@@ -1624,15 +1626,39 @@ pub const RenderGroup = extern struct {
             for (0..LIGHT_LOOKUP_Y) |y| {
                 for (0..LIGHT_LOOKUP_X) |x| {
                     var index: u16 = textures.lookup[z][y][x];
-                    while (index > 0) {
-                        const position_next: *LightingTexel = &textures.position_next[index];
 
-                        const position: Vector3 = position_next.position;
-                        const color: Color = Color.unpackColorRGBA(textures.color[index]).scaledTo(1.0 / 255.0);
+                    if (false) {
+                        while (index > 0) {
+                            const position_next: *LightingTexel = &textures.position_next[index];
 
-                        self.pushCube(commands.white_bitmap, position, 0.1, 0.1, color, null);
+                            const position: Vector3 = position_next.position;
+                            const color: Color = Color.unpackColorRGBA(textures.color[index]).scaledTo(1.0 / 255.0);
 
-                        index = @truncate(position_next.next);
+                            self.pushCube(commands.white_bitmap, position, 0.1, 0.1, color, null);
+
+                            index = @intCast(position_next.next);
+                        }
+                    } else {
+                        if (index > 0) {
+                            var color_count: u32 = 0;
+                            var color: Color = .zero();
+                            while (index > 0) {
+                                const position_next: *LightingTexel = &textures.position_next[index];
+                                color = color.plus(Color.unpackColorRGBA(textures.color[index]).scaledTo(1.0 / 255.0));
+                                color_count += 1;
+                                index = @intCast(position_next.next);
+                            }
+                            color = color.scaledTo(1.0 / @as(f32, @floatFromInt(color_count)));
+
+                            const position: Vector3 = textures.min_corner
+                                .plus(textures.cell_dimension.scaledTo(0.5))
+                                .plus(
+                                textures.cell_dimension.hadamardProduct(
+                                    .newU(@intCast(x), @intCast(y), @intCast(z)),
+                                ),
+                            );
+                            self.pushCube(commands.white_bitmap, position, 0.1, 0.1, color, null);
+                        }
                     }
                 }
             }
@@ -1825,7 +1851,7 @@ pub const RenderGroup = extern struct {
         var max_corner: Vector3 = .splat(std.math.floatMin(f32));
         {
             var element_index: u32 = 0;
-            while (element_index < solution.element_count) : (element_index += 4) {
+            while (element_index < solution.element_count) : (element_index += 1) {
                 const element: *LightingElement = &solution.elements[element_index];
 
                 for (0..3) |i| {
@@ -1840,6 +1866,11 @@ pub const RenderGroup = extern struct {
         max_corner = max_corner.plus(epsilon);
 
         const dimension: Vector3 = max_corner.minus(min_corner);
+        const cell_dimension: Vector3 = .new(
+            dimension.x() / @as(f32, @floatFromInt(LIGHT_LOOKUP_X)),
+            dimension.y() / @as(f32, @floatFromInt(LIGHT_LOOKUP_Y)),
+            dimension.z() / @as(f32, @floatFromInt(LIGHT_LOOKUP_Z)),
+        );
         const inverse_cell_dimension: Vector3 = .new(
             @as(f32, @floatFromInt(LIGHT_LOOKUP_X)) / dimension.x(),
             @as(f32, @floatFromInt(LIGHT_LOOKUP_Y)) / dimension.y(),
@@ -1856,6 +1887,7 @@ pub const RenderGroup = extern struct {
             const voxel_y: u32 = @intFromFloat(voxel_position.y());
             const voxel_z: u32 = @intFromFloat(voxel_position.z());
             const lookup_at: *u16 = &dest.lookup[voxel_z][voxel_y][voxel_x];
+            const lookup_at_f: *f32 = &dest.lookup_f[voxel_z][voxel_y][voxel_x];
 
             const front_emission_color: Color = element.front_emission_color.clamp01().toColor(1);
             const color: u32 = front_emission_color.scaledTo(255).packColorRGBA();
@@ -1866,9 +1898,15 @@ pub const RenderGroup = extern struct {
             position_next.position = element.position;
             position_next.next = lookup_at.*;
             lookup_at.* = @intCast(pack_index);
+            lookup_at_f.* = @floatFromInt(pack_index);
 
             dest.color[pack_index] = color;
         }
+
+        dest.min_corner = min_corner;
+        dest.max_corner = max_corner;
+        dest.cell_dimension = cell_dimension;
+        dest.inverse_cell_dimension = inverse_cell_dimension;
 
         self.pushLighting(dest, min_corner, inverse_cell_dimension);
     }

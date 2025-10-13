@@ -685,7 +685,7 @@ pub fn updateAndRenderWorld(
             //     0.01,
             // );
 
-            if (true) {
+            if (false) {
                 render_group.pushRectangleOutline(
                     &world_transform,
                     screen_bounds.getDimension(),

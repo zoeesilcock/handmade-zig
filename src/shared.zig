@@ -888,6 +888,12 @@ pub const LightingTextures = extern struct {
     position_next: [LIGHT_DATA_WIDTH]LightingTexel, // 64Kb
     color: [LIGHT_DATA_WIDTH]u32, // 16Kb
     lookup: [LIGHT_LOOKUP_Z][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]u16, // 4Mb
+    lookup_f: [LIGHT_LOOKUP_Z][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]f32,
+
+    min_corner: Vector3,
+    max_corner: Vector3,
+    cell_dimension: Vector3,
+    inverse_cell_dimension: Vector3,
 
     pub fn clearLookup(self: *LightingTextures) void {
         self.lookup =

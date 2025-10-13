@@ -142,6 +142,9 @@ pub const GL_RG8UI = 0x8238;
 pub const GL_RG16I = 0x8239;
 pub const GL_RG16UI = 0x823A;
 pub const GL_RG32I = 0x823B;
+pub const GL_RED_INTEGER = 0x8D94;
+pub const GL_GREEN_INTEGER = 0x8D95;
+pub const GL_BLUE_INTEGER = 0x8D96;
 
 pub const GL_MULTISAMPLE = 0x809D;
 pub const GL_SAMPLE_ALPHA_TO_COVERAGE = 0x809E;
@@ -700,7 +703,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\
         \\uniform sampler1D PositionNextSampler;
         \\uniform sampler1D ColorSampler;
-        \\uniform sampler3D LookupSampler;
+        \\uniform usampler3D LookupSampler;
         \\uniform vec3 VoxelMinCorner;
         \\uniform vec3 VoxelInverseCellDimension;
         \\
@@ -743,18 +746,29 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\
         \\    vec3 VoxelPosition = VoxelInverseCellDimension * (WorldPosition - VoxelMinCorner);
         \\    ivec3 VoxelIndex = ivec3(floor(VoxelPosition));
-        \\    int LightIndex = int((65535.0f * texelFetch(LookupSampler, VoxelIndex, 0).r) + 0.5f);
+        \\    //VoxelIndex = ivec3(240, 17, 31);
+        \\    int LightIndex = int(texelFetch(LookupSampler, VoxelIndex, 0).r);
         \\    vec3 UseLightColor = vec3(0, 0, 0);
-        \\    while (LightIndex != 0)
+        \\    if (VoxelIndex.x < 0 ||
+        \\        VoxelIndex.y < 0 ||
+        \\        VoxelIndex.z < 0 ||
+        \\        VoxelIndex.x >= 256 ||
+        \\        VoxelIndex.y >= 256 ||
+        \\        VoxelIndex.z >= 32)
         \\    {
-        \\       vec4 LightPositionNext = texelFetch(PositionNextSampler, LightIndex, 0);
-        \\       vec4 LightColor = texelFetch(ColorSampler, LightIndex, 0);
-        \\
-        \\       vec3 LightPosition = LightPositionNext.rgb;
-        \\       LightIndex = int(LightPositionNext.a);
-        \\
-        \\       UseLightColor = vec3(0, 1, 0); //LightColor.rgb;
+        \\       UseLightColor.r = 1.0f;
         \\    }
+        // \\    vec3 UseLightColor = vec3(0, 0, 0);
+        // \\    if (LightIndex != 0)
+        // \\    {
+        // \\       vec4 LightPositionNext = texelFetch(PositionNextSampler, LightIndex, 0);
+        // \\       vec4 LightColor = texelFetch(ColorSampler, LightIndex, 0);
+        // \\
+        // \\       vec3 LightPosition = LightPositionNext.rgb;
+        // \\       LightIndex = int(LightPositionNext.a);
+        // \\
+        // \\       UseLightColor = vec3(0, 1, 0); //LightColor.rgb;
+        // \\    }
         \\    SurfaceReflection.rgb = UseLightColor;
         \\
         \\    BlendUnitColor[0] = SurfaceReflection;
@@ -1958,17 +1972,30 @@ fn changeToSettings(settings: *RenderSettings) void {
     platform.optGLTexImage3D.?(
         GL_TEXTURE_3D,
         0,
-        GL_R8,
+        GL_R32F,
         LIGHT_LOOKUP_X,
         LIGHT_LOOKUP_Y,
         LIGHT_LOOKUP_Z,
         0,
-        gl.GL_RED,
+        GL_RED_INTEGER,
         gl.GL_UNSIGNED_SHORT,
         null,
     );
+    // platform.optGLTexImage3D.?(
+    //     GL_TEXTURE_3D,
+    //     0,
+    //     GL_R32F,
+    //     LIGHT_LOOKUP_X,
+    //     LIGHT_LOOKUP_Y,
+    //     LIGHT_LOOKUP_Z,
+    //     0,
+    //     gl.GL_RED,
+    //     gl.GL_FLOAT,
+    //     null,
+    // );
 
     gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
     gl.glBindTexture(GL_TEXTURE_3D, 0);
 }
 
@@ -2292,6 +2319,7 @@ pub fn renderCommands(
                 gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_color);
                 platform.optGLActiveTexture.?(GL_TEXTURE4);
                 gl.glBindTexture(GL_TEXTURE_3D, open_gl.lighting_lookup);
+                platform.optGLActiveTexture.?(GL_TEXTURE0);
 
                 useZBiasProgramBegin(program, setup, alpha_threshold);
 
@@ -2335,10 +2363,23 @@ pub fn renderCommands(
                     LIGHT_LOOKUP_X,
                     LIGHT_LOOKUP_Y,
                     LIGHT_LOOKUP_Z,
-                    gl.GL_RED,
+                    GL_RED_INTEGER,
                     gl.GL_UNSIGNED_SHORT,
                     entry.lookup,
                 );
+                // platform.optGLTexSubImage3D.?(
+                //     GL_TEXTURE_3D,
+                //     0,
+                //     0,
+                //     0,
+                //     0,
+                //     LIGHT_LOOKUP_X,
+                //     LIGHT_LOOKUP_Y,
+                //     LIGHT_LOOKUP_Z,
+                //     gl.GL_RED,
+                //     gl.GL_FLOAT,
+                //     entry.lookup_f,
+                // );
 
                 gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
                 gl.glBindTexture(GL_TEXTURE_3D, 0);

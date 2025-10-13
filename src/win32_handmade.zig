@@ -2458,7 +2458,9 @@ pub export fn wWinMain(
         );
 
         if (opt_window_handle) |window_handle| {
-            toggleFullscreen(window_handle);
+            if (!INTERNAL) {
+                toggleFullscreen(window_handle);
+            }
             const window_dc = win32.GetDC(window_handle);
             _ = initOpenGL(window_dc);
 
