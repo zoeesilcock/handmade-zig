@@ -105,7 +105,6 @@ pub const RenderEntryLightingTransfer = extern struct {
     position_next: [*]f32,
     color: [*]u32,
     lookup: [*]u16,
-    lookup_f: [*]f32,
 };
 
 pub const RenderSetup = extern struct {
@@ -456,7 +455,6 @@ pub const RenderGroup = extern struct {
             dest.position_next = @ptrCast(&source.position_next);
             dest.color = @ptrCast(&source.color);
             dest.lookup = @ptrCast(&source.lookup);
-            dest.lookup_f = @ptrCast(&source.lookup_f);
             dest.voxel_min_corner = min_corner;
             dest.voxel_inverse_cell_dimension = inverse_cell_dimension;
         }
@@ -1887,7 +1885,6 @@ pub const RenderGroup = extern struct {
             const voxel_y: u32 = @intFromFloat(voxel_position.y());
             const voxel_z: u32 = @intFromFloat(voxel_position.z());
             const lookup_at: *u16 = &dest.lookup[voxel_z][voxel_y][voxel_x];
-            const lookup_at_f: *f32 = &dest.lookup_f[voxel_z][voxel_y][voxel_x];
 
             const front_emission_color: Color = element.front_emission_color.clamp01().toColor(1);
             const color: u32 = front_emission_color.scaledTo(255).packColorRGBA();
@@ -1896,12 +1893,28 @@ pub const RenderGroup = extern struct {
             std.debug.assert(pack_index < dest.position_next.len);
             const position_next = &dest.position_next[pack_index];
             position_next.position = element.position;
-            position_next.next = lookup_at.*;
+            position_next.next = @floatFromInt(lookup_at.*);
             lookup_at.* = @intCast(pack_index);
-            lookup_at_f.* = @floatFromInt(pack_index);
 
             dest.color[pack_index] = color;
         }
+
+        // var counter: u16 = 0;
+        // for (0..LIGHT_LOOKUP_Z) |z| {
+        //     for (0..LIGHT_LOOKUP_Y) |y| {
+        //         for (0..LIGHT_LOOKUP_X) |x| {
+        //             dest.lookup[z][y][x] = counter;
+        //             counter +%= 1;
+        //         }
+        //     }
+        // }
+
+        // var index: u32 = 0;
+        // while (index < dest.position_next.len) : (index += 1) {
+        //     dest.position_next[index].position = .new(1, 0.8, 0.4);
+        //     dest.position_next[index].next = @floatFromInt(index);
+        //     dest.color[index] = index;
+        // }
 
         dest.min_corner = min_corner;
         dest.max_corner = max_corner;

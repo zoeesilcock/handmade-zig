@@ -880,15 +880,14 @@ pub const debug_color_table: [11]Color3 = .{
 };
 
 pub const LIGHT_DATA_WIDTH = 4096;
-pub const LIGHT_LOOKUP_X = 256;
-pub const LIGHT_LOOKUP_Y = 256;
+pub const LIGHT_LOOKUP_X = 32;
+pub const LIGHT_LOOKUP_Y = 32;
 pub const LIGHT_LOOKUP_Z = 32;
 
 pub const LightingTextures = extern struct {
     position_next: [LIGHT_DATA_WIDTH]LightingTexel, // 64Kb
     color: [LIGHT_DATA_WIDTH]u32, // 16Kb
     lookup: [LIGHT_LOOKUP_Z][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]u16, // 4Mb
-    lookup_f: [LIGHT_LOOKUP_Z][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]f32,
 
     min_corner: Vector3,
     max_corner: Vector3,
@@ -907,7 +906,7 @@ pub const LightingTextures = extern struct {
 
 pub const LightingTexel = extern struct {
     position: Vector3,
-    next: u32,
+    next: f32,
 };
 
 pub const TexturedVertex = extern struct {
