@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 // Defaults.
 const FORCE_RELEASE_MODE = false;
 const PACKAGE_DEFAULT = .Game;
-const INTERNAL_DEFAULT = false;
+const INTERNAL_DEFAULT = true;
 const SLOW_DEFAULT = false;
 const BACKEND_DEFAULT = .Win32;
 

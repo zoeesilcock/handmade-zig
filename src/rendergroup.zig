@@ -104,6 +104,7 @@ pub const RenderEntryLightingTransfer = extern struct {
 
     position_next: [*]f32,
     color: [*]u32,
+    direction: [*]f32,
     lookup: [*]u16,
 };
 
@@ -214,6 +215,9 @@ const LightingElement = extern struct {
     front_emission_color: Color3,
     back_emission_color: Color3,
     accumulated_color: Color3, // Transient.
+
+    // incident_light: Vector3,
+    // average_direction_to_light: Vector3,
 
     original_bitmap: ?*LoadedBitmap,
     original_vertices: [4]TexturedVertex = undefined,
@@ -454,6 +458,7 @@ pub const RenderGroup = extern struct {
         if (self.pushRenderElement(RenderEntryLightingTransfer)) |dest| {
             dest.position_next = @ptrCast(&source.position_next);
             dest.color = @ptrCast(&source.color);
+            dest.direction = @ptrCast(&source.direction);
             dest.lookup = @ptrCast(&source.lookup);
             dest.voxel_min_corner = min_corner;
             dest.voxel_inverse_cell_dimension = inverse_cell_dimension;
@@ -1456,83 +1461,81 @@ pub const RenderGroup = extern struct {
         const elements = &solution.elements;
 
         // Compute lighting.
+        const ray_count = 8;
         var series: random.Series = .seed(1234);
-        const ray_count: u32 = 8;
-        var rays: [ray_count]Vector3 = undefined;
-        var ray_directions: [ray_count]Vector3 = undefined;
-        for (&ray_directions) |*offset| {
-            offset.* = Vector3.new(
-                series.randomBilateral(),
-                series.randomBilateral(),
-                series.randomBilateral(),
-            );
-        }
+
         for (0..global_config.Renderer_Lighting_IterationCount) |_| {
             var dest_index: u32 = 0;
             while (dest_index < solution.element_count) : (dest_index += 1) {
                 var dest: *LightingElement = &elements[dest_index];
 
-                for (&rays, 0..) |*ray, i| {
-                    ray.* = dest.normal.plus(ray_directions[i]).normalizeOrZero();
-                }
-
-                var closest_hit: [rays.len]f32 = [1]f32{std.math.floatMax(f32)} ** rays.len;
                 const to_camera: Vector3 = camera_position.minus(dest.position).normalizeOrZero();
                 var accumulated_color: Vector3 = .zero();
 
-                var source_index: u32 = 0;
-                while (source_index < solution.element_count) : (source_index += 1) {
-                    var source: *LightingElement = &elements[source_index];
+                var ray_index: u32 = 0;
+                while (ray_index < ray_count) : (ray_index += 1) {
+                    const ray_direction: Vector3 = .new(
+                        series.randomBilateral(),
+                        series.randomBilateral(),
+                        series.randomBilateral(),
+                    );
 
-                    const light_color: Vector3 =
-                        source.reflection_color.hadamardProduct(source.front_emission_color).toVector3();
-                    var to_light: Vector3 = source.position.minus(dest.position);
-                    const light_distance: f32 = to_light.length();
-                    if (light_distance > 0) {
-                        to_light = to_light.scaledTo(1.0 / light_distance);
-
-                        const reflection_normal: Vector3 = dest.normal;
-                        const diffuse_coefficient: f32 = 1;
-                        const specular_coefficent: f32 = 1 - diffuse_coefficient;
-                        // const specular_power = 1.0 + (15.0);
-                        const distance_falloff: f32 = 1.0 / (1.0 + math.square(light_distance));
-
-                        const diffuse_dot: f32 = math.clampf01(to_light.dotProduct(reflection_normal));
-                        const diffuse_contrib: f32 = distance_falloff * diffuse_coefficient * diffuse_dot;
-                        const diffuse_contrib3: Vector3 = .splat(diffuse_contrib);
-                        const diffuse_light: Vector3 = diffuse_contrib3.hadamardProduct(light_color);
-
-                        const reflection_vector: Vector3 =
-                            to_camera.negated().plus(reflection_normal.scaledTo(2 * reflection_normal.dotProduct(to_camera)));
-                        const specular_dot: f32 = math.clampf01(to_light.dotProduct(reflection_vector));
-                        // specular_dot = pow(specular_dot, specular_power);
-                        const specular_contrib: f32 = specular_coefficent * specular_dot;
-                        const specular_contrib3: Vector3 = .splat(specular_contrib);
-                        const specular_light: Vector3 = specular_contrib3.hadamardProduct(light_color);
-
-                        const total_light: Vector3 = diffuse_light.plus(specular_light);
-                        const result: Vector3 = total_light;
-
-                        var ray_index: u32 = 0;
-                        while (ray_index < rays.len) : (ray_index += 1) {
-                            const ray: Vector3 = rays[ray_index];
-                            const ray_source_normal = ray.dotProduct(source.normal);
+                    var closest_hit: f32 = std.math.floatMax(f32);
+                    var source_hit: u32 = solution.element_count;
+                    var source_index: u32 = 0;
+                    while (source_index < solution.element_count) : (source_index += 1) {
+                        if (source_index != dest_index) {
+                            var source: *LightingElement = &elements[source_index];
+                            const ray_source_normal = ray_direction.dotProduct(source.normal);
                             if (ray_source_normal < -0.001) {
                                 const relative_source_position: Vector3 = source.position.minus(dest.position);
                                 const d: f32 = -source.normal.dotProduct(relative_source_position);
                                 const t_ray: f32 = -d / ray_source_normal;
 
-                                if (t_ray > 0 and t_ray < closest_hit[ray_index]) {
-                                    const ray_position: Vector3 = ray.scaledTo(t_ray);
+                                if (t_ray > 0 and t_ray < closest_hit) {
+                                    const ray_position: Vector3 = ray_direction.scaledTo(t_ray);
                                     const cone_radius: f32 = 0.25 * t_ray;
                                     const distance_squared: f32 =
                                         ray_position.minus(relative_source_position).lengthSquared();
                                     if (distance_squared < math.square(source.radius + cone_radius)) {
-                                        closest_hit[ray_index] = t_ray;
-                                        accumulated_color = accumulated_color.plus(result);
+                                        closest_hit = t_ray;
+                                        source_hit = source_index;
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    if (source_hit != solution.element_count) {
+                        var source: *LightingElement = &elements[source_hit];
+                        var to_light: Vector3 = source.position.minus(dest.position);
+                        const light_distance: f32 = to_light.length();
+                        if (light_distance > 0) {
+                            const light_color: Vector3 =
+                                source.reflection_color.hadamardProduct(source.front_emission_color).toVector3();
+                            to_light = to_light.scaledTo(1.0 / light_distance);
+
+                            const reflection_normal: Vector3 = dest.normal;
+                            const diffuse_coefficient: f32 = 1;
+                            const specular_coefficent: f32 = 1 - diffuse_coefficient;
+                            // const specular_power = 1.0 + (15.0);
+                            const distance_falloff: f32 = 1.0 / (1.0 + math.square(light_distance));
+
+                            const diffuse_dot: f32 = math.clampf01(to_light.dotProduct(reflection_normal));
+                            const diffuse_contrib: f32 = distance_falloff * diffuse_coefficient * diffuse_dot;
+                            const diffuse_contrib3: Vector3 = .splat(diffuse_contrib);
+                            const diffuse_light: Vector3 = diffuse_contrib3.hadamardProduct(light_color);
+
+                            const reflection_vector: Vector3 =
+                                to_camera.negated().plus(reflection_normal.scaledTo(2 * reflection_normal.dotProduct(to_camera)));
+                            const specular_dot: f32 = math.clampf01(to_light.dotProduct(reflection_vector));
+                            // specular_dot = pow(specular_dot, specular_power);
+                            const specular_contrib: f32 = specular_coefficent * specular_dot;
+                            const specular_contrib3: Vector3 = .splat(specular_contrib);
+                            const specular_light: Vector3 = specular_contrib3.hadamardProduct(light_color);
+
+                            const total_light: Vector3 = diffuse_light.plus(specular_light);
+                            accumulated_color = accumulated_color.plus(total_light);
                         }
                     }
                 }
@@ -1892,11 +1895,12 @@ pub const RenderGroup = extern struct {
             pack_index += 1;
             std.debug.assert(pack_index < dest.position_next.len);
             const position_next = &dest.position_next[pack_index];
-            position_next.position = element.position;
-            position_next.next = @floatFromInt(lookup_at.*);
+            position_next.position = element.position.toVector4(@floatFromInt(lookup_at.*));
+            // position_next.next = @floatFromInt(lookup_at.*);
             lookup_at.* = @intCast(pack_index);
 
             dest.color[pack_index] = color;
+            // dest.direction[pack_index] = direction;
         }
 
         // var counter: u16 = 0;
