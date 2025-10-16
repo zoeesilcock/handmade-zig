@@ -147,7 +147,6 @@ pub export fn updateAndRender(
             DebugInterface.debugBeginDataBlock(@src(), "Lighting");
             {
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_ShowReflectors, "Renderer_Lighting_ShowReflectors");
-                DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_ShowVisibility, "Renderer_Lighting_ShowVisibility");
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_IterationCount, "Renderer_Lighting_IterationCount");
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_OcclusionIterationCount, "Renderer_Lighting_OcclusionIterationCount");
             }

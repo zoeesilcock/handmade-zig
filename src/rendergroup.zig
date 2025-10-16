@@ -207,17 +207,14 @@ const LightingElement = extern struct {
     radius: f32,
     reflection_color: Color3,
 
-    // Ambient occlusion.
-    visibility: f32,
-    shadow: f32, // Transient.
+    // Propagation.
+    emission_color: Color3,
+    next_emission_color: Color3,
+    next_emission_weight: f32,
 
-    // Lighting.
-    front_emission_color: Color3,
-    back_emission_color: Color3,
-    accumulated_color: Color3, // Transient.
-
-    // incident_light: Vector3,
-    // average_direction_to_light: Vector3,
+    // Gather.
+    incident_light: Vector3,
+    average_direction_to_light: Vector3,
 
     original_bitmap: ?*LoadedBitmap,
     original_vertices: [4]TexturedVertex = undefined,
@@ -1362,13 +1359,12 @@ pub const RenderGroup = extern struct {
 
             element.normal = vert0.normal;
             element.front_emission_color = .zero();
-            element.back_emission_color = .zero();
             element.accumulated_color = .zero();
             element.reflection_color = color.rgb().scaledTo(0.95);
             element.transparency = color.a();
-            element.front_emission_color = Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
-            element.visibility = 1;
-            element.shadow = 0;
+            element.emission_color = Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
+            element.next_emission_color = .zero();
+            element.next_emission_weight = 0;
 
             element.original_bitmap = bitmaps[0];
             element.original_vertices[0] = vert0.*;
@@ -1430,15 +1426,12 @@ pub const RenderGroup = extern struct {
                 const color: Color = Color.unpackColorRGBA(verts[vert_index].color).scaledTo(1.0 / 255.0);
 
                 element[0].normal = verts[vert_index].normal;
-                element[0].front_emission_color = .zero();
-                element[0].back_emission_color = .zero();
-                element[0].accumulated_color = .zero();
                 element[0].reflection_color = color.rgb().scaledTo(0.95);
                 element[0].transparency = color.a();
-                element[0].front_emission_color =
+                element[0].emission_color =
                     Color3.new(1, 1, 1).scaledTo(verts[vert_index].emission * max_emission);
-                element[0].visibility = 1;
-                element[0].shadow = 0;
+                element[0].next_emission_color = .zero();
+                element[0].next_emission_weight = 0;
 
                 element[0].original_bitmap = bitmaps[0];
                 element[0].original_vertices[0] = vert0.*;
@@ -1454,157 +1447,137 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn lightingTest(self: *RenderGroup, solution: *LightingSolution) void {
-        self.extractReflectorsFromVerts(solution);
+    const RaycastResult = struct {
+        color: Color3,
+        index: u32,
+    };
 
-        const camera_position: Vector3 = self.last_setup.camera_position;
-        const elements = &solution.elements;
+    fn raycast(
+        solution: *LightingSolution,
+        skip_index: u32,
+        ray_origin: Vector3,
+        ray_direction: Vector3,
+    ) RaycastResult {
+        var result: RaycastResult = .{
+            .color = .zero(),
+            .index = solution.element_count,
+        };
+        var closest_hit: f32 = std.math.floatMax(f32);
 
-        // Compute lighting.
+        var source_index: u32 = 0;
+        while (source_index < solution.element_count) : (source_index += 1) {
+            if (source_index != skip_index) {
+                var source: *LightingElement = &solution.elements[source_index];
+                const ray_source_normal = ray_direction.dotProduct(source.normal);
+                if (ray_source_normal < -0.001) {
+                    const relative_source_position: Vector3 = source.position.minus(ray_origin);
+                    const d: f32 = -source.normal.dotProduct(relative_source_position);
+                    const t_ray: f32 = -d / ray_source_normal;
+
+                    if (t_ray > 0 and t_ray < closest_hit) {
+                        const ray_position: Vector3 = ray_direction.scaledTo(t_ray);
+                        const cone_radius: f32 = 0.25 * t_ray;
+                        const distance_squared: f32 =
+                            ray_position.minus(relative_source_position).lengthSquared();
+                        if (distance_squared < math.square(source.radius + cone_radius)) {
+                            closest_hit = t_ray;
+                            result.color = source.emission_color;
+                            result.index = source_index;
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    fn computeLightPropagation(solution: *LightingSolution) void {
+        const min_emission = 0.0;
         const ray_count = 8;
         var series: random.Series = .seed(1234);
 
         for (0..global_config.Renderer_Lighting_IterationCount) |_| {
-            var dest_index: u32 = 0;
-            while (dest_index < solution.element_count) : (dest_index += 1) {
-                var dest: *LightingElement = &elements[dest_index];
+            var emitter_index: u32 = 0;
+            while (emitter_index < solution.element_count) : (emitter_index += 1) {
+                var emitter: *LightingElement = &solution.elements[emitter_index];
+                const sum: f32 = emitter.emission_color.r() + emitter.emission_color.g() + emitter.emission_color.b();
+                if (sum > min_emission) {
+                    var ray_index: u32 = 0;
+                    while (ray_index < ray_count) : (ray_index += 1) {
+                        const emission_direction: Vector3 = emitter.normal.plus(.new(
+                            series.randomBilateral(),
+                            series.randomBilateral(),
+                            series.randomBilateral(),
+                        )).normalizeOrZero();
 
-                const to_camera: Vector3 = camera_position.minus(dest.position).normalizeOrZero();
-                var accumulated_color: Vector3 = .zero();
+                        const hit_index: u32 = raycast(
+                            solution,
+                            emitter_index,
+                            emitter.position,
+                            emission_direction,
+                        ).index;
 
-                var ray_index: u32 = 0;
-                while (ray_index < ray_count) : (ray_index += 1) {
-                    const ray_direction: Vector3 = .new(
-                        series.randomBilateral(),
-                        series.randomBilateral(),
-                        series.randomBilateral(),
-                    );
+                        if (hit_index < solution.element_count) {
+                            const hit: *LightingElement = &solution.elements[hit_index];
 
-                    var closest_hit: f32 = std.math.floatMax(f32);
-                    var source_hit: u32 = solution.element_count;
-                    var source_index: u32 = 0;
-                    while (source_index < solution.element_count) : (source_index += 1) {
-                        if (source_index != dest_index) {
-                            var source: *LightingElement = &elements[source_index];
-                            const ray_source_normal = ray_direction.dotProduct(source.normal);
-                            if (ray_source_normal < -0.001) {
-                                const relative_source_position: Vector3 = source.position.minus(dest.position);
-                                const d: f32 = -source.normal.dotProduct(relative_source_position);
-                                const t_ray: f32 = -d / ray_source_normal;
+                            const angular_attenuation: f32 = math.clampf01(-emission_direction.dotProduct(hit.normal));
+                            const light_color: Color3 = emitter.emission_color.scaledTo(angular_attenuation);
 
-                                if (t_ray > 0 and t_ray < closest_hit) {
-                                    const ray_position: Vector3 = ray_direction.scaledTo(t_ray);
-                                    const cone_radius: f32 = 0.25 * t_ray;
-                                    const distance_squared: f32 =
-                                        ray_position.minus(relative_source_position).lengthSquared();
-                                    if (distance_squared < math.square(source.radius + cone_radius)) {
-                                        closest_hit = t_ray;
-                                        source_hit = source_index;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (source_hit != solution.element_count) {
-                        var source: *LightingElement = &elements[source_hit];
-                        var to_light: Vector3 = source.position.minus(dest.position);
-                        const light_distance: f32 = to_light.length();
-                        if (light_distance > 0) {
-                            const light_color: Vector3 =
-                                source.reflection_color.hadamardProduct(source.front_emission_color).toVector3();
-                            to_light = to_light.scaledTo(1.0 / light_distance);
-
-                            const reflection_normal: Vector3 = dest.normal;
-                            const diffuse_coefficient: f32 = 1;
-                            const specular_coefficent: f32 = 1 - diffuse_coefficient;
-                            // const specular_power = 1.0 + (15.0);
-                            const distance_falloff: f32 = 1.0 / (1.0 + math.square(light_distance));
-
-                            const diffuse_dot: f32 = math.clampf01(to_light.dotProduct(reflection_normal));
-                            const diffuse_contrib: f32 = distance_falloff * diffuse_coefficient * diffuse_dot;
-                            const diffuse_contrib3: Vector3 = .splat(diffuse_contrib);
-                            const diffuse_light: Vector3 = diffuse_contrib3.hadamardProduct(light_color);
-
-                            const reflection_vector: Vector3 =
-                                to_camera.negated().plus(reflection_normal.scaledTo(2 * reflection_normal.dotProduct(to_camera)));
-                            const specular_dot: f32 = math.clampf01(to_light.dotProduct(reflection_vector));
-                            // specular_dot = pow(specular_dot, specular_power);
-                            const specular_contrib: f32 = specular_coefficent * specular_dot;
-                            const specular_contrib3: Vector3 = .splat(specular_contrib);
-                            const specular_light: Vector3 = specular_contrib3.hadamardProduct(light_color);
-
-                            const total_light: Vector3 = diffuse_light.plus(specular_light);
-                            accumulated_color = accumulated_color.plus(total_light);
+                            hit.next_emission_color = hit.next_emission_color.plus(light_color);
+                            hit.next_emission_weight += 1;
                         }
                     }
                 }
-
-                dest.accumulated_color = accumulated_color.toColor3().scaledTo(dest.visibility);
             }
 
-            var quad_index: u32 = 0;
-            while (quad_index < solution.element_count) : (quad_index += 1) {
-                var dest: *LightingElement = &elements[quad_index];
-                const iteration_count: f32 = @floatFromInt(global_config.Renderer_Lighting_IterationCount);
-                const ray_count_f: f32 = @floatFromInt(ray_count);
-                dest.front_emission_color =
-                    dest.front_emission_color.plus(dest.accumulated_color.scaledTo(1.0 / (ray_count_f * iteration_count)));
-            }
-        }
-
-        // Calculate ambient occlusion.
-        for (0..global_config.Renderer_Lighting_OcclusionIterationCount) |i| {
-            var dest_index: u32 = 0;
-            while (dest_index < solution.element_count) : (dest_index += 1) {
-                var dest: *LightingElement = &elements[dest_index];
-                var shadow: f32 = 0;
-
-                var source_index: u32 = 0;
-                while (source_index < solution.element_count) : (source_index += 1) {
-                    var source: *LightingElement = &elements[source_index];
-
-                    std.debug.assert(source.visibility >= 0);
-                    std.debug.assert(source.visibility <= 1);
-
-                    var v: Vector3 = source.position.minus(dest.position);
-                    const vsq = v.lengthSquared();
-                    const v_len = @sqrt(vsq);
-
-                    if (v_len > 0.0001) {
-                        std.debug.assert(dest_index != source_index);
-
-                        v = v.scaledTo(1.0 / v_len);
-
-                        const apparent_source_amount: f32 = intrinsics.absoluteValue(source.normal.dotProduct(v));
-                        const apparent_dest_amount: f32 = math.clampf01(4 * dest.normal.dotProduct(v));
-                        const apparent_source_area: f32 = (math.PI32 * math.square(source.radius)) / vsq;
-
-                        const s: f32 = (1 - intrinsics.reciprocalSquareRoot(apparent_source_area + 1.0)) *
-                            apparent_source_amount * apparent_dest_amount;
-
-                        std.debug.assert(s >= 0);
-                        std.debug.assert(s <= 1);
-
-                        shadow += source.visibility * s;
-                    }
+            var reflector_index: u32 = 0;
+            while (reflector_index < solution.element_count) : (reflector_index += 1) {
+                var reflector: *LightingElement = &solution.elements[reflector_index];
+                if (reflector.next_emission_weight > 0) {
+                    reflector.emission_color = reflector.reflection_color.hadamardProduct(reflector.next_emission_color)
+                        .scaledTo(1.0 / reflector.next_emission_weight);
                 }
 
-                shadow = math.clampf01(shadow);
-
-                if (i == 1) {
-                    std.debug.assert(shadow <= dest.shadow);
-                }
-
-                dest.shadow = shadow;
-            }
-
-            var quad_index: u32 = 0;
-            while (quad_index < solution.element_count) : (quad_index += 1) {
-                var dest: *LightingElement = &elements[quad_index];
-                dest.visibility = 1.0 - dest.shadow;
+                reflector.next_emission_color = .zero();
+                reflector.next_emission_weight = 0;
             }
         }
+    }
+
+    fn gatherFinalLighting(solution: *LightingSolution) void {
+        const ray_count = 16;
+        var series: random.Series = .seed(1234);
+
+        var dest_index: u32 = 0;
+        while (dest_index < solution.element_count) : (dest_index += 1) {
+            const dest: *LightingElement = &solution.elements[dest_index];
+
+            var incident_accumulated: Vector3 = .zero();
+            var incident_direction: Vector3 = .zero();
+            var ray_index: u32 = 0;
+            while (ray_index < ray_count) : (ray_index += 1) {
+                const ray_direction: Vector3 = dest.normal.plus(.new(
+                    series.randomBilateral(),
+                    series.randomBilateral(),
+                    series.randomBilateral(),
+                )).normalizeOrZero();
+                const incident_color: Color3 = raycast(solution, dest_index, dest.position, ray_direction).color;
+                const weight: f32 = incident_color.length();
+
+                incident_accumulated = incident_accumulated.plus(incident_color.toVector3());
+                incident_direction = incident_direction.plus(ray_direction.scaledTo(weight));
+            }
+
+            dest.incident_light = incident_accumulated;
+            dest.average_direction_to_light = incident_direction.normalizeOrZero();
+        }
+    }
+
+    pub fn lightingTest(self: *RenderGroup, solution: *LightingSolution) void {
+        self.extractReflectorsFromVerts(solution);
+        computeLightPropagation(solution);
+        gatherFinalLighting(solution);
     }
 
     pub fn outputLighting(self: *RenderGroup, solution: *LightingSolution, opt_textures: ?*LightingTextures) void {
@@ -1680,10 +1653,7 @@ pub const RenderGroup = extern struct {
             const vert2: *TexturedVertex = &element.original_vertices[2];
             const vert3: *TexturedVertex = &element.original_vertices[3];
 
-            var front_emission_color: Color = element.front_emission_color.clamp01().toColor(1);
-            if (global_config.Renderer_Lighting_ShowVisibility) {
-                front_emission_color = Color3.white().scaledTo(element.visibility).toColor(1);
-            }
+            var emission_color: Color = element.emission_color.clamp01().toColor(1);
 
             var position0: Vector4 = .zero();
             var position1: Vector4 = .zero();
@@ -1739,7 +1709,7 @@ pub const RenderGroup = extern struct {
                 _ = position3.setW(0);
 
                 const front_emission_color32 =
-                    front_emission_color.rgb().toColor(element.transparency).scaledTo(255.0).packColorRGBA();
+                    emission_color.rgb().toColor(element.transparency).scaledTo(255.0).packColorRGBA();
                 color0 = front_emission_color32;
                 color1 = front_emission_color32;
                 color2 = front_emission_color32;
@@ -1751,13 +1721,13 @@ pub const RenderGroup = extern struct {
                 position3 = vert3.position;
 
                 color0 =
-                    front_emission_color.hadamardProduct(Color.unpackColorRGBA(vert0.color)).packColorRGBA();
+                    emission_color.hadamardProduct(Color.unpackColorRGBA(vert0.color)).packColorRGBA();
                 color1 =
-                    front_emission_color.hadamardProduct(Color.unpackColorRGBA(vert1.color)).packColorRGBA();
+                    emission_color.hadamardProduct(Color.unpackColorRGBA(vert1.color)).packColorRGBA();
                 color2 =
-                    front_emission_color.hadamardProduct(Color.unpackColorRGBA(vert2.color)).packColorRGBA();
+                    emission_color.hadamardProduct(Color.unpackColorRGBA(vert2.color)).packColorRGBA();
                 color3 =
-                    front_emission_color.hadamardProduct(Color.unpackColorRGBA(vert3.color)).packColorRGBA();
+                    emission_color.hadamardProduct(Color.unpackColorRGBA(vert3.color)).packColorRGBA();
             }
 
             self.pushQuad(
@@ -1797,10 +1767,10 @@ pub const RenderGroup = extern struct {
             const vert2: *TexturedVertex = &element[0].original_vertices[2];
             const vert3: *TexturedVertex = &element[0].original_vertices[3];
 
-            const front_emission_color0: Color = element0[0].front_emission_color.clamp01().toColor(1);
-            const front_emission_color1: Color = element1[0].front_emission_color.clamp01().toColor(1);
-            const front_emission_color2: Color = element2[0].front_emission_color.clamp01().toColor(1);
-            const front_emission_color3: Color = element3[0].front_emission_color.clamp01().toColor(1);
+            const front_emission_color0: Color = element0[0].emission_color.clamp01().toColor(1);
+            const front_emission_color1: Color = element1[0].emission_color.clamp01().toColor(1);
+            const front_emission_color2: Color = element2[0].emission_color.clamp01().toColor(1);
+            const front_emission_color3: Color = element3[0].emission_color.clamp01().toColor(1);
 
             var position0: Vector4 = .zero();
             var position1: Vector4 = .zero();
@@ -1889,8 +1859,9 @@ pub const RenderGroup = extern struct {
             const voxel_z: u32 = @intFromFloat(voxel_position.z());
             const lookup_at: *u16 = &dest.lookup[voxel_z][voxel_y][voxel_x];
 
-            const front_emission_color: Color = element.front_emission_color.clamp01().toColor(1);
-            const color: u32 = front_emission_color.scaledTo(255).packColorRGBA();
+            const direction: Vector4 = element.average_direction_to_light.toVector4(0);
+            const incident_light: Color = element.incident_light.clamp01().toColor3().toColor(1);
+            const color: u32 = incident_light.scaledTo(255).packColorRGBA();
 
             pack_index += 1;
             std.debug.assert(pack_index < dest.position_next.len);
@@ -1900,25 +1871,8 @@ pub const RenderGroup = extern struct {
             lookup_at.* = @intCast(pack_index);
 
             dest.color[pack_index] = color;
-            // dest.direction[pack_index] = direction;
+            dest.direction[pack_index] = direction;
         }
-
-        // var counter: u16 = 0;
-        // for (0..LIGHT_LOOKUP_Z) |z| {
-        //     for (0..LIGHT_LOOKUP_Y) |y| {
-        //         for (0..LIGHT_LOOKUP_X) |x| {
-        //             dest.lookup[z][y][x] = counter;
-        //             counter +%= 1;
-        //         }
-        //     }
-        // }
-
-        // var index: u32 = 0;
-        // while (index < dest.position_next.len) : (index += 1) {
-        //     dest.position_next[index].position = .new(1, 0.8, 0.4);
-        //     dest.position_next[index].next = @floatFromInt(index);
-        //     dest.color[index] = index;
-        // }
 
         dest.min_corner = min_corner;
         dest.max_corner = max_corner;

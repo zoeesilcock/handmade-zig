@@ -689,6 +689,38 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\  WorldNormal = VertN;
         \\}
     ;
+
+    // TODO: Put this into the fragment shader.
+    // const iteration_count: f32 = @floatFromInt(global_config.Renderer_Lighting_IterationCount);
+    // const ray_count_f: f32 = @floatFromInt(ray_count);
+    // dest.emission_color =
+    //     dest.emission_color.plus(dest.next_emission_color.scaledTo(1.0 / (ray_count_f * iteration_count)));
+    //
+    // const light_color: Vector3 =
+    //     source.reflection_color.hadamardProduct(source.emission_color).toVector3();
+    //
+    // const reflection_normal: Vector3 = dest.normal;
+    // const diffuse_coefficient: f32 = 1;
+    // const specular_coefficent: f32 = 1 - diffuse_coefficient;
+    // // const specular_power = 1.0 + (15.0);
+    // const distance_falloff: f32 = 1.0 / (1.0 + math.square(light_distance));
+    //
+    // const diffuse_dot: f32 = math.clampf01(to_light.dotProduct(reflection_normal));
+    // const diffuse_contrib: f32 = distance_falloff * diffuse_coefficient * diffuse_dot;
+    // const diffuse_contrib3: Vector3 = .splat(diffuse_contrib);
+    // const diffuse_light: Vector3 = diffuse_contrib3.hadamardProduct(light_color);
+    //
+    // const reflection_vector: Vector3 =
+    //     to_camera.negated().plus(reflection_normal.scaledTo(2 * reflection_normal.dotProduct(to_camera)));
+    // const specular_dot: f32 = math.clampf01(to_light.dotProduct(reflection_vector));
+    // // specular_dot = pow(specular_dot, specular_power);
+    // const specular_contrib: f32 = specular_coefficent * specular_dot;
+    // const specular_contrib3: Vector3 = .splat(specular_contrib);
+    // const specular_light: Vector3 = specular_contrib3.hadamardProduct(light_color);
+    //
+    // const total_light: Vector3 = diffuse_light.plus(specular_light);
+    // accumulated_color = accumulated_color.plus(total_light);
+
     const fragment_code =
         \\// Fragment code
         \\uniform sampler2D TextureSampler;
@@ -734,7 +766,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\    LightIndex = int(LightPositionNext.a);
         \\
         \\    float Contribution = clamp(1.0f - 0.5f * length(LightPosition - WorldPosition), 0, 1);
-        // \\    Contribution *= dot(LightDirection.rgb, WorldNormal);
+        \\    Contribution *= dot(LightDirection.rgb, WorldNormal);
         \\
         \\    Result.rgb += Contribution * LightColor.rgb;
         \\    Result.a += Contribution;

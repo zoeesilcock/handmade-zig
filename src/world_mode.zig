@@ -1106,7 +1106,7 @@ fn addSnakeSegment(
 
     entity.addPiece(.Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
     entity.addPiece(if (segment_index != 0) .Torso else .Head, 1.5, .zero(), .white(), null);
-    entity.addPieceLight(0.1, .new(0, 0, 0.5), 0.3, .new(1, 1, 0));
+    //entity.addPieceLight(0.1, .new(0, 0, 0.5), 0.3, .new(1, 1, 0));
 
     endEntity(world_mode, entity, world_position);
 }
