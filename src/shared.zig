@@ -879,7 +879,7 @@ pub const debug_color_table: [11]Color3 = .{
     Color3.new(0.5, 0, 1),
 };
 
-pub const LIGHT_DATA_WIDTH = 4096;
+pub const LIGHT_DATA_WIDTH = 8192;
 pub const LIGHT_LOOKUP_X = 8;
 pub const LIGHT_LOOKUP_Y = 8;
 pub const LIGHT_LOOKUP_Z = 8;

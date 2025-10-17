@@ -204,7 +204,10 @@ const LightingElement = extern struct {
     position: Vector3,
     normal: Vector3,
     transparency: f32,
-    radius: f32,
+    width: f32,
+    height: f32,
+    x_axis: Vector3,
+    y_axis: Vector3,
     reflection_color: Color3,
 
     // Propagation.
@@ -215,9 +218,6 @@ const LightingElement = extern struct {
     // Gather.
     incident_light: Vector3,
     average_direction_to_light: Vector3,
-
-    original_bitmap: ?*LoadedBitmap,
-    original_vertices: [4]TexturedVertex = undefined,
 };
 
 pub const LightingSolution = extern struct {
@@ -1321,15 +1321,17 @@ pub const RenderGroup = extern struct {
         std.debug.assert(self.current_quads != null);
         const quads: *RenderEntryTexturedQuads = self.current_quads.?;
 
-        var elements = &solution.elements;
-        solution.element_count = quads.quad_count;
+        const y_subdivision_count = 3;
+        const x_subdivision_count = 3;
+        solution.element_count = (y_subdivision_count * x_subdivision_count) * quads.quad_count;
+        std.debug.assert(solution.element_count < solution.elements.len);
 
         var verts: [*]TexturedVertex = commands.vertex_array + quads.vertex_array_offset;
         var bitmaps: [*]?*LoadedBitmap = @ptrCast(&commands.quad_bitmaps[quads.vertex_array_offset >> 2]);
 
         var quad_index: u32 = 0;
+        var element: [*]LightingElement = &solution.elements;
         while (quad_index < quads.quad_count) : (quad_index += 1) {
-            var element: *LightingElement = &elements[quad_index];
             var vert0: *TexturedVertex = @ptrCast(verts + 0);
             var vert1: *TexturedVertex = @ptrCast(verts + 1);
             var vert2: *TexturedVertex = @ptrCast(verts + 3);
@@ -1348,98 +1350,42 @@ pub const RenderGroup = extern struct {
             _ = vert3_position.setZ(vert3_position.z() + vert3.position.w());
 
             const span30: Vector3 = vert3_position.minus(vert0_position);
-            const span20: Vector3 = vert2_position.minus(vert0_position);
             const span10: Vector3 = vert1_position.minus(vert0_position);
 
-            element.position = vert0_position.plus(span20.scaledTo(0.5));
-            element.radius = 0.75 * @min(span30.length(), span10.length());
+            var x_axis: Vector3 = span10;
+            var y_axis: Vector3 = span30;
 
-            // TODO: Remove the premultiplied alpha here?
-            const color: Color = Color.unpackColorRGBA(vert0.color).scaledTo(1.0 / 255.0);
+            const width: f32 = x_axis.length();
+            const height: f32 = y_axis.length();
+            x_axis = x_axis.normalizeOrZero();
+            y_axis = y_axis.normalizeOrZero();
 
-            element.normal = vert0.normal;
-            element.front_emission_color = .zero();
-            element.accumulated_color = .zero();
-            element.reflection_color = color.rgb().scaledTo(0.95);
-            element.transparency = color.a();
-            element.emission_color = Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
-            element.next_emission_color = .zero();
-            element.next_emission_weight = 0;
+            const sub_width: f32 = width / @as(f32, @floatFromInt(x_subdivision_count));
+            const sub_height: f32 = height / @as(f32, @floatFromInt(y_subdivision_count));
+            for (0..y_subdivision_count) |y_sub| {
+                for (0..x_subdivision_count) |x_sub| {
+                    element[0].width = sub_width;
+                    element[0].height = sub_height;
 
-            element.original_bitmap = bitmaps[0];
-            element.original_vertices[0] = vert0.*;
-            element.original_vertices[1] = vert1.*;
-            element.original_vertices[2] = vert2.*;
-            element.original_vertices[3] = vert3.*;
+                    element[0].position = vert0_position
+                        .plus(x_axis.scaledTo((@as(f32, @floatFromInt(x_sub)) + 0.5) * sub_width))
+                        .plus(y_axis.scaledTo((@as(f32, @floatFromInt(y_sub)) + 0.5) * sub_height));
 
-            verts += 4;
-            bitmaps += 1;
-        }
-    }
+                    // TODO: Remove the premultiplied alpha here?
+                    const color: Color = Color.unpackColorRGBA(vert0.color).scaledTo(1.0 / 255.0);
 
-    fn extractReflectorsFromVerts(self: *RenderGroup, solution: *LightingSolution) void {
-        const commands: *RenderCommands = self.commands;
-        std.debug.assert(self.current_quads != null);
-        const quads: *RenderEntryTexturedQuads = self.current_quads.?;
+                    element[0].x_axis = x_axis;
+                    element[0].y_axis = y_axis;
+                    element[0].normal = vert0.normal;
+                    element[0].emission_color = .zero();
+                    element[0].reflection_color = color.rgb().scaledTo(0.95);
+                    element[0].transparency = color.a();
+                    element[0].emission_color = Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
+                    element[0].next_emission_color = .zero();
+                    element[0].next_emission_weight = 0;
 
-        solution.element_count = 4 * quads.quad_count;
-
-        var verts: [*]TexturedVertex = commands.vertex_array + quads.vertex_array_offset;
-        var bitmaps: [*]?*LoadedBitmap = @ptrCast(&commands.quad_bitmaps[quads.vertex_array_offset >> 2]);
-
-        var quad_index: u32 = 0;
-        var element: [*]LightingElement = &solution.elements;
-        while (quad_index < quads.quad_count) : (quad_index += 1) {
-            var vert0: *TexturedVertex = @ptrCast(verts + 0);
-            var vert1: *TexturedVertex = @ptrCast(verts + 1);
-            var vert2: *TexturedVertex = @ptrCast(verts + 3);
-            var vert3: *TexturedVertex = @ptrCast(verts + 2);
-
-            var vert_position: [4]Vector3 = undefined;
-
-            vert_position[0] = vert0.position.xyz();
-            _ = vert_position[0].setZ(vert_position[0].z() + vert0.position.w());
-
-            vert_position[1] = vert1.position.xyz();
-            _ = vert_position[1].setZ(vert_position[1].z() + vert1.position.w());
-
-            vert_position[2] = vert2.position.xyz();
-            _ = vert_position[2].setZ(vert_position[2].z() + vert2.position.w());
-
-            vert_position[3] = vert3.position.xyz();
-            _ = vert_position[3].setZ(vert_position[3].z() + vert3.position.w());
-
-            const span30: Vector3 = vert_position[3].minus(vert_position[0]);
-            // const span20: Vector3 = vert_position[2].minus(vert_position[0]);
-            const span10: Vector3 = vert_position[1].minus(vert_position[0]);
-            const radius: f32 = 0.3 * @min(span30.length(), span10.length());
-
-            element[0].position = vert_position[0].plus(span10.scaledTo(0.25)).plus(span30.scaledTo(0.25));
-            element[1].position = vert_position[1].minus(span10.scaledTo(0.25)).plus(span30.scaledTo(0.25));
-            element[2].position = vert_position[2].minus(span10.scaledTo(0.25)).minus(span30.scaledTo(0.25));
-            element[3].position = vert_position[3].plus(span10.scaledTo(0.25)).minus(span30.scaledTo(0.25));
-
-            for (0..4) |vert_index| {
-                element[0].radius = radius;
-
-                // TODO: Remove the premultiplied alpha here?
-                const color: Color = Color.unpackColorRGBA(verts[vert_index].color).scaledTo(1.0 / 255.0);
-
-                element[0].normal = verts[vert_index].normal;
-                element[0].reflection_color = color.rgb().scaledTo(0.95);
-                element[0].transparency = color.a();
-                element[0].emission_color =
-                    Color3.new(1, 1, 1).scaledTo(verts[vert_index].emission * max_emission);
-                element[0].next_emission_color = .zero();
-                element[0].next_emission_weight = 0;
-
-                element[0].original_bitmap = bitmaps[0];
-                element[0].original_vertices[0] = vert0.*;
-                element[0].original_vertices[1] = vert1.*;
-                element[0].original_vertices[2] = vert2.*;
-                element[0].original_vertices[3] = vert3.*;
-
-                element += 1;
+                    element += 1;
+                }
             }
 
             verts += 4;
@@ -1470,16 +1416,18 @@ pub const RenderGroup = extern struct {
                 var source: *LightingElement = &solution.elements[source_index];
                 const ray_source_normal = ray_direction.dotProduct(source.normal);
                 if (ray_source_normal < -0.001) {
-                    const relative_source_position: Vector3 = source.position.minus(ray_origin);
-                    const d: f32 = -source.normal.dotProduct(relative_source_position);
+                    const relative_origin: Vector3 = ray_origin.minus(source.position);
+                    const d: f32 = source.normal.dotProduct(relative_origin);
                     const t_ray: f32 = -d / ray_source_normal;
 
                     if (t_ray > 0 and t_ray < closest_hit) {
-                        const ray_position: Vector3 = ray_direction.scaledTo(t_ray);
-                        const cone_radius: f32 = 0.25 * t_ray;
-                        const distance_squared: f32 =
-                            ray_position.minus(relative_source_position).lengthSquared();
-                        if (distance_squared < math.square(source.radius + cone_radius)) {
+                        const ray_position: Vector3 = relative_origin.plus(ray_direction.scaledTo(t_ray));
+                        const x_check: f32 = 2.0 * ray_position.dotProduct(source.x_axis);
+                        const y_check: f32 = 2.0 * ray_position.dotProduct(source.y_axis);
+
+                        if (x_check >= -source.width and x_check <= source.width and
+                            y_check >= -source.height and y_check <= source.height)
+                        {
                             closest_hit = t_ray;
                             result.color = source.emission_color;
                             result.index = source_index;
@@ -1575,20 +1523,18 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn lightingTest(self: *RenderGroup, solution: *LightingSolution) void {
-        self.extractReflectorsFromVerts(solution);
+        self.extractReflectorsFromQuads(solution);
         computeLightPropagation(solution);
         gatherFinalLighting(solution);
     }
 
     pub fn outputLighting(self: *RenderGroup, solution: *LightingSolution, opt_textures: ?*LightingTextures) void {
-        if (opt_textures) |textures| {
-            self.outputTexturesDebug(solution, textures);
-        } else {
-            if (global_config.Renderer_Lighting_ShowReflectors) {
-                self.outputLightingQuads(solution);
-            } else {
-                self.outputLightingVerts(solution);
-            }
+        _ = opt_textures;
+        // if (opt_textures) |textures| {
+        //     self.outputTexturesDebug(solution, textures);
+        // } else
+        {
+            self.outputLightingQuads(solution);
         }
     }
 
@@ -1620,7 +1566,7 @@ pub const RenderGroup = extern struct {
                                 const position_next: *LightingTexel = &textures.position_next[index];
                                 color = color.plus(Color.unpackColorRGBA(textures.color[index]).scaledTo(1.0 / 255.0));
                                 color_count += 1;
-                                index = @intCast(position_next.next);
+                                index = @intFromFloat(position_next.position.w());
                             }
                             color = color.scaledTo(1.0 / @as(f32, @floatFromInt(color_count)));
 
@@ -1646,12 +1592,7 @@ pub const RenderGroup = extern struct {
         var element_index: u32 = 0;
         while (element_index < solution.element_count) : (element_index += 1) {
             var element: *LightingElement = &solution.elements[element_index];
-            var bitmap: ?*LoadedBitmap = element.original_bitmap;
-
-            const vert0: *TexturedVertex = &element.original_vertices[0];
-            const vert1: *TexturedVertex = &element.original_vertices[1];
-            const vert2: *TexturedVertex = &element.original_vertices[2];
-            const vert3: *TexturedVertex = &element.original_vertices[3];
+            const bitmap: ?*LoadedBitmap = commands.white_bitmap;
 
             var emission_color: Color = element.emission_color.clamp01().toColor(1);
 
@@ -1665,150 +1606,40 @@ pub const RenderGroup = extern struct {
             var color2: u32 = 0;
             var color3: u32 = 0;
 
-            if (global_config.Renderer_Lighting_ShowReflectors) {
-                bitmap = commands.white_bitmap;
+            const x: Vector3 = element.x_axis.scaledTo((0.5 * element.width) - 0.03);
+            const y: Vector3 = element.y_axis.scaledTo((0.5 * element.height) - 0.03);
 
-                var base: Vector3 = .zero();
-                {
-                    var normal = vert0.normal;
-                    _ = normal.setX(@abs(normal.x()));
-                    _ = normal.setY(@abs(normal.y()));
-                    _ = normal.setZ(@abs(normal.z()));
+            _ = position0.setXYZ(element.position.minus(x).minus(y));
+            _ = position1.setXYZ(element.position.plus(x).minus(y));
+            _ = position2.setXYZ(element.position.plus(x).plus(y));
+            _ = position3.setXYZ(element.position.minus(x).plus(y));
 
-                    var min_el: u32 = 0;
-                    if (normal.x() < normal.y()) {
-                        if (normal.z() < normal.y()) {
-                            min_el = 2;
-                        } else {
-                            min_el = 0;
-                        }
-                    } else {
-                        if (normal.z() < normal.y()) {
-                            min_el = 2;
-                        } else {
-                            min_el = 1;
-                        }
-                    }
-                    base.values[min_el] = 1;
-                }
+            _ = position0.setW(0);
+            _ = position1.setW(0);
+            _ = position2.setW(0);
+            _ = position3.setW(0);
 
-                var x: Vector3 = base.crossProduct(vert0.normal);
-                var y: Vector3 = x.crossProduct(vert0.normal).negated();
+            const front_emission_color32 =
+                emission_color.rgb().toColor(element.transparency).scaledTo(255.0).packColorRGBA();
+            color0 = front_emission_color32;
+            color1 = front_emission_color32;
+            color2 = front_emission_color32;
+            color3 = front_emission_color32;
 
-                x = x.normalizeOrZero().scaledTo(element.radius);
-                y = y.normalizeOrZero().scaledTo(element.radius);
-
-                _ = position0.setXYZ(element.position.plus(x));
-                _ = position1.setXYZ(element.position.plus(y));
-                _ = position2.setXYZ(element.position.minus(x));
-                _ = position3.setXYZ(element.position.minus(y));
-
-                _ = position0.setW(0);
-                _ = position1.setW(0);
-                _ = position2.setW(0);
-                _ = position3.setW(0);
-
-                const front_emission_color32 =
-                    emission_color.rgb().toColor(element.transparency).scaledTo(255.0).packColorRGBA();
-                color0 = front_emission_color32;
-                color1 = front_emission_color32;
-                color2 = front_emission_color32;
-                color3 = front_emission_color32;
-            } else {
-                position0 = vert0.position;
-                position1 = vert1.position;
-                position2 = vert2.position;
-                position3 = vert3.position;
-
-                color0 =
-                    emission_color.hadamardProduct(Color.unpackColorRGBA(vert0.color)).packColorRGBA();
-                color1 =
-                    emission_color.hadamardProduct(Color.unpackColorRGBA(vert1.color)).packColorRGBA();
-                color2 =
-                    emission_color.hadamardProduct(Color.unpackColorRGBA(vert2.color)).packColorRGBA();
-                color3 =
-                    emission_color.hadamardProduct(Color.unpackColorRGBA(vert3.color)).packColorRGBA();
-            }
-
+            const uv: Vector2 = .zero();
             self.pushQuad(
                 bitmap,
                 position0,
-                vert0.uv,
+                uv,
                 color0,
                 position1,
-                vert1.uv,
+                uv,
                 color1,
                 position2,
-                vert2.uv,
+                uv,
                 color2,
                 position3,
-                vert3.uv,
-                color3,
-                null,
-            );
-        }
-    }
-
-    fn outputLightingVerts(self: *RenderGroup, solution: *LightingSolution) void {
-        _ = self.getCurrentQuads(solution.element_count / 4);
-
-        var element_index: u32 = 0;
-        while (element_index < solution.element_count) : (element_index += 4) {
-            var element: [*]LightingElement = @ptrCast(&solution.elements[element_index]);
-            var element0: [*]LightingElement = element;
-            var element1: [*]LightingElement = element + 1;
-            var element2: [*]LightingElement = element + 2;
-            var element3: [*]LightingElement = element + 3;
-
-            const bitmap: ?*LoadedBitmap = element[0].original_bitmap;
-
-            const vert0: *TexturedVertex = &element[0].original_vertices[0];
-            const vert1: *TexturedVertex = &element[0].original_vertices[1];
-            const vert2: *TexturedVertex = &element[0].original_vertices[2];
-            const vert3: *TexturedVertex = &element[0].original_vertices[3];
-
-            const front_emission_color0: Color = element0[0].emission_color.clamp01().toColor(1);
-            const front_emission_color1: Color = element1[0].emission_color.clamp01().toColor(1);
-            const front_emission_color2: Color = element2[0].emission_color.clamp01().toColor(1);
-            const front_emission_color3: Color = element3[0].emission_color.clamp01().toColor(1);
-
-            var position0: Vector4 = .zero();
-            var position1: Vector4 = .zero();
-            var position2: Vector4 = .zero();
-            var position3: Vector4 = .zero();
-
-            var color0: u32 = 0;
-            var color1: u32 = 0;
-            var color2: u32 = 0;
-            var color3: u32 = 0;
-
-            position0 = vert0.position;
-            position1 = vert1.position;
-            position2 = vert2.position;
-            position3 = vert3.position;
-
-            color0 =
-                front_emission_color0.hadamardProduct(Color.unpackColorRGBA(vert0.color)).packColorRGBA();
-            color1 =
-                front_emission_color1.hadamardProduct(Color.unpackColorRGBA(vert1.color)).packColorRGBA();
-            color2 =
-                front_emission_color2.hadamardProduct(Color.unpackColorRGBA(vert2.color)).packColorRGBA();
-            color3 =
-                front_emission_color3.hadamardProduct(Color.unpackColorRGBA(vert3.color)).packColorRGBA();
-
-            self.pushQuad(
-                bitmap,
-                position0,
-                vert0.uv,
-                color0,
-                position1,
-                vert1.uv,
-                color1,
-                position2,
-                vert2.uv,
-                color2,
-                position3,
-                vert3.uv,
+                uv,
                 color3,
                 null,
             );

@@ -589,8 +589,8 @@ pub fn updateAndRenderWorld(
         world_mode.standard_room_dimension.scaledTo(3),
     );
 
-    // if (world_mode.show_lighting) {
-    if (false) {
+    // if (false) {
+    if (world_mode.show_lighting) {
         render_group.outputLighting(&world_mode.test_lighting, &world_mode.test_textures);
 
         if (input.f_key_pressed[1]) {
