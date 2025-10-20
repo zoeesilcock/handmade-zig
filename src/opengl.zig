@@ -595,6 +595,7 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
 const shader_header_code =
     \\// Header code
     \\#define MaxLightIntensity 10
+    \\#define LengthSq(a) dot(a, a)
     \\
     \\float clamp01MapToRange(float min, float max, float value) {
     \\  float range = max - min;
@@ -641,11 +642,17 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
         \\#define DepthPeel %d
+        \\#define LIGHT_LOOKUP_X %d
+        \\#define LIGHT_LOOKUP_Y %d
+        \\#define LIGHT_LOOKUP_Z %d
     ,
         .{
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
             @as(i32, @intCast(@intFromBool(depth_peel))),
+            LIGHT_LOOKUP_X,
+            LIGHT_LOOKUP_Y,
+            LIGHT_LOOKUP_Z,
         },
     );
     const vertex_code =
@@ -751,11 +758,23 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\
         \\layout(location = 0) out vec4 BlendUnitColor[3];
         \\
+        \\int ClampVoxel(int A, int Max)
+        \\{
+        \\  if (A < 0) A = 0;
+        \\  if (A > Max) A = Max;
+        \\  return(A);
+        \\}
+        \\
         \\vec3 SumVoxelLight(ivec3 At)
         \\{
+        \\  At.x = ClampVoxel(At.x, LIGHT_LOOKUP_X - 1);
+        \\  At.y = ClampVoxel(At.y, LIGHT_LOOKUP_Y - 1);
+        \\  At.z = ClampVoxel(At.z, LIGHT_LOOKUP_Z - 1);
+        \\
         \\  vec4 Result = vec4(0, 0, 0, 0);
         \\
         \\  int LightIndex = int(texelFetch(LookupSampler, At, 0).r);
+        \\
         \\  while (LightIndex != 0)
         \\  {
         \\    vec4 LightPositionNext = texelFetch(PositionNextSampler, LightIndex, 0);
@@ -765,17 +784,18 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\    vec3 LightPosition = LightPositionNext.rgb;
         \\    LightIndex = int(LightPositionNext.a);
         \\
-        \\    float Contribution = clamp(1.0f - 0.5f * length(LightPosition - WorldPosition), 0, 1);
-        \\    Contribution *= dot(LightDirection.rgb, WorldNormal);
+        \\    float Contribution = 1.0f / (1.0f + LengthSq(LightPosition - WorldPosition));
+        \\    float DirectionalFalloff = dot(LightDirection.rgb, WorldNormal);
         \\
-        \\    Result.rgb += Contribution * LightColor.rgb;
+        \\    Result.rgb += Contribution * DirectionalFalloff * LightColor.rgb;
         \\    Result.a += Contribution;
         \\  }
         \\
-        \\  if (Result.a > 1.0f)
+        \\  if (Result.a > 0.0f)
         \\  {
         \\    Result.rgb *= 1.0f / Result.a;
         \\  }
+        \\
         \\  return(Result.rgb);
         \\}
         \\
@@ -833,6 +853,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\    vec3 L = mix(L0, L1, VoxelFraction.x);
         \\
         \\    SurfaceReflection.rgb *= L;
+        // \\    SurfaceReflection.rgb = L;
         \\
         // \\    if (VoxelIndex.x < 0 ||
         // \\        VoxelIndex.y < 0 ||

@@ -880,9 +880,9 @@ pub const debug_color_table: [11]Color3 = .{
 };
 
 pub const LIGHT_DATA_WIDTH = 8192;
-pub const LIGHT_LOOKUP_X = 8;
-pub const LIGHT_LOOKUP_Y = 8;
-pub const LIGHT_LOOKUP_Z = 8;
+pub const LIGHT_LOOKUP_X: u32 = 8;
+pub const LIGHT_LOOKUP_Y: u32 = 8;
+pub const LIGHT_LOOKUP_Z: u32 = 8;
 
 pub const LightingTextures = extern struct {
     position_next: [LIGHT_DATA_WIDTH]LightingTexel,

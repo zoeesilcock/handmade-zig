@@ -1405,7 +1405,7 @@ pub const RenderGroup = extern struct {
         ray_direction: Vector3,
     ) RaycastResult {
         var result: RaycastResult = .{
-            .color = .zero(),
+            .color = .new(0.3, 0.3, 0.3),
             .index = solution.element_count,
         };
         var closest_hit: f32 = std.math.floatMax(f32);
@@ -1517,7 +1517,7 @@ pub const RenderGroup = extern struct {
                 incident_direction = incident_direction.plus(ray_direction.scaledTo(weight));
             }
 
-            dest.incident_light = incident_accumulated;
+            dest.incident_light = incident_accumulated.scaledTo(1.0 / @as(f32, @floatFromInt(ray_count)));
             dest.average_direction_to_light = incident_direction.normalizeOrZero();
         }
     }
@@ -1529,11 +1529,9 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn outputLighting(self: *RenderGroup, solution: *LightingSolution, opt_textures: ?*LightingTextures) void {
-        _ = opt_textures;
-        // if (opt_textures) |textures| {
-        //     self.outputTexturesDebug(solution, textures);
-        // } else
-        {
+        if (opt_textures) |textures| {
+            self.outputTexturesDebug(solution, textures);
+        } else {
             self.outputLightingQuads(solution);
         }
     }
@@ -1703,6 +1701,36 @@ pub const RenderGroup = extern struct {
 
             dest.color[pack_index] = color;
             dest.direction[pack_index] = direction;
+        }
+
+        for (0..LIGHT_LOOKUP_Z) |z| {
+            for (0..LIGHT_LOOKUP_Y) |y| {
+                for (0..LIGHT_LOOKUP_X) |x| {
+                    if (dest.lookup[z][y][x] == 0) {
+                        var neighbor: u16 = 0;
+
+                        var dzi: i32 = if (z == 0) 0 else -1;
+                        const dzm: i32 = if (z == (LIGHT_LOOKUP_Z - 1)) 0 else 1;
+                        while (dzi <= dzm) : (dzi += 1) {
+                            var dyi: i32 = if (y == 0) 0 else -1;
+                            const dym: i32 = if (y == (LIGHT_LOOKUP_Y - 1)) 0 else 1;
+                            while (dyi <= dym) : (dyi += 1) {
+                                var dxi: i32 = if (x == 0) 0 else -1;
+                                const dxm: i32 = if (x == (LIGHT_LOOKUP_X - 1)) 0 else 1;
+                                while (dxi <= dxm) : (dxi += 1) {
+                                    const dz: u32 = @intCast(@as(i32, @intCast(z)) + dzi);
+                                    const dy: u32 = @intCast(@as(i32, @intCast(y)) + dyi);
+                                    const dx: u32 = @intCast(@as(i32, @intCast(x)) + dxi);
+                                    neighbor =
+                                        if (neighbor > 0) neighbor else dest.lookup[dz][dy][dx];
+                                }
+                            }
+                        }
+
+                        dest.lookup[z][y][x] = neighbor;
+                    }
+                }
+            }
         }
 
         dest.min_corner = min_corner;
