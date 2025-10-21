@@ -2346,6 +2346,7 @@ pub fn frameEnd(
         game_memory.debug_state = debugInit(@intCast(commands.settings.width), @intCast(commands.settings.height));
     }
 
+    // TODO: Why do the debug elements disturb the light calculations for us, but not for Casey?
     if (false) {
         if (game_memory.debug_state) |debug_state| {
             if (getGameAssets(game_memory)) |assets| {

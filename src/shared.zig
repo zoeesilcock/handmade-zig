@@ -880,9 +880,10 @@ pub const debug_color_table: [11]Color3 = .{
 };
 
 pub const LIGHT_DATA_WIDTH = 8192;
-pub const LIGHT_LOOKUP_X: u32 = 8;
-pub const LIGHT_LOOKUP_Y: u32 = 8;
-pub const LIGHT_LOOKUP_Z: u32 = 8;
+pub const LIGHT_LOOKUP_X: u32 = 16;
+pub const LIGHT_LOOKUP_Y: u32 = 16;
+pub const LIGHT_LOOKUP_Z: u32 = 16;
+pub const MAX_LIGHT_POWER: f32 = 10;
 
 pub const LightingTextures = extern struct {
     position_next: [LIGHT_DATA_WIDTH]LightingTexel,
@@ -925,6 +926,7 @@ pub const RenderSettings = extern struct {
     multisampling_hint: bool = false,
     pixelation_hint: bool = false,
     multisample_debug: bool = false,
+    lighting_disabled: bool = false,
 
     pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
         const type_info = @typeInfo(@TypeOf(self.*));

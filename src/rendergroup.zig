@@ -60,6 +60,7 @@ const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
 const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
 const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
 const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
+const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 const ManualSortKey = render.ManualSortKey;
 const SpriteFlag = render.SpriteFlag;
 
@@ -1405,7 +1406,7 @@ pub const RenderGroup = extern struct {
         ray_direction: Vector3,
     ) RaycastResult {
         var result: RaycastResult = .{
-            .color = .new(0.3, 0.3, 0.3),
+            .color = .zero(),
             .index = solution.element_count,
         };
         var closest_hit: f32 = std.math.floatMax(f32);
@@ -1440,6 +1441,19 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
+    fn sampleHemisphere(series: *random.Series, normal: Vector3) Vector3 {
+        const result: Vector3 = normal.plus(Vector3.new(
+            series.randomBilateral(),
+            series.randomBilateral(),
+            series.randomBilateral(),
+        ).scaledTo(0.5)).normalizeOrZero();
+
+        // TODO: Why does this assertion fail for the gatherFinalLighting?
+        // std.debug.assert(result.dotProduct(normal) > 0);
+
+        return result;
+    }
+
     fn computeLightPropagation(solution: *LightingSolution) void {
         const min_emission = 0.0;
         const ray_count = 8;
@@ -1453,11 +1467,7 @@ pub const RenderGroup = extern struct {
                 if (sum > min_emission) {
                     var ray_index: u32 = 0;
                     while (ray_index < ray_count) : (ray_index += 1) {
-                        const emission_direction: Vector3 = emitter.normal.plus(.new(
-                            series.randomBilateral(),
-                            series.randomBilateral(),
-                            series.randomBilateral(),
-                        )).normalizeOrZero();
+                        const emission_direction: Vector3 = sampleHemisphere(&series, emitter.normal);
 
                         const hit_index: u32 = raycast(
                             solution,
@@ -1505,11 +1515,7 @@ pub const RenderGroup = extern struct {
             var incident_direction: Vector3 = .zero();
             var ray_index: u32 = 0;
             while (ray_index < ray_count) : (ray_index += 1) {
-                const ray_direction: Vector3 = dest.normal.plus(.new(
-                    series.randomBilateral(),
-                    series.randomBilateral(),
-                    series.randomBilateral(),
-                )).normalizeOrZero();
+                const ray_direction: Vector3 = sampleHemisphere(&series, dest.normal);
                 const incident_color: Color3 = raycast(solution, dest_index, dest.position, ray_direction).color;
                 const weight: f32 = incident_color.length();
 
@@ -1529,11 +1535,20 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn outputLighting(self: *RenderGroup, solution: *LightingSolution, opt_textures: ?*LightingTextures) void {
-        if (opt_textures) |textures| {
-            self.outputTexturesDebug(solution, textures);
+        if (false) {
+            if (opt_textures) |textures| {
+                self.outputTexturesDebug(solution, textures);
+            }
         } else {
             self.outputLightingQuads(solution);
         }
+    }
+
+    fn decodePower(encoded_light: Color) Color {
+        const result = encoded_light;
+        result.setRGB(result.rgb().scaledTo(MAX_LIGHT_POWER * result.a()));
+        result.setA(1);
+        return result;
     }
 
     fn outputTexturesDebug(self: *RenderGroup, solution: *LightingSolution, textures: *LightingTextures) void {
@@ -1559,14 +1574,17 @@ pub const RenderGroup = extern struct {
                     } else {
                         if (index > 0) {
                             var color_count: u32 = 0;
-                            var color: Color = .zero();
+                            var color: Color = .new(0, 0, 0, 1);
                             while (index > 0) {
                                 const position_next: *LightingTexel = &textures.position_next[index];
-                                color = color.plus(Color.unpackColorRGBA(textures.color[index]).scaledTo(1.0 / 255.0));
+                                var unpack: Color = Color.unpackColorRGBA(textures.color[index]);
+                                unpack = decodePower(unpack);
+
+                                color = color.plus(unpack.scaledTo(1.0 / 255.0));
                                 color_count += 1;
                                 index = @intFromFloat(position_next.position.w());
                             }
-                            color = color.scaledTo(1.0 / @as(f32, @floatFromInt(color_count)));
+                            _ = color.setRGB(color.rgb().scaledTo(1.0 / @as(f32, @floatFromInt(color_count))));
 
                             const position: Vector3 = textures.min_corner
                                 .plus(textures.cell_dimension.scaledTo(0.5))
@@ -1689,7 +1707,12 @@ pub const RenderGroup = extern struct {
             const lookup_at: *u16 = &dest.lookup[voxel_z][voxel_y][voxel_x];
 
             const direction: Vector4 = element.average_direction_to_light.toVector4(0);
-            const incident_light: Color = element.incident_light.clamp01().toColor3().toColor(1);
+            const light_power: f32 = element.incident_light.length();
+            var incident_light: Color = .zero();
+            if (light_power > 0) {
+                const light_color: Color3 = element.incident_light.dividedByF(light_power).toColor3();
+                incident_light = light_color.clamp01().toColor(math.clampf01(light_power / MAX_LIGHT_POWER));
+            }
             const color: u32 = incident_light.scaledTo(255).packColorRGBA();
 
             pack_index += 1;

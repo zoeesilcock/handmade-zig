@@ -253,6 +253,7 @@ const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
 const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
 const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
 const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
+const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -632,7 +633,7 @@ const shader_header_code =
     \\}
 ;
 
-fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
+fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabled: bool) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -645,6 +646,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\#define LIGHT_LOOKUP_X %d
         \\#define LIGHT_LOOKUP_Y %d
         \\#define LIGHT_LOOKUP_Z %d
+        \\#define MAX_LIGHT_POWER %f
+        \\#define LIGHTING_DISABLED %d
     ,
         .{
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
@@ -653,6 +656,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
             LIGHT_LOOKUP_X,
             LIGHT_LOOKUP_Y,
             LIGHT_LOOKUP_Z,
+            MAX_LIGHT_POWER,
+            @as(u32, @intCast(@intFromBool(lighting_disabled))),
         },
     );
     const vertex_code =
@@ -785,9 +790,9 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\    LightIndex = int(LightPositionNext.a);
         \\
         \\    float Contribution = 1.0f / (1.0f + LengthSq(LightPosition - WorldPosition));
-        \\    float DirectionalFalloff = dot(LightDirection.rgb, WorldNormal);
+        \\    float DirectionalFalloff = clamp(dot(LightDirection.rgb, WorldNormal), 0, 1);
         \\
-        \\    Result.rgb += Contribution * DirectionalFalloff * LightColor.rgb;
+        \\    Result.rgb += Contribution * DirectionalFalloff * LightColor.rgb * LightColor.a * MAX_LIGHT_POWER;
         \\    Result.a += Contribution;
         \\  }
         \\
@@ -828,6 +833,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\    SurfaceReflection.rgb = sqrt(SurfaceReflection.rgb);
         \\#endif
         \\
+        \\#if LIGHTING_DISABLED
+        \\#else
         \\    vec3 VoxelPosition = (VoxelInverseCellDimension * (WorldPosition - VoxelMinCorner)) - vec3(0.5f, 0.5f, 0.5f);
         \\    vec3 VoxelPositionFloor = floor(VoxelPosition);
         \\    vec3 VoxelFraction = VoxelPosition - VoxelPositionFloor;
@@ -854,6 +861,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         \\
         \\    SurfaceReflection.rgb *= L;
         // \\    SurfaceReflection.rgb = L;
+        \\#endif
         \\
         // \\    if (VoxelIndex.x < 0 ||
         // \\        VoxelIndex.y < 0 ||
@@ -864,7 +872,6 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool) void {
         // \\    {
         // \\       SurfaceReflection.r = 1.0f;
         // \\    }
-        \\
         \\    BlendUnitColor[0] = SurfaceReflection;
         \\  }
         \\  else
@@ -1923,8 +1930,8 @@ fn changeToSettings(settings: *RenderSettings) void {
         open_gl.depth_peel_count = open_gl.depth_peel_buffers.len;
     }
 
-    compileZBiasProgram(&open_gl.z_bias_no_depth_peel, false);
-    compileZBiasProgram(&open_gl.z_bias_depth_peel, true);
+    compileZBiasProgram(&open_gl.z_bias_no_depth_peel, false, open_gl.current_settings.lighting_disabled);
+    compileZBiasProgram(&open_gl.z_bias_depth_peel, true, open_gl.current_settings.lighting_disabled);
     compilePeelCompositeProgram(&open_gl.peel_composite);
     compileFinalStretchProgram(&open_gl.final_stretch);
     compileResolveMultisampleProgram(&open_gl.resolve_multisample);
@@ -2249,12 +2256,6 @@ fn computeLightTransport() void {
         }
         platform.optGLActiveTexture.?(GL_TEXTURE0);
     }
-}
-
-fn settingsHaveChanged(a: *RenderSettings, b: *RenderSettings) bool {
-    _ = a;
-    _ = b;
-    return true;
 }
 
 pub fn renderCommands(

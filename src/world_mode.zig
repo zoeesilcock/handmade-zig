@@ -589,6 +589,19 @@ pub fn updateAndRenderWorld(
         world_mode.standard_room_dimension.scaledTo(3),
     );
 
+    if (input.f_key_pressed[2]) {
+        render_group.commands.settings.lighting_disabled = !render_group.commands.settings.lighting_disabled;
+    }
+
+    if (input.f_key_pressed[5]) {
+        if (global_config.Renderer_Lighting_IterationCount > 0) {
+            global_config.Renderer_Lighting_IterationCount -= 1;
+        }
+    }
+    if (input.f_key_pressed[6]) {
+        global_config.Renderer_Lighting_IterationCount += 1;
+    }
+
     // if (false) {
     if (world_mode.show_lighting) {
         render_group.outputLighting(&world_mode.test_lighting, &world_mode.test_textures);

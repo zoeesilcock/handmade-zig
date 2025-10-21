@@ -32,7 +32,7 @@ pub const Series = extern struct {
     }
 
     pub fn randomBilateral(self: *Series) f32 {
-        return self.randomUnilateral() * 2 - 1;
+        return 2.0 * self.randomUnilateral() - 1.0;
     }
 
     pub fn randomFloatBetween(self: *Series, min: f32, max: f32) f32 {
