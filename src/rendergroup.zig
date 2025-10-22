@@ -214,10 +214,8 @@ const LightingElement = extern struct {
     // Propagation.
     emission_color: Color3,
     next_emission_color: Color3,
-    next_emission_weight: f32,
 
     // Gather.
-    incident_light: Vector3,
     average_direction_to_light: Vector3,
 };
 
@@ -1383,7 +1381,7 @@ pub const RenderGroup = extern struct {
                     element[0].transparency = color.a();
                     element[0].emission_color = Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
                     element[0].next_emission_color = .zero();
-                    element[0].next_emission_weight = 0;
+                    element[0].average_direction_to_light = .zero();
 
                     element += 1;
                 }
@@ -1442,28 +1440,48 @@ pub const RenderGroup = extern struct {
     }
 
     fn sampleHemisphere(series: *random.Series, normal: Vector3) Vector3 {
-        const result: Vector3 = normal.plus(Vector3.new(
+        var result: Vector3 = Vector3.new(
             series.randomBilateral(),
             series.randomBilateral(),
             series.randomBilateral(),
-        ).scaledTo(0.5)).normalizeOrZero();
+        ).normalizeOrZero();
 
-        // TODO: Why does this assertion fail for the gatherFinalLighting?
-        // std.debug.assert(result.dotProduct(normal) > 0);
+        if (result.dotProduct(normal) < 0) {
+            result = result.negated();
+        }
 
         return result;
     }
 
+    fn accumulateSample(
+        element: *LightingElement,
+        light_color: Color3,
+        light_power: f32,
+        normal_to_light: Vector3,
+    ) void {
+        const angular_falloff: f32 = math.clampf01(element.normal.dotProduct(normal_to_light));
+        const power: f32 = light_power * angular_falloff;
+        const weight: f32 = power * light_color.length();
+
+        element.next_emission_color = element.next_emission_color.plus(light_color.scaledTo(power));
+        element.average_direction_to_light = element.average_direction_to_light.plus(
+            normal_to_light.scaledTo(weight),
+        );
+    }
+
     fn computeLightPropagation(solution: *LightingSolution) void {
         const min_emission = 0.0;
-        const ray_count = 8;
+        var ray_count: u32 = 64;
         var series: random.Series = .seed(1234);
 
         for (0..global_config.Renderer_Lighting_IterationCount) |_| {
+            const power: f32 = 1.0 / @as(f32, @floatFromInt(ray_count));
             var emitter_index: u32 = 0;
             while (emitter_index < solution.element_count) : (emitter_index += 1) {
                 var emitter: *LightingElement = &solution.elements[emitter_index];
-                const sum: f32 = emitter.emission_color.r() + emitter.emission_color.g() + emitter.emission_color.b();
+                const emitter_color: Color3 = emitter.reflection_color.hadamardProduct(emitter.emission_color);
+
+                const sum: f32 = emitter_color.r() + emitter_color.g() + emitter_color.b();
                 if (sum > min_emission) {
                     var ray_index: u32 = 0;
                     while (ray_index < ray_count) : (ray_index += 1) {
@@ -1478,28 +1496,57 @@ pub const RenderGroup = extern struct {
 
                         if (hit_index < solution.element_count) {
                             const hit: *LightingElement = &solution.elements[hit_index];
-
-                            const angular_attenuation: f32 = math.clampf01(-emission_direction.dotProduct(hit.normal));
-                            const light_color: Color3 = emitter.emission_color.scaledTo(angular_attenuation);
-
-                            hit.next_emission_color = hit.next_emission_color.plus(light_color);
-                            hit.next_emission_weight += 1;
+                            accumulateSample(hit, emitter_color, power, emission_direction.negated());
                         }
                     }
                 }
             }
 
+            const sky_ray_count: u32 = 32;
+            const sky_power: f32 =
+                1.0 / @as(f32, @floatFromInt(sky_ray_count * global_config.Renderer_Lighting_IterationCount));
+            const sky_color: Color = .new(0.79, 0.95, 1, 1.0 * sky_power);
+            const sun_color: Color = .new(
+                0.99,
+                1,
+                0.73,
+                10.0 / (@as(f32, @floatFromInt(global_config.Renderer_Lighting_IterationCount))),
+            );
+            const sun_direction: Vector3 = Vector3.new(1, 1, 1).normalizeOrZero();
+
             var reflector_index: u32 = 0;
             while (reflector_index < solution.element_count) : (reflector_index += 1) {
                 var reflector: *LightingElement = &solution.elements[reflector_index];
-                if (reflector.next_emission_weight > 0) {
-                    reflector.emission_color = reflector.reflection_color.hadamardProduct(reflector.next_emission_color)
-                        .scaledTo(1.0 / reflector.next_emission_weight);
+
+                if (false) {
+                    var sky_ray_index: u32 = 0;
+                    while (sky_ray_index < sky_ray_count) : (sky_ray_index += 1) {
+                        const ray_direction: Vector3 = sampleHemisphere(&series, reflector.normal);
+                        if (raycast(
+                            solution,
+                            reflector_index,
+                            reflector.position,
+                            ray_direction,
+                        ).index == solution.element_count) {
+                            accumulateSample(reflector, sky_color.rgb(), sky_color.a(), ray_direction);
+                        }
+                    }
+
+                    if (raycast(
+                        solution,
+                        reflector_index,
+                        reflector.position,
+                        sun_direction,
+                    ).index == solution.element_count) {
+                        accumulateSample(reflector, sun_color.rgb(), sun_color.a(), sun_direction);
+                    }
                 }
 
+                reflector.emission_color = reflector.emission_color.plus(reflector.next_emission_color);
                 reflector.next_emission_color = .zero();
-                reflector.next_emission_weight = 0;
             }
+
+            ray_count /= 2;
         }
     }
 
@@ -1511,20 +1558,24 @@ pub const RenderGroup = extern struct {
         while (dest_index < solution.element_count) : (dest_index += 1) {
             const dest: *LightingElement = &solution.elements[dest_index];
 
-            var incident_accumulated: Vector3 = .zero();
-            var incident_direction: Vector3 = .zero();
-            var ray_index: u32 = 0;
-            while (ray_index < ray_count) : (ray_index += 1) {
-                const ray_direction: Vector3 = sampleHemisphere(&series, dest.normal);
-                const incident_color: Color3 = raycast(solution, dest_index, dest.position, ray_direction).color;
-                const weight: f32 = incident_color.length();
+            if (false) {
+                var incident_accumulated: Vector3 = .zero();
+                var incident_direction: Vector3 = .zero();
+                var ray_index: u32 = 0;
+                while (ray_index < ray_count) : (ray_index += 1) {
+                    const ray_direction: Vector3 = sampleHemisphere(&series, dest.normal);
+                    const incident_color: Color3 = raycast(solution, dest_index, dest.position, ray_direction).color;
+                    const weight: f32 = incident_color.length();
 
-                incident_accumulated = incident_accumulated.plus(incident_color.toVector3());
-                incident_direction = incident_direction.plus(ray_direction.scaledTo(weight));
+                    incident_accumulated = incident_accumulated.plus(incident_color.toVector3());
+                    incident_direction = incident_direction.plus(ray_direction.scaledTo(weight));
+                }
+
+                dest.incident_light = incident_accumulated.scaledTo(1.0 / @as(f32, @floatFromInt(ray_count)));
+                dest.average_direction_to_light = incident_direction.normalizeOrZero();
+            } else {
+                dest.average_direction_to_light = dest.average_direction_to_light.normalizeOrZero();
             }
-
-            dest.incident_light = incident_accumulated.scaledTo(1.0 / @as(f32, @floatFromInt(ray_count)));
-            dest.average_direction_to_light = incident_direction.normalizeOrZero();
         }
     }
 
@@ -1707,10 +1758,10 @@ pub const RenderGroup = extern struct {
             const lookup_at: *u16 = &dest.lookup[voxel_z][voxel_y][voxel_x];
 
             const direction: Vector4 = element.average_direction_to_light.toVector4(0);
-            const light_power: f32 = element.incident_light.length();
+            const light_power: f32 = element.emission_color.length();
             var incident_light: Color = .zero();
             if (light_power > 0) {
-                const light_color: Color3 = element.incident_light.dividedByF(light_power).toColor3();
+                const light_color: Color3 = element.emission_color.dividedByF(light_power);
                 incident_light = light_color.clamp01().toColor(math.clampf01(light_power / MAX_LIGHT_POWER));
             }
             const color: u32 = incident_light.scaledTo(255).packColorRGBA();

@@ -1022,7 +1022,7 @@ pub fn addPlayer(
     const hero_scale = 3;
     const shadow_alpha = 0.5;
     const color: Color = .white();
-    if (true) {
+    if (false) {
         body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
         body.addPiece(
             .Torso,
