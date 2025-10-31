@@ -217,6 +217,8 @@ const LightingElement = extern struct {
 
     // Gather.
     average_direction_to_light: Vector3,
+
+    pack_index: u32,
 };
 
 pub const LightingSolution = extern struct {
@@ -565,9 +567,11 @@ pub const RenderGroup = extern struct {
 
         entry.?.quad_count += 1;
 
-        self.commands.quad_bitmaps[self.commands.vertex_count >> 2] = bitmap;
-        var vert: [*]TexturedVertex = self.commands.vertex_array + self.commands.vertex_count;
+        const vertex_index: u32 = self.commands.vertex_count;
         self.commands.vertex_count += 4;
+
+        self.commands.quad_bitmaps[vertex_index >> 2] = bitmap;
+        var vert: [*]TexturedVertex = self.commands.vertex_array + vertex_index;
 
         var e10 = p1.minus(p0);
         _ = e10.setZ(e10.z() + e10.w());
@@ -581,29 +585,40 @@ pub const RenderGroup = extern struct {
         const n2: Vector3 = normal;
         const n3: Vector3 = normal;
 
+        const light_count: u16 = 4;
+        const light_index: u16 = @intCast(vertex_index);
+
         vert[0].position = p3;
         vert[0].normal = n3;
         vert[0].uv = uv3;
         vert[0].color = c3;
         vert[0].emission = emission;
+        vert[0].light_index = light_index;
+        vert[0].light_count = light_count;
 
         vert[1].position = p0;
         vert[1].normal = n0;
         vert[1].uv = uv0;
         vert[1].color = c0;
         vert[1].emission = emission;
+        vert[1].light_index = light_index;
+        vert[1].light_count = light_count;
 
         vert[2].position = p2;
         vert[2].normal = n2;
         vert[2].uv = uv2;
         vert[2].color = c2;
         vert[2].emission = emission;
+        vert[2].light_index = light_index;
+        vert[2].light_count = light_count;
 
         vert[3].position = p1;
         vert[3].normal = n1;
         vert[3].uv = uv1;
         vert[3].color = c1;
         vert[3].emission = emission;
+        vert[3].light_index = light_index;
+        vert[3].light_count = light_count;
     }
 
     fn pushQuadUnpackedColors(
@@ -1320,8 +1335,8 @@ pub const RenderGroup = extern struct {
         std.debug.assert(self.current_quads != null);
         const quads: *RenderEntryTexturedQuads = self.current_quads.?;
 
-        const y_subdivision_count = 3;
-        const x_subdivision_count = 3;
+        const y_subdivision_count = 2;
+        const x_subdivision_count = 2;
         solution.element_count = (y_subdivision_count * x_subdivision_count) * quads.quad_count;
         std.debug.assert(solution.element_count < solution.elements.len);
 
@@ -1361,6 +1376,8 @@ pub const RenderGroup = extern struct {
 
             const sub_width: f32 = width / @as(f32, @floatFromInt(x_subdivision_count));
             const sub_height: f32 = height / @as(f32, @floatFromInt(y_subdivision_count));
+
+            var pack_index: u32 = vert0.light_index;
             for (0..y_subdivision_count) |y_sub| {
                 for (0..x_subdivision_count) |x_sub| {
                     element[0].width = sub_width;
@@ -1382,7 +1399,9 @@ pub const RenderGroup = extern struct {
                     element[0].emission_color = Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
                     element[0].next_emission_color = .zero();
                     element[0].average_direction_to_light = .zero();
+                    element[0].pack_index = pack_index;
 
+                    pack_index += 1;
                     element += 1;
                 }
             }
@@ -1716,46 +1735,79 @@ pub const RenderGroup = extern struct {
     pub fn outputLightingTextures(self: *RenderGroup, solution: *LightingSolution, dest: *LightingTextures) void {
         dest.clearLookup();
 
-        var min_corner: Vector3 = .splat(std.math.floatMax(f32));
-        var max_corner: Vector3 = .splat(std.math.floatMin(f32));
-        {
+        if (false) {
+            var min_corner: Vector3 = .splat(std.math.floatMax(f32));
+            var max_corner: Vector3 = .splat(std.math.floatMin(f32));
+            {
+                var element_index: u32 = 0;
+                while (element_index < solution.element_count) : (element_index += 1) {
+                    const element: *LightingElement = &solution.elements[element_index];
+
+                    for (0..3) |i| {
+                        min_corner.values[i] = @min(element.position.values[i], min_corner.values[i]);
+                        max_corner.values[i] = @max(element.position.values[i], max_corner.values[i]);
+                    }
+                }
+            }
+
+            const epsilon: Vector3 = .splat(0.1);
+            min_corner = min_corner.minus(epsilon);
+            max_corner = max_corner.plus(epsilon);
+
+            const dimension: Vector3 = max_corner.minus(min_corner);
+            const cell_dimension: Vector3 = .new(
+                dimension.x() / @as(f32, @floatFromInt(LIGHT_LOOKUP_X)),
+                dimension.y() / @as(f32, @floatFromInt(LIGHT_LOOKUP_Y)),
+                dimension.z() / @as(f32, @floatFromInt(LIGHT_LOOKUP_Z)),
+            );
+            _ = cell_dimension;
+            const inverse_cell_dimension: Vector3 = .new(
+                @as(f32, @floatFromInt(LIGHT_LOOKUP_X)) / dimension.x(),
+                @as(f32, @floatFromInt(LIGHT_LOOKUP_Y)) / dimension.y(),
+                @as(f32, @floatFromInt(LIGHT_LOOKUP_Z)) / dimension.z(),
+            );
+
+            var pack_index: u32 = 0;
             var element_index: u32 = 0;
             while (element_index < solution.element_count) : (element_index += 1) {
                 const element: *LightingElement = &solution.elements[element_index];
 
-                for (0..3) |i| {
-                    min_corner.values[i] = @min(element.position.values[i], min_corner.values[i]);
-                    max_corner.values[i] = @max(element.position.values[i], max_corner.values[i]);
+                const voxel_position: Vector3 = inverse_cell_dimension.hadamardProduct(element.position.minus(min_corner));
+                const voxel_x: u32 = @intFromFloat(voxel_position.x());
+                const voxel_y: u32 = @intFromFloat(voxel_position.y());
+                const voxel_z: u32 = @intFromFloat(voxel_position.z());
+                const lookup_at: *u16 = &dest.lookup[voxel_z][voxel_y][voxel_x];
+
+                const direction: Vector4 = element.average_direction_to_light.toVector4(0);
+                const light_power: f32 = element.emission_color.length();
+                var incident_light: Color = .zero();
+                if (light_power > 0) {
+                    const light_color: Color3 = element.emission_color.dividedByF(light_power);
+                    incident_light = light_color.clamp01().toColor(math.clampf01(light_power / MAX_LIGHT_POWER));
                 }
+                const color: u32 = incident_light.scaledTo(255).packColorRGBA();
+
+                pack_index += 1;
+                std.debug.assert(pack_index < dest.position_next.len);
+                const position_next = &dest.position_next[pack_index];
+                position_next.position = element.position.toVector4(@floatFromInt(lookup_at.*));
+                // position_next.next = @floatFromInt(lookup_at.*);
+                lookup_at.* = @intCast(pack_index);
+
+                dest.color[pack_index] = color;
+                dest.direction[pack_index] = direction;
             }
         }
 
-        const epsilon: Vector3 = .splat(0.1);
-        min_corner = min_corner.minus(epsilon);
-        max_corner = max_corner.plus(epsilon);
+        const min_corner: Vector3 = .zero();
+        const max_corner: Vector3 = .one();
+        const cell_dimension: Vector3 = .one();
+        const inverse_cell_dimension: Vector3 = .one();
 
-        const dimension: Vector3 = max_corner.minus(min_corner);
-        const cell_dimension: Vector3 = .new(
-            dimension.x() / @as(f32, @floatFromInt(LIGHT_LOOKUP_X)),
-            dimension.y() / @as(f32, @floatFromInt(LIGHT_LOOKUP_Y)),
-            dimension.z() / @as(f32, @floatFromInt(LIGHT_LOOKUP_Z)),
-        );
-        const inverse_cell_dimension: Vector3 = .new(
-            @as(f32, @floatFromInt(LIGHT_LOOKUP_X)) / dimension.x(),
-            @as(f32, @floatFromInt(LIGHT_LOOKUP_Y)) / dimension.y(),
-            @as(f32, @floatFromInt(LIGHT_LOOKUP_Z)) / dimension.z(),
-        );
-
-        var pack_index: u32 = 0;
         var element_index: u32 = 0;
         while (element_index < solution.element_count) : (element_index += 1) {
             const element: *LightingElement = &solution.elements[element_index];
-
-            const voxel_position: Vector3 = inverse_cell_dimension.hadamardProduct(element.position.minus(min_corner));
-            const voxel_x: u32 = @intFromFloat(voxel_position.x());
-            const voxel_y: u32 = @intFromFloat(voxel_position.y());
-            const voxel_z: u32 = @intFromFloat(voxel_position.z());
-            const lookup_at: *u16 = &dest.lookup[voxel_z][voxel_y][voxel_x];
+            const pack_index: u32 = element.pack_index;
 
             const direction: Vector4 = element.average_direction_to_light.toVector4(0);
             const light_power: f32 = element.emission_color.length();
@@ -1766,12 +1818,9 @@ pub const RenderGroup = extern struct {
             }
             const color: u32 = incident_light.scaledTo(255).packColorRGBA();
 
-            pack_index += 1;
             std.debug.assert(pack_index < dest.position_next.len);
             const position_next = &dest.position_next[pack_index];
-            position_next.position = element.position.toVector4(@floatFromInt(lookup_at.*));
-            // position_next.next = @floatFromInt(lookup_at.*);
-            lookup_at.* = @intCast(pack_index);
+            position_next.position = element.position.toVector4(0);
 
             dest.color[pack_index] = color;
             dest.direction[pack_index] = direction;

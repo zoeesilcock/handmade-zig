@@ -306,6 +306,8 @@ const OpenGLProgramCommon = struct {
     vert_normal_id: i32 = 0,
     vert_uv_id: i32 = 0,
     vert_color_id: i32 = 0,
+    vert_light_index_id: i32 = 0,
+    vert_light_count_id: i32 = 0,
 
     sampler_count: u32,
     samplers: [16]i32 = [1]i32{0} ** 16,
@@ -672,11 +674,17 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\in vec2 VertUV;
         \\in vec4 VertColor;
         \\
+        \\in unsigned int VertLightIndex;
+        \\in unsigned int VertLightCount;
+        \\
         \\smooth out vec2 FragUV;
         \\smooth out vec4 FragColor;
         \\smooth out float FogDistance;
         \\smooth out vec3 WorldPosition;
         \\smooth out vec3 WorldNormal;
+        \\
+        \\flat out unsigned int FragLightIndex;
+        \\flat out unsigned int FragLightCount;
         \\
         \\void main(void)
         \\{
@@ -699,6 +707,9 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\  FogDistance = dot(ZVertex.xyz - CameraPosition, FogDirection);
         \\  WorldPosition = ZVertex.xyz;
         \\  WorldNormal = VertN;
+        \\
+        \\  FragLightIndex = VertLightIndex;
+        \\  FragLightCount = VertLightCount;
         \\}
     ;
 
@@ -761,6 +772,9 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\smooth in vec3 WorldPosition;
         \\smooth in vec3 WorldNormal;
         \\
+        \\flat in unsigned int FragLightIndex;
+        \\flat in unsigned int FragLightCount;
+        \\
         \\layout(location = 0) out vec4 BlendUnitColor[3];
         \\
         \\int ClampVoxel(int A, int Max)
@@ -804,6 +818,43 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\  return(Result.rgb);
         \\}
         \\
+        \\vec3 SumLight()
+        \\{
+        \\  vec4 Result = vec4(0, 0, 0, 0);
+        \\
+        \\  int LightIndex = int(FragLightIndex);
+        \\  int LightCount = int(FragLightCount);
+        \\  if (LightCount > 4)
+        \\  {
+        \\    LightCount = 0;
+        \\  }
+        \\
+        \\  while (LightCount > 0)
+        \\  {
+        \\    vec4 LightPositionNext = texelFetch(PositionNextSampler, LightIndex, 0);
+        \\    vec4 LightColor = texelFetch(ColorSampler, LightIndex, 0);
+        \\    vec4 LightDirection = texelFetch(DirectionSampler, LightIndex, 0);
+        \\
+        \\    vec3 LightPosition = LightPositionNext.rgb;
+        \\
+        \\    float Contribution = 1.0f / (1.0f + LengthSq(LightPosition - WorldPosition));
+        \\    float DirectionalFalloff = clamp(dot(LightDirection.rgb, WorldNormal), 0, 1);
+        \\
+        \\    Result.rgb += Contribution * DirectionalFalloff * LightColor.rgb * LightColor.a * MAX_LIGHT_POWER;
+        \\    Result.a += Contribution;
+        \\
+        \\    LightIndex += 1;
+        \\    LightCount -= 1;
+        \\  }
+        \\
+        \\  if (Result.a > 0.0f)
+        \\  {
+        \\    Result.rgb *= 1.0f / Result.a;
+        \\  }
+        \\
+        \\  return(Result.rgb);
+        \\}
+        \\
         \\void main(void)
         \\{
         \\#if DepthPeel
@@ -835,32 +886,37 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\
         \\#if LIGHTING_DISABLED
         \\#else
-        \\    vec3 VoxelPosition = (VoxelInverseCellDimension * (WorldPosition - VoxelMinCorner)) - vec3(0.5f, 0.5f, 0.5f);
-        \\    vec3 VoxelPositionFloor = floor(VoxelPosition);
-        \\    vec3 VoxelFraction = VoxelPosition - VoxelPositionFloor;
-        \\    ivec3 VoxelIndex = ivec3(VoxelPositionFloor);
+        // \\    vec3 VoxelPosition = (VoxelInverseCellDimension * (WorldPosition - VoxelMinCorner)) - vec3(0.5f, 0.5f, 0.5f);
+        // \\    vec3 VoxelPositionFloor = floor(VoxelPosition);
+        // \\    vec3 VoxelFraction = VoxelPosition - VoxelPositionFloor;
+        // \\    ivec3 VoxelIndex = ivec3(VoxelPositionFloor);
+        // \\
+        // \\    vec3 L000 = SumVoxelLight(VoxelIndex);
+        // \\    vec3 L001 = SumVoxelLight(VoxelIndex + ivec3(0, 0, 1));
+        // \\    vec3 L010 = SumVoxelLight(VoxelIndex + ivec3(0, 1, 0));
+        // \\    vec3 L011 = SumVoxelLight(VoxelIndex + ivec3(0, 1, 1));
+        // \\    vec3 L100 = SumVoxelLight(VoxelIndex + ivec3(1, 0, 0));
+        // \\    vec3 L101 = SumVoxelLight(VoxelIndex + ivec3(1, 0, 1));
+        // \\    vec3 L110 = SumVoxelLight(VoxelIndex + ivec3(1, 1, 0));
+        // \\    vec3 L111 = SumVoxelLight(VoxelIndex + ivec3(1, 1, 1));
+        // \\
+        // \\    vec3 L00 = mix(L000, L001, VoxelFraction.z);
+        // \\    vec3 L01 = mix(L010, L011, VoxelFraction.z);
+        // \\    vec3 L10 = mix(L100, L101, VoxelFraction.z);
+        // \\    vec3 L11 = mix(L110, L111, VoxelFraction.z);
+        // \\
+        // \\    vec3 L0 = mix(L00, L01, VoxelFraction.y);
+        // \\    vec3 L1 = mix(L10, L11, VoxelFraction.y);
+        // \\
+        // \\    vec3 L = mix(L0, L1, VoxelFraction.x);
+        // \\    vec3 L = SumLight();
         \\
-        \\    vec3 L000 = SumVoxelLight(VoxelIndex);
-        \\    vec3 L001 = SumVoxelLight(VoxelIndex + ivec3(0, 0, 1));
-        \\    vec3 L010 = SumVoxelLight(VoxelIndex + ivec3(0, 1, 0));
-        \\    vec3 L011 = SumVoxelLight(VoxelIndex + ivec3(0, 1, 1));
-        \\    vec3 L100 = SumVoxelLight(VoxelIndex + ivec3(1, 0, 0));
-        \\    vec3 L101 = SumVoxelLight(VoxelIndex + ivec3(1, 0, 1));
-        \\    vec3 L110 = SumVoxelLight(VoxelIndex + ivec3(1, 1, 0));
-        \\    vec3 L111 = SumVoxelLight(VoxelIndex + ivec3(1, 1, 1));
+        \\    vec3 L = vec3(0, 0, 0);
+        \\    L.r = float(FragLightCount) / 16.0f;
+        \\    L.g = float(FragLightIndex) / 4096.0f;
         \\
-        \\    vec3 L00 = mix(L000, L001, VoxelFraction.z);
-        \\    vec3 L01 = mix(L010, L011, VoxelFraction.z);
-        \\    vec3 L10 = mix(L100, L101, VoxelFraction.z);
-        \\    vec3 L11 = mix(L110, L111, VoxelFraction.z);
-        \\
-        \\    vec3 L0 = mix(L00, L01, VoxelFraction.y);
-        \\    vec3 L1 = mix(L10, L11, VoxelFraction.y);
-        \\
-        \\    vec3 L = mix(L0, L1, VoxelFraction.x);
-        \\
-        \\    SurfaceReflection.rgb *= L;
-        // \\    SurfaceReflection.rgb = L;
+        // \\    SurfaceReflection.rgb *= L;
+        \\    SurfaceReflection.rgb = L;
         \\#endif
         \\
         // \\    if (VoxelIndex.x < 0 ||
@@ -1663,6 +1719,8 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
     const normal_array_index: i32 = program.vert_normal_id;
     const uv_array_index: i32 = program.vert_uv_id;
     const color_array_index: i32 = program.vert_color_id;
+    const light_index_index: i32 = program.vert_light_index_id;
+    const light_count_index: i32 = program.vert_light_count_id;
 
     if (isValidArray(position_array_index)) {
         platform.optGLEnableVertexAttribArray.?(@intCast(position_array_index));
@@ -1708,6 +1766,29 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
             @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
         );
     }
+    // TODO: Can you send down a "vector of 2 unsigned shorts"?
+    if (isValidArray(light_index_index)) {
+        platform.optGLEnableVertexAttribArray.?(@intCast(light_index_index));
+        platform.optGLVertexAttribPointer.?(
+            @intCast(light_index_index),
+            1,
+            gl.GL_UNSIGNED_SHORT,
+            false,
+            @sizeOf(TexturedVertex),
+            @ptrFromInt(@offsetOf(TexturedVertex, "light_index")),
+        );
+    }
+    if (isValidArray(light_count_index)) {
+        platform.optGLEnableVertexAttribArray.?(@intCast(light_count_index));
+        platform.optGLVertexAttribPointer.?(
+            @intCast(light_count_index),
+            1,
+            gl.GL_UNSIGNED_SHORT,
+            false,
+            @sizeOf(TexturedVertex),
+            @ptrFromInt(@offsetOf(TexturedVertex, "light_count")),
+        );
+    }
 
     var sampler_index: u32 = 0;
     while (sampler_index < program.sampler_count) : (sampler_index += 1) {
@@ -1722,6 +1803,8 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     const normal_array_index: i32 = program.vert_normal_id;
     const color_array_index: i32 = program.vert_color_id;
     const uv_array_index: i32 = program.vert_uv_id;
+    const light_index_index: i32 = program.vert_light_index_id;
+    const light_count_index: i32 = program.vert_light_count_id;
 
     if (isValidArray(position_array_index)) {
         platform.optGLDisableVertexAttribArray.?(@intCast(position_array_index));
@@ -1734,6 +1817,12 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     }
     if (isValidArray(uv_array_index)) {
         platform.optGLDisableVertexAttribArray.?(@intCast(uv_array_index));
+    }
+    if (isValidArray(light_index_index)) {
+        platform.optGLDisableVertexAttribArray.?(@intCast(light_index_index));
+    }
+    if (isValidArray(light_count_index)) {
+        platform.optGLDisableVertexAttribArray.?(@intCast(light_count_index));
     }
 }
 
@@ -2885,6 +2974,8 @@ fn createProgram(
     program.vert_normal_id = platform.optGLGetAttribLocation.?(program_id, "VertN");
     program.vert_uv_id = platform.optGLGetAttribLocation.?(program_id, "VertUV");
     program.vert_color_id = platform.optGLGetAttribLocation.?(program_id, "VertColor");
+    program.vert_light_index_id = platform.optGLGetAttribLocation.?(program_id, "VertLightIndex");
+    program.vert_light_count_id = platform.optGLGetAttribLocation.?(program_id, "VertLightCount");
     program.sampler_count = 0;
 
     return program_id;

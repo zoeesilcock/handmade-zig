@@ -880,9 +880,9 @@ pub const debug_color_table: [11]Color3 = .{
 };
 
 pub const LIGHT_DATA_WIDTH = 8192;
-pub const LIGHT_LOOKUP_X: u32 = 16;
-pub const LIGHT_LOOKUP_Y: u32 = 16;
-pub const LIGHT_LOOKUP_Z: u32 = 16;
+pub const LIGHT_LOOKUP_X: u32 = 8;
+pub const LIGHT_LOOKUP_Y: u32 = 8;
+pub const LIGHT_LOOKUP_Z: u32 = 8;
 pub const MAX_LIGHT_POWER: f32 = 10;
 
 pub const LightingTextures = extern struct {
@@ -917,6 +917,10 @@ pub const TexturedVertex = extern struct {
     uv: Vector2,
     color: u32, // Packed RGBA in memory order (ABGR in little endian).
     emission: f32 = 0,
+
+    // TODO: Doesn't need to be per-vertex - move this into its own per-primitive buffer.
+    light_index: u16 = 0,
+    light_count: u16 = 0,
 };
 
 pub const RenderSettings = extern struct {
