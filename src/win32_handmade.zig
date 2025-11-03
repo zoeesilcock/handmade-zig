@@ -173,6 +173,8 @@ const GLDisableVertexAttribArray: type = fn (index: u32) callconv(.winapi) void;
 pub var optGLDisableVertexAttribArray: ?*const GLDisableVertexAttribArray = null;
 const GLVertexAttribPointer: type = fn (index: u32, size: i32, data_type: u32, normalized: bool, stride: isize, pointer: ?*anyopaque) callconv(.winapi) void;
 pub var optGLVertexAttribPointer: ?*const GLVertexAttribPointer = null;
+const GLVertexAttribIPointer: type = fn (index: u32, size: i32, data_type: u32, stride: isize, pointer: ?*anyopaque) callconv(.winapi) void;
+pub var optGLVertexAttribIPointer: ?*const GLVertexAttribIPointer = null;
 const GLGenVertexArrays: type = fn (size: i32, arrays: ?*u32) callconv(.winapi) void;
 pub var optGLGenVertexArrays: ?*const GLGenVertexArrays = null;
 const GLBindVertexArray: type = fn (array: u32) callconv(.winapi) void;
@@ -1644,6 +1646,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLEnableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glEnableVertexAttribArray"));
             optGLDisableVertexAttribArray = @ptrCast(win32.wglGetProcAddress("glDisableVertexAttribArray"));
             optGLVertexAttribPointer = @ptrCast(win32.wglGetProcAddress("glVertexAttribPointer"));
+            optGLVertexAttribIPointer = @ptrCast(win32.wglGetProcAddress("glVertexAttribIPointer"));
             optGLGenVertexArrays = @ptrCast(win32.wglGetProcAddress("glGenVertexArrays"));
             optGLBindVertexArray = @ptrCast(win32.wglGetProcAddress("glBindVertexArray"));
             optGLDrawArrays = @ptrCast(win32.wglGetProcAddress("glDrawArrays"));
@@ -1684,6 +1687,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             std.debug.assert(optGLEnableVertexAttribArray != null);
             std.debug.assert(optGLDisableVertexAttribArray != null);
             std.debug.assert(optGLVertexAttribPointer != null);
+            std.debug.assert(optGLVertexAttribIPointer != null);
             std.debug.assert(optGLGenVertexArrays != null);
             std.debug.assert(optGLBindVertexArray != null);
             std.debug.assert(optGLDrawArrays != null);

@@ -496,6 +496,10 @@ pub fn updateAndRenderWorld(
     TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
     defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
 
+    if (!world_mode.show_lighting) {
+        render_group.enableLighting();
+    }
+
     const result = false;
 
     var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
@@ -731,10 +735,11 @@ pub fn updateAndRenderWorld(
         }
         endSim(&transient_state.arena, &world_sim, world_mode.world);
 
-        if (input.f_key_pressed[1]) {
+        // if (input.f_key_pressed[1])
+        {
             render_group.lightingTest(&world_mode.test_lighting);
             render_group.outputLightingTextures(&world_mode.test_lighting, &world_mode.test_textures);
-            world_mode.show_lighting = true;
+            // world_mode.show_lighting = true;
         }
     }
 

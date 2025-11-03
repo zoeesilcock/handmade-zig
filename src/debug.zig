@@ -2346,21 +2346,18 @@ pub fn frameEnd(
         game_memory.debug_state = debugInit(@intCast(commands.settings.width), @intCast(commands.settings.height));
     }
 
-    // TODO: Why do the debug elements disturb the light calculations for us, but not for Casey?
-    if (false) {
-        if (game_memory.debug_state) |debug_state| {
-            if (getGameAssets(game_memory)) |assets| {
-                debugStart(
-                    debug_state,
-                    commands,
-                    assets,
-                    getMainGenerationID(game_memory),
-                    @intCast(commands.settings.width),
-                    @intCast(commands.settings.height),
-                );
-                debug_state.collateDebugRecords(event_count, &shared.global_debug_table.events[event_array_index]);
-                debugEnd(debug_state, &input);
-            }
+    if (game_memory.debug_state) |debug_state| {
+        if (getGameAssets(game_memory)) |assets| {
+            debugStart(
+                debug_state,
+                commands,
+                assets,
+                getMainGenerationID(game_memory),
+                @intCast(commands.settings.width),
+                @intCast(commands.settings.height),
+            );
+            debug_state.collateDebugRecords(event_count, &shared.global_debug_table.events[event_array_index]);
+            debugEnd(debug_state, &input);
         }
     }
 }

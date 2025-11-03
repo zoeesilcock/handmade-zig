@@ -674,8 +674,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\in vec2 VertUV;
         \\in vec4 VertColor;
         \\
-        \\in unsigned int VertLightIndex;
-        \\in unsigned int VertLightCount;
+        \\in int VertLightIndex;
+        \\in int VertLightCount;
         \\
         \\smooth out vec2 FragUV;
         \\smooth out vec4 FragColor;
@@ -683,8 +683,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\smooth out vec3 WorldPosition;
         \\smooth out vec3 WorldNormal;
         \\
-        \\flat out unsigned int FragLightIndex;
-        \\flat out unsigned int FragLightCount;
+        \\flat out int FragLightIndex;
+        \\flat out int FragLightCount;
         \\
         \\void main(void)
         \\{
@@ -772,8 +772,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\smooth in vec3 WorldPosition;
         \\smooth in vec3 WorldNormal;
         \\
-        \\flat in unsigned int FragLightIndex;
-        \\flat in unsigned int FragLightCount;
+        \\flat in int FragLightIndex;
+        \\flat in int FragLightCount;
         \\
         \\layout(location = 0) out vec4 BlendUnitColor[3];
         \\
@@ -822,12 +822,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\{
         \\  vec4 Result = vec4(0, 0, 0, 0);
         \\
-        \\  int LightIndex = int(FragLightIndex);
-        \\  int LightCount = int(FragLightCount);
-        \\  if (LightCount > 4)
-        \\  {
-        \\    LightCount = 0;
-        \\  }
+        \\  int LightIndex = FragLightIndex;
+        \\  int LightCount = FragLightCount;
         \\
         \\  while (LightCount > 0)
         \\  {
@@ -909,14 +905,12 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         // \\    vec3 L1 = mix(L10, L11, VoxelFraction.y);
         // \\
         // \\    vec3 L = mix(L0, L1, VoxelFraction.x);
-        // \\    vec3 L = SumLight();
         \\
-        \\    vec3 L = vec3(0, 0, 0);
-        \\    L.r = float(FragLightCount) / 16.0f;
-        \\    L.g = float(FragLightIndex) / 4096.0f;
-        \\
-        // \\    SurfaceReflection.rgb *= L;
-        \\    SurfaceReflection.rgb = L;
+        \\    if (FragLightIndex != 0)
+        \\    {
+        \\      vec3 L = SumLight();
+        \\      SurfaceReflection.rgb *= L;
+        \\    }
         \\#endif
         \\
         // \\    if (VoxelIndex.x < 0 ||
@@ -936,6 +930,9 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\  }
         \\}
     ;
+
+    // TODO: Why is our clear color much darker than Casey's?
+    // TODO: Why does the bottom half of the level flicker between lit and unlit?
 
     const program_handle = createProgram(
         @ptrCast(defines[0..defines_length]),
@@ -1769,22 +1766,20 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
     // TODO: Can you send down a "vector of 2 unsigned shorts"?
     if (isValidArray(light_index_index)) {
         platform.optGLEnableVertexAttribArray.?(@intCast(light_index_index));
-        platform.optGLVertexAttribPointer.?(
+        platform.optGLVertexAttribIPointer.?(
             @intCast(light_index_index),
             1,
             gl.GL_UNSIGNED_SHORT,
-            false,
             @sizeOf(TexturedVertex),
             @ptrFromInt(@offsetOf(TexturedVertex, "light_index")),
         );
     }
     if (isValidArray(light_count_index)) {
         platform.optGLEnableVertexAttribArray.?(@intCast(light_count_index));
-        platform.optGLVertexAttribPointer.?(
+        platform.optGLVertexAttribIPointer.?(
             @intCast(light_count_index),
             1,
             gl.GL_UNSIGNED_SHORT,
-            false,
             @sizeOf(TexturedVertex),
             @ptrFromInt(@offsetOf(TexturedVertex, "light_count")),
         );

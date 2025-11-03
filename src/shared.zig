@@ -911,6 +911,27 @@ pub const LightingTexel = extern struct {
     // next: f32,
 };
 
+pub const LightingSurface = extern struct {
+    position: Vector3,
+    normal: Vector3,
+    transparency: f32,
+    width: f32,
+    height: f32,
+    x_axis: Vector3,
+    y_axis: Vector3,
+    light_index: u16 = 0,
+    light_count: u16 = 0,
+};
+
+pub const LightingPoint = extern struct {
+    position: Vector3,
+    reflection_color: Color3,
+
+    // TODO: Is it better to duplicate these or not?
+    normal: Vector3,
+    surface_index: u32,
+};
+
 pub const TexturedVertex = extern struct {
     position: Vector4,
     normal: Vector3,
