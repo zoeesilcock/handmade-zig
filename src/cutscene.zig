@@ -383,7 +383,6 @@ fn renderLayeredScene(
             -0.1,
             1000,
             null,
-            null,
         );
 
         if (scene.layers.len == 0) {

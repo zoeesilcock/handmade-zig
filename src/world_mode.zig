@@ -258,7 +258,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             room_radius_y,
         );
 
-        if (true) {
+        if (false) {
             // _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
             // _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
@@ -496,10 +496,6 @@ pub fn updateAndRenderWorld(
     TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
     defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
 
-    if (!world_mode.show_lighting) {
-        render_group.enableLighting();
-    }
-
     const result = false;
 
     var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
@@ -534,7 +530,6 @@ pub fn updateAndRenderWorld(
 
     const near_clip_plane: f32 = 3;
     const far_clip_plane: f32 = 100;
-    const debug_light_position: Vector3 = world_mode.debug_light_position;
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
@@ -555,7 +550,6 @@ pub fn updateAndRenderWorld(
         near_clip_plane,
         far_clip_plane,
         true,
-        debug_light_position,
     );
 
     if (world_mode.use_debug_camera) {
@@ -572,7 +566,6 @@ pub fn updateAndRenderWorld(
             near_clip_plane,
             far_clip_plane,
             false,
-            debug_light_position,
         );
     }
 
@@ -597,23 +590,26 @@ pub fn updateAndRenderWorld(
         render_group.commands.settings.lighting_disabled = !render_group.commands.settings.lighting_disabled;
     }
 
+    var recompute_lighting: bool = false;
     if (input.f_key_pressed[5]) {
         if (global_config.Renderer_Lighting_IterationCount > 0) {
             global_config.Renderer_Lighting_IterationCount -= 1;
+            recompute_lighting = true;
         }
     }
     if (input.f_key_pressed[6]) {
         global_config.Renderer_Lighting_IterationCount += 1;
+        recompute_lighting = true;
+    }
+    if (input.f_key_pressed[1]) {
+        world_mode.show_lighting = !world_mode.show_lighting;
     }
 
-    // if (false) {
-    if (world_mode.show_lighting) {
-        render_group.outputLighting(&world_mode.test_lighting, &world_mode.test_textures);
-
-        if (input.f_key_pressed[1]) {
-            world_mode.show_lighting = false;
-        }
+    if (!recompute_lighting and world_mode.show_lighting) {
+        render_group.outputLightingPoints(&world_mode.test_lighting, &world_mode.test_textures);
     } else {
+        render_group.enableLighting();
+
         if (false) {
             var sim_work: [16]WorldSimWork = undefined;
             var sim_index: u32 = 0;
@@ -739,7 +735,6 @@ pub fn updateAndRenderWorld(
         {
             render_group.lightingTest(&world_mode.test_lighting);
             render_group.outputLightingTextures(&world_mode.test_lighting, &world_mode.test_textures);
-            // world_mode.show_lighting = true;
         }
     }
 

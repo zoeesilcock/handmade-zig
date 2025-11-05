@@ -880,35 +880,9 @@ pub const debug_color_table: [11]Color3 = .{
 };
 
 pub const LIGHT_DATA_WIDTH = 8192;
-pub const LIGHT_LOOKUP_X: u32 = 8;
-pub const LIGHT_LOOKUP_Y: u32 = 8;
-pub const LIGHT_LOOKUP_Z: u32 = 8;
-pub const MAX_LIGHT_POWER: f32 = 10;
-
 pub const LightingTextures = extern struct {
-    position_next: [LIGHT_DATA_WIDTH]LightingTexel,
-    color: [LIGHT_DATA_WIDTH]u32,
-    direction: [LIGHT_DATA_WIDTH]Vector4,
-    lookup: [LIGHT_LOOKUP_Z][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]u16,
-
-    min_corner: Vector3,
-    max_corner: Vector3,
-    cell_dimension: Vector3,
-    inverse_cell_dimension: Vector3,
-
-    pub fn clearLookup(self: *LightingTextures) void {
-        self.lookup =
-            [1][LIGHT_LOOKUP_Y][LIGHT_LOOKUP_X]u16{
-                [1][LIGHT_LOOKUP_X]u16{
-                    [1]u16{0} ** LIGHT_LOOKUP_X,
-                } ** LIGHT_LOOKUP_Y,
-            } ** LIGHT_LOOKUP_Z;
-    }
-};
-
-pub const LightingTexel = extern struct {
-    position: Vector4,
-    // next: f32,
+    light_data0: [LIGHT_DATA_WIDTH]Vector4, // Px, Py, Pz, Dx
+    light_data1: [LIGHT_DATA_WIDTH]Vector4, // SignDz*Cr, Cg, Cb, Dy
 };
 
 pub const LightingSurface = extern struct {

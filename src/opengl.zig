@@ -233,7 +233,7 @@ const ALL_COLOR_ATTACHMENTS = [_]u32{
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
-const ALLOW_GPU_SRGB = false;
+const ALLOW_GPU_SRGB = true;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 
 const RenderCommands = shared.RenderCommands;
@@ -250,10 +250,6 @@ const RenderEntryCube = rendergroup.RenderEntryCube;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
 const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
 const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
-const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
-const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
-const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
-const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -325,10 +321,6 @@ const ZBiasProgram = struct {
     clip_alpha_start_distance_id: i32 = 0,
     clip_alpha_end_distance_id: i32 = 0,
     alpha_threshold_id: i32 = 0,
-
-    debug_light_position_id: i32 = 0,
-    voxel_min_corner_id: i32 = 0,
-    voxel_inverse_cell_dimension_id: i32 = 0,
 };
 
 const ResolveMultisampleProgram = struct {
@@ -423,12 +415,8 @@ const OpenGL = struct {
     multi_grid_light_up: OpenGLProgramCommon = undefined,
     multi_grid_light_down: MultiGridLightDownProgram = undefined,
 
-    voxel_min_corner: Vector3 = .zero(),
-    voxel_inverse_cell_dimension: Vector3 = .zero(),
-    lighting_position_next: u32 = 0,
-    lighting_color: u32 = 0,
-    lighting_direction: u32 = 0,
-    lighting_lookup: u32 = 0,
+    light_data0: u32 = 0,
+    light_data1: u32 = 0,
 
     light_buffer_count: u32 = 0,
     light_buffers: [12]LightBuffer = undefined,
@@ -645,20 +633,12 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\#define ShaderSimTexReadSRGB %d
         \\#define ShaderSimTexWriteSRGB %d
         \\#define DepthPeel %d
-        \\#define LIGHT_LOOKUP_X %d
-        \\#define LIGHT_LOOKUP_Y %d
-        \\#define LIGHT_LOOKUP_Z %d
-        \\#define MAX_LIGHT_POWER %f
         \\#define LIGHTING_DISABLED %d
     ,
         .{
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
             @as(i32, @intCast(@intFromBool(depth_peel))),
-            LIGHT_LOOKUP_X,
-            LIGHT_LOOKUP_Y,
-            LIGHT_LOOKUP_Z,
-            MAX_LIGHT_POWER,
             @as(u32, @intCast(@intFromBool(lighting_disabled))),
         },
     );
@@ -757,14 +737,9 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\uniform float ClipAlphaStartDistance;
         \\uniform float ClipAlphaEndDistance;
         \\uniform vec3 CameraPosition;
-        \\uniform vec3 LightPosition;
         \\
-        \\uniform sampler1D PositionNextSampler;
-        \\uniform sampler1D ColorSampler;
-        \\uniform sampler1D DirectionSampler;
-        \\uniform usampler3D LookupSampler;
-        \\uniform vec3 VoxelMinCorner;
-        \\uniform vec3 VoxelInverseCellDimension;
+        \\uniform sampler1D Light0Sampler;
+        \\uniform sampler1D Light1Sampler;
         \\
         \\smooth in vec2 FragUV;
         \\smooth in vec4 FragColor;
@@ -777,47 +752,6 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\
         \\layout(location = 0) out vec4 BlendUnitColor[3];
         \\
-        \\int ClampVoxel(int A, int Max)
-        \\{
-        \\  if (A < 0) A = 0;
-        \\  if (A > Max) A = Max;
-        \\  return(A);
-        \\}
-        \\
-        \\vec3 SumVoxelLight(ivec3 At)
-        \\{
-        \\  At.x = ClampVoxel(At.x, LIGHT_LOOKUP_X - 1);
-        \\  At.y = ClampVoxel(At.y, LIGHT_LOOKUP_Y - 1);
-        \\  At.z = ClampVoxel(At.z, LIGHT_LOOKUP_Z - 1);
-        \\
-        \\  vec4 Result = vec4(0, 0, 0, 0);
-        \\
-        \\  int LightIndex = int(texelFetch(LookupSampler, At, 0).r);
-        \\
-        \\  while (LightIndex != 0)
-        \\  {
-        \\    vec4 LightPositionNext = texelFetch(PositionNextSampler, LightIndex, 0);
-        \\    vec4 LightColor = texelFetch(ColorSampler, LightIndex, 0);
-        \\    vec4 LightDirection = texelFetch(DirectionSampler, LightIndex, 0);
-        \\
-        \\    vec3 LightPosition = LightPositionNext.rgb;
-        \\    LightIndex = int(LightPositionNext.a);
-        \\
-        \\    float Contribution = 1.0f / (1.0f + LengthSq(LightPosition - WorldPosition));
-        \\    float DirectionalFalloff = clamp(dot(LightDirection.rgb, WorldNormal), 0, 1);
-        \\
-        \\    Result.rgb += Contribution * DirectionalFalloff * LightColor.rgb * LightColor.a * MAX_LIGHT_POWER;
-        \\    Result.a += Contribution;
-        \\  }
-        \\
-        \\  if (Result.a > 0.0f)
-        \\  {
-        \\    Result.rgb *= 1.0f / Result.a;
-        \\  }
-        \\
-        \\  return(Result.rgb);
-        \\}
-        \\
         \\vec3 SumLight()
         \\{
         \\  vec4 Result = vec4(0, 0, 0, 0);
@@ -827,16 +761,26 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\
         \\  while (LightCount > 0)
         \\  {
-        \\    vec4 LightPositionNext = texelFetch(PositionNextSampler, LightIndex, 0);
-        \\    vec4 LightColor = texelFetch(ColorSampler, LightIndex, 0);
-        \\    vec4 LightDirection = texelFetch(DirectionSampler, LightIndex, 0);
+        \\    vec4 LightData0 = texelFetch(Light0Sampler, LightIndex, 0);
+        \\    vec4 LightData1 = texelFetch(Light1Sampler, LightIndex, 0);
         \\
-        \\    vec3 LightPosition = LightPositionNext.rgb;
+        \\    vec3 LightPosition = LightData0.xyz;
+        \\    vec3 LightColor = LightData1.rgb;
+        \\    vec3 LightDirection;
+        \\    LightDirection.x = LightData0.a;
+        \\    LightDirection.y = LightData1.a;
+        \\    LightDirection.z =
+        \\      sqrt(1.0f - (LightDirection.x * LightDirection.x + LightDirection.y * LightDirection.y));
+        \\    if (LightColor.r < 0)
+        \\    {
+        \\      LightColor.r = -LightColor.r;
+        \\      LightDirection.z = -LightDirection.z;
+        \\    }
         \\
         \\    float Contribution = 1.0f / (1.0f + LengthSq(LightPosition - WorldPosition));
         \\    float DirectionalFalloff = clamp(dot(LightDirection.rgb, WorldNormal), 0, 1);
         \\
-        \\    Result.rgb += Contribution * DirectionalFalloff * LightColor.rgb * LightColor.a * MAX_LIGHT_POWER;
+        \\    Result.rgb += Contribution * DirectionalFalloff * LightColor.rgb;
         \\    Result.a += Contribution;
         \\
         \\    LightIndex += 1;
@@ -882,30 +826,6 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\
         \\#if LIGHTING_DISABLED
         \\#else
-        // \\    vec3 VoxelPosition = (VoxelInverseCellDimension * (WorldPosition - VoxelMinCorner)) - vec3(0.5f, 0.5f, 0.5f);
-        // \\    vec3 VoxelPositionFloor = floor(VoxelPosition);
-        // \\    vec3 VoxelFraction = VoxelPosition - VoxelPositionFloor;
-        // \\    ivec3 VoxelIndex = ivec3(VoxelPositionFloor);
-        // \\
-        // \\    vec3 L000 = SumVoxelLight(VoxelIndex);
-        // \\    vec3 L001 = SumVoxelLight(VoxelIndex + ivec3(0, 0, 1));
-        // \\    vec3 L010 = SumVoxelLight(VoxelIndex + ivec3(0, 1, 0));
-        // \\    vec3 L011 = SumVoxelLight(VoxelIndex + ivec3(0, 1, 1));
-        // \\    vec3 L100 = SumVoxelLight(VoxelIndex + ivec3(1, 0, 0));
-        // \\    vec3 L101 = SumVoxelLight(VoxelIndex + ivec3(1, 0, 1));
-        // \\    vec3 L110 = SumVoxelLight(VoxelIndex + ivec3(1, 1, 0));
-        // \\    vec3 L111 = SumVoxelLight(VoxelIndex + ivec3(1, 1, 1));
-        // \\
-        // \\    vec3 L00 = mix(L000, L001, VoxelFraction.z);
-        // \\    vec3 L01 = mix(L010, L011, VoxelFraction.z);
-        // \\    vec3 L10 = mix(L100, L101, VoxelFraction.z);
-        // \\    vec3 L11 = mix(L110, L111, VoxelFraction.z);
-        // \\
-        // \\    vec3 L0 = mix(L00, L01, VoxelFraction.y);
-        // \\    vec3 L1 = mix(L10, L11, VoxelFraction.y);
-        // \\
-        // \\    vec3 L = mix(L0, L1, VoxelFraction.x);
-        \\
         \\    if (FragLightIndex != 0)
         \\    {
         \\      vec3 L = SumLight();
@@ -913,15 +833,6 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\    }
         \\#endif
         \\
-        // \\    if (VoxelIndex.x < 0 ||
-        // \\        VoxelIndex.y < 0 ||
-        // \\        VoxelIndex.z < 0 ||
-        // \\        VoxelIndex.x >= 8 ||
-        // \\        VoxelIndex.y >= 8 ||
-        // \\        VoxelIndex.z >= 32)
-        // \\    {
-        // \\       SurfaceReflection.r = 1.0f;
-        // \\    }
         \\    BlendUnitColor[0] = SurfaceReflection;
         \\  }
         \\  else
@@ -946,10 +857,8 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         &.{
             "TextureSampler",
             "DepthSampler",
-            "PositionNextSampler",
-            "ColorSampler",
-            "DirectionSampler",
-            "LookupSampler",
+            "Light0Sampler",
+            "Light1Sampler",
         },
     );
 
@@ -963,11 +872,6 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
     program.clip_alpha_start_distance_id = platform.optGLGetUniformLocation.?(program_handle, "ClipAlphaStartDistance");
     program.clip_alpha_end_distance_id = platform.optGLGetUniformLocation.?(program_handle, "ClipAlphaEndDistance");
     program.alpha_threshold_id = platform.optGLGetUniformLocation.?(program_handle, "AlphaThreshold");
-
-    program.debug_light_position_id = platform.optGLGetUniformLocation.?(program_handle, "LightPosition");
-
-    program.voxel_min_corner_id = platform.optGLGetUniformLocation.?(program_handle, "VoxelMinCorner");
-    program.voxel_inverse_cell_dimension_id = platform.optGLGetUniformLocation.?(program_handle, "VoxelInverseCellDimension");
 }
 
 fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
@@ -1681,10 +1585,6 @@ fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *RenderSetup, alpha_thres
     platform.optGLUniform1f.?(program.clip_alpha_start_distance_id, setup.clip_alpha_start_distance);
     platform.optGLUniform1f.?(program.clip_alpha_end_distance_id, setup.clip_alpha_end_distance);
     platform.optGLUniform1f.?(program.alpha_threshold_id, alpha_threshold);
-
-    platform.optGLUniform3fv.?(program.debug_light_position_id, 1, setup.debug_light_position.toGL());
-    platform.optGLUniform3fv.?(program.voxel_min_corner_id, 1, open_gl.voxel_min_corner.toGL());
-    platform.optGLUniform3fv.?(program.voxel_inverse_cell_dimension_id, 1, open_gl.voxel_inverse_cell_dimension.toGL());
 }
 
 fn useResolveMultisampleProgramBegin(program: *ResolveMultisampleProgram) void {
@@ -1694,9 +1594,8 @@ fn useResolveMultisampleProgramBegin(program: *ResolveMultisampleProgram) void {
 }
 
 fn useFakeSeedLightingProgramBegin(program: *FakeSeedLightingProgram, setup: *RenderSetup) void {
+    _ = setup;
     useProgramBegin(&program.common);
-
-    platform.optGLUniform3fv.?(program.debug_light_position_id, 1, setup.debug_light_position.toGL());
 }
 
 fn useMultiGridLightDownProgramBegin(program: *MultiGridLightDownProgram, source_uv_step: Vector2) void {
@@ -1986,10 +1885,8 @@ fn changeToSettings(settings: *RenderSettings) void {
     freeProgram(&open_gl.multi_grid_light_up);
     freeProgram(&open_gl.multi_grid_light_down.common);
 
-    gl.glDeleteTextures(1, &open_gl.lighting_position_next);
-    gl.glDeleteTextures(1, &open_gl.lighting_color);
-    gl.glDeleteTextures(1, &open_gl.lighting_direction);
-    gl.glDeleteTextures(1, &open_gl.lighting_lookup);
+    gl.glDeleteTextures(1, &open_gl.light_data0);
+    gl.glDeleteTextures(1, &open_gl.light_data1);
 
     // Create new dynamic resources.
     open_gl.current_settings = settings.*;
@@ -2152,48 +2049,21 @@ fn changeToSettings(settings: *RenderSettings) void {
         }
     }
 
-    gl.glGenTextures(1, &open_gl.lighting_position_next);
-    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_position_next);
+    gl.glGenTextures(1, &open_gl.light_data0);
+    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data0);
     gl.glTexImage1D(gl.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, gl.GL_RGBA, gl.GL_FLOAT, null);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    gl.glGenTextures(1, &open_gl.lighting_color);
-    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_color);
-    gl.glTexImage1D(gl.GL_TEXTURE_1D, 0, gl.GL_RGBA8, LIGHT_DATA_WIDTH, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, null);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    gl.glGenTextures(1, &open_gl.lighting_direction);
-    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_direction);
+    gl.glGenTextures(1, &open_gl.light_data1);
+    gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data1);
     gl.glTexImage1D(gl.GL_TEXTURE_1D, 0, GL_RGBA32F, LIGHT_DATA_WIDTH, 0, gl.GL_RGBA, gl.GL_FLOAT, null);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    gl.glGenTextures(1, &open_gl.lighting_lookup);
-    gl.glBindTexture(GL_TEXTURE_3D, open_gl.lighting_lookup);
-    platform.optGLTexImage3D.?(
-        GL_TEXTURE_3D,
-        0,
-        GL_R16UI,
-        LIGHT_LOOKUP_X,
-        LIGHT_LOOKUP_Y,
-        LIGHT_LOOKUP_Z,
-        0,
-        GL_RED_INTEGER,
-        gl.GL_UNSIGNED_SHORT,
-        null,
-    );
-    gl.glTexParameteri(GL_TEXTURE_3D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(GL_TEXTURE_3D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST);
-    gl.glTexParameteri(GL_TEXTURE_3D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(GL_TEXTURE_3D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
@@ -2509,13 +2379,9 @@ pub fn renderCommands(
                 }
 
                 platform.optGLActiveTexture.?(GL_TEXTURE2);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_position_next);
+                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data0);
                 platform.optGLActiveTexture.?(GL_TEXTURE3);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_color);
-                platform.optGLActiveTexture.?(GL_TEXTURE4);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_direction);
-                platform.optGLActiveTexture.?(GL_TEXTURE5);
-                gl.glBindTexture(GL_TEXTURE_3D, open_gl.lighting_lookup);
+                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data1);
                 platform.optGLActiveTexture.?(GL_TEXTURE0);
 
                 useZBiasProgramBegin(program, setup, alpha_threshold);
@@ -2546,32 +2412,11 @@ pub fn renderCommands(
                 const entry: *RenderEntryLightingTransfer = @ptrCast(@alignCast(data));
                 header_at += @sizeOf(RenderEntryLightingTransfer);
 
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_position_next);
-                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_FLOAT, entry.position_next);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_color);
-                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, entry.color);
-                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.lighting_direction);
-                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_FLOAT, entry.direction);
-                gl.glBindTexture(GL_TEXTURE_3D, open_gl.lighting_lookup);
-                platform.optGLTexSubImage3D.?(
-                    GL_TEXTURE_3D,
-                    0,
-                    0,
-                    0,
-                    0,
-                    LIGHT_LOOKUP_X,
-                    LIGHT_LOOKUP_Y,
-                    LIGHT_LOOKUP_Z,
-                    GL_RED_INTEGER,
-                    gl.GL_UNSIGNED_SHORT,
-                    entry.lookup,
-                );
-
+                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data0);
+                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_FLOAT, entry.light_data0);
+                gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data1);
+                gl.glTexSubImage1D(gl.GL_TEXTURE_1D, 0, 0, LIGHT_DATA_WIDTH, gl.GL_RGBA, gl.GL_FLOAT, entry.light_data1);
                 gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
-                gl.glBindTexture(GL_TEXTURE_3D, 0);
-
-                open_gl.voxel_min_corner = entry.voxel_min_corner;
-                open_gl.voxel_inverse_cell_dimension = entry.voxel_inverse_cell_dimension;
             },
         }
     }
