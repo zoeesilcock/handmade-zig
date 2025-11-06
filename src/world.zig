@@ -143,7 +143,7 @@ fn useChunkSpace(
     world: *World,
     size: u32,
     chunk: *WorldChunk,
-) *Entity {
+) *anyopaque {
     if (chunk.first_block == null or !chunk.first_block.?.hasRoomFor(size)) {
         if (world.first_free_block == null) {
             world.first_free_block = world.arena.pushStruct(WorldEntityBlock, null);
@@ -161,25 +161,20 @@ fn useChunkSpace(
 
     const block: *WorldEntityBlock = chunk.first_block.?;
 
+    std.debug.assert(block.hasRoomFor(@intCast(size)));
+
     const dest_address = @intFromPtr(&block.entity_data) + block.entity_data_size;
-    const dest: usize = std.mem.alignForward(usize, dest_address, @alignOf(Entity));
-    const aligned_offset = dest - dest_address;
-    const aligned_size = size + aligned_offset;
-
-    // If we hit this assertion it means that there was space for the unaligned size, but not once it was aligned.
-    std.debug.assert(block.hasRoomFor(@intCast(aligned_size)));
-
+    block.entity_data_size += @intCast(size);
     block.entity_count += 1;
-    block.entity_data_size += @intCast(aligned_size);
 
-    return @ptrFromInt(dest);
+    return @ptrFromInt(dest_address);
 }
 
 pub fn useChunkSpaceAt(
     world: *World,
     size: u32,
     at: WorldPosition,
-) *Entity {
+) *anyopaque {
     TimedBlock.beginFunction(@src(), .UseChunkSpaceAt);
     defer TimedBlock.endFunction(@src(), .UseChunkSpaceAt);
 
@@ -187,7 +182,7 @@ pub fn useChunkSpaceAt(
 
     const chunk: ?*WorldChunk = getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, world.arena);
     std.debug.assert(chunk != null);
-    const result: *Entity = useChunkSpace(world, size, chunk.?);
+    const result = useChunkSpace(world, size, chunk.?);
 
     world.change_ticket.end();
 
@@ -314,13 +309,12 @@ pub fn getWorldChunkInternal(
     std.debug.assert(hash_slot < world.chunk_hash.len);
 
     var opt_chunk: *?*WorldChunk = &world.chunk_hash[hash_slot];
-    while (opt_chunk.*) |chunk| : (opt_chunk = &chunk.next_in_hash) {
-        if ((chunk_x == chunk.x) and
-            (chunk_y == chunk.y) and
-            (chunk_z == chunk.z))
-        {
-            break;
-        }
+    while (opt_chunk.* != null and
+        !((chunk_x == opt_chunk.*.?.x) and
+            (chunk_y == opt_chunk.*.?.y) and
+            (chunk_z == opt_chunk.*.?.z)))
+    {
+        opt_chunk = &opt_chunk.*.?.next_in_hash;
     }
 
     return opt_chunk;

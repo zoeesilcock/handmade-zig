@@ -276,7 +276,7 @@ fn connectEntityPointers(sim_region: *SimRegion) void {
     }
 }
 
-fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *EntityReference) void {
+fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *align(1) EntityReference) void {
     if (reference.ptr) |ptr| {
         if (ptr.isDeleted()) {
             reference.index.value = 0;
@@ -290,7 +290,7 @@ fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *EntityReference)
     }
 }
 
-fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *TraversableReference) void {
+fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *align(1) TraversableReference) void {
     packEntityReference(opt_sim_region, &reference.entity);
 }
 
@@ -386,15 +386,13 @@ pub fn beginWorldChange(
                         var entity_index: u32 = 0;
                         while (entity_index < block.entity_count) : (entity_index += 1) {
                             if (sim_region.entity_count < sim_region.max_entity_count) {
-                                const source_address = @intFromPtr(&block.entity_data);
-                                const source_address_aligned: usize = std.mem.alignForward(usize, source_address, @alignOf(Entity));
-                                const entities_ptr: [*]Entity = @ptrFromInt(source_address_aligned);
-                                const source = &entities_ptr[entity_index];
-                                const id: EntityId = source.id;
-                                const dest: *Entity = &sim_region.entities[sim_region.entity_count];
+                                const entities_ptr: [*]align(1) Entity = @ptrCast(&block.entity_data);
+                                const source: [*]align(1) Entity = entities_ptr + entity_index;
+                                const id: EntityId = source[0].id;
+                                const dest: *Entity = @ptrCast(sim_region.entities + sim_region.entity_count);
                                 sim_region.entity_count += 1;
 
-                                dest.* = source.*;
+                                dest.* = source[0];
 
                                 dest.id = id;
 
@@ -446,21 +444,20 @@ pub fn endWorldChange(world_ptr: *World, sim_region: *SimRegion) void {
     defer TimedBlock.endFunction(@src(), .EndWorldChange);
 
     var sim_entity_index: u32 = 0;
+    var entity: [*]Entity = sim_region.entities;
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
-        const entity = &sim_region.entities[sim_entity_index];
-
-        if (!entity.hasFlag(EntityFlags.Deleted.toInt())) {
+        if (!entity[0].hasFlag(EntityFlags.Deleted.toInt())) {
             const entity_position: world.WorldPosition =
-                world.mapIntoChunkSpace(world_ptr, sim_region.origin, entity.position);
+                world.mapIntoChunkSpace(world_ptr, sim_region.origin, entity[0].position);
             var chunk_position: world.WorldPosition = entity_position;
             chunk_position.offset = .zero();
 
-            const chunk_delta: Vector3 = entity_position.offset.minus(entity.position);
+            const chunk_delta: Vector3 = entity_position.offset.minus(entity[0].position);
 
-            entity.position = entity.position.plus(chunk_delta);
-            var dest_e: *Entity = world.useChunkSpaceAt(world_ptr, @sizeOf(Entity), chunk_position);
+            entity[0].position = entity[0].position.plus(chunk_delta);
+            var dest_e: *align(1) Entity = @ptrCast(world.useChunkSpaceAt(world_ptr, @sizeOf(Entity), chunk_position));
 
-            dest_e.* = entity.*;
+            dest_e.* = entity[0];
             packTraversableReference(sim_region, &dest_e.occupying);
             packTraversableReference(sim_region, &dest_e.came_from);
             packTraversableReference(sim_region, &dest_e.auto_boost_to);
@@ -473,6 +470,8 @@ pub fn endWorldChange(world_ptr: *World, sim_region: *SimRegion) void {
             // const test_position: Vector3 = entity.position.plus(reverse_chunk_delta);
             // std.debug.assert(old_entity_position.z() == test_position.z());
         }
+
+        entity += 1;
     }
 }
 
