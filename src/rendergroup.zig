@@ -1405,7 +1405,6 @@ pub const RenderGroup = extern struct {
                         solution.average_direction_to_light[light_index] = .zero();
 
                         light_index += 1;
-
                         if (point_count < light_index) {
                             point_count = light_index;
                             std.debug.assert(point_count < solution.points.len);
@@ -1506,7 +1505,7 @@ pub const RenderGroup = extern struct {
         const source_emission_color: [*]Color3 = &solution.emission_color0;
         var dest_emission_color: [*]Color3 = &solution.emission_color1;
 
-        const light_retention: f32 = 0.25;
+        const light_retention: f32 = 0.5;
         const min_emission = 0.0;
         var ray_count: u32 = 64;
         var series: random.Series = .seed(1234);
@@ -1531,8 +1530,7 @@ pub const RenderGroup = extern struct {
                             point.position,
                             emission_direction,
                         );
-                        const hit_index: u32 = ray_index;
-
+                        const hit_index: u32 = ray.index;
                         if (hit_index < solution.surface_count) {
                             const hit_surface: *LightingSurface = &solution.surfaces[hit_index];
                             var closest_point_index: u32 = 0;
