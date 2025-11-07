@@ -63,7 +63,9 @@ pub const WorldEntityBlock = extern struct {
     next: ?*WorldEntityBlock,
 
     entity_data_size: u32,
-    entity_data: [1 << 16]u8,
+    // The extra 16k here are to mitigate issues caused by entities changing order due to not fitting within one block.
+    // This is probably because our entity struct takes more space than Casey's.
+    entity_data: [1 << 16 + 1 << 14]u8,
 
     pub fn clear(self: *WorldEntityBlock) void {
         self.entity_count = 0;
