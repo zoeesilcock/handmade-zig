@@ -207,6 +207,11 @@ pub const LightingSolution = extern struct {
     emission_color0: [LIGHT_DATA_WIDTH]Color3 = [1]Color3{undefined} ** LIGHT_DATA_WIDTH,
     emission_color1: [LIGHT_DATA_WIDTH]Color3 = [1]Color3{undefined} ** LIGHT_DATA_WIDTH,
     average_direction_to_light: [LIGHT_DATA_WIDTH]Vector3 = [1]Vector3{undefined} ** LIGHT_DATA_WIDTH,
+    series: random.Series,
+
+    last_is_valid: bool,
+    last_emission: [LIGHT_DATA_WIDTH]Color3 = [1]Color3{undefined} ** LIGHT_DATA_WIDTH,
+    last_direction: [LIGHT_DATA_WIDTH]Vector3 = [1]Vector3{undefined} ** LIGHT_DATA_WIDTH,
 };
 
 pub const RenderGroup = extern struct {
@@ -546,8 +551,12 @@ pub const RenderGroup = extern struct {
         uv3: Vector2,
         c3: u32,
         opt_emission: ?f32,
+        opt_light_count: ?u16,
+        opt_light_index: ?u16,
     ) void {
         const emission = opt_emission orelse 0;
+        const light_count = opt_light_count orelse 0;
+        const light_index = opt_light_index orelse 0;
         const commands: *RenderCommands = self.commands;
         const entry: ?*RenderEntryTexturedQuads = self.current_quads;
         std.debug.assert(entry != null);
@@ -573,14 +582,6 @@ pub const RenderGroup = extern struct {
         const n1: Vector3 = normal;
         const n2: Vector3 = normal;
         const n3: Vector3 = normal;
-
-        var light_count: u16 = 0;
-        var light_index: u16 = 0;
-        if (self.lighting_enabled) {
-            light_count = 4;
-            light_index = self.light_index;
-            self.light_index += 4;
-        }
 
         vert[0].position = p3;
         vert[0].normal = n3;
@@ -631,6 +632,8 @@ pub const RenderGroup = extern struct {
         uv3: Vector2,
         c3: Color,
         opt_emission: ?f32,
+        opt_light_count: ?u16,
+        opt_light_index: ?u16,
     ) void {
         self.pushQuad(
             bitmap,
@@ -647,6 +650,8 @@ pub const RenderGroup = extern struct {
             uv3,
             c3.scaledTo(255).packColorRGBA(),
             opt_emission,
+            opt_light_count,
+            opt_light_index,
         );
     }
 
@@ -705,6 +710,8 @@ pub const RenderGroup = extern struct {
             p3,
             uv3,
             c3,
+            null,
+            null,
             null,
         );
     }
@@ -789,6 +796,8 @@ pub const RenderGroup = extern struct {
                     .new(min_uv.x(), max_uv.y()),
                     vertex_color,
                     null,
+                    null,
+                    null,
                 );
             }
         }
@@ -846,6 +855,7 @@ pub const RenderGroup = extern struct {
         radius: f32,
         color: Color3,
         emission: f32,
+        opt_light_index_store: ?*u32,
     ) void {
         self.pushCube(
             self.commands.white_bitmap,
@@ -854,6 +864,7 @@ pub const RenderGroup = extern struct {
             radius,
             color.toColor(1),
             emission,
+            opt_light_index_store,
         );
     }
 
@@ -865,8 +876,14 @@ pub const RenderGroup = extern struct {
         height: f32,
         color: Color,
         opt_emission: ?f32,
+        opt_light_index_store_in: ?*u32,
     ) void {
+        var opt_light_index_store = opt_light_index_store_in;
         if (self.getCurrentQuads(6) != null) {
+            if (!self.lighting_enabled) {
+                opt_light_index_store = null;
+            }
+
             const nx: f32 = position.x() - radius;
             const px: f32 = position.x() + radius;
             const ny: f32 = position.y() - radius;
@@ -898,6 +915,21 @@ pub const RenderGroup = extern struct {
             const ct = top_color;
             const cb = top_color;
 
+            var light_count: u16 = 0;
+            var light_index: u16 = 0;
+            if (opt_light_index_store) |light_index_store| {
+                light_count = 4;
+
+                if (light_index_store.* > 0) {
+                    light_index = @intCast(light_index_store.*);
+                } else {
+                    light_index = self.light_index;
+                    light_index_store.* = light_index;
+                }
+
+                self.light_index += 6 * light_count;
+            }
+
             self.pushQuadUnpackedColors(
                 bitmap,
                 p0,
@@ -913,7 +945,10 @@ pub const RenderGroup = extern struct {
                 t3,
                 top_color,
                 opt_emission,
+                light_count,
+                light_index,
             );
+            light_index += light_count;
             self.pushQuadUnpackedColors(
                 bitmap,
                 p7,
@@ -929,7 +964,10 @@ pub const RenderGroup = extern struct {
                 t3,
                 bottom_color,
                 opt_emission,
+                light_count,
+                light_index,
             );
+            light_index += light_count;
             self.pushQuadUnpackedColors(
                 bitmap,
                 p4,
@@ -945,7 +983,10 @@ pub const RenderGroup = extern struct {
                 t3,
                 ct,
                 opt_emission,
+                light_count,
+                light_index,
             );
+            light_index += light_count;
             self.pushQuadUnpackedColors(
                 bitmap,
                 p2,
@@ -961,7 +1002,10 @@ pub const RenderGroup = extern struct {
                 t3,
                 ct,
                 opt_emission,
+                light_count,
+                light_index,
             );
+            light_index += light_count;
             self.pushQuadUnpackedColors(
                 bitmap,
                 p1,
@@ -977,7 +1021,10 @@ pub const RenderGroup = extern struct {
                 t3,
                 ct,
                 opt_emission,
+                light_count,
+                light_index,
             );
+            light_index += light_count;
             self.pushQuadUnpackedColors(
                 bitmap,
                 p7,
@@ -993,6 +1040,8 @@ pub const RenderGroup = extern struct {
                 t3,
                 ct,
                 opt_emission,
+                light_count,
+                light_index,
             );
         }
     }
@@ -1050,6 +1099,8 @@ pub const RenderGroup = extern struct {
                 .new(min_position.x(), max_position.y(), z, 0),
                 .new(min_uv.x(), max_uv.y()),
                 packed_color,
+                null,
+                null,
                 null,
             );
         }
@@ -1331,6 +1382,17 @@ pub const RenderGroup = extern struct {
         var surface_count: u32 = 0;
         var point_count: u32 = 0;
 
+        _ = memory.copy(
+            @sizeOf(Color3) * solution.emission_color0.len,
+            &solution.emission_color0,
+            &solution.last_emission,
+        );
+        _ = memory.copy(
+            @sizeOf(Vector3) * solution.average_direction_to_light.len,
+            &solution.average_direction_to_light,
+            &solution.last_direction,
+        );
+
         var verts: [*]TexturedVertex = commands.vertex_array + quads.vertex_array_offset;
 
         var quad_index: u32 = 0;
@@ -1401,7 +1463,6 @@ pub const RenderGroup = extern struct {
 
                         solution.emission_color0[light_index] =
                             Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
-                        solution.emission_color1[light_index] = .zero();
                         solution.average_direction_to_light[light_index] = .zero();
 
                         light_index += 1;
@@ -1508,7 +1569,7 @@ pub const RenderGroup = extern struct {
         const light_retention: f32 = 0.5;
         const min_emission = 0.0;
         var ray_count: u32 = 64;
-        var series: random.Series = .seed(1234);
+        var series: random.Series = solution.series;
 
         for (0..global_config.Renderer_Lighting_IterationCount) |_| {
             const power: f32 = (1.0 - light_retention) / @as(f32, @floatFromInt(ray_count));
@@ -1608,11 +1669,24 @@ pub const RenderGroup = extern struct {
             }
         }
 
+        var last_emission = &solution.last_emission;
+        var last_direction = &solution.last_direction;
+        if (!solution.last_is_valid) {
+            last_emission = &solution.emission_color0;
+            last_direction = &solution.average_direction_to_light;
+            solution.last_is_valid = true;
+        }
+
         var point_index: u32 = 1; // Point 0 is never used.
         while (point_index < solution.point_count) : (point_index += 1) {
+            const t: f32 = 0.02;
+            solution.emission_color0[point_index] =
+                last_emission[point_index].lerp(solution.emission_color0[point_index], t);
             solution.average_direction_to_light[point_index] =
-                solution.average_direction_to_light[point_index].normalizeOrZero();
+                last_direction[point_index].lerp(solution.average_direction_to_light[point_index].normalizeOrZero(), t).normalizeOrZero();
         }
+
+        solution.series = series;
     }
 
     pub fn lightingTest(self: *RenderGroup, solution: *LightingSolution) void {
@@ -1688,6 +1762,8 @@ pub const RenderGroup = extern struct {
                 position3,
                 uv,
                 color3,
+                null,
+                null,
                 null,
             );
         }

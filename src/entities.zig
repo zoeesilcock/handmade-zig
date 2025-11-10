@@ -84,6 +84,7 @@ pub const EntityVisiblePiece = extern struct {
     asset_type: AssetTypeId,
     dimension: Vector2,
     flags: u32,
+    light_index: u32,
 };
 
 pub const CameraBehavior = enum(u32) {
@@ -564,6 +565,7 @@ pub fn updateAndRenderEntities(
                             piece.dimension.x(),
                             piece.color.rgb(),
                             piece.dimension.y(),
+                            &piece.light_index,
                         );
                     } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
                         render_group.pushCube(
@@ -573,6 +575,7 @@ pub fn updateAndRenderEntities(
                             piece.dimension.y(),
                             piece.color,
                             null,
+                            &piece.light_index,
                         );
                     } else {
                         render_group.pushBitmapId(

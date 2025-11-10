@@ -105,6 +105,8 @@ pub const GameModeWorld = struct {
     debug_camera_orbit: f32,
     debug_camera_dolly: f32,
     debug_light_position: Vector3,
+    updating_lighting: bool,
+    debug_light_index: u32,
 
     camera_pitch: f32,
     camera_orbit: f32,
@@ -258,7 +260,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             room_radius_y,
         );
 
-        if (false) {
+        if (true) {
             // _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
             // _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
@@ -530,6 +532,7 @@ pub fn updateAndRenderWorld(
 
     const near_clip_plane: f32 = 3;
     const far_clip_plane: f32 = 100;
+    var updating_lighting: bool = world_mode.updating_lighting;
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
@@ -604,6 +607,12 @@ pub fn updateAndRenderWorld(
     if (input.f_key_pressed[1]) {
         world_mode.show_lighting = !world_mode.show_lighting;
     }
+    if (input.f_key_pressed[3]) {
+        updating_lighting = true;
+    }
+    if (input.f_key_pressed[4]) {
+        world_mode.updating_lighting = !world_mode.updating_lighting;
+    }
 
     if (!recompute_lighting and world_mode.show_lighting) {
         render_group.outputLightingPoints(&world_mode.test_lighting, &world_mode.test_textures);
@@ -676,7 +685,13 @@ pub fn updateAndRenderWorld(
                 world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
             }
 
-            render_group.pushCubeLight(world_mode.debug_light_position, 0.5, .new(1, 1, 1), 1);
+            render_group.pushCubeLight(
+                world_mode.debug_light_position,
+                0.5,
+                .new(1, 1, 1),
+                1,
+                &world_mode.debug_light_index,
+            );
 
             // TODO: Re-enable particles.
             if (false) {
@@ -731,8 +746,7 @@ pub fn updateAndRenderWorld(
         }
         endSim(&transient_state.arena, &world_sim, world_mode.world);
 
-        // if (input.f_key_pressed[1])
-        {
+        if (updating_lighting) {
             render_group.lightingTest(&world_mode.test_lighting);
             render_group.outputLightingTextures(&world_mode.test_lighting, &world_mode.test_textures);
         }
@@ -1119,7 +1133,7 @@ fn addSnakeSegment(
 
     entity.addPiece(.Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
     entity.addPiece(if (segment_index != 0) .Torso else .Head, 1.5, .zero(), .white(), null);
-    //entity.addPieceLight(0.1, .new(0, 0, 0.5), 0.3, .new(1, 1, 0));
+    entity.addPieceLight(0.1, .new(0, 0, 0.5), 0.3, .new(1, 1, 0));
 
     endEntity(world_mode, entity, world_position);
 }
