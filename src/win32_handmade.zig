@@ -1065,8 +1065,9 @@ fn processPendingMessages(
         TimedBlock.beginBlock(@src(), .PeekMessage);
 
         const skip_messages = [_]u32{
-            win32.WM_PAINT,
-            win32.WM_MOUSEMOVE,
+            // win32.WM_PAINT,
+            // Ignoring WM_MOUSEMOVE lead to performance issues.
+            // win32.WM_MOUSEMOVE,
             // Guard against an unknown message which spammed the game on Casey's machine.
             0x738,
             0xffffffff,

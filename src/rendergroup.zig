@@ -1621,7 +1621,7 @@ pub const RenderGroup = extern struct {
                     }
                 }
 
-                dest_emission_color[emitter_index] = retained_color;
+                dest_emission_color[emitter_index] = dest_emission_color[emitter_index].plus(retained_color);
             }
 
             // const sky_ray_count: u32 = 32;
@@ -1679,7 +1679,7 @@ pub const RenderGroup = extern struct {
 
         var point_index: u32 = 1; // Point 0 is never used.
         while (point_index < solution.point_count) : (point_index += 1) {
-            const t: f32 = 0.02;
+            const t: f32 = 0.1;
             solution.emission_color0[point_index] =
                 last_emission[point_index].lerp(solution.emission_color0[point_index], t);
             solution.average_direction_to_light[point_index] =

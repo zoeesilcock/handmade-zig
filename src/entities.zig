@@ -98,15 +98,14 @@ pub const CameraBehavior = enum(u32) {
 pub const Entity = extern struct {
     id: EntityId = .{},
 
-    brain_type: BrainType,
     brain_slot: BrainSlot = .{},
     brain_id: BrainId = .{},
 
     camera_behavior: u32,
-    camera_offset: Vector3,
     camera_min_velocity: f32,
     camera_max_velocity: f32,
     camera_min_time: f32,
+    camera_offset: Vector3,
     camera_velocity_direction: Vector3,
 
     //
@@ -118,9 +117,9 @@ pub const Entity = extern struct {
     velocity: Vector3 = Vector3.zero(),
     acceleration: Vector3 = Vector3.zero(), // Do not pack this.
 
-    collision_volume: Rectangle3,
-
     distance_limit: f32 = 0,
+
+    collision_volume: Rectangle3,
 
     facing_direction: f32 = 0,
     bob_time: f32 = 0,
@@ -139,7 +138,6 @@ pub const Entity = extern struct {
     movement_time: f32,
     occupying: TraversableReference,
     came_from: TraversableReference,
-    auto_boost_to: TraversableReference,
 
     angle_base: Vector3,
     angle_current: f32,
@@ -159,6 +157,8 @@ pub const Entity = extern struct {
 
     piece_count: u32,
     pieces: [4]EntityVisiblePiece, // 0 is the "on top" piece.
+
+    auto_boost_to: TraversableReference,
 
     pub fn addPiece(
         self: *Entity,
