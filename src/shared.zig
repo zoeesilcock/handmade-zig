@@ -880,6 +880,7 @@ pub const debug_color_table: [11]Color3 = .{
 };
 
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
+pub const MAX_LIGHT_EMISSION = 10.0;
 pub const LightingTextures = extern struct {
     light_data0: [LIGHT_DATA_WIDTH]Vector4, // Px, Py, Pz, Dx
     light_data1: [LIGHT_DATA_WIDTH]Vector4, // SignDz*Cr, Cg, Cb, Dy
@@ -893,6 +894,14 @@ pub const LightingSurface = extern struct {
     height: f32,
     x_axis: Vector3,
     y_axis: Vector3,
+    light_index: u16 = 0,
+    light_count: u16 = 0,
+};
+
+pub const LightingBox = extern struct {
+    min: Vector3,
+    max: Vector3,
+    transparency: f32,
     light_index: u16 = 0,
     light_count: u16 = 0,
 };
@@ -957,6 +966,12 @@ pub const RenderCommands = extern struct {
     quad_bitmaps: [*]?*LoadedBitmap,
     white_bitmap: ?*LoadedBitmap,
 
+    surface_count: u32,
+    surfaces: [*]LightingSurface,
+    light_point_count: u32,
+    light_points: [*]LightingPoint,
+    emission_color0: [*]Color3,
+
     clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
 
     pub fn default(
@@ -968,6 +983,9 @@ pub const RenderCommands = extern struct {
         vertex_array: [*]TexturedVertex,
         bitmap_array: [*]?*LoadedBitmap,
         white_bitmap: *LoadedBitmap,
+        surfaces: [*]LightingSurface,
+        light_points: [*]LightingPoint,
+        emission_color0: [*]Color3,
     ) RenderCommands {
         return RenderCommands{
             .settings = .{
@@ -988,6 +1006,14 @@ pub const RenderCommands = extern struct {
             .quad_bitmaps = bitmap_array,
             .white_bitmap = white_bitmap,
 
+            .surface_count = 0,
+            .surfaces = surfaces,
+
+            .light_point_count = 0,
+            .light_points = light_points,
+
+            .emission_color0 = emission_color0,
+
             .clear_color = .black(),
         };
     }
@@ -995,6 +1021,8 @@ pub const RenderCommands = extern struct {
     pub fn reset(self: *RenderCommands) void {
         self.push_buffer_data_at = self.push_buffer_base;
         self.vertex_count = 0;
+        self.surface_count = 0;
+        self.light_point_count = 0;
     }
 };
 

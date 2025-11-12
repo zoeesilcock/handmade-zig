@@ -208,13 +208,13 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
     var prev_room: StandardRoom = .{};
 
-    for (0..8) |screen_index| {
+    for (0..1) |screen_index| {
         last_screen_z = abs_tile_z;
 
         // const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
         // const room_radius_y: i32 = 4 + @as(i32, @intCast(series.randomChoice(4)));
         _ = series.randomChoice(4);
-        const room_radius_x: i32 = 8;
+        const room_radius_x: i32 = 4;
         const room_radius_y: i32 = 4;
         if (door_direction == 1) {
             room_center_tile_x += room_radius_x;

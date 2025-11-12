@@ -40,6 +40,7 @@ const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
+const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
@@ -67,6 +68,8 @@ const TicketMutex = shared.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const LoadedBitmap = asset.LoadedBitmap;
+const LightingSurface = shared.LightingSurface;
+const LightingPoint = shared.LightingPoint;
 
 const std = @import("std");
 const math = @import("math.zig");
@@ -2561,14 +2564,35 @@ pub export fn wWinMain(
 
                 var frame_temp_arena: MemoryArena = .{};
                 const push_buffer_size: u32 = shared.megabytes(64);
-                const push_buffer_block: ?*PlatformMemoryBlock = allocateMemory(push_buffer_size, @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
+                const push_buffer_block: ?*PlatformMemoryBlock = allocateMemory(
+                    push_buffer_size,
+                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
+                );
                 const push_buffer = push_buffer_block.?.base;
 
                 const max_vertex_count: u32 = 65536;
-                const vertex_array_block: ?*PlatformMemoryBlock = allocateMemory(max_vertex_count * @sizeOf(TexturedVertex), @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
+                const vertex_array_block: ?*PlatformMemoryBlock = allocateMemory(
+                    max_vertex_count * @sizeOf(TexturedVertex),
+                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
+                );
                 const vertex_array: [*]TexturedVertex = @ptrCast(@alignCast(vertex_array_block.?.base));
-                const bitmap_array_block: ?*PlatformMemoryBlock = allocateMemory(max_vertex_count * @sizeOf(LoadedBitmap), @intFromEnum(PlatformMemoryBlockFlags.NotRestored));
+                const bitmap_array_block: ?*PlatformMemoryBlock = allocateMemory(
+                    max_vertex_count * @sizeOf(LoadedBitmap),
+                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
+                );
                 const bitmap_array: [*]?*LoadedBitmap = @ptrCast(@alignCast(bitmap_array_block.?.base));
+                const surfaces: [*]LightingSurface = @ptrCast(@alignCast(allocateMemory(
+                    LIGHT_DATA_WIDTH * @sizeOf(LightingSurface),
+                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
+                ).?.base));
+                const light_points: [*]LightingPoint = @ptrCast(@alignCast(allocateMemory(
+                    LIGHT_DATA_WIDTH * @sizeOf(LightingPoint),
+                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
+                ).?.base));
+                const emission_color0: [*]math.Color3 = @ptrCast(@alignCast(allocateMemory(
+                    LIGHT_DATA_WIDTH * @sizeOf(math.Color3),
+                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
+                ).?.base));
 
                 var render_commands: shared.RenderCommands = shared.RenderCommands.default(
                     push_buffer_size,
@@ -2579,6 +2603,9 @@ pub export fn wWinMain(
                     vertex_array,
                     bitmap_array,
                     &open_gl.white_bitmap,
+                    surfaces,
+                    light_points,
+                    emission_color0,
                 );
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);

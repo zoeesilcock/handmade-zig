@@ -60,6 +60,7 @@ const LightingPoint = shared.LightingPoint;
 const LightingIntermediate = shared.LightingIntermediate;
 const LightingTexel = shared.LightingTexel;
 const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
+const MAX_LIGHT_EMISSION = shared.MAX_LIGHT_EMISSION;
 const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
 const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
 const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
@@ -199,12 +200,12 @@ const RenderTransform = extern struct {
 
 pub const LightingSolution = extern struct {
     surface_count: u32 = 0,
-    surfaces: [LIGHT_DATA_WIDTH]LightingSurface = [1]LightingSurface{undefined} ** LIGHT_DATA_WIDTH,
+    surfaces: [*]LightingSurface = undefined,
 
     point_count: u32 = 0,
-    points: [LIGHT_DATA_WIDTH]LightingPoint = [1]LightingPoint{undefined} ** LIGHT_DATA_WIDTH,
+    points: [*]LightingPoint = undefined,
 
-    emission_color0: [LIGHT_DATA_WIDTH]Color3 = [1]Color3{undefined} ** LIGHT_DATA_WIDTH,
+    emission_color0: [*]Color3 = undefined,
     emission_color1: [LIGHT_DATA_WIDTH]Color3 = [1]Color3{undefined} ** LIGHT_DATA_WIDTH,
     average_direction_to_light: [LIGHT_DATA_WIDTH]Vector3 = [1]Vector3{undefined} ** LIGHT_DATA_WIDTH,
     series: random.Series,
@@ -878,6 +879,7 @@ pub const RenderGroup = extern struct {
         opt_emission: ?f32,
         opt_light_index_store_in: ?*u32,
     ) void {
+        const emission = opt_emission orelse 0;
         var opt_light_index_store = opt_light_index_store_in;
         if (self.getCurrentQuads(6) != null) {
             if (!self.lighting_enabled) {
@@ -928,6 +930,124 @@ pub const RenderGroup = extern struct {
                 }
 
                 self.light_index += 6 * light_count;
+
+                const min_surface_index: u32 = self.commands.surface_count;
+
+                {
+                    var surface: [*]LightingSurface = self.commands.surfaces + min_surface_index;
+                    self.commands.surface_count += 6;
+                    std.debug.assert(self.commands.surface_count <= LIGHT_DATA_WIDTH);
+
+                    surface[0].position = .new(position.x(), position.y(), pz);
+                    surface[0].normal = .new(0, 0, 1);
+                    surface[0].transparency = 0;
+                    surface[0].width = 2.0 * radius;
+                    surface[0].height = 2.0 * radius;
+                    surface[0].x_axis = .new(0, 1, 0);
+                    surface[0].y_axis = .new(-1, 0, 0);
+                    surface[0].light_index = light_index;
+                    surface[0].light_count = 4;
+                    light_index += 4;
+                    surface += 1;
+
+                    surface[0].position = .new(position.x(), position.y(), nz);
+                    surface[0].normal = .new(0, 0, -1);
+                    surface[0].transparency = 0;
+                    surface[0].width = 2.0 * radius;
+                    surface[0].height = 2.0 * radius;
+                    surface[0].x_axis = .new(0, 1, 0);
+                    surface[0].y_axis = .new(1, 0, 0);
+                    surface[0].light_index = light_index;
+                    surface[0].light_count = 4;
+                    light_index += 4;
+                    surface += 1;
+
+                    surface[0].position = .new(position.x(), ny, position.z());
+                    surface[0].normal = .new(0, -1, 0);
+                    surface[0].transparency = 0;
+                    surface[0].width = 2.0 * radius;
+                    surface[0].height = height;
+                    surface[0].x_axis = .new(1, 0, 0);
+                    surface[0].y_axis = .new(0, 0, 1);
+                    surface[0].light_index = light_index;
+                    surface[0].light_count = 4;
+                    light_index += 4;
+                    surface += 1;
+
+                    surface[0].position = .new(position.x(), py, position.z());
+                    surface[0].normal = .new(0, 1, 0);
+                    surface[0].transparency = 0;
+                    surface[0].width = 2.0 * radius;
+                    surface[0].height = height;
+                    surface[0].x_axis = .new(-1, 0, 0);
+                    surface[0].y_axis = .new(0, 0, 1);
+                    surface[0].light_index = light_index;
+                    surface[0].light_count = 4;
+                    light_index += 4;
+                    surface += 1;
+
+                    surface[0].position = .new(nx, position.y(), position.z());
+                    surface[0].normal = .new(-1, 0, 0);
+                    surface[0].transparency = 0;
+                    surface[0].width = 2.0 * radius;
+                    surface[0].height = height;
+                    surface[0].x_axis = .new(0, -1, 0);
+                    surface[0].y_axis = .new(0, 0, 1);
+                    surface[0].light_index = light_index;
+                    surface[0].light_count = 4;
+                    light_index += 4;
+                    surface += 1;
+
+                    surface[0].position = .new(px, position.y(), position.z());
+                    surface[0].normal = .new(1, 0, 0);
+                    surface[0].transparency = 0;
+                    surface[0].width = 2.0 * radius;
+                    surface[0].height = height;
+                    surface[0].x_axis = .new(0, 1, 0);
+                    surface[0].y_axis = .new(0, 0, 1);
+                    surface[0].light_index = light_index;
+                    surface[0].light_count = 4;
+                    light_index += 4;
+                    surface += 1;
+
+                    light_index -= 6 * 4;
+                }
+
+                var surface_index: u32 = min_surface_index;
+                while (surface_index < (min_surface_index + 6)) : (surface_index += 1) {
+                    var surface: [*]LightingSurface = self.commands.surfaces + surface_index;
+
+                    const y_subdivision_count = 2;
+                    const x_subdivision_count = 2;
+                    const sub_width: f32 = surface[0].width / @as(f32, @floatFromInt(x_subdivision_count));
+                    const sub_height: f32 = surface[0].height / @as(f32, @floatFromInt(y_subdivision_count));
+                    std.debug.assert((x_subdivision_count * y_subdivision_count) == 4);
+                    for (0..y_subdivision_count) |y_sub| {
+                        for (0..x_subdivision_count) |x_sub| {
+                            var point: *LightingPoint = &self.commands.light_points[light_index];
+
+                            point.normal = surface[0].normal;
+                            point.surface_index = surface_index;
+                            point.position = surface[0].position
+                                .minus(surface[0].x_axis.scaledTo(0.5 * surface[0].width))
+                                .minus(surface[0].y_axis.scaledTo(0.5 * surface[0].height))
+                                .plus(surface[0].x_axis.scaledTo((@as(f32, @floatFromInt(x_sub)) + 0.5) * sub_width))
+                                .plus(surface[0].y_axis.scaledTo((@as(f32, @floatFromInt(y_sub)) + 0.5) * sub_height));
+                            point.reflection_color = color.rgb().scaledTo(0.95);
+
+                            self.commands.emission_color0[light_index] =
+                                Color3.new(1, 1, 1).scaledTo(emission * MAX_LIGHT_EMISSION);
+
+                            light_index += 1;
+                            if (self.commands.light_point_count < light_index) {
+                                self.commands.light_point_count = light_index;
+                                std.debug.assert(self.commands.light_point_count < LIGHT_DATA_WIDTH);
+                            }
+                        }
+                    }
+                }
+
+                light_index -= 6 * light_count;
             }
 
             self.pushQuadUnpackedColors(
@@ -1369,117 +1489,6 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    const max_emission: f32 = 10;
-
-    fn extractReflectorsFromQuads(self: *RenderGroup, solution: *LightingSolution) void {
-        const commands: *RenderCommands = self.commands;
-        std.debug.assert(self.current_quads != null);
-        const quads: *RenderEntryTexturedQuads = self.current_quads.?;
-
-        const y_subdivision_count = 2;
-        const x_subdivision_count = 2;
-
-        var surface_count: u32 = 0;
-        var point_count: u32 = 0;
-
-        _ = memory.copy(
-            @sizeOf(Color3) * solution.emission_color0.len,
-            &solution.emission_color0,
-            &solution.last_emission,
-        );
-        _ = memory.copy(
-            @sizeOf(Vector3) * solution.average_direction_to_light.len,
-            &solution.average_direction_to_light,
-            &solution.last_direction,
-        );
-
-        var verts: [*]TexturedVertex = commands.vertex_array + quads.vertex_array_offset;
-
-        var quad_index: u32 = 0;
-        while (quad_index < quads.quad_count) : (quad_index += 1) {
-            var vert0: *TexturedVertex = @ptrCast(verts + 0);
-            var vert1: *TexturedVertex = @ptrCast(verts + 1);
-            var vert2: *TexturedVertex = @ptrCast(verts + 3);
-            var vert3: *TexturedVertex = @ptrCast(verts + 2);
-
-            if (vert0.light_index != 0) {
-                const color: Color = Color.unpackColorRGBA(vert0.color).scaledTo(1.0 / 255.0);
-
-                var vert0_position: Vector3 = vert0.position.xyz();
-                _ = vert0_position.setZ(vert0_position.z() + vert0.position.w());
-
-                var vert1_position: Vector3 = vert1.position.xyz();
-                _ = vert1_position.setZ(vert1_position.z() + vert1.position.w());
-
-                var vert2_position: Vector3 = vert2.position.xyz();
-                _ = vert2_position.setZ(vert2_position.z() + vert2.position.w());
-
-                var vert3_position: Vector3 = vert3.position.xyz();
-                _ = vert3_position.setZ(vert3_position.z() + vert3.position.w());
-
-                const span30: Vector3 = vert3_position.minus(vert0_position);
-                const span10: Vector3 = vert1_position.minus(vert0_position);
-
-                var x_axis: Vector3 = span10;
-                var y_axis: Vector3 = span30;
-
-                const width: f32 = x_axis.length();
-                const height: f32 = y_axis.length();
-                x_axis = x_axis.normalizeOrZero();
-                y_axis = y_axis.normalizeOrZero();
-
-                const sub_width: f32 = width / @as(f32, @floatFromInt(x_subdivision_count));
-                const sub_height: f32 = height / @as(f32, @floatFromInt(y_subdivision_count));
-
-                std.debug.assert(surface_count < solution.surfaces.len);
-                const surface_index: u32 = surface_count;
-                surface_count += 1;
-                var surface: *LightingSurface = &solution.surfaces[surface_index];
-
-                surface.position = vert0_position
-                    .plus(x_axis.scaledTo(0.5 * width))
-                    .plus(y_axis.scaledTo(0.5 * height));
-                surface.normal = vert0.normal;
-                surface.transparency = color.a();
-                surface.width = width;
-                surface.height = height;
-                surface.x_axis = x_axis;
-                surface.y_axis = y_axis;
-                surface.light_index = vert0.light_index;
-                surface.light_count = vert0.light_count;
-
-                var light_index: u32 = vert0.light_index;
-                std.debug.assert((x_subdivision_count * y_subdivision_count) == vert0.light_count);
-                for (0..y_subdivision_count) |y_sub| {
-                    for (0..x_subdivision_count) |x_sub| {
-                        var point: *LightingPoint = &solution.points[light_index];
-
-                        point.normal = surface.normal;
-                        point.surface_index = surface_index;
-                        point.position = vert0_position
-                            .plus(x_axis.scaledTo((@as(f32, @floatFromInt(x_sub)) + 0.5) * sub_width))
-                            .plus(y_axis.scaledTo((@as(f32, @floatFromInt(y_sub)) + 0.5) * sub_height));
-                        point.reflection_color = color.rgb().scaledTo(0.95);
-
-                        solution.emission_color0[light_index] =
-                            Color3.new(1, 1, 1).scaledTo(vert0.emission * max_emission);
-                        solution.average_direction_to_light[light_index] = .zero();
-
-                        light_index += 1;
-                        if (point_count < light_index) {
-                            point_count = light_index;
-                            std.debug.assert(point_count < solution.points.len);
-                        }
-                    }
-                }
-            }
-            verts += 4;
-        }
-
-        solution.surface_count = surface_count;
-        solution.point_count = point_count;
-    }
-
     const RaycastResult = struct {
         position: Vector3,
         index: u32,
@@ -1563,7 +1572,10 @@ pub const RenderGroup = extern struct {
     }
 
     fn computeLightPropagation(solution: *LightingSolution) void {
-        const source_emission_color: [*]Color3 = &solution.emission_color0;
+        TimedBlock.beginFunction(@src(), .ComputeLightPropagation);
+        defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
+
+        const source_emission_color: [*]Color3 = solution.emission_color0;
         var dest_emission_color: [*]Color3 = &solution.emission_color1;
 
         const light_retention: f32 = 0.5;
@@ -1672,7 +1684,7 @@ pub const RenderGroup = extern struct {
         var last_emission = &solution.last_emission;
         var last_direction = &solution.last_direction;
         if (!solution.last_is_valid) {
-            last_emission = &solution.emission_color0;
+            last_emission = @ptrCast(solution.emission_color0);
             last_direction = &solution.average_direction_to_light;
             solution.last_is_valid = true;
         }
@@ -1690,11 +1702,39 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn lightingTest(self: *RenderGroup, solution: *LightingSolution) void {
-        self.extractReflectorsFromQuads(solution);
+        solution.surface_count = self.commands.surface_count;
+        solution.point_count = self.commands.light_point_count;
+
+        solution.surfaces = self.commands.surfaces;
+        solution.points = self.commands.light_points;
+        solution.emission_color0 = self.commands.emission_color0;
+
+        DebugInterface.debugValue(@src(), &solution.surface_count, "SurfaceCount");
+        DebugInterface.debugValue(@src(), &solution.point_count, "PointCount");
+
+        _ = memory.copy(
+            @sizeOf(Vector3) * solution.point_count,
+            &solution.average_direction_to_light,
+            &solution.last_direction,
+        );
+        memory.zeroSize(
+            @sizeOf(Vector3) * solution.point_count,
+            &solution.average_direction_to_light,
+        );
+
         computeLightPropagation(solution);
+
+        _ = memory.copy(
+            @sizeOf(Color3) * solution.point_count,
+            solution.emission_color0,
+            &solution.last_emission,
+        );
     }
 
     pub fn outputLightingPoints(self: *RenderGroup, solution: *LightingSolution, opt_textures: ?*LightingTextures) void {
+        TimedBlock.beginFunction(@src(), .OutputLightingPoints);
+        defer TimedBlock.endFunction(@src(), .OutputLightingPoints);
+
         _ = opt_textures;
 
         const commands: *RenderCommands = self.commands;
@@ -1770,6 +1810,9 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn outputLightingTextures(self: *RenderGroup, solution: *LightingSolution, dest: *LightingTextures) void {
+        TimedBlock.beginFunction(@src(), .OutputLightingTextures);
+        defer TimedBlock.endFunction(@src(), .OutputLightingTextures);
+
         var point_index: u32 = 0;
         while (point_index < solution.point_count) : (point_index += 1) {
             const position: Vector3 = solution.points[point_index].position;
