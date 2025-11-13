@@ -68,7 +68,7 @@ const TicketMutex = shared.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const LoadedBitmap = asset.LoadedBitmap;
-const LightingSurface = shared.LightingSurface;
+const LightingBox = shared.LightingBox;
 const LightingPoint = shared.LightingPoint;
 
 const std = @import("std");
@@ -2581,8 +2581,8 @@ pub export fn wWinMain(
                     @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
                 );
                 const bitmap_array: [*]?*LoadedBitmap = @ptrCast(@alignCast(bitmap_array_block.?.base));
-                const surfaces: [*]LightingSurface = @ptrCast(@alignCast(allocateMemory(
-                    LIGHT_DATA_WIDTH * @sizeOf(LightingSurface),
+                const light_boxes: [*]LightingBox = @ptrCast(@alignCast(allocateMemory(
+                    LIGHT_DATA_WIDTH * @sizeOf(LightingBox),
                     @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
                 ).?.base));
                 const light_points: [*]LightingPoint = @ptrCast(@alignCast(allocateMemory(
@@ -2603,7 +2603,7 @@ pub export fn wWinMain(
                     vertex_array,
                     bitmap_array,
                     &open_gl.white_bitmap,
-                    surfaces,
+                    light_boxes,
                     light_points,
                     emission_color0,
                 );

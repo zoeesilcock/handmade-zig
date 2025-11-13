@@ -899,20 +899,17 @@ pub const LightingSurface = extern struct {
 };
 
 pub const LightingBox = extern struct {
-    min: Vector3,
-    max: Vector3,
+    min_corner: Vector3,
+    max_corner: Vector3,
     transparency: f32,
-    light_index: u16 = 0,
-    light_count: u16 = 0,
+    light_index: [7]u16 = [1]u16{0} ** 7,
+    padd: u16 = 0,
 };
 
 pub const LightingPoint = extern struct {
     position: Vector3,
     reflection_color: Color3,
-
-    // TODO: Is it better to duplicate these or not?
     normal: Vector3,
-    surface_index: u32,
 };
 
 pub const TexturedVertex = extern struct {
@@ -966,8 +963,8 @@ pub const RenderCommands = extern struct {
     quad_bitmaps: [*]?*LoadedBitmap,
     white_bitmap: ?*LoadedBitmap,
 
-    surface_count: u32,
-    surfaces: [*]LightingSurface,
+    light_box_count: u32,
+    light_boxes: [*]LightingBox,
     light_point_count: u32,
     light_points: [*]LightingPoint,
     emission_color0: [*]Color3,
@@ -983,7 +980,7 @@ pub const RenderCommands = extern struct {
         vertex_array: [*]TexturedVertex,
         bitmap_array: [*]?*LoadedBitmap,
         white_bitmap: *LoadedBitmap,
-        surfaces: [*]LightingSurface,
+        light_boxes: [*]LightingBox,
         light_points: [*]LightingPoint,
         emission_color0: [*]Color3,
     ) RenderCommands {
@@ -1006,8 +1003,8 @@ pub const RenderCommands = extern struct {
             .quad_bitmaps = bitmap_array,
             .white_bitmap = white_bitmap,
 
-            .surface_count = 0,
-            .surfaces = surfaces,
+            .light_box_count = 0,
+            .light_boxes = light_boxes,
 
             .light_point_count = 0,
             .light_points = light_points,
@@ -1021,7 +1018,7 @@ pub const RenderCommands = extern struct {
     pub fn reset(self: *RenderCommands) void {
         self.push_buffer_data_at = self.push_buffer_base;
         self.vertex_count = 0;
-        self.surface_count = 0;
+        self.light_box_count = 0;
         self.light_point_count = 0;
     }
 };

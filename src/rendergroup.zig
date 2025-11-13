@@ -57,6 +57,7 @@ const TexturedVertex = shared.TexturedVertex;
 const LightingTextures = shared.LightingTextures;
 const LightingSurface = shared.LightingSurface;
 const LightingPoint = shared.LightingPoint;
+const LightingBox = shared.LightingBox;
 const LightingIntermediate = shared.LightingIntermediate;
 const LightingTexel = shared.LightingTexel;
 const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
@@ -200,7 +201,7 @@ const RenderTransform = extern struct {
 
 pub const LightingSolution = extern struct {
     surface_count: u32 = 0,
-    surfaces: [*]LightingSurface = undefined,
+    surfaces: [LIGHT_DATA_WIDTH]LightingSurface = [1]LightingSurface{undefined} ** LIGHT_DATA_WIDTH,
 
     point_count: u32 = 0,
     points: [*]LightingPoint = undefined,
@@ -869,6 +870,56 @@ pub const RenderGroup = extern struct {
         );
     }
 
+    const LightBoxSurface = struct {
+        position: Vector3,
+        normal: Vector3,
+        x_axis: Vector3,
+        y_axis: Vector3,
+        half_width: f32,
+        half_height: f32,
+    };
+
+    fn getBoxSurface(min_corner_in: Vector3, max_corner_in: Vector3, surface_index: u32) LightBoxSurface {
+        var min_corner: Vector3 = min_corner_in;
+        var max_corner: Vector3 = max_corner_in;
+
+        const axis_index: u32 = surface_index >> 1;
+        const positive: u32 = surface_index & 0x1;
+
+        var normal: Vector3 = .zero();
+        var y_axis: Vector3 = if (axis_index == 2) .new(0, 1, 0) else .new(0, 0, 1);
+
+        if (positive == 1) {
+            normal.values[axis_index] = 1;
+            min_corner.values[axis_index] = max_corner.values[axis_index];
+        } else {
+            normal.values[axis_index] = -1;
+            max_corner.values[axis_index] = min_corner.values[axis_index];
+        }
+
+        var sign_x: f32 = if (positive == 1) 1 else -1;
+        if (axis_index == 1) {
+            sign_x *= -1;
+        }
+        var x_axis: Vector3 = if (axis_index == 0) .new(0, sign_x, 0) else .new(sign_x, 0, 0);
+
+        const span: Vector3 = max_corner.minus(min_corner);
+        const width: f32 = intrinsics.absoluteValue(x_axis.dotProduct(span));
+        const height: f32 = intrinsics.absoluteValue(y_axis.dotProduct(span));
+        const position: Vector3 = min_corner.plus(span.scaledTo(0.5));
+
+        const result: LightBoxSurface = .{
+            .position = position,
+            .normal = normal,
+            .x_axis = x_axis,
+            .y_axis = y_axis,
+            .half_width = 0.5 * width,
+            .half_height = 0.5 * height,
+        };
+
+        return result;
+    }
+
     pub fn pushCube(
         self: *RenderGroup,
         bitmap: ?*LoadedBitmap,
@@ -931,108 +982,43 @@ pub const RenderGroup = extern struct {
 
                 self.light_index += 6 * light_count;
 
-                const min_surface_index: u32 = self.commands.surface_count;
+                var light_box: [*]LightingBox = self.commands.light_boxes + self.commands.light_box_count;
+                self.commands.light_box_count += 1;
+                std.debug.assert(self.commands.light_box_count <= LIGHT_DATA_WIDTH);
 
-                {
-                    var surface: [*]LightingSurface = self.commands.surfaces + min_surface_index;
-                    self.commands.surface_count += 6;
-                    std.debug.assert(self.commands.surface_count <= LIGHT_DATA_WIDTH);
+                light_box[0].min_corner = .new(nx, ny, nz);
+                light_box[0].max_corner = .new(px, py, pz);
+                light_box[0].transparency = 0;
+                light_box[0].light_index[0] = light_index;
+                light_box[0].light_index[1] = light_index + 4;
+                light_box[0].light_index[2] = light_index + 8;
+                light_box[0].light_index[3] = light_index + 12;
+                light_box[0].light_index[4] = light_index + 16;
+                light_box[0].light_index[5] = light_index + 20;
+                light_box[0].light_index[6] = light_index + 24;
 
-                    surface[0].position = .new(position.x(), position.y(), pz);
-                    surface[0].normal = .new(0, 0, 1);
-                    surface[0].transparency = 0;
-                    surface[0].width = 2.0 * radius;
-                    surface[0].height = 2.0 * radius;
-                    surface[0].x_axis = .new(0, 1, 0);
-                    surface[0].y_axis = .new(-1, 0, 0);
-                    surface[0].light_index = light_index;
-                    surface[0].light_count = 4;
-                    light_index += 4;
-                    surface += 1;
-
-                    surface[0].position = .new(position.x(), position.y(), nz);
-                    surface[0].normal = .new(0, 0, -1);
-                    surface[0].transparency = 0;
-                    surface[0].width = 2.0 * radius;
-                    surface[0].height = 2.0 * radius;
-                    surface[0].x_axis = .new(0, 1, 0);
-                    surface[0].y_axis = .new(1, 0, 0);
-                    surface[0].light_index = light_index;
-                    surface[0].light_count = 4;
-                    light_index += 4;
-                    surface += 1;
-
-                    surface[0].position = .new(position.x(), ny, position.z());
-                    surface[0].normal = .new(0, -1, 0);
-                    surface[0].transparency = 0;
-                    surface[0].width = 2.0 * radius;
-                    surface[0].height = height;
-                    surface[0].x_axis = .new(1, 0, 0);
-                    surface[0].y_axis = .new(0, 0, 1);
-                    surface[0].light_index = light_index;
-                    surface[0].light_count = 4;
-                    light_index += 4;
-                    surface += 1;
-
-                    surface[0].position = .new(position.x(), py, position.z());
-                    surface[0].normal = .new(0, 1, 0);
-                    surface[0].transparency = 0;
-                    surface[0].width = 2.0 * radius;
-                    surface[0].height = height;
-                    surface[0].x_axis = .new(-1, 0, 0);
-                    surface[0].y_axis = .new(0, 0, 1);
-                    surface[0].light_index = light_index;
-                    surface[0].light_count = 4;
-                    light_index += 4;
-                    surface += 1;
-
-                    surface[0].position = .new(nx, position.y(), position.z());
-                    surface[0].normal = .new(-1, 0, 0);
-                    surface[0].transparency = 0;
-                    surface[0].width = 2.0 * radius;
-                    surface[0].height = height;
-                    surface[0].x_axis = .new(0, -1, 0);
-                    surface[0].y_axis = .new(0, 0, 1);
-                    surface[0].light_index = light_index;
-                    surface[0].light_count = 4;
-                    light_index += 4;
-                    surface += 1;
-
-                    surface[0].position = .new(px, position.y(), position.z());
-                    surface[0].normal = .new(1, 0, 0);
-                    surface[0].transparency = 0;
-                    surface[0].width = 2.0 * radius;
-                    surface[0].height = height;
-                    surface[0].x_axis = .new(0, 1, 0);
-                    surface[0].y_axis = .new(0, 0, 1);
-                    surface[0].light_index = light_index;
-                    surface[0].light_count = 4;
-                    light_index += 4;
-                    surface += 1;
-
-                    light_index -= 6 * 4;
-                }
-
-                var surface_index: u32 = min_surface_index;
-                while (surface_index < (min_surface_index + 6)) : (surface_index += 1) {
-                    var surface: [*]LightingSurface = self.commands.surfaces + surface_index;
+                var surface_index: u32 = 0;
+                while (surface_index < 6) : (surface_index += 1) {
+                    const surface: LightBoxSurface = getBoxSurface(
+                        light_box[0].min_corner,
+                        light_box[0].max_corner,
+                        surface_index,
+                    );
 
                     const y_subdivision_count = 2;
                     const x_subdivision_count = 2;
-                    const sub_width: f32 = surface[0].width / @as(f32, @floatFromInt(x_subdivision_count));
-                    const sub_height: f32 = surface[0].height / @as(f32, @floatFromInt(y_subdivision_count));
                     std.debug.assert((x_subdivision_count * y_subdivision_count) == 4);
                     for (0..y_subdivision_count) |y_sub| {
+                        const y_sub_ratio: f32 = -0.5 + @as(f32, @floatFromInt(y_sub));
                         for (0..x_subdivision_count) |x_sub| {
+                            const x_sub_ratio: f32 = -0.5 + @as(f32, @floatFromInt(x_sub));
                             var point: *LightingPoint = &self.commands.light_points[light_index];
 
-                            point.normal = surface[0].normal;
-                            point.surface_index = surface_index;
-                            point.position = surface[0].position
-                                .minus(surface[0].x_axis.scaledTo(0.5 * surface[0].width))
-                                .minus(surface[0].y_axis.scaledTo(0.5 * surface[0].height))
-                                .plus(surface[0].x_axis.scaledTo((@as(f32, @floatFromInt(x_sub)) + 0.5) * sub_width))
-                                .plus(surface[0].y_axis.scaledTo((@as(f32, @floatFromInt(y_sub)) + 0.5) * sub_height));
+                            point.normal = surface.normal;
+                            point.position = surface.position
+                                .plus(surface.x_axis.scaledTo(x_sub_ratio * surface.half_width))
+                                .plus(surface.y_axis.scaledTo(y_sub_ratio * surface.half_height));
+
                             point.reflection_color = color.rgb().scaledTo(0.95);
 
                             self.commands.emission_color0[light_index] =
@@ -1050,74 +1036,18 @@ pub const RenderGroup = extern struct {
                 light_index -= 6 * light_count;
             }
 
-            self.pushQuadUnpackedColors(
-                bitmap,
-                p0,
-                t0,
-                top_color,
-                p1,
-                t1,
-                top_color,
-                p2,
-                t2,
-                top_color,
-                p3,
-                t3,
-                top_color,
-                opt_emission,
-                light_count,
-                light_index,
-            );
-            light_index += light_count;
+            // Negative X.
             self.pushQuadUnpackedColors(
                 bitmap,
                 p7,
                 t0,
-                bottom_color,
-                p6,
-                t1,
-                bottom_color,
-                p5,
-                t2,
-                bottom_color,
-                p4,
-                t3,
-                bottom_color,
-                opt_emission,
-                light_count,
-                light_index,
-            );
-            light_index += light_count;
-            self.pushQuadUnpackedColors(
-                bitmap,
-                p4,
-                t0,
                 cb,
-                p5,
+                p4,
                 t1,
                 cb,
-                p1,
-                t2,
-                ct,
                 p0,
-                t3,
-                ct,
-                opt_emission,
-                light_count,
-                light_index,
-            );
-            light_index += light_count;
-            self.pushQuadUnpackedColors(
-                bitmap,
-                p2,
-                t0,
-                ct,
-                p6,
-                t1,
-                cb,
-                p7,
                 t2,
-                cb,
+                ct,
                 p3,
                 t3,
                 ct,
@@ -1126,6 +1056,8 @@ pub const RenderGroup = extern struct {
                 light_index,
             );
             light_index += light_count;
+
+            // Positive X.
             self.pushQuadUnpackedColors(
                 bitmap,
                 p1,
@@ -1145,17 +1077,40 @@ pub const RenderGroup = extern struct {
                 light_index,
             );
             light_index += light_count;
+
+            // Negative Y.
             self.pushQuadUnpackedColors(
                 bitmap,
-                p7,
+                p4,
                 t0,
                 cb,
-                p4,
+                p5,
                 t1,
                 cb,
-                p0,
+                p1,
                 t2,
                 ct,
+                p0,
+                t3,
+                ct,
+                opt_emission,
+                light_count,
+                light_index,
+            );
+            light_index += light_count;
+
+            // Positive Y.
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p2,
+                t0,
+                ct,
+                p6,
+                t1,
+                cb,
+                p7,
+                t2,
+                cb,
                 p3,
                 t3,
                 ct,
@@ -1163,6 +1118,49 @@ pub const RenderGroup = extern struct {
                 light_count,
                 light_index,
             );
+            light_index += light_count;
+
+            // Negative Z.
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p7,
+                t0,
+                bottom_color,
+                p6,
+                t1,
+                bottom_color,
+                p5,
+                t2,
+                bottom_color,
+                p4,
+                t3,
+                bottom_color,
+                opt_emission,
+                light_count,
+                light_index,
+            );
+            light_index += light_count;
+
+            // Positive Z.
+            self.pushQuadUnpackedColors(
+                bitmap,
+                p0,
+                t0,
+                top_color,
+                p1,
+                t1,
+                top_color,
+                p2,
+                t2,
+                top_color,
+                p3,
+                t3,
+                top_color,
+                opt_emission,
+                light_count,
+                light_index,
+            );
+            light_index += light_count;
         }
     }
 
@@ -1702,10 +1700,33 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn lightingTest(self: *RenderGroup, solution: *LightingSolution) void {
-        solution.surface_count = self.commands.surface_count;
-        solution.point_count = self.commands.light_point_count;
+        const box_count: u32 = self.commands.light_box_count;
+        var surface: [*]LightingSurface = @ptrCast(&solution.surfaces);
+        solution.surface_count = 6 * box_count;
+        std.debug.assert(solution.surface_count < solution.surfaces.len);
 
-        solution.surfaces = self.commands.surfaces;
+        var box_index: u32 = 0;
+        while (box_index < box_count) : (box_index += 1) {
+            const box: *LightingBox = &self.commands.light_boxes[box_index];
+            var box_surface_index: u32 = 0;
+            while (box_surface_index < 6) : (box_surface_index += 1) {
+                const box_surface: LightBoxSurface =
+                    getBoxSurface(box.min_corner, box.max_corner, box_surface_index);
+
+                surface[0].position = box_surface.position;
+                surface[0].normal = box_surface.normal;
+                surface[0].transparency = box.transparency;
+                surface[0].width = 2.0 * box_surface.half_width;
+                surface[0].height = 2.0 * box_surface.half_height;
+                surface[0].x_axis = box_surface.x_axis;
+                surface[0].y_axis = box_surface.y_axis;
+                surface[0].light_index = box.light_index[box_surface_index];
+                surface[0].light_count = box.light_index[box_surface_index + 1] - surface[0].light_index;
+                surface += 1;
+            }
+        }
+
+        solution.point_count = self.commands.light_point_count;
         solution.points = self.commands.light_points;
         solution.emission_color0 = self.commands.emission_color0;
 
@@ -1744,68 +1765,72 @@ pub const RenderGroup = extern struct {
         const element_height: f32 = 0.25;
         const bitmap: ?*LoadedBitmap = commands.white_bitmap;
 
-        var point_index: u32 = 0;
-        while (point_index < solution.point_count) : (point_index += 1) {
-            const point: *LightingPoint = &solution.points[point_index];
-            const surface: *LightingSurface = &solution.surfaces[point.surface_index];
+        var surface_index: u32 = 0;
+        while (surface_index < solution.surface_count) : (surface_index += 1) {
+            const surface: *LightingSurface = &solution.surfaces[surface_index];
 
-            const position: Vector3 = point.position;
-            const x_axis: Vector3 = surface.x_axis;
-            const y_axis: Vector3 = surface.y_axis;
+            var point_index: u32 = surface.light_index;
+            while (point_index < surface.light_index + surface.light_count) : (point_index += 1) {
+                const point: *LightingPoint = &solution.points[point_index];
 
-            const emission_color: Color3 = solution.emission_color0[point_index];
-            // const direction: Vector4 = solution.average_direction_to_light[point_index].toVector4(0);
+                const position: Vector3 = point.position;
+                const x_axis: Vector3 = surface.x_axis;
+                const y_axis: Vector3 = surface.y_axis;
 
-            var front_emission_color: Color = emission_color.clamp01().toColor(1);
+                const emission_color: Color3 = solution.emission_color0[point_index];
+                // const direction: Vector4 = solution.average_direction_to_light[point_index].toVector4(0);
 
-            var position0: Vector4 = .zero();
-            var position1: Vector4 = .zero();
-            var position2: Vector4 = .zero();
-            var position3: Vector4 = .zero();
+                var front_emission_color: Color = emission_color.clamp01().toColor(1);
 
-            var color0: u32 = 0;
-            var color1: u32 = 0;
-            var color2: u32 = 0;
-            var color3: u32 = 0;
+                var position0: Vector4 = .zero();
+                var position1: Vector4 = .zero();
+                var position2: Vector4 = .zero();
+                var position3: Vector4 = .zero();
 
-            const x: Vector3 = x_axis.scaledTo(0.5 * element_width);
-            const y: Vector3 = y_axis.scaledTo(0.5 * element_height);
+                var color0: u32 = 0;
+                var color1: u32 = 0;
+                var color2: u32 = 0;
+                var color3: u32 = 0;
 
-            _ = position0.setXYZ(position.minus(x).minus(y));
-            _ = position1.setXYZ(position.plus(x).minus(y));
-            _ = position2.setXYZ(position.plus(x).plus(y));
-            _ = position3.setXYZ(position.minus(x).plus(y));
+                const x: Vector3 = x_axis.scaledTo(0.5 * element_width);
+                const y: Vector3 = y_axis.scaledTo(0.5 * element_height);
 
-            _ = position0.setW(0);
-            _ = position1.setW(0);
-            _ = position2.setW(0);
-            _ = position3.setW(0);
+                _ = position0.setXYZ(position.minus(x).minus(y));
+                _ = position1.setXYZ(position.plus(x).minus(y));
+                _ = position2.setXYZ(position.plus(x).plus(y));
+                _ = position3.setXYZ(position.minus(x).plus(y));
 
-            const front_emission_color32 = front_emission_color.scaledTo(255.0).packColorRGBA();
-            color0 = front_emission_color32;
-            color1 = front_emission_color32;
-            color2 = front_emission_color32;
-            color3 = front_emission_color32;
+                _ = position0.setW(0);
+                _ = position1.setW(0);
+                _ = position2.setW(0);
+                _ = position3.setW(0);
 
-            const uv: Vector2 = .zero();
-            self.pushQuad(
-                bitmap,
-                position0,
-                uv,
-                color0,
-                position1,
-                uv,
-                color1,
-                position2,
-                uv,
-                color2,
-                position3,
-                uv,
-                color3,
-                null,
-                null,
-                null,
-            );
+                const front_emission_color32 = front_emission_color.scaledTo(255.0).packColorRGBA();
+                color0 = front_emission_color32;
+                color1 = front_emission_color32;
+                color2 = front_emission_color32;
+                color3 = front_emission_color32;
+
+                const uv: Vector2 = .zero();
+                self.pushQuad(
+                    bitmap,
+                    position0,
+                    uv,
+                    color0,
+                    position1,
+                    uv,
+                    color1,
+                    position2,
+                    uv,
+                    color2,
+                    position3,
+                    uv,
+                    color3,
+                    null,
+                    null,
+                    null,
+                );
+            }
         }
     }
 
