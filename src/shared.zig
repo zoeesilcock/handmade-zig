@@ -899,8 +899,8 @@ pub const LightingSurface = extern struct {
 };
 
 pub const LightingBox = extern struct {
-    min_corner: Vector3,
-    max_corner: Vector3,
+    position: Vector3,
+    radius: Vector3,
     transparency: f32,
     light_index: [7]u16 = [1]u16{0} ** 7,
     padd: u16 = 0,
