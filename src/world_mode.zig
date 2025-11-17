@@ -9,6 +9,7 @@ const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const render = @import("render.zig");
 const rendergroup = @import("rendergroup.zig");
+const lighting = @import("lighting.zig");
 const particles = @import("particles.zig");
 const random = @import("random.zig");
 const intrinsics = @import("intrinsics.zig");
@@ -40,8 +41,8 @@ const BitmapId = file_formats.BitmapId;
 const RenderGroup = rendergroup.RenderGroup;
 const ObjectTransform = rendergroup.ObjectTransform;
 const TransientClipRect = rendergroup.TransientClipRect;
-const LightingSolution = rendergroup.LightingSolution;
-const LightingTextures = shared.LightingTextures;
+const LightingSolution = lighting.LightingSolution;
+const LightingTextures = lighting.LightingTextures;
 const CameraParams = render.CameraParams;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
@@ -616,7 +617,7 @@ pub fn updateAndRenderWorld(
     }
 
     if (!recompute_lighting and world_mode.show_lighting) {
-        render_group.outputLightingPoints(&world_mode.test_lighting, &world_mode.test_textures);
+        lighting.outputLightingPoints(render_group, &world_mode.test_lighting, &world_mode.test_textures);
     } else {
         render_group.enableLighting();
 
@@ -748,8 +749,8 @@ pub fn updateAndRenderWorld(
         endSim(&transient_state.arena, &world_sim, world_mode.world);
 
         if (updating_lighting) {
-            render_group.lightingTest(&world_mode.test_lighting);
-            render_group.outputLightingTextures(&world_mode.test_lighting, &world_mode.test_textures);
+            lighting.lightingTest(render_group, &world_mode.test_lighting);
+            lighting.outputLightingTextures(render_group, &world_mode.test_lighting, &world_mode.test_textures);
         }
     }
 

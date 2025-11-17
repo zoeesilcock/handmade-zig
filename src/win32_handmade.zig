@@ -40,7 +40,7 @@ const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
-const LIGHT_DATA_WIDTH = shared.LIGHT_DATA_WIDTH;
+const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
@@ -50,6 +50,7 @@ const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const render = @import("render.zig");
 const rendergroup = @import("rendergroup.zig");
+const lighting = @import("lighting.zig");
 const asset = @import("asset.zig");
 const sort = @import("sort.zig");
 const opengl = @import("opengl.zig");
@@ -68,8 +69,8 @@ const TicketMutex = shared.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const LoadedBitmap = asset.LoadedBitmap;
-const LightingBox = shared.LightingBox;
-const LightingPoint = shared.LightingPoint;
+const LightingBox = lighting.LightingBox;
+const LightingPoint = lighting.LightingPoint;
 
 const std = @import("std");
 const math = @import("math.zig");

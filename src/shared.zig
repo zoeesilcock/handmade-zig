@@ -15,6 +15,7 @@ const entities = @import("entities.zig");
 const brains = @import("brains.zig");
 const rendergroup = @import("rendergroup.zig");
 const render = @import("render.zig");
+const lighting = @import("lighting.zig");
 const file_formats = @import("file_formats");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
@@ -46,6 +47,8 @@ const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const TemporaryMemory = memory.TemporaryMemory;
 const TimedBlock = debug_interface.TimedBlock;
+const LightingBox = lighting.LightingBox;
+const LightingPoint = lighting.LightingPoint;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -877,39 +880,6 @@ pub const debug_color_table: [11]Color3 = .{
     Color3.new(0.5, 1, 0),
     Color3.new(0, 1, 0.5),
     Color3.new(0.5, 0, 1),
-};
-
-pub const LIGHT_DATA_WIDTH = 2 * 8192;
-pub const MAX_LIGHT_EMISSION = 10.0;
-pub const LightingTextures = extern struct {
-    light_data0: [LIGHT_DATA_WIDTH]Vector4, // Px, Py, Pz, Dx
-    light_data1: [LIGHT_DATA_WIDTH]Vector4, // SignDz*Cr, Cg, Cb, Dy
-};
-
-pub const LightingSurface = extern struct {
-    position: Vector3,
-    normal: Vector3,
-    transparency: f32,
-    width: f32,
-    height: f32,
-    x_axis: Vector3,
-    y_axis: Vector3,
-    light_index: u16 = 0,
-    light_count: u16 = 0,
-};
-
-pub const LightingBox = extern struct {
-    position: Vector3,
-    radius: Vector3,
-    transparency: f32,
-    light_index: [7]u16 = [1]u16{0} ** 7,
-    padd: u16 = 0,
-};
-
-pub const LightingPoint = extern struct {
-    position: Vector3,
-    reflection_color: Color3,
-    normal: Vector3,
 };
 
 pub const TexturedVertex = extern struct {
