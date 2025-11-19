@@ -251,6 +251,15 @@ fn Vector3Type(comptime ScalarType: type) type {
     };
 }
 
+pub inline fn isInRectangleCenterHalfDim(position: Vector3, radius: Vector3, test_point: Vector3) bool {
+    const relative: Vector3 = test_point.minus(position);
+    const result = ((@abs(relative.x()) <= radius.x()) and
+        (@abs(relative.y()) <= radius.y()) and
+        (@abs(relative.z()) <= radius.z()));
+
+    return result;
+}
+
 fn Vector4Type(comptime ScalarType: type) type {
     return extern struct {
         const Self = @This();
@@ -790,6 +799,7 @@ fn Rectangle2Type(comptime ScalarType: type) type {
         pub const getMaxCorner = Shared.getMaxCorner;
         pub const getCenter = Shared.getCenter;
         pub const getDimension = Shared.getDimension;
+        pub const getRadius = Shared.getRadius;
         pub const getWidth = Shared.getWidth;
         pub const getHeight = Shared.getHeight;
         pub const getBarycentricPosition = Shared.getBarycentricPosition;
@@ -829,6 +839,21 @@ fn Rectangle3Type(comptime ScalarType: type) type {
             };
         }
 
+        pub inline fn getUnionWith(self: *const Self, b: *Self) Self {
+            return Self{
+                .min = VectorType.new(
+                    @min(self.min.x(), b.min.x()),
+                    @min(self.min.y(), b.min.y()),
+                    @min(self.min.z(), b.min.z()),
+                ),
+                .max = VectorType.new(
+                    @max(self.max.x(), b.max.x()),
+                    @max(self.max.y(), b.max.y()),
+                    @max(self.max.z(), b.max.z()),
+                ),
+            };
+        }
+
         const Shared = RectangleShared(3, VectorType, ScalarType, Self);
         pub const invertedInfinity = if (ScalarType == f32) Shared.invertedInfinityFloat else Shared.invertedInfinityInt;
         pub const zero = Shared.zero;
@@ -840,6 +865,7 @@ fn Rectangle3Type(comptime ScalarType: type) type {
         pub const getMaxCorner = Shared.getMaxCorner;
         pub const getCenter = Shared.getCenter;
         pub const getDimension = Shared.getDimension;
+        pub const getRadius = Shared.getRadius;
         pub const getWidth = Shared.getWidth;
         pub const getHeight = Shared.getHeight;
         pub const getBarycentricPosition = Shared.getBarycentricPosition;
@@ -860,12 +886,12 @@ fn RectangleShared(
     return struct {
         pub inline fn invertedInfinityInt() Self {
             const scalar_max = std.math.maxInt(ScalarType);
-            return Self.new(scalar_max, scalar_max, -scalar_max, -scalar_max);
+            return Self.fromMinMax(.splat(scalar_max), .splat(-scalar_max));
         }
 
         pub inline fn invertedInfinityFloat() Self {
             const scalar_max = std.math.floatMax(ScalarType);
-            return Self.new(scalar_max, scalar_max, -scalar_max, -scalar_max);
+            return Self.fromMinMax(.splat(scalar_max), .splat(-scalar_max));
         }
 
         pub inline fn zero() Self {
@@ -914,6 +940,10 @@ fn RectangleShared(
 
         pub inline fn getDimension(self: *const Self) VectorType {
             return self.max.minus(self.min);
+        }
+
+        pub inline fn getRadius(self: *const Self) VectorType {
+            return self.getDimension().scaledTo(0.5);
         }
 
         pub inline fn getWidth(self: *const Self) ScalarType {

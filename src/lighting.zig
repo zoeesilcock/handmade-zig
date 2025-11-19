@@ -14,6 +14,7 @@ var global_config = &@import("config.zig").global_config;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
+const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const Color3 = math.Color3;
 const RenderGroup = rendergroup.RenderGroup;
@@ -31,11 +32,15 @@ pub const LightingTextures = extern struct {
 };
 
 pub const LightingSolution = extern struct {
-    box_count: u32 = 0,
+    box_count: u16 = 0,
     boxes: [*]LightingBox = undefined,
 
+    scratch_a: [LIGHT_DATA_WIDTH]u16 = [1]u16{0} ** LIGHT_DATA_WIDTH,
+    scratch_b: [LIGHT_DATA_WIDTH]u16 = [1]u16{0} ** LIGHT_DATA_WIDTH,
+
+    box_reference_count: u16 = 0,
     box_table: [LIGHT_DATA_WIDTH]u16 = [1]u16{0} ** LIGHT_DATA_WIDTH,
-    root_box_index: u32,
+    root_box_index: u16,
 
     point_count: u16 = 0,
     points: [*]LightingPoint = undefined,
@@ -141,6 +146,41 @@ fn getBox(solution: *LightingSolution, box_index: u32) *LightingBox {
     return @ptrCast(box);
 }
 
+fn addBoxReference(solution: *LightingSolution, box_storage_index: u16) u16 {
+    std.debug.assert(solution.box_reference_count < solution.box_table.len);
+
+    const result = solution.box_reference_count;
+    solution.box_reference_count += 1;
+    solution.box_table[result] = box_storage_index;
+
+    return result;
+}
+
+fn addBoxReferences(solution: *LightingSolution, count: u16, references: [*]u16) u16 {
+    std.debug.assert(
+        @as(u32, @intCast(solution.box_reference_count)) + @as(u32, @intCast(count)) <= solution.box_table.len,
+    );
+
+    const result: u16 = solution.box_reference_count;
+    solution.box_reference_count += count;
+
+    var index: u16 = 0;
+    while (index < count) : (index += 1) {
+        solution.box_table[result + index] = references[index];
+    }
+
+    return result;
+}
+
+fn addBoxStorage(solution: *LightingSolution) u16 {
+    std.debug.assert(solution.box_count < LIGHT_DATA_WIDTH);
+
+    const result = solution.box_count;
+    solution.box_count += 1;
+
+    return @intCast(result);
+}
+
 fn raycast(
     solution: *LightingSolution,
     skip_index: u32,
@@ -182,40 +222,44 @@ fn raycastRecurse(
 
             solution.raycast_box_count += 1;
 
-            var axis_index: u32 = 0;
-            while (axis_index < 3) : (axis_index += 1) {
-                const positive: u32 = @intFromBool(ray_direction.values[axis_index] < 0);
-                const box_surface_index: u32 = @intCast((axis_index << 1) | positive);
+            if (box.child_count > 0 and math.isInRectangleCenterHalfDim(box.position, box.radius, ray_origin)) {
+                raycastRecurse(solution, skip_index, ray_origin, ray_direction, box, result);
+            } else {
+                var axis_index: u32 = 0;
+                while (axis_index < 3) : (axis_index += 1) {
+                    const positive: u32 = @intFromBool(ray_direction.values[axis_index] < 0);
+                    const box_surface_index: u32 = @intCast((axis_index << 1) | positive);
 
-                const sign: f32 = if (positive == 1) 1 else -1;
+                    const sign: f32 = if (positive == 1) 1 else -1;
 
-                const radius: Vector3 = box.radius;
-                var position: Vector3 = box.position;
-                position.values[axis_index] += sign * radius.values[axis_index];
+                    const radius: Vector3 = box.radius;
+                    var position: Vector3 = box.position;
+                    position.values[axis_index] += sign * radius.values[axis_index];
 
-                const relative_origin: Vector3 = ray_origin.minus(position);
-                const t_ray: f32 = -relative_origin.values[axis_index] / ray_direction.values[axis_index];
-                if (t_ray > 0 and t_ray < result.t_ray) {
-                    const ray_position: Vector3 = relative_origin.plus(ray_direction.scaledTo(t_ray));
+                    const relative_origin: Vector3 = ray_origin.minus(position);
+                    const t_ray: f32 = -relative_origin.values[axis_index] / ray_direction.values[axis_index];
+                    if (t_ray > 0 and t_ray < result.t_ray) {
+                        const ray_position: Vector3 = relative_origin.plus(ray_direction.scaledTo(t_ray));
 
-                    const x_check: f32 = if (axis_index == 0) ray_position.y() else ray_position.x();
-                    const half_width: f32 = if (axis_index == 0) radius.y() else radius.x();
+                        const x_check: f32 = if (axis_index == 0) ray_position.y() else ray_position.x();
+                        const half_width: f32 = if (axis_index == 0) radius.y() else radius.x();
 
-                    const y_check: f32 = if (axis_index == 2) ray_position.y() else ray_position.z();
-                    const half_height: f32 = if (axis_index == 2) radius.y() else radius.z();
+                        const y_check: f32 = if (axis_index == 2) ray_position.y() else ray_position.z();
+                        const half_height: f32 = if (axis_index == 2) radius.y() else radius.z();
 
-                    if (@abs(x_check) <= @abs(half_width) and
-                        @abs(y_check) <= @abs(half_height))
-                    {
-                        if (box.child_count > 0) {
-                            raycastRecurse(solution, skip_index, ray_origin, ray_direction, box, result);
-                        } else {
-                            result.t_ray = t_ray;
-                            result.box = box;
-                            result.box_surface_index = box_surface_index;
+                        if (@abs(x_check) <= half_width and
+                            @abs(y_check) <= half_height)
+                        {
+                            if (box.child_count > 0) {
+                                raycastRecurse(solution, skip_index, ray_origin, ray_direction, box, result);
+                            } else {
+                                result.t_ray = t_ray;
+                                result.box = box;
+                                result.box_surface_index = box_surface_index;
+                            }
+
+                            break;
                         }
-
-                        break;
                     }
                 }
             }
@@ -393,52 +437,98 @@ fn computeLightPropagation(solution: *LightingSolution) void {
     solution.series = series;
 }
 
-fn addOverlappingBoxes(
+fn splitBox(
     solution: *LightingSolution,
-    container: *LightingBox,
-    first_box_index: u32,
-    box_count: u32,
+    parent_box: *LightingBox,
+    source_count_in: u16,
+    source: [*]u16,
+    dest: [*]u16,
+    dimension_index: u32,
 ) void {
-    _ = container;
+    var source_count: u16 = source_count_in;
 
-    var test_index: u32 = first_box_index;
-    while (test_index < (first_box_index + box_count)) : (test_index += 1) {
-        const test_box: *LightingBox = getBox(solution, test_index);
+    if (source_count > 4) {
+        var attempt: u32 = 0;
+        while (attempt < 3) : (attempt += 1) {
+            var class_direction: Vector3 = .zero();
+            class_direction.values[dimension_index] = 1.0;
+            const class_distance: f32 = class_direction.dotProduct(parent_box.position);
 
-        _ = test_box;
-        // if (radiusBoxesOverlap(constainer.position, container.radius, test_box.position, test_box.radius)) {
-        //     addBoxReference(solution, container, test_index);
-        // }
+            var count_a: u16 = 0;
+            var count_b: u16 = 0;
+            var bounds_a: Rectangle3 = Rectangle3.invertedInfinity();
+            var bounds_b: Rectangle3 = Rectangle3.invertedInfinity();
+
+            var source_index: u16 = 0;
+            while (source_index < source_count) : (source_index += 1) {
+                const box_reference: u16 = source[source_index];
+                const box: *LightingBox = @ptrCast(solution.boxes + box_reference);
+
+                var box_rect: Rectangle3 = Rectangle3.fromCenterHalfDimension(box.position, box.radius);
+                if (class_direction.dotProduct(box.position) < class_distance) {
+                    dest[count_a] = box_reference;
+                    bounds_a = bounds_a.getUnionWith(&box_rect);
+                    count_a += 1;
+                } else {
+                    dest[(source_count - 1) - count_b] = box_reference;
+                    bounds_b = bounds_b.getUnionWith(&box_rect);
+                    count_b += 1;
+                }
+            }
+
+            const next_dimension_index: u32 = @mod(dimension_index + 1, 3);
+
+            if (count_a > 0 and count_b > 0) {
+                const child_box_a_at: u16 = addBoxStorage(solution);
+                var child_box_a: *LightingBox = @ptrCast(solution.boxes + child_box_a_at);
+                child_box_a.position = bounds_a.getCenter();
+                child_box_a.radius = bounds_a.getRadius();
+                splitBox(solution, child_box_a, count_a, dest, source, next_dimension_index);
+
+                const child_box_b_at: u16 = addBoxStorage(solution);
+                var child_box_b: *LightingBox = @ptrCast(solution.boxes + child_box_b_at);
+                child_box_b.position = bounds_b.getCenter();
+                child_box_b.radius = bounds_b.getRadius();
+                splitBox(solution, child_box_b, count_b, dest + count_a, source, next_dimension_index);
+
+                source_count = 2;
+                source[0] = child_box_a_at;
+                source[1] = child_box_b_at;
+                break;
+            }
+        }
     }
-}
 
-fn splitBox(solution: *LightingSolution, parent_box: *LightingBox) void {
-    _ = solution;
-    _ = parent_box;
-    // const child_box_a: *LightingBox;
-    // const child_box_b: *LightingBox;
+    parent_box.child_count = source_count;
+    parent_box.first_child_index = addBoxReferences(solution, source_count, source);
 }
 
 fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
-    solution.root_box_index = solution.box_count;
-    solution.box_count += 1;
+    TimedBlock.beginFunction(@src(), .BuildSpatialPartitionForLighting);
+    defer TimedBlock.endFunction(@src(), .BuildSpatialPartitionForLighting);
 
-    const box: *LightingBox = @ptrCast(solution.boxes + solution.root_box_index);
-    box.position = .zero();
-    box.radius = Vector3.new(10000, 10000, 10000).negated();
-    box.child_count = @intCast(solution.box_count - 1);
-    box.first_child_index = 0;
+    const actual_box_count: u16 = solution.box_count;
 
+    var bounds: Rectangle3 = Rectangle3.invertedInfinity();
     var box_index: u16 = 0;
     while (box_index < solution.box_count) : (box_index += 1) {
-        solution.box_table[box_index] = box_index;
+        const box: *LightingBox = @ptrCast(solution.boxes + box_index);
+        solution.scratch_a[box_index] = box_index;
+        var box_rect: Rectangle3 = Rectangle3.fromCenterHalfDimension(box.position, box.radius);
+        bounds = bounds.getUnionWith(&box_rect);
     }
 
-    splitBox(solution, box);
+    solution.root_box_index = addBoxReference(solution, addBoxStorage(solution));
+    const root_box: *LightingBox = getBox(solution, solution.root_box_index);
+    root_box.position = bounds.getCenter();
+    root_box.radius = bounds.getRadius();
+
+    splitBox(solution, root_box, actual_box_count, &solution.scratch_a, &solution.scratch_b, 0);
 }
 
 pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
-    solution.box_count = group.commands.light_box_count;
+    solution.box_reference_count = 0;
+    solution.box_count = @intCast(group.commands.light_box_count);
     solution.boxes = group.commands.light_boxes;
     solution.point_count = @intCast(group.commands.light_point_count);
     solution.points = group.commands.light_points;
