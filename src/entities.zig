@@ -7,6 +7,7 @@ const math = @import("math.zig");
 const render = @import("render.zig");
 const particles = @import("particles.zig");
 const rendergroup = @import("rendergroup.zig");
+const lighting = @import("lighting.zig");
 const file_formats = @import("file_formats");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
@@ -36,7 +37,11 @@ const AssetTagId = file_formats.AssetTagId;
 const BitmapId = file_formats.BitmapId;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
+const LightingPoint = lighting.LightingPoint;
+const LightingPointState = lighting.LightingPointState;
+const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
 
+const ENTITY_MAX_PIECE_COUNT = 4;
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
 pub const INTERNAL = @import("build_options").internal;
 var global_config = &@import("config.zig").global_config;
@@ -109,6 +114,11 @@ pub const Entity = extern struct {
     camera_velocity_direction: Vector3,
 
     //
+    // This lighting data will get "cleaned" whenever a chunk isn't used for one frame.
+    //
+    lighting: [ENTITY_MAX_PIECE_COUNT][LIGHT_POINTS_PER_CHUNK]LightingPointState,
+
+    //
     // Everything below here is not worked out yet.
     //
     flags: u32 = 0,
@@ -156,7 +166,7 @@ pub const Entity = extern struct {
     traversables: [16]EntityTraversablePoint,
 
     piece_count: u32,
-    pieces: [4]EntityVisiblePiece, // 0 is the "on top" piece.
+    pieces: [ENTITY_MAX_PIECE_COUNT]EntityVisiblePiece, // 0 is the "on top" piece.
 
     auto_boost_to: TraversableReference,
 
@@ -565,7 +575,7 @@ pub fn updateAndRenderEntities(
                             piece.dimension.x(),
                             piece.color.rgb(),
                             piece.dimension.y(),
-                            &piece.light_index,
+                            @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
                         render_group.pushCube(
@@ -575,7 +585,7 @@ pub fn updateAndRenderEntities(
                             piece.dimension.y(),
                             piece.color,
                             null,
-                            &piece.light_index,
+                            @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else {
                         render_group.pushBitmapId(

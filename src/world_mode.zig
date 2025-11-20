@@ -43,6 +43,8 @@ const ObjectTransform = rendergroup.ObjectTransform;
 const TransientClipRect = rendergroup.TransientClipRect;
 const LightingSolution = lighting.LightingSolution;
 const LightingTextures = lighting.LightingTextures;
+const LightingPointState = lighting.LightingPointState;
+const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
 const CameraParams = render.CameraParams;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
@@ -107,7 +109,7 @@ pub const GameModeWorld = struct {
     debug_camera_dolly: f32,
     debug_light_position: Vector3,
     updating_lighting: bool,
-    debug_light_index: u32,
+    debug_light_store: [LIGHT_POINTS_PER_CHUNK]LightingPointState,
 
     camera_pitch: f32,
     camera_orbit: f32,
@@ -590,6 +592,12 @@ pub fn updateAndRenderWorld(
         .zero(),
         world_mode.standard_room_dimension.scaledTo(3),
     );
+    var light_bounds: Rectangle3 = .fromCenterDimension(
+        .zero(),
+        world_mode.standard_room_dimension,
+    );
+    _ = light_bounds.min.setZ(sim_bounds.min.z());
+    _ = light_bounds.max.setZ(sim_bounds.max.z());
 
     if (input.f_key_pressed[2]) {
         render_group.commands.settings.lighting_disabled = !render_group.commands.settings.lighting_disabled;
@@ -619,7 +627,7 @@ pub fn updateAndRenderWorld(
     if (!recompute_lighting and world_mode.show_lighting) {
         lighting.outputLightingPoints(render_group, &world_mode.test_lighting, &world_mode.test_textures);
     } else {
-        render_group.enableLighting();
+        render_group.enableLighting(light_bounds);
 
         if (false) {
             var sim_work: [16]WorldSimWork = undefined;
@@ -692,7 +700,7 @@ pub fn updateAndRenderWorld(
                 0.5,
                 .new(1, 1, 1),
                 1,
-                &world_mode.debug_light_index,
+                @ptrCast(&world_mode.debug_light_store),
             );
 
             // TODO: Re-enable particles.
@@ -746,12 +754,12 @@ pub fn updateAndRenderWorld(
                 );
             }
         }
-        endSim(&transient_state.arena, &world_sim, world_mode.world);
 
         if (updating_lighting) {
             lighting.lightingTest(render_group, &world_mode.test_lighting);
             lighting.outputLightingTextures(render_group, &world_mode.test_lighting, &world_mode.test_textures);
         }
+        endSim(&transient_state.arena, &world_sim, world_mode.world);
     }
 
     render_group.endDepthPeel();

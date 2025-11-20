@@ -49,6 +49,9 @@ const TemporaryMemory = memory.TemporaryMemory;
 const TimedBlock = debug_interface.TimedBlock;
 const LightingBox = lighting.LightingBox;
 const LightingPoint = lighting.LightingPoint;
+const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
+const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
+const LIGHT_CHUNK_COUNT = lighting.LIGHT_CHUNK_COUNT;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -935,9 +938,8 @@ pub const RenderCommands = extern struct {
 
     light_box_count: u32,
     light_boxes: [*]LightingBox,
-    light_point_count: u32,
-    light_points: [*]LightingPoint,
-    emission_color0: [*]Color3,
+
+    light_point_index: u16,
 
     clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
 
@@ -951,8 +953,6 @@ pub const RenderCommands = extern struct {
         bitmap_array: [*]?*LoadedBitmap,
         white_bitmap: *LoadedBitmap,
         light_boxes: [*]LightingBox,
-        light_points: [*]LightingPoint,
-        emission_color0: [*]Color3,
     ) RenderCommands {
         return RenderCommands{
             .settings = .{
@@ -976,10 +976,7 @@ pub const RenderCommands = extern struct {
             .light_box_count = 0,
             .light_boxes = light_boxes,
 
-            .light_point_count = 0,
-            .light_points = light_points,
-
-            .emission_color0 = emission_color0,
+            .light_point_index = 0,
 
             .clear_color = .black(),
         };
@@ -989,7 +986,27 @@ pub const RenderCommands = extern struct {
         self.push_buffer_data_at = self.push_buffer_base;
         self.vertex_count = 0;
         self.light_box_count = 0;
-        self.light_point_count = 0;
+    }
+
+    pub fn lightChunkFrameSweep(self: *RenderCommands) void {
+        // Chunk 0 is always skipped because the 0 light index value is reserved for things that don't use lighting.
+        var light_chunk_index: u16 = 1;
+        while (light_chunk_index < LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK) : (light_chunk_index += 1) {
+            if (self.light_chunk_used[light_chunk_index] > 0) {
+                self.light_chunk_used[light_chunk_index] = 0;
+            } else {
+                freeLightChunk(self, light_chunk_index);
+            }
+        }
+    }
+
+    pub fn freeLightChunk(self: *RenderCommands, light_chunk_index: u16) void {
+        std.debug.assert(light_chunk_index > 0);
+        std.debug.assert(light_chunk_index < LIGHT_CHUNK_COUNT);
+
+        self.light_points[light_chunk_index * LIGHT_POINTS_PER_CHUNK] =
+            .{ .next_free = self.first_free_lighting_chunk };
+        self.first_free_lighting_chunk = light_chunk_index;
     }
 };
 

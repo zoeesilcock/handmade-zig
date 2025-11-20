@@ -23,8 +23,10 @@ const LoadedBitmap = asset.LoadedBitmap;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 
+pub const LIGHT_POINTS_PER_CHUNK = 24;
 pub const MAX_LIGHT_EMISSION = 10.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
+pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
 
 pub const LightingTextures = extern struct {
     light_data0: [LIGHT_DATA_WIDTH]Vector4, // Px, Py, Pz, Dx
@@ -42,17 +44,13 @@ pub const LightingSolution = extern struct {
     box_table: [LIGHT_DATA_WIDTH]u16 = [1]u16{0} ** LIGHT_DATA_WIDTH,
     root_box_index: u16,
 
-    point_count: u16 = 0,
-    points: [*]LightingPoint = undefined,
+    point_count: u16,
+    points: [LIGHT_DATA_WIDTH]LightingPoint = undefined,
 
-    emission_color0: [*]Color3 = undefined,
-    emission_color1: [LIGHT_DATA_WIDTH]Color3 = [1]Color3{undefined} ** LIGHT_DATA_WIDTH,
-    average_direction_to_light: [LIGHT_DATA_WIDTH]Vector3 = [1]Vector3{undefined} ** LIGHT_DATA_WIDTH,
+    emission_color0: [LIGHT_DATA_WIDTH]Color3 = undefined,
+    emission_color1: [LIGHT_DATA_WIDTH]Color3 = undefined,
+    average_direction_to_light: [LIGHT_DATA_WIDTH]Vector3 = undefined,
     series: random.Series,
-
-    last_is_valid: bool,
-    last_emission: [LIGHT_DATA_WIDTH]Color3 = [1]Color3{undefined} ** LIGHT_DATA_WIDTH,
-    last_direction: [LIGHT_DATA_WIDTH]Vector3 = [1]Vector3{undefined} ** LIGHT_DATA_WIDTH,
 
     total_ray_count: u32, // Number of total rays cast.
     raycast_point_count: u32, // Number of times a point got used as an origin.
@@ -72,19 +70,29 @@ pub const LightingSurface = extern struct {
 };
 
 pub const LightingBox = extern struct {
+    storage: [*]LightingPointState,
     position: Vector3,
     radius: Vector3,
+    reflection_color: Color3,
     transparency: f32,
+    emission: f32,
     light_index: [7]u16 = [1]u16{0} ** 7,
     child_count: u16 = 0,
     first_child_index: u16,
-    pad: u16,
 };
 
-pub const LightingPoint = extern struct {
-    position: Vector3,
-    reflection_color: Color3,
-    normal: Vector3,
+pub const LightingPointState = extern struct {
+    emit: Color3,
+    direction: Vector3,
+};
+
+pub const LightingPoint = extern union {
+    value: extern struct {
+        position: Vector3,
+        reflection_color: Color3,
+        normal: Vector3,
+    },
+    next_free: u16,
 };
 
 pub const LightBoxSurface = struct {
@@ -306,7 +314,7 @@ fn computeLightPropagation(solution: *LightingSolution) void {
     TimedBlock.beginFunction(@src(), .ComputeLightPropagation);
     defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
 
-    const source_emission_color: [*]Color3 = solution.emission_color0;
+    const source_emission_color: [*]Color3 = &solution.emission_color0;
     var dest_emission_color: [*]Color3 = &solution.emission_color1;
 
     const light_retention: f32 = 0.5;
@@ -316,12 +324,12 @@ fn computeLightPropagation(solution: *LightingSolution) void {
 
     for (0..global_config.Renderer_Lighting_IterationCount) |_| {
         const power: f32 = (1.0 - light_retention) / @as(f32, @floatFromInt(ray_count));
-        var emitter_index: u32 = 1; // Point 0 is never used.
+        var emitter_index: u32 = 1; // Light point index 0 is never used.
         while (emitter_index < solution.point_count) : (emitter_index += 1) {
             var emitter: *LightingPoint = &solution.points[emitter_index];
             var retained_color: Color3 = source_emission_color[emitter_index];
             const emitter_color: Color3 =
-                emitter.reflection_color.hadamardProduct(source_emission_color[emitter_index]);
+                emitter.value.reflection_color.hadamardProduct(source_emission_color[emitter_index]);
 
             const sum: f32 = emitter_color.r() + emitter_color.g() + emitter_color.b();
             if (sum > min_emission) {
@@ -329,18 +337,20 @@ fn computeLightPropagation(solution: *LightingSolution) void {
 
                 var ray_index: u32 = 0;
                 while (ray_index < ray_count) : (ray_index += 1) {
-                    const emission_direction: Vector3 = sampleHemisphere(&series, emitter.normal);
+                    const emission_direction: Vector3 = sampleHemisphere(&series, emitter.value.normal);
                     const ray: RaycastResult = raycast(
                         solution,
                         emitter_index,
-                        emitter.position,
+                        emitter.value.position,
                         emission_direction,
                     );
 
                     if (ray.box) |hit_box| {
                         const hit_index: u32 = hit_box.light_index[ray.box_surface_index];
-                        const hit_point_count: u32 = hit_box.light_index[ray.box_surface_index + 1] - hit_index;
-                        const ray_position: Vector3 = emitter.position.plus(emission_direction.scaledTo(ray.t_ray));
+                        const hit_point_count: u32 =
+                            hit_box.light_index[ray.box_surface_index + 1] - hit_index;
+                        const ray_position: Vector3 =
+                            emitter.value.position.plus(emission_direction.scaledTo(ray.t_ray));
 
                         var closest_point_index: u32 = 0;
                         var closest_distance_sq: f32 = std.math.floatMax(f32);
@@ -348,7 +358,8 @@ fn computeLightPropagation(solution: *LightingSolution) void {
                         while (surface_point_index < hit_point_count) : (surface_point_index += 1) {
                             const point_index: u32 = hit_index + surface_point_index;
                             const hit_point: *LightingPoint = &solution.points[point_index];
-                            const distance_sq: f32 = ray_position.minus(hit_point.position).lengthSquared();
+                            const distance_sq: f32 =
+                                ray_position.minus(hit_point.value.position).lengthSquared();
                             if (closest_distance_sq > distance_sq) {
                                 closest_point_index = point_index;
                                 closest_distance_sq = distance_sq;
@@ -357,7 +368,7 @@ fn computeLightPropagation(solution: *LightingSolution) void {
 
                         if (closest_point_index > 0) {
                             retained_color = retained_color.minus(accumulateSample(
-                                solution.points[closest_point_index].normal,
+                                solution.points[closest_point_index].value.normal,
                                 @ptrCast(dest_emission_color + closest_point_index),
                                 &solution.average_direction_to_light[closest_point_index],
                                 emitter_color,
@@ -384,7 +395,7 @@ fn computeLightPropagation(solution: *LightingSolution) void {
         // );
         // const sun_direction: Vector3 = Vector3.new(1, 1, 1).normalizeOrZero();
 
-        var point_index: u32 = 1; // Point 0 is never used.
+        var point_index: u32 = 1; // Light point index 0 is never used.
         while (point_index < solution.point_count) : (point_index += 1) {
             // var sky_ray_index: u32 = 0;
             // while (sky_ray_index < sky_ray_count) : (sky_ray_index += 1) {
@@ -415,23 +426,6 @@ fn computeLightPropagation(solution: *LightingSolution) void {
         if (ray_count > 8) {
             ray_count /= 2;
         }
-    }
-
-    var last_emission = &solution.last_emission;
-    var last_direction = &solution.last_direction;
-    if (!solution.last_is_valid) {
-        last_emission = @ptrCast(solution.emission_color0);
-        last_direction = &solution.average_direction_to_light;
-        solution.last_is_valid = true;
-    }
-
-    var point_index: u32 = 1; // Point 0 is never used.
-    while (point_index < solution.point_count) : (point_index += 1) {
-        const t: f32 = 0.1;
-        solution.emission_color0[point_index] =
-            last_emission[point_index].lerp(solution.emission_color0[point_index], t);
-        solution.average_direction_to_light[point_index] =
-            last_direction[point_index].lerp(solution.average_direction_to_light[point_index].normalizeOrZero(), t).normalizeOrZero();
     }
 
     solution.series = series;
@@ -529,39 +523,96 @@ fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
 pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
     solution.box_reference_count = 0;
     solution.box_count = @intCast(group.commands.light_box_count);
+    const original_box_count: u32 = solution.box_count;
     solution.boxes = group.commands.light_boxes;
-    solution.point_count = @intCast(group.commands.light_point_count);
-    solution.points = group.commands.light_points;
-    solution.emission_color0 = group.commands.emission_color0;
+    solution.point_count = group.commands.light_point_index;
 
     solution.total_ray_count = 0;
     solution.raycast_point_count = 0;
     solution.raycast_box_count = 0;
 
+    var box_index: u32 = 0;
+    while (box_index < original_box_count) : (box_index += 1) {
+        const box: *LightingBox = @ptrCast(solution.boxes + box_index);
+
+        var light_index: u32 = box.light_index[0];
+        var surface_index: u32 = 0;
+        while (surface_index < 6) : (surface_index += 1) {
+            const surface: LightBoxSurface = getBoxSurface(box.position, box.radius, surface_index);
+            const y_subdivision_count = 2;
+            const x_subdivision_count = 2;
+            std.debug.assert((x_subdivision_count * y_subdivision_count) == 4);
+            for (0..y_subdivision_count) |y_sub| {
+                const y_sub_ratio: f32 = -0.5 + @as(f32, @floatFromInt(y_sub));
+                for (0..x_subdivision_count) |x_sub| {
+                    const x_sub_ratio: f32 = -0.5 + @as(f32, @floatFromInt(x_sub));
+                    var point: *LightingPoint = &solution.points[light_index];
+
+                    point.value.normal = surface.normal;
+                    point.value.position = surface.position
+                        .plus(surface.x_axis.scaledTo(x_sub_ratio * surface.half_width))
+                        .plus(surface.y_axis.scaledTo(y_sub_ratio * surface.half_height));
+
+                    point.value.reflection_color = box.reflection_color.scaledTo(0.95);
+
+                    solution.emission_color0[light_index] =
+                        Color3.new(1, 1, 1).scaledTo(box.emission * MAX_LIGHT_EMISSION);
+
+                    light_index += 1;
+                    std.debug.assert(light_index < LIGHT_DATA_WIDTH);
+                }
+            }
+        }
+    }
+
     buildSpatialPartitionForLighting(solution);
 
     DebugInterface.debugValue(@src(), &group.commands.light_box_count, "LightBoxCount");
-    DebugInterface.debugValue(@src(), &group.commands.light_point_count, "LightPointCount");
     DebugInterface.debugValue(@src(), &solution.box_count, "BoxCount");
     DebugInterface.debugValue(@src(), &solution.point_count, "PointCount");
 
-    _ = memory.copy(
-        @sizeOf(Vector3) * solution.point_count,
-        &solution.average_direction_to_light,
-        &solution.last_direction,
-    );
     memory.zeroSize(
-        @sizeOf(Vector3) * solution.point_count,
+        @sizeOf(Vector3) * LIGHT_DATA_WIDTH,
         &solution.average_direction_to_light,
     );
 
     computeLightPropagation(solution);
 
-    _ = memory.copy(
-        @sizeOf(Color3) * solution.point_count,
-        solution.emission_color0,
-        &solution.last_emission,
-    );
+    box_index = 0;
+    while (box_index < original_box_count) : (box_index += 1) {
+        const box: *LightingBox = @ptrCast(solution.boxes + box_index);
+        const first_point: *LightingPointState = @ptrCast(box.storage);
+        const valid: bool = first_point.direction.x() != 0 or
+            first_point.direction.y() != 0 or
+            first_point.direction.z() != 0;
+
+        if (valid) {
+            var local_index: u32 = 0;
+            while (local_index < (box.light_index[6] - box.light_index[0])) : (local_index += 1) {
+                const point_index: u32 = local_index + box.light_index[0];
+                const t: f32 = 0.1;
+                box.storage[local_index].emit =
+                    box.storage[local_index].emit.lerp(solution.emission_color0[point_index], t);
+                solution.emission_color0[point_index] = box.storage[local_index].emit;
+
+                box.storage[local_index].direction =
+                    box.storage[local_index].direction.lerp(
+                        solution.average_direction_to_light[point_index].normalizeOrZero(),
+                        t,
+                    ).normalizeOrZero();
+                solution.average_direction_to_light[point_index] = box.storage[local_index].direction;
+            }
+        } else {
+            var local_index: u32 = 0;
+            while (local_index < (box.light_index[6] - box.light_index[0])) : (local_index += 1) {
+                const point_index: u32 = local_index + box.light_index[0];
+                box.storage[local_index].emit = solution.emission_color0[point_index];
+                const direction: Vector3 = solution.average_direction_to_light[point_index].normalizeOrZero();
+                solution.average_direction_to_light[point_index] = direction;
+                box.storage[local_index].direction = direction;
+            }
+        }
+    }
 
     DebugInterface.debugValue(@src(), &solution.total_ray_count, "TotalRayCount");
     DebugInterface.debugValue(@src(), &solution.raycast_point_count, "RaycastPointCount");
@@ -597,7 +648,7 @@ pub fn outputLightingPoints(
             while (point_index < box.light_index[box_surface_index + 1]) : (point_index += 1) {
                 const point: *LightingPoint = &solution.points[point_index];
 
-                const position: Vector3 = point.position;
+                const position: Vector3 = point.value.position;
                 const x_axis: Vector3 = box_surface.x_axis;
                 const y_axis: Vector3 = box_surface.y_axis;
 
@@ -663,9 +714,9 @@ pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, 
     TimedBlock.beginFunction(@src(), .OutputLightingTextures);
     defer TimedBlock.endFunction(@src(), .OutputLightingTextures);
 
-    var point_index: u32 = 0;
+    var point_index: u32 = 1; // Light point index 0 is never used.
     while (point_index < solution.point_count) : (point_index += 1) {
-        const position: Vector3 = solution.points[point_index].position;
+        const position: Vector3 = solution.points[point_index].value.position;
         var color: Color3 = solution.emission_color0[point_index];
         var direction: Vector3 = solution.average_direction_to_light[point_index];
 

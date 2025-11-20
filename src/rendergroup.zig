@@ -57,10 +57,12 @@ const TexturedVertex = shared.TexturedVertex;
 const LightingTextures = lighting.LightingTextures;
 const LightingSurface = shared.LightingSurface;
 const LightingPoint = lighting.LightingPoint;
+const LightingPointState = lighting.LightingPointState;
 const LightingBox = lighting.LightingBox;
 const LightingIntermediate = shared.LightingIntermediate;
 const LightingTexel = shared.LightingTexel;
 const LightBoxSurface = lighting.LightBoxSurface;
+const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 const MAX_LIGHT_EMISSION = lighting.MAX_LIGHT_EMISSION;
 const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
@@ -205,7 +207,7 @@ pub const RenderGroup = extern struct {
 
     screen_dimensions: Vector2,
     lighting_enabled: bool,
-    light_index: u16,
+    light_bounds: Rectangle3,
 
     debug_tag: u32,
 
@@ -236,7 +238,7 @@ pub const RenderGroup = extern struct {
             .commands = commands,
             .current_quads = undefined,
             .lighting_enabled = false,
-            .light_index = 1,
+            .light_bounds = .zero(),
         };
 
         var initial_setup: RenderSetup = .{
@@ -259,8 +261,9 @@ pub const RenderGroup = extern struct {
         // self.commands.missing_resource_count += self.missing_resource_count
     }
 
-    pub fn enableLighting(self: *RenderGroup) void {
+    pub fn enableLighting(self: *RenderGroup, lighting_bounds: Rectangle3) void {
         self.lighting_enabled = true;
+        self.light_bounds = lighting_bounds;
     }
 
     pub fn allResourcesPresent(self: *RenderGroup) bool {
@@ -841,7 +844,7 @@ pub const RenderGroup = extern struct {
         radius: f32,
         color: Color3,
         emission: f32,
-        opt_light_index_store: ?*u32,
+        opt_light_store: ?*LightingPointState,
     ) void {
         self.pushCube(
             self.commands.white_bitmap,
@@ -850,7 +853,7 @@ pub const RenderGroup = extern struct {
             radius,
             color.toColor(1),
             emission,
-            opt_light_index_store,
+            opt_light_store,
         );
     }
 
@@ -862,13 +865,17 @@ pub const RenderGroup = extern struct {
         height: f32,
         color: Color,
         opt_emission: ?f32,
-        opt_light_index_store_in: ?*u32,
+        opt_light_store_in: ?*LightingPointState,
     ) void {
         const emission = opt_emission orelse 0;
-        var opt_light_index_store = opt_light_index_store_in;
+        var opt_light_store: ?*LightingPointState = opt_light_store_in;
+
+        std.debug.assert(emission >= 0);
+        std.debug.assert(emission <= 1);
+
         if (self.getCurrentQuads(6) != null) {
             if (!self.lighting_enabled) {
-                opt_light_index_store = null;
+                opt_light_store = null;
             }
 
             const nx: f32 = position.x() - radius;
@@ -904,70 +911,37 @@ pub const RenderGroup = extern struct {
 
             var light_count: u16 = 0;
             var light_index: u16 = 0;
-            if (opt_light_index_store) |light_index_store| {
-                light_count = 4;
-
-                if (light_index_store.* > 0) {
-                    light_index = @intCast(light_index_store.*);
-                } else {
-                    light_index = self.light_index;
-                    light_index_store.* = light_index;
-                }
-
-                self.light_index += 6 * light_count;
-
-                var light_box: [*]LightingBox = self.commands.light_boxes + self.commands.light_box_count;
-                self.commands.light_box_count += 1;
-                std.debug.assert(self.commands.light_box_count <= LIGHT_DATA_WIDTH);
-
+            if (opt_light_store) |light_store| {
                 const min_corner: Vector3 = .new(nx, ny, nz);
                 const max_corner: Vector3 = .new(px, py, pz);
-                light_box[0].position = max_corner.plus(min_corner).scaledTo(0.5);
-                light_box[0].radius = max_corner.minus(min_corner).scaledTo(0.5);
-                light_box[0].transparency = 0;
-                light_box[0].light_index[0] = light_index;
-                light_box[0].light_index[1] = light_index + 4;
-                light_box[0].light_index[2] = light_index + 8;
-                light_box[0].light_index[3] = light_index + 12;
-                light_box[0].light_index[4] = light_index + 16;
-                light_box[0].light_index[5] = light_index + 20;
-                light_box[0].light_index[6] = light_index + 24;
-                light_box[0].child_count = 0;
+                const cube_bounds: Rectangle3 = .fromMinMax(min_corner, max_corner);
 
-                var surface_index: u32 = 0;
-                while (surface_index < 6) : (surface_index += 1) {
-                    const surface: LightBoxSurface =
-                        lighting.getBoxSurface(light_box[0].position, light_box[0].radius, surface_index);
+                if (cube_bounds.intersects(&self.light_bounds)) {
+                    light_count = LIGHT_POINTS_PER_CHUNK / 6;
+                    light_index = self.commands.light_point_index;
+                    self.commands.light_point_index += LIGHT_POINTS_PER_CHUNK;
 
-                    const y_subdivision_count = 2;
-                    const x_subdivision_count = 2;
-                    std.debug.assert((x_subdivision_count * y_subdivision_count) == 4);
-                    for (0..y_subdivision_count) |y_sub| {
-                        const y_sub_ratio: f32 = -0.5 + @as(f32, @floatFromInt(y_sub));
-                        for (0..x_subdivision_count) |x_sub| {
-                            const x_sub_ratio: f32 = -0.5 + @as(f32, @floatFromInt(x_sub));
-                            var point: *LightingPoint = &self.commands.light_points[light_index];
+                    std.debug.assert(self.commands.light_point_index <= LIGHT_DATA_WIDTH);
 
-                            point.normal = surface.normal;
-                            point.position = surface.position
-                                .plus(surface.x_axis.scaledTo(x_sub_ratio * surface.half_width))
-                                .plus(surface.y_axis.scaledTo(y_sub_ratio * surface.half_height));
+                    var light_box: [*]LightingBox = self.commands.light_boxes + self.commands.light_box_count;
+                    self.commands.light_box_count += 1;
+                    std.debug.assert(self.commands.light_box_count <= LIGHT_DATA_WIDTH);
 
-                            point.reflection_color = color.rgb().scaledTo(0.95);
-
-                            self.commands.emission_color0[light_index] =
-                                Color3.new(1, 1, 1).scaledTo(emission * MAX_LIGHT_EMISSION);
-
-                            light_index += 1;
-                            if (self.commands.light_point_count < light_index) {
-                                self.commands.light_point_count = light_index;
-                                std.debug.assert(self.commands.light_point_count < LIGHT_DATA_WIDTH);
-                            }
-                        }
-                    }
+                    light_box[0].position = max_corner.plus(min_corner).scaledTo(0.5);
+                    light_box[0].radius = max_corner.minus(min_corner).scaledTo(0.5);
+                    light_box[0].transparency = 0;
+                    light_box[0].emission = emission;
+                    light_box[0].reflection_color = color.rgb();
+                    light_box[0].storage = @ptrCast(light_store);
+                    light_box[0].light_index[0] = light_index;
+                    light_box[0].light_index[1] = light_index + 4;
+                    light_box[0].light_index[2] = light_index + 8;
+                    light_box[0].light_index[3] = light_index + 12;
+                    light_box[0].light_index[4] = light_index + 16;
+                    light_box[0].light_index[5] = light_index + 20;
+                    light_box[0].light_index[6] = light_index + 24;
+                    light_box[0].child_count = 0;
                 }
-
-                light_index -= 6 * light_count;
             }
 
             // Negative X.

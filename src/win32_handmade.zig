@@ -2586,14 +2586,6 @@ pub export fn wWinMain(
                     LIGHT_DATA_WIDTH * @sizeOf(LightingBox),
                     @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
                 ).?.base));
-                const light_points: [*]LightingPoint = @ptrCast(@alignCast(allocateMemory(
-                    LIGHT_DATA_WIDTH * @sizeOf(LightingPoint),
-                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
-                ).?.base));
-                const emission_color0: [*]math.Color3 = @ptrCast(@alignCast(allocateMemory(
-                    LIGHT_DATA_WIDTH * @sizeOf(math.Color3),
-                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
-                ).?.base));
 
                 var render_commands: shared.RenderCommands = shared.RenderCommands.default(
                     push_buffer_size,
@@ -2605,8 +2597,6 @@ pub export fn wWinMain(
                     bitmap_array,
                     &open_gl.white_bitmap,
                     light_boxes,
-                    light_points,
-                    emission_color0,
                 );
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
@@ -2682,6 +2672,8 @@ pub export fn wWinMain(
                     //
 
                     TimedBlock.beginBlock(@src(), .GameUpdate);
+
+                    render_commands.light_point_index = 1;
 
                     if (!paused) {
                         if (state.input_recording_index > 0) {
