@@ -245,7 +245,8 @@ const RenderSetup = rendergroup.RenderSetup;
 const RenderEntryHeader = rendergroup.RenderEntryHeader;
 const RenderEntryTexturedQuads = rendergroup.RenderEntryTexturedQuads;
 const RenderEntryLightingTransfer = rendergroup.RenderEntryLightingTransfer;
-const RenderEntryClear = rendergroup.RenderEntryClear;
+const RenderEntryBeginPeels = rendergroup.RenderEntryBeginPeels;
+const RenderEntryFullClear = rendergroup.RenderEntryFullClear;
 const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
 const RenderEntryCube = rendergroup.RenderEntryCube;
 const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
@@ -2248,39 +2249,20 @@ pub fn renderCommands(
     std.debug.assert(open_gl.depth_peel_count > 0);
     const max_render_target_index: u32 = open_gl.depth_peel_count - 1;
 
-    var target_index: u32 = 0;
-    while (target_index <= open_gl.depth_peel_count) : (target_index += 1) {
-        bindFrameBuffer(&open_gl.depth_peel_buffers[target_index], render_width, render_height);
-
-        gl.glScissor(0, 0, render_width, render_height);
-        gl.glClearDepth(1);
-        if (target_index == max_render_target_index) {
-            gl.glClearColor(
-                commands.clear_color.r(),
-                commands.clear_color.g(),
-                commands.clear_color.b(),
-                1,
-            );
-        } else {
-            gl.glClearColor(0, 0, 0, 0);
-        }
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT);
-    }
-    bindFrameBuffer(null, render_width, render_height);
-
-    bindFrameBuffer(&open_gl.depth_peel_buffers[0], render_width, render_height);
+    gl.glClearDepth(1);
 
     var debug_setup: ?*RenderSetup = null;
-    var peeling: bool = false;
     var on_peel_index: u32 = 0;
     var peel_header_restore: [*]u8 = undefined;
     var header_at: [*]u8 = commands.push_buffer_base;
     while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) : (header_at += @sizeOf(RenderEntryHeader)) {
         const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
         const alignment: usize = switch (header.type) {
+            .RenderEntryFullClear => @alignOf(RenderEntryFullClear),
+            .RenderEntryBeginPeels => @alignOf(RenderEntryBeginPeels),
             .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
             .RenderEntryLightingTransfer => @alignOf(RenderEntryLightingTransfer),
-            .RenderEntryDepthClear, .RenderEntryBeginPeels, .RenderEntryEndPeels => @alignOf(u32),
+            .RenderEntryDepthClear, .RenderEntryEndPeels => @alignOf(u32),
         };
 
         const header_address = @intFromPtr(header);
@@ -2291,8 +2273,27 @@ pub fn renderCommands(
         header_at += aligned_address - data_address;
 
         switch (header.type) {
+            .RenderEntryFullClear => {
+                const entry: *RenderEntryFullClear = @ptrCast(@alignCast(data));
+                header_at += @sizeOf(RenderEntryFullClear);
+
+                gl.glClearColor(entry.clear_color.r(), entry.clear_color.g(), entry.clear_color.b(), 1);
+                gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT);
+            },
             .RenderEntryBeginPeels => {
+                const entry: *RenderEntryBeginPeels = @ptrCast(@alignCast(data));
+                header_at += @sizeOf(RenderEntryBeginPeels);
+
                 peel_header_restore = header_at;
+                bindFrameBuffer(&open_gl.depth_peel_buffers[on_peel_index], render_width, render_height);
+
+                gl.glScissor(0, 0, render_width, render_height);
+                if (on_peel_index == max_render_target_index) {
+                    gl.glClearColor(entry.clear_color.r(), entry.clear_color.g(), entry.clear_color.b(), 1);
+                } else {
+                    gl.glClearColor(0, 0, 0, 0);
+                }
+                gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT);
             },
             .RenderEntryEndPeels => {
                 if (open_gl.multisampling) {
@@ -2325,13 +2326,11 @@ pub fn renderCommands(
                     on_peel_index += 1;
 
                     bindFrameBuffer(&open_gl.depth_peel_buffers[on_peel_index], render_width, render_height);
-                    peeling = on_peel_index > 0;
                 } else {
                     std.debug.assert(on_peel_index == max_render_target_index);
 
                     const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(0);
                     bindFrameBuffer(peel_buffer, render_width, render_height);
-                    peeling = false;
                     on_peel_index = 0;
                 }
             },
@@ -2342,6 +2341,7 @@ pub fn renderCommands(
                 const entry: *RenderEntryTexturedQuads = @ptrCast(@alignCast(data));
                 header_at += @sizeOf(RenderEntryTexturedQuads);
 
+                const peeling: bool = on_peel_index > 0;
                 const setup: *RenderSetup = &entry.setup;
 
                 if (debug_setup == null) {

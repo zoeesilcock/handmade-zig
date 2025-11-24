@@ -27,6 +27,7 @@ pub const LIGHT_POINTS_PER_CHUNK = 24;
 pub const MAX_LIGHT_EMISSION = 10.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
+const SLOW = shared.SLOW;
 
 pub const LightingTextures = extern struct {
     light_data0: [LIGHT_DATA_WIDTH]Vector4, // Px, Py, Pz, Dx
@@ -437,9 +438,10 @@ fn splitBox(
     source_count_in: u16,
     source: [*]u16,
     dest: [*]u16,
-    dimension_index: u32,
+    dimension_index_in: u32,
 ) void {
     var source_count: u16 = source_count_in;
+    var dimension_index: u32 = dimension_index_in;
 
     if (source_count > 4) {
         var attempt: u32 = 0;
@@ -490,6 +492,8 @@ fn splitBox(
                 source[1] = child_box_b_at;
                 break;
             }
+
+            dimension_index = next_dimension_index;
         }
     }
 
@@ -562,6 +566,7 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
                     std.debug.assert(light_index < LIGHT_DATA_WIDTH);
                 }
             }
+            std.debug.assert(light_index == box.light_index[surface_index + 1]);
         }
     }
 
@@ -576,21 +581,31 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
         &solution.average_direction_to_light,
     );
 
+    if (SLOW) {
+        var point_index: u32 = 0;
+        while (point_index < solution.point_count) : (point_index += 1) {
+            const emission_color1: Color3 = solution.emission_color1[point_index];
+            std.debug.assert(emission_color1.r() == 0 and emission_color1.g() == 0 and emission_color1.b() == 0);
+        }
+    }
+
     computeLightPropagation(solution);
 
     box_index = 0;
     while (box_index < original_box_count) : (box_index += 1) {
         const box: *LightingBox = @ptrCast(solution.boxes + box_index);
-        const first_point: *LightingPointState = @ptrCast(box.storage);
-        const valid: bool = first_point.direction.x() != 0 or
-            first_point.direction.y() != 0 or
-            first_point.direction.z() != 0;
+        // const first_point: *LightingPointState = @ptrCast(box.storage);
+        // const valid: bool = first_point.direction.x() != 0 or
+        //     first_point.direction.y() != 0 or
+        //     first_point.direction.z() != 0;
+        const valid: bool = true;
 
+        const local_count: u32 = box.light_index[6] - box.light_index[0];
         if (valid) {
+            const t: f32 = 0.1;
             var local_index: u32 = 0;
-            while (local_index < (box.light_index[6] - box.light_index[0])) : (local_index += 1) {
+            while (local_index < local_count) : (local_index += 1) {
                 const point_index: u32 = local_index + box.light_index[0];
-                const t: f32 = 0.1;
                 box.storage[local_index].emit =
                     box.storage[local_index].emit.lerp(solution.emission_color0[point_index], t);
                 solution.emission_color0[point_index] = box.storage[local_index].emit;
@@ -604,7 +619,7 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
             }
         } else {
             var local_index: u32 = 0;
-            while (local_index < (box.light_index[6] - box.light_index[0])) : (local_index += 1) {
+            while (local_index < local_count) : (local_index += 1) {
                 const point_index: u32 = local_index + box.light_index[0];
                 box.storage[local_index].emit = solution.emission_color0[point_index];
                 const direction: Vector3 = solution.average_direction_to_light[point_index].normalizeOrZero();
@@ -653,7 +668,6 @@ pub fn outputLightingPoints(
                 const y_axis: Vector3 = box_surface.y_axis;
 
                 const emission_color: Color3 = solution.emission_color0[point_index];
-                // const direction: Vector4 = solution.average_direction_to_light[point_index].toVector4(0);
 
                 var front_emission_color: Color = emission_color.clamp01().toColor(1);
 
@@ -721,7 +735,8 @@ pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, 
         var direction: Vector3 = solution.average_direction_to_light[point_index];
 
         if (direction.z() < 0) {
-            _ = direction.setZ(-direction.z());
+            // _ = direction.setZ(-direction.z());
+            // Negate the red channel to indicate that Z was negative, since we have no storage for the sign of Z.
             _ = color.setR(-color.r());
         }
 

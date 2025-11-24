@@ -108,13 +108,13 @@ pub const GameModeWorld = struct {
     debug_camera_orbit: f32,
     debug_camera_dolly: f32,
     debug_light_position: Vector3,
-    updating_lighting: bool,
     debug_light_store: [LIGHT_POINTS_PER_CHUNK]LightingPointState,
 
     camera_pitch: f32,
     camera_orbit: f32,
     camera_dolly: f32,
 
+    updating_lighting: bool,
     show_lighting: bool,
     test_lighting: LightingSolution,
     test_textures: LightingTextures,
@@ -528,15 +528,11 @@ pub fn updateAndRenderWorld(
     world_mode.camera_orbit = 0;
     world_mode.camera_dolly = 0;
 
-    render_group.beginDepthPeel();
-
-    // Clear background.
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
-    render_group.pushClear(background_color);
+    render_group.beginDepthPeel(background_color);
 
     const near_clip_plane: f32 = 3;
     const far_clip_plane: f32 = 100;
-    var updating_lighting: bool = world_mode.updating_lighting;
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
@@ -602,167 +598,164 @@ pub fn updateAndRenderWorld(
     if (input.f_key_pressed[2]) {
         render_group.commands.settings.lighting_disabled = !render_group.commands.settings.lighting_disabled;
     }
-
-    var recompute_lighting: bool = false;
     if (input.f_key_pressed[5]) {
         if (global_config.Renderer_Lighting_IterationCount > 0) {
             global_config.Renderer_Lighting_IterationCount -= 1;
-            recompute_lighting = true;
         }
     }
     if (input.f_key_pressed[6]) {
         global_config.Renderer_Lighting_IterationCount += 1;
-        recompute_lighting = true;
     }
     if (input.f_key_pressed[1]) {
         world_mode.show_lighting = !world_mode.show_lighting;
-    }
-    if (input.f_key_pressed[3]) {
-        updating_lighting = true;
     }
     if (input.f_key_pressed[4]) {
         world_mode.updating_lighting = !world_mode.updating_lighting;
     }
 
-    if (!recompute_lighting and world_mode.show_lighting) {
-        lighting.outputLightingPoints(render_group, &world_mode.test_lighting, &world_mode.test_textures);
-    } else {
-        render_group.enableLighting(light_bounds);
+    render_group.enableLighting(light_bounds);
+    render_group.pushLighting(&world_mode.test_textures);
 
-        if (false) {
-            var sim_work: [16]WorldSimWork = undefined;
-            var sim_index: u32 = 0;
-            for (0..4) |sim_y| {
-                for (0..4) |sim_x| {
-                    var work: *WorldSimWork = &sim_work[sim_index];
-                    sim_index += 1;
+    if (false) {
+        var sim_work: [16]WorldSimWork = undefined;
+        var sim_index: u32 = 0;
+        for (0..4) |sim_y| {
+            for (0..4) |sim_x| {
+                var work: *WorldSimWork = &sim_work[sim_index];
+                sim_index += 1;
 
-                    var center_position: WorldPosition = world_mode.camera.position;
-                    center_position.chunk_x += @intCast(-70 * (sim_x + 1));
-                    center_position.chunk_y += @intCast(-70 * (sim_y + 1));
+                var center_position: WorldPosition = world_mode.camera.position;
+                center_position.chunk_x += @intCast(-70 * (sim_x + 1));
+                center_position.chunk_y += @intCast(-70 * (sim_y + 1));
 
-                    work.sim_center_position = center_position;
-                    work.sim_bounds = sim_bounds;
-                    work.world_mode = world_mode;
-                    work.delta_time = input.frame_delta_time;
+                work.sim_center_position = center_position;
+                work.sim_bounds = sim_bounds;
+                work.world_mode = world_mode;
+                work.delta_time = input.frame_delta_time;
 
-                    if (true) {
-                        shared.platform.addQueueEntry(transient_state.high_priority_queue, &doWorldSim, work);
-                    } else {
-                        doWorldSim(transient_state.high_priority_queue, work);
-                    }
+                if (true) {
+                    shared.platform.addQueueEntry(transient_state.high_priority_queue, &doWorldSim, work);
+                } else {
+                    doWorldSim(transient_state.high_priority_queue, work);
                 }
             }
-
-            shared.platform.completeAllQueuedWork(transient_state.high_priority_queue);
         }
 
-        var world_sim: WorldSim = beginSim(
-            &transient_state.arena,
-            world_mode.world,
-            world_mode.camera.simulation_center,
-            sim_bounds,
+        shared.platform.completeAllQueuedWork(transient_state.high_priority_queue);
+    }
+
+    var world_sim: WorldSim = beginSim(
+        &transient_state.arena,
+        world_mode.world,
+        world_mode.camera.simulation_center,
+        sim_bounds,
+        input.frame_delta_time,
+    );
+    {
+        checkForJoiningPlayers(state, input, world_sim.sim_region);
+
+        simulate(
+            &world_sim,
+            &world_mode.world.game_entropy,
             input.frame_delta_time,
+            transient_state.assets,
+            state,
+            input,
+            render_group,
+            world_mode.particle_cache,
         );
-        {
-            checkForJoiningPlayers(state, input, world_sim.sim_region);
 
-            simulate(
-                &world_sim,
-                &world_mode.world.game_entropy,
-                input.frame_delta_time,
-                transient_state.assets,
-                state,
-                input,
-                render_group,
-                world_mode.particle_cache,
-            );
+        // Can we merge the camera update down into the simulation so that we correctly update the camera for the current frame?
 
-            // Can we merge the camera update down into the simulation so that we correctly update the camera for the current frame?
-
-            const last_camera_position: WorldPosition = world_mode.camera.position;
-            if (sim.getEntityByStorageIndex(
+        const last_camera_position: WorldPosition = world_mode.camera.position;
+        if (sim.getEntityByStorageIndex(
+            world_sim.sim_region,
+            world_mode.camera.following_entity_index,
+        )) |camera_following_entity| {
+            sim.updateCameraForEntityMovement(
+                world_mode.world,
                 world_sim.sim_region,
-                world_mode.camera.following_entity_index,
-            )) |camera_following_entity| {
-                sim.updateCameraForEntityMovement(
-                    world_mode.world,
-                    world_sim.sim_region,
-                    &world_mode.camera,
-                    camera_following_entity,
-                    input.frame_delta_time,
-                );
-                world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
-            }
-
-            render_group.pushCubeLight(
-                world_mode.debug_light_position,
-                0.5,
-                .new(1, 1, 1),
-                1,
-                @ptrCast(&world_mode.debug_light_store),
+                &world_mode.camera,
+                camera_following_entity,
+                input.frame_delta_time,
             );
+            world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
+        }
 
-            // TODO: Re-enable particles.
-            if (false) {
-                const frame_to_frame_camera_delta_position: Vector3 =
-                    world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
-                particles.updateAndRenderParticleSystem(
-                    world_mode.particle_cache,
-                    input.frame_delta_time,
-                    render_group,
-                    frame_to_frame_camera_delta_position.negated(),
-                );
-            }
+        render_group.pushCubeLight(
+            world_mode.debug_light_position,
+            0.5,
+            .new(1, 1, 1),
+            1,
+            @ptrCast(&world_mode.debug_light_store),
+        );
 
-            var world_transform = ObjectTransform.defaultUpright();
+        // TODO: Re-enable particles.
+        if (false) {
+            const frame_to_frame_camera_delta_position: Vector3 =
+                world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
+            particles.updateAndRenderParticleSystem(
+                world_mode.particle_cache,
+                input.frame_delta_time,
+                render_group,
+                frame_to_frame_camera_delta_position.negated(),
+            );
+        }
 
-            // render_group.pushVolumeOutline(
-            //     &world_transform,
-            //     .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
-            //     .new(1, 1, 0, 1),
-            //     0.01,
+        var world_transform = ObjectTransform.defaultUpright();
+
+        // render_group.pushVolumeOutline(
+        //     &world_transform,
+        //     .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
+        //     .new(1, 1, 0, 1),
+        //     0.01,
+        // );
+
+        if (false) {
+            render_group.pushRectangleOutline(
+                &world_transform,
+                screen_bounds.getDimension(),
+                Vector3.new(0, 0, 0.005),
+                Color.new(1, 1, 0, 1),
+                0.1,
+            );
+            // render_group.pushRectangleOutline(
+            //     world_transform,
+            //     camera_bounds_in_meters.getDimension().xy(),
+            //     Vector3.zero(),
+            //     Color.new(1, 1, 1, 1),
             // );
-
-            if (false) {
-                render_group.pushRectangleOutline(
-                    &world_transform,
-                    screen_bounds.getDimension(),
-                    Vector3.new(0, 0, 0.005),
-                    Color.new(1, 1, 0, 1),
-                    0.1,
-                );
-                // render_group.pushRectangleOutline(
-                //     world_transform,
-                //     camera_bounds_in_meters.getDimension().xy(),
-                //     Vector3.zero(),
-                //     Color.new(1, 1, 1, 1),
-                // );
-                render_group.pushRectangleOutline(
-                    &world_transform,
-                    sim_bounds.getDimension().xy(),
-                    Vector3.new(0, 0, 0.005),
-                    Color.new(0, 1, 1, 1),
-                    0.1,
-                );
-                render_group.pushRectangleOutline(
-                    &world_transform,
-                    world_sim.sim_region.bounds.getDimension().xy(),
-                    Vector3.new(0, 0, 0.005),
-                    Color.new(1, 0, 1, 1),
-                    0.1,
-                );
-            }
+            render_group.pushRectangleOutline(
+                &world_transform,
+                sim_bounds.getDimension().xy(),
+                Vector3.new(0, 0, 0.005),
+                Color.new(0, 1, 1, 1),
+                0.1,
+            );
+            render_group.pushRectangleOutline(
+                &world_transform,
+                world_sim.sim_region.bounds.getDimension().xy(),
+                Vector3.new(0, 0, 0.005),
+                Color.new(1, 0, 1, 1),
+                0.1,
+            );
         }
-
-        if (updating_lighting) {
-            lighting.lightingTest(render_group, &world_mode.test_lighting);
-            lighting.outputLightingTextures(render_group, &world_mode.test_lighting, &world_mode.test_textures);
-        }
-        endSim(&transient_state.arena, &world_sim, world_mode.world);
     }
 
     render_group.endDepthPeel();
+
+    if (world_mode.updating_lighting) {
+        lighting.lightingTest(render_group, &world_mode.test_lighting);
+
+        if (world_mode.show_lighting) {
+            render_group.pushFullClear(background_color);
+            lighting.outputLightingPoints(render_group, &world_mode.test_lighting, &world_mode.test_textures);
+        } else {
+            lighting.outputLightingTextures(render_group, &world_mode.test_lighting, &world_mode.test_textures);
+        }
+    }
+
+    endSim(&transient_state.arena, &world_sim, world_mode.world);
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;

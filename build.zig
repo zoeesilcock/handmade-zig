@@ -5,7 +5,7 @@ const builtin = @import("builtin");
 const FORCE_RELEASE_MODE = false;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
-const SLOW_DEFAULT = false;
+const SLOW_DEFAULT = true;
 const BACKEND_DEFAULT = .Win32;
 
 const Package = enum {
@@ -20,7 +20,7 @@ const Package = enum {
 
 pub fn build(b: *std.Build) void {
     if (FORCE_RELEASE_MODE) {
-        b.release_mode = .fast;
+        b.release_mode = .small;
     }
 
     // Retrieve build options.

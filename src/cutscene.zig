@@ -277,7 +277,7 @@ pub fn updateAndRenderTitleScreen(
     _ = draw_buffer;
 
     if (!result) {
-        render_group.pushClear(Color.new(1, 0.25, 0.25, 0));
+        render_group.pushFullClear(Color.new(1, 0.25, 0.25, 0));
 
         if (title_screen.time > 10) {
             playIntroCutscene(state, transient_state);
@@ -386,7 +386,7 @@ fn renderLayeredScene(
         );
 
         if (scene.layers.len == 0) {
-            render_group.pushClear(Color.new(0, 0, 0, 0));
+            render_group.pushFullClear(Color.new(0, 0, 0, 0));
         }
     }
 

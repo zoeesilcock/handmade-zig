@@ -90,6 +90,7 @@ pub const EnvironmentMap = extern struct {
 
 pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
+    RenderEntryFullClear,
     RenderEntryDepthClear,
     RenderEntryBeginPeels,
     RenderEntryEndPeels,
@@ -99,6 +100,14 @@ pub const RenderEntryType = enum(u16) {
 pub const RenderEntryHeader = extern struct {
     type: RenderEntryType,
     debug_tag: u32,
+};
+
+pub const RenderEntryFullClear = extern struct {
+    clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
+};
+
+pub const RenderEntryBeginPeels = extern struct {
+    clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
 };
 
 pub const RenderEntryTexturedQuads = extern struct {
@@ -394,12 +403,21 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-    pub fn beginDepthPeel(self: *RenderGroup) void {
-        _ = self.pushRenderElement_(
-            0,
-            .RenderEntryBeginPeels,
-            @alignOf(u32),
-        );
+    pub fn beginDepthPeel(self: *RenderGroup, color: Color) void {
+        if (self.pushRenderElement(RenderEntryBeginPeels)) |entry| {
+            if (true) {
+                // TODO: Why do we need to square the color to get a more similar result to Casey here?
+                entry.clear_color = .new(
+                    math.square(color.r()),
+                    math.square(color.g()),
+                    math.square(color.b()),
+                    color.a(),
+                );
+            } else {
+                entry.clear_color = color;
+            }
+            self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
+        }
     }
 
     pub fn endDepthPeel(self: *RenderGroup) void {
@@ -418,18 +436,20 @@ pub const RenderGroup = extern struct {
         );
     }
 
-    pub fn pushClear(self: *RenderGroup, color: Color) void {
-        if (true) {
-            self.commands.clear_color = .new(
-                math.square(color.r()),
-                math.square(color.g()),
-                math.square(color.b()),
-                color.a(),
-            );
+    pub fn pushFullClear(self: *RenderGroup, color: Color) void {
+        if (self.pushRenderElement(RenderEntryFullClear)) |entry| {
+            if (true) {
+                // TODO: Why do we need to square the color to get a more similar result to Casey here?
+                entry.clear_color = .new(
+                    math.square(color.r()),
+                    math.square(color.g()),
+                    math.square(color.b()),
+                    color.a(),
+                );
+            } else {
+                entry.clear_color = color;
+            }
             self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
-        } else {
-            self.commands.clear_color = color;
-            self.last_setup.fog_color = .new(color.r(), color.g(), color.b());
         }
     }
 
@@ -919,6 +939,7 @@ pub const RenderGroup = extern struct {
                 if (cube_bounds.intersects(&self.light_bounds)) {
                     light_count = LIGHT_POINTS_PER_CHUNK / 6;
                     light_index = self.commands.light_point_index;
+                    std.debug.assert(light_index != 0);
                     self.commands.light_point_index += LIGHT_POINTS_PER_CHUNK;
 
                     std.debug.assert(self.commands.light_point_index <= LIGHT_DATA_WIDTH);

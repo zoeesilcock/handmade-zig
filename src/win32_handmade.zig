@@ -1804,13 +1804,14 @@ fn displayBufferInWindow(
         };
         render.softwareRenderCommands(render_queue, commands, &output_target, temp_arena);
 
+        const clear_color: math.Color = .black();
         opengl.displayBitmap(
             back_buffer.width,
             back_buffer.height,
             draw_region,
             output_target.pitch,
             back_buffer.memory,
-            commands.clear_color,
+            clear_color,
             open_gl.reserved_blit_texture,
         );
         _ = win32.SwapBuffers(device_context.?);

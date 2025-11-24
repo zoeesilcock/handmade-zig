@@ -941,8 +941,6 @@ pub const RenderCommands = extern struct {
 
     light_point_index: u16,
 
-    clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
-
     pub fn default(
         max_push_buffer_size: u32,
         push_buffer: *anyopaque,
@@ -977,8 +975,6 @@ pub const RenderCommands = extern struct {
             .light_boxes = light_boxes,
 
             .light_point_index = 0,
-
-            .clear_color = .black(),
         };
     }
 
