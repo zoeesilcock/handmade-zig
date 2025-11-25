@@ -234,7 +234,7 @@ const ALL_COLOR_ATTACHMENTS = [_]u32{
 // Build options.
 const INTERNAL = shared.INTERNAL;
 
-const ALLOW_GPU_SRGB = true;
+const ALLOW_GPU_SRGB = false;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 
 const RenderCommands = shared.RenderCommands;
@@ -2255,8 +2255,9 @@ pub fn renderCommands(
     var on_peel_index: u32 = 0;
     var peel_header_restore: [*]u8 = undefined;
     var header_at: [*]u8 = commands.push_buffer_base;
-    while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) : (header_at += @sizeOf(RenderEntryHeader)) {
+    while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) {
         const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
+        header_at += @sizeOf(RenderEntryHeader);
         const alignment: usize = switch (header.type) {
             .RenderEntryFullClear => @alignOf(RenderEntryFullClear),
             .RenderEntryBeginPeels => @alignOf(RenderEntryBeginPeels),
@@ -2284,7 +2285,7 @@ pub fn renderCommands(
                 const entry: *RenderEntryBeginPeels = @ptrCast(@alignCast(data));
                 header_at += @sizeOf(RenderEntryBeginPeels);
 
-                peel_header_restore = header_at;
+                peel_header_restore = @ptrCast(header);
                 bindFrameBuffer(&open_gl.depth_peel_buffers[on_peel_index], render_width, render_height);
 
                 gl.glScissor(0, 0, render_width, render_height);

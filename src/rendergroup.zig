@@ -405,17 +405,8 @@ pub const RenderGroup = extern struct {
 
     pub fn beginDepthPeel(self: *RenderGroup, color: Color) void {
         if (self.pushRenderElement(RenderEntryBeginPeels)) |entry| {
-            if (true) {
-                // TODO: Why do we need to square the color to get a more similar result to Casey here?
-                entry.clear_color = .new(
-                    math.square(color.r()),
-                    math.square(color.g()),
-                    math.square(color.b()),
-                    color.a(),
-                );
-            } else {
-                entry.clear_color = color;
-            }
+            // For sRGB mode, this color needs to be squared.
+            entry.clear_color = color;
             self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
         }
     }
@@ -438,17 +429,8 @@ pub const RenderGroup = extern struct {
 
     pub fn pushFullClear(self: *RenderGroup, color: Color) void {
         if (self.pushRenderElement(RenderEntryFullClear)) |entry| {
-            if (true) {
-                // TODO: Why do we need to square the color to get a more similar result to Casey here?
-                entry.clear_color = .new(
-                    math.square(color.r()),
-                    math.square(color.g()),
-                    math.square(color.b()),
-                    color.a(),
-                );
-            } else {
-                entry.clear_color = color;
-            }
+            // For sRGB mode, this color needs to be squared.
+            entry.clear_color = color;
             self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
         }
     }

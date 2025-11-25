@@ -983,27 +983,6 @@ pub const RenderCommands = extern struct {
         self.vertex_count = 0;
         self.light_box_count = 0;
     }
-
-    pub fn lightChunkFrameSweep(self: *RenderCommands) void {
-        // Chunk 0 is always skipped because the 0 light index value is reserved for things that don't use lighting.
-        var light_chunk_index: u16 = 1;
-        while (light_chunk_index < LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK) : (light_chunk_index += 1) {
-            if (self.light_chunk_used[light_chunk_index] > 0) {
-                self.light_chunk_used[light_chunk_index] = 0;
-            } else {
-                freeLightChunk(self, light_chunk_index);
-            }
-        }
-    }
-
-    pub fn freeLightChunk(self: *RenderCommands, light_chunk_index: u16) void {
-        std.debug.assert(light_chunk_index > 0);
-        std.debug.assert(light_chunk_index < LIGHT_CHUNK_COUNT);
-
-        self.light_points[light_chunk_index * LIGHT_POINTS_PER_CHUNK] =
-            .{ .next_free = self.first_free_lighting_chunk };
-        self.first_free_lighting_chunk = light_chunk_index;
-    }
 };
 
 pub const OffscreenBuffer = extern struct {

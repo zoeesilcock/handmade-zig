@@ -598,14 +598,6 @@ pub fn updateAndRenderWorld(
     if (input.f_key_pressed[2]) {
         render_group.commands.settings.lighting_disabled = !render_group.commands.settings.lighting_disabled;
     }
-    if (input.f_key_pressed[5]) {
-        if (global_config.Renderer_Lighting_IterationCount > 0) {
-            global_config.Renderer_Lighting_IterationCount -= 1;
-        }
-    }
-    if (input.f_key_pressed[6]) {
-        global_config.Renderer_Lighting_IterationCount += 1;
-    }
     if (input.f_key_pressed[1]) {
         world_mode.show_lighting = !world_mode.show_lighting;
     }
@@ -690,17 +682,14 @@ pub fn updateAndRenderWorld(
             @ptrCast(&world_mode.debug_light_store),
         );
 
-        // TODO: Re-enable particles.
-        if (false) {
-            const frame_to_frame_camera_delta_position: Vector3 =
-                world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
-            particles.updateAndRenderParticleSystem(
-                world_mode.particle_cache,
-                input.frame_delta_time,
-                render_group,
-                frame_to_frame_camera_delta_position.negated(),
-            );
-        }
+        const frame_to_frame_camera_delta_position: Vector3 =
+            world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
+        particles.updateAndRenderParticleSystem(
+            world_mode.particle_cache,
+            input.frame_delta_time,
+            render_group,
+            frame_to_frame_camera_delta_position.negated(),
+        );
 
         var world_transform = ObjectTransform.defaultUpright();
 
