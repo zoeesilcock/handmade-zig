@@ -835,6 +835,10 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\    }
         \\#endif
         \\
+        \\    SurfaceReflection.r = clamp(SurfaceReflection.r, 0, 1);
+        \\    SurfaceReflection.g = clamp(SurfaceReflection.g, 0, 1);
+        \\    SurfaceReflection.b = clamp(SurfaceReflection.b, 0, 1);
+        \\
         \\    BlendUnitColor[0] = SurfaceReflection;
         \\  }
         \\  else

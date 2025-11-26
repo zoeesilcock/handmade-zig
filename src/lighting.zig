@@ -24,7 +24,7 @@ const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 
 pub const LIGHT_POINTS_PER_CHUNK = 24;
-pub const MAX_LIGHT_EMISSION = 5.0;
+pub const MAX_LIGHT_EMISSION = 25.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
 const SLOW = shared.SLOW;
@@ -48,8 +48,11 @@ pub const LightingSolution = extern struct {
     point_count: u16,
     points: [LIGHT_DATA_WIDTH]LightingPoint = undefined,
 
-    emission_color0: [LIGHT_DATA_WIDTH]Color3 = undefined,
-    emission_color1: [LIGHT_DATA_WIDTH]Color3 = undefined,
+    // PPS = Photons per second.
+    initial_pps: [LIGHT_DATA_WIDTH]Color3 = undefined,
+    accumulated_weight: [LIGHT_DATA_WIDTH]f32 = undefined,
+    accumulated_pps: [LIGHT_DATA_WIDTH]Color3 = undefined,
+    emission_pps: [LIGHT_DATA_WIDTH]Color3 = undefined, // This isn't really needed, could be recomputed on output.
     average_direction_to_light: [LIGHT_DATA_WIDTH]Vector3 = undefined,
     series: random.Series,
 
@@ -283,52 +286,42 @@ fn sampleHemisphere(series: *random.Series, normal: Vector3) Vector3 {
 }
 
 fn accumulateSample(
-    surface_normal: Vector3,
-    dest_emission_color: *Color3,
-    average_direction_to_light: *Vector3,
+    solution: *LightingSolution,
+    dest_sample_index: u32,
     light_color: Color3,
-    light_power: f32,
     normal_to_light: Vector3,
-) Color3 {
+) void {
+    const surface_normal: Vector3 = solution.points[dest_sample_index].normal;
     const angular_falloff: f32 = math.clampf01(surface_normal.dotProduct(normal_to_light));
-    const power: f32 = light_power * angular_falloff;
-    const weight: f32 = power * light_color.length();
 
-    const result: Color3 = light_color.scaledTo(power);
-    dest_emission_color.* = dest_emission_color.plus(result);
-    average_direction_to_light.* = average_direction_to_light.plus(
-        normal_to_light.scaledTo(weight),
-    );
+    const sample_color: Color3 = light_color.scaledTo(angular_falloff);
+    const weight: f32 = sample_color.length();
 
-    return result;
+    solution.accumulated_weight[dest_sample_index] += 1;
+    solution.accumulated_pps[dest_sample_index] =
+        solution.accumulated_pps[dest_sample_index].plus(
+            sample_color,
+        );
+    solution.average_direction_to_light[dest_sample_index] =
+        solution.average_direction_to_light[dest_sample_index].plus(
+            normal_to_light.scaledTo(weight),
+        );
 }
 
 fn computeLightPropagation(solution: *LightingSolution) void {
     TimedBlock.beginFunction(@src(), .ComputeLightPropagation);
     defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
 
-    const source_emission_color: [*]Color3 = &solution.emission_color0;
-    var dest_emission_color: [*]Color3 = &solution.emission_color1;
+    const ray_count: u32 = 16;
 
-    const blend_amount: f32 = 0.01;
-    const ray_count: u32 = 4;
-    const power: f32 = blend_amount / @as(f32, @floatFromInt(ray_count));
-
-    // const sky_color: Color = .new(0.2, 0.2, 0.95, 0.5);
-    const moon_color: Color = Color.new(0.1, 0.8, 1.0, 1.0);
-    // const ground_color: Color = .new(0.3, 0.2, 0.1, 1.0);
+    // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
+    const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.2);
+    // const ground_color: Color3 = .new(0.3, 0.2, 0.1);
     // const sun_direction: Vector3 = Vector3.new(1, 1, 1).normalizeOrZero();
-
-    var total_added: Color3 = .zero();
-    var total_removed: Color3 = .zero();
 
     var series: random.Series = solution.series;
     var sample_point_index: u32 = 1; // Light point index 0 is never used.
     while (sample_point_index < solution.point_count) : (sample_point_index += 1) {
-        dest_emission_color[sample_point_index] = dest_emission_color[sample_point_index].plus(
-            source_emission_color[sample_point_index],
-        );
-
         const sample_point: *LightingPoint = &solution.points[sample_point_index];
 
         var ray_index: u32 = 0;
@@ -341,8 +334,11 @@ fn computeLightPropagation(solution: *LightingSolution) void {
                 sample_direction,
             );
 
-            var emission_color: Color3 = undefined;
+            var transfer_pps: Color3 = .zero();
             if (ray.box) |hit_box| {
+                // TODO: Update this transfer to be bidirectional.
+                // TODO: Stratified sampling?
+
                 const hit_index: u32 = hit_box.light_index[ray.box_surface_index];
                 const hit_point_count: u32 =
                     hit_box.light_index[ray.box_surface_index + 1] - hit_index;
@@ -358,80 +354,23 @@ fn computeLightPropagation(solution: *LightingSolution) void {
                         ray_position.minus(hit_point.position).lengthSquared();
                     const inverse_distance_sq: f32 = 1.0 / (1.0 + distance_sq);
 
-                    total_weight += inverse_distance_sq;
-                    emission_color = emission_color.plus(
-                        hit_point.reflection_color.hadamardProduct(source_emission_color[hit_point_index])
+                    transfer_pps = transfer_pps.plus(
+                        hit_point.reflection_color.hadamardProduct(solution.initial_pps[hit_point_index])
                             .scaledTo(inverse_distance_sq),
                     );
+                    total_weight += inverse_distance_sq;
                 }
 
                 var inverse_total_weight: f32 = 1;
                 if (total_weight > 0) {
                     inverse_total_weight = 1.0 / total_weight;
-                }
-
-                surface_point_index = 0;
-                while (surface_point_index < hit_point_count) : (surface_point_index += 1) {
-                    const hit_point_index: u32 = hit_index + surface_point_index;
-                    const hit_point: *LightingPoint = &solution.points[hit_point_index];
-                    const distance_sq: f32 =
-                        ray_position.minus(hit_point.position).lengthSquared();
-                    const inverse_distance_sq: f32 = 1.0 / (1.0 + distance_sq);
-                    const weight: f32 = inverse_distance_sq * inverse_total_weight;
-
-                    std.debug.assert(weight <= 1);
-
-                    const contrib_color: Color3 =
-                        hit_point.reflection_color.hadamardProduct(source_emission_color[hit_point_index]);
-                    const removed_color: Color3 = contrib_color.scaledTo(power * weight);
-                    dest_emission_color[hit_point_index] = dest_emission_color[hit_point_index].minus(removed_color);
-                    emission_color = emission_color.plus(contrib_color.scaledTo(weight));
-
-                    total_removed = total_removed.plus(removed_color);
+                    transfer_pps = transfer_pps.scaledTo(inverse_total_weight);
                 }
             } else {
-                emission_color = moon_color.rgb();
+                transfer_pps = moon_color;
             }
 
-            total_added = total_added.plus(accumulateSample(
-                sample_point.normal,
-                @ptrCast(dest_emission_color + sample_point_index),
-                &solution.average_direction_to_light[sample_point_index],
-                emission_color,
-                power,
-                sample_direction,
-            ));
-        }
-    }
-
-    {
-        var total_source_light: Color3 = .zero();
-        var total_dest_light: Color3 = .zero();
-        var point_index: u32 = 0;
-        while (point_index < solution.point_count) : (point_index += 1) {
-            total_source_light = total_source_light.plus(
-                source_emission_color[point_index],
-            );
-            total_dest_light = total_dest_light.plus(
-                dest_emission_color[point_index],
-            );
-        }
-
-        // const source_sum: f32 = total_source_light.r() + total_source_light.g() + total_source_light.b();
-        const source_sum: f32 = 10000;
-        const dest_sum: f32 = total_dest_light.r() + total_dest_light.g() + total_dest_light.b();
-        var check_dest_light: Color3 = .zero();
-
-        if (dest_sum > 0) {
-            const normalization_coefficient: f32 = source_sum / dest_sum;
-            point_index = 0;
-            while (point_index < solution.point_count) : (point_index += 1) {
-                source_emission_color[point_index] =
-                    dest_emission_color[point_index].scaledTo(normalization_coefficient);
-                dest_emission_color[point_index] = .zero();
-
-                check_dest_light = check_dest_light.plus(source_emission_color[point_index]);
-            }
+            accumulateSample(solution, sample_point_index, transfer_pps, sample_direction);
         }
     }
 
@@ -541,6 +480,8 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
     solution.raycast_point_count = 0;
     solution.raycast_box_count = 0;
 
+    const t_update: f32 = 0.05;
+
     var box_index: u32 = 0;
     while (box_index < original_box_count) : (box_index += 1) {
         const box: *LightingBox = @ptrCast(solution.boxes + box_index);
@@ -566,12 +507,14 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
                     point.reflection_color = box.reflection_color.scaledTo(0.95);
 
                     const local_index: u32 = light_index - box.light_index[0];
-                    solution.emission_color0[light_index] =
+                    solution.emission_pps[light_index] =
                         Color3.new(1, 1, 1).scaledTo(box.emission * MAX_LIGHT_EMISSION);
-                    solution.emission_color0[light_index] = solution.emission_color0[light_index].plus(
+                    solution.initial_pps[light_index] = solution.emission_pps[light_index].plus(
                         box.storage[local_index].emit,
                     );
-                    solution.average_direction_to_light[light_index] = box.storage[local_index].direction;
+                    solution.average_direction_to_light[light_index] = .zero();
+                    solution.accumulated_pps[light_index] = .zero();
+                    solution.accumulated_weight[light_index] = 0;
 
                     light_index += 1;
                     std.debug.assert(light_index < LIGHT_DATA_WIDTH);
@@ -587,51 +530,45 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
     DebugInterface.debugValue(@src(), &solution.box_count, "BoxCount");
     DebugInterface.debugValue(@src(), &solution.point_count, "PointCount");
 
-    if (SLOW) {
-        var point_index: u32 = 0;
-        while (point_index < solution.point_count) : (point_index += 1) {
-            const emission_color1: Color3 = solution.emission_color1[point_index];
-            std.debug.assert(emission_color1.r() == 0 and emission_color1.g() == 0 and emission_color1.b() == 0);
-        }
-    }
-
     computeLightPropagation(solution);
 
     box_index = 0;
     while (box_index < original_box_count) : (box_index += 1) {
         const box: *LightingBox = @ptrCast(solution.boxes + box_index);
-        // const first_point: *LightingPointState = @ptrCast(box.storage);
-        // const valid: bool = first_point.direction.x() != 0 or
-        //     first_point.direction.y() != 0 or
-        //     first_point.direction.z() != 0;
-        const valid: bool = false;
-
         const local_count: u32 = box.light_index[6] - box.light_index[0];
-        if (valid) {
-            const t: f32 = 0.1;
-            var local_index: u32 = 0;
-            while (local_index < local_count) : (local_index += 1) {
-                const point_index: u32 = local_index + box.light_index[0];
-                box.storage[local_index].emit =
-                    box.storage[local_index].emit.lerp(solution.emission_color0[point_index], t);
-                solution.emission_color0[point_index] = box.storage[local_index].emit;
+        var local_index: u32 = 0;
+        while (local_index < local_count) : (local_index += 1) {
+            const point_index: u32 = local_index + box.light_index[0];
 
-                box.storage[local_index].direction =
-                    box.storage[local_index].direction.lerp(
-                        solution.average_direction_to_light[point_index].normalizeOrZero(),
-                        t,
-                    ).normalizeOrZero();
-                solution.average_direction_to_light[point_index] = box.storage[local_index].direction;
+            // Can probably remove the accumulated weight check if we always guarantee at least
+            // one positively weighted sample per point?
+            const accumulated_weight: f32 = solution.accumulated_weight[point_index];
+            var inverse_weight: f32 = 0;
+            if (accumulated_weight > 0) {
+                inverse_weight = 1.0 / accumulated_weight;
             }
-        } else {
-            var local_index: u32 = 0;
-            while (local_index < local_count) : (local_index += 1) {
-                const point_index: u32 = local_index + box.light_index[0];
-                box.storage[local_index].emit = solution.emission_color0[point_index];
-                const direction: Vector3 = solution.average_direction_to_light[point_index].normalizeOrZero();
-                solution.average_direction_to_light[point_index] = direction;
-                box.storage[local_index].direction = direction;
+            const accumulated_pps: Color3 = solution.accumulated_pps[point_index].scaledTo(inverse_weight);
+            const direction: Vector3 = solution.average_direction_to_light[point_index].normalizeOrZero();
+
+            var last_pps: Color3 = accumulated_pps;
+            var last_direction: Vector3 = direction;
+
+            const box_store_direction: Vector3 = box.storage[local_index].direction;
+            const valid: bool =
+                box_store_direction.x() != 0 or
+                box_store_direction.y() != 0 or
+                box_store_direction.z() != 0;
+            if (valid) {
+                last_pps = box.storage[local_index].emit;
+                last_direction = box_store_direction;
             }
+
+            box.storage[local_index].emit = last_pps.lerp(accumulated_pps, t_update);
+            solution.accumulated_pps[point_index] = box.storage[local_index].emit;
+
+            box.storage[local_index].direction =
+                last_direction.lerp(direction, t_update).normalizeOrZero();
+            solution.average_direction_to_light[point_index] = box.storage[local_index].direction;
         }
     }
 
@@ -673,7 +610,8 @@ pub fn outputLightingPoints(
                 const x_axis: Vector3 = box_surface.x_axis;
                 const y_axis: Vector3 = box_surface.y_axis;
 
-                const emission_color: Color3 = solution.emission_color0[point_index];
+                const emission_color: Color3 =
+                    solution.accumulated_pps[point_index].plus(solution.emission_pps[point_index]);
 
                 var front_emission_color: Color = emission_color.clamp01().toColor(1);
 
@@ -737,8 +675,11 @@ pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, 
     var point_index: u32 = 1; // Light point index 0 is never used.
     while (point_index < solution.point_count) : (point_index += 1) {
         const position: Vector3 = solution.points[point_index].position;
-        var color: Color3 = solution.emission_color0[point_index];
+        var color: Color3 = solution.accumulated_pps[point_index].plus(solution.emission_pps[point_index]);
         var direction: Vector3 = solution.average_direction_to_light[point_index];
+
+        // TODO: Stop stuffing normal once we're sure about the variance.
+        direction = solution.points[point_index].normal;
 
         if (direction.z() < 0) {
             // _ = direction.setZ(-direction.z());

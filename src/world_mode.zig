@@ -211,7 +211,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
     var prev_room: StandardRoom = .{};
 
-    for (0..32) |screen_index| {
+    for (0..1) |screen_index| {
         last_screen_z = abs_tile_z;
 
         // const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));

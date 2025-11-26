@@ -546,6 +546,9 @@ pub const RenderGroup = extern struct {
         opt_light_index: ?u16,
     ) void {
         const emission = opt_emission orelse 0;
+        std.debug.assert(emission >= 0);
+        std.debug.assert(emission <= 1);
+
         const light_count = opt_light_count orelse 0;
         const light_index = opt_light_index orelse 0;
         const commands: *RenderCommands = self.commands;
