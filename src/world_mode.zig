@@ -211,14 +211,14 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     var door_down = false;
     var prev_room: StandardRoom = .{};
 
-    for (0..1) |screen_index| {
+    for (0..8) |screen_index| {
         last_screen_z = abs_tile_z;
 
         // const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
         // const room_radius_y: i32 = 4 + @as(i32, @intCast(series.randomChoice(4)));
         _ = series.randomChoice(4);
-        const room_radius_x: i32 = 4;
-        const room_radius_y: i32 = 4;
+        const room_radius_x: i32 = 8;
+        const room_radius_y: i32 = 8;
         if (door_direction == 1) {
             room_center_tile_x += room_radius_x;
         } else if (door_direction == 0) {
@@ -227,8 +227,8 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
         // const door_direction = 1;
         // _ = series.randomChoice(2);
-        // door_direction = 2;
-        door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
+        door_direction = 3;
+        // door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
         // door_direction = series.randomChoice(2);
 
         var created_z_door = false;
@@ -603,6 +603,15 @@ pub fn updateAndRenderWorld(
     }
     if (input.f_key_pressed[4]) {
         world_mode.updating_lighting = !world_mode.updating_lighting;
+    }
+
+    if (input.f_key_pressed[5]) {
+        if (world_mode.test_lighting.debug_box_draw_depth > 0) {
+            world_mode.test_lighting.debug_box_draw_depth -= 1;
+        }
+    }
+    if (input.f_key_pressed[6]) {
+        world_mode.test_lighting.debug_box_draw_depth += 1;
     }
 
     render_group.enableLighting(light_bounds);

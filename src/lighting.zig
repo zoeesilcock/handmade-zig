@@ -46,6 +46,7 @@ pub const LightingSolution = extern struct {
     root_box_index: u16,
 
     point_count: u16,
+    extended_point_count: u16,
     points: [LIGHT_DATA_WIDTH]LightingPoint = undefined,
 
     // PPS = Photons per second.
@@ -56,9 +57,11 @@ pub const LightingSolution = extern struct {
     average_direction_to_light: [LIGHT_DATA_WIDTH]Vector3 = undefined,
     series: random.Series,
 
-    total_ray_count: u32, // Number of total rays cast.
-    raycast_point_count: u32, // Number of times a point got used as an origin.
-    raycast_box_count: u32, // Number of times a box got considered for intersection.
+    total_casts_initiated: u32, // Number of attempts to raycast from a point.
+    total_partitions_tested: u32, // Number of partition boxes checked.
+    total_leaves_tested: u32, // Number of leaf boxes checked.
+
+    debug_box_draw_depth: u32,
 };
 
 pub const LightingSurface = extern struct {
@@ -201,6 +204,8 @@ fn raycast(
         .t_ray = std.math.floatMax(f32),
     };
 
+    solution.total_casts_initiated += 1;
+
     raycastRecurse(
         solution,
         ray_origin,
@@ -219,13 +224,15 @@ fn raycastRecurse(
     root_box: *LightingBox,
     result: *RaycastResult,
 ) void {
-    solution.total_ray_count += 1;
-
     var source_index: u32 = root_box.first_child_index;
     while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
         const box: *LightingBox = getBox(solution, source_index);
 
-        solution.raycast_box_count += 1;
+        if (box.child_count > 0) {
+            solution.total_partitions_tested += 1;
+        } else {
+            solution.total_leaves_tested += 1;
+        }
 
         if (box.child_count > 0 and math.isInRectangleCenterHalfDim(box.position, box.radius, ray_origin)) {
             raycastRecurse(solution, ray_origin, ray_direction, box, result);
@@ -255,7 +262,8 @@ fn raycastRecurse(
                     if (@abs(x_check) <= half_width and
                         @abs(y_check) <= half_height)
                     {
-                        if (box.child_count > 0) {
+                        const close_enough: bool = t_ray < 5.0;
+                        if (box.child_count > 0 and close_enough) {
                             raycastRecurse(solution, ray_origin, ray_direction, box, result);
                         } else {
                             result.t_ray = t_ray;
@@ -444,6 +452,64 @@ fn splitBox(
 
     parent_box.child_count = source_count;
     parent_box.first_child_index = addBoxReferences(solution, source_count, source);
+
+    var assign_light_index: u16 = solution.extended_point_count;
+    parent_box.light_index[0] = assign_light_index;
+    assign_light_index += 1;
+    parent_box.light_index[1] = assign_light_index;
+    assign_light_index += 1;
+    parent_box.light_index[2] = assign_light_index;
+    assign_light_index += 1;
+    parent_box.light_index[3] = assign_light_index;
+    assign_light_index += 1;
+    parent_box.light_index[4] = assign_light_index;
+    assign_light_index += 1;
+    parent_box.light_index[5] = assign_light_index;
+    assign_light_index += 1;
+    parent_box.light_index[6] = assign_light_index;
+    solution.extended_point_count = assign_light_index;
+
+    var surface_index: u32 = 0;
+    while (surface_index < 6) : (surface_index += 1) {
+        const light_index: u16 = parent_box.light_index[surface_index];
+        var point: *LightingPoint = &solution.points[light_index];
+        const surface: LightBoxSurface = getBoxSurface(parent_box.position, parent_box.radius, surface_index);
+
+        point.normal = surface.normal;
+        point.position = surface.position;
+        solution.average_direction_to_light[light_index] = .zero();
+        solution.accumulated_weight[light_index] = 0;
+
+        var reflection_color: Color3 = .zero();
+        var emission_pps: Color3 = .zero();
+        var initial_pps: Color3 = .zero();
+        var total_weight: f32 = 0;
+
+        var child_index: u16 = parent_box.first_child_index;
+        while (child_index < (parent_box.first_child_index + parent_box.child_count)) : (child_index += 1) {
+            const child_box: *LightingBox = getBox(solution, child_index);
+            var child_point_index: u32 = child_box.light_index[surface_index];
+            while (child_point_index < child_box.light_index[surface_index + 1]) : (child_point_index += 1) {
+                const child_point: *LightingPoint = &solution.points[child_point_index];
+                const weight: f32 = 1.0 / (1.0 + point.position.minus(child_point.position).lengthSquared());
+
+                reflection_color = reflection_color.plus(child_point.reflection_color.scaledTo(weight));
+                emission_pps = emission_pps.plus(solution.emission_pps[child_point_index].scaledTo(weight));
+                initial_pps = initial_pps.plus(solution.initial_pps[child_point_index].scaledTo(weight));
+                total_weight += weight;
+            }
+        }
+
+        var inverse_weight: f32 = 1;
+        if (total_weight > 0) {
+            inverse_weight = 1.0 / total_weight;
+        }
+
+        point.reflection_color = reflection_color.scaledTo(inverse_weight);
+        solution.emission_pps[light_index] = emission_pps.scaledTo(inverse_weight);
+        solution.initial_pps[light_index] = initial_pps.scaledTo(inverse_weight);
+        solution.accumulated_pps[light_index] = solution.initial_pps[light_index];
+    }
 }
 
 fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
@@ -475,10 +541,11 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
     const original_box_count: u32 = solution.box_count;
     solution.boxes = group.commands.light_boxes;
     solution.point_count = group.commands.light_point_index;
+    solution.extended_point_count = solution.point_count;
 
-    solution.total_ray_count = 0;
-    solution.raycast_point_count = 0;
-    solution.raycast_box_count = 0;
+    solution.total_casts_initiated = 0;
+    solution.total_partitions_tested = 0;
+    solution.total_leaves_tested = 0;
 
     const t_update: f32 = 0.05;
 
@@ -572,35 +639,32 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
         }
     }
 
-    DebugInterface.debugValue(@src(), &solution.total_ray_count, "TotalRayCount");
-    DebugInterface.debugValue(@src(), &solution.raycast_point_count, "RaycastPointCount");
-    DebugInterface.debugValue(@src(), &solution.raycast_box_count, "RaycastBoxCount");
+    DebugInterface.debugValue(@src(), &solution.total_casts_initiated, "TotalCastsInitiated");
+    DebugInterface.debugValue(@src(), &solution.total_partitions_tested, "TotalPartitionsTested");
+    DebugInterface.debugValue(@src(), &solution.total_leaves_tested, "TotalLeavesTested");
 }
 
-pub fn outputLightingPoints(
+fn outputLightingPointsRecurse(
     group: *RenderGroup,
     solution: *LightingSolution,
-    opt_textures: ?*LightingTextures,
+    box: *LightingBox,
+    depth: u32,
 ) void {
-    TimedBlock.beginFunction(@src(), .OutputLightingPoints);
-    defer TimedBlock.endFunction(@src(), .OutputLightingPoints);
+    if (depth == 0 or box.child_count == 0) {
+        const bitmap: ?*LoadedBitmap = group.commands.white_bitmap;
 
-    _ = opt_textures;
-
-    const commands: *RenderCommands = group.commands;
-    _ = group.getCurrentQuads(solution.point_count);
-
-    const element_width: f32 = 0.25;
-    const element_height: f32 = 0.25;
-    const bitmap: ?*LoadedBitmap = commands.white_bitmap;
-
-    var box_index: u32 = 0;
-    while (box_index < commands.light_box_count) : (box_index += 1) {
         var box_surface_index: u32 = 0;
         while (box_surface_index < 6) : (box_surface_index += 1) {
-            const box: *LightingBox = &solution.boxes[box_index];
             const box_surface: LightBoxSurface =
                 getBoxSurface(box.position, box.radius, box_surface_index);
+
+            const point_count: u32 = box.light_index[box_surface_index + 1] - box.light_index[box_surface_index];
+            var size_ratio: f32 = 1.8;
+            if (point_count > 1) {
+                size_ratio /= @floatFromInt(point_count);
+            }
+            const element_width: f32 = size_ratio * box_surface.half_width;
+            const element_height: f32 = size_ratio * box_surface.half_height;
 
             var point_index: u32 = box.light_index[box_surface_index];
             while (point_index < box.light_index[box_surface_index + 1]) : (point_index += 1) {
@@ -610,8 +674,10 @@ pub fn outputLightingPoints(
                 const x_axis: Vector3 = box_surface.x_axis;
                 const y_axis: Vector3 = box_surface.y_axis;
 
-                const emission_color: Color3 =
-                    solution.accumulated_pps[point_index].plus(solution.emission_pps[point_index]);
+                var emission_color: Color3 = solution.accumulated_pps[point_index];
+                if (box.child_count == 0) {
+                    emission_color = emission_color.plus(solution.emission_pps[point_index]);
+                }
 
                 var front_emission_color: Color = emission_color.clamp01().toColor(1);
 
@@ -665,7 +731,36 @@ pub fn outputLightingPoints(
                 );
             }
         }
+    } else {
+        var child_index: u32 = 0;
+        while (child_index < box.child_count) : (child_index += 1) {
+            outputLightingPointsRecurse(
+                group,
+                solution,
+                getBox(solution, (box.first_child_index + child_index)),
+                depth - 1,
+            );
+        }
     }
+}
+
+pub fn outputLightingPoints(
+    group: *RenderGroup,
+    solution: *LightingSolution,
+    opt_textures: ?*LightingTextures,
+) void {
+    TimedBlock.beginFunction(@src(), .OutputLightingPoints);
+    defer TimedBlock.endFunction(@src(), .OutputLightingPoints);
+
+    _ = opt_textures;
+    _ = group.getCurrentQuads(solution.point_count);
+
+    outputLightingPointsRecurse(
+        group,
+        solution,
+        getBox(solution, solution.root_box_index),
+        solution.debug_box_draw_depth,
+    );
 }
 
 pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, dest: *LightingTextures) void {
