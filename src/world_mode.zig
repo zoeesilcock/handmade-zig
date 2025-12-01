@@ -531,7 +531,7 @@ pub fn updateAndRenderWorld(
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
     render_group.beginDepthPeel(background_color);
 
-    const near_clip_plane: f32 = 3;
+    const near_clip_plane: f32 = if (world_mode.use_debug_camera) 0.2 else 3;
     const far_clip_plane: f32 = 100;
 
     var camera_o: Matrix4x4 =
@@ -595,12 +595,14 @@ pub fn updateAndRenderWorld(
     _ = light_bounds.min.setZ(sim_bounds.min.z());
     _ = light_bounds.max.setZ(sim_bounds.max.z());
 
-    if (input.f_key_pressed[2]) {
-        render_group.commands.settings.lighting_disabled = !render_group.commands.settings.lighting_disabled;
-    }
     if (input.f_key_pressed[1]) {
         world_mode.show_lighting = !world_mode.show_lighting;
     }
+
+    if (input.f_key_pressed[2]) {
+        world_mode.test_lighting.update_debug_lines = !world_mode.test_lighting.update_debug_lines;
+    }
+
     if (input.f_key_pressed[4]) {
         world_mode.updating_lighting = !world_mode.updating_lighting;
     }
@@ -743,7 +745,7 @@ pub fn updateAndRenderWorld(
     render_group.endDepthPeel();
 
     if (world_mode.updating_lighting) {
-        lighting.lightingTest(render_group, &world_mode.test_lighting);
+        lighting.lightingTest(render_group, &world_mode.test_lighting, transient_state.high_priority_queue);
 
         if (world_mode.show_lighting) {
             render_group.pushFullClear(background_color);

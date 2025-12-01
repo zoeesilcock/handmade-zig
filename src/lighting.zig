@@ -55,13 +55,26 @@ pub const LightingSolution = extern struct {
     accumulated_pps: [LIGHT_DATA_WIDTH]Color3 = undefined,
     emission_pps: [LIGHT_DATA_WIDTH]Color3 = undefined, // This isn't really needed, could be recomputed on output.
     average_direction_to_light: [LIGHT_DATA_WIDTH]Vector3 = undefined,
-    series: random.Series,
+
+    entropy_counter: u32,
 
     total_casts_initiated: u32, // Number of attempts to raycast from a point.
     total_partitions_tested: u32, // Number of partition boxes checked.
     total_leaves_tested: u32, // Number of leaf boxes checked.
 
     debug_box_draw_depth: u32,
+
+    update_debug_lines: bool,
+    debug_point_index: u32,
+    debug_line_count: u32,
+    debug_lines: [4096]DebugLine = undefined,
+    sample_table: [16]Vector3 = undefined, // Must always have a length that is a power of two.
+};
+
+const DebugLine = extern struct {
+    from_position: Vector3,
+    to_position: Vector3,
+    color: Color,
 };
 
 pub const LightingSurface = extern struct {
@@ -97,6 +110,8 @@ pub const LightingPoint = extern struct {
     position: Vector3,
     reflection_color: Color3,
     normal: Vector3,
+    x_axis: Vector3,
+    y_axis: Vector3,
 };
 
 pub const LightBoxSurface = struct {
@@ -204,7 +219,7 @@ fn raycast(
         .t_ray = std.math.floatMax(f32),
     };
 
-    solution.total_casts_initiated += 1;
+    // solution.total_casts_initiated += 1;
 
     raycastRecurse(
         solution,
@@ -228,11 +243,11 @@ fn raycastRecurse(
     while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
         const box: *LightingBox = getBox(solution, source_index);
 
-        if (box.child_count > 0) {
-            solution.total_partitions_tested += 1;
-        } else {
-            solution.total_leaves_tested += 1;
-        }
+        // if (box.child_count > 0) {
+        //     solution.total_partitions_tested += 1;
+        // } else {
+        //     solution.total_leaves_tested += 1;
+        // }
 
         if (box.child_count > 0 and math.isInRectangleCenterHalfDim(box.position, box.radius, ray_origin)) {
             raycastRecurse(solution, ray_origin, ray_direction, box, result);
@@ -279,15 +294,38 @@ fn raycastRecurse(
     }
 }
 
-fn sampleHemisphere(series: *random.Series, normal: Vector3) Vector3 {
-    var result: Vector3 = Vector3.new(
-        series.randomBilateral(),
-        series.randomBilateral(),
-        series.randomBilateral(),
-    ).normalizeOrZero();
+fn sampleHemisphere(
+    solution: *LightingSolution,
+    series: *random.Series,
+    normal: Vector3,
+    x_axis: Vector3,
+    y_axis: Vector3,
+    sample_index: u32,
+) Vector3 {
+    _ = x_axis;
+    _ = y_axis;
+    var result: Vector3 = .zero();
 
-    if (result.dotProduct(normal) < 0) {
-        result = result.negated();
+    if (true) {
+        const ratio: f32 = 0.25;
+        const basis: Vector3 = solution.sample_table[sample_index & (solution.sample_table.len - 1)];
+        result = basis.plus(
+            Vector3.new(
+                series.randomBilateral(),
+                series.randomBilateral(),
+                series.randomBilateral(),
+            ).scaledTo(ratio),
+        );
+    } else {
+        result = .new(
+            series.randomBilateral(),
+            series.randomBilateral(),
+            series.randomBilateral(),
+        );
+
+        if (result.dotProduct(normal) < 0) {
+            result = result.negated();
+        }
     }
 
     return result;
@@ -316,31 +354,69 @@ fn accumulateSample(
         );
 }
 
-fn computeLightPropagation(solution: *LightingSolution) void {
+fn pushDebugLine(solution: *LightingSolution, from_position: Vector3, to_position: Vector3, color: Color) void {
+    if (solution.update_debug_lines) {
+        std.debug.assert(solution.debug_line_count < solution.debug_lines.len);
+
+        const line: *DebugLine = &solution.debug_lines[solution.debug_line_count];
+        solution.debug_line_count += 1;
+
+        line.from_position = from_position;
+        line.to_position = to_position;
+        line.color = color;
+    }
+}
+
+fn computeLightPropagation(
+    solution: *LightingSolution,
+    first_sample_index: u32,
+    one_past_last_sample_index: u32,
+) void {
     TimedBlock.beginFunction(@src(), .ComputeLightPropagation);
     defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
 
-    const ray_count: u32 = 16;
+    const ray_count: u32 = 64;
 
     // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
     const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.2);
     // const ground_color: Color3 = .new(0.3, 0.2, 0.1);
     // const sun_direction: Vector3 = Vector3.new(1, 1, 1).normalizeOrZero();
 
-    var series: random.Series = solution.series;
-    var sample_point_index: u32 = 1; // Light point index 0 is never used.
-    while (sample_point_index < solution.point_count) : (sample_point_index += 1) {
+    var sample_point_index: u32 = first_sample_index; // Light point index 0 is never used.
+    while (sample_point_index < one_past_last_sample_index) : (sample_point_index += 1) {
         const sample_point: *LightingPoint = &solution.points[sample_point_index];
+        var series: random.Series = .seed(213897 * (2398 + solution.entropy_counter));
 
         var ray_index: u32 = 0;
         while (ray_index < ray_count) : (ray_index += 1) {
-            const sample_direction: Vector3 = sampleHemisphere(&series, sample_point.normal);
+            const sample_direction: Vector3 = sampleHemisphere(
+                solution,
+                &series,
+                sample_point.normal,
+                sample_point.x_axis,
+                sample_point.y_axis,
+                ray_index,
+            );
 
             const ray: RaycastResult = raycast(
                 solution,
                 sample_point.position,
                 sample_direction,
             );
+
+            if (sample_point_index == solution.debug_point_index) {
+                const draw_length: f32 = 0.25;
+                const end_point: Vector3 = sample_point.position.plus(sample_direction.scaledTo(
+                    if (ray.box != null) ray.t_ray else draw_length,
+                ));
+
+                pushDebugLine(
+                    solution,
+                    sample_point.position,
+                    end_point,
+                    if (ray.box != null) .new(0, 1, 0, 1) else .new(1, 0, 0, 1),
+                );
+            }
 
             var transfer_pps: Color3 = .zero();
             if (ray.box) |hit_box| {
@@ -381,8 +457,59 @@ fn computeLightPropagation(solution: *LightingSolution) void {
             accumulateSample(solution, sample_point_index, transfer_pps, sample_direction);
         }
     }
+}
 
-    solution.series = series;
+const LightingWork = struct {
+    solution: *LightingSolution,
+    first_sample_index: u32,
+    one_past_last_sample_index: u32,
+};
+
+pub fn doLightingWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
+    _ = queue;
+
+    TimedBlock.beginFunction(@src(), .DoLightingWork);
+    defer TimedBlock.endFunction(@src(), .DoLightingWork);
+
+    const work: *LightingWork = @ptrCast(@alignCast(data));
+
+    computeLightPropagation(work.solution, work.first_sample_index, work.one_past_last_sample_index);
+}
+
+fn computeAllLightPropagation(
+    solution: *LightingSolution,
+    lighting_queue: *shared.PlatformWorkQueue,
+) void {
+    if (true) {
+        var works: [256]LightingWork = undefined;
+        const points_per_work: u32 = 256;
+        var done: bool = false;
+
+        var work_index: u32 = 0;
+        while (work_index < works.len) : (work_index += 1) {
+            const work = &works[work_index];
+            work.solution = solution;
+            work.first_sample_index = work_index * points_per_work;
+            work.one_past_last_sample_index = work.first_sample_index + points_per_work;
+            if (work.one_past_last_sample_index > solution.point_count) {
+                work.one_past_last_sample_index = solution.point_count;
+                done = true;
+            }
+
+            if (work.first_sample_index == 0) {
+                work.first_sample_index = 1;
+            }
+            shared.platform.addQueueEntry(lighting_queue, &doLightingWork, work);
+
+            if (done) {
+                break;
+            }
+        }
+        shared.platform.completeAllQueuedWork(lighting_queue);
+        std.debug.assert(done == true);
+    } else {
+        computeLightPropagation(solution, 0, solution.point_count);
+    }
 }
 
 fn splitBox(
@@ -535,7 +662,36 @@ fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
     splitBox(solution, root_box, actual_box_count, &solution.scratch_a, &solution.scratch_b, 0);
 }
 
-pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
+pub fn lightingTest(
+    group: *RenderGroup,
+    solution: *LightingSolution,
+    lighting_queue: *shared.PlatformWorkQueue,
+) void {
+    TimedBlock.beginFunction(@src(), .LightingTest);
+    defer TimedBlock.endFunction(@src(), .LightingTest);
+
+    solution.sample_table[0] = Vector3.new(0.2, 0, 1).normalizeOrZero();
+    solution.sample_table[1] = Vector3.new(-0.2, 0, 1).normalizeOrZero();
+    solution.sample_table[2] = Vector3.new(0, 0.2, 1).normalizeOrZero();
+    solution.sample_table[3] = Vector3.new(0, -0.2, 1).normalizeOrZero();
+
+    solution.sample_table[4] = Vector3.new(-0.5, -0.5, 0.5).normalizeOrZero();
+    solution.sample_table[5] = Vector3.new(-0.5, 0, 0.5).normalizeOrZero();
+    solution.sample_table[6] = Vector3.new(-0.5, 0.5, 0.5).normalizeOrZero();
+    solution.sample_table[7] = Vector3.new(0.5, -0.5, 0.5).normalizeOrZero();
+    solution.sample_table[8] = Vector3.new(0.5, 0, 0.5).normalizeOrZero();
+    solution.sample_table[9] = Vector3.new(0.5, 0.5, 0.5).normalizeOrZero();
+    solution.sample_table[10] = Vector3.new(0, -0.5, 0.5).normalizeOrZero();
+    solution.sample_table[11] = Vector3.new(0, 0.5, 0.5).normalizeOrZero();
+
+    solution.sample_table[12] = Vector3.new(1, 0, 0.25).normalizeOrZero();
+    solution.sample_table[13] = Vector3.new(-1, 0, 0.25).normalizeOrZero();
+    solution.sample_table[14] = Vector3.new(0, 1, 0.25).normalizeOrZero();
+    solution.sample_table[15] = Vector3.new(0, -1, 0.25).normalizeOrZero();
+
+    if (solution.update_debug_lines) {
+        solution.debug_line_count = 0;
+    }
     solution.box_reference_count = 0;
     solution.box_count = @intCast(group.commands.light_box_count);
     const original_box_count: u32 = solution.box_count;
@@ -547,7 +703,11 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
     solution.total_partitions_tested = 0;
     solution.total_leaves_tested = 0;
 
+    const entropy_frame_count: u32 = 256;
     const t_update: f32 = 0.05;
+
+    const debug_location: Vector3 = .new(0, 0, 1);
+    var debug_point_distance: f32 = std.math.floatMax(f32);
 
     var box_index: u32 = 0;
     while (box_index < original_box_count) : (box_index += 1) {
@@ -567,6 +727,8 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
                     var point: *LightingPoint = &solution.points[light_index];
 
                     point.normal = surface.normal;
+                    point.x_axis = surface.x_axis;
+                    point.y_axis = surface.y_axis;
                     point.position = surface.position
                         .plus(surface.x_axis.scaledTo(x_sub_ratio * surface.half_width))
                         .plus(surface.y_axis.scaledTo(y_sub_ratio * surface.half_height));
@@ -583,6 +745,12 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
                     solution.accumulated_pps[light_index] = .zero();
                     solution.accumulated_weight[light_index] = 0;
 
+                    const this_distance: f32 = point.position.minus(debug_location).lengthSquared();
+                    if (debug_point_distance > this_distance) {
+                        solution.debug_point_index = light_index;
+                        debug_point_distance = this_distance;
+                    }
+
                     light_index += 1;
                     std.debug.assert(light_index < LIGHT_DATA_WIDTH);
                 }
@@ -597,7 +765,7 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
     DebugInterface.debugValue(@src(), &solution.box_count, "BoxCount");
     DebugInterface.debugValue(@src(), &solution.point_count, "PointCount");
 
-    computeLightPropagation(solution);
+    computeAllLightPropagation(solution, lighting_queue);
 
     box_index = 0;
     while (box_index < original_box_count) : (box_index += 1) {
@@ -642,6 +810,20 @@ pub fn lightingTest(group: *RenderGroup, solution: *LightingSolution) void {
     DebugInterface.debugValue(@src(), &solution.total_casts_initiated, "TotalCastsInitiated");
     DebugInterface.debugValue(@src(), &solution.total_partitions_tested, "TotalPartitionsTested");
     DebugInterface.debugValue(@src(), &solution.total_leaves_tested, "TotalLeavesTested");
+
+    _ = group.getCurrentQuads(solution.debug_line_count);
+    const bitmap: ?*LoadedBitmap = group.commands.white_bitmap;
+    var debug_line_index: u32 = 0;
+    while (debug_line_index < solution.debug_line_count) : (debug_line_index += 1) {
+        const line: *DebugLine = &solution.debug_lines[debug_line_index];
+
+        group.pushLineSegment(bitmap, line.from_position, line.color, line.to_position, line.color, 0.01);
+    }
+
+    solution.entropy_counter += 1;
+    if (solution.entropy_counter >= entropy_frame_count) {
+        solution.entropy_counter = 0;
+    }
 }
 
 fn outputLightingPointsRecurse(
@@ -774,7 +956,7 @@ pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, 
         var direction: Vector3 = solution.average_direction_to_light[point_index];
 
         // TODO: Stop stuffing normal once we're sure about the variance.
-        direction = solution.points[point_index].normal;
+        // direction = solution.points[point_index].normal;
 
         if (direction.z() < 0) {
             // _ = direction.setZ(-direction.z());
