@@ -72,10 +72,6 @@ const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 const ManualSortKey = render.ManualSortKey;
 const SpriteFlag = render.SpriteFlag;
 
-const Vec4f = math.Vec4f;
-const Vec4u = math.Vec4u;
-const Vec4i = math.Vec4i;
-
 pub const UsedBitmapDim = struct {
     basis_position: Vector3 = undefined,
     size: Vector2 = undefined,

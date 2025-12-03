@@ -16,8 +16,8 @@ const SoundId = file_formats.SoundId;
 const SoundOutputBuffer = shared.SoundOutputBuffer;
 const Assets = asset.Assets;
 const Vector2 = math.Vector2;
-const Vec4f = simd.Vec4f;
-const Vec4i = simd.Vec4i;
+const F32_4x = simd.F32_4x;
+const I32_4x = simd.I32_4x;
 const TimedBlock = debug_interface.TimedBlock;
 
 pub const PlayingSound = struct {
@@ -125,26 +125,26 @@ pub const AudioState = struct {
         std.debug.assert((sound_buffer.sample_count & 3) == 0);
         const chunk_count = sound_buffer.sample_count / 4;
 
-        const real_channel0: [*]Vec4f = temp_arena.pushArray(
+        const real_channel0: [*]F32_4x = temp_arena.pushArray(
             chunk_count,
-            Vec4f,
+            F32_4x,
             ArenaPushParams.alignedNoClear(16),
         );
-        const real_channel1: [*]Vec4f = temp_arena.pushArray(
+        const real_channel1: [*]F32_4x = temp_arena.pushArray(
             chunk_count,
-            Vec4f,
+            F32_4x,
             ArenaPushParams.alignedNoClear(16),
         );
 
         const seconds_per_sample = 1.0 / @as(f32, @floatFromInt(sound_buffer.samples_per_second));
         const output_channel_count = 2;
-        const zero: Vec4f = @splat(0);
-        const one: Vec4f = @splat(1);
+        const zero: F32_4x = @splat(0);
+        const one: F32_4x = @splat(1);
 
         // Clear out the mixer channels.
         {
-            var dest0: [*]Vec4f = real_channel0;
-            var dest1: [*]Vec4f = real_channel1;
+            var dest0: [*]F32_4x = real_channel0;
+            var dest1: [*]F32_4x = real_channel1;
             var sample_index: u32 = 0;
             while (sample_index < chunk_count) : (sample_index += 1) {
                 dest0[0] = zero;
@@ -177,26 +177,26 @@ pub const AudioState = struct {
                         const sample_velocity_chunk: f32 = sample_velocity * 4.0;
 
                         // Channel 0.
-                        const master_volume0: Vec4f = @splat(self.master_volume.values[0]);
-                        var volume0 = Vec4f{
+                        const master_volume0: F32_4x = @splat(self.master_volume.values[0]);
+                        var volume0 = F32_4x{
                             volume.values[0] + 0 * volume_velocity.values[0],
                             volume.values[0] + 1 * volume_velocity.values[0],
                             volume.values[0] + 2 * volume_velocity.values[0],
                             volume.values[0] + 3 * volume_velocity.values[0],
                         };
-                        // const volume_velocity0: Vec4f = @splat(volume_velocity.values[0]);
-                        const volume_velocity_chunk0: Vec4f = @splat(volume_velocity_chunk.values[0]);
+                        // const volume_velocity0: F32_4x = @splat(volume_velocity.values[0]);
+                        const volume_velocity_chunk0: F32_4x = @splat(volume_velocity_chunk.values[0]);
 
                         // Channel 1.
-                        const master_volume1: Vec4f = @splat(self.master_volume.values[1]);
-                        var volume1 = Vec4f{
+                        const master_volume1: F32_4x = @splat(self.master_volume.values[1]);
+                        var volume1 = F32_4x{
                             volume.values[1] + 0 * volume_velocity.values[1],
                             volume.values[1] + 1 * volume_velocity.values[1],
                             volume.values[1] + 2 * volume_velocity.values[1],
                             volume.values[1] + 3 * volume_velocity.values[1],
                         };
-                        // const volume_velocity1: Vec4f = @splat(volume_velocity.values[1]);
-                        const volume_velocity_chunk1: Vec4f = @splat(volume_velocity_chunk.values[1]);
+                        // const volume_velocity1: F32_4x = @splat(volume_velocity.values[1]);
+                        const volume_velocity_chunk1: F32_4x = @splat(volume_velocity_chunk.values[1]);
 
                         std.debug.assert(playing_sound.samples_played >= 0);
 
@@ -242,25 +242,25 @@ pub const AudioState = struct {
                         var loop_index: u32 = 0;
                         while (loop_index < chunks_to_mix) : (loop_index += 1) {
                             const sample_position: f32 = begin_sample_position + loop_index_c * @as(f32, @floatFromInt(loop_index));
-                            var sample_value: Vec4f = zero;
+                            var sample_value: F32_4x = zero;
 
                             if (true) {
                                 // With linear interpolation.
-                                const sample_pos = Vec4f{
+                                const sample_pos = F32_4x{
                                     sample_position + 0 * sample_velocity,
                                     sample_position + 1 * sample_velocity,
                                     sample_position + 2 * sample_velocity,
                                     sample_position + 3 * sample_velocity,
                                 };
-                                const sample_index: Vec4i = @intFromFloat(sample_pos);
-                                const fraction: Vec4f = sample_pos - @as(Vec4f, @floatFromInt(sample_index));
-                                const sample_value_f = Vec4f{
+                                const sample_index: I32_4x = @intFromFloat(sample_pos);
+                                const fraction: F32_4x = sample_pos - @as(F32_4x, @floatFromInt(sample_index));
+                                const sample_value_f = F32_4x{
                                     @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[0])]),
                                     @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[1])]),
                                     @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[2])]),
                                     @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[3])]),
                                 };
-                                const sample_value_c = Vec4f{
+                                const sample_value_c = F32_4x{
                                     @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[0] + 1)]),
                                     @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[1] + 1)]),
                                     @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[2] + 1)]),
@@ -269,7 +269,7 @@ pub const AudioState = struct {
                                 sample_value = ((one - fraction) * sample_value_f) + (fraction * sample_value_c);
                             } else {
                                 // Without linear interpolation.
-                                sample_value = Vec4f{
+                                sample_value = F32_4x{
                                     @floatFromInt(loaded_sound.samples[0].?[intrinsics.roundReal32ToUInt32(sample_position + 0 * sample_velocity)]),
                                     @floatFromInt(loaded_sound.samples[0].?[intrinsics.roundReal32ToUInt32(sample_position + 1 * sample_velocity)]),
                                     @floatFromInt(loaded_sound.samples[0].?[intrinsics.roundReal32ToUInt32(sample_position + 2 * sample_velocity)]),
@@ -277,8 +277,8 @@ pub const AudioState = struct {
                                 };
                             }
 
-                            var d0: [*]Vec4f = @ptrCast(&dest0[0]);
-                            var d1: [*]Vec4f = @ptrCast(&dest1[0]);
+                            var d0: [*]F32_4x = @ptrCast(&dest0[0]);
+                            var d1: [*]F32_4x = @ptrCast(&dest1[0]);
 
                             d0[0] += (master_volume0 * volume0) * sample_value;
                             d1[0] += (master_volume1 * volume1) * sample_value;
@@ -347,16 +347,16 @@ pub const AudioState = struct {
 
         // Convert back to 16-bit.
         {
-            const source0: [*]Vec4f = real_channel0;
-            const source1: [*]Vec4f = real_channel1;
+            const source0: [*]F32_4x = real_channel0;
+            const source1: [*]F32_4x = real_channel1;
             var sample_out: [*]@Vector(8, i16) = @ptrCast(@alignCast(sound_buffer.samples));
 
             var sample_index: u32 = 0;
             while (sample_index < chunk_count) : (sample_index += 1) {
-                const l: Vec4i = @intFromFloat(source0[sample_index]);
-                const r: Vec4i = @intFromFloat(source1[sample_index]);
-                const lr0: Vec4i = @shuffle(i32, l, r, Vec4i{ 0, -1, 1, -2 });
-                const lr1: Vec4i = @shuffle(i32, l, r, Vec4i{ 2, -3, 3, -4 });
+                const l: I32_4x = @intFromFloat(source0[sample_index]);
+                const r: I32_4x = @intFromFloat(source1[sample_index]);
+                const lr0: I32_4x = @shuffle(i32, l, r, I32_4x{ 0, -1, 1, -2 });
+                const lr1: I32_4x = @shuffle(i32, l, r, I32_4x{ 2, -3, 3, -4 });
                 const s01: @Vector(8, i16) = @truncate(std.simd.join(lr0, lr1));
 
                 sample_out[sample_index] = s01;

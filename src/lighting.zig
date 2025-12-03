@@ -1,5 +1,7 @@
 const math = @import("math.zig");
 const rendergroup = @import("rendergroup.zig");
+const lighting = @import("lighting.zig");
+const simd = @import("simd.zig");
 const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const asset = @import("asset.zig");
@@ -17,9 +19,14 @@ const Vector4 = math.Vector4;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const Color3 = math.Color3;
+const V3_4x = simd.V3_4x;
+const F32_4x = simd.F32_4x;
+const U32_4x = simd.U32_4x;
+const Bool_4x = simd.Bool_4x;
 const RenderGroup = rendergroup.RenderGroup;
 const RenderCommands = shared.RenderCommands;
 const LoadedBitmap = asset.LoadedBitmap;
+const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 
@@ -51,24 +58,36 @@ pub const LightingSolution = extern struct {
 
     // PPS = Photons per second.
     initial_pps: [LIGHT_DATA_WIDTH]Color3 = undefined,
-    accumulated_weight: [LIGHT_DATA_WIDTH]f32 = undefined,
-    accumulated_pps: [LIGHT_DATA_WIDTH]Color3 = undefined,
     emission_pps: [LIGHT_DATA_WIDTH]Color3 = undefined, // This isn't really needed, could be recomputed on output.
-    average_direction_to_light: [LIGHT_DATA_WIDTH]Vector3 = undefined,
 
     entropy_counter: u32,
 
-    total_casts_initiated: u32, // Number of attempts to raycast from a point.
-    total_partitions_tested: u32, // Number of partition boxes checked.
-    total_leaves_tested: u32, // Number of leaf boxes checked.
-
     debug_box_draw_depth: u32,
+
+    sample_table: [16]Vector3 = undefined, // Must always have a length that is a power of two.
+
+    max_work_count: u32,
+    works: [*]LightingWork = undefined, // 256.
+    accumulated_weight: [*]f32 = undefined, // LIGHT_DATA_WIDTH.
+    accumulated_pps: [*]Color3 = undefined, // LIGHT_DATA_WIDTH.
+    average_direction_to_light: [*]Vector3 = undefined, // LIGHT_DATA_WIDTH.
 
     update_debug_lines: bool,
     debug_point_index: u32,
     debug_line_count: u32,
     debug_lines: [4096]DebugLine = undefined,
-    sample_table: [16]Vector3 = undefined, // Must always have a length that is a power of two.
+};
+
+const LightingWork = extern struct {
+    solution: *LightingSolution,
+    first_sample_index: u32,
+    one_past_last_sample_index: u32,
+
+    total_casts_initiated: u32 = 0, // Number of attempts to raycast from a point.
+    total_partitions_tested: u32 = 0, // Number of partition boxes checked.
+    total_leaves_tested: u32 = 0, // Number of leaf boxes checked.
+    pad: u32 = undefined,
+    big_pad: [32]u8 = undefined,
 };
 
 const DebugLine = extern struct {
@@ -124,9 +143,9 @@ pub const LightBoxSurface = struct {
 };
 
 const RaycastResult = struct {
-    box: ?*LightingBox,
-    box_surface_index: u32,
-    t_ray: f32,
+    box_index: u32 = 0,
+    box_surface_index: u32 = 0,
+    ray_position: Vector3 = .zero(),
 };
 
 pub fn getBoxSurface(position_in: Vector3, radius: Vector3, surface_index: u32) LightBoxSurface {
@@ -209,84 +228,128 @@ fn addBoxStorage(solution: *LightingSolution) u16 {
 }
 
 fn raycast(
-    solution: *LightingSolution,
-    ray_origin: Vector3,
-    ray_direction: Vector3,
-) RaycastResult {
-    var result: RaycastResult = .{
-        .box = null,
-        .box_surface_index = 0,
-        .t_ray = std.math.floatMax(f32),
-    };
-
-    // solution.total_casts_initiated += 1;
-
-    raycastRecurse(
-        solution,
-        ray_origin,
-        ray_direction,
-        getBox(solution, solution.root_box_index),
-        &result,
-    );
-
-    return result;
-}
-
-fn raycastRecurse(
-    solution: *LightingSolution,
-    ray_origin: Vector3,
-    ray_direction: Vector3,
-    root_box: *LightingBox,
-    result: *RaycastResult,
+    work: *LightingWork,
+    ray_origin_4x: V3_4x,
+    ray_direction_4x: V3_4x,
+    result: *[4]RaycastResult,
 ) void {
-    var source_index: u32 = root_box.first_child_index;
-    while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
-        const box: *LightingBox = getBox(solution, source_index);
+    const solution: *LightingSolution = work.solution;
+    work.total_casts_initiated += 1;
 
-        // if (box.child_count > 0) {
-        //     solution.total_partitions_tested += 1;
-        // } else {
-        //     solution.total_leaves_tested += 1;
-        // }
+    result[0].box_index = 0;
+    result[1].box_index = 0;
+    result[2].box_index = 0;
+    result[3].box_index = 0;
 
-        if (box.child_count > 0 and math.isInRectangleCenterHalfDim(box.position, box.radius, ray_origin)) {
-            raycastRecurse(solution, ray_origin, ray_direction, box, result);
-        } else {
-            var axis_index: u32 = 0;
-            while (axis_index < 3) : (axis_index += 1) {
+    var result_t_ray: F32_4x = @splat(std.math.floatMax(f32));
+
+    var depth: u32 = 0;
+    var box_stack: [64]*LightingBox = undefined;
+    box_stack[depth] = getBox(solution, solution.root_box_index);
+    depth += 1;
+
+    // const ray_direction_positive: V3_4x = ray_direction_4x.lessThan(@as(V3_4x, @splat(0)));
+    var sign: [3]F32_4x = undefined;
+    var box_surface_index: [3][4]u32 = undefined;
+    {
+        var axis_index: u32 = 0;
+        while (axis_index < 3) : (axis_index += 1) {
+            var c_index: u32 = 0;
+            while (c_index < 4) : (c_index += 1) {
+                const ray_direction: Vector3 = ray_direction_4x.getComponent(c_index);
                 const positive: u32 = @intFromBool(ray_direction.values[axis_index] < 0);
-                const box_surface_index: u32 = @intCast((axis_index << 1) | positive);
 
-                const sign: f32 = if (positive == 1) 1 else -1;
+                box_surface_index[axis_index][c_index] = @intCast((axis_index << 1) | positive);
+                sign[axis_index][c_index] = if (positive != 0) 1.0 else 0.0;
+            }
+        }
+    }
 
-                const radius: Vector3 = box.radius;
-                var position: Vector3 = box.position;
-                position.values[axis_index] += sign * radius.values[axis_index];
+    while (depth > 0) {
+        depth -= 1;
+        const root_box: *LightingBox = box_stack[depth];
 
-                const relative_origin: Vector3 = ray_origin.minus(position);
-                const t_ray: f32 = -relative_origin.values[axis_index] / ray_direction.values[axis_index];
-                if (t_ray > 0 and t_ray < result.t_ray) {
-                    const ray_position: Vector3 = relative_origin.plus(ray_direction.scaledTo(t_ray));
+        var source_index: u32 = root_box.first_child_index;
+        while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
+            const box: *LightingBox = getBox(solution, source_index);
 
-                    const x_check: f32 = if (axis_index == 0) ray_position.y() else ray_position.x();
-                    const half_width: f32 = if (axis_index == 0) radius.y() else radius.x();
+            const box_position: V3_4x = .fromVector3(box.position);
+            const rel_origin: V3_4x = ray_origin_4x.minus(box_position);
+            const box_radius: V3_4x = .fromVector3(box.radius);
 
-                    const y_check: f32 = if (axis_index == 2) ray_position.y() else ray_position.z();
-                    const half_height: f32 = if (axis_index == 2) radius.y() else radius.z();
+            var is_in_box = false;
+            if (box.child_count > 0) {
+                work.total_partitions_tested += 1;
+                const comparison: V3_4x = rel_origin.absoluteValue().lessThanOrEqualTo(box_radius);
+                is_in_box = comparison.all3TrueInAtLeastOneLane();
+            } else {
+                work.total_leaves_tested += 1;
+            }
 
-                    if (@abs(x_check) <= half_width and
-                        @abs(y_check) <= half_height)
-                    {
-                        const close_enough: bool = t_ray < 5.0;
-                        if (box.child_count > 0 and close_enough) {
-                            raycastRecurse(solution, ray_origin, ray_direction, box, result);
-                        } else {
-                            result.t_ray = t_ray;
-                            result.box = box;
-                            result.box_surface_index = box_surface_index;
+            if (is_in_box) {
+                std.debug.assert(depth < box_stack.len);
+                box_stack[depth] = box;
+                depth += 1;
+            } else {
+                var axis_index: u32 = 0;
+                while (axis_index < 3) : (axis_index += 1) {
+                    var face_rel_origin: V3_4x = rel_origin;
+                    face_rel_origin.setLane(
+                        axis_index,
+                        face_rel_origin.getLane(axis_index) - sign[axis_index] * box_radius.getLane(axis_index),
+                    );
+                    const t_ray: F32_4x =
+                        face_rel_origin.negated().getLane(axis_index) / ray_direction_4x.getLane(axis_index);
+
+                    // var c_index: u32 = 0;
+                    // while (c_index < 4) : (c_index += 1) {
+                    //     const ray_origin: Vector3 = ray_origin_4x.getComponent(c_index);
+                    //     const test_in_box: bool = math.isInRectangleCenterHalfDim(box.position, box.radius, ray_origin);
+                    //     if (is_in_box != test_in_box) {
+                    //         const is_in_box2 = comparison.all3TrueInAtLeastOneLane();
+                    //         _ = is_in_box2;
+                    //     }
+                    //     // std.debug.assert(is_in_box == test_in_box);
+                    // }
+
+                    const delta: V3_4x = ray_direction_4x.scaledToV(t_ray);
+                    const ray_position_4x: V3_4x = ray_origin_4x.plus(delta);
+                    const face_rel_position: V3_4x = face_rel_origin.plus(delta);
+
+                    const zero_4x: F32_4x = @splat(0);
+                    const t_check: Bool_4x = (t_ray > zero_4x) & (t_ray < result_t_ray);
+
+                    if (simd.anyTrue(t_check)) {
+                        const x_check: F32_4x = if (axis_index == 0) face_rel_position.y else face_rel_position.x;
+                        const half_width: F32_4x = if (axis_index == 0) box_radius.y else box_radius.x;
+
+                        const y_check: F32_4x = if (axis_index == 2) face_rel_position.y else face_rel_position.z;
+                        const half_height: F32_4x = if (axis_index == 2) box_radius.y else box_radius.z;
+
+                        const bound_check: Bool_4x = (@abs(x_check) <= half_width) & (@abs(y_check) <= half_height);
+                        const mask: Bool_4x = bound_check & t_check;
+                        const t_max: F32_4x = @splat(5);
+                        const close_enough: Bool_4x = t_ray < t_max;
+
+                        if (simd.anyTrue(@bitCast(mask))) {
+                            if (box.child_count > 0 and simd.anyTrue(close_enough)) {
+                                std.debug.assert(depth < box_stack.len);
+                                box_stack[depth] = box;
+                                depth += 1;
+                                break;
+                            } else {
+                                var c_index: u32 = 0;
+                                while (c_index < 4) : (c_index += 1) {
+                                    if (mask[c_index]) {
+                                        result_t_ray[c_index] = t_ray[c_index];
+                                        result[c_index].box_index = source_index;
+                                        result[c_index].box_surface_index = box_surface_index[axis_index][c_index];
+                                        result[c_index].ray_position = ray_position_4x.getComponent(c_index);
+                                    }
+                                }
+                                break;
+                            }
                         }
-
-                        break;
                     }
                 }
             }
@@ -368,14 +431,15 @@ fn pushDebugLine(solution: *LightingSolution, from_position: Vector3, to_positio
 }
 
 fn computeLightPropagation(
-    solution: *LightingSolution,
-    first_sample_index: u32,
-    one_past_last_sample_index: u32,
+    work: *LightingWork,
 ) void {
     TimedBlock.beginFunction(@src(), .ComputeLightPropagation);
     defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
 
-    const ray_count: u32 = 64;
+    const ray_count: u32 = 16;
+    const solution: *LightingSolution = work.solution;
+    const first_sample_index: u32 = work.first_sample_index;
+    const one_past_last_sample_index: u32 = work.one_past_last_sample_index;
 
     // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
     const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.2);
@@ -389,81 +453,112 @@ fn computeLightPropagation(
 
         var ray_index: u32 = 0;
         while (ray_index < ray_count) : (ray_index += 1) {
-            const sample_direction: Vector3 = sampleHemisphere(
-                solution,
-                &series,
-                sample_point.normal,
-                sample_point.x_axis,
-                sample_point.y_axis,
-                ray_index,
-            );
-
-            const ray: RaycastResult = raycast(
-                solution,
-                sample_point.position,
-                sample_direction,
-            );
-
-            if (sample_point_index == solution.debug_point_index) {
-                const draw_length: f32 = 0.25;
-                const end_point: Vector3 = sample_point.position.plus(sample_direction.scaledTo(
-                    if (ray.box != null) ray.t_ray else draw_length,
-                ));
-
-                pushDebugLine(
+            const sample_direction: [4]Vector3 = .{
+                sampleHemisphere(
                     solution,
-                    sample_point.position,
-                    end_point,
-                    if (ray.box != null) .new(0, 1, 0, 1) else .new(1, 0, 0, 1),
-                );
-            }
+                    &series,
+                    sample_point.normal,
+                    sample_point.x_axis,
+                    sample_point.y_axis,
+                    ray_index,
+                ),
+                sampleHemisphere(
+                    solution,
+                    &series,
+                    sample_point.normal,
+                    sample_point.x_axis,
+                    sample_point.y_axis,
+                    ray_index,
+                ),
+                sampleHemisphere(
+                    solution,
+                    &series,
+                    sample_point.normal,
+                    sample_point.x_axis,
+                    sample_point.y_axis,
+                    ray_index,
+                ),
+                sampleHemisphere(
+                    solution,
+                    &series,
+                    sample_point.normal,
+                    sample_point.x_axis,
+                    sample_point.y_axis,
+                    ray_index,
+                ),
+            };
+            const sample_direction_4x: V3_4x = .new(
+                sample_direction[0],
+                sample_direction[1],
+                sample_direction[2],
+                sample_direction[3],
+            );
+            const sample_point_position_4x: V3_4x = .fromVector3(sample_point.position);
 
-            var transfer_pps: Color3 = .zero();
-            if (ray.box) |hit_box| {
-                // TODO: Update this transfer to be bidirectional.
-                // TODO: Stratified sampling?
+            var ray: [4]RaycastResult = [1]RaycastResult{.{}} ** 4;
+            raycast(work, sample_point_position_4x, sample_direction_4x, &ray);
 
-                const hit_index: u32 = hit_box.light_index[ray.box_surface_index];
-                const hit_point_count: u32 =
-                    hit_box.light_index[ray.box_surface_index + 1] - hit_index;
-                const ray_position: Vector3 =
-                    sample_point.position.plus(sample_direction.scaledTo(ray.t_ray));
+            var sub_ray: u32 = 0;
+            while (sub_ray < ray.len) : (sub_ray += 1) {
+                const opt_hit_box: ?*LightingBox = @ptrCast(getBox(solution, ray[sub_ray].box_index));
+                const box_surface_index: u32 = ray[sub_ray].box_surface_index;
+                const ray_position: Vector3 = ray[sub_ray].ray_position;
 
-                var total_weight: f32 = 0;
-                var surface_point_index: u32 = 0;
-                while (surface_point_index < hit_point_count) : (surface_point_index += 1) {
-                    const hit_point_index: u32 = hit_index + surface_point_index;
-                    const hit_point: *LightingPoint = &solution.points[hit_point_index];
-                    const distance_sq: f32 =
-                        ray_position.minus(hit_point.position).lengthSquared();
-                    const inverse_distance_sq: f32 = 1.0 / (1.0 + distance_sq);
+                // if (false) {
+                //     if (sample_point_index == solution.debug_point_index) {
+                //         const draw_length: f32 = 0.25;
+                //         const end_point: Vector3 = sample_point.position.plus(sample_direction.scaledTo(
+                //             if (ray.box != null) t_ray else draw_length,
+                //         ));
+                //
+                //         pushDebugLine(
+                //             solution,
+                //             sample_point.position,
+                //             end_point,
+                //             if (ray.box != null) .new(0, 1, 0, 1) else .new(1, 0, 0, 1),
+                //         );
+                //     }
+                // }
 
-                    transfer_pps = transfer_pps.plus(
-                        hit_point.reflection_color.hadamardProduct(solution.initial_pps[hit_point_index])
-                            .scaledTo(inverse_distance_sq),
-                    );
-                    total_weight += inverse_distance_sq;
+                var transfer_pps: Color3 = .zero();
+                if (opt_hit_box) |hit_box| {
+                    // TODO: Update this transfer to be bidirectional.
+                    // TODO: Stratified sampling?
+
+                    const hit_index: u32 = hit_box.light_index[box_surface_index];
+                    const hit_point_count: u32 =
+                        hit_box.light_index[box_surface_index + 1] - hit_index;
+
+                    var total_weight: f32 = 0;
+                    var surface_point_index: u32 = 0;
+                    while (surface_point_index < hit_point_count) : (surface_point_index += 1) {
+                        const hit_point_index: u32 = hit_index + surface_point_index;
+                        const hit_point: *LightingPoint = &solution.points[hit_point_index];
+                        const distance_sq: f32 =
+                            ray_position.minus(hit_point.position).lengthSquared();
+                        const inverse_distance_sq: f32 = 1.0 / (1.0 + distance_sq);
+
+                        transfer_pps = transfer_pps.plus(
+                            hit_point.reflection_color.hadamardProduct(solution.initial_pps[hit_point_index])
+                                .scaledTo(inverse_distance_sq),
+                        );
+                        total_weight += inverse_distance_sq;
+                    }
+
+                    var inverse_total_weight: f32 = 1;
+                    if (total_weight > 0) {
+                        inverse_total_weight = 1.0 / total_weight;
+                        transfer_pps = transfer_pps.scaledTo(inverse_total_weight);
+                    }
+                } else {
+                    transfer_pps = moon_color;
                 }
 
-                var inverse_total_weight: f32 = 1;
-                if (total_weight > 0) {
-                    inverse_total_weight = 1.0 / total_weight;
-                    transfer_pps = transfer_pps.scaledTo(inverse_total_weight);
-                }
-            } else {
-                transfer_pps = moon_color;
+                accumulateSample(solution, sample_point_index, transfer_pps, sample_direction[sub_ray]);
             }
-
-            accumulateSample(solution, sample_point_index, transfer_pps, sample_direction);
         }
     }
 }
-
-const LightingWork = struct {
-    solution: *LightingSolution,
-    first_sample_index: u32,
-    one_past_last_sample_index: u32,
-};
 
 pub fn doLightingWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
     _ = queue;
@@ -473,21 +568,29 @@ pub fn doLightingWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) call
 
     const work: *LightingWork = @ptrCast(@alignCast(data));
 
-    computeLightPropagation(work.solution, work.first_sample_index, work.one_past_last_sample_index);
+    computeLightPropagation(work);
 }
 
 fn computeAllLightPropagation(
     solution: *LightingSolution,
     lighting_queue: *shared.PlatformWorkQueue,
 ) void {
-    if (true) {
-        var works: [256]LightingWork = undefined;
+    var work_count: u32 = 0;
+    var works: [*]LightingWork = solution.works;
+
+    if (false) {
         const points_per_work: u32 = 256;
         var done: bool = false;
 
         var work_index: u32 = 0;
-        while (work_index < works.len) : (work_index += 1) {
-            const work = &works[work_index];
+        while (work_index < solution.max_work_count) : (work_index += 1) {
+            const work = &works[work_count];
+            work_count += 1;
+
+            std.debug.assert((@intFromPtr(work) & 63) == 0);
+
+            memory.zeroStruct(LightingWork, work);
+
             work.solution = solution;
             work.first_sample_index = work_index * points_per_work;
             work.one_past_last_sample_index = work.first_sample_index + points_per_work;
@@ -508,8 +611,39 @@ fn computeAllLightPropagation(
         shared.platform.completeAllQueuedWork(lighting_queue);
         std.debug.assert(done == true);
     } else {
-        computeLightPropagation(solution, 0, solution.point_count);
+        const work = &works[work_count];
+        work_count += 1;
+        work.* = .{
+            .solution = solution,
+            .first_sample_index = 1,
+            .one_past_last_sample_index = solution.point_count,
+        };
+        computeLightPropagation(work);
     }
+
+    var total_casts_initiated: u32 = 0;
+    var total_partitions_tested: u32 = 0;
+    var total_leaves_tested: u32 = 0;
+
+    var work_index: u32 = 0;
+    while (work_index < work_count) : (work_index += 1) {
+        const work = &works[work_index];
+        total_casts_initiated += work.total_casts_initiated;
+        total_partitions_tested += work.total_partitions_tested;
+        total_leaves_tested += work.total_leaves_tested;
+    }
+
+    DebugInterface.debugValue(@src(), &total_casts_initiated, "TotalCastsInitiated");
+    DebugInterface.debugValue(@src(), &total_partitions_tested, "TotalPartitionsTested");
+    DebugInterface.debugValue(@src(), &total_leaves_tested, "TotalLeavesTested");
+
+    var partitions_per_cast: f32 =
+        @floatCast(@as(f64, @floatFromInt(total_partitions_tested)) / @as(f64, @floatFromInt(total_casts_initiated)));
+    var leaves_per_cast: f32 =
+        @floatCast(@as(f64, @floatFromInt(total_leaves_tested)) / @as(f64, @floatFromInt(total_casts_initiated)));
+
+    DebugInterface.debugValue(@src(), &partitions_per_cast, "PartitionsPerCast");
+    DebugInterface.debugValue(@src(), &leaves_per_cast, "LeavesPerCast");
 }
 
 fn splitBox(
@@ -662,6 +796,14 @@ fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
     splitBox(solution, root_box, actual_box_count, &solution.scratch_a, &solution.scratch_b, 0);
 }
 
+pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
+    solution.max_work_count = 256;
+    solution.works = arena.pushArray(solution.max_work_count, LightingWork, .aligned(64, true));
+    solution.accumulated_weight = arena.pushArray(LIGHT_DATA_WIDTH, f32, .aligned(64, true));
+    solution.accumulated_pps = arena.pushArray(LIGHT_DATA_WIDTH, Color3, .aligned(64, true));
+    solution.average_direction_to_light = arena.pushArray(LIGHT_DATA_WIDTH, Vector3, .aligned(64, true));
+}
+
 pub fn lightingTest(
     group: *RenderGroup,
     solution: *LightingSolution,
@@ -698,10 +840,6 @@ pub fn lightingTest(
     solution.boxes = group.commands.light_boxes;
     solution.point_count = group.commands.light_point_index;
     solution.extended_point_count = solution.point_count;
-
-    solution.total_casts_initiated = 0;
-    solution.total_partitions_tested = 0;
-    solution.total_leaves_tested = 0;
 
     const entropy_frame_count: u32 = 256;
     const t_update: f32 = 0.05;
@@ -806,10 +944,6 @@ pub fn lightingTest(
             solution.average_direction_to_light[point_index] = box.storage[local_index].direction;
         }
     }
-
-    DebugInterface.debugValue(@src(), &solution.total_casts_initiated, "TotalCastsInitiated");
-    DebugInterface.debugValue(@src(), &solution.total_partitions_tested, "TotalPartitionsTested");
-    DebugInterface.debugValue(@src(), &solution.total_leaves_tested, "TotalLeavesTested");
 
     _ = group.getCurrentQuads(solution.debug_line_count);
     const bitmap: ?*LoadedBitmap = group.commands.white_bitmap;

@@ -166,6 +166,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         GameModeWorld,
         ArenaPushParams.aligned(@alignOf(GameModeWorld), true),
     );
+    lighting.initLighting(&world_mode.test_lighting, &state.mode_arena);
     world_mode.updating_lighting = true;
 
     world_mode.particle_cache =

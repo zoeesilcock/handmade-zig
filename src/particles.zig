@@ -14,7 +14,6 @@ const std = @import("std");
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
-const Vec4f = simd.Vec4f;
 const V3_4x = simd.V3_4x;
 const V4_4x = simd.V4_4x;
 const RenderGroup = rendergroup.RenderGroup;
