@@ -143,9 +143,10 @@ pub const LightBoxSurface = struct {
 };
 
 const RaycastResult = struct {
-    box_index: u32 = 0,
-    box_surface_index: u32 = 0,
-    ray_position: Vector3 = .zero(),
+    hit: Bool_4x = @splat(false),
+    box_index: U32_4x = @splat(0),
+    box_surface_index: U32_4x = @splat(0),
+    t_ray: F32_4x = @splat(0),
 };
 
 pub fn getBoxSurface(position_in: Vector3, radius: Vector3, surface_index: u32) LightBoxSurface {
@@ -229,35 +230,29 @@ fn addBoxStorage(solution: *LightingSolution) u16 {
 
 fn raycast(
     work: *LightingWork,
-    ray_origin_4x: V3_4x,
-    ray_direction_4x: V3_4x,
-    result: *[4]RaycastResult,
-) void {
+    ray_origin: V3_4x,
+    ray_direction: V3_4x,
+) RaycastResult {
     const solution: *LightingSolution = work.solution;
     work.total_casts_initiated += 1;
 
-    result[0].box_index = 0;
-    result[1].box_index = 0;
-    result[2].box_index = 0;
-    result[3].box_index = 0;
-
-    var result_t_ray: F32_4x = @splat(std.math.floatMax(f32));
+    var result: RaycastResult = .{};
+    result.t_ray = @splat(std.math.floatMax(f32));
 
     var depth: u32 = 0;
     var box_stack: [64]*LightingBox = undefined;
     box_stack[depth] = getBox(solution, solution.root_box_index);
     depth += 1;
 
-    // const ray_direction_positive: V3_4x = ray_direction_4x.lessThan(@as(V3_4x, @splat(0)));
+    // const ray_direction_positive: V3_4x = ray_direction.lessThan(@as(V3_4x, @splat(0)));
     var sign: [3]F32_4x = undefined;
-    var box_surface_index: [3][4]u32 = undefined;
+    var box_surface_index: [3]U32_4x = undefined;
     {
         var axis_index: u32 = 0;
         while (axis_index < 3) : (axis_index += 1) {
             var c_index: u32 = 0;
             while (c_index < 4) : (c_index += 1) {
-                const ray_direction: Vector3 = ray_direction_4x.getComponent(c_index);
-                const positive: u32 = @intFromBool(ray_direction.values[axis_index] < 0);
+                const positive: u32 = @intFromBool(ray_direction.getComponent(c_index).values[axis_index] < 0);
 
                 box_surface_index[axis_index][c_index] = @intCast((axis_index << 1) | positive);
                 sign[axis_index][c_index] = if (positive != 0) 1.0 else 0.0;
@@ -274,7 +269,7 @@ fn raycast(
             const box: *LightingBox = getBox(solution, source_index);
 
             const box_position: V3_4x = .fromVector3(box.position);
-            const rel_origin: V3_4x = ray_origin_4x.minus(box_position);
+            const rel_origin: V3_4x = ray_origin.minus(box_position);
             const box_radius: V3_4x = .fromVector3(box.radius);
 
             var is_in_box = false;
@@ -299,25 +294,13 @@ fn raycast(
                         face_rel_origin.getLane(axis_index) - sign[axis_index] * box_radius.getLane(axis_index),
                     );
                     const t_ray: F32_4x =
-                        face_rel_origin.negated().getLane(axis_index) / ray_direction_4x.getLane(axis_index);
+                        face_rel_origin.negated().getLane(axis_index) / ray_direction.getLane(axis_index);
 
-                    // var c_index: u32 = 0;
-                    // while (c_index < 4) : (c_index += 1) {
-                    //     const ray_origin: Vector3 = ray_origin_4x.getComponent(c_index);
-                    //     const test_in_box: bool = math.isInRectangleCenterHalfDim(box.position, box.radius, ray_origin);
-                    //     if (is_in_box != test_in_box) {
-                    //         const is_in_box2 = comparison.all3TrueInAtLeastOneLane();
-                    //         _ = is_in_box2;
-                    //     }
-                    //     // std.debug.assert(is_in_box == test_in_box);
-                    // }
-
-                    const delta: V3_4x = ray_direction_4x.scaledToV(t_ray);
-                    const ray_position_4x: V3_4x = ray_origin_4x.plus(delta);
+                    const delta: V3_4x = ray_direction.scaledToV(t_ray);
                     const face_rel_position: V3_4x = face_rel_origin.plus(delta);
 
-                    const zero_4x: F32_4x = @splat(0);
-                    const t_check: Bool_4x = (t_ray > zero_4x) & (t_ray < result_t_ray);
+                    const zero: F32_4x = @splat(0);
+                    const t_check: Bool_4x = (t_ray > zero) & (t_ray < result.t_ray);
 
                     if (simd.anyTrue(t_check)) {
                         const x_check: F32_4x = if (axis_index == 0) face_rel_position.y else face_rel_position.x;
@@ -329,24 +312,22 @@ fn raycast(
                         const bound_check: Bool_4x = (@abs(x_check) <= half_width) & (@abs(y_check) <= half_height);
                         const mask: Bool_4x = bound_check & t_check;
                         const t_max: F32_4x = @splat(5);
-                        const close_enough: Bool_4x = t_ray < t_max;
+                        const close_enough: Bool_4x = mask & (t_ray < t_max);
 
-                        if (simd.anyTrue(@bitCast(mask))) {
-                            if (box.child_count > 0 and simd.anyTrue(close_enough)) {
-                                std.debug.assert(depth < box_stack.len);
-                                box_stack[depth] = box;
-                                depth += 1;
-                                break;
-                            } else {
-                                var c_index: u32 = 0;
-                                while (c_index < 4) : (c_index += 1) {
-                                    if (mask[c_index]) {
-                                        result_t_ray[c_index] = t_ray[c_index];
-                                        result[c_index].box_index = source_index;
-                                        result[c_index].box_surface_index = box_surface_index[axis_index][c_index];
-                                        result[c_index].ray_position = ray_position_4x.getComponent(c_index);
-                                    }
-                                }
+                        if (box.child_count > 0 and simd.anyTrue(close_enough)) {
+                            std.debug.assert(depth < box_stack.len);
+                            box_stack[depth] = box;
+                            depth += 1;
+                            break;
+                        } else if (simd.anyTrue(@bitCast(mask))) {
+                            result.hit |= mask;
+                            result.t_ray = @select(f32, mask, t_ray, result.t_ray);
+                            result.box_index =
+                                @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
+                            result.box_surface_index =
+                                @select(u32, mask, box_surface_index[axis_index], result.box_surface_index);
+
+                            if (simd.allTrue(@bitCast(mask))) {
                                 break;
                             }
                         }
@@ -355,66 +336,8 @@ fn raycast(
             }
         }
     }
-}
-
-fn sampleHemisphere(
-    solution: *LightingSolution,
-    series: *random.Series,
-    normal: Vector3,
-    x_axis: Vector3,
-    y_axis: Vector3,
-    sample_index: u32,
-) Vector3 {
-    _ = x_axis;
-    _ = y_axis;
-    var result: Vector3 = .zero();
-
-    if (true) {
-        const ratio: f32 = 0.25;
-        const basis: Vector3 = solution.sample_table[sample_index & (solution.sample_table.len - 1)];
-        result = basis.plus(
-            Vector3.new(
-                series.randomBilateral(),
-                series.randomBilateral(),
-                series.randomBilateral(),
-            ).scaledTo(ratio),
-        );
-    } else {
-        result = .new(
-            series.randomBilateral(),
-            series.randomBilateral(),
-            series.randomBilateral(),
-        );
-
-        if (result.dotProduct(normal) < 0) {
-            result = result.negated();
-        }
-    }
 
     return result;
-}
-
-fn accumulateSample(
-    solution: *LightingSolution,
-    dest_sample_index: u32,
-    light_color: Color3,
-    normal_to_light: Vector3,
-) void {
-    const surface_normal: Vector3 = solution.points[dest_sample_index].normal;
-    const angular_falloff: f32 = math.clampf01(surface_normal.dotProduct(normal_to_light));
-
-    const sample_color: Color3 = light_color.scaledTo(angular_falloff);
-    const weight: f32 = sample_color.length();
-
-    solution.accumulated_weight[dest_sample_index] += 1;
-    solution.accumulated_pps[dest_sample_index] =
-        solution.accumulated_pps[dest_sample_index].plus(
-            sample_color,
-        );
-    solution.average_direction_to_light[dest_sample_index] =
-        solution.average_direction_to_light[dest_sample_index].plus(
-            normal_to_light.scaledTo(weight),
-        );
 }
 
 fn pushDebugLine(solution: *LightingSolution, from_position: Vector3, to_position: Vector3, color: Color) void {
@@ -449,61 +372,37 @@ fn computeLightPropagation(
     var sample_point_index: u32 = first_sample_index; // Light point index 0 is never used.
     while (sample_point_index < one_past_last_sample_index) : (sample_point_index += 1) {
         const sample_point: *LightingPoint = &solution.points[sample_point_index];
+        const ray_origin: V3_4x = .fromVector3(sample_point.position);
+        const sample_point_normal: V3_4x = .fromVector3(sample_point.normal);
+
         var series: random.Series = .seed(213897 * (2398 + solution.entropy_counter));
 
         var ray_index: u32 = 0;
         while (ray_index < ray_count) : (ray_index += 1) {
-            const sample_direction: [4]Vector3 = .{
-                sampleHemisphere(
-                    solution,
-                    &series,
-                    sample_point.normal,
-                    sample_point.x_axis,
-                    sample_point.y_axis,
-                    ray_index,
-                ),
-                sampleHemisphere(
-                    solution,
-                    &series,
-                    sample_point.normal,
-                    sample_point.x_axis,
-                    sample_point.y_axis,
-                    ray_index,
-                ),
-                sampleHemisphere(
-                    solution,
-                    &series,
-                    sample_point.normal,
-                    sample_point.x_axis,
-                    sample_point.y_axis,
-                    ray_index,
-                ),
-                sampleHemisphere(
-                    solution,
-                    &series,
-                    sample_point.normal,
-                    sample_point.x_axis,
-                    sample_point.y_axis,
-                    ray_index,
-                ),
-            };
-            const sample_direction_4x: V3_4x = .new(
-                sample_direction[0],
-                sample_direction[1],
-                sample_direction[2],
-                sample_direction[3],
+            const basis: V3_4x = .fromVector3(
+                Vector3.new(
+                    series.randomBilateral(),
+                    series.randomBilateral(),
+                    series.randomBilateral(),
+                ).normalizeOrZero(),
             );
-            const sample_point_position_4x: V3_4x = .fromVector3(sample_point.position);
+            var delta: V3_4x = .fromAxes(
+                series.randomBilateral_4x(),
+                series.randomBilateral_4x(),
+                series.randomBilateral_4x(),
+            );
 
-            var ray: [4]RaycastResult = [1]RaycastResult{.{}} ** 4;
-            raycast(work, sample_point_position_4x, sample_direction_4x, &ray);
+            var sample_direction_4x: V3_4x = basis.plus(delta.scaledTo(0.1)).approxNormalizeOrZero();
+            const mask: Bool_4x =
+                sample_direction_4x.dotProduct(sample_point_normal) < @as(F32_4x, @splat(0));
+            sample_direction_4x = sample_direction_4x.select(mask, sample_direction_4x.negated());
+
+            const ray: RaycastResult = raycast(work, ray_origin, sample_direction_4x);
+
+            const ray_position_4x: V3_4x = ray_origin.plus(sample_direction_4x.scaledToV(ray.t_ray));
 
             var sub_ray: u32 = 0;
-            while (sub_ray < ray.len) : (sub_ray += 1) {
-                const opt_hit_box: ?*LightingBox = @ptrCast(getBox(solution, ray[sub_ray].box_index));
-                const box_surface_index: u32 = ray[sub_ray].box_surface_index;
-                const ray_position: Vector3 = ray[sub_ray].ray_position;
-
+            while (sub_ray < 4) : (sub_ray += 1) {
                 // if (false) {
                 //     if (sample_point_index == solution.debug_point_index) {
                 //         const draw_length: f32 = 0.25;
@@ -521,7 +420,11 @@ fn computeLightPropagation(
                 // }
 
                 var transfer_pps: Color3 = .zero();
-                if (opt_hit_box) |hit_box| {
+                if (ray.hit[sub_ray]) {
+                    const hit_box: *LightingBox = getBox(solution, ray.box_index[sub_ray]);
+                    const box_surface_index: u32 = ray.box_surface_index[sub_ray];
+                    const ray_position: Vector3 = ray_position_4x.getComponent(sub_ray);
+
                     // TODO: Update this transfer to be bidirectional.
                     // TODO: Stratified sampling?
 
@@ -554,7 +457,23 @@ fn computeLightPropagation(
                     transfer_pps = moon_color;
                 }
 
-                accumulateSample(solution, sample_point_index, transfer_pps, sample_direction[sub_ray]);
+                // Accumulate sample.
+                const normal_to_light: Vector3 = sample_direction_4x.getComponent(sub_ray);
+                const surface_normal: Vector3 = solution.points[sample_point_index].normal;
+                const angular_falloff: f32 = math.clampf01(surface_normal.dotProduct(normal_to_light));
+
+                const sample_color: Color3 = transfer_pps.scaledTo(angular_falloff);
+                const weight: f32 = sample_color.length();
+
+                solution.accumulated_weight[sample_point_index] += 1;
+                solution.accumulated_pps[sample_point_index] =
+                    solution.accumulated_pps[sample_point_index].plus(
+                        sample_color,
+                    );
+                solution.average_direction_to_light[sample_point_index] =
+                    solution.average_direction_to_light[sample_point_index].plus(
+                        normal_to_light.scaledTo(weight),
+                    );
             }
         }
     }
@@ -578,7 +497,7 @@ fn computeAllLightPropagation(
     var work_count: u32 = 0;
     var works: [*]LightingWork = solution.works;
 
-    if (false) {
+    if (true) {
         const points_per_work: u32 = 256;
         var done: bool = false;
 

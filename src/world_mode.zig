@@ -265,7 +265,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             room_radius_y,
         );
 
-        if (true) {
+        if (false) {
             // _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
             // _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 

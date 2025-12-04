@@ -39,6 +39,10 @@ pub fn allFalse(comparison: Bool_4x) bool {
     return mmMovemaskPs(comparison) == 0;
 }
 
+fn approxInvSquareRoot(input: F32_4x) F32_4x {
+    return @as(F32_4x, @splat(1)) / @sqrt(input);
+}
+
 pub const V3_4x = extern struct {
     x: F32_4x,
     y: F32_4x,
@@ -50,6 +54,10 @@ pub const V3_4x = extern struct {
             .y = .{ in0.y(), in1.y(), in2.y(), in3.y() },
             .z = .{ in0.z(), in1.z(), in2.z(), in3.z() },
         };
+    }
+
+    pub fn fromAxes(in_x: F32_4x, in_y: F32_4x, in_z: F32_4x) V3_4x {
+        return .{ .x = in_x, .y = in_y, .z = in_z };
     }
 
     pub fn fromVector3(in: Vector3) V3_4x {
@@ -78,6 +86,14 @@ pub const V3_4x = extern struct {
 
     pub fn getComponent(self: V3_4x, c_index: u32) Vector3 {
         return .new(self.x[c_index], self.y[c_index], self.z[c_index]);
+    }
+
+    pub fn select(self: V3_4x, mask: Bool_4x, b: V3_4x) V3_4x {
+        return .{
+            .x = @select(f32, mask, b.x, self.z),
+            .y = @select(f32, mask, b.y, self.y),
+            .z = @select(f32, mask, b.z, self.z),
+        };
     }
 
     pub fn getLane(self: V3_4x, index: u32) F32_4x {
@@ -194,6 +210,27 @@ pub const V3_4x = extern struct {
         result.y *= v;
         result.z *= v;
         return result;
+    }
+
+    pub fn lengthSquared(self: *const V3_4x) F32_4x {
+        return self.dotProduct(self.*);
+    }
+
+    pub fn approxNormalizeOrZero(self: V3_4x) V3_4x {
+        var result: V3_4x = self;
+
+        const length_squared: F32_4x = self.lengthSquared();
+        const normalized: V3_4x = self.scaledToV(approxInvSquareRoot(length_squared));
+        const limit: F32_4x = @splat(0.0001);
+        const mask: Bool_4x = (length_squared > (limit * limit));
+
+        result = result.select(mask, normalized);
+
+        return result;
+    }
+
+    pub fn dotProduct(self: V3_4x, other: V3_4x) F32_4x {
+        return self.x * other.x + self.y * other.y + self.z * other.z;
     }
 };
 

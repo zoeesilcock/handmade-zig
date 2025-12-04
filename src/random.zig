@@ -1,5 +1,6 @@
 const std = @import("std");
 const math = @import("math.zig");
+const simd = @import("simd.zig");
 
 pub const MIN_RANDOM_NUMBER = 0x000025a0;
 pub const MAX_RANDOM_NUMBER = 0x05f5c21f;
@@ -33,6 +34,15 @@ pub const Series = extern struct {
 
     pub fn randomBilateral(self: *Series) f32 {
         return 2.0 * self.randomUnilateral() - 1.0;
+    }
+
+    pub fn randomBilateral_4x(self: *Series) simd.F32_4x {
+        return .{
+            self.randomBilateral(),
+            self.randomBilateral(),
+            self.randomBilateral(),
+            self.randomBilateral(),
+        };
     }
 
     pub fn randomFloatBetween(self: *Series, min: f32, max: f32) f32 {
