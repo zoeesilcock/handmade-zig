@@ -88,6 +88,22 @@ pub const V3_4x = extern struct {
         return .new(self.x[c_index], self.y[c_index], self.z[c_index]);
     }
 
+    pub fn min(self: V3_4x, b: V3_4x) V3_4x {
+        return .{
+            .x = @min(self.x, b.x),
+            .y = @min(self.y, b.y),
+            .z = @min(self.z, b.z),
+        };
+    }
+
+    pub fn max(self: V3_4x, b: V3_4x) V3_4x {
+        return .{
+            .x = @max(self.x, b.x),
+            .y = @max(self.y, b.y),
+            .z = @max(self.z, b.z),
+        };
+    }
+
     pub fn select(self: V3_4x, mask: Bool_4x, b: V3_4x) V3_4x {
         return .{
             .x = @select(f32, mask, b.x, self.z),
@@ -209,6 +225,22 @@ pub const V3_4x = extern struct {
         result.x *= v;
         result.y *= v;
         result.z *= v;
+        return result;
+    }
+
+    pub fn dividedBy(self: V3_4x, b: V3_4x) V3_4x {
+        var result = self;
+        result.x /= b.x;
+        result.y /= b.y;
+        result.z /= b.z;
+        return result;
+    }
+
+    pub fn times(self: V3_4x, b: V3_4x) V3_4x {
+        var result = self;
+        result.x *= b.x;
+        result.y *= b.y;
+        result.z *= b.z;
         return result;
     }
 

@@ -33,6 +33,7 @@ pub const INTERNAL = @import("build_options").internal;
 pub const MAX_DEBUG_REGIONS_PER_FRAME = 2 * 4096;
 
 pub const DebugTable = extern struct {
+    hud_function: [*:0]const u8 = "",
     edit_event: DebugEvent = DebugEvent{},
     mouse_position: Vector2 = .zero(),
     record_increment: u32 = 0,
@@ -334,6 +335,16 @@ pub const TimedBlock = if (INTERNAL) struct {
 
     pub fn endFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         end(DebugEvent.debugName(source, counter, "END_BLOCK_"), "END_BLOCK_");
+    }
+
+    pub fn beginHudFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
+        const debug_name = DebugEvent.debugName(source, counter, source.fn_name);
+        shared.global_debug_table.hud_function = debug_name;
+        begin(debug_name, source.fn_name);
+    }
+
+    pub fn endHudFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
+        endFunction(source, counter);
     }
 
     fn begin(guid: [*:0]const u8, name: [*:0]const u8) void {

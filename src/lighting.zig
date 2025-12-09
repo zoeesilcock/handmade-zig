@@ -85,8 +85,8 @@ const LightingWork = extern struct {
 
     total_casts_initiated: u32 = 0, // Number of attempts to raycast from a point.
     total_partitions_tested: u32 = 0, // Number of partition boxes checked.
+    total_partition_leaves_used: u32 = 0, // Number of partition boxes used as leaves.
     total_leaves_tested: u32 = 0, // Number of leaf boxes checked.
-    pad: u32 = undefined,
     big_pad: [32]u8 = undefined,
 };
 
@@ -244,92 +244,167 @@ fn raycast(
     box_stack[depth] = getBox(solution, solution.root_box_index);
     depth += 1;
 
-    // const ray_direction_positive: V3_4x = ray_direction.lessThan(@as(V3_4x, @splat(0)));
-    var sign: [3]F32_4x = undefined;
-    var box_surface_index: [3]U32_4x = undefined;
-    {
-        var axis_index: u32 = 0;
-        while (axis_index < 3) : (axis_index += 1) {
-            var c_index: u32 = 0;
-            while (c_index < 4) : (c_index += 1) {
-                const positive: u32 = @intFromBool(ray_direction.getComponent(c_index).values[axis_index] < 0);
+    const t_close_enough: F32_4x = @splat(5);
 
-                box_surface_index[axis_index][c_index] = @intCast((axis_index << 1) | positive);
-                sign[axis_index][c_index] = if (positive != 0) 1.0 else 0.0;
+    if (false) {
+        // const ray_direction_positive: V3_4x = ray_direction.lessThan(@as(V3_4x, @splat(0)));
+        var sign: [3]F32_4x = undefined;
+        var box_surface_index: [3]U32_4x = undefined;
+        {
+            var axis_index: u32 = 0;
+            while (axis_index < 3) : (axis_index += 1) {
+                var c_index: u32 = 0;
+                while (c_index < 4) : (c_index += 1) {
+                    const positive: u32 = @intFromBool(ray_direction.getComponent(c_index).values[axis_index] < 0);
+
+                    box_surface_index[axis_index][c_index] = @intCast((axis_index << 1) | positive);
+                    sign[axis_index][c_index] = if (positive != 0) 1.0 else 0.0;
+                }
             }
         }
-    }
 
-    while (depth > 0) {
-        depth -= 1;
-        const root_box: *LightingBox = box_stack[depth];
+        while (depth > 0) {
+            depth -= 1;
+            const root_box: *LightingBox = box_stack[depth];
 
-        var source_index: u32 = root_box.first_child_index;
-        while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
-            const box: *LightingBox = getBox(solution, source_index);
+            var source_index: u32 = root_box.first_child_index;
+            while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
+                const box: *LightingBox = getBox(solution, source_index);
 
-            const box_position: V3_4x = .fromVector3(box.position);
-            const rel_origin: V3_4x = ray_origin.minus(box_position);
-            const box_radius: V3_4x = .fromVector3(box.radius);
+                const box_position: V3_4x = .fromVector3(box.position);
+                const rel_origin: V3_4x = ray_origin.minus(box_position);
+                const box_radius: V3_4x = .fromVector3(box.radius);
 
-            var is_in_box = false;
-            if (box.child_count > 0) {
-                work.total_partitions_tested += 1;
-                const comparison: V3_4x = rel_origin.absoluteValue().lessThanOrEqualTo(box_radius);
-                is_in_box = comparison.all3TrueInAtLeastOneLane();
-            } else {
-                work.total_leaves_tested += 1;
-            }
+                var is_in_box = false;
+                if (box.child_count > 0) {
+                    work.total_partitions_tested += 1;
+                    const comparison: V3_4x = rel_origin.absoluteValue().lessThanOrEqualTo(box_radius);
+                    is_in_box = comparison.all3TrueInAtLeastOneLane();
+                } else {
+                    work.total_leaves_tested += 1;
+                }
 
-            if (is_in_box) {
-                std.debug.assert(depth < box_stack.len);
-                box_stack[depth] = box;
-                depth += 1;
-            } else {
-                var axis_index: u32 = 0;
-                while (axis_index < 3) : (axis_index += 1) {
-                    var face_rel_origin: V3_4x = rel_origin;
-                    face_rel_origin.setLane(
-                        axis_index,
-                        face_rel_origin.getLane(axis_index) - sign[axis_index] * box_radius.getLane(axis_index),
-                    );
-                    const t_ray: F32_4x =
-                        face_rel_origin.negated().getLane(axis_index) / ray_direction.getLane(axis_index);
+                if (is_in_box) {
+                    std.debug.assert(depth < box_stack.len);
+                    box_stack[depth] = box;
+                    depth += 1;
+                } else {
+                    var axis_index: u32 = 0;
+                    while (axis_index < 3) : (axis_index += 1) {
+                        var face_rel_origin: V3_4x = rel_origin;
+                        face_rel_origin.setLane(
+                            axis_index,
+                            face_rel_origin.getLane(axis_index) - sign[axis_index] * box_radius.getLane(axis_index),
+                        );
+                        const t_ray: F32_4x =
+                            face_rel_origin.negated().getLane(axis_index) / ray_direction.getLane(axis_index);
 
-                    const delta: V3_4x = ray_direction.scaledToV(t_ray);
-                    const face_rel_position: V3_4x = face_rel_origin.plus(delta);
+                        const delta: V3_4x = ray_direction.scaledToV(t_ray);
+                        const face_rel_position: V3_4x = face_rel_origin.plus(delta);
 
-                    const zero: F32_4x = @splat(0);
-                    const t_check: Bool_4x = (t_ray > zero) & (t_ray < result.t_ray);
+                        const zero: F32_4x = @splat(0);
+                        const t_check: Bool_4x = (t_ray > zero) & (t_ray < result.t_ray);
 
-                    if (simd.anyTrue(t_check)) {
-                        const x_check: F32_4x = if (axis_index == 0) face_rel_position.y else face_rel_position.x;
-                        const half_width: F32_4x = if (axis_index == 0) box_radius.y else box_radius.x;
+                        if (simd.anyTrue(t_check)) {
+                            const x_check: F32_4x = if (axis_index == 0) face_rel_position.y else face_rel_position.x;
+                            const half_width: F32_4x = if (axis_index == 0) box_radius.y else box_radius.x;
 
-                        const y_check: F32_4x = if (axis_index == 2) face_rel_position.y else face_rel_position.z;
-                        const half_height: F32_4x = if (axis_index == 2) box_radius.y else box_radius.z;
+                            const y_check: F32_4x = if (axis_index == 2) face_rel_position.y else face_rel_position.z;
+                            const half_height: F32_4x = if (axis_index == 2) box_radius.y else box_radius.z;
 
-                        const bound_check: Bool_4x = (@abs(x_check) <= half_width) & (@abs(y_check) <= half_height);
-                        const mask: Bool_4x = bound_check & t_check;
-                        const t_max: F32_4x = @splat(5);
-                        const close_enough: Bool_4x = mask & (t_ray < t_max);
+                            const bound_check: Bool_4x = (@abs(x_check) <= half_width) & (@abs(y_check) <= half_height);
+                            const mask: Bool_4x = bound_check & t_check;
+                            const close_enough: Bool_4x = mask & (t_ray < t_close_enough);
 
-                        if (box.child_count > 0 and simd.anyTrue(close_enough)) {
-                            std.debug.assert(depth < box_stack.len);
-                            box_stack[depth] = box;
-                            depth += 1;
-                            break;
-                        } else if (simd.anyTrue(@bitCast(mask))) {
-                            result.hit |= mask;
-                            result.t_ray = @select(f32, mask, t_ray, result.t_ray);
-                            result.box_index =
-                                @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
-                            result.box_surface_index =
-                                @select(u32, mask, box_surface_index[axis_index], result.box_surface_index);
-
-                            if (simd.allTrue(@bitCast(mask))) {
+                            if (box.child_count > 0 and simd.anyTrue(close_enough)) {
+                                std.debug.assert(depth < box_stack.len);
+                                box_stack[depth] = box;
+                                depth += 1;
                                 break;
+                            } else if (simd.anyTrue(@bitCast(mask))) {
+                                result.hit |= mask;
+                                result.t_ray = @select(f32, mask, t_ray, result.t_ray);
+                                result.box_index =
+                                    @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
+                                result.box_surface_index =
+                                    @select(u32, mask, box_surface_index[axis_index], result.box_surface_index);
+
+                                if (simd.allTrue(@bitCast(mask))) {
+                                    work.total_partition_leaves_used += 1;
+                                    break;
+                                }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        const inverse_ray_direction: V3_4x = @as(V3_4x, .splat(@splat(1))).dividedBy(ray_direction);
+
+        while (depth > 0) {
+            depth -= 1;
+            const root_box: *LightingBox = box_stack[depth];
+
+            var source_index: u32 = root_box.first_child_index;
+            while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
+                const box: *LightingBox = getBox(solution, source_index);
+
+                if (box.child_count > 0) {
+                    work.total_partitions_tested += 1;
+                } else {
+                    work.total_leaves_tested += 1;
+                }
+
+                const box_position: V3_4x = .fromVector3(box.position);
+                const box_radius: V3_4x = .fromVector3(box.radius);
+                const box_min: V3_4x = box_position.minus(box_radius);
+                const box_max: V3_4x = box_position.plus(box_radius);
+
+                const t_box_min: V3_4x = box_min.minus(ray_origin).times(inverse_ray_direction);
+                const t_box_max: V3_4x = box_max.minus(ray_origin).times(inverse_ray_direction);
+
+                const t_min3: V3_4x = t_box_min.min(t_box_max);
+                const t_max3: V3_4x = t_box_min.max(t_box_max);
+
+                const t_min: F32_4x = @max(t_min3.x, @max(t_min3.y, t_min3.z));
+                const t_max: F32_4x = @min(t_max3.x, @min(t_max3.y, t_max3.z));
+
+                const max_pass: Bool_4x = t_max > @as(F32_4x, @splat(0));
+                if (simd.anyTrue(max_pass)) {
+                    const t_inside: Bool_4x = max_pass & (t_min < @as(F32_4x, @splat(0)));
+                    const t_valid: Bool_4x = t_min < t_max;
+                    const mask: Bool_4x = t_valid & (t_min < result.t_ray);
+                    const close_enough: Bool_4x = mask & (t_min < t_close_enough);
+
+                    if (box.child_count > 0 and (simd.anyTrue(t_inside) or simd.anyTrue(close_enough))) {
+                        std.debug.assert(depth < box_stack.len);
+                        box_stack[depth] = box;
+                        depth += 1;
+                    } else if (simd.anyTrue(t_valid)) {
+                        var box_surface_index: U32_4x = @as(U32_4x, @splat(0)) &
+                            @as(U32_4x, @intFromBool(t_box_min.x == t_min));
+                        box_surface_index |= @as(U32_4x, @splat(1)) &
+                            @as(U32_4x, @intFromBool(t_box_min.x == t_min));
+                        box_surface_index |= @as(U32_4x, @splat(2)) &
+                            @as(U32_4x, @intFromBool(t_box_min.y == t_min));
+                        box_surface_index |= @as(U32_4x, @splat(3)) &
+                            @as(U32_4x, @intFromBool(t_box_min.y == t_min));
+                        box_surface_index |= @as(U32_4x, @splat(4)) &
+                            @as(U32_4x, @intFromBool(t_box_min.z == t_min));
+                        box_surface_index |= @as(U32_4x, @splat(5)) &
+                            @as(U32_4x, @intFromBool(t_box_min.z == t_min));
+
+                        result.t_ray = @select(f32, mask, t_min, result.t_ray);
+                        result.hit |= mask;
+                        result.box_index =
+                            @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
+                        result.box_surface_index =
+                            @select(u32, mask, box_surface_index, result.box_surface_index);
+
+                        if (simd.allTrue(@bitCast(mask))) {
+                            work.total_partition_leaves_used += 1;
+                            break;
                         }
                     }
                 }
@@ -356,8 +431,8 @@ fn pushDebugLine(solution: *LightingSolution, from_position: Vector3, to_positio
 fn computeLightPropagation(
     work: *LightingWork,
 ) void {
-    TimedBlock.beginFunction(@src(), .ComputeLightPropagation);
-    defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
+    // TimedBlock.beginFunction(@src(), .ComputeLightPropagation);
+    // defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
 
     const ray_count: u32 = 16;
     const solution: *LightingSolution = work.solution;
@@ -542,6 +617,7 @@ fn computeAllLightPropagation(
 
     var total_casts_initiated: u32 = 0;
     var total_partitions_tested: u32 = 0;
+    var total_partition_leaves_used: u32 = 0;
     var total_leaves_tested: u32 = 0;
 
     var work_index: u32 = 0;
@@ -549,20 +625,25 @@ fn computeAllLightPropagation(
         const work = &works[work_index];
         total_casts_initiated += work.total_casts_initiated;
         total_partitions_tested += work.total_partitions_tested;
+        total_partition_leaves_used += work.total_partition_leaves_used;
         total_leaves_tested += work.total_leaves_tested;
     }
 
     DebugInterface.debugValue(@src(), &total_casts_initiated, "TotalCastsInitiated");
     DebugInterface.debugValue(@src(), &total_partitions_tested, "TotalPartitionsTested");
+    DebugInterface.debugValue(@src(), &total_partition_leaves_used, "TotalPartitionLeavesUsed");
     DebugInterface.debugValue(@src(), &total_leaves_tested, "TotalLeavesTested");
 
     var partitions_per_cast: f32 =
         @floatCast(@as(f64, @floatFromInt(total_partitions_tested)) / @as(f64, @floatFromInt(total_casts_initiated)));
     var leaves_per_cast: f32 =
         @floatCast(@as(f64, @floatFromInt(total_leaves_tested)) / @as(f64, @floatFromInt(total_casts_initiated)));
+    var partitions_per_leaf: f32 =
+        @floatCast(@as(f64, @floatFromInt(total_partitions_tested)) / @as(f64, @floatFromInt(total_leaves_tested)));
 
     DebugInterface.debugValue(@src(), &partitions_per_cast, "PartitionsPerCast");
     DebugInterface.debugValue(@src(), &leaves_per_cast, "LeavesPerCast");
+    DebugInterface.debugValue(@src(), &partitions_per_leaf, "PartitionsPerLeaf");
 }
 
 fn splitBox(
@@ -579,51 +660,58 @@ fn splitBox(
     if (source_count > 4) {
         var attempt: u32 = 0;
         while (attempt < 3) : (attempt += 1) {
-            var class_direction: Vector3 = .zero();
-            class_direction.values[dimension_index] = 1.0;
-            const class_distance: f32 = class_direction.dotProduct(parent_box.position);
+            var next_dimension_index: u32 = 0;
 
-            var count_a: u16 = 0;
-            var count_b: u16 = 0;
-            var bounds_a: Rectangle3 = Rectangle3.invertedInfinity();
-            var bounds_b: Rectangle3 = Rectangle3.invertedInfinity();
+            if (true) {
+                // One-plane case (k-d-tree-like).
+                var class_direction: Vector3 = .zero();
+                class_direction.values[dimension_index] = 1.0;
+                const class_distance: f32 = class_direction.dotProduct(parent_box.position);
 
-            var source_index: u16 = 0;
-            while (source_index < source_count) : (source_index += 1) {
-                const box_reference: u16 = source[source_index];
-                const box: *LightingBox = @ptrCast(solution.boxes + box_reference);
+                var count_a: u16 = 0;
+                var count_b: u16 = 0;
+                var bounds_a: Rectangle3 = Rectangle3.invertedInfinity();
+                var bounds_b: Rectangle3 = Rectangle3.invertedInfinity();
 
-                var box_rect: Rectangle3 = Rectangle3.fromCenterHalfDimension(box.position, box.radius);
-                if (class_direction.dotProduct(box.position) < class_distance) {
-                    dest[count_a] = box_reference;
-                    bounds_a = bounds_a.getUnionWith(&box_rect);
-                    count_a += 1;
-                } else {
-                    dest[(source_count - 1) - count_b] = box_reference;
-                    bounds_b = bounds_b.getUnionWith(&box_rect);
-                    count_b += 1;
+                var source_index: u16 = 0;
+                while (source_index < source_count) : (source_index += 1) {
+                    const box_reference: u16 = source[source_index];
+                    const box: *LightingBox = @ptrCast(solution.boxes + box_reference);
+
+                    var box_rect: Rectangle3 = Rectangle3.fromCenterHalfDimension(box.position, box.radius);
+                    if (class_direction.dotProduct(box.position) < class_distance) {
+                        dest[count_a] = box_reference;
+                        bounds_a = bounds_a.getUnionWith(&box_rect);
+                        count_a += 1;
+                    } else {
+                        dest[(source_count - 1) - count_b] = box_reference;
+                        bounds_b = bounds_b.getUnionWith(&box_rect);
+                        count_b += 1;
+                    }
                 }
-            }
 
-            const next_dimension_index: u32 = @mod(dimension_index + 1, 3);
+                next_dimension_index = @mod(dimension_index + 1, 3);
 
-            if (count_a > 0 and count_b > 0) {
-                const child_box_a_at: u16 = addBoxStorage(solution);
-                var child_box_a: *LightingBox = @ptrCast(solution.boxes + child_box_a_at);
-                child_box_a.position = bounds_a.getCenter();
-                child_box_a.radius = bounds_a.getRadius();
-                splitBox(solution, child_box_a, count_a, dest, source, next_dimension_index);
+                if (count_a > 0 and count_b > 0) {
+                    const child_box_a_at: u16 = addBoxStorage(solution);
+                    var child_box_a: *LightingBox = @ptrCast(solution.boxes + child_box_a_at);
+                    child_box_a.position = bounds_a.getCenter();
+                    child_box_a.radius = bounds_a.getRadius();
+                    splitBox(solution, child_box_a, count_a, dest, source, next_dimension_index);
 
-                const child_box_b_at: u16 = addBoxStorage(solution);
-                var child_box_b: *LightingBox = @ptrCast(solution.boxes + child_box_b_at);
-                child_box_b.position = bounds_b.getCenter();
-                child_box_b.radius = bounds_b.getRadius();
-                splitBox(solution, child_box_b, count_b, dest + count_a, source, next_dimension_index);
+                    const child_box_b_at: u16 = addBoxStorage(solution);
+                    var child_box_b: *LightingBox = @ptrCast(solution.boxes + child_box_b_at);
+                    child_box_b.position = bounds_b.getCenter();
+                    child_box_b.radius = bounds_b.getRadius();
+                    splitBox(solution, child_box_b, count_b, dest + count_a, source, next_dimension_index);
 
-                source_count = 2;
-                source[0] = child_box_a_at;
-                source[1] = child_box_b_at;
-                break;
+                    source_count = 2;
+                    source[0] = child_box_a_at;
+                    source[1] = child_box_b_at;
+                    break;
+                }
+            } else {
+                // Two-plane case (quad-tree-like).
             }
 
             dimension_index = next_dimension_index;
@@ -728,8 +816,8 @@ pub fn lightingTest(
     solution: *LightingSolution,
     lighting_queue: *shared.PlatformWorkQueue,
 ) void {
-    TimedBlock.beginFunction(@src(), .LightingTest);
-    defer TimedBlock.endFunction(@src(), .LightingTest);
+    TimedBlock.beginHudFunction(@src(), .LightingTest);
+    defer TimedBlock.endHudFunction(@src(), .LightingTest);
 
     solution.sample_table[0] = Vector3.new(0.2, 0, 1).normalizeOrZero();
     solution.sample_table[1] = Vector3.new(-0.2, 0, 1).normalizeOrZero();

@@ -16,6 +16,7 @@ const Rectangle3 = math.Rectangle3;
 const DebugState = debug.DebugState;
 const DebugTree = debug.DebugTree;
 const DebugElement = debug.DebugElement;
+const DebugLineBuffer = debug.DebugLineBuffer;
 const DebugVariableLink = debug.DebugVariableLink;
 const DebugId = debug_interface.DebugId;
 const DebugType = debug_interface.DebugType;
@@ -426,22 +427,22 @@ pub const TooltipBuffer = struct {
     data: [*]u8 = undefined,
 };
 
-pub fn addTooltip(debug_state: *DebugState) TooltipBuffer {
+pub fn addLine(buffer: *DebugLineBuffer) TooltipBuffer {
     var result: TooltipBuffer = .{
-        .size = debug_state.tooltip_text[0].len,
+        .size = buffer.line_text[0].len,
     };
 
-    if (debug_state.tooltip_count < debug_state.tooltip_text.len) {
-        result.data = &debug_state.tooltip_text[debug_state.tooltip_count];
-        debug_state.tooltip_count += 1;
+    if (buffer.line_count < buffer.line_text.len) {
+        result.data = &buffer.line_text[buffer.line_count];
+        buffer.line_count += 1;
     } else {
-        result.data = &debug_state.tooltip_text[debug_state.tooltip_count - 1];
+        result.data = &buffer.line_text[buffer.line_count - 1];
     }
 
     return result;
 }
 
-pub fn drawTooltips(debug_state: *DebugState) void {
+pub fn drawLineBuffer(debug_state: *DebugState, buffer: *DebugLineBuffer) void {
     var layout: *Layout = &debug_state.mouse_text_layout;
 
     if (layout.debug_state.debug_font_info) |font_info| {
@@ -450,8 +451,8 @@ pub fn drawTooltips(debug_state: *DebugState) void {
         defer transient_clip_rect.restore();
 
         var tooltip_index: u32 = 0;
-        while (tooltip_index < debug_state.tooltip_count) : (tooltip_index += 1) {
-            const text = debug_state.tooltip_text[tooltip_index];
+        while (tooltip_index < buffer.line_count) : (tooltip_index += 1) {
+            const text = buffer.line_text[tooltip_index];
             const text_bounds = getTextSize(layout.debug_state, @ptrCast(&text));
             var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
 

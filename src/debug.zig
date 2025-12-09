@@ -140,6 +140,11 @@ const ElementAddOp = enum(u32) {
     CreateHierarchy = 0x2,
 };
 
+pub const DebugLineBuffer = struct {
+    line_count: u32,
+    line_text: [16][256]u8,
+};
+
 pub const DebugState = struct {
     debug_arena: MemoryArena,
     per_frame_arena: MemoryArena,
@@ -164,6 +169,7 @@ pub const DebugState = struct {
     element_hash: [1024]?*DebugElement = [1]?*DebugElement{null} ** 1024,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
     root_group: *DebugVariableLink,
+    function_group: *DebugVariableLink,
     profile_group: *DebugVariableLink,
     tree_sentinel: DebugTree,
 
@@ -205,8 +211,10 @@ pub const DebugState = struct {
     root_info_size: u32,
     root_info: [*:0]u8,
 
-    tooltip_count: u32,
-    tooltip_text: [16][256]u8,
+    function_info_size: u32,
+    function_info: [*:0]u8,
+
+    tooltips: DebugLineBuffer,
 
     pub fn get() ?*DebugState {
         var result: ?*DebugState = null;
@@ -287,7 +295,6 @@ pub const DebugState = struct {
         const collation_frame: *DebugFrame = self.getCollationFrame();
 
         result.?.next = null;
-        result.?.frame_index = collation_frame.frame_index;
         result.?.data = .{ .event = event.* };
 
         collation_frame.stored_event_count += 1;
@@ -479,7 +486,7 @@ pub const DebugState = struct {
         const dest: *DebugVariableLink = self.addElementToGroup(dest_group, source.element);
         dest.name = source.name;
 
-        if (source.hasChildren()) {
+        if (source.canHaveChildren()) {
             var child: *DebugVariableLink = source.first_child;
             while (child != source.getSentinel()) : (child = child.next) {
                 _ = self.cloneVariableLinkInto(dest, child);
@@ -947,7 +954,6 @@ const DebugProfileNode = extern struct {
 
 pub const DebugStoredEvent = struct {
     next: ?*DebugStoredEvent,
-    frame_index: u32,
     data: union {
         event: DebugEvent,
         profile_node: DebugProfileNode,
@@ -1004,8 +1010,8 @@ pub const DebugVariableLink = struct {
         return result;
     }
 
-    pub fn hasChildren(self: *DebugVariableLink) bool {
-        return self.first_child != self.getSentinel();
+    pub fn canHaveChildren(self: *DebugVariableLink) bool {
+        return self.element == null; //self.first_child != self.getSentinel();
     }
 };
 
@@ -1184,7 +1190,7 @@ fn drawFrameSlider(
             debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, region_rect, 1, color, 2);
 
             if (mouse_position.isInRectangle(region_rect)) {
-                const text_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+                const text_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
                 _ = shared.formatString(text_buffer.size, text_buffer.data, "%u", .{frame_index});
 
                 debug_state.next_hot_interaction = DebugInteraction.setUInt32(
@@ -1282,7 +1288,7 @@ fn drawProfileBars(
         debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, region_rect, base_z + 1, Color.black(), 2);
 
         if (mouse_position.isInRectangle(region_rect)) {
-            const text_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+            const text_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
             _ = shared.formatString(text_buffer.size, text_buffer.data, "%s: %10ucy", .{
                 element.guid,
                 node.duration,
@@ -1363,7 +1369,7 @@ fn drawFrameBars(
                 );
 
                 if (mouse_position.isInRectangle(region_rect)) {
-                    const text_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+                    const text_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
                     _ = shared.formatString(text_buffer.size, text_buffer.data, "%s: %10ucy", .{
                         element.guid,
                         node.duration,
@@ -1517,7 +1523,7 @@ fn drawTopClocksList(
 
         const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, @ptrCast(&buffer), at);
         if (mouse_position.isInRectangle(text_rect)) {
-            const tooltip_buffer: TooltipBuffer = debug_ui.addTooltip(debug_state);
+            const tooltip_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
             _ = shared.formatString(
                 tooltip_buffer.size,
                 tooltip_buffer.data,
@@ -1870,7 +1876,7 @@ fn drawDebugElement(
 fn drawTreeLink(debug_state: *DebugState, layout: *Layout, tree: *DebugTree, link: *DebugVariableLink) void {
     const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
 
-    if (link.hasChildren()) {
+    if (link.canHaveChildren()) {
         const id: DebugId = DebugId.fromLink(tree, link);
         const debug_id: DebugId = DebugId.fromLink(tree, link);
         const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
@@ -2179,6 +2185,11 @@ fn debugInit(
     debug_state.root_info = @ptrCast(debug_state.debug_arena.pushSize(debug_state.root_info_size, null));
     debug_state.root_group.name = debug_state.root_info;
 
+    debug_state.function_group = debug_state.createVariableLink(9, "Functions");
+    debug_state.function_info_size = 256;
+    debug_state.function_info = @ptrCast(debug_state.debug_arena.pushSize(debug_state.function_info_size, null));
+    debug_state.function_group.name = debug_state.function_info;
+
     debug_state.profile_group = debug_state.createVariableLink(7, "Profile");
 
     var root_profile_event: DebugEvent = .{
@@ -2190,6 +2201,10 @@ fn debugInit(
     _ = debug_state.addTree(
         debug_state.root_group,
         Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
+    );
+    _ = debug_state.addTree(
+        debug_state.function_group,
+        Vector2.new(0.0 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
     );
 
     return debug_state;
@@ -2252,7 +2267,7 @@ fn debugStart(
     _ = debug_state.tooltip_transform.offset_position.setZ(-1000);
 
     debug_state.default_clip_rect = debug_state.render_group.last_setup.clip_rect;
-    debug_state.tooltip_count = 0;
+    debug_state.tooltips.line_count = 0;
 
     if (!debug_state.paused) {
         debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
@@ -2272,7 +2287,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     _ = shared.formatString(
         debug_state.root_info_size,
         debug_state.root_info,
-        "%.02fms %de %dp %dd - Mem: %lu blocks, %lu used / %lu size %f %f",
+        "%.02fms %de %dp %dd - Mem: %lu blocks, %lu used",
         .{
             most_recent_frame.wall_seconds_elapsed * 1000,
             most_recent_frame.stored_event_count,
@@ -2280,11 +2295,55 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
             most_recent_frame.data_block_count,
             mem_stats.block_count,
             mem_stats.total_used,
-            mem_stats.total_size,
-            input.mouse_x,
-            input.mouse_y,
         },
     );
+
+    if (debug_state.getElementFromGuid(shared.global_debug_table.hud_function)) |hud_element| {
+        var min_duration: u64 = std.math.maxInt(u64);
+        var max_duration: u64 = 0;
+        var cur_duration: u64 = 0;
+        var total_duration: u64 = 0;
+        var total_count: u32 = 0;
+
+        var frame_index: u32 = 0;
+        while (frame_index < MAX_FRAME_COUNT) : (frame_index += 1) {
+            const frame: *DebugElementFrame = &hud_element.frames[frame_index];
+            var duration: u64 = 0;
+
+            if (frame.oldest_event != null) {
+                var opt_event: ?*DebugStoredEvent = frame.oldest_event;
+                while (opt_event) |event| : (opt_event = event.next) {
+                    const node: *DebugProfileNode = &event.data.profile_node;
+                    duration += node.duration;
+                }
+
+                if (min_duration > duration) {
+                    min_duration = duration;
+                }
+                if (max_duration < duration) {
+                    max_duration = duration;
+                }
+                if (frame_index == debug_state.viewing_frame_ordinal) {
+                    cur_duration = duration;
+                }
+
+                total_duration += duration;
+                total_count += 1;
+            }
+        }
+
+        const cur_kilocycles: u32 = @intCast(cur_duration / 1000);
+        const min_kilocycles: u32 = @intCast(min_duration / 1000);
+        const max_kilocycles: u32 = @intCast(max_duration / 1000);
+        const avg_kilocycles: u32 = @intCast(total_duration / (1000 * total_count));
+
+        _ = shared.formatString(
+            debug_state.function_info_size,
+            debug_state.function_info,
+            "%s: %dkcy cur | %dkcy min | %dkcy avg | %dkcy max",
+            .{ hud_element.name, cur_kilocycles, min_kilocycles, avg_kilocycles, max_kilocycles },
+        );
+    }
 
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
@@ -2300,7 +2359,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
     interact(debug_state, input, mouse_position);
 
-    debug_ui.drawTooltips(debug_state);
+    debug_ui.drawLineBuffer(debug_state, &debug_state.tooltips);
     group.end();
 
     memory.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);

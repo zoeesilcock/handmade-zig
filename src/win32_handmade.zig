@@ -1709,7 +1709,7 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
 
             optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
-                _ = wglSwapIntervalEXT(1);
+                _ = wglSwapIntervalEXT(0);
             }
 
             opengl.init(info, open_gl.supports_srgb_frame_buffer);
