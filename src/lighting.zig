@@ -30,6 +30,7 @@ const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 
+pub const LIGHT_TEST_ACCUMULATION_COUNT = 1024;
 pub const LIGHT_POINTS_PER_CHUNK = 24;
 pub const MAX_LIGHT_EMISSION = 25.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
@@ -60,6 +61,7 @@ pub const LightingSolution = extern struct {
     initial_pps: [LIGHT_DATA_WIDTH]Color3 = undefined,
     emission_pps: [LIGHT_DATA_WIDTH]Color3 = undefined, // This isn't really needed, could be recomputed on output.
 
+    series: random.Series,
     entropy_counter: u32,
 
     debug_box_draw_depth: u32,
@@ -76,6 +78,9 @@ pub const LightingSolution = extern struct {
     debug_point_index: u32,
     debug_line_count: u32,
     debug_lines: [4096]DebugLine = undefined,
+
+    accumulation_count: f32 = 0,
+    accumulating: bool = false,
 };
 
 const LightingWork = extern struct {
@@ -121,8 +126,8 @@ pub const LightingBox = extern struct {
 };
 
 pub const LightingPointState = extern struct {
-    emit: Color3,
-    direction: Vector3,
+    last_pps: Color3,
+    last_direction: Vector3,
 };
 
 pub const LightingPoint = extern struct {
@@ -440,7 +445,7 @@ fn computeLightPropagation(
     const one_past_last_sample_index: u32 = work.one_past_last_sample_index;
 
     // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
-    const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.2);
+    const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.4);
     // const ground_color: Color3 = .new(0.3, 0.2, 0.1);
     // const sun_direction: Vector3 = Vector3.new(1, 1, 1).normalizeOrZero();
 
@@ -450,7 +455,7 @@ fn computeLightPropagation(
         const ray_origin: V3_4x = .fromVector3(sample_point.position);
         const sample_point_normal: V3_4x = .fromVector3(sample_point.normal);
 
-        var series: random.Series = .seed(213897 * (2398 + solution.entropy_counter));
+        var series: random.Series = .seed(213897 * (2398 + solution.entropy_counter), null, null, null);
 
         var ray_index: u32 = 0;
         while (ray_index < ray_count) : (ray_index += 1) {
@@ -529,7 +534,7 @@ fn computeLightPropagation(
                         transfer_pps = transfer_pps.scaledTo(inverse_total_weight);
                     }
                 } else {
-                    transfer_pps = moon_color;
+                    transfer_pps = moon_color.scaledTo(sample_direction_4x.getComponent(sub_ray).clamp01().z());
                 }
 
                 // Accumulate sample.
@@ -804,6 +809,7 @@ fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
 }
 
 pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
+    solution.series = .seed(1234, null, null, null);
     solution.max_work_count = 256;
     solution.works = arena.pushArray(solution.max_work_count, LightingWork, .aligned(64, true));
     solution.accumulated_weight = arena.pushArray(LIGHT_DATA_WIDTH, f32, .aligned(64, true));
@@ -838,6 +844,7 @@ pub fn lightingTest(
     solution.sample_table[14] = Vector3.new(0, 1, 0.25).normalizeOrZero();
     solution.sample_table[15] = Vector3.new(0, -1, 0.25).normalizeOrZero();
 
+    solution.update_debug_lines = true;
     if (solution.update_debug_lines) {
         solution.debug_line_count = 0;
     }
@@ -850,6 +857,18 @@ pub fn lightingTest(
 
     const entropy_frame_count: u32 = 256;
     const t_update: f32 = 0.05;
+
+    var should_accumulate: bool = false;
+    var accumulation_coefficient: f32 = 1;
+    if (solution.accumulating) {
+        if (solution.accumulation_count < LIGHT_TEST_ACCUMULATION_COUNT) {
+            accumulation_coefficient = 0;
+            if (solution.accumulation_count > 0) {
+                accumulation_coefficient = 1.0 / solution.accumulation_count;
+            }
+            should_accumulate = true;
+        }
+    }
 
     const debug_location: Vector3 = .new(0, 0, 1);
     var debug_point_distance: f32 = std.math.floatMax(f32);
@@ -884,7 +903,7 @@ pub fn lightingTest(
                     solution.emission_pps[light_index] =
                         Color3.new(1, 1, 1).scaledTo(box.emission * MAX_LIGHT_EMISSION);
                     solution.initial_pps[light_index] = solution.emission_pps[light_index].plus(
-                        box.storage[local_index].emit,
+                        box.storage[local_index].last_pps.scaledTo(accumulation_coefficient),
                     );
                     solution.average_direction_to_light[light_index] = .zero();
                     solution.accumulated_pps[light_index] = .zero();
@@ -912,6 +931,13 @@ pub fn lightingTest(
 
     computeAllLightPropagation(solution, lighting_queue);
 
+    if (solution.accumulating) {
+        if (should_accumulate) {
+            solution.accumulation_count += 1;
+        }
+        accumulation_coefficient = 1.0 / solution.accumulation_count;
+    }
+
     box_index = 0;
     while (box_index < original_box_count) : (box_index += 1) {
         const box: *LightingBox = @ptrCast(solution.boxes + box_index);
@@ -933,22 +959,46 @@ pub fn lightingTest(
             var last_pps: Color3 = accumulated_pps;
             var last_direction: Vector3 = direction;
 
-            const box_store_direction: Vector3 = box.storage[local_index].direction;
+            const box_store_direction: Vector3 = box.storage[local_index].last_direction;
             const valid: bool =
                 box_store_direction.x() != 0 or
                 box_store_direction.y() != 0 or
                 box_store_direction.z() != 0;
             if (valid) {
-                last_pps = box.storage[local_index].emit;
+                last_pps = box.storage[local_index].last_pps;
                 last_direction = box_store_direction;
             }
 
-            box.storage[local_index].emit = last_pps.lerp(accumulated_pps, t_update);
-            solution.accumulated_pps[point_index] = box.storage[local_index].emit;
+            if (solution.accumulating) {
+                if (should_accumulate) {
+                    box.storage[local_index].last_pps = last_pps.plus(accumulated_pps);
+                }
+                solution.accumulated_pps[point_index] =
+                    box.storage[local_index].last_pps.scaledTo(accumulation_coefficient);
+            } else {
+                box.storage[local_index].last_pps = last_pps.lerp(accumulated_pps, t_update);
+                solution.accumulated_pps[point_index] = box.storage[local_index].last_pps;
+            }
 
-            box.storage[local_index].direction =
+            box.storage[local_index].last_direction =
                 last_direction.lerp(direction, t_update).normalizeOrZero();
-            solution.average_direction_to_light[point_index] = box.storage[local_index].direction;
+            solution.average_direction_to_light[point_index] = box.storage[local_index].last_direction;
+        }
+    }
+
+    if (solution.update_debug_lines) {
+        solution.debug_line_count = 0;
+        const start_point: Vector3 = .new(0, 0, 1.5);
+        var index: u32 = 0;
+        while (index < 64) : (index += 1) {
+            var normal: Vector3 = Vector3.new(
+                solution.series.randomBilateral(),
+                solution.series.randomBilateral(),
+                0,
+            );
+            normal = normal.normalizeOrZero().scaledTo(solution.series.randomUnilateral());
+            _ = normal.setZ(@sqrt(1.0 - math.square(normal.x()) - math.square(normal.y())));
+            pushDebugLine(solution, start_point, start_point.plus(normal.scaledTo(1)), .new(0, 1, 1, 1));
         }
     }
 
@@ -958,7 +1008,7 @@ pub fn lightingTest(
     while (debug_line_index < solution.debug_line_count) : (debug_line_index += 1) {
         const line: *DebugLine = &solution.debug_lines[debug_line_index];
 
-        group.pushLineSegment(bitmap, line.from_position, line.color, line.to_position, line.color, 0.01);
+        group.pushLineSegment(bitmap, line.from_position, line.color, line.to_position, line.color, 0.005);
     }
 
     solution.entropy_counter += 1;
@@ -1097,7 +1147,7 @@ pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, 
         var direction: Vector3 = solution.average_direction_to_light[point_index];
 
         // TODO: Stop stuffing normal once we're sure about the variance.
-        // direction = solution.points[point_index].normal;
+        direction = solution.points[point_index].normal;
 
         if (direction.z() < 0) {
             // _ = direction.setZ(-direction.z());

@@ -115,7 +115,7 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
     world.first_free = null;
     world.arena = parent_arena;
-    world.game_entropy = .seed(1235);
+    world.game_entropy = .seed(1234, null, null, null);
 
     return world;
 }

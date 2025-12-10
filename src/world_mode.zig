@@ -174,7 +174,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     particles.initParticleCache(world_mode.particle_cache, transient_state.assets);
 
     world_mode.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
-    world_mode.effects_entropy = .seed(1234);
+    world_mode.effects_entropy = .seed(1234, null, null, null);
     world_mode.typical_floor_height = 5;
 
     // TODO: Replace this with a value received from the renderer.
@@ -602,6 +602,15 @@ pub fn updateAndRenderWorld(
 
     if (input.f_key_pressed[2]) {
         world_mode.test_lighting.update_debug_lines = !world_mode.test_lighting.update_debug_lines;
+    }
+
+    if (input.f_key_pressed[3]) {
+        if (world_mode.test_lighting.accumulating) {
+            world_mode.test_lighting.accumulating = false;
+            world_mode.test_lighting.accumulation_count = 0;
+        } else {
+            world_mode.test_lighting.accumulating = true;
+        }
     }
 
     if (input.f_key_pressed[4]) {

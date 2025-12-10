@@ -54,7 +54,7 @@ const Particle4x = extern struct {
 
 pub fn initParticleCache(cache: *ParticleCache, assets: *Assets) void {
     memory.zeroStruct(ParticleCache, cache);
-    cache.particle_entropy = .seed(1234);
+    cache.particle_entropy = .seed(1234, null, null, null);
 
     var match_vector = asset.AssetVector{};
     match_vector.e[AssetTagId.FacingDirection.toInt()] = 0;
