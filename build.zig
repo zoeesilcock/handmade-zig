@@ -76,8 +76,10 @@ fn addExecutable(
             .root_source_file = b.path("src/win32_handmade.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = false,
         }),
     });
+    exe.stack_size = 0x100000; // 1MB.
     exe.root_module.addOptions("build_options", build_options);
     exe.root_module.addImport("file_formats", file_formats_module);
 
@@ -122,9 +124,11 @@ fn addLibrary(
             .root_source_file = b.path("src/handmade.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = false,
         }),
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
+    lib_handmade.stack_size = 0x100000; // 1MB.
     lib_handmade.root_module.addOptions("build_options", build_options);
     lib_handmade.root_module.addImport("file_formats", file_formats_module);
 
@@ -135,9 +139,11 @@ fn addLibrary(
             .root_source_file = b.path("src/handmade.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = false,
         }),
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
+    lib_check.stack_size = 0x100000; // 1MB.
     lib_check.root_module.addOptions("build_options", build_options);
     lib_check.root_module.addImport("file_formats", file_formats_module);
     const check = b.step("check", "Check if lib compiles");
@@ -179,14 +185,15 @@ fn addAssetBuilder(
             .root_source_file = b.path("tools/test_asset_builder.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
+    asset_builder_exe.stack_size = 0x100000; // 1MB.
     asset_builder_exe.root_module.addOptions("build_options", build_options);
     asset_builder_exe.root_module.addImport("shared", shared_module);
     asset_builder_exe.root_module.addImport("file_formats", file_formats_module);
 
     const stb_dep = b.dependency("stb", .{});
-    asset_builder_exe.linkLibC();
     asset_builder_exe.addIncludePath(stb_dep.path(""));
     asset_builder_exe.addCSourceFiles(.{ .files = &[_][]const u8{"tools/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
 
@@ -214,8 +221,10 @@ fn addSimplePreprocessor(
             .root_source_file = b.path("tools/simple_preprocessor.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = false,
         }),
     });
+    simple_preprocessor_exe.stack_size = 0x100000; // 1MB.
     simple_preprocessor_exe.root_module.addOptions("build_options", build_options);
 
     b.installArtifact(simple_preprocessor_exe);
@@ -242,8 +251,10 @@ fn addSimpleCompressor(
             .root_source_file = b.path("tools/simple_compressor.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = false,
         }),
     });
+    simple_compressor_exe.stack_size = 0x100000; // 1MB.
     simple_compressor_exe.root_module.addOptions("build_options", build_options);
 
     b.installArtifact(simple_compressor_exe);

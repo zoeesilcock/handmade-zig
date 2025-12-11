@@ -62,7 +62,6 @@ pub const LightingSolution = extern struct {
     emission_pps: [LIGHT_DATA_WIDTH]Color3 = undefined, // This isn't really needed, could be recomputed on output.
 
     series: random.Series,
-    entropy_counter: u32,
 
     debug_box_draw_depth: u32,
 
@@ -387,18 +386,27 @@ fn raycast(
                         box_stack[depth] = box;
                         depth += 1;
                     } else if (simd.anyTrue(t_valid)) {
-                        var box_surface_index: U32_4x = @as(U32_4x, @splat(0)) &
-                            @as(U32_4x, @intFromBool(t_box_min.x == t_min));
-                        box_surface_index |= @as(U32_4x, @splat(1)) &
-                            @as(U32_4x, @intFromBool(t_box_min.x == t_min));
-                        box_surface_index |= @as(U32_4x, @splat(2)) &
-                            @as(U32_4x, @intFromBool(t_box_min.y == t_min));
-                        box_surface_index |= @as(U32_4x, @splat(3)) &
-                            @as(U32_4x, @intFromBool(t_box_min.y == t_min));
-                        box_surface_index |= @as(U32_4x, @splat(4)) &
-                            @as(U32_4x, @intFromBool(t_box_min.z == t_min));
-                        box_surface_index |= @as(U32_4x, @splat(5)) &
-                            @as(U32_4x, @intFromBool(t_box_min.z == t_min));
+                        var box_surface_index: U32_4x = @splat(0);
+                        var running_mask: U32_4x = @intFromBool(t_box_min.x == t_min);
+
+                        var this_mask: U32_4x = @intFromBool(t_box_max.x == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(1)) & (this_mask & ~running_mask);
+                        running_mask |= this_mask;
+
+                        this_mask = @intFromBool(t_box_min.y == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(2)) & (this_mask & ~running_mask);
+                        running_mask |= this_mask;
+
+                        this_mask = @intFromBool(t_box_max.y == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(3)) & (this_mask & ~running_mask);
+                        running_mask |= this_mask;
+
+                        this_mask = @intFromBool(t_box_min.z == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(4)) & (this_mask & ~running_mask);
+                        running_mask |= this_mask;
+
+                        this_mask = @intFromBool(t_box_max.z == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(5)) & (this_mask & ~running_mask);
 
                         result.t_ray = @select(f32, mask, t_min, result.t_ray);
                         result.hit |= mask;
@@ -443,6 +451,7 @@ fn computeLightPropagation(
     const solution: *LightingSolution = work.solution;
     const first_sample_index: u32 = work.first_sample_index;
     const one_past_last_sample_index: u32 = work.one_past_last_sample_index;
+    var series: random.Series = solution.series;
 
     // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
     const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.4);
@@ -454,8 +463,6 @@ fn computeLightPropagation(
         const sample_point: *LightingPoint = &solution.points[sample_point_index];
         const ray_origin: V3_4x = .fromVector3(sample_point.position);
         const sample_point_normal: V3_4x = .fromVector3(sample_point.normal);
-
-        var series: random.Series = .seed(213897 * (2398 + solution.entropy_counter), null, null, null);
 
         var ray_index: u32 = 0;
         while (ray_index < ray_count) : (ray_index += 1) {
@@ -557,6 +564,8 @@ fn computeLightPropagation(
             }
         }
     }
+
+    solution.series = series;
 }
 
 pub fn doLightingWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
@@ -855,7 +864,6 @@ pub fn lightingTest(
     solution.point_count = group.commands.light_point_index;
     solution.extended_point_count = solution.point_count;
 
-    const entropy_frame_count: u32 = 256;
     const t_update: f32 = 0.05;
 
     var should_accumulate: bool = false;
@@ -986,34 +994,47 @@ pub fn lightingTest(
         }
     }
 
-    if (solution.update_debug_lines) {
-        solution.debug_line_count = 0;
-        const start_point: Vector3 = .new(0, 0, 1.5);
-        var index: u32 = 0;
-        while (index < 64) : (index += 1) {
-            var normal: Vector3 = Vector3.new(
-                solution.series.randomBilateral(),
-                solution.series.randomBilateral(),
-                0,
-            );
-            normal = normal.normalizeOrZero().scaledTo(solution.series.randomUnilateral());
-            _ = normal.setZ(@sqrt(1.0 - math.square(normal.x()) - math.square(normal.y())));
-            pushDebugLine(solution, start_point, start_point.plus(normal.scaledTo(1)), .new(0, 1, 1, 1));
-        }
-    }
-
     _ = group.getCurrentQuads(solution.debug_line_count);
     const bitmap: ?*LoadedBitmap = group.commands.white_bitmap;
     var debug_line_index: u32 = 0;
     while (debug_line_index < solution.debug_line_count) : (debug_line_index += 1) {
         const line: *DebugLine = &solution.debug_lines[debug_line_index];
 
-        group.pushLineSegment(bitmap, line.from_position, line.color, line.to_position, line.color, 0.005);
+        group.pushLineSegment(bitmap, line.from_position, line.color, line.to_position, line.color, 0.01);
     }
 
-    solution.entropy_counter += 1;
-    if (solution.entropy_counter >= entropy_frame_count) {
-        solution.entropy_counter = 0;
+    if (solution.update_debug_lines) {
+        var hemi_series: random.Series = .seed(null, null, null, null);
+        _ = group.getCurrentQuads(64 * 6);
+        solution.debug_line_count = 0;
+        const start_point: Vector3 = .new(0, 0, 1.25);
+        var index: u32 = 0;
+        while (index < 64) : (index += 1) {
+            var normal: Vector3 = Vector3.new(
+                hemi_series.randomBilateral(),
+                hemi_series.randomBilateral(),
+                0,
+            );
+            normal = normal.normalizeOrZero().scaledTo(hemi_series.randomUnilateral());
+            _ = normal.setZ(@sqrt(1.0 - math.square(normal.x()) - math.square(normal.y())));
+
+            group.pushCube(
+                bitmap,
+                start_point.plus(normal.scaledTo(1)),
+                0.01,
+                0.02,
+                .white(),
+                null,
+                null,
+            );
+
+            pushDebugLine(
+                solution,
+                start_point.plus(normal.scaledTo(0.9)),
+                start_point.plus(normal.scaledTo(1)),
+                .new(0, 1, 1, 1),
+            );
+        }
     }
 }
 

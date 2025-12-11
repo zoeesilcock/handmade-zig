@@ -2195,7 +2195,7 @@ fn makeQueue(queue: *shared.PlatformWorkQueue, thread_count: i32, startups: [*]T
 
             const thread_handle = win32.CreateThread(
                 null,
-                0,
+                shared.megabytes(1),
                 threadProc,
                 @ptrCast(@constCast(startup)),
                 win32.THREAD_CREATE_RUN_IMMEDIATELY,
@@ -2359,6 +2359,8 @@ fn fullRestart(source_exe: [*:0]const u8, dest_exe: [*:0]const u8, delete_exe: [
     }
 }
 
+// pub export fn wWinMainCRTStartup() callconv(.c) c_int {
+//     const instance: ?win32.HINSTANCE = win32.GetModuleHandleW(null);
 pub export fn wWinMain(
     instance: ?win32.HINSTANCE,
     prev_instance: ?win32.HINSTANCE,
@@ -2957,6 +2959,8 @@ pub export fn wWinMain(
     } else {
         win32.OutputDebugStringA("Register class failed.\n");
     }
+
+    win32.ExitProcess(0);
 
     return 0;
 }
