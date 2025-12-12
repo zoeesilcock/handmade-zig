@@ -1004,35 +1004,105 @@ pub fn lightingTest(
     }
 
     if (solution.update_debug_lines) {
-        var hemi_series: random.Series = .seed(null, null, null, null);
-        _ = group.getCurrentQuads(64 * 6);
-        solution.debug_line_count = 0;
         const start_point: Vector3 = .new(0, 0, 1.25);
-        var index: u32 = 0;
-        while (index < 64) : (index += 1) {
-            var normal: Vector3 = Vector3.new(
-                hemi_series.randomBilateral(),
-                hemi_series.randomBilateral(),
-                0,
-            );
-            normal = normal.normalizeOrZero().scaledTo(hemi_series.randomUnilateral());
-            _ = normal.setZ(@sqrt(1.0 - math.square(normal.x()) - math.square(normal.y())));
 
+        if (false) {
+            var hemi_series: random.Series = .seed(null, null, null, null);
+            var sample_count: u32 = 0;
+            while (sample_count < 1) : (sample_count += 1) {
+                _ = group.getCurrentQuads(64 * 6);
+                const theta: f32 = math.PI32 * (3.0 - @sqrt(5.0));
+                const n: u32 = 16;
+                const n2: f32 = 3 * @as(f32, @floatFromInt(n));
+
+                var index: u32 = 0;
+                while (index < n) : (index += 1) {
+                    var sub_index: u32 = 0;
+                    while (sub_index < 4) : (sub_index += 1) {
+                        const i: f32 = @as(f32, @floatFromInt(index));
+                        const rho: f32 = theta * i;
+                        const z: f32 =
+                            (1.0 - (1.0 / @as(f32, n2))) *
+                            (1.0 - ((2.0 * i) / (n2 - 1)));
+                        const tau: f32 = @sqrt(1.0 - z * z);
+
+                        var normal: Vector3 = Vector3.new(
+                            tau * @cos(rho),
+                            tau * @sin(rho),
+                            z,
+                        );
+
+                        normal = normal.plus(
+                            Vector3.new(
+                                hemi_series.randomBilateral(),
+                                hemi_series.randomBilateral(),
+                                hemi_series.randomBilateral(),
+                            ).scaledTo(0.4),
+                        ).normalizeOrZero();
+
+                        group.pushCube(
+                            bitmap,
+                            start_point.plus(normal.scaledTo(1)),
+                            0.01,
+                            0.02,
+                            .white(),
+                            null,
+                            null,
+                        );
+                    }
+                }
+            }
+        }
+
+        var hemi_series: random.Series = .seed(null, null, null, null);
+        // var hemi_series: random.Series = solution.series;
+
+        var point_count: u32 = 0;
+        var points: [64]Vector3 = undefined;
+
+        while (point_count < points.len) {
+            const p: Vector3 = Vector3.new(
+                hemi_series.randomBilateral(),
+                hemi_series.randomBilateral(),
+                hemi_series.randomUnilateral(),
+            ).normalizeOrZero();
+
+            const max_cos: f32 = @cos((0.127 * math.PI32) - (0.07 * math.PI32 * p.z()));
+
+            var test_index: u32 = 0;
+            var valid: bool = true;
+            while (test_index < point_count) : (test_index += 1) {
+                if (points[test_index].dotProduct(p) > max_cos) {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if (valid) {
+                points[point_count] = p;
+                point_count += 1;
+            }
+        }
+
+        _ = group.getCurrentQuads(point_count * 6);
+
+        var point_index: u32 = 0;
+        while (point_index < point_count) : (point_index += 1) {
+            // const displacement: Vector3 = Vector3.new(
+            //     hemi_series.randomBilateral(),
+            //     hemi_series.randomBilateral(),
+            //     hemi_series.randomUnilateral(),
+            // );
+            const p: Vector3 = points[point_index];
+            const normal: Vector3 = p; // .plus(displacement.scaledTo(0.5 * (1.0 - 0.3 * p.z()))).normalizeOrZero();
             group.pushCube(
                 bitmap,
-                start_point.plus(normal.scaledTo(1)),
+                start_point.plus(normal),
                 0.01,
                 0.02,
                 .white(),
                 null,
                 null,
-            );
-
-            pushDebugLine(
-                solution,
-                start_point.plus(normal.scaledTo(0.9)),
-                start_point.plus(normal.scaledTo(1)),
-                .new(0, 1, 1, 1),
             );
         }
     }
