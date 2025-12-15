@@ -625,6 +625,15 @@ pub fn updateAndRenderWorld(
     if (input.f_key_pressed[6]) {
         world_mode.test_lighting.debug_box_draw_depth += 1;
     }
+    // if (input.f_key_pressed[9]) {
+    //     lighting.generateSpiralSamples(&world_mode.test_lighting.series, &world_mode.test_lighting.sample_points);
+    // }
+    // if (input.f_key_pressed[10]) {
+    //     lighting.generatePoissonSamples(&world_mode.test_lighting.series, &world_mode.test_lighting.sample_points);
+    // }
+    // if (input.f_key_pressed[11]) {
+    //     lighting.generatePolarSamples(&world_mode.test_lighting.series, &world_mode.test_lighting.sample_points);
+    // }
 
     render_group.enableLighting(light_bounds);
     render_group.pushLighting(&world_mode.test_textures);
