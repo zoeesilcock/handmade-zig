@@ -82,6 +82,7 @@ pub const LightingSolution = extern struct {
     accumulating: bool = false,
 
     sample_points: [16][16]V3_4x = undefined,
+    pattern_name: [*]const u8,
 };
 
 const LightingWork = extern struct {
@@ -154,6 +155,215 @@ const RaycastResult = struct {
     box_surface_index: U32_4x = @splat(0),
     t_ray: F32_4x = @splat(0),
 };
+
+const LightingPattern = struct {
+    name: [*]const u8,
+    generator: *const lightingPatternGenerator,
+
+    pub fn new(name: [*]const u8, generator: *const lightingPatternGenerator) LightingPattern {
+        return .{
+            .name = name,
+            .generator = generator,
+        };
+    }
+};
+
+const lightingPatternGenerator = fn (series: *random.Series, dest: [*]Vector3) void;
+
+var lighting_pattern_generators = [_]LightingPattern{
+    .new("Poisson", &generatePoissonSamples),
+    .new("White noise", &generateWhiteNoiseSamples),
+    .new("Polar", &generatePolarSamples),
+    .new("Spiral", &generateSpiralSamples),
+};
+
+fn testFunc(dir: Vector3) f32 {
+    return 3.0 * dir.x() + 2.0 * dir.y() - 0.5 * dir.z() * dir.z();
+}
+
+pub fn generateLightingPattern(solution: *LightingSolution, pattern_index: u32) void {
+    const pattern: *LightingPattern =
+        &lighting_pattern_generators[@mod(pattern_index, lighting_pattern_generators.len)];
+    var series: random.Series = solution.series;
+
+    var min_test_avg: f32 = std.math.floatMax(f32);
+    var max_test_avg: f32 = std.math.floatMin(f32);
+    const sample_count: u32 = 64;
+    var test_index: u32 = 0;
+    while (test_index <= 1024) : (test_index += 1) {
+        var test_sum: f32 = 0;
+        var dir_index: u32 = 0;
+        while (dir_index < sample_count) : (dir_index += 1) {
+            while (true) {
+                var dir: Vector3 = Vector3.new(
+                    series.randomBilateral(),
+                    series.randomBilateral(),
+                    series.randomBilateral(),
+                );
+
+                if (dir.z() < 0) {
+                    _ = dir.setZ(-dir.z());
+                }
+
+                if (dir.lengthSquared() <= 1.0) {
+                    dir = dir.normalizeOrZero();
+                    test_sum += testFunc(dir) * dir.z();
+
+                    break;
+                }
+            }
+        }
+
+        const test_avg: f32 = test_sum / @as(f32, @floatFromInt(sample_count));
+        min_test_avg = @min(min_test_avg, test_avg);
+        max_test_avg = @max(max_test_avg, test_avg);
+    }
+
+    var min_avg: f32 = std.math.floatMax(f32);
+    var max_avg: f32 = std.math.floatMin(f32);
+    var version_index: u32 = 0;
+    while (version_index < solution.sample_points.len) : (version_index += 1) {
+        var temp: [64]Vector3 = undefined;
+        pattern.generator(&series, &temp);
+
+        var sum: f32 = 0;
+        var dir_index: u32 = 0;
+        while (dir_index < temp.len) : (dir_index += 1) {
+            sum += testFunc(temp[dir_index]);
+        }
+        const avg: f32 = sum / @as(f32, @floatFromInt(sample_count));
+        min_avg = @min(min_avg, avg);
+        max_avg = @max(max_avg, avg);
+
+        var dest = &solution.sample_points[version_index];
+        dir_index = 0;
+        while (dir_index < dest.len) : (dir_index += 1) {
+            dest[dir_index] = .new(
+                temp[4 * dir_index + 0],
+                temp[4 * dir_index + 1],
+                temp[4 * dir_index + 2],
+                temp[4 * dir_index + 3],
+            );
+        }
+    }
+
+    solution.pattern_name = pattern.name;
+}
+
+fn generateWhiteNoiseSamples(series: *random.Series, dest: [*]Vector3) void {
+    var dest_index: u32 = 0;
+    while (dest_index < 64) : (dest_index += 1) {
+        while (true) {
+            var p: Vector3 = Vector3.new(
+                series.randomBilateral(),
+                series.randomBilateral(),
+                0,
+            );
+
+            const length: f32 = p.lengthSquared();
+            if (length < 1.0) {
+                _ = p.setZ(@sqrt(1.0 - length));
+                dest[dest_index] = p;
+                break;
+            }
+        }
+    }
+}
+
+fn generatePolarSamples(series: *random.Series, dest: [*]Vector3) void {
+    const spoke_table = [_]u32{
+        4,
+        16,
+        16,
+        16,
+        12,
+    };
+
+    var point_count: u32 = 0;
+    const slice_count: u32 = spoke_table.len;
+    var slice: u32 = 0;
+    while (slice < slice_count) : (slice += 1) {
+        const spoke_count: u32 = spoke_table[slice];
+        var spoke: u32 = 0;
+        while (spoke < spoke_count) : (spoke += 1) {
+            const jitter: f32 = series.randomUnilateral();
+            const ratio: f32 = (@as(f32, @floatFromInt(slice)) + jitter) / @as(f32, @floatFromInt(slice_count));
+            const z: f32 = @cos(0.5 * math.PI32 * ratio + 0.2);
+            const radius: f32 = @sqrt(1.0 - z * z);
+
+            const theta: f32 = math.TAU32 * @as(f32, @floatFromInt(spoke)) / @as(f32, @floatFromInt(spoke_count));
+
+            const x: f32 = radius * @sin(theta);
+            const y: f32 = radius * @cos(theta);
+
+            dest[point_count] = .new(x, y, z);
+            point_count += 1;
+        }
+    }
+}
+
+fn generateSpiralSamples(series: *random.Series, dest: [*]Vector3) void {
+    const sphere_amount: f32 = 2.0 + 2.0 * series.randomUnilateral();
+    const rho_offset: f32 = math.TAU32 * series.randomUnilateral();
+    const theta: f32 = math.PI32 * (3.0 - @sqrt(5.0));
+    const n: u32 = 64;
+    const n2: f32 = sphere_amount * @as(f32, @floatFromInt(n));
+
+    var index: u32 = 0;
+    while (index < n) : (index += 1) {
+        const i: f32 = @as(f32, @floatFromInt(index));
+        const rho: f32 = rho_offset + theta * i;
+        const z: f32 =
+            (1.0 - (1.0 / @as(f32, n2))) *
+            (1.0 - ((2.0 * i) / (n2 - 1)));
+        const tau: f32 = @sqrt(1.0 - z * z);
+
+        const normal: Vector3 = Vector3.new(
+            tau * @cos(rho),
+            tau * @sin(rho),
+            z,
+        );
+
+        dest[index] = normal;
+    }
+}
+
+fn generatePoissonSamples(series: *random.Series, dest: [*]Vector3) void {
+    const min_dist_sq: f32 = math.square(0.17);
+    var point_count: u32 = 0;
+    while (point_count < 64) {
+        const p: Vector3 = Vector3.new(
+            series.randomBilateral(),
+            series.randomBilateral(),
+            0,
+        );
+
+        // const max_cos: f32 = @cos((0.120 * math.PI32) - (0.07 * math.PI32 * p.z()));
+
+        var test_index: u32 = 0;
+        var valid: bool = p.lengthSquared() <= 1.0;
+        while (test_index < point_count) : (test_index += 1) {
+            if (dest[test_index].minus(p).lengthSquared() < min_dist_sq) {
+                valid = false;
+                break;
+            }
+        }
+
+        if (valid) {
+            dest[point_count] = p;
+            point_count += 1;
+        }
+    }
+
+    var dest_index: u32 = 0;
+    while (dest_index < 64) : (dest_index += 1) {
+        var p: Vector3 = dest[dest_index];
+
+        _ = p.setZ(@sqrt(1.0 - p.lengthSquared()));
+
+        dest[dest_index] = p;
+    }
+}
 
 pub fn getBoxSurface(position_in: Vector3, radius: Vector3, surface_index: u32) LightBoxSurface {
     const axis_index: u32 = surface_index >> 1;
@@ -250,177 +460,82 @@ fn raycast(
     box_stack[depth] = getBox(solution, solution.root_box_index);
     depth += 1;
 
-    const t_close_enough: F32_4x = @splat(5);
+    const t_close_enough: F32_4x = @splat(10);
 
-    if (false) {
-        // const ray_direction_positive: V3_4x = ray_direction.lessThan(@as(V3_4x, @splat(0)));
-        var sign: [3]F32_4x = undefined;
-        var box_surface_index: [3]U32_4x = undefined;
-        {
-            var axis_index: u32 = 0;
-            while (axis_index < 3) : (axis_index += 1) {
-                var c_index: u32 = 0;
-                while (c_index < 4) : (c_index += 1) {
-                    const positive: u32 = @intFromBool(ray_direction.getComponent(c_index).values[axis_index] < 0);
+    const inverse_ray_direction: V3_4x = @as(V3_4x, .splat(@splat(1))).dividedBy(ray_direction);
 
-                    box_surface_index[axis_index][c_index] = @intCast((axis_index << 1) | positive);
-                    sign[axis_index][c_index] = if (positive != 0) 1.0 else 0.0;
-                }
+    while (depth > 0) {
+        depth -= 1;
+        const root_box: *LightingBox = box_stack[depth];
+
+        var source_index: u32 = root_box.first_child_index;
+        while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
+            const box: *LightingBox = getBox(solution, source_index);
+
+            if (box.child_count > 0) {
+                work.total_partitions_tested += 1;
+            } else {
+                work.total_leaves_tested += 1;
             }
-        }
 
-        while (depth > 0) {
-            depth -= 1;
-            const root_box: *LightingBox = box_stack[depth];
+            const box_position: V3_4x = .fromVector3(box.position);
+            const box_radius: V3_4x = .fromVector3(box.radius);
+            const box_min: V3_4x = box_position.minus(box_radius);
+            const box_max: V3_4x = box_position.plus(box_radius);
 
-            var source_index: u32 = root_box.first_child_index;
-            while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
-                const box: *LightingBox = getBox(solution, source_index);
+            const t_box_min: V3_4x = box_min.minus(ray_origin).times(inverse_ray_direction);
+            const t_box_max: V3_4x = box_max.minus(ray_origin).times(inverse_ray_direction);
 
-                const box_position: V3_4x = .fromVector3(box.position);
-                const rel_origin: V3_4x = ray_origin.minus(box_position);
-                const box_radius: V3_4x = .fromVector3(box.radius);
+            const t_min3: V3_4x = t_box_min.min(t_box_max);
+            const t_max3: V3_4x = t_box_min.max(t_box_max);
 
-                var is_in_box = false;
-                if (box.child_count > 0) {
-                    work.total_partitions_tested += 1;
-                    const comparison: V3_4x = rel_origin.absoluteValue().lessThanOrEqualTo(box_radius);
-                    is_in_box = comparison.all3TrueInAtLeastOneLane();
-                } else {
-                    work.total_leaves_tested += 1;
-                }
+            const t_min: F32_4x = @max(t_min3.x, @max(t_min3.y, t_min3.z));
+            const t_max: F32_4x = @min(t_max3.x, @min(t_max3.y, t_max3.z));
 
-                if (is_in_box) {
+            const max_pass: Bool_4x = t_max > @as(F32_4x, @splat(0));
+            if (simd.anyTrue(max_pass)) {
+                const t_inside: Bool_4x = max_pass & (t_min < @as(F32_4x, @splat(0)));
+                const t_valid: Bool_4x = (t_min > @as(F32_4x, @splat(0))) & (t_min < t_max);
+                const mask: Bool_4x = t_valid & (t_min < result.t_ray);
+                const close_enough: Bool_4x = mask & (t_min < t_close_enough);
+
+                if (box.child_count > 0 and (simd.anyTrue(t_inside) or simd.anyTrue(close_enough))) {
                     std.debug.assert(depth < box_stack.len);
                     box_stack[depth] = box;
                     depth += 1;
-                } else {
-                    var axis_index: u32 = 0;
-                    while (axis_index < 3) : (axis_index += 1) {
-                        var face_rel_origin: V3_4x = rel_origin;
-                        face_rel_origin.setLane(
-                            axis_index,
-                            face_rel_origin.getLane(axis_index) - sign[axis_index] * box_radius.getLane(axis_index),
-                        );
-                        const t_ray: F32_4x =
-                            face_rel_origin.negated().getLane(axis_index) / ray_direction.getLane(axis_index);
+                } else if (simd.anyTrue(t_valid)) {
+                    var box_surface_index: U32_4x = @splat(0);
+                    var running_mask: U32_4x = @intFromBool(t_box_min.x == t_min);
 
-                        const delta: V3_4x = ray_direction.scaledToV(t_ray);
-                        const face_rel_position: V3_4x = face_rel_origin.plus(delta);
+                    var this_mask: U32_4x = @intFromBool(t_box_max.x == t_min);
+                    box_surface_index |= @as(U32_4x, @splat(1)) & (this_mask & ~running_mask);
+                    running_mask |= this_mask;
 
-                        const zero: F32_4x = @splat(0);
-                        const t_check: Bool_4x = (t_ray > zero) & (t_ray < result.t_ray);
+                    this_mask = @intFromBool(t_box_min.y == t_min);
+                    box_surface_index |= @as(U32_4x, @splat(2)) & (this_mask & ~running_mask);
+                    running_mask |= this_mask;
 
-                        if (simd.anyTrue(t_check)) {
-                            const x_check: F32_4x = if (axis_index == 0) face_rel_position.y else face_rel_position.x;
-                            const half_width: F32_4x = if (axis_index == 0) box_radius.y else box_radius.x;
+                    this_mask = @intFromBool(t_box_max.y == t_min);
+                    box_surface_index |= @as(U32_4x, @splat(3)) & (this_mask & ~running_mask);
+                    running_mask |= this_mask;
 
-                            const y_check: F32_4x = if (axis_index == 2) face_rel_position.y else face_rel_position.z;
-                            const half_height: F32_4x = if (axis_index == 2) box_radius.y else box_radius.z;
+                    this_mask = @intFromBool(t_box_min.z == t_min);
+                    box_surface_index |= @as(U32_4x, @splat(4)) & (this_mask & ~running_mask);
+                    running_mask |= this_mask;
 
-                            const bound_check: Bool_4x = (@abs(x_check) <= half_width) & (@abs(y_check) <= half_height);
-                            const mask: Bool_4x = bound_check & t_check;
-                            const close_enough: Bool_4x = mask & (t_ray < t_close_enough);
+                    this_mask = @intFromBool(t_box_max.z == t_min);
+                    box_surface_index |= @as(U32_4x, @splat(5)) & (this_mask & ~running_mask);
 
-                            if (box.child_count > 0 and simd.anyTrue(close_enough)) {
-                                std.debug.assert(depth < box_stack.len);
-                                box_stack[depth] = box;
-                                depth += 1;
-                                break;
-                            } else if (simd.anyTrue(@bitCast(mask))) {
-                                result.hit |= mask;
-                                result.t_ray = @select(f32, mask, t_ray, result.t_ray);
-                                result.box_index =
-                                    @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
-                                result.box_surface_index =
-                                    @select(u32, mask, box_surface_index[axis_index], result.box_surface_index);
+                    result.t_ray = @select(f32, mask, t_min, result.t_ray);
+                    result.hit |= mask;
+                    result.box_index =
+                        @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
+                    result.box_surface_index =
+                        @select(u32, mask, box_surface_index, result.box_surface_index);
 
-                                if (simd.allTrue(@bitCast(mask))) {
-                                    work.total_partition_leaves_used += 1;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        const inverse_ray_direction: V3_4x = @as(V3_4x, .splat(@splat(1))).dividedBy(ray_direction);
-
-        while (depth > 0) {
-            depth -= 1;
-            const root_box: *LightingBox = box_stack[depth];
-
-            var source_index: u32 = root_box.first_child_index;
-            while (source_index < (root_box.first_child_index + root_box.child_count)) : (source_index += 1) {
-                const box: *LightingBox = getBox(solution, source_index);
-
-                if (box.child_count > 0) {
-                    work.total_partitions_tested += 1;
-                } else {
-                    work.total_leaves_tested += 1;
-                }
-
-                const box_position: V3_4x = .fromVector3(box.position);
-                const box_radius: V3_4x = .fromVector3(box.radius);
-                const box_min: V3_4x = box_position.minus(box_radius);
-                const box_max: V3_4x = box_position.plus(box_radius);
-
-                const t_box_min: V3_4x = box_min.minus(ray_origin).times(inverse_ray_direction);
-                const t_box_max: V3_4x = box_max.minus(ray_origin).times(inverse_ray_direction);
-
-                const t_min3: V3_4x = t_box_min.min(t_box_max);
-                const t_max3: V3_4x = t_box_min.max(t_box_max);
-
-                const t_min: F32_4x = @max(t_min3.x, @max(t_min3.y, t_min3.z));
-                const t_max: F32_4x = @min(t_max3.x, @min(t_max3.y, t_max3.z));
-
-                const max_pass: Bool_4x = t_max > @as(F32_4x, @splat(0));
-                if (simd.anyTrue(max_pass)) {
-                    const t_inside: Bool_4x = max_pass & (t_min < @as(F32_4x, @splat(0)));
-                    const t_valid: Bool_4x = t_min < t_max;
-                    const mask: Bool_4x = t_valid & (t_min < result.t_ray);
-                    const close_enough: Bool_4x = mask & (t_min < t_close_enough);
-
-                    if (box.child_count > 0 and (simd.anyTrue(t_inside) or simd.anyTrue(close_enough))) {
-                        std.debug.assert(depth < box_stack.len);
-                        box_stack[depth] = box;
-                        depth += 1;
-                    } else if (simd.anyTrue(t_valid)) {
-                        var box_surface_index: U32_4x = @splat(0);
-                        var running_mask: U32_4x = @intFromBool(t_box_min.x == t_min);
-
-                        var this_mask: U32_4x = @intFromBool(t_box_max.x == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(1)) & (this_mask & ~running_mask);
-                        running_mask |= this_mask;
-
-                        this_mask = @intFromBool(t_box_min.y == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(2)) & (this_mask & ~running_mask);
-                        running_mask |= this_mask;
-
-                        this_mask = @intFromBool(t_box_max.y == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(3)) & (this_mask & ~running_mask);
-                        running_mask |= this_mask;
-
-                        this_mask = @intFromBool(t_box_min.z == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(4)) & (this_mask & ~running_mask);
-                        running_mask |= this_mask;
-
-                        this_mask = @intFromBool(t_box_max.z == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(5)) & (this_mask & ~running_mask);
-
-                        result.t_ray = @select(f32, mask, t_min, result.t_ray);
-                        result.hit |= mask;
-                        result.box_index =
-                            @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
-                        result.box_surface_index =
-                            @select(u32, mask, box_surface_index, result.box_surface_index);
-
-                        if (simd.allTrue(@bitCast(mask))) {
-                            work.total_partition_leaves_used += 1;
-                            break;
-                        }
+                    if (simd.allTrue(@bitCast(mask))) {
+                        work.total_partition_leaves_used += 1;
+                        break;
                     }
                 }
             }
@@ -453,7 +568,9 @@ fn computeLightPropagation(
     const solution: *LightingSolution = work.solution;
     const first_sample_index: u32 = work.first_sample_index;
     const one_past_last_sample_index: u32 = work.one_past_last_sample_index;
-    // var series: random.Series = solution.series;
+    var series: random.Series = solution.series;
+
+    const sample_point_entropy: u32 = series.randomInt();
 
     // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
     const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.4);
@@ -468,30 +585,18 @@ fn computeLightPropagation(
         const sample_point_y_axis: V3_4x = .fromVector3(sample_point.y_axis);
         const sample_point_normal: V3_4x = .fromVector3(sample_point.normal);
 
+        if (sample_point_index == solution.debug_point_index) {
+            pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.x_axis), .new(1, 0, 0, 1));
+            pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.y_axis), .new(0, 1, 0, 1));
+            pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.normal), .new(0, 0, 1, 1));
+        }
+
         const sample_pattern_mask: u32 = 15;
 
         var ray_index: u32 = 0;
         while (ray_index < ray_count) : (ray_index += 1) {
-            // const basis: V3_4x = .fromVector3(
-            //     Vector3.new(
-            //         series.randomBilateral(),
-            //         series.randomBilateral(),
-            //         series.randomBilateral(),
-            //     ).normalizeOrZero(),
-            // );
-            // var delta: V3_4x = .fromAxes(
-            //     series.randomBilateral_4x(),
-            //     series.randomBilateral_4x(),
-            //     series.randomBilateral_4x(),
-            // );
-            //
-            // var sample_direction_4x: V3_4x = basis.plus(delta.scaledTo(0.1)).approxNormalizeOrZero();
-            // const mask: Bool_4x =
-            //     sample_direction_4x.dotProduct(sample_point_normal) < @as(F32_4x, @splat(0));
-            // sample_direction_4x = sample_direction_4x.select(mask, sample_direction_4x.negated());
-
             var sample_direction_4x: V3_4x =
-                solution.sample_points[sample_point_index & sample_pattern_mask][ray_index];
+                solution.sample_points[sample_point_index + sample_point_entropy & sample_pattern_mask][ray_index];
             sample_direction_4x =
                 sample_point_x_axis.scaledToV(sample_direction_4x.x)
                     .plus(sample_point_y_axis.scaledToV(sample_direction_4x.y)
@@ -503,21 +608,24 @@ fn computeLightPropagation(
 
             var sub_ray: u32 = 0;
             while (sub_ray < 4) : (sub_ray += 1) {
-                // if (false) {
-                //     if (sample_point_index == solution.debug_point_index) {
-                //         const draw_length: f32 = 0.25;
-                //         const end_point: Vector3 = sample_point.position.plus(sample_direction.scaledTo(
-                //             if (ray.box != null) t_ray else draw_length,
-                //         ));
-                //
-                //         pushDebugLine(
-                //             solution,
-                //             sample_point.position,
-                //             end_point,
-                //             if (ray.box != null) .new(0, 1, 0, 1) else .new(1, 0, 0, 1),
-                //         );
-                //     }
-                // }
+                if (true) {
+                    if (sample_point_index == solution.debug_point_index) {
+                        const sample_direction: Vector3 = sample_direction_4x.getComponent(sub_ray);
+                        const hit: bool = ray.hit[sub_ray];
+                        const t_ray: f32 = ray.t_ray[sub_ray];
+                        const draw_length: f32 = 0.25;
+                        const end_point: Vector3 = sample_point.position.plus(sample_direction.scaledTo(
+                            if (hit) t_ray else draw_length,
+                        ));
+
+                        pushDebugLine(
+                            solution,
+                            sample_point.position,
+                            end_point,
+                            if (hit) .new(0, 1, 1, 1) else .new(1, 1, 0, 1),
+                        );
+                    }
+                }
 
                 var transfer_pps: Color3 = .zero();
                 if (ray.hit[sub_ray]) {
@@ -559,10 +667,10 @@ fn computeLightPropagation(
 
                 // Accumulate sample.
                 const normal_to_light: Vector3 = sample_direction_4x.getComponent(sub_ray);
-                const surface_normal: Vector3 = solution.points[sample_point_index].normal;
-                const angular_falloff: f32 = math.clampf01(surface_normal.dotProduct(normal_to_light));
+                // const surface_normal: Vector3 = solution.points[sample_point_index].normal;
+                // const angular_falloff: f32 = math.clampf01(surface_normal.dotProduct(normal_to_light));
 
-                const sample_color: Color3 = transfer_pps.scaledTo(angular_falloff);
+                const sample_color: Color3 = transfer_pps; //.scaledTo(angular_falloff);
                 const weight: f32 = sample_color.length();
 
                 solution.accumulated_weight[sample_point_index] += 1;
@@ -578,7 +686,9 @@ fn computeLightPropagation(
         }
     }
 
-    // solution.series = series;
+    solution.series = series;
+
+    DebugInterface.debugValue(@src(), &solution.pattern_name, "PatternName");
 }
 
 pub fn doLightingWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
@@ -830,97 +940,6 @@ fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
     splitBox(solution, root_box, actual_box_count, &solution.scratch_a, &solution.scratch_b, 0);
 }
 
-pub fn generatePolarSamples(source_series: *random.Series, dest: [*]Vector3) void {
-    var hemi_series: random.Series = source_series.*;
-
-    const spoke_table = [_]u32{
-        4,
-        16,
-        16,
-        16,
-        12,
-    };
-
-    var point_count: u32 = 0;
-    const slice_count: u32 = spoke_table.len;
-    var slice: u32 = 0;
-    while (slice < slice_count) : (slice += 1) {
-        const spoke_count: u32 = spoke_table[slice];
-        var spoke: u32 = 0;
-        while (spoke < spoke_count) : (spoke += 1) {
-            const jitter: f32 = hemi_series.randomUnilateral();
-            const ratio: f32 = (@as(f32, @floatFromInt(slice)) + jitter) / @as(f32, @floatFromInt(slice_count));
-            const z: f32 = @cos(0.5 * math.PI32 * ratio + 0.2);
-            const radius: f32 = @sqrt(1.0 - z * z);
-
-            const theta: f32 = math.TAU32 * @as(f32, @floatFromInt(spoke)) / @as(f32, @floatFromInt(spoke_count));
-
-            const x: f32 = radius * @sin(theta);
-            const y: f32 = radius * @cos(theta);
-
-            dest[point_count] = .new(x, y, z);
-            point_count += 1;
-        }
-    }
-}
-
-pub fn generateSpiralSamples(source_series: *random.Series, dest: [*]Vector3) void {
-    var hemi_series: random.Series = source_series.*;
-
-    const sphere_amount: f32 = 2.0 + 2.0 * hemi_series.randomUnilateral();
-    const rho_offset: f32 = math.TAU32 * hemi_series.randomUnilateral();
-    const theta: f32 = math.PI32 * (3.0 - @sqrt(5.0));
-    const n: u32 = 64;
-    const n2: f32 = sphere_amount * @as(f32, @floatFromInt(n));
-
-    var index: u32 = 0;
-    while (index < n) : (index += 1) {
-        const i: f32 = @as(f32, @floatFromInt(index));
-        const rho: f32 = rho_offset + theta * i;
-        const z: f32 =
-            (1.0 - (1.0 / @as(f32, n2))) *
-            (1.0 - ((2.0 * i) / (n2 - 1)));
-        const tau: f32 = @sqrt(1.0 - z * z);
-
-        const normal: Vector3 = Vector3.new(
-            tau * @cos(rho),
-            tau * @sin(rho),
-            z,
-        );
-
-        dest[index] = normal;
-    }
-}
-
-pub fn generatePoissonSamples(source_series: *random.Series, dest: [*]Vector3) void {
-    var hemi_series: random.Series = source_series.*;
-
-    var point_count: u32 = 0;
-    while (point_count < 64) {
-        const p: Vector3 = Vector3.new(
-            hemi_series.randomBilateral(),
-            hemi_series.randomBilateral(),
-            hemi_series.randomUnilateral(),
-        ).normalizeOrZero();
-
-        const max_cos: f32 = @cos((0.120 * math.PI32) - (0.07 * math.PI32 * p.z()));
-
-        var test_index: u32 = 0;
-        var valid: bool = true;
-        while (test_index < point_count) : (test_index += 1) {
-            if (dest[test_index].dotProduct(p) > max_cos) {
-                valid = false;
-                break;
-            }
-        }
-
-        if (valid) {
-            dest[point_count] = p;
-            point_count += 1;
-        }
-    }
-}
-
 pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
     solution.series = .seed(1234, null, null, null);
     solution.max_work_count = 256;
@@ -929,33 +948,7 @@ pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
     solution.accumulated_pps = arena.pushArray(LIGHT_DATA_WIDTH, Color3, .aligned(64, true));
     solution.average_direction_to_light = arena.pushArray(LIGHT_DATA_WIDTH, Vector3, .aligned(64, true));
 
-    // generateSpiralSamples(&solution.series, &solution.sample_points);
-
-    var series: random.Series = solution.series;
-    var pattern_index: u32 = 0;
-    while (pattern_index < solution.sample_points.len) : (pattern_index += 1) {
-        var bundle_index: u32 = 0;
-        while (bundle_index < solution.sample_points[0].len) : (bundle_index += 1) {
-            const basis: V3_4x = .fromVector3(
-                Vector3.new(
-                    series.randomBilateral(),
-                    series.randomBilateral(),
-                    series.randomBilateral(),
-                ).normalizeOrZero(),
-            );
-            var delta: V3_4x = .fromAxes(
-                series.randomBilateral_4x(),
-                series.randomBilateral_4x(),
-                series.randomBilateral_4x(),
-            );
-
-            var sample_direction_4x: V3_4x = basis.plus(delta.scaledTo(0.1)).approxNormalizeOrZero();
-            const mask: Bool_4x = sample_direction_4x.z < @as(F32_4x, @splat(0));
-            sample_direction_4x = sample_direction_4x.select(mask, sample_direction_4x.negated());
-
-            solution.sample_points[pattern_index][bundle_index] = sample_direction_4x;
-        }
-    }
+    generateLightingPattern(solution, 0);
 }
 
 pub fn lightingTest(
@@ -985,7 +978,6 @@ pub fn lightingTest(
     solution.sample_table[14] = Vector3.new(0, 1, 0.25).normalizeOrZero();
     solution.sample_table[15] = Vector3.new(0, -1, 0.25).normalizeOrZero();
 
-    solution.update_debug_lines = true;
     if (solution.update_debug_lines) {
         solution.debug_line_count = 0;
     }
@@ -1010,7 +1002,7 @@ pub fn lightingTest(
         }
     }
 
-    const debug_location: Vector3 = .new(0, 0, 1);
+    const debug_location: Vector3 = .new(0, 3, -1);
     var debug_point_distance: f32 = std.math.floatMax(f32);
 
     var box_index: u32 = 0;
@@ -1135,89 +1127,93 @@ pub fn lightingTest(
         group.pushLineSegment(bitmap, line.from_position, line.color, line.to_position, line.color, 0.01);
     }
 
-    // if (solution.update_debug_lines) {
-    //     const start_point: Vector3 = .new(0, 0, 1.05);
-    //
-    //     const color_table = [_]Color{
-    //         .new(0, 0, 0, 1),
-    //         .new(1, 0, 0, 1),
-    //         .new(0, 1, 0, 1),
-    //         .new(0, 0, 1, 1),
-    //         .new(1, 1, 0, 1),
-    //         .new(0, 1, 1, 1),
-    //         .new(1, 0, 1, 1),
-    //         .new(1, 1, 1, 1),
-    //     };
-    //
-    //     const cluster_table = [_]u32{
-    //         0,
-    //         1,
-    //         3,
-    //         6,
-    //
-    //         2,
-    //         4,
-    //         7,
-    //         12,
-    //
-    //         9,
-    //         14,
-    //         17,
-    //         22,
-    //     };
-    //
-    //     _ = group.getCurrentQuads(solution.sample_points.len * 6);
-    //     // const hemi_series: random.Series = solution.series;
-    //
-    //     var point_index: u32 = 0;
-    //     while (point_index < solution.sample_points.len) : (point_index += 1) {
-    //         const normal: Vector3 = solution.sample_points[point_index];
-    //         const color: Color = color_table[@mod(point_index, color_table.len)];
-    //         group.pushCube(
-    //             bitmap,
-    //             start_point.plus(normal),
-    //             0.01,
-    //             0.02,
-    //             color,
-    //             null,
-    //             null,
-    //         );
-    //     }
-    //
-    //     point_index = 0;
-    //     while (point_index < cluster_table.len) : (point_index += 1) {
-    //         const color: Color = color_table[@mod(point_index / 4, color_table.len)];
-    //         const normal: Vector3 = solution.sample_points[cluster_table[point_index]];
-    //         group.pushLineSegment(
-    //             bitmap,
-    //             start_point.plus(normal),
-    //             color,
-    //             start_point.plus(normal.scaledTo(1.06)),
-    //             color,
-    //             0.01,
-    //         );
-    //     }
-    //
-    //     if (false) {
-    //         _ = group.getCurrentQuads(solution.sample_points.len * 6);
-    //         point_index = 0;
-    //         while (point_index < solution.sample_points.len) : (point_index += 1) {
-    //             const position: Vector3 = start_point;
-    //             const normal_a: Vector3 = solution.sample_points[point_index - 1];
-    //             const normal_b: Vector3 = solution.sample_points[point_index];
-    //
-    //             const color: Color = .new(1, 1, 0, 1);
-    //             group.pushLineSegment(
-    //                 bitmap,
-    //                 position.plus(normal_a),
-    //                 color,
-    //                 position.plus(normal_b),
-    //                 color,
-    //                 0.01,
-    //             );
-    //         }
-    //     }
-    // }
+    const start_point: Vector3 = .new(0, 0, 1.05);
+
+    const color_table = [_]Color{
+        .new(0, 0, 0, 1),
+        .new(1, 0, 0, 1),
+        .new(0, 1, 0, 1),
+        .new(0, 0, 1, 1),
+        .new(1, 1, 0, 1),
+        .new(0, 1, 1, 1),
+        .new(1, 0, 1, 1),
+        .new(1, 1, 1, 1),
+    };
+
+    const cluster_table = [_]u32{
+        0,
+        1,
+        3,
+        6,
+
+        2,
+        4,
+        7,
+        12,
+
+        9,
+        14,
+        17,
+        22,
+    };
+
+    _ = group.getCurrentQuads(solution.sample_points[0].len * 4 * 6);
+    // const hemi_series: random.Series = solution.series;
+
+    var point_index: u32 = 0;
+    while (point_index < solution.sample_points[0].len) : (point_index += 1) {
+        var component_index: u32 = 0;
+        while (component_index < 4) : (component_index += 1) {
+            const color: Color = color_table[@mod(4 * point_index + component_index, color_table.len)];
+            const normal: Vector3 = solution.sample_points[0][point_index].getComponent(component_index);
+
+            group.pushCube(
+                bitmap,
+                start_point.plus(normal),
+                0.01,
+                0.02,
+                color,
+                null,
+                null,
+            );
+        }
+    }
+
+    if (false) {
+        point_index = 0;
+        while (point_index < cluster_table.len) : (point_index += 1) {
+            const color: Color = color_table[@mod(point_index / 4, color_table.len)];
+            const normal: Vector3 = solution.sample_points[cluster_table[point_index]];
+            group.pushLineSegment(
+                bitmap,
+                start_point.plus(normal),
+                color,
+                start_point.plus(normal.scaledTo(1.06)),
+                color,
+                0.01,
+            );
+        }
+    }
+
+    if (false) {
+        _ = group.getCurrentQuads(solution.sample_points.len * 6);
+        point_index = 0;
+        while (point_index < solution.sample_points.len) : (point_index += 1) {
+            const position: Vector3 = start_point;
+            const normal_a: Vector3 = solution.sample_points[point_index - 1];
+            const normal_b: Vector3 = solution.sample_points[point_index];
+
+            const color: Color = .new(1, 1, 0, 1);
+            group.pushLineSegment(
+                bitmap,
+                position.plus(normal_a),
+                color,
+                position.plus(normal_b),
+                color,
+                0.01,
+            );
+        }
+    }
 }
 
 fn outputLightingPointsRecurse(

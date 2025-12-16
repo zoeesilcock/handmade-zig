@@ -84,6 +84,7 @@ pub const DebugType = if (INTERNAL) enum(u32) {
     OpenDataBlock,
     CloseDataBlock,
 
+    StringPointer,
     bool,
     f32,
     u16,
@@ -119,6 +120,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     data: extern union {
         value_debug_event: *DebugEvent,
         debug_id: DebugId,
+        string_pointer: [*]const u8,
         bool: bool,
         u16: u16,
         u32: u32,
@@ -181,6 +183,10 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         const guids_match = shared.global_debug_table.edit_event.guid == self.guid;
         // TODO: Could we use comptime to avoid duplicating this logic for each type?
         switch (@TypeOf(source)) {
+            [*]const u8 => {
+                self.event_type = .StringPointer;
+                self.data = .{ .string_pointer = dest.* };
+            },
             bool => {
                 if (guids_match) {
                     dest.* = shared.global_debug_table.edit_event.data.bool;

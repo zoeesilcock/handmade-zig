@@ -1056,6 +1056,9 @@ fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *D
 
     if (flags & DebugVariableToTextFlag.Value.toInt() != 0) {
         switch (event.event_type) {
+            .StringPointer => {
+                at += shared.formatString(end - at, at, "%s", .{@as([*:0]const u8, @ptrCast(event.data.string_pointer))});
+            },
             .bool => {
                 at += shared.formatString(end - at, at, "%s", .{
                     @as([*:0]const u8, @ptrCast(if (event.data.bool) "true" else "false")),

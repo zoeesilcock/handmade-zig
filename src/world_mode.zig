@@ -116,6 +116,7 @@ pub const GameModeWorld = struct {
 
     updating_lighting: bool,
     show_lighting: bool,
+    lighting_pattern: u32,
     test_lighting: LightingSolution,
     test_textures: LightingTextures,
 };
@@ -265,7 +266,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
             room_radius_y,
         );
 
-        if (false) {
+        if (true) {
             // _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
             // _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
 
@@ -625,15 +626,10 @@ pub fn updateAndRenderWorld(
     if (input.f_key_pressed[6]) {
         world_mode.test_lighting.debug_box_draw_depth += 1;
     }
-    // if (input.f_key_pressed[9]) {
-    //     lighting.generateSpiralSamples(&world_mode.test_lighting.series, &world_mode.test_lighting.sample_points);
-    // }
-    // if (input.f_key_pressed[10]) {
-    //     lighting.generatePoissonSamples(&world_mode.test_lighting.series, &world_mode.test_lighting.sample_points);
-    // }
-    // if (input.f_key_pressed[11]) {
-    //     lighting.generatePolarSamples(&world_mode.test_lighting.series, &world_mode.test_lighting.sample_points);
-    // }
+    if (input.f_key_pressed[9]) {
+        world_mode.lighting_pattern += 1;
+        lighting.generateLightingPattern(&world_mode.test_lighting, world_mode.lighting_pattern);
+    }
 
     render_group.enableLighting(light_bounds);
     render_group.pushLighting(&world_mode.test_textures);
@@ -1155,7 +1151,7 @@ fn addSnakeSegment(
 
     entity.addPiece(.Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
     entity.addPiece(if (segment_index != 0) .Torso else .Head, 1.5, .zero(), .white(), null);
-    entity.addPieceLight(0.1, .new(0, 0, 0.5), 0.3, .new(1, 1, 0));
+    entity.addPieceLight(0.1, .new(0, 0, 0.5), 1.0, .new(1, 1, 0));
 
     endEntity(world_mode, entity, world_position);
 }
