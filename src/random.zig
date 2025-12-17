@@ -1,6 +1,7 @@
 const std = @import("std");
 const math = @import("math.zig");
 const simd = @import("simd.zig");
+const intrinsics = @import("intrinsics.zig");
 
 pub const Series = extern struct {
     state: simd.U32_4x,
@@ -56,5 +57,33 @@ pub const Series = extern struct {
 
     pub fn randomIntBetween(self: *Series, min: i32, max: i32) i32 {
         return min + @mod(@as(i32, @intCast(self.randomInt())), ((max + 1) - min));
+    }
+};
+
+pub const SeriesPCG = extern struct {
+    state: u64,
+    selector: u64,
+
+    pub fn seed(seed_state: u64, selector: u64) SeriesPCG {
+        return .{ .state = seed_state, .selector = (selector << 1) | 1 };
+    }
+
+    pub fn randomInt(self: *SeriesPCG) u32 {
+        var state: u64 = self.state;
+        state = state * 6364136223846793005 + self.selector;
+        self.state = state;
+
+        const pre_rotate: u32 = @intCast((state ^ (state >> 18)) >> 27);
+        const result: u32 = intrinsics.rotateRight(pre_rotate, @intCast(state >> 59));
+        return result;
+    }
+
+    pub fn randomUnilateral(self: *SeriesPCG) f32 {
+        const divisor = 1.0 / @as(f32, @floatFromInt(std.math.maxInt(u32)));
+        return divisor * @as(f32, @floatFromInt(self.randomInt()));
+    }
+
+    pub fn randomBilateral(self: *SeriesPCG) f32 {
+        return 2.0 * self.randomUnilateral() - 1.0;
     }
 };

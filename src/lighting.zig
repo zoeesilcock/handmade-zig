@@ -187,10 +187,10 @@ pub fn generateLightingPattern(solution: *LightingSolution, pattern_index: u32) 
     var series: random.Series = solution.series;
 
     var min_test_avg: f32 = std.math.floatMax(f32);
-    var max_test_avg: f32 = std.math.floatMin(f32);
-    const sample_count: u32 = 64;
+    var max_test_avg: f32 = -std.math.floatMax(f32);
+    const sample_count: u32 = 65536;
     var test_index: u32 = 0;
-    while (test_index <= 1024) : (test_index += 1) {
+    while (test_index <= 256) : (test_index += 1) {
         var test_sum: f32 = 0;
         var dir_index: u32 = 0;
         while (dir_index < sample_count) : (dir_index += 1) {
@@ -220,7 +220,7 @@ pub fn generateLightingPattern(solution: *LightingSolution, pattern_index: u32) 
     }
 
     var min_avg: f32 = std.math.floatMax(f32);
-    var max_avg: f32 = std.math.floatMin(f32);
+    var max_avg: f32 = -std.math.floatMax(f32);
     var version_index: u32 = 0;
     while (version_index < solution.sample_points.len) : (version_index += 1) {
         var temp: [64]Vector3 = undefined;
@@ -1157,25 +1157,87 @@ pub fn lightingTest(
         22,
     };
 
-    _ = group.getCurrentQuads(solution.sample_points[0].len * 4 * 6);
-    // const hemi_series: random.Series = solution.series;
-
+    const draw_point_count: u32 = 2 * 1024;
+    _ = group.getCurrentQuads(draw_point_count * 4 * 6);
+    var test_series_x: random.SeriesPCG = .seed(23984593284, 3249823984);
+    var test_series_y: random.SeriesPCG = .seed(85462378423, 90857892378);
+    var test_series_z: random.SeriesPCG = .seed(34205873903, 94569083);
+    // var test_series_x: random.Series = .seed(239843284, null, null, null);
+    // var test_series_y: random.Series = .seed(854623723, null, null, null);
+    // var test_series_z: random.Series = .seed(342058739, null, null, null);
     var point_index: u32 = 0;
-    while (point_index < solution.sample_points[0].len) : (point_index += 1) {
-        var component_index: u32 = 0;
-        while (component_index < 4) : (component_index += 1) {
-            const color: Color = color_table[@mod(4 * point_index + component_index, color_table.len)];
-            const normal: Vector3 = solution.sample_points[0][point_index].getComponent(component_index);
+    while (point_index < draw_point_count) : (point_index += 1) {
+        while (true) {
+            if (false) {
+                var dir: Vector3 = Vector3.new(
+                    test_series_x.randomBilateral(),
+                    test_series_y.randomBilateral(),
+                    test_series_z.randomBilateral(),
+                );
 
-            group.pushCube(
-                bitmap,
-                start_point.plus(normal),
-                0.01,
-                0.02,
-                color,
-                null,
-                null,
-            );
+                if (dir.z() < 0) {
+                    _ = dir.setZ(-dir.z());
+                }
+
+                if (dir.lengthSquared() <= 1.0) {
+                    dir = dir.normalizeOrZero();
+                    group.pushCube(
+                        bitmap,
+                        start_point.plus(dir),
+                        0.01,
+                        0.02,
+                        .new(1, 1, 0, 1),
+                        null,
+                        null,
+                    );
+                    break;
+                }
+            } else {
+                const x1: f32 = test_series_x.randomBilateral();
+                const x2: f32 = test_series_y.randomBilateral();
+                const sqr: f32 = x1 * x1 + x2 * x2;
+                const root: f32 = @sqrt(1 - x1 * x1 - x2 * x2);
+
+                const dir: Vector3 = .new(
+                    2.0 * x1 * root,
+                    2.0 * x2 * root,
+                    1.0 - 2.0 * sqr,
+                );
+
+                if (sqr < 0.5) {
+                    group.pushCube(
+                        bitmap,
+                        start_point.plus(dir),
+                        0.01,
+                        0.02,
+                        .new(1, 1, 0, 1),
+                        null,
+                        null,
+                    );
+                    break;
+                }
+            }
+        }
+    }
+
+    if (false) {
+        point_index = 0;
+        while (point_index < solution.sample_points[0].len) : (point_index += 1) {
+            var component_index: u32 = 0;
+            while (component_index < 4) : (component_index += 1) {
+                const color: Color = color_table[@mod(4 * point_index + component_index, color_table.len)];
+                const normal: Vector3 = solution.sample_points[0][point_index].getComponent(component_index);
+
+                group.pushCube(
+                    bitmap,
+                    start_point.plus(normal),
+                    0.01,
+                    0.02,
+                    color,
+                    null,
+                    null,
+                );
+            }
         }
     }
 
