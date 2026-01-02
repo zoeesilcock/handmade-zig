@@ -40,6 +40,10 @@ const SLOW = shared.SLOW;
 pub const LightingTextures = extern struct {
     light_data0: [LIGHT_DATA_WIDTH]Vector4, // Px, Py, Pz, Dx
     light_data1: [LIGHT_DATA_WIDTH]Vector4, // SignDz*Cr, Cg, Cb, Dy
+
+    // TODO: Encode this way eventually:
+    // light_data0: [LIGHT_DATA_WIDTH]Vector3, // Dx, Dy, Dz
+    // light_data1: [LIGHT_DATA_WIDTH]Vector3, // Cr, Cg, Cb
 };
 
 pub const LightingSolution = extern struct {
@@ -138,6 +142,7 @@ pub const LightingPoint = extern struct {
     normal: Vector3,
     x_axis: Vector3,
     y_axis: Vector3,
+    pack_index: u32,
 };
 
 pub const LightBoxSurface = struct {
@@ -1030,6 +1035,7 @@ pub fn lightingTest(
                         .plus(surface.y_axis.scaledTo(y_sub_ratio * surface.half_height));
 
                     point.reflection_color = box.reflection_color.scaledTo(0.95);
+                    point.pack_index = light_index;
 
                     const local_index: u32 = light_index - box.light_index[0];
                     solution.emission_pps[light_index] =
@@ -1157,71 +1163,73 @@ pub fn lightingTest(
         22,
     };
 
-    const draw_point_count: u32 = 2 * 1024;
-    _ = group.getCurrentQuads(draw_point_count * 4 * 6);
-    var test_series_x: random.SeriesPCG = .seed(23984593284, 3249823984);
-    var test_series_y: random.SeriesPCG = .seed(85462378423, 90857892378);
-    var test_series_z: random.SeriesPCG = .seed(34205873903, 94569083);
-    // var test_series_x: random.Series = .seed(239843284, null, null, null);
-    // var test_series_y: random.Series = .seed(854623723, null, null, null);
-    // var test_series_z: random.Series = .seed(342058739, null, null, null);
-    var point_index: u32 = 0;
-    while (point_index < draw_point_count) : (point_index += 1) {
-        while (true) {
-            if (false) {
-                var dir: Vector3 = Vector3.new(
-                    test_series_x.randomBilateral(),
-                    test_series_y.randomBilateral(),
-                    test_series_z.randomBilateral(),
-                );
-
-                if (dir.z() < 0) {
-                    _ = dir.setZ(-dir.z());
-                }
-
-                if (dir.lengthSquared() <= 1.0) {
-                    dir = dir.normalizeOrZero();
-                    group.pushCube(
-                        bitmap,
-                        start_point.plus(dir),
-                        0.01,
-                        0.02,
-                        .new(1, 1, 0, 1),
-                        null,
-                        null,
+    if (false) {
+        const draw_point_count: u32 = 2 * 1024;
+        _ = group.getCurrentQuads(draw_point_count * 4 * 6);
+        var test_series_x: random.SeriesPCG = .seed(23984593284, 3249823984);
+        var test_series_y: random.SeriesPCG = .seed(85462378423, 90857892378);
+        var test_series_z: random.SeriesPCG = .seed(34205873903, 94569083);
+        // var test_series_x: random.Series = .seed(239843284, null, null, null);
+        // var test_series_y: random.Series = .seed(854623723, null, null, null);
+        // var test_series_z: random.Series = .seed(342058739, null, null, null);
+        var point_index: u32 = 0;
+        while (point_index < draw_point_count) : (point_index += 1) {
+            while (true) {
+                if (false) {
+                    var dir: Vector3 = Vector3.new(
+                        test_series_x.randomBilateral(),
+                        test_series_y.randomBilateral(),
+                        test_series_z.randomBilateral(),
                     );
-                    break;
-                }
-            } else {
-                const x1: f32 = test_series_x.randomBilateral();
-                const x2: f32 = test_series_y.randomBilateral();
-                const sqr: f32 = x1 * x1 + x2 * x2;
-                const root: f32 = @sqrt(1 - x1 * x1 - x2 * x2);
 
-                const dir: Vector3 = .new(
-                    2.0 * x1 * root,
-                    2.0 * x2 * root,
-                    1.0 - 2.0 * sqr,
-                );
+                    if (dir.z() < 0) {
+                        _ = dir.setZ(-dir.z());
+                    }
 
-                if (sqr < 0.5) {
-                    group.pushCube(
-                        bitmap,
-                        start_point.plus(dir),
-                        0.01,
-                        0.02,
-                        .new(1, 1, 0, 1),
-                        null,
-                        null,
+                    if (dir.lengthSquared() <= 1.0) {
+                        dir = dir.normalizeOrZero();
+                        group.pushCube(
+                            bitmap,
+                            start_point.plus(dir),
+                            0.01,
+                            0.02,
+                            .new(1, 1, 0, 1),
+                            null,
+                            null,
+                        );
+                        break;
+                    }
+                } else {
+                    const x1: f32 = test_series_x.randomBilateral();
+                    const x2: f32 = test_series_y.randomBilateral();
+                    const sqr: f32 = x1 * x1 + x2 * x2;
+                    const root: f32 = @sqrt(1 - x1 * x1 - x2 * x2);
+
+                    const dir: Vector3 = .new(
+                        2.0 * x1 * root,
+                        2.0 * x2 * root,
+                        1.0 - 2.0 * sqr,
                     );
-                    break;
+
+                    if (sqr < 0.5) {
+                        group.pushCube(
+                            bitmap,
+                            start_point.plus(dir),
+                            0.01,
+                            0.02,
+                            .new(1, 1, 0, 1),
+                            null,
+                            null,
+                        );
+                        break;
+                    }
                 }
             }
         }
     }
 
     if (false) {
-        point_index = 0;
+        var point_index: u32 = 0;
         while (point_index < solution.sample_points[0].len) : (point_index += 1) {
             var component_index: u32 = 0;
             while (component_index < 4) : (component_index += 1) {
@@ -1242,7 +1250,7 @@ pub fn lightingTest(
     }
 
     if (false) {
-        point_index = 0;
+        var point_index: u32 = 0;
         while (point_index < cluster_table.len) : (point_index += 1) {
             const color: Color = color_table[@mod(point_index / 4, color_table.len)];
             const normal: Vector3 = solution.sample_points[cluster_table[point_index]];
@@ -1259,7 +1267,7 @@ pub fn lightingTest(
 
     if (false) {
         _ = group.getCurrentQuads(solution.sample_points.len * 6);
-        point_index = 0;
+        var point_index: u32 = 0;
         while (point_index < solution.sample_points.len) : (point_index += 1) {
             const position: Vector3 = start_point;
             const normal_a: Vector3 = solution.sample_points[point_index - 1];
@@ -1403,12 +1411,13 @@ pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, 
 
     var point_index: u32 = 1; // Light point index 0 is never used.
     while (point_index < solution.point_count) : (point_index += 1) {
-        const position: Vector3 = solution.points[point_index].position;
+        const point: *LightingPoint = &solution.points[point_index];
+        const position: Vector3 = point.position;
         var color: Color3 = solution.accumulated_pps[point_index].plus(solution.emission_pps[point_index]);
         var direction: Vector3 = solution.average_direction_to_light[point_index];
 
         // TODO: Stop stuffing normal once we're sure about the variance.
-        direction = solution.points[point_index].normal;
+        direction = point.normal;
 
         if (direction.z() < 0) {
             // _ = direction.setZ(-direction.z());
@@ -1416,8 +1425,8 @@ pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, 
             _ = color.setR(-color.r());
         }
 
-        dest.light_data0[point_index] = .new(position.x(), position.y(), position.z(), direction.x());
-        dest.light_data1[point_index] = .new(color.r(), color.g(), color.b(), direction.y());
+        dest.light_data0[point.pack_index] = .new(position.x(), position.y(), position.z(), direction.x());
+        dest.light_data1[point.pack_index] = .new(color.r(), color.g(), color.b(), direction.y());
     }
 
     group.pushLighting(dest);

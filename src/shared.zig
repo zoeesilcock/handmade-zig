@@ -887,14 +887,13 @@ pub const debug_color_table: [11]Color3 = .{
 
 pub const TexturedVertex = extern struct {
     position: Vector4,
-    normal: Vector3,
-    uv: Vector2,
+    light_uv: Vector2,
+    uv: Vector2, // TODO: Convert this down to 8-bit?
     color: u32, // Packed RGBA in memory order (ABGR in little endian).
-    emission: f32 = 0,
 
     // TODO: Doesn't need to be per-vertex - move this into its own per-primitive buffer.
+    normal: Vector3,
     light_index: u16 = 0,
-    light_count: u16 = 0,
 };
 
 pub const RenderSettings = extern struct {

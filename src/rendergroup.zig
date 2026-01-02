@@ -541,11 +541,12 @@ pub const RenderGroup = extern struct {
         opt_light_count: ?u16,
         opt_light_index: ?u16,
     ) void {
+        _ = opt_light_count;
+
         const emission = opt_emission orelse 0;
         std.debug.assert(emission >= 0);
         std.debug.assert(emission <= 1);
 
-        const light_count = opt_light_count orelse 0;
         const light_index = opt_light_index orelse 0;
         const commands: *RenderCommands = self.commands;
         const entry: ?*RenderEntryTexturedQuads = self.current_quads;
@@ -577,33 +578,25 @@ pub const RenderGroup = extern struct {
         vert[0].normal = n3;
         vert[0].uv = uv3;
         vert[0].color = c3;
-        vert[0].emission = emission;
         vert[0].light_index = light_index;
-        vert[0].light_count = light_count;
 
         vert[1].position = p0;
         vert[1].normal = n0;
         vert[1].uv = uv0;
         vert[1].color = c0;
-        vert[1].emission = emission;
         vert[1].light_index = light_index;
-        vert[1].light_count = light_count;
 
         vert[2].position = p2;
         vert[2].normal = n2;
         vert[2].uv = uv2;
         vert[2].color = c2;
-        vert[2].emission = emission;
         vert[2].light_index = light_index;
-        vert[2].light_count = light_count;
 
         vert[3].position = p1;
         vert[3].normal = n1;
         vert[3].uv = uv1;
         vert[3].color = c1;
-        vert[3].emission = emission;
         vert[3].light_index = light_index;
-        vert[3].light_count = light_count;
     }
 
     fn pushQuadUnpackedColors(
