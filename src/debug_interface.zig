@@ -403,6 +403,16 @@ pub const TimedBlock = if (INTERNAL) struct {
         _ = counter;
     }
 
+    pub fn beginHudFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
+        _ = source;
+        _ = counter;
+    }
+
+    pub fn endHudFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
+        _ = source;
+        _ = counter;
+    }
+
     pub fn frameMarker(source: std.builtin.SourceLocation, counter: @TypeOf(.EnumLiteral), seconds_elapsed: f32) void {
         _ = source;
         _ = counter;
