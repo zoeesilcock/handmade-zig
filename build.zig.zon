@@ -1,7 +1,7 @@
 .{
     .name = .handmade_zig,
     .version = "0.0.1",
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.2",
     .fingerprint = 0x309e02702e3f459,
     .dependencies = .{
         .zigwin32 = .{
