@@ -12,16 +12,6 @@
             }
         },
         {
-            "label": "build for raylib",
-            "type": "shell",
-            "command": "zig build -Dbackend=Raylib",
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        },
-        {
             "label": "build with timing",
             "type": "shell",
             "command": "zig build -Dtiming",
