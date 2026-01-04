@@ -1666,6 +1666,11 @@ fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
             optGLTexImage3D = @ptrCast(win32.wglGetProcAddress("glTexImage3D"));
             optGLTexSubImage3D = @ptrCast(win32.wglGetProcAddress("glTexSubImage3D"));
 
+            if (optGLDrawArrays == null) {
+                const opengl32 = win32.LoadLibraryA("opengl32.dll");
+                optGLDrawArrays = @ptrCast(win32.GetProcAddress(opengl32, "glDrawArrays"));
+            }
+
             std.debug.assert(optGLTexImage2DMultiSample != null);
             std.debug.assert(optGLBlitFrameBuffer != null);
             std.debug.assert(optGLCreateShader != null);
