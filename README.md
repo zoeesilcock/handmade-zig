@@ -28,7 +28,7 @@ zig build --watch -Dpackage=Library
 ```
 
 ## Debugging
-The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [C/C++ extension](https://github.com/Microsoft/vscode-cpptools) in VS Code. Using regular Visual Studio with C/C++ tooling appears to give the most reliable results. Another alternative that works almost as well as Visual Studio is [Rad Debugger](https://github.com/EpicGamesExt/raddebugger).
+The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [C/C++ extension](https://github.com/Microsoft/vscode-cpptools) in VS Code. Using regular Visual Studio with C/C++ tooling appears to give the most reliable results. Another alternative that works almost as well as Visual Studio is [RAD Debugger](https://github.com/EpicGamesExt/raddebugger).
 
 When running outside of an IDE, `OutputDebugString` messages can be viewed using [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview).
 
