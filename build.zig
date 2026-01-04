@@ -6,7 +6,6 @@ const FORCE_RELEASE_MODE = false;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
 const SLOW_DEFAULT = true;
-const BACKEND_DEFAULT = .Win32;
 
 const Package = enum {
     All,
