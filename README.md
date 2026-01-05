@@ -10,6 +10,11 @@ PowerShell:
 zig build ; Start-Process -NoNewWindow -FilePath ./zig-out/bin/handmade-zig.exe -WorkingDirectory ./data
 ```
 
+ZSH + Wine on Linux:
+```
+zig build -fwine -Dtarget=x86_64-windows && (cd data && ../zig-out/bin/handmade-zig.exe)
+```
+
 ## Assets
 Graphical assets are not included as they are not created by me. They need to be added to the `data/` directory manually. We currently expect the assets found in this location of the pre-order data: `handmade_hero_legacy_art.zip/v0_hhas`.
 
