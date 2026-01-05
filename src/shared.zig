@@ -1040,6 +1040,7 @@ pub const ControllerInput = extern struct {
 
     stick_average_x: f32 = 0,
     stick_average_y: f32 = 0,
+    clutch_max: f32 = 0, // This is the "dodge" clutch, eg. triggers or space bar?
 
     move_up: ControllerButtonState = ControllerButtonState{},
     move_down: ControllerButtonState = ControllerButtonState{},
@@ -1073,6 +1074,8 @@ pub const ControllerInput = extern struct {
 
         target.start_button.ended_down = self.start_button.ended_down;
         target.back_button.ended_down = self.back_button.ended_down;
+
+        target.clutch_max = self.clutch_max;
     }
 
     pub fn resetButtonTransitionCounts(self: *ControllerInput) void {
@@ -1208,7 +1211,6 @@ pub const GroundBuffer = extern struct {
 
 pub const ControlledHero = struct {
     brain_id: BrainId = undefined,
-    recenter_timer: f32 = 0,
     controller_direction: Vector2 = .zero(),
 };
 

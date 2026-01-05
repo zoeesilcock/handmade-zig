@@ -229,8 +229,8 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
         // const door_direction = 1;
         // _ = series.randomChoice(2);
-        door_direction = 3;
-        // door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
+        // door_direction = 3;
+        door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
         // door_direction = series.randomChoice(2);
 
         var created_z_door = false;
@@ -1054,7 +1054,7 @@ pub fn addPlayer(
     const hero_scale = 3;
     const shadow_alpha = 0.5;
     const color: Color = .white();
-    if (false) {
+    if (true) {
         body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
         body.addPiece(
             .Torso,

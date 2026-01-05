@@ -918,6 +918,12 @@ fn processXInput(
                 new_controller.is_connected = true;
                 new_controller.is_analog = old_controller.is_analog;
 
+                var trigger_max: u8 = pad.bLeftTrigger;
+                if (pad.bRightTrigger > trigger_max) {
+                    trigger_max = pad.bRightTrigger;
+                }
+                new_controller.clutch_max = @as(f32, @floatFromInt(trigger_max)) / 255;
+
                 // Left stick X.
                 new_controller.stick_average_x = processXInputStick(pad.sThumbLX, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
 
@@ -1051,7 +1057,7 @@ fn processXInputStick(value: i16, dead_zone: i16) f32 {
     if (value < -@as(i16, @intCast(dead_zone))) {
         result = (float_value + float_dead_zone) / (32768.0 - float_dead_zone);
     } else if (value > dead_zone) {
-        result = (float_value - float_dead_zone) / (32767.0 + float_dead_zone);
+        result = (float_value - float_dead_zone) / (32767.0 - float_dead_zone);
     }
 
     return result;
@@ -1158,17 +1164,22 @@ fn processKeyboardInput(
             @intFromEnum(win32.VK_RIGHT) => {
                 processKeyboardInputMessage(&keyboard_controller.action_right, is_down);
             },
-            @intFromEnum(win32.VK_SPACE) => {
-                processKeyboardInputMessage(&keyboard_controller.start_button, is_down);
-            },
             @intFromEnum(win32.VK_ESCAPE) => {
                 processKeyboardInputMessage(&keyboard_controller.back_button, is_down);
+            },
+            @intFromEnum(win32.VK_SPACE), @intFromEnum(win32.VK_SHIFT) => {
+                const either_down: bool =
+                    (win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0) or
+                    (win32.GetKeyState(@intFromEnum(win32.VK_SPACE)) & (1 << 7) != 0);
+                keyboard_controller.clutch_max = if (either_down) 1 else 0;
             },
             @intFromEnum(win32.VK_RETURN) => {
                 if (is_down and alt_was_down) {
                     if (message.hwnd) |window| {
                         toggleFullscreen(window);
                     }
+                } else {
+                    processKeyboardInputMessage(&keyboard_controller.start_button, is_down);
                 }
             },
             'P' => {
