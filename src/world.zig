@@ -41,6 +41,10 @@ pub const World = extern struct {
 
     chunk_hash: [4096]?*WorldChunk,
 
+    // Temporary - eventually these will be spatially partitioned, probably?
+    room_count: u32,
+    rooms: [65536 / 4]WorldRoom,
+
     arena: *MemoryArena,
 
     first_free_chunk: ?*WorldChunk,
@@ -55,6 +59,18 @@ pub const WorldChunk = extern struct {
     first_block: ?*WorldEntityBlock,
 
     next_in_hash: ?*WorldChunk = null,
+};
+
+pub const WorldRoomCamera = enum(u32) {
+    FocusOnRoom,
+    FocusOnPlayer,
+};
+
+pub const WorldRoom = extern struct {
+    min_pos: WorldPosition,
+    max_pos: WorldPosition,
+
+    camera: WorldRoomCamera,
 };
 
 pub const WorldEntityBlock = extern struct {
@@ -320,6 +336,23 @@ pub fn getWorldChunkInternal(
     }
 
     return opt_chunk;
+}
+
+pub fn addWorldRoom(
+    world: *World,
+    min_pos: WorldPosition,
+    max_pos: WorldPosition,
+    camera: WorldRoomCamera,
+) *WorldRoom {
+    std.debug.assert(world.room_count < world.rooms.len);
+    var room: *WorldRoom = &world.rooms[world.room_count];
+    world.room_count += 1;
+
+    room.min_pos = min_pos;
+    room.max_pos = max_pos;
+    room.camera = camera;
+
+    return room;
 }
 
 pub fn recannonicalizeCoordinate(chunk_dimension: f32, tile_abs: *i32, tile_rel: *f32) void {

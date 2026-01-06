@@ -24,6 +24,7 @@ const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const PairwiseCollisionRule = @import("world_mode.zig").PairwiseCollisionRule;
 const GameCamera = @import("world_mode.zig").GameCamera;
 const World = world.World;
+const WorldPosition = world.WorldPosition;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
 const EntityReference = entities.EntityReference;
@@ -42,7 +43,7 @@ const ParticleCache = particles.ParticleCache;
 pub const SimRegion = extern struct {
     world: *World,
 
-    origin: world.WorldPosition,
+    origin: WorldPosition,
     bounds: Rectangle3,
     updatable_bounds: Rectangle3,
 
@@ -307,10 +308,14 @@ fn addEntityToHash(sim_region: *SimRegion, entity: *Entity) void {
     markEntityOccupied(sim_region, entry);
 }
 
+pub fn getSimRelativePosition(sim_region: *SimRegion, position: WorldPosition) Vector3 {
+    return world.subtractPositions(sim_region.world, &position, &sim_region.origin);
+}
+
 pub fn beginWorldChange(
     sim_arena: *MemoryArena,
     game_world: *World,
-    origin: world.WorldPosition,
+    origin: WorldPosition,
     bounds: Rectangle3,
     delta_time: f32,
 ) *SimRegion {
@@ -369,14 +374,13 @@ pub fn beginWorldChange(
                     std.debug.assert(chunk.x == chunk_x);
                     std.debug.assert(chunk.y == chunk_y);
                     std.debug.assert(chunk.z == chunk_z);
-                    const chunk_position: world.WorldPosition = .{
+                    const chunk_position: WorldPosition = .{
                         .chunk_x = chunk_x,
                         .chunk_y = chunk_y,
                         .chunk_z = chunk_z,
                         .offset = .zero(),
                     };
-                    const chunk_delta: Vector3 =
-                        world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);
+                    const chunk_delta: Vector3 = getSimRelativePosition(sim_region, chunk_position);
                     const first_block: ?*world.WorldEntityBlock = chunk.first_block;
                     var last_block: ?*world.WorldEntityBlock = first_block;
                     var opt_block: ?*world.WorldEntityBlock = first_block;
@@ -447,9 +451,9 @@ pub fn endWorldChange(world_ptr: *World, sim_region: *SimRegion) void {
     var entity: [*]Entity = sim_region.entities;
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
         if (!entity[0].hasFlag(EntityFlags.Deleted.toInt())) {
-            const entity_position: world.WorldPosition =
+            const entity_position: WorldPosition =
                 world.mapIntoChunkSpace(world_ptr, sim_region.origin, entity[0].position);
-            var chunk_position: world.WorldPosition = entity_position;
+            var chunk_position: WorldPosition = entity_position;
             chunk_position.offset = .zero();
 
             const chunk_delta: Vector3 = entity_position.offset.minus(entity[0].position);

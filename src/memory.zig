@@ -120,7 +120,7 @@ pub const MemoryArena = extern struct {
 
             if (self.allocation_flags &
                 (@intFromEnum(PlatformMemoryBlockFlags.OverflowCheck) |
-                 @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck)) != 0)
+                    @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck)) != 0)
             {
                 self.minimum_block_size = 0;
                 aligned_size = shared.alignPow2(@intCast(size), params.alignment);
@@ -202,7 +202,7 @@ pub const MemoryArena = extern struct {
 
         result.block = self.current_block;
         if (self.current_block) |current_block| {
-           result.used = current_block.used;
+            result.used = current_block.used;
         }
 
         self.temp_count += 1;
@@ -235,7 +235,13 @@ pub const MemoryArena = extern struct {
 
     pub fn clear(self: *MemoryArena) void {
         while (self.current_block != null) {
+            // Because the arena itself may be stored in the last block,
+            // we must ensure that we don't look at it after freeing.
+            const this_is_last_block: bool = self.current_block.?.arena_prev == null;
             self.freeLastBlock();
+            if (this_is_last_block) {
+                break;
+            }
         }
     }
 

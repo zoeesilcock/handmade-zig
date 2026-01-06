@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const math = @import("math.zig");
 const world = @import("world.zig");
+const world_gen = @import("world_gen.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
@@ -20,7 +21,7 @@ const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 var global_config = &@import("config.zig").global_config;
-const tile_side_in_meters: f32 = 1.4;
+pub const tile_side_in_meters: f32 = 1.4;
 
 // Types.
 const Vector2 = math.Vector2;
@@ -35,6 +36,7 @@ const ControlledHero = shared.ControlledHero;
 const GameInputMouseButton = shared.GameInputMouseButton;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
+const WorldRoom = world.WorldRoom;
 const LoadedBitmap = asset.LoadedBitmap;
 const PlayingSound = audio.PlayingSound;
 const BitmapId = file_formats.BitmapId;
@@ -183,185 +185,9 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     const chunk_dimension_in_meters = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
 
     world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
-    world_mode.standard_room_dimension = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
-
-    const sim_memory = transient_state.arena.beginTemporaryMemory();
-    const null_origin: WorldPosition = .zero();
-    const null_rect: Rectangle3 = .{ .min = .zero(), .max = .zero() };
-    world_mode.creation_region = sim.beginWorldChange(
-        &transient_state.arena,
-        world_mode.world,
-        null_origin,
-        null_rect,
-        0,
-    );
-
-    var series = &world_mode.world.game_entropy;
-    const screen_base_z: i32 = 0;
-    var door_direction: u32 = 0;
-    var room_center_tile_x: i32 = 0;
-    var room_center_tile_y: i32 = 0;
-    var abs_tile_z: i32 = screen_base_z;
-
-    var last_screen_z: i32 = abs_tile_z;
-
-    var door_left = false;
-    var door_right = false;
-    var door_top = false;
-    var door_bottom = false;
-    var door_up = false;
-    var door_down = false;
-    var prev_room: StandardRoom = .{};
-
-    for (0..8) |screen_index| {
-        last_screen_z = abs_tile_z;
-
-        // const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
-        // const room_radius_y: i32 = 4 + @as(i32, @intCast(series.randomChoice(4)));
-        _ = series.randomChoice(4);
-        const room_radius_x: i32 = 8;
-        const room_radius_y: i32 = 8;
-        if (door_direction == 1) {
-            room_center_tile_x += room_radius_x;
-        } else if (door_direction == 0) {
-            room_center_tile_y += room_radius_y;
-        }
-
-        // const door_direction = 1;
-        // _ = series.randomChoice(2);
-        // door_direction = 3;
-        door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
-        // door_direction = series.randomChoice(2);
-
-        var created_z_door = false;
-        if (door_direction == 3) {
-            created_z_door = true;
-            door_down = true;
-        } else if (door_direction == 2) {
-            created_z_door = true;
-            door_up = true;
-        } else if (door_direction == 1) {
-            door_right = true;
-        } else {
-            door_top = true;
-        }
-
-        var left_hole: bool = @mod(screen_index, 2) != 0;
-        var right_hole: bool = !left_hole;
-        if (screen_index == 0) {
-            left_hole = false;
-            right_hole = false;
-        }
-
-        const room_width: i32 = 2 * room_radius_x + 1;
-        const room_height: i32 = 2 * room_radius_y + 1;
-        const room: StandardRoom = addStandardRoom(
-            world_mode,
-            room_center_tile_x,
-            room_center_tile_y,
-            abs_tile_z,
-            left_hole,
-            right_hole,
-            room_radius_x,
-            room_radius_y,
-        );
-
-        if (true) {
-            // _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
-            // _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
-
-            const snake_brain_id = addBrain(world_mode);
-            var segment_index: u32 = 0;
-            while (segment_index < 3) : (segment_index += 1) {
-                const x: u32 = 2 + segment_index;
-                _ = addSnakeSegment(world_mode, room.position[x][1], room.ground[x][1], snake_brain_id, segment_index);
-            }
-        }
-
-        for (0..@intCast(room_height)) |tile_y| {
-            for (0..@intCast(room_width)) |tile_x| {
-                const position: WorldPosition = room.position[tile_x][tile_y];
-                const ground: TraversableReference = room.ground[tile_x][tile_y];
-
-                var should_be_door = true;
-                if ((tile_x == 0) and (!door_left or (tile_y != @divFloor(room_height, 2)))) {
-                    should_be_door = false;
-                }
-                if ((tile_x == (room_width - 1)) and (!door_right or (tile_y != @divFloor(room_height, 2)))) {
-                    should_be_door = false;
-                }
-                if ((tile_y == 0) and (!door_bottom or (tile_x != @divFloor(room_width, 2)))) {
-                    should_be_door = false;
-                }
-                if ((tile_y == (room_height - 1)) and (!door_top or (tile_x != @divFloor(room_width, 2)))) {
-                    should_be_door = false;
-                }
-
-                if (!should_be_door) {
-                    _ = addWall(world_mode, position, ground);
-                } else if (created_z_door) {
-                    // if ((@mod(abs_tile_z, 2) == 1 and (tile_x == 10 and tile_y == 5)) or
-                    //     ((@mod(abs_tile_z, 2) == 0 and (tile_x == 4 and tile_y == 5))))
-                    // {
-                    //     _ = addStairs(world_mode, abs_tile_x, abs_tile_y, if (door_down) abs_tile_z - 1 else abs_tile_z);
-                    // }
-                }
-            }
-        }
-
-        door_left = door_right;
-        door_bottom = door_top;
-
-        if (created_z_door) {
-            door_up = !door_up;
-            door_down = !door_down;
-        } else {
-            door_up = false;
-            door_down = false;
-        }
-
-        door_right = false;
-        door_top = false;
-
-        if (door_direction == 3) {
-            abs_tile_z -= 1;
-        } else if (door_direction == 2) {
-            abs_tile_z += 1;
-        } else if (door_direction == 1) {
-            room_center_tile_x += room_radius_x + 1;
-        } else {
-            room_center_tile_y += room_radius_y + 1;
-        }
-
-        prev_room = room;
-    }
-
-    if (false) {
-        // Fill the low entity storage with walls.
-        while (world_mode.entity_count < (world_mode.low_entities.len - 16)) {
-            const coordinate: i32 = @intCast(1024 + world_mode.entity_count);
-            _ = addWall(world_mode, coordinate, coordinate, 0);
-        }
-    }
-
-    const camera_tile_x = room_center_tile_x;
-    const camera_tile_y = room_center_tile_y;
-    const camera_tile_z = last_screen_z;
-    const new_camera_position: WorldPosition = chunkPositionFromTilePosition(
-        world_mode.world,
-        camera_tile_x,
-        camera_tile_y,
-        camera_tile_z,
-        null,
-    );
-    world_mode.camera.position = new_camera_position;
-    world_mode.camera.simulation_center = new_camera_position;
-
-    sim.endWorldChange(world_mode.world, world_mode.creation_region.?);
-    world_mode.creation_region = null;
-    transient_state.arena.endTemporaryMemory(sim_memory);
-
     state.mode = .{ .world = world_mode };
+
+    world_gen.createWorld(world_mode, transient_state);
 }
 
 fn checkForJoiningPlayers(
@@ -719,14 +545,14 @@ pub fn updateAndRenderWorld(
 
         var world_transform = ObjectTransform.defaultUpright();
 
-        // render_group.pushVolumeOutline(
-        //     &world_transform,
-        //     .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
-        //     .new(1, 1, 0, 1),
-        //     0.01,
-        // );
-
         if (false) {
+            render_group.pushVolumeOutline(
+                &world_transform,
+                .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
+                .new(1, 1, 0, 1),
+                0.01,
+            );
+
             render_group.pushRectangleOutline(
                 &world_transform,
                 screen_bounds.getDimension(),
@@ -753,6 +579,20 @@ pub fn updateAndRenderWorld(
                 Vector3.new(0, 0, 0.005),
                 Color.new(1, 0, 1, 1),
                 0.1,
+            );
+        }
+
+        var room_index: u32 = 0;
+        while (room_index < world_mode.world.room_count) : (room_index += 1) {
+            const room: *WorldRoom = &world_mode.world.rooms[room_index];
+            render_group.pushVolumeOutline(
+                &world_transform,
+                .fromMinMax(
+                    sim.getSimRelativePosition(world_sim.sim_region, room.min_pos),
+                    sim.getSimRelativePosition(world_sim.sim_region, room.max_pos),
+                ),
+                .new(1, 1, 0, 1),
+                0.01,
             );
         }
     }
@@ -803,206 +643,18 @@ fn beginEntity(world_mode: *GameModeWorld) *Entity {
     return entity;
 }
 
-fn endEntity(world_mode: *GameModeWorld, entity: *Entity, chunk_position: WorldPosition) void {
+pub fn endEntity(world_mode: *GameModeWorld, entity: *Entity, chunk_position: WorldPosition) void {
     entity.position = world.subtractPositions(world_mode.world, &chunk_position, &world_mode.creation_region.?.origin);
 }
 
-fn beginGroundedEntity(
+pub fn beginGroundedEntity(
     world_mode: *GameModeWorld,
 ) *Entity {
     const entity = beginEntity(world_mode);
     return entity;
 }
 
-const StandardRoom = struct {
-    position: [64][64]WorldPosition = undefined,
-    ground: [64][64]TraversableReference = undefined,
-};
-
-fn addStandardRoom(
-    world_mode: *GameModeWorld,
-    abs_tile_x: i32,
-    abs_tile_y: i32,
-    abs_tile_z: i32,
-    left_hole: bool,
-    right_hole: bool,
-    radius_x: i32,
-    radius_y: i32,
-) StandardRoom {
-    var result: StandardRoom = .{};
-    var offset_y: i32 = -radius_y;
-
-    // const has_left_hole = left_hole;
-    // const has_right_hole = right_hole;
-    _ = left_hole;
-    _ = right_hole;
-    const has_left_hole = true;
-    const has_right_hole = true;
-
-    while (offset_y <= radius_y) : (offset_y += 1) {
-        var offset_x: i32 = -radius_x;
-        while (offset_x <= radius_x) : (offset_x += 1) {
-            var color: Color = .newFromSRGB(0.31, 0.49, 0.32, 1);
-            color = .newFromSRGB(1, 1, 1, 1);
-
-            var standing_on: TraversableReference = .{};
-            var world_position = chunkPositionFromTilePosition(
-                world_mode.world,
-                abs_tile_x + offset_x,
-                abs_tile_y + offset_y,
-                abs_tile_z,
-                null,
-            );
-
-            if (has_left_hole and offset_x >= -5 and offset_x <= -3 and offset_y >= 0 and offset_y <= 1) {
-                // Hole down to the floor below.
-            } else if (has_right_hole and offset_x >= 3 and offset_x <= 4 and offset_y >= -1 and offset_y <= 2) {
-                // Hole down to the floor below.
-            } else {
-                var wall_height: f32 = 0.5;
-                if (offset_x >= -2 and offset_x <= 1 and (offset_y == 2 or offset_y == -2)) {
-                    color = if (offset_y == -2) .newFromSRGB(1, 0, 0, 1) else .newFromSRGB(0, 0, 1, 1);
-                    wall_height = 3;
-                }
-
-                _ = world_position.offset.setX(world_position.offset.x() + 0 * world_mode.world.game_entropy.randomBilateral());
-                _ = world_position.offset.setY(world_position.offset.y() + 0 * world_mode.world.game_entropy.randomBilateral());
-                _ = world_position.offset.setZ(world_position.offset.z() + wall_height + 0.5 * world_mode.world.game_entropy.randomUnilateral());
-
-                const entity: *Entity = beginGroundedEntity(world_mode);
-                standing_on.entity.ptr = entity;
-                standing_on.entity.index = entity.id;
-                entity.traversable_count = 1;
-                entity.traversables[0].position = Vector3.zero();
-                entity.traversables[0].occupier = null;
-                entity.addPieceV2(
-                    .Grass,
-                    .new(0.7, wall_height),
-                    .zero(),
-                    color,
-                    @intFromEnum(EntityVisiblePieceFlag.Cube),
-                );
-                endEntity(world_mode, entity, world_position);
-            }
-
-            const array_x: usize = @intCast(offset_x + radius_x);
-            const array_y: usize = @intCast(offset_y + radius_y);
-            result.position[array_x][array_y] = world_position;
-            result.ground[array_x][array_y] = standing_on;
-        }
-    }
-
-    var stair_positions: [4]WorldPosition = [1]WorldPosition{undefined} ** 4;
-    offset_y = -1;
-    while (offset_y <= 2) : (offset_y += 1) {
-        const offset_x: i32 = 3;
-        var standing_on: TraversableReference = .{};
-        var world_position = chunkPositionFromTilePosition(
-            world_mode.world,
-            abs_tile_x + offset_x,
-            abs_tile_y + offset_y,
-            abs_tile_z,
-            .new(0.5 * tile_side_in_meters, 0, 0),
-        );
-        stair_positions[@intCast(offset_y + 1)] = world_position;
-
-        _ = world_position.offset.setZ(
-            world_position.offset.z() + 0.3 - (@as(f32, @floatFromInt(offset_y + 2)) * 0.8),
-        );
-
-        const entity: *Entity = beginGroundedEntity(world_mode);
-        standing_on.entity.ptr = entity;
-        standing_on.entity.index = entity.id;
-        entity.traversable_count = 1;
-        entity.traversables[0].position = Vector3.zero();
-        entity.traversables[0].occupier = null;
-        entity.addPieceV2(
-            .Grass,
-            .new(0.7, 0.5),
-            .zero(),
-            .newFromSRGB(0.31, 0.49, 0.32, 1),
-            @intFromEnum(EntityVisiblePieceFlag.Cube),
-        );
-        endEntity(world_mode, entity, world_position);
-
-        const array_x: usize = @intCast(offset_x + radius_x);
-        const array_y: usize = @intCast(offset_y + radius_y);
-        result.position[array_x][array_y] = world_position;
-        result.ground[array_x][array_y] = standing_on;
-    }
-
-    {
-        // Hole camera.
-        const entity: *Entity = beginGroundedEntity(world_mode);
-        entity.camera_behavior =
-            @intFromEnum(CameraBehavior.Inspect) |
-            @intFromEnum(CameraBehavior.Offset) |
-            @intFromEnum(CameraBehavior.GeneralVelocityConstraint);
-        entity.camera_offset = .new(0, 2, 3);
-        entity.camera_min_time = 1;
-        entity.camera_min_velocity = 0;
-        entity.camera_max_velocity = 0.1;
-        const x_dim: f32 = 1.5 * tile_side_in_meters;
-        const y_dim: f32 = 0.5 * tile_side_in_meters;
-        entity.collision_volume = .fromMinMax(
-            .new(-x_dim, -y_dim, 0),
-            .new(x_dim, y_dim, 0.5 * world_mode.typical_floor_height),
-        );
-        endEntity(world_mode, entity, result.position[@intCast(-4 + radius_x)][@intCast(-1 + radius_y)]);
-    }
-
-    {
-        // Stairs camera, on stairs.
-        var entity: *Entity = beginGroundedEntity(world_mode);
-        entity.camera_behavior = @intFromEnum(CameraBehavior.ViewPlayer);
-        var x_dim: f32 = 0.5 * tile_side_in_meters;
-        var y_dim: f32 = 1.5 * tile_side_in_meters;
-        entity.collision_volume = .fromMinMax(
-            .new(-x_dim, -y_dim, -0.5 * world_mode.typical_floor_height),
-            .new(x_dim, y_dim, 0.3 * world_mode.typical_floor_height),
-        );
-        endEntity(world_mode, entity, stair_positions[2]);
-
-        // Stairs camera, at top of stairs.
-        entity = beginGroundedEntity(world_mode);
-        entity.camera_behavior =
-            @intFromEnum(CameraBehavior.ViewPlayer) |
-            @intFromEnum(CameraBehavior.DirectionalVelocityConstraint);
-        entity.camera_velocity_direction = .new(0, 1, 0);
-        entity.camera_min_velocity = 0.2;
-        entity.camera_max_velocity = std.math.floatMax(f32);
-        x_dim = 1 * tile_side_in_meters;
-        y_dim = 1.5 * tile_side_in_meters;
-        entity.collision_volume = .fromMinMax(
-            .new(-x_dim, -y_dim, -0.2 * world_mode.typical_floor_height),
-            .new(x_dim, y_dim, 0.5 * world_mode.typical_floor_height),
-        );
-        endEntity(world_mode, entity, stair_positions[0]);
-    }
-
-    const room_position = chunkPositionFromTilePosition(
-        world_mode.world,
-        abs_tile_x,
-        abs_tile_y,
-        abs_tile_z,
-        null,
-    );
-
-    const room: *Entity = beginGroundedEntity(world_mode);
-    room.collision_volume = makeSimpleGroundedCollision(
-        @as(f32, @floatFromInt((2 * radius_x + 1))) * tile_side_in_meters,
-        @as(f32, @floatFromInt((2 * radius_y + 1))) * tile_side_in_meters,
-        world_mode.typical_floor_height,
-        0,
-    );
-
-    room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
-    endEntity(world_mode, room, room_position);
-
-    return result;
-}
-
-fn addBrain(world_mode: *GameModeWorld) BrainId {
+pub fn addBrain(world_mode: *GameModeWorld) BrainId {
     world_mode.last_used_entity_storage_index += 1;
     const brain_id: BrainId = .{ .value = world_mode.last_used_entity_storage_index };
     return brain_id;
@@ -1081,40 +733,6 @@ pub fn addPlayer(
     endEntity(world_mode, body, position);
 }
 
-fn addWall(world_mode: *GameModeWorld, world_position: WorldPosition, standing_on: TraversableReference) void {
-    const entity = beginGroundedEntity(world_mode);
-
-    entity.collision_volume = makeSimpleGroundedCollision(
-        tile_side_in_meters,
-        tile_side_in_meters,
-        world_mode.typical_floor_height - 0.1,
-        0,
-    );
-
-    entity.addFlags(EntityFlags.Collides.toInt());
-    entity.occupying = standing_on;
-    entity.addPiece(.Tree, 2.5, .zero(), .white(), null);
-
-    endEntity(world_mode, entity, world_position);
-}
-
-fn addStairs(world_mode: *GameModeWorld, abs_tile_x: i32, abs_tile_y: i32, abs_tile_z: i32) void {
-    const world_position = chunkPositionFromTilePosition(world_mode.world, abs_tile_x, abs_tile_y, abs_tile_z, null);
-    const entity = beginGroundedEntity(world_mode);
-
-    entity.collision_volume = makeSimpleGroundedCollision(
-        tile_side_in_meters,
-        tile_side_in_meters * 2.0,
-        world_mode.typical_floor_height * 1.1,
-        0,
-    );
-    entity.walkable_dimension = entity.collision_volume.getDimension().xy();
-    entity.walkable_height = world_mode.typical_floor_height;
-    entity.addFlags(EntityFlags.Collides.toInt());
-
-    endEntity(world_mode, entity, world_position);
-}
-
 fn addMonster(world_mode: *GameModeWorld, world_position: WorldPosition, standing_on: TraversableReference) void {
     var entity = beginGroundedEntity(world_mode);
 
@@ -1132,7 +750,7 @@ fn addMonster(world_mode: *GameModeWorld, world_position: WorldPosition, standin
     endEntity(world_mode, entity, world_position);
 }
 
-fn addSnakeSegment(
+pub fn addSnakeSegment(
     world_mode: *GameModeWorld,
     world_position: WorldPosition,
     standing_on: TraversableReference,
@@ -1186,7 +804,7 @@ fn initHitPoints(entity: *Entity, count: u32) void {
     }
 }
 
-fn makeSimpleGroundedCollision(
+pub fn makeSimpleGroundedCollision(
     x_dimension: f32,
     y_dimension: f32,
     z_dimension: f32,
