@@ -3,6 +3,7 @@ const memory = @import("memory.zig");
 const math = @import("math.zig");
 const world = @import("world.zig");
 const world_gen = @import("world_gen.zig");
+const room_gen = @import("room_gen.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
@@ -21,7 +22,6 @@ const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 var global_config = &@import("config.zig").global_config;
-pub const tile_side_in_meters: f32 = 1.4;
 
 // Types.
 const Vector2 = math.Vector2;
@@ -64,15 +64,12 @@ const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityVisiblePiece = entities.EntityVisiblePiece;
 const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
 const CameraBehavior = entities.CameraBehavior;
+const SimRegion = sim.SimRegion;
 const Brain = brains.Brain;
 const BrainId = brains.BrainId;
 const BrainSlot = brains.BrainSlot;
 const BrainHero = brains.BrainHero;
-const BrainSnake = brains.BrainSnake;
-const BrainMonster = brains.BrainMonster;
-const BrainFamiliar = brains.BrainFamiliar;
 const ReservedBrainId = brains.ReservedBrainId;
-const SimRegion = sim.SimRegion;
 
 pub const GameCamera = struct {
     following_entity_index: EntityId = .{},
@@ -100,9 +97,6 @@ pub const GameModeWorld = struct {
     particles: [256]Particle = [1]Particle{Particle{}} ** 256,
     particle_cels: [particles.PARTICLE_CEL_DIM][particles.PARTICLE_CEL_DIM]ParticleCel = undefined,
     particle_cache: *ParticleCache,
-
-    creation_region: ?*SimRegion,
-    last_used_entity_storage_index: u32,
 
     last_mouse_position: Vector2,
     use_debug_camera: bool,
@@ -176,7 +170,6 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
         state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false));
     particles.initParticleCache(world_mode.particle_cache, transient_state.assets);
 
-    world_mode.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
     world_mode.effects_entropy = .seed(1234, null, null, null);
     world_mode.typical_floor_height = 5;
 
@@ -191,6 +184,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 }
 
 fn checkForJoiningPlayers(
+    world_mode: *GameModeWorld,
     opt_state: ?*shared.State,
     opt_input: ?*shared.GameInput,
     sim_region: *SimRegion,
@@ -206,13 +200,82 @@ fn checkForJoiningPlayers(
                         var traversable: TraversableReference = undefined;
                         if (sim.getClosestTraversable(sim_region, .zero(), &traversable, 0)) {
                             controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
-                            addPlayer(state.mode.world, sim_region, traversable, controlled_hero.brain_id);
+                            addPlayer(world_mode, sim_region, traversable, controlled_hero.brain_id);
                         }
                     }
                 }
             }
         }
     }
+}
+
+fn addPlayer(
+    world_mode: *GameModeWorld,
+    sim_region: *SimRegion,
+    standing_on: TraversableReference,
+    brain_id: BrainId,
+) void {
+    const position: WorldPosition = world.mapIntoChunkSpace(
+        sim_region.world,
+        sim_region.origin,
+        standing_on.getSimSpaceTraversable().position,
+    );
+    var body = room_gen.addEntity(sim_region);
+    const head = room_gen.addEntity(sim_region);
+    head.collision_volume = room_gen.makeSimpleGroundedCollision(1, 0.5, 0.6, 0.7);
+    head.addFlags(EntityFlags.Collides.toInt());
+
+    const glove = room_gen.addEntity(sim_region);
+    glove.addFlags(EntityFlags.Collides.toInt());
+    glove.movement_mode = .AngleOffset;
+    glove.angle_current = -0.25 * math.TAU32;
+    glove.angle_base_distance = 0.3;
+    glove.angle_swipe_distance = 1;
+    glove.angle_current_distance = 0.3;
+
+    // initHitPoints(body, 3);
+
+    head.brain_slot = BrainSlot.forField(BrainHero, "head");
+    head.brain_id = brain_id;
+
+    body.brain_slot = BrainSlot.forField(BrainHero, "body");
+    body.brain_id = brain_id;
+    body.occupying = standing_on;
+
+    glove.brain_slot = BrainSlot.forField(BrainHero, "glove");
+    glove.brain_id = brain_id;
+
+    if (world_mode.camera.following_entity_index.value == 0) {
+        world_mode.camera.following_entity_index = head.id;
+    }
+
+    const hero_scale = 3;
+    const color: Color = .white();
+    if (true) {
+        body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, room_gen.shadow_alpha), null);
+        body.addPiece(
+            .Torso,
+            hero_scale * 1.2,
+            .new(0, 0, 0),
+            color,
+            @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
+        );
+        body.addPiece(
+            .Cape,
+            hero_scale * 1.2,
+            .new(0, -0.1, 0),
+            color,
+            @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
+        );
+
+        head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
+
+        glove.addPiece(.Sword, hero_scale * 0.25, .new(0, 0, 0), color, null);
+    }
+
+    room_gen.placeEntity(sim_region, glove, position);
+    room_gen.placeEntity(sim_region, head, position);
+    room_gen.placeEntity(sim_region, body, position);
 }
 
 fn beginSim(
@@ -279,9 +342,8 @@ fn simulate(
 fn endSim(
     arena: *MemoryArena,
     world_sim: *WorldSim,
-    world_ptr: *world.World,
 ) void {
-    sim.endWorldChange(world_ptr, world_sim.sim_region);
+    sim.endWorldChange(world_sim.sim_region);
     arena.endTemporaryMemory(world_sim.sim_memory);
 }
 
@@ -314,7 +376,7 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
         null,
         null,
     );
-    endSim(&arena, &world_sim, work.world_mode.world);
+    endSim(&arena, &world_sim);
 
     arena.clear();
 }
@@ -496,7 +558,7 @@ pub fn updateAndRenderWorld(
         input.frame_delta_time,
     );
     {
-        checkForJoiningPlayers(state, input, world_sim.sim_region);
+        checkForJoiningPlayers(world_mode, state, input, world_sim.sim_region);
 
         simulate(
             &world_sim,
@@ -545,7 +607,7 @@ pub fn updateAndRenderWorld(
 
         var world_transform = ObjectTransform.defaultUpright();
 
-        if (false) {
+        if (true) {
             render_group.pushVolumeOutline(
                 &world_transform,
                 .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
@@ -610,7 +672,7 @@ pub fn updateAndRenderWorld(
         }
     }
 
-    endSim(&transient_state.arena, &world_sim, world_mode.world);
+    endSim(&transient_state.arena, &world_sim);
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;
@@ -624,230 +686,6 @@ pub fn updateAndRenderWorld(
     if (!heores_exist) {
         cutscene.playTitleScreen(state, transient_state);
     }
-
-    return result;
-}
-
-fn allocateEntityId(world_mode: *GameModeWorld) EntityId {
-    world_mode.last_used_entity_storage_index += 1;
-    const result: EntityId = .{ .value = world_mode.last_used_entity_storage_index };
-    return result;
-}
-
-fn beginEntity(world_mode: *GameModeWorld) *Entity {
-    const entity: *Entity = sim.createEntity(world_mode.creation_region.?, allocateEntityId(world_mode));
-
-    entity.x_axis = .new(1, 0);
-    entity.y_axis = .new(0, 1);
-
-    return entity;
-}
-
-pub fn endEntity(world_mode: *GameModeWorld, entity: *Entity, chunk_position: WorldPosition) void {
-    entity.position = world.subtractPositions(world_mode.world, &chunk_position, &world_mode.creation_region.?.origin);
-}
-
-pub fn beginGroundedEntity(
-    world_mode: *GameModeWorld,
-) *Entity {
-    const entity = beginEntity(world_mode);
-    return entity;
-}
-
-pub fn addBrain(world_mode: *GameModeWorld) BrainId {
-    world_mode.last_used_entity_storage_index += 1;
-    const brain_id: BrainId = .{ .value = world_mode.last_used_entity_storage_index };
-    return brain_id;
-}
-
-pub fn addPlayer(
-    world_mode: *GameModeWorld,
-    sim_region: *SimRegion,
-    standing_on: TraversableReference,
-    brain_id: BrainId,
-) void {
-    world_mode.creation_region = sim_region;
-    defer world_mode.creation_region = null;
-
-    const position: WorldPosition = world.mapIntoChunkSpace(
-        sim_region.world,
-        sim_region.origin,
-        standing_on.getSimSpaceTraversable().position,
-    );
-    var body = beginGroundedEntity(world_mode);
-    const head = beginGroundedEntity(world_mode);
-    head.collision_volume = makeSimpleGroundedCollision(1, 0.5, 0.6, 0.7);
-    head.addFlags(EntityFlags.Collides.toInt());
-
-    const glove = beginGroundedEntity(world_mode);
-    glove.addFlags(EntityFlags.Collides.toInt());
-    glove.movement_mode = .AngleOffset;
-    glove.angle_current = -0.25 * math.TAU32;
-    glove.angle_base_distance = 0.3;
-    glove.angle_swipe_distance = 1;
-    glove.angle_current_distance = 0.3;
-
-    // initHitPoints(body, 3);
-
-    head.brain_slot = BrainSlot.forField(BrainHero, "head");
-    head.brain_id = brain_id;
-
-    body.brain_slot = BrainSlot.forField(BrainHero, "body");
-    body.brain_id = brain_id;
-    body.occupying = standing_on;
-
-    glove.brain_slot = BrainSlot.forField(BrainHero, "glove");
-    glove.brain_id = brain_id;
-
-    if (world_mode.camera.following_entity_index.value == 0) {
-        world_mode.camera.following_entity_index = head.id;
-    }
-
-    const hero_scale = 3;
-    const shadow_alpha = 0.5;
-    const color: Color = .white();
-    if (true) {
-        body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, shadow_alpha), null);
-        body.addPiece(
-            .Torso,
-            hero_scale * 1.2,
-            .new(0, 0, 0),
-            color,
-            @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
-        );
-        body.addPiece(
-            .Cape,
-            hero_scale * 1.2,
-            .new(0, -0.1, 0),
-            color,
-            @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
-        );
-
-        head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
-
-        glove.addPiece(.Sword, hero_scale * 0.25, .new(0, 0, 0), color, null);
-    }
-
-    endEntity(world_mode, glove, position);
-    endEntity(world_mode, head, position);
-    endEntity(world_mode, body, position);
-}
-
-fn addMonster(world_mode: *GameModeWorld, world_position: WorldPosition, standing_on: TraversableReference) void {
-    var entity = beginGroundedEntity(world_mode);
-
-    entity.addFlags(EntityFlags.Collides.toInt());
-
-    entity.brain_slot = BrainSlot.forField(BrainMonster, "body");
-    entity.brain_id = addBrain(world_mode);
-    entity.occupying = standing_on;
-
-    initHitPoints(entity, 3);
-
-    entity.addPiece(.Shadow, 4.5, .zero(), .new(1, 1, 1, 0.5), null);
-    entity.addPiece(.Torso, 4.5, .zero(), .white(), null);
-
-    endEntity(world_mode, entity, world_position);
-}
-
-pub fn addSnakeSegment(
-    world_mode: *GameModeWorld,
-    world_position: WorldPosition,
-    standing_on: TraversableReference,
-    brain_id: BrainId,
-    segment_index: u32,
-) void {
-    var entity = beginGroundedEntity(world_mode);
-
-    entity.addFlags(EntityFlags.Collides.toInt());
-
-    entity.brain_slot = BrainSlot.forIndexedField(BrainSnake, "segments", segment_index);
-    entity.brain_id = brain_id;
-    entity.occupying = standing_on;
-
-    initHitPoints(entity, 3);
-
-    entity.addPiece(.Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
-    entity.addPiece(if (segment_index != 0) .Torso else .Head, 1.5, .zero(), .white(), null);
-    entity.addPieceLight(0.1, .new(0, 0, 0.5), 1.0, .new(1, 1, 0));
-
-    endEntity(world_mode, entity, world_position);
-}
-
-fn addFamiliar(world_mode: *GameModeWorld, world_position: WorldPosition, standing_on: TraversableReference) void {
-    const entity = beginGroundedEntity(world_mode);
-
-    entity.addFlags(EntityFlags.Collides.toInt());
-
-    entity.brain_slot = BrainSlot.forField(BrainFamiliar, "head");
-    entity.brain_id = addBrain(world_mode);
-    entity.occupying = standing_on;
-
-    const shadow_alpha = 0.5;
-    entity.addPiece(.Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
-    entity.addPiece(.Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
-
-    endEntity(world_mode, entity, world_position);
-}
-
-fn initHitPoints(entity: *Entity, count: u32) void {
-    std.debug.assert(count <= entity.hit_points.len);
-
-    entity.hit_point_max = count;
-
-    var hit_point_index: u32 = 0;
-    while (hit_point_index < entity.hit_point_max) : (hit_point_index += 1) {
-        const hit_point = &entity.hit_points[hit_point_index];
-
-        hit_point.flags = 0;
-        hit_point.filled_amount = shared.HIT_POINT_SUB_COUNT;
-    }
-}
-
-pub fn makeSimpleGroundedCollision(
-    x_dimension: f32,
-    y_dimension: f32,
-    z_dimension: f32,
-    opt_z_offset: ?f32,
-) Rectangle3 {
-    const z_offset: f32 = opt_z_offset orelse 0;
-    const result: Rectangle3 = .fromCenterDimension(
-        Vector3.new(0, 0, 0.5 * z_dimension + z_offset),
-        Vector3.new(x_dimension, y_dimension, z_dimension),
-    );
-
-    return result;
-}
-
-pub fn chunkPositionFromTilePosition(
-    game_world: *world.World,
-    abs_tile_x: i32,
-    abs_tile_y: i32,
-    abs_tile_z: i32,
-    opt_additional_offset: ?Vector3,
-) WorldPosition {
-    const tile_depth_in_meters = game_world.chunk_dimension_in_meters.z();
-
-    const base_position = WorldPosition.zero();
-    const tile_dimension = Vector3.new(
-        tile_side_in_meters,
-        tile_side_in_meters,
-        tile_depth_in_meters,
-    );
-    var offset = Vector3.new(
-        @floatFromInt(abs_tile_x),
-        @floatFromInt(abs_tile_y),
-        @floatFromInt(abs_tile_z),
-    ).hadamardProduct(tile_dimension);
-    _ = offset.setZ(offset.z() - 0.4 * tile_depth_in_meters);
-
-    if (opt_additional_offset) |additional_offset| {
-        offset = offset.plus(additional_offset);
-    }
-
-    const result = world.mapIntoChunkSpace(game_world, base_position, offset);
-
-    std.debug.assert(world.isVector3Canonical(game_world, result.offset));
 
     return result;
 }

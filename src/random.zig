@@ -56,7 +56,7 @@ pub const Series = extern struct {
     }
 
     pub fn randomIntBetween(self: *Series, min: i32, max: i32) i32 {
-        return min + @mod(@as(i32, @intCast(self.randomInt())), ((max + 1) - min));
+        return min + @mod(@as(i32, @bitCast(self.randomInt())), ((max + 1) - min));
     }
 };
 

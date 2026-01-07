@@ -191,57 +191,57 @@ pub fn generateLightingPattern(solution: *LightingSolution, pattern_index: u32) 
         &lighting_pattern_generators[@mod(pattern_index, lighting_pattern_generators.len)];
     var series: random.Series = solution.series;
 
-    var min_test_avg: f32 = std.math.floatMax(f32);
-    var max_test_avg: f32 = -std.math.floatMax(f32);
-    const sample_count: u32 = 65536;
-    var test_index: u32 = 0;
-    while (test_index <= 256) : (test_index += 1) {
-        var test_sum: f32 = 0;
-        var dir_index: u32 = 0;
-        while (dir_index < sample_count) : (dir_index += 1) {
-            while (true) {
-                var dir: Vector3 = Vector3.new(
-                    series.randomBilateral(),
-                    series.randomBilateral(),
-                    series.randomBilateral(),
-                );
-
-                if (dir.z() < 0) {
-                    _ = dir.setZ(-dir.z());
-                }
-
-                if (dir.lengthSquared() <= 1.0) {
-                    dir = dir.normalizeOrZero();
-                    test_sum += testFunc(dir) * dir.z();
-
-                    break;
-                }
-            }
-        }
-
-        const test_avg: f32 = test_sum / @as(f32, @floatFromInt(sample_count));
-        min_test_avg = @min(min_test_avg, test_avg);
-        max_test_avg = @max(max_test_avg, test_avg);
-    }
-
-    var min_avg: f32 = std.math.floatMax(f32);
-    var max_avg: f32 = -std.math.floatMax(f32);
+    // var min_test_avg: f32 = std.math.floatMax(f32);
+    // var max_test_avg: f32 = -std.math.floatMax(f32);
+    // const sample_count: u32 = 65536;
+    // var test_index: u32 = 0;
+    // while (test_index <= 256) : (test_index += 1) {
+    //     var test_sum: f32 = 0;
+    //     var dir_index: u32 = 0;
+    //     while (dir_index < sample_count) : (dir_index += 1) {
+    //         while (true) {
+    //             var dir: Vector3 = Vector3.new(
+    //                 series.randomBilateral(),
+    //                 series.randomBilateral(),
+    //                 series.randomBilateral(),
+    //             );
+    //
+    //             if (dir.z() < 0) {
+    //                 _ = dir.setZ(-dir.z());
+    //             }
+    //
+    //             if (dir.lengthSquared() <= 1.0) {
+    //                 dir = dir.normalizeOrZero();
+    //                 test_sum += testFunc(dir) * dir.z();
+    //
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //
+    //     const test_avg: f32 = test_sum / @as(f32, @floatFromInt(sample_count));
+    //     min_test_avg = @min(min_test_avg, test_avg);
+    //     max_test_avg = @max(max_test_avg, test_avg);
+    // }
+    //
+    // var min_avg: f32 = std.math.floatMax(f32);
+    // var max_avg: f32 = -std.math.floatMax(f32);
     var version_index: u32 = 0;
     while (version_index < solution.sample_points.len) : (version_index += 1) {
         var temp: [64]Vector3 = undefined;
         pattern.generator(&series, &temp);
 
-        var sum: f32 = 0;
-        var dir_index: u32 = 0;
-        while (dir_index < temp.len) : (dir_index += 1) {
-            sum += testFunc(temp[dir_index]);
-        }
-        const avg: f32 = sum / @as(f32, @floatFromInt(sample_count));
-        min_avg = @min(min_avg, avg);
-        max_avg = @max(max_avg, avg);
+        // var sum: f32 = 0;
+        // var dir_index: u32 = 0;
+        // while (dir_index < temp.len) : (dir_index += 1) {
+        //     sum += testFunc(temp[dir_index]);
+        // }
+        // const avg: f32 = sum / @as(f32, @floatFromInt(sample_count));
+        // min_avg = @min(min_avg, avg);
+        // max_avg = @max(max_avg, avg);
 
         var dest = &solution.sample_points[version_index];
-        dir_index = 0;
+        var dir_index: u32 = 0;
         while (dir_index < dest.len) : (dir_index += 1) {
             dest[dir_index] = .new(
                 temp[4 * dir_index + 0],

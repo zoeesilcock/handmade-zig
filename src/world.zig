@@ -1,5 +1,6 @@
 const shared = @import("shared.zig");
 const memory = @import("memory.zig");
+const brains = @import("brains.zig");
 const intrinsics = @import("intrinsics.zig");
 const math = @import("math.zig");
 const sim = @import("sim.zig");
@@ -27,6 +28,9 @@ const StoredEntityReference = entities.StoredEntityReference;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
 const TicketMutex = shared.TicketMutex;
+const BrainId = brains.BrainId;
+const ReservedBrainId = brains.ReservedBrainId;
+const EntityId = entities.EntityId;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
@@ -34,8 +38,11 @@ const TILES_PER_CHUNK = 16;
 
 pub const World = extern struct {
     change_ticket: TicketMutex,
+
     chunk_dimension_in_meters: Vector3,
     game_entropy: random.Series,
+
+    last_used_entity_storage_index: u32,
 
     first_free: ?*WorldEntityBlock,
 
@@ -132,8 +139,21 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
     world.first_free = null;
     world.arena = parent_arena;
     world.game_entropy = .seed(1234, null, null, null);
+    world.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
 
     return world;
+}
+
+pub fn allocateEntityId(world: *World) EntityId {
+    world.last_used_entity_storage_index += 1;
+    const result: EntityId = .{ .value = world.last_used_entity_storage_index };
+    return result;
+}
+
+pub fn addBrain(world: *World) BrainId {
+    world.last_used_entity_storage_index += 1;
+    const brain_id: BrainId = .{ .value = world.last_used_entity_storage_index };
+    return brain_id;
 }
 
 fn isCanonical(chunk_dimension: f32, relative: f32) bool {

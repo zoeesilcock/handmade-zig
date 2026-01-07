@@ -89,6 +89,14 @@ const WallTestData = struct {
     normal: Vector3,
 };
 
+pub fn allocateEntityId(region: *SimRegion) EntityId {
+    return world.allocateEntityId(region.world);
+}
+
+pub fn addBrain(region: *SimRegion) BrainId {
+    return world.addBrain(region.world);
+}
+
 fn shiftIndex(index: MemoryIndex) MemoryIndex {
     const shiftee: u64 = 1;
     const shift: u6 = @truncate(index);
@@ -443,7 +451,7 @@ pub fn beginWorldChange(
     return sim_region;
 }
 
-pub fn endWorldChange(world_ptr: *World, sim_region: *SimRegion) void {
+pub fn endWorldChange(sim_region: *SimRegion) void {
     TimedBlock.beginFunction(@src(), .EndWorldChange);
     defer TimedBlock.endFunction(@src(), .EndWorldChange);
 
@@ -452,14 +460,15 @@ pub fn endWorldChange(world_ptr: *World, sim_region: *SimRegion) void {
     while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
         if (!entity[0].hasFlag(EntityFlags.Deleted.toInt())) {
             const entity_position: WorldPosition =
-                world.mapIntoChunkSpace(world_ptr, sim_region.origin, entity[0].position);
+                world.mapIntoChunkSpace(sim_region.world, sim_region.origin, entity[0].position);
             var chunk_position: WorldPosition = entity_position;
             chunk_position.offset = .zero();
 
             const chunk_delta: Vector3 = entity_position.offset.minus(entity[0].position);
 
             entity[0].position = entity[0].position.plus(chunk_delta);
-            var dest_e: *align(1) Entity = @ptrCast(world.useChunkSpaceAt(world_ptr, @sizeOf(Entity), chunk_position));
+            var dest_e: *align(1) Entity =
+                @ptrCast(world.useChunkSpaceAt(sim_region.world, @sizeOf(Entity), chunk_position));
 
             dest_e.* = entity[0];
             packTraversableReference(sim_region, &dest_e.occupying);
