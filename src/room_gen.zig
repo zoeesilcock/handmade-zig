@@ -36,23 +36,26 @@ const BrainFamiliar = brains.BrainFamiliar;
 
 const tile_side_in_meters: f32 = 1.4;
 pub const shadow_alpha = 0.5;
+const X = 0;
+const Y = 1;
+const Z = 2;
 
 fn isInVolume(volume: *GenVolume, x: i32, y: i32, z: i32) bool {
     const result: bool =
-        (x >= volume.x and x < volume.x + volume.x_count) and
-        (y >= volume.y and y < volume.y + volume.y_count) and
-        (z >= volume.z and z < volume.z + volume.z_count);
+        (x >= volume.min[X] and x < volume.max[X]) and
+        (y >= volume.min[Y] and y < volume.max[Y]) and
+        (z >= volume.min[Z] and z < volume.max[Z]);
 
     return result;
 }
 
 pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
-    const min_tile_x: i32 = room.volume.x;
-    const x_count: i32 = room.volume.x_count;
-    const min_tile_y: i32 = room.volume.y;
-    const y_count: i32 = room.volume.y_count;
-    const min_tile_z: i32 = room.volume.z;
-    const z_count: i32 = room.volume.z_count;
+    const min_tile_x: i32 = room.volume.min[X];
+    const x_count: i32 = room.volume.max[X] - min_tile_x;
+    const min_tile_y: i32 = room.volume.min[Y];
+    const y_count: i32 = room.volume.max[Y] - min_tile_y;
+    const min_tile_z: i32 = room.volume.min[Z];
+    const z_count: i32 = room.volume.max[Z] - min_tile_z;
     const floor_tile_z: i32 = min_tile_z;
 
     const tile_depth_in_meters = world.chunk_dimension_in_meters.z();
@@ -62,9 +65,9 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
     const change_center: WorldPosition =
         chunkPositionFromTilePosition(
             world,
-            @divFloor(min_tile_x + x_count, 2),
-            @divFloor(min_tile_y + y_count, 2),
-            @divFloor(min_tile_z + z_count, 2),
+            min_tile_x + @divFloor(x_count, 2),
+            min_tile_y + @divFloor(y_count, 2),
+            min_tile_z + @divFloor(z_count, 2),
             null,
         );
     const change_rectangle: Rectangle3 = .fromCenterDimension(
