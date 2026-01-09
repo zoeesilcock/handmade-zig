@@ -4,8 +4,8 @@ const sim = @import("sim.zig");
 const world_gen = @import("world_gen.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
-const world_module = @import("world.zig");
-const world_mode_module = @import("world_mode.zig");
+const world_mod = @import("world.zig");
+const world_mode_mod = @import("world_mode.zig");
 const std = @import("std");
 
 // Types.
@@ -19,8 +19,8 @@ const EntityVisiblePiece = entities.EntityVisiblePiece;
 const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
 const EntityFlags = entities.EntityFlags;
 const TraversableReference = entities.TraversableReference;
-const World = world_module.World;
-const WorldPosition = world_module.WorldPosition;
+const World = world_mod.World;
+const WorldPosition = world_mod.WorldPosition;
 const WorldGenerator = world_gen.WorldGenerator;
 const GenRoom = world_gen.GenRoom;
 const GenVolume = world_gen.GenVolume;
@@ -165,7 +165,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
     camera_room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
     placeEntity(region, camera_room, change_center);
 
-    const world_room: *world_module.WorldRoom = world_module.addWorldRoom(
+    const world_room: *world_mod.WorldRoom = world_mod.addWorldRoom(
         world,
         chunkPositionFromTilePosition(
             world,
@@ -198,7 +198,7 @@ pub fn addEntity(region: *SimRegion) *Entity {
 }
 
 pub fn placeEntity(region: *SimRegion, entity: *Entity, chunk_position: WorldPosition) void {
-    entity.position = world_module.subtractPositions(region.world, &chunk_position, &region.origin);
+    entity.position = world_mod.subtractPositions(region.world, &chunk_position, &region.origin);
 }
 
 fn addMonster(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) void {
@@ -312,9 +312,9 @@ pub fn chunkPositionFromTilePosition(
         offset = offset.plus(additional_offset);
     }
 
-    const result = world_module.mapIntoChunkSpace(game_world, base_position, offset);
+    const result = world_mod.mapIntoChunkSpace(game_world, base_position, offset);
 
-    std.debug.assert(world_module.isVector3Canonical(game_world, result.offset));
+    std.debug.assert(world_mod.isVector3Canonical(game_world, result.offset));
 
     return result;
 }

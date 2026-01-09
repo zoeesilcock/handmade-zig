@@ -1,4 +1,5 @@
 const math = @import("math.zig");
+const box_mod = @import("box.zig");
 const rendergroup = @import("rendergroup.zig");
 const lighting = @import("lighting.zig");
 const simd = @import("simd.zig");
@@ -143,15 +144,6 @@ pub const LightingPoint = extern struct {
     x_axis: Vector3,
     y_axis: Vector3,
     pack_index: u32,
-};
-
-pub const LightBoxSurface = struct {
-    position: Vector3,
-    normal: Vector3,
-    x_axis: Vector3,
-    y_axis: Vector3,
-    half_width: f32,
-    half_height: f32,
 };
 
 const RaycastResult = struct {
@@ -368,43 +360,6 @@ fn generatePoissonSamples(series: *random.Series, dest: [*]Vector3) void {
 
         dest[dest_index] = p;
     }
-}
-
-pub fn getBoxSurface(position_in: Vector3, radius: Vector3, surface_index: u32) LightBoxSurface {
-    const axis_index: u32 = surface_index >> 1;
-    const positive: u32 = surface_index & 0x1;
-
-    var normal: Vector3 = .zero();
-    var y_axis: Vector3 = if (axis_index == 2) .new(0, 1, 0) else .new(0, 0, 1);
-
-    var position: Vector3 = position_in;
-    if (positive == 1) {
-        normal.values[axis_index] = 1;
-        position.values[axis_index] += radius.values[axis_index];
-    } else {
-        normal.values[axis_index] = -1;
-        position.values[axis_index] -= radius.values[axis_index];
-    }
-
-    var sign_x: f32 = if (positive == 1) 1 else -1;
-    if (axis_index == 1) {
-        sign_x *= -1;
-    }
-    var x_axis: Vector3 = if (axis_index == 0) .new(0, sign_x, 0) else .new(sign_x, 0, 0);
-
-    const half_width: f32 = intrinsics.absoluteValue(x_axis.dotProduct(radius));
-    const half_height: f32 = intrinsics.absoluteValue(y_axis.dotProduct(radius));
-
-    const result: LightBoxSurface = .{
-        .position = position,
-        .normal = normal,
-        .x_axis = x_axis,
-        .y_axis = y_axis,
-        .half_width = half_width,
-        .half_height = half_height,
-    };
-
-    return result;
 }
 
 fn getBox(solution: *LightingSolution, box_index: u32) *LightingBox {
@@ -883,7 +838,8 @@ fn splitBox(
     while (surface_index < 6) : (surface_index += 1) {
         const light_index: u16 = parent_box.light_index[surface_index];
         var point: *LightingPoint = &solution.points[light_index];
-        const surface: LightBoxSurface = getBoxSurface(parent_box.position, parent_box.radius, surface_index);
+        const surface: box_mod.LightBoxSurface =
+            box_mod.getBoxSurface(parent_box.position, parent_box.radius, surface_index);
 
         point.normal = surface.normal;
         point.position = surface.position;
@@ -1017,7 +973,7 @@ pub fn lightingTest(
         var light_index: u32 = box.light_index[0];
         var surface_index: u32 = 0;
         while (surface_index < 6) : (surface_index += 1) {
-            const surface: LightBoxSurface = getBoxSurface(box.position, box.radius, surface_index);
+            const surface: box_mod.LightBoxSurface = box_mod.getBoxSurface(box.position, box.radius, surface_index);
             const y_subdivision_count = 2;
             const x_subdivision_count = 2;
             std.debug.assert((x_subdivision_count * y_subdivision_count) == 4);
@@ -1297,8 +1253,8 @@ fn outputLightingPointsRecurse(
 
         var box_surface_index: u32 = 0;
         while (box_surface_index < 6) : (box_surface_index += 1) {
-            const box_surface: LightBoxSurface =
-                getBoxSurface(box.position, box.radius, box_surface_index);
+            const box_surface: box_mod.LightBoxSurface =
+                box_mod.getBoxSurface(box.position, box.radius, box_surface_index);
 
             const point_count: u32 = box.light_index[box_surface_index + 1] - box.light_index[box_surface_index];
             var size_ratio: f32 = 1.8;
