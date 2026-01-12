@@ -1,6 +1,7 @@
 const math = @import("math.zig");
 const shared = @import("shared.zig");
 const sim = @import("sim.zig");
+const gen_math = @import("gen_math.zig");
 const world_gen = @import("world_gen.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
@@ -23,7 +24,8 @@ const World = world_mod.World;
 const WorldPosition = world_mod.WorldPosition;
 const WorldGenerator = world_gen.WorldGenerator;
 const GenRoom = world_gen.GenRoom;
-const GenVolume = world_gen.GenVolume;
+const GenVolume = gen_math.GenVolume;
+const GenVector3 = gen_math.GenVector3;
 const GenRoomConnection = world_gen.GenRoomConnection;
 const GenConnection = world_gen.GenConnection;
 const Brain = brains.Brain;
@@ -40,22 +42,14 @@ const X = 0;
 const Y = 1;
 const Z = 2;
 
-fn isInVolume(volume: *GenVolume, x: i32, y: i32, z: i32) bool {
-    const result: bool =
-        (x >= volume.min[X] and x < volume.max[X]) and
-        (y >= volume.min[Y] and y < volume.max[Y]) and
-        (z >= volume.min[Z] and z < volume.max[Z]);
-
-    return result;
-}
-
 pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
+    const dimension: GenVector3 = room.volume.getDimension();
     const min_tile_x: i32 = room.volume.min[X];
-    const x_count: i32 = room.volume.max[X] - min_tile_x;
+    const x_count: i32 = dimension[X];
     const min_tile_y: i32 = room.volume.min[Y];
-    const y_count: i32 = room.volume.max[Y] - min_tile_y;
+    const y_count: i32 = dimension[Y];
     const min_tile_z: i32 = room.volume.min[Z];
-    const z_count: i32 = room.volume.max[Z] - min_tile_z;
+    const z_count: i32 = dimension[Z];
     const floor_tile_z: i32 = min_tile_z;
 
     const tile_depth_in_meters = world.chunk_dimension_in_meters.z();
@@ -107,7 +101,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             var opt_room_connection: ?*GenRoomConnection = room.first_connection;
             while (opt_room_connection) |room_connection| : (opt_room_connection = room_connection.next) {
                 const connection: *GenConnection = room_connection.connection;
-                if (isInVolume(&connection.volume, tile_x, tile_y, floor_tile_z)) {
+                if (connection.volume.isInVolume(tile_x, tile_y, floor_tile_z)) {
                     on_connection = true;
                 }
             }

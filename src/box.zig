@@ -69,9 +69,25 @@ pub fn getSurfaceIndex(axis_index: u32, positive: u32) u32 {
     return (axis_index << 1) | positive;
 }
 
+pub fn getSurfaceIndexFromDirectionMask(direction_mask: u32) BoxSurfaceIndex {
+    const scan: intrinsics.BitScanResult = intrinsics.findLeastSignificantSetBit(direction_mask);
+    std.debug.assert(scan.found);
+    std.debug.assert(scan.index >= 0 and scan.index <= @intFromEnum(BoxSurfaceIndex.Up));
+
+    const result: BoxSurfaceIndex = @enumFromInt(scan.index);
+    std.debug.assert(getSurfaceMaskFromSurface(result) == direction_mask);
+
+    return result;
+}
+
 pub fn getSurfaceMask(axis_index: u32, positive: u32) u32 {
     return @as(u8, 1) << @intCast(getSurfaceIndex(axis_index, positive));
 }
+
+pub fn getSurfaceMaskFromSurface(surface_index: BoxSurfaceIndex) u32 {
+    return @as(u8, 1) << @intCast(@intFromEnum(surface_index));
+}
+
 pub const LightBoxSurface = struct {
     position: Vector3,
     normal: Vector3,
