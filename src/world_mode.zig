@@ -395,7 +395,7 @@ pub fn updateAndRenderWorld(
     const result = false;
 
     var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
-    const camera: CameraParams = .get(draw_buffer.width, 0.6);
+    const camera: CameraParams = .get(draw_buffer.width, 1);
     const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
     const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
     if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Left.toInt()].isDown()) {

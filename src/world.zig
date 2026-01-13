@@ -18,7 +18,6 @@ const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const MemoryArena = memory.MemoryArena;
 const ArenaPushParams = memory.ArenaPushParams;
-const TimedBlock = debug_interface.TimedBlock;
 const LoadedBitmap = asset.LoadedBitmap;
 const BitmapId = file_formats.BitmapId;
 const PlayingSound = audio.PlayingSound;
@@ -50,7 +49,7 @@ pub const World = extern struct {
 
     // Temporary - eventually these will be spatially partitioned, probably?
     room_count: u32,
-    rooms: [65536 / 4]WorldRoom,
+    rooms: [65536]WorldRoom,
 
     arena: *MemoryArena,
 
@@ -213,9 +212,6 @@ pub fn useChunkSpaceAt(
     size: u32,
     at: WorldPosition,
 ) *anyopaque {
-    TimedBlock.beginFunction(@src(), .UseChunkSpaceAt);
-    defer TimedBlock.endFunction(@src(), .UseChunkSpaceAt);
-
     world.change_ticket.begin();
 
     const chunk: ?*WorldChunk = getWorldChunk(world, at.chunk_x, at.chunk_y, at.chunk_z, world.arena);
@@ -233,9 +229,6 @@ pub fn addToFreeList(
     first_block: ?*WorldEntityBlock,
     last_block: ?*WorldEntityBlock,
 ) void {
-    TimedBlock.beginFunction(@src(), .AddToFreeList);
-    defer TimedBlock.endFunction(@src(), .AddToFreeList);
-
     world.change_ticket.begin();
 
     old.next_in_hash = world.first_free_chunk;
@@ -265,9 +258,6 @@ pub fn removeWorldChunk(
     chunk_y: i32,
     chunk_z: i32,
 ) ?*WorldChunk {
-    TimedBlock.beginFunction(@src(), .GetWorldChunkInternal);
-    defer TimedBlock.endFunction(@src(), .GetWorldChunkInternal);
-
     world.change_ticket.begin();
 
     const chunk_ptr: *?*WorldChunk = getWorldChunkInternal(world, chunk_x, chunk_y, chunk_z);
@@ -332,9 +322,6 @@ pub fn getWorldChunkInternal(
     chunk_y: i32,
     chunk_z: i32,
 ) *?*WorldChunk {
-    TimedBlock.beginFunction(@src(), .GetWorldChunkInternal);
-    defer TimedBlock.endFunction(@src(), .GetWorldChunkInternal);
-
     std.debug.assert(chunk_x > -TILE_CHUNK_SAFE_MARGIN);
     std.debug.assert(chunk_x > -TILE_CHUNK_SAFE_MARGIN);
     std.debug.assert(chunk_y > -TILE_CHUNK_SAFE_MARGIN);

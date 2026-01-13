@@ -112,6 +112,17 @@ pub const GenVolume = struct {
         return result;
     }
 
+    pub fn hasVolume(self: GenVolume) bool {
+        const dimension: GenVector3 = self.getDimension();
+
+        const result =
+            dimension[X] > 0 and
+            dimension[Y] > 0 and
+            dimension[Z] > 0;
+
+        return result;
+    }
+
     pub fn clipMin(self: *GenVolume, dimension: u32, value: i32) void {
         if (self.min[dimension] < value) {
             self.min[dimension] = value;

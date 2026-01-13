@@ -213,9 +213,6 @@ pub fn entityOverlapsEntity(a: *Entity, b: *Entity) bool {
 }
 
 fn getOrAddBrain(sim_region: *SimRegion, brain_id: BrainId, brain_type: BrainType) *Brain {
-    TimedBlock.beginFunction(@src(), .GetOrAddBrain);
-    defer TimedBlock.endFunction(@src(), .GetOrAddBrain);
-
     var result: ?*Brain = null;
 
     const opt_hash: ?*BrainHash = getBrainHashFromId(sim_region, brain_id);
@@ -304,9 +301,6 @@ fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *align(1) Tr
 }
 
 fn addEntityToHash(sim_region: *SimRegion, entity: *Entity) void {
-    TimedBlock.beginFunction(@src(), .AddEntityToHash);
-    defer TimedBlock.endFunction(@src(), .AddEntityToHash);
-
     const entry: *EntityHash = getEntityHashFromId(sim_region, entity.id).?;
     std.debug.assert(
         isEmpty(&sim_region.entity_hash_occupancy, entry - &sim_region.entity_hash),
@@ -809,7 +803,7 @@ pub fn updateCameraForEntityMovement(
         const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
         const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
         var target_position: Vector3 = simulation_center;
-        var target_offset_z: f32 = 8;
+        var target_offset_z: f32 = 16;
 
         if (opt_special_camera) |special_camera| {
             if (camera.time_in_special > special_camera.camera_min_time) {

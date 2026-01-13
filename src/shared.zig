@@ -46,7 +46,6 @@ const BrainId = brains.BrainId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const TemporaryMemory = memory.TemporaryMemory;
-const TimedBlock = debug_interface.TimedBlock;
 const LightingBox = lighting.LightingBox;
 const LightingPoint = lighting.LightingPoint;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
@@ -117,9 +116,6 @@ pub const TicketMutex = extern struct {
     serving: u64,
 
     pub fn begin(self: *TicketMutex) void {
-        TimedBlock.beginBlock(@src(), .BeginTicketMutex);
-        defer TimedBlock.endBlock(@src(), .BeginTicketMutex);
-
         const ticket = @atomicRmw(u64, &self.ticket, .Add, 1, .seq_cst);
         while (ticket != self.serving) {
             // TODO: This isn't implemented in Zig yet:

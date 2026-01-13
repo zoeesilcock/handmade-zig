@@ -365,8 +365,33 @@ fn placeRoom(
     return result;
 }
 
-fn placeRoomAlongEdge(gen: *WorldGenerator, base_room: *GenRoom, direction_mask: u32, generation_index: u32) void {
-    _ = gen;
+fn getDeltaLongAxisForClearPlacement(
+    gen: *WorldGenerator,
+    test_volume: *GenVolume,
+    edge_axis: u32,
+    generation_index: u32,
+) i32 {
+    _ = edge_axis;
+
+    var result: i32 = 0;
+
+    var opt_room: ?*GenRoom = gen.first_room;
+    while (opt_room) |room| : (opt_room = room.global_next) {
+        if (room.generation_index == generation_index) {
+            const intersection: GenVolume = room.volume.getIntersectionWith(test_volume);
+
+            if (intersection.hasVolume()) {
+                // TODO: Actually return the amount to move.
+                result = 1;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
+fn placeRoomsAlongEdge(gen: *WorldGenerator, base_room: *GenRoom, direction_mask: u32, generation_index: u32) void {
     const surface_index: BoxSurfaceIndex = box_mod.getSurfaceIndexFromDirectionMask(direction_mask);
 
     var axis_a: u32 = 0;
@@ -398,7 +423,6 @@ fn placeRoomAlongEdge(gen: *WorldGenerator, base_room: *GenRoom, direction_mask:
 
     const min_edge_position: i32 = base_room.volume.min[edge_axis];
     const max_edge_position: i32 = base_room.volume.max[edge_axis];
-    var at_edge_position: i32 = min_edge_position;
 
     var opt_room_connection: ?*GenRoomConnection = base_room.first_connection;
     while (opt_room_connection) |room_connection| : (opt_room_connection = room_connection.next) {
@@ -409,35 +433,63 @@ fn placeRoomAlongEdge(gen: *WorldGenerator, base_room: *GenRoom, direction_mask:
             room.generation_index != generation_index)
         {
             room.generation_index = generation_index;
-            room.volume.min[edge_axis] = at_edge_position;
-            at_edge_position = at_edge_position + room.required_dimension[edge_axis];
-            room.volume.max[edge_axis] = at_edge_position - 1;
 
-            if (other_a_min) {
-                room.volume.max[axis_a] = base_room.volume.min[axis_a] - 1;
-                room.volume.min[axis_a] = room.volume.max[axis_a] - room.required_dimension[axis_a] + 1;
-            } else {
-                room.volume.min[axis_a] = base_room.volume.max[axis_a] - 1;
-                room.volume.max[axis_a] = room.volume.min[axis_a] + room.required_dimension[axis_a] + 1;
+            var placed: bool = false;
+            var at_edge_position: i32 = min_edge_position;
+            while (at_edge_position < max_edge_position) {
+                var test_volume: GenVolume = .zero();
+
+                test_volume.min[edge_axis] = at_edge_position;
+                test_volume.max[edge_axis] = test_volume.min[edge_axis] + room.required_dimension[edge_axis] - 1;
+
+                if (other_a_min) {
+                    test_volume.max[axis_a] = base_room.volume.min[axis_a] - 1;
+                    test_volume.min[axis_a] = test_volume.max[axis_a] - room.required_dimension[axis_a] + 1;
+                } else {
+                    test_volume.min[axis_a] = base_room.volume.max[axis_a] + 1;
+                    test_volume.max[axis_a] = test_volume.min[axis_a] + room.required_dimension[axis_a] - 1;
+                }
+
+                // if (other_b_min) {
+                //     test_volume.max[axis_b] = base_room.volume.min[axis_b] - 1;
+                //     test_volume.min[axis_b] = test_volume.max[axis_b] - room.required_dimension[axis_b] + 1;
+                // } else {
+                //     test_volume.min[axis_b] = base_room.volume.max[axis_b] - 1;
+                //     test_volume.max[axis_b] = test_volume.min[axis_b] + room.required_dimension[axis_b] + 1;
+                // }
+
+                test_volume.min[2] = base_room.volume.min[2];
+                test_volume.max[2] = base_room.volume.max[2];
+
+                const delta: i32 = getDeltaLongAxisForClearPlacement(gen, &test_volume, edge_axis, generation_index);
+                if (delta == 0) {
+                    placed = true;
+                    room.volume = test_volume;
+                    break;
+                } else {
+                    at_edge_position = at_edge_position + delta;
+                }
             }
 
-            // if (other_b_min) {
-            //     room.volume.max[axis_b] = base_room.volume.min[axis_b] - 1;
-            //     room.volume.min[axis_b] = room.volume.max[axis_b] - room.required_dimension[axis_b] + 1;
-            // } else {
-            //     room.volume.min[axis_b] = base_room.volume.max[axis_b] - 1;
-            //     room.volume.max[axis_b] = room.volume.min[axis_b] + room.required_dimension[axis_b] + 1;
-            // }
+            std.debug.assert(placed);
 
-            room.volume.min[2] = base_room.volume.min[2];
-            room.volume.max[2] = base_room.volume.max[2];
+            var door: GenVolume = base_room.volume.getIntersectionWith(&room.volume);
+            const door_edge: i32 = @divFloor(door.min[edge_axis] + door.max[edge_axis], 2);
+            door.min[edge_axis] = door_edge;
+            door.max[edge_axis] = door_edge;
+
+            const min_door: i32 = door.min[axis_a];
+            const max_door: i32 = door.max[axis_a];
+
+            door.min[axis_a] = max_door;
+            door.max[axis_a] = min_door;
+
+            connection.volume = door;
         }
     }
-
-    _ = max_edge_position;
 }
 
-fn layout(gen: *WorldGenerator, world: *World) void {
+fn layout(gen: *WorldGenerator, world: *World, start_at_room: *GenRoom) void {
     // var series = &world.game_entropy;
 
     const change_memory = gen.temp_memory.beginTemporaryMemory();
@@ -448,7 +500,7 @@ fn layout(gen: *WorldGenerator, world: *World) void {
 
     if (false) {
         // TODO: This will have to go eventually but for right now we want to control the initial room location.
-        const first_room: *GenRoom = gen.first_room.?;
+        const first_room: *GenRoom = start_at_room;
         const volume: GenVolume = .{
             .min = .{
                 -4,
@@ -482,15 +534,15 @@ fn layout(gen: *WorldGenerator, world: *World) void {
             }
         }
     } else {
-        const first_room: *GenRoom = gen.first_room.?;
+        const first_room: *GenRoom = start_at_room;
         var volume: GenVolume = .{
             .min = .{ 0, 0, 0 },
             .max = .{ 0, 0, 0 },
         };
 
-        volume.max[X] = volume.min[X] + first_room.required_dimension[X];
-        volume.max[Y] = volume.min[Y] + first_room.required_dimension[Y];
-        volume.max[Z] = volume.min[Z] + first_room.required_dimension[Z];
+        volume.max[X] = volume.min[X] + first_room.required_dimension[X] - 1;
+        volume.max[Y] = volume.min[Y] + first_room.required_dimension[Y] - 1;
+        volume.max[Z] = volume.min[Z] + first_room.required_dimension[Z] - 1;
         placeRoomInVolume(first_room, volume);
         first_room.generation_index = generation_index;
         stack.pushConnectedRooms(first_room, generation_index);
@@ -506,7 +558,7 @@ fn layout(gen: *WorldGenerator, world: *World) void {
                         if (other_room.generation_index == generation_index) {
                             if (room.generation_index != generation_index) {
                                 const direction: u32 = connection.getDirectionMaskFromRoom(other_room);
-                                placeRoomAlongEdge(gen, other_room, direction, generation_index);
+                                placeRoomsAlongEdge(gen, other_room, direction, generation_index);
                                 std.debug.assert(room.generation_index == generation_index);
                             }
                         } else {
@@ -557,21 +609,21 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     const forest_entrance: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage ForestEntrance");
     // const side_alley: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage Side Alley");
 
-    setSize(gen, main_room, 16, 16, null);
+    setSize(gen, main_room, 13, 13, null);
     setSize(gen, tailor_room, 8, 6, null);
     setSize(gen, kitchen, 8, 6, null);
-    setSize(gen, front_hall, 5, 16, null);
+    setSize(gen, front_hall, 5, 13, null);
     setSize(gen, bedroom_a, 8, 6, null);
     setSize(gen, bedroom_b, 8, 6, null);
     setSize(gen, bedroom_c, 8, 6, null);
     setSize(gen, bedroom_d, 8, 6, null);
-    setSize(gen, back_hall, 16, 5, null);
+    setSize(gen, back_hall, 13, 5, null);
     setSize(gen, hero_save_slot_a, 5, 6, null);
     setSize(gen, hero_save_slot_b, 5, 6, null);
     setSize(gen, hero_save_slot_c, 5, 6, null);
-    setSize(gen, garden, 16, 16, null);
-    // setSize(gen, side_alley, 5, 16, null);
-    setSize(gen, forest_path, 16, 16, null);
+    setSize(gen, garden, 13, 13, null);
+    // setSize(gen, side_alley, 5, 13, null);
+    setSize(gen, forest_path, 13, 13, null);
     setSize(gen, forest_entrance, 8, 8, null);
 
     _ = connect(gen, main_room, .North, forest_path);
@@ -607,11 +659,17 @@ pub fn createWorldNew(world: *World) GenResult {
 
     const gen: *WorldGenerator = beginWorldGen();
     const orphanage: GenOrphanage = createOrphanage(gen);
-    _ = orphanage;
-    layout(gen, world);
+    layout(gen, world, orphanage.hero_bedroom);
     generateWorld(gen, world);
 
-    result.initial_camera_position = room_gen.chunkPositionFromTilePosition(world, 4, 4, 0, null);
+    const hero_room: GenVolume = orphanage.hero_bedroom.volume;
+    result.initial_camera_position = room_gen.chunkPositionFromTilePosition(
+        world,
+        @divFloor(hero_room.min[X] + hero_room.max[X], 2),
+        @divFloor(hero_room.min[Y] + hero_room.max[Y], 2),
+        @divFloor(hero_room.min[Z] + hero_room.max[Z], 2),
+        null,
+    );
 
     endWorldGen(gen);
 
@@ -626,182 +684,6 @@ pub fn createWorld(world_mode: *world_mode_mod.GameModeWorld, transient_state: *
     world_mode.camera.position = generated.initial_camera_position;
     world_mode.camera.simulation_center = generated.initial_camera_position;
     world_mode.standard_room_dimension = Vector3.new(17 * 1.4, 9 * 1.4, world_mode.typical_floor_height);
-
-    // const sim_memory = transient_state.arena.beginTemporaryMemory();
-    // const null_origin: WorldPosition = .zero();
-    // const null_rect: Rectangle3 = .{ .min = .zero(), .max = .zero() };
-    // world_mode.creation_region = sim.beginWorldChange(
-    //     &transient_state.arena,
-    //     world_mode.world,
-    //     null_origin,
-    //     null_rect,
-    //     0,
-    // );
-    //
-    // var series = &world_mode.world.game_entropy;
-    // const screen_base_z: i32 = 0;
-    // var door_direction: u32 = 0;
-    // var room_center_tile_x: i32 = 0;
-    // var room_center_tile_y: i32 = 0;
-    // var abs_tile_z: i32 = screen_base_z;
-    //
-    // var last_screen_z: i32 = abs_tile_z;
-    //
-    // var door_left = false;
-    // var door_right = false;
-    // var door_top = false;
-    // var door_bottom = false;
-    // var door_up = false;
-    // var door_down = false;
-    // var prev_room: StandardRoom = .{};
-    //
-    // for (0..8) |screen_index| {
-    //     last_screen_z = abs_tile_z;
-    //
-    //     // const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
-    //     // const room_radius_y: i32 = 4 + @as(i32, @intCast(series.randomChoice(4)));
-    //     _ = series.randomChoice(4);
-    //     const room_radius_x: i32 = 8;
-    //     const room_radius_y: i32 = 8;
-    //     if (door_direction == 1) {
-    //         room_center_tile_x += room_radius_x;
-    //     } else if (door_direction == 0) {
-    //         room_center_tile_y += room_radius_y;
-    //     }
-    //
-    //     // const door_direction = 1;
-    //     // _ = series.randomChoice(2);
-    //     // door_direction = 3;
-    //     door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
-    //     // door_direction = series.randomChoice(2);
-    //
-    //     var created_z_door = false;
-    //     if (door_direction == 3) {
-    //         created_z_door = true;
-    //         door_down = true;
-    //     } else if (door_direction == 2) {
-    //         created_z_door = true;
-    //         door_up = true;
-    //     } else if (door_direction == 1) {
-    //         door_right = true;
-    //     } else {
-    //         door_top = true;
-    //     }
-    //
-    //     var left_hole: bool = @mod(screen_index, 2) != 0;
-    //     var right_hole: bool = !left_hole;
-    //     if (screen_index == 0) {
-    //         left_hole = false;
-    //         right_hole = false;
-    //     }
-    //
-    //     const room_width: i32 = 2 * room_radius_x + 1;
-    //     const room_height: i32 = 2 * room_radius_y + 1;
-    //     const room: StandardRoom = addStandardRoom(
-    //         world_mode,
-    //         room_center_tile_x,
-    //         room_center_tile_y,
-    //         abs_tile_z,
-    //         left_hole,
-    //         right_hole,
-    //         room_radius_x,
-    //         room_radius_y,
-    //     );
-    //
-    //     if (true) {
-    //         // _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
-    //         // _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
-    //
-    //         const snake_brain_id = world_mode_mod.addBrain(world_mode);
-    //         var segment_index: u32 = 0;
-    //         while (segment_index < 3) : (segment_index += 1) {
-    //             const x: u32 = 2 + segment_index;
-    //             _ = world_mode_mod.addSnakeSegment(world_mode, room.position[x][1], room.ground[x][1], snake_brain_id, segment_index);
-    //         }
-    //     }
-    //
-    //     for (0..@intCast(room_height)) |tile_y| {
-    //         for (0..@intCast(room_width)) |tile_x| {
-    //             const position: WorldPosition = room.position[tile_x][tile_y];
-    //             const ground: TraversableReference = room.ground[tile_x][tile_y];
-    //
-    //             var should_be_door = true;
-    //             if ((tile_x == 0) and (!door_left or (tile_y != @divFloor(room_height, 2)))) {
-    //                 should_be_door = false;
-    //             }
-    //             if ((tile_x == (room_width - 1)) and (!door_right or (tile_y != @divFloor(room_height, 2)))) {
-    //                 should_be_door = false;
-    //             }
-    //             if ((tile_y == 0) and (!door_bottom or (tile_x != @divFloor(room_width, 2)))) {
-    //                 should_be_door = false;
-    //             }
-    //             if ((tile_y == (room_height - 1)) and (!door_top or (tile_x != @divFloor(room_width, 2)))) {
-    //                 should_be_door = false;
-    //             }
-    //
-    //             if (!should_be_door) {
-    //                 _ = addWall(world_mode, position, ground);
-    //             } else if (created_z_door) {
-    //                 // if ((@mod(abs_tile_z, 2) == 1 and (tile_x == 10 and tile_y == 5)) or
-    //                 //     ((@mod(abs_tile_z, 2) == 0 and (tile_x == 4 and tile_y == 5))))
-    //                 // {
-    //                 //     _ = addStairs(world_mode, abs_tile_x, abs_tile_y, if (door_down) abs_tile_z - 1 else abs_tile_z);
-    //                 // }
-    //             }
-    //         }
-    //     }
-    //
-    //     door_left = door_right;
-    //     door_bottom = door_top;
-    //
-    //     if (created_z_door) {
-    //         door_up = !door_up;
-    //         door_down = !door_down;
-    //     } else {
-    //         door_up = false;
-    //         door_down = false;
-    //     }
-    //
-    //     door_right = false;
-    //     door_top = false;
-    //
-    //     if (door_direction == 3) {
-    //         abs_tile_z -= 1;
-    //     } else if (door_direction == 2) {
-    //         abs_tile_z += 1;
-    //     } else if (door_direction == 1) {
-    //         room_center_tile_x += room_radius_x + 1;
-    //     } else {
-    //         room_center_tile_y += room_radius_y + 1;
-    //     }
-    //
-    //     prev_room = room;
-    // }
-    //
-    // if (false) {
-    //     // Fill the low entity storage with walls.
-    //     while (world_mode.entity_count < (world_mode.low_entities.len - 16)) {
-    //         const coordinate: i32 = @intCast(1024 + world_mode.entity_count);
-    //         _ = addWall(world_mode, coordinate, coordinate, 0);
-    //     }
-    // }
-    //
-    // const camera_tile_x = room_center_tile_x;
-    // const camera_tile_y = room_center_tile_y;
-    // const camera_tile_z = last_screen_z;
-    // const new_camera_position: WorldPosition = world_mode_mod.chunkPositionFromTilePosition(
-    //     world_mode.world,
-    //     camera_tile_x,
-    //     camera_tile_y,
-    //     camera_tile_z,
-    //     null,
-    // );
-    // world_mode.camera.position = new_camera_position;
-    // world_mode.camera.simulation_center = new_camera_position;
-    //
-    // sim.endWorldChange(world_mode.creation_region.?);
-    // world_mode.creation_region = null;
-    // transient_state.arena.endTemporaryMemory(sim_memory);
 }
 
 // const StandardRoom = struct {
@@ -1044,4 +926,182 @@ pub fn createWorld(world_mode: *world_mode_mod.GameModeWorld, transient_state: *
 //     entity.addFlags(EntityFlags.Collides.toInt());
 //
 //     world_mode_mod.placeEntity(world_mode, entity, world_position);
+// }
+//
+// pub fn createWorldOld(world_mode: *world_mode_mod.GameModeWorld, transient_state: *TransientState) void {
+//     const sim_memory = transient_state.arena.beginTemporaryMemory();
+//     const null_origin: WorldPosition = .zero();
+//     const null_rect: Rectangle3 = .{ .min = .zero(), .max = .zero() };
+//     world_mode.creation_region = sim.beginWorldChange(
+//         &transient_state.arena,
+//         world_mode.world,
+//         null_origin,
+//         null_rect,
+//         0,
+//     );
+//
+//     var series = &world_mode.world.game_entropy;
+//     const screen_base_z: i32 = 0;
+//     var door_direction: u32 = 0;
+//     var room_center_tile_x: i32 = 0;
+//     var room_center_tile_y: i32 = 0;
+//     var abs_tile_z: i32 = screen_base_z;
+//
+//     var last_screen_z: i32 = abs_tile_z;
+//
+//     var door_left = false;
+//     var door_right = false;
+//     var door_top = false;
+//     var door_bottom = false;
+//     var door_up = false;
+//     var door_down = false;
+//     var prev_room: StandardRoom = .{};
+//
+//     for (0..8) |screen_index| {
+//         last_screen_z = abs_tile_z;
+//
+//         // const room_radius_x: i32 = 8 + @as(i32, @intCast(series.randomChoice(4)));
+//         // const room_radius_y: i32 = 4 + @as(i32, @intCast(series.randomChoice(4)));
+//         _ = series.randomChoice(4);
+//         const room_radius_x: i32 = 8;
+//         const room_radius_y: i32 = 8;
+//         if (door_direction == 1) {
+//             room_center_tile_x += room_radius_x;
+//         } else if (door_direction == 0) {
+//             room_center_tile_y += room_radius_y;
+//         }
+//
+//         // const door_direction = 1;
+//         // _ = series.randomChoice(2);
+//         // door_direction = 3;
+//         door_direction = series.randomChoice(if (door_up or door_down) 2 else 4);
+//         // door_direction = series.randomChoice(2);
+//
+//         var created_z_door = false;
+//         if (door_direction == 3) {
+//             created_z_door = true;
+//             door_down = true;
+//         } else if (door_direction == 2) {
+//             created_z_door = true;
+//             door_up = true;
+//         } else if (door_direction == 1) {
+//             door_right = true;
+//         } else {
+//             door_top = true;
+//         }
+//
+//         var left_hole: bool = @mod(screen_index, 2) != 0;
+//         var right_hole: bool = !left_hole;
+//         if (screen_index == 0) {
+//             left_hole = false;
+//             right_hole = false;
+//         }
+//
+//         const room_width: i32 = 2 * room_radius_x + 1;
+//         const room_height: i32 = 2 * room_radius_y + 1;
+//         const room: StandardRoom = addStandardRoom(
+//             world_mode,
+//             room_center_tile_x,
+//             room_center_tile_y,
+//             abs_tile_z,
+//             left_hole,
+//             right_hole,
+//             room_radius_x,
+//             room_radius_y,
+//         );
+//
+//         if (true) {
+//             // _ = addMonster(world_mode, room.position[3][6], room.ground[3][6]);
+//             // _ = addFamiliar(world_mode, room.position[4][3], room.ground[4][3]);
+//
+//             const snake_brain_id = world_mode_mod.addBrain(world_mode);
+//             var segment_index: u32 = 0;
+//             while (segment_index < 3) : (segment_index += 1) {
+//                 const x: u32 = 2 + segment_index;
+//                 _ = world_mode_mod.addSnakeSegment(world_mode, room.position[x][1], room.ground[x][1], snake_brain_id, segment_index);
+//             }
+//         }
+//
+//         for (0..@intCast(room_height)) |tile_y| {
+//             for (0..@intCast(room_width)) |tile_x| {
+//                 const position: WorldPosition = room.position[tile_x][tile_y];
+//                 const ground: TraversableReference = room.ground[tile_x][tile_y];
+//
+//                 var should_be_door = true;
+//                 if ((tile_x == 0) and (!door_left or (tile_y != @divFloor(room_height, 2)))) {
+//                     should_be_door = false;
+//                 }
+//                 if ((tile_x == (room_width - 1)) and (!door_right or (tile_y != @divFloor(room_height, 2)))) {
+//                     should_be_door = false;
+//                 }
+//                 if ((tile_y == 0) and (!door_bottom or (tile_x != @divFloor(room_width, 2)))) {
+//                     should_be_door = false;
+//                 }
+//                 if ((tile_y == (room_height - 1)) and (!door_top or (tile_x != @divFloor(room_width, 2)))) {
+//                     should_be_door = false;
+//                 }
+//
+//                 if (!should_be_door) {
+//                     _ = addWall(world_mode, position, ground);
+//                 } else if (created_z_door) {
+//                     // if ((@mod(abs_tile_z, 2) == 1 and (tile_x == 10 and tile_y == 5)) or
+//                     //     ((@mod(abs_tile_z, 2) == 0 and (tile_x == 4 and tile_y == 5))))
+//                     // {
+//                     //     _ = addStairs(world_mode, abs_tile_x, abs_tile_y, if (door_down) abs_tile_z - 1 else abs_tile_z);
+//                     // }
+//                 }
+//             }
+//         }
+//
+//         door_left = door_right;
+//         door_bottom = door_top;
+//
+//         if (created_z_door) {
+//             door_up = !door_up;
+//             door_down = !door_down;
+//         } else {
+//             door_up = false;
+//             door_down = false;
+//         }
+//
+//         door_right = false;
+//         door_top = false;
+//
+//         if (door_direction == 3) {
+//             abs_tile_z -= 1;
+//         } else if (door_direction == 2) {
+//             abs_tile_z += 1;
+//         } else if (door_direction == 1) {
+//             room_center_tile_x += room_radius_x + 1;
+//         } else {
+//             room_center_tile_y += room_radius_y + 1;
+//         }
+//
+//         prev_room = room;
+//     }
+//
+//     if (false) {
+//         // Fill the low entity storage with walls.
+//         while (world_mode.entity_count < (world_mode.low_entities.len - 16)) {
+//             const coordinate: i32 = @intCast(1024 + world_mode.entity_count);
+//             _ = addWall(world_mode, coordinate, coordinate, 0);
+//         }
+//     }
+//
+//     const camera_tile_x = room_center_tile_x;
+//     const camera_tile_y = room_center_tile_y;
+//     const camera_tile_z = last_screen_z;
+//     const new_camera_position: WorldPosition = world_mode_mod.chunkPositionFromTilePosition(
+//         world_mode.world,
+//         camera_tile_x,
+//         camera_tile_y,
+//         camera_tile_z,
+//         null,
+//     );
+//     world_mode.camera.position = new_camera_position;
+//     world_mode.camera.simulation_center = new_camera_position;
+//
+//     sim.endWorldChange(world_mode.creation_region.?);
+//     world_mode.creation_region = null;
+//     transient_state.arena.endTemporaryMemory(sim_memory);
 // }
