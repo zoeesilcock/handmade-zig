@@ -24,20 +24,28 @@ pub const BoxSurfaceIndex = enum(u32) {
     Up,
 };
 
-pub const BoxSurfaceMask = enum(u32) {
-    West = (1 << @intFromEnum(BoxSurfaceIndex.West)),
-    East = (1 << @intFromEnum(BoxSurfaceIndex.East)),
-    South = (1 << @intFromEnum(BoxSurfaceIndex.South)),
-    North = (1 << @intFromEnum(BoxSurfaceIndex.North)),
-    Down = (1 << @intFromEnum(BoxSurfaceIndex.Down)),
-    Up = (1 << @intFromEnum(BoxSurfaceIndex.Up)),
+const BoxMask_West: u32 = (1 << @intFromEnum(BoxSurfaceIndex.West));
+const BoxMask_East: u32 = (1 << @intFromEnum(BoxSurfaceIndex.East));
+const BoxMask_South: u32 = (1 << @intFromEnum(BoxSurfaceIndex.South));
+const BoxMask_North: u32 = (1 << @intFromEnum(BoxSurfaceIndex.North));
+const BoxMask_Down: u32 = (1 << @intFromEnum(BoxSurfaceIndex.Down));
+const BoxMask_Up: u32 = (1 << @intFromEnum(BoxSurfaceIndex.Up));
 
-    Planar = (@intFromEnum(BoxSurfaceIndex.West) |
-        @intFromEnum(BoxSurfaceIndex.East) |
-        @intFromEnum(BoxSurfaceIndex.South) |
-        @intFromEnum(BoxSurfaceIndex.North)),
-    Vertical = (@intFromEnum(BoxSurfaceIndex.Up) |
-        @intFromEnum(BoxSurfaceIndex.Down)),
+pub const BoxSurfaceMask = enum(u32) {
+    West = BoxMask_West,
+    East = BoxMask_East,
+    South = BoxMask_South,
+    North = BoxMask_North,
+    Down = BoxMask_Down,
+    Up = BoxMask_Up,
+
+    Planar = (BoxMask_West |
+        BoxMask_East |
+        BoxMask_South |
+        BoxMask_North),
+
+    Vertical = (BoxMask_Up |
+        BoxMask_Down),
 
     pub fn getComplement(box_mask: u32) u32 {
         const bit_mask: u32 = ((1 << 0) | (1 << 2) | (1 << 4));

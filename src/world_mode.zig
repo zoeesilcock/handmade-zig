@@ -422,7 +422,7 @@ pub fn updateAndRenderWorld(
     render_group.beginDepthPeel(background_color);
 
     const near_clip_plane: f32 = if (world_mode.use_debug_camera) 0.2 else 3;
-    const far_clip_plane: f32 = 100;
+    const far_clip_plane: f32 = if (world_mode.use_debug_camera) 1000 + 2.0 * world_mode.debug_camera_dolly else 100;
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));

@@ -1,5 +1,6 @@
 const math = @import("math.zig");
 const shared = @import("shared.zig");
+const random = @import("random.zig");
 const gen_math = @import("gen_math.zig");
 const room_gen = @import("room_gen.zig");
 const box_mod = @import("box.zig");
@@ -39,9 +40,12 @@ pub const WorldGenerator = struct {
     first_connection: ?*GenConnection,
 
     creation_region: ?*SimRegion,
+    entropy: *random.Series,
 };
 
-const GenRoomSpec = struct {};
+const GenRoomSpec = struct {
+    required_dimension: GenVector3,
+};
 
 pub const GenRoom = struct {
     first_connection: ?*GenRoomConnection,
@@ -50,8 +54,6 @@ pub const GenRoom = struct {
     spec: *GenRoomSpec,
     volume: GenVolume,
     generation_index: u32,
-
-    required_dimension: GenVector3,
 
     debug_label: if (INTERNAL) []const u8 else void,
 };
@@ -112,9 +114,18 @@ pub const GenConnection = struct {
     }
 };
 
+const GenDungeon = struct {
+    entrance_room: ?*GenRoom = null,
+    exit_room: ?*GenRoom = null,
+};
+
+const GenForest = struct {
+    exits: [4]?*GenRoom = [1]?*GenRoom{null} ** 4,
+};
+
 const GenOrphanage = struct {
-    hero_bedroom: *GenRoom,
-    forest_entrance: *GenRoom,
+    hero_bedroom: ?*GenRoom = null,
+    forest_entrance: ?*GenRoom = null,
 };
 
 const GenResult = struct {
@@ -187,7 +198,7 @@ fn genSpec(gen: *WorldGenerator) *GenRoomSpec {
 }
 
 fn genRoom(gen: *WorldGenerator, spec: *GenRoomSpec, label: []const u8) *GenRoom {
-    var room: *GenRoom = gen.memory.pushStruct(GenRoom, null);
+    var room: *GenRoom = gen.memory.pushStruct(GenRoom, .aligned(@alignOf(GenRoom), true));
     room.spec = spec;
 
     if (INTERNAL) {
@@ -232,11 +243,11 @@ fn connect(gen: *WorldGenerator, a: *GenRoom, direction: BoxSurfaceIndex, b: *Ge
     return connectByMask(gen, a, b, box_mod.getSurfaceMaskFromSurface(direction));
 }
 
-fn setSize(gen: *WorldGenerator, room: *GenRoom, dim_x: i32, dim_y: i32, opt_dim_z: ?i32) void {
+fn setSize(gen: *WorldGenerator, spec: *GenRoomSpec, dim_x: i32, dim_y: i32, opt_dim_z: ?i32) void {
     _ = gen;
     const dim_z: i32 = opt_dim_z orelse 1;
 
-    room.required_dimension = .{ dim_x, dim_y, dim_z };
+    spec.required_dimension = .{ dim_x, dim_y, dim_z };
 }
 
 fn beginWorldGen() *WorldGenerator {
@@ -391,106 +402,150 @@ fn getDeltaLongAxisForClearPlacement(
     return result;
 }
 
-fn placeRoomsAlongEdge(gen: *WorldGenerator, base_room: *GenRoom, direction_mask: u32, generation_index: u32) void {
-    const surface_index: BoxSurfaceIndex = box_mod.getSurfaceIndexFromDirectionMask(direction_mask);
+fn placeRoomAlongEdge(
+    gen: *WorldGenerator,
+    base_room: *GenRoom,
+    connection: *GenConnection,
+    surface_index: BoxSurfaceIndex,
+    generation_index: u32,
+) bool {
+    std.debug.assert(connection.couldGoDirectionByMask(base_room, box_mod.getSurfaceMaskFromSurface(surface_index)));
 
-    var axis_a: u32 = 0;
-    var edge_axis: u32 = 0;
-    var other_a_min: bool = false;
+    var relative_x_axis: u32 = 0;
+    var relative_y_axis: u32 = 0;
+    var relative_z_axis: u32 = 0;
+    var relative_z_axis_min: bool = false;
     switch (surface_index) {
         .West => {
-            axis_a = 0;
-            edge_axis = 1;
-            other_a_min = true;
+            relative_x_axis = 1;
+            relative_y_axis = 2;
+            relative_z_axis = 0;
+            relative_z_axis_min = true;
         },
         .East => {
-            axis_a = 0;
-            edge_axis = 1;
-            other_a_min = false;
+            relative_x_axis = 1;
+            relative_y_axis = 2;
+            relative_z_axis = 0;
+            relative_z_axis_min = false;
         },
         .South => {
-            axis_a = 1;
-            edge_axis = 0;
-            other_a_min = true;
+            relative_x_axis = 0;
+            relative_y_axis = 2;
+            relative_z_axis = 1;
+            relative_z_axis_min = true;
         },
         .North => {
-            axis_a = 1;
-            edge_axis = 0;
-            other_a_min = false;
+            relative_x_axis = 0;
+            relative_y_axis = 2;
+            relative_z_axis = 1;
+            relative_z_axis_min = false;
         },
-        else => unreachable,
+        .Down => {
+            relative_x_axis = 0;
+            relative_y_axis = 1;
+            relative_z_axis = 2;
+            relative_z_axis_min = true;
+        },
+        .Up => {
+            relative_x_axis = 0;
+            relative_y_axis = 1;
+            relative_z_axis = 2;
+            relative_z_axis_min = false;
+        },
     }
 
-    const min_edge_position: i32 = base_room.volume.min[edge_axis];
-    const max_edge_position: i32 = base_room.volume.max[edge_axis];
+    const room: *GenRoom = connection.getOtherRoom(base_room);
+    std.debug.assert(room.generation_index != generation_index);
+    const spec: *GenRoomSpec = room.spec;
 
-    var opt_room_connection: ?*GenRoomConnection = base_room.first_connection;
-    while (opt_room_connection) |room_connection| : (opt_room_connection = room_connection.next) {
-        const connection: *GenConnection = room_connection.connection;
-        const room: *GenRoom = connection.getOtherRoom(base_room);
+    var test_volume: GenVolume = .zero();
 
-        if (connection.couldGoDirectionByMask(base_room, direction_mask) and
-            room.generation_index != generation_index)
-        {
-            room.generation_index = generation_index;
+    if (relative_z_axis_min) {
+        test_volume.max[relative_z_axis] = base_room.volume.min[relative_z_axis] - 1;
+        test_volume.min[relative_z_axis] =
+            test_volume.max[relative_z_axis] - spec.required_dimension[relative_z_axis] + 1;
+    } else {
+        test_volume.min[relative_z_axis] = base_room.volume.max[relative_z_axis] + 1;
+        test_volume.max[relative_z_axis] =
+            test_volume.min[relative_z_axis] + spec.required_dimension[relative_z_axis] - 1;
+    }
 
-            var placed: bool = false;
-            var at_edge_position: i32 = min_edge_position;
-            while (at_edge_position < max_edge_position) {
-                var test_volume: GenVolume = .zero();
+    const min_relative_x: i32 = base_room.volume.min[relative_x_axis];
+    const max_relative_x: i32 = base_room.volume.max[relative_x_axis];
 
-                test_volume.min[edge_axis] = at_edge_position;
-                test_volume.max[edge_axis] = test_volume.min[edge_axis] + room.required_dimension[edge_axis] - 1;
+    const min_relative_y: i32 = base_room.volume.min[relative_y_axis];
+    const max_relative_y: i32 = base_room.volume.max[relative_y_axis];
 
-                if (other_a_min) {
-                    test_volume.max[axis_a] = base_room.volume.min[axis_a] - 1;
-                    test_volume.min[axis_a] = test_volume.max[axis_a] - room.required_dimension[axis_a] + 1;
-                } else {
-                    test_volume.min[axis_a] = base_room.volume.max[axis_a] + 1;
-                    test_volume.max[axis_a] = test_volume.min[axis_a] + room.required_dimension[axis_a] - 1;
-                }
+    var relative_y: i32 = min_relative_y;
+    while (room.generation_index != generation_index and relative_y <= max_relative_y) {
+        test_volume.min[relative_y_axis] = relative_y;
+        test_volume.max[relative_y_axis] = relative_y + spec.required_dimension[relative_y_axis] - 1;
 
-                // if (other_b_min) {
-                //     test_volume.max[axis_b] = base_room.volume.min[axis_b] - 1;
-                //     test_volume.min[axis_b] = test_volume.max[axis_b] - room.required_dimension[axis_b] + 1;
-                // } else {
-                //     test_volume.min[axis_b] = base_room.volume.max[axis_b] - 1;
-                //     test_volume.max[axis_b] = test_volume.min[axis_b] + room.required_dimension[axis_b] + 1;
-                // }
+        var relative_x: i32 = min_relative_x;
+        while (relative_x < max_relative_x) {
+            test_volume.min[relative_x_axis] = relative_x;
+            test_volume.max[relative_x_axis] = relative_x + spec.required_dimension[relative_x_axis] - 1;
 
-                test_volume.min[2] = base_room.volume.min[2];
-                test_volume.max[2] = base_room.volume.max[2];
+            const delta_x: i32 = getDeltaLongAxisForClearPlacement(
+                gen,
+                &test_volume,
+                relative_x_axis,
+                generation_index,
+            );
 
-                const delta: i32 = getDeltaLongAxisForClearPlacement(gen, &test_volume, edge_axis, generation_index);
-                if (delta == 0) {
-                    placed = true;
-                    room.volume = test_volume;
-                    break;
-                } else {
-                    at_edge_position = at_edge_position + delta;
-                }
+            if (delta_x == 0) {
+                room.generation_index = generation_index;
+                room.volume = test_volume;
+
+                var door: GenVolume = base_room.volume.getIntersectionWith(&room.volume);
+                const door_edge_x: i32 = @divFloor(door.min[relative_x_axis] + door.max[relative_x_axis], 2);
+                door.min[relative_x_axis] = door_edge_x;
+                door.max[relative_x_axis] = door_edge_x;
+
+                const door_edge_y: i32 = @divFloor(door.min[relative_y_axis] + door.max[relative_y_axis], 2);
+                door.min[relative_y_axis] = door_edge_y;
+                door.max[relative_y_axis] = door_edge_y;
+
+                const min_door: i32 = door.min[relative_z_axis];
+                const max_door: i32 = door.max[relative_z_axis];
+                door.min[relative_z_axis] = max_door;
+                door.max[relative_z_axis] = min_door;
+
+                connection.volume = door;
+
+                break;
+            } else {
+                relative_x += delta_x;
             }
+        }
 
-            std.debug.assert(placed);
+        relative_y += 1;
+    }
 
-            var door: GenVolume = base_room.volume.getIntersectionWith(&room.volume);
-            const door_edge: i32 = @divFloor(door.min[edge_axis] + door.max[edge_axis], 2);
-            door.min[edge_axis] = door_edge;
-            door.max[edge_axis] = door_edge;
+    const result: bool = room.generation_index == generation_index;
+    return result;
+}
 
-            const min_door: i32 = door.min[axis_a];
-            const max_door: i32 = door.max[axis_a];
-
-            door.min[axis_a] = max_door;
-            door.max[axis_a] = min_door;
-
-            connection.volume = door;
+fn getRandomDirectionFromMask(gen: *WorldGenerator, direction_mask: u32) BoxSurfaceIndex {
+    var direction_count: u32 = 0;
+    var directions: [6]BoxSurfaceIndex = undefined;
+    var direction_index: u32 = 0;
+    while (direction_index < directions.len) : (direction_index += 1) {
+        if (direction_mask & (box_mod.getSurfaceMaskFromSurface(@enumFromInt(direction_index))) != 0) {
+            directions[direction_count] = @enumFromInt(direction_index);
+            direction_count += 1;
         }
     }
+
+    std.debug.assert(direction_count > 0);
+
+    const result: BoxSurfaceIndex = directions[gen.entropy.randomChoice(direction_count)];
+
+    return result;
 }
 
 fn layout(gen: *WorldGenerator, world: *World, start_at_room: *GenRoom) void {
-    // var series = &world.game_entropy;
+    _ = world;
 
     const change_memory = gen.temp_memory.beginTemporaryMemory();
     defer gen.temp_memory.endTemporaryMemory(change_memory);
@@ -498,72 +553,44 @@ fn layout(gen: *WorldGenerator, world: *World, start_at_room: *GenRoom) void {
     var stack: GenRoomStack = .{ .memory = &gen.temp_memory };
     const generation_index: u32 = 1;
 
-    if (false) {
-        // TODO: This will have to go eventually but for right now we want to control the initial room location.
-        const first_room: *GenRoom = start_at_room;
-        const volume: GenVolume = .{
-            .min = .{
-                -4,
-                -4,
-                0,
-            },
-            .max = .{
-                3,
-                3,
-                0,
-            },
-        };
-        placeRoomInVolume(first_room, volume);
-        first_room.generation_index = generation_index;
-        stack.pushConnectedRooms(first_room, generation_index);
+    const first_room: *GenRoom = start_at_room;
+    var volume: GenVolume = .{
+        .min = .{ 0, 0, 0 },
+        .max = .{ 0, 0, 0 },
+    };
 
-        stack.pushRoom(gen.first_room);
-        while (stack.hasEntries()) {
-            if (stack.popRoom()) |room| {
-                if (room.generation_index != generation_index) {
-                    room.generation_index = generation_index;
-                    stack.pushConnectedRooms(room, generation_index);
+    volume.max[X] = volume.min[X] + first_room.spec.required_dimension[X] - 1;
+    volume.max[Y] = volume.min[Y] + first_room.spec.required_dimension[Y] - 1;
+    volume.max[Z] = volume.min[Z] + first_room.spec.required_dimension[Z] - 1;
+    placeRoomInVolume(first_room, volume);
+    first_room.generation_index = generation_index;
+    stack.pushConnectedRooms(first_room, generation_index);
 
-                    var min_volume: GenVolume = .infinityVolume();
-                    var max_volume: GenVolume = .infinityVolume();
+    while (stack.hasEntries()) {
+        if (stack.popRoom()) |room| {
+            if (room.generation_index != generation_index) {
+                var opt_room_connection: ?*GenRoomConnection = room.first_connection;
+                while (opt_room_connection) |room_connection| : (opt_room_connection = room_connection.next) {
+                    const connection: *GenConnection = room_connection.connection;
+                    const other_room: *GenRoom = connection.getOtherRoom(room);
 
-                    const room_placed: bool = placeRoom(gen, world, room, &min_volume, &max_volume, room.first_connection);
-                    _ = room_placed;
-                    // std.debug.assert(room_placed);
-                }
-            }
-        }
-    } else {
-        const first_room: *GenRoom = start_at_room;
-        var volume: GenVolume = .{
-            .min = .{ 0, 0, 0 },
-            .max = .{ 0, 0, 0 },
-        };
+                    if (other_room.generation_index == generation_index) {
+                        if (room.generation_index != generation_index) {
+                            var direction_mask: u32 = connection.getDirectionMaskFromRoom(other_room);
 
-        volume.max[X] = volume.min[X] + first_room.required_dimension[X] - 1;
-        volume.max[Y] = volume.min[Y] + first_room.required_dimension[Y] - 1;
-        volume.max[Z] = volume.min[Z] + first_room.required_dimension[Z] - 1;
-        placeRoomInVolume(first_room, volume);
-        first_room.generation_index = generation_index;
-        stack.pushConnectedRooms(first_room, generation_index);
-
-        while (stack.hasEntries()) {
-            if (stack.popRoom()) |room| {
-                if (room.generation_index != generation_index) {
-                    var opt_room_connection: ?*GenRoomConnection = room.first_connection;
-                    while (opt_room_connection) |room_connection| : (opt_room_connection = room_connection.next) {
-                        const connection: *GenConnection = room_connection.connection;
-                        const other_room: *GenRoom = connection.getOtherRoom(room);
-
-                        if (other_room.generation_index == generation_index) {
-                            if (room.generation_index != generation_index) {
-                                const direction: u32 = connection.getDirectionMaskFromRoom(other_room);
-                                placeRoomsAlongEdge(gen, other_room, direction, generation_index);
-                                std.debug.assert(room.generation_index == generation_index);
+                            while (direction_mask > 0) {
+                                const direction: BoxSurfaceIndex = getRandomDirectionFromMask(gen, direction_mask);
+                                if (placeRoomAlongEdge(gen, other_room, connection, direction, generation_index)) {
+                                    break;
+                                } else {
+                                    direction_mask &= ~box_mod.getSurfaceMaskFromSurface(direction);
+                                }
                             }
-                        } else {
-                            stack.pushRoom(other_room);
+
+                            std.debug.assert(room.generation_index == generation_index);
                         }
+                    } else {
+                        stack.pushRoom(other_room);
                     }
                 }
             }
@@ -583,48 +610,112 @@ fn endWorldGen(gen: *WorldGenerator) void {
     gen.memory.clear();
 }
 
+fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
+    var result: GenDungeon = .{};
+
+    const dungeon_spec: *GenRoomSpec = genSpec(gen);
+    setSize(gen, dungeon_spec, 17, 9, 1);
+
+    var opt_room_above: ?*GenRoom = null;
+    var floor_index: i32 = 0;
+    while (floor_index < floor_count) : (floor_index += 1) {
+        const temp = gen.temp_memory.beginTemporaryMemory();
+        defer gen.temp_memory.endTemporaryMemory(temp);
+
+        const floor_entrance_room: *GenRoom = genRoom(gen, dungeon_spec, "Floor Entrance");
+
+        if (opt_room_above) |room_above| {
+            _ = connect(gen, room_above, .Down, floor_entrance_room);
+        } else {
+            result.entrance_room = floor_entrance_room;
+        }
+
+        var prev_room: *GenRoom = floor_entrance_room;
+        const path_count: i32 = gen.entropy.randomIntBetween(4 + @divFloor(floor_index, 2), 6 + floor_index);
+
+        var chain: [*]*GenRoom = temp.arena.pushArray(@intCast(path_count), *GenRoom, null);
+
+        var path_index: u32 = 0;
+        while (path_index < path_count) : (path_index += 1) {
+            const room: *GenRoom = genRoom(gen, dungeon_spec, "Dungeon Path");
+            chain[path_index] = room;
+
+            _ = connectByMask(gen, prev_room, room, @intFromEnum(BoxSurfaceMask.Planar));
+            prev_room = room;
+        }
+
+        // TODO: Need a utility here that removes path rooms when they are chosen, to avoid over-connecting a room
+        // with special rooms.
+        const shop: *GenRoom = genRoom(gen, dungeon_spec, "Shop");
+        _ = connectByMask(
+            gen,
+            chain[gen.entropy.randomChoice(@intCast(path_count))],
+            shop,
+            @intFromEnum(BoxSurfaceMask.Planar),
+        );
+
+        const item_room: *GenRoom = genRoom(gen, dungeon_spec, "Item Room");
+        _ = connectByMask(
+            gen,
+            chain[gen.entropy.randomChoice(@intCast(path_count))],
+            item_room,
+            @intFromEnum(BoxSurfaceMask.Planar),
+        );
+
+        const floor_exit_room: *GenRoom = genRoom(gen, dungeon_spec, "Floor Exit");
+        _ = connectByMask(gen, prev_room, floor_exit_room, @intFromEnum(BoxSurfaceMask.Planar));
+
+        opt_room_above = floor_exit_room;
+    }
+
+    result.exit_room = opt_room_above;
+
+    return result;
+}
+
+fn createForest(gen: *WorldGenerator) GenForest {
+    _ = gen;
+}
+
 fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
+    var result: GenOrphanage = .{};
     const bedroom_spec: *GenRoomSpec = genSpec(gen);
+    const save_slot_spec: *GenRoomSpec = genSpec(gen);
     const main_room_spec: *GenRoomSpec = genSpec(gen);
-    const tailor_spec: *GenRoomSpec = genSpec(gen);
+    const tailor_room_spec: *GenRoomSpec = genSpec(gen);
     const kitchen_spec: *GenRoomSpec = genSpec(gen);
     const garden_spec: *GenRoomSpec = genSpec(gen);
     const basic_forest_spec: *GenRoomSpec = genSpec(gen);
-    const hallway_spec: *GenRoomSpec = genSpec(gen);
+    const vertical_hallway_spec: *GenRoomSpec = genSpec(gen);
+    const horizontal_hallway_spec: *GenRoomSpec = genSpec(gen);
 
     const main_room: *GenRoom = genRoom(gen, main_room_spec, "Orphanage Main Room");
-    const tailor_room: *GenRoom = genRoom(gen, tailor_spec, "Orphanage Tailor's Room");
+    const tailor_room: *GenRoom = genRoom(gen, tailor_room_spec, "Orphanage Tailor's Room");
     const kitchen: *GenRoom = genRoom(gen, kitchen_spec, "Orphanage Kitchen");
-    const front_hall: *GenRoom = genRoom(gen, hallway_spec, "Orphanage Front Hallway");
+    const front_hall: *GenRoom = genRoom(gen, vertical_hallway_spec, "Orphanage Front Hallway");
+    const back_hall: *GenRoom = genRoom(gen, horizontal_hallway_spec, "Orphanage Back Hallway");
     const bedroom_a: *GenRoom = genRoom(gen, bedroom_spec, "Orphanage Bedroom A");
     const bedroom_b: *GenRoom = genRoom(gen, bedroom_spec, "Orphanage Bedroom B");
     const bedroom_c: *GenRoom = genRoom(gen, bedroom_spec, "Orphanage Bedroom C");
     const bedroom_d: *GenRoom = genRoom(gen, bedroom_spec, "Orphanage Bedroom D");
-    const back_hall: *GenRoom = genRoom(gen, hallway_spec, "Orphanage Back Hallway");
-    const hero_save_slot_a: *GenRoom = genRoom(gen, bedroom_spec, "Save Slot A");
-    const hero_save_slot_b: *GenRoom = genRoom(gen, bedroom_spec, "Save Slot B");
-    const hero_save_slot_c: *GenRoom = genRoom(gen, bedroom_spec, "Save Slot C");
+    const hero_save_slot_a: *GenRoom = genRoom(gen, save_slot_spec, "Save Slot A");
+    const hero_save_slot_b: *GenRoom = genRoom(gen, save_slot_spec, "Save Slot B");
+    const hero_save_slot_c: *GenRoom = genRoom(gen, save_slot_spec, "Save Slot C");
     const garden: *GenRoom = genRoom(gen, garden_spec, "Orphanage Garden");
     const forest_path: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage Forest Path");
     const forest_entrance: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage ForestEntrance");
     // const side_alley: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage Side Alley");
 
-    setSize(gen, main_room, 13, 13, null);
-    setSize(gen, tailor_room, 8, 6, null);
-    setSize(gen, kitchen, 8, 6, null);
-    setSize(gen, front_hall, 5, 13, null);
-    setSize(gen, bedroom_a, 8, 6, null);
-    setSize(gen, bedroom_b, 8, 6, null);
-    setSize(gen, bedroom_c, 8, 6, null);
-    setSize(gen, bedroom_d, 8, 6, null);
-    setSize(gen, back_hall, 13, 5, null);
-    setSize(gen, hero_save_slot_a, 5, 6, null);
-    setSize(gen, hero_save_slot_b, 5, 6, null);
-    setSize(gen, hero_save_slot_c, 5, 6, null);
-    setSize(gen, garden, 13, 13, null);
+    setSize(gen, main_room_spec, 13, 13, null);
+    setSize(gen, tailor_room_spec, 8, 6, null);
+    setSize(gen, kitchen_spec, 8, 6, null);
+    setSize(gen, vertical_hallway_spec, 5, 13, null);
+    setSize(gen, bedroom_spec, 8, 6, null);
+    setSize(gen, horizontal_hallway_spec, 13, 5, null);
+    setSize(gen, save_slot_spec, 5, 6, null);
+    setSize(gen, garden_spec, 13, 13, null);
     // setSize(gen, side_alley, 5, 13, null);
-    setSize(gen, forest_path, 13, 13, null);
-    setSize(gen, forest_entrance, 8, 8, null);
+    setSize(gen, basic_forest_spec, 13, 13, null);
 
     _ = connect(gen, main_room, .North, forest_path);
     _ = connect(gen, main_room, .West, tailor_room);
@@ -646,10 +737,8 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     // _ = connect(gen, side_alley, .North, forest_path);
     _ = connect(gen, forest_path, .North, forest_entrance);
 
-    const result: GenOrphanage = .{
-        .hero_bedroom = hero_save_slot_a,
-        .forest_entrance = forest_entrance,
-    };
+    result.hero_bedroom = hero_save_slot_a;
+    result.forest_entrance = forest_entrance;
 
     return result;
 }
@@ -657,12 +746,20 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
 pub fn createWorldNew(world: *World) GenResult {
     var result: GenResult = .{ .initial_camera_position = undefined };
 
-    const gen: *WorldGenerator = beginWorldGen();
+    var gen: *WorldGenerator = beginWorldGen();
+    gen.entropy = &world.game_entropy;
+
     const orphanage: GenOrphanage = createOrphanage(gen);
-    layout(gen, world, orphanage.hero_bedroom);
+    const dungeon: GenDungeon = createDungeon(gen, 4);
+    _ = connect(gen, orphanage.forest_entrance.?, .Down, dungeon.entrance_room.?);
+
+    const start_room: *GenRoom = orphanage.hero_bedroom.?;
+
+    layout(gen, world, start_room);
     generateWorld(gen, world);
 
-    const hero_room: GenVolume = orphanage.hero_bedroom.volume;
+    const hero_room: GenVolume = orphanage.hero_bedroom.?.volume;
+
     result.initial_camera_position = room_gen.chunkPositionFromTilePosition(
         world,
         @divFloor(hero_room.min[X] + hero_room.max[X], 2),
