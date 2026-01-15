@@ -426,7 +426,7 @@ pub fn updateAndRenderWorld(
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
-    const delta_from_sim: Vector3 = world.subtractPositions(
+    var delta_from_sim: Vector3 = world.subtractPositions(
         world_mode.world,
         &world_mode.camera.position,
         &world_mode.camera.simulation_center,
@@ -462,7 +462,9 @@ pub fn updateAndRenderWorld(
         );
     }
 
-    const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget();
+    DebugInterface.debugValue(@src(), &delta_from_sim, "DeltaFromSim");
+
+    const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget(world_mode.camera.offset_z);
     const screen_bounds: Rectangle2 = .fromCenterDimension(.zero(), .new(
         world_camera_rect.max.x() - world_camera_rect.min.x(),
         world_camera_rect.max.y() - world_camera_rect.min.y(),
@@ -478,10 +480,7 @@ pub fn updateAndRenderWorld(
         .zero(),
         world_mode.standard_room_dimension.scaledTo(3),
     );
-    var light_bounds: Rectangle3 = .fromCenterDimension(
-        .zero(),
-        world_mode.standard_room_dimension,
-    );
+    var light_bounds: Rectangle3 = world_camera_rect;
     _ = light_bounds.min.setZ(sim_bounds.min.z());
     _ = light_bounds.max.setZ(sim_bounds.max.z());
 
@@ -608,13 +607,25 @@ pub fn updateAndRenderWorld(
         var world_transform = ObjectTransform.defaultUpright();
 
         if (true) {
+            // render_group.pushVolumeOutline(
+            //     &world_transform,
+            //     .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
+            //     .new(1, 1, 0, 1),
+            //     0.01,
+            // );
             render_group.pushVolumeOutline(
                 &world_transform,
-                .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
-                .new(1, 1, 0, 1),
-                0.01,
+                world_camera_rect,
+                .new(1, 1, 1, 1),
+                0.1,
             );
-
+            render_group.pushRectangleOutline(
+                &world_transform,
+                screen_bounds.getDimension(),
+                Vector3.new(0, 0, 0.005),
+                Color.new(1, 1, 0, 1),
+                0.1,
+            );
             render_group.pushRectangleOutline(
                 &world_transform,
                 screen_bounds.getDimension(),
@@ -623,14 +634,15 @@ pub fn updateAndRenderWorld(
                 0.1,
             );
             // render_group.pushRectangleOutline(
-            //     world_transform,
+            //     &world_transform,
             //     camera_bounds_in_meters.getDimension().xy(),
             //     Vector3.zero(),
             //     Color.new(1, 1, 1, 1),
+            //     0.1,
             // );
             render_group.pushRectangleOutline(
                 &world_transform,
-                sim_bounds.getDimension().xy(),
+                light_bounds.getDimension().xy(),
                 Vector3.new(0, 0, 0.005),
                 Color.new(0, 1, 1, 1),
                 0.1,

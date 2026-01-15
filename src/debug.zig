@@ -2338,7 +2338,8 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
         const cur_kilocycles: u32 = @intCast(cur_duration / 1000);
         const min_kilocycles: u32 = @intCast(min_duration / 1000);
         const max_kilocycles: u32 = @intCast(max_duration / 1000);
-        const avg_kilocycles: u32 = @intCast(total_duration / (1000 * total_count));
+        const avg_kilocycles: u32 =
+            @intFromFloat(math.safeRatio0(@floatFromInt(total_duration), @floatFromInt((1000 * total_count))));
 
         _ = shared.formatString(
             debug_state.function_info_size,

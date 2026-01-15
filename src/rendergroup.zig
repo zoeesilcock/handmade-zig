@@ -204,6 +204,8 @@ const RenderTransform = extern struct {
     x: Vector3 = .zero(),
     y: Vector3 = .zero(),
     z: Vector3 = .zero(),
+
+    // This is both the world camera transform and the projection matrix combined.
     projection: MatrixInverse4x4 = .{},
 };
 
@@ -347,7 +349,6 @@ pub const RenderGroup = extern struct {
         var probe_z: Vector4 =
             render_transform.position.minus(render_transform.z.scaledTo(world_distance_from_camera_z)).toVector4(1);
         probe_z = render_transform.projection.forward.timesV4(probe_z);
-        const clip_z: f32 = probe_z.z() / probe_z.w();
 
         const screen_center: Vector2 = self.screen_dimensions.scaledTo(0.5);
 
@@ -355,13 +356,14 @@ pub const RenderGroup = extern struct {
         _ = clip_space_xy.setX(clip_space_xy.x() * 2 / self.screen_dimensions.x());
         _ = clip_space_xy.setY(clip_space_xy.y() * 2 / self.screen_dimensions.y());
 
-        const clip: Vector3 = clip_space_xy.toVector3(clip_z);
-        const world_position: Vector3 = render_transform.projection.inverse.timesV(clip);
+        _ = clip_space_xy.setX(clip_space_xy.x() * probe_z.w());
+        _ = clip_space_xy.setY(clip_space_xy.y() * probe_z.w());
 
-        return world_position;
+        const clip: Vector4 = .new(clip_space_xy.x(), clip_space_xy.y(), probe_z.z(), probe_z.w());
+        const world_position: Vector4 = render_transform.projection.inverse.timesV4(clip);
+
+        return world_position.xyz();
     }
-
-    // const object_position: Vector3 = world_position.minus(object_transform.offset_position);
 
     pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle3 {
         var transform: ObjectTransform = .defaultFlat();
@@ -373,8 +375,7 @@ pub const RenderGroup = extern struct {
         return Rectangle3.fromMinMax(min_corner, max_corner);
     }
 
-    pub fn getCameraRectangleAtTarget(self: *RenderGroup) Rectangle3 {
-        const z: f32 = 8;
+    pub fn getCameraRectangleAtTarget(self: *RenderGroup, z: f32) Rectangle3 {
         return self.getCameraRectangleAtDistance(z);
     }
 
