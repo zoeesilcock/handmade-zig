@@ -67,16 +67,9 @@ pub const WorldChunk = extern struct {
     next_in_hash: ?*WorldChunk = null,
 };
 
-pub const WorldRoomCamera = enum(u32) {
-    FocusOnRoom,
-    FocusOnPlayer,
-};
-
 pub const WorldRoom = extern struct {
     min_pos: WorldPosition,
     max_pos: WorldPosition,
-
-    camera: WorldRoomCamera,
 };
 
 pub const WorldEntityBlock = extern struct {
@@ -349,7 +342,6 @@ pub fn addWorldRoom(
     world: *World,
     min_pos: WorldPosition,
     max_pos: WorldPosition,
-    camera: WorldRoomCamera,
 ) *WorldRoom {
     std.debug.assert(world.room_count < world.rooms.len);
     var room: *WorldRoom = &world.rooms[world.room_count];
@@ -357,7 +349,6 @@ pub fn addWorldRoom(
 
     room.min_pos = min_pos;
     room.max_pos = max_pos;
-    room.camera = camera;
 
     return room;
 }

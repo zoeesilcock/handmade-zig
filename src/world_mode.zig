@@ -246,21 +246,23 @@ fn addPlayer(
     glove.brain_id = brain_id;
 
     if (world_mode.camera.following_entity_index.value == 0) {
-        world_mode.camera.following_entity_index = head.id;
+        world_mode.camera.following_entity_index = body.id;
     }
 
     const hero_scale = 3;
     const color: Color = .white();
     if (true) {
-        body.addPiece(.Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, room_gen.shadow_alpha), null);
-        body.addPiece(
+        room_gen.addPiece(body, .Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, room_gen.shadow_alpha), null);
+        room_gen.addPiece(
+            body,
             .Torso,
             hero_scale * 1.2,
             .new(0, 0, 0),
             color,
             @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
         );
-        body.addPiece(
+        room_gen.addPiece(
+            body,
             .Cape,
             hero_scale * 1.2,
             .new(0, -0.1, 0),
@@ -268,9 +270,9 @@ fn addPlayer(
             @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
         );
 
-        head.addPiece(.Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
+        room_gen.addPiece(head, .Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
 
-        glove.addPiece(.Sword, hero_scale * 0.25, .new(0, 0, 0), color, null);
+        room_gen.addPiece(glove, .Sword, hero_scale * 0.25, .new(0, 0, 0), color, null);
     }
 
     room_gen.placeEntity(sim_region, glove, position);
@@ -463,6 +465,7 @@ pub fn updateAndRenderWorld(
     }
 
     DebugInterface.debugValue(@src(), &delta_from_sim, "DeltaFromSim");
+    DebugInterface.debugValue(@src(), &world_mode.camera.offset_z, "CameraOffsetZ");
 
     const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget(world_mode.camera.offset_z);
     const screen_bounds: Rectangle2 = .fromCenterDimension(.zero(), .new(
@@ -476,10 +479,14 @@ pub fn updateAndRenderWorld(
     _ = camera_bounds_in_meters.min.setZ(-3.0 * world_mode.typical_floor_height);
     _ = camera_bounds_in_meters.max.setZ(1.0 * world_mode.typical_floor_height);
 
-    const sim_bounds: Rectangle3 = .fromCenterDimension(
+    // There are risks to allowing the simulation region to be determined by the camera, because of the way we use
+    // "brains" wherer logical entity collections can be split by a simulation boundary.
+    var sim_bounds: Rectangle3 = .fromCenterDimension(
         .zero(),
         world_mode.standard_room_dimension.scaledTo(3),
     );
+    sim_bounds = world_camera_rect.addRadius(.new(5, 5, 0)).getUnionWith(&sim_bounds);
+
     var light_bounds: Rectangle3 = world_camera_rect;
     _ = light_bounds.min.setZ(sim_bounds.min.z());
     _ = light_bounds.max.setZ(sim_bounds.max.z());
@@ -587,13 +594,13 @@ pub fn updateAndRenderWorld(
             world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
         }
 
-        render_group.pushCubeLight(
-            world_mode.debug_light_position,
-            0.5,
-            .new(1, 1, 1),
-            1,
-            @ptrCast(&world_mode.debug_light_store),
-        );
+        // render_group.pushCubeLight(
+        //     world_mode.debug_light_position,
+        //     0.5,
+        //     .new(1, 1, 1),
+        //     1,
+        //     @ptrCast(&world_mode.debug_light_store),
+        // );
 
         const frame_to_frame_camera_delta_position: Vector3 =
             world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
@@ -606,7 +613,19 @@ pub fn updateAndRenderWorld(
 
         var world_transform = ObjectTransform.defaultUpright();
 
-        if (true) {
+        var min_chunk_position: WorldPosition = world_mode.camera.position;
+        min_chunk_position.offset = .zero();
+        var max_chunk_position: WorldPosition = min_chunk_position;
+        max_chunk_position.chunk_x += 1;
+        max_chunk_position.chunk_y += 1;
+        max_chunk_position.chunk_z += 1;
+
+        const chunk_boundary: Rectangle3 = .fromMinMax(
+            sim.mapIntoSimSpace(world_sim.sim_region, min_chunk_position),
+            sim.mapIntoSimSpace(world_sim.sim_region, max_chunk_position),
+        );
+
+        if (false) {
             // render_group.pushVolumeOutline(
             //     &world_transform,
             //     .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
@@ -617,6 +636,12 @@ pub fn updateAndRenderWorld(
                 &world_transform,
                 world_camera_rect,
                 .new(1, 1, 1, 1),
+                0.1,
+            );
+            render_group.pushVolumeOutline(
+                &world_transform,
+                chunk_boundary,
+                .new(1, 0.5, 0, 1),
                 0.1,
             );
             render_group.pushRectangleOutline(
@@ -656,18 +681,20 @@ pub fn updateAndRenderWorld(
             );
         }
 
-        var room_index: u32 = 0;
-        while (room_index < world_mode.world.room_count) : (room_index += 1) {
-            const room: *WorldRoom = &world_mode.world.rooms[room_index];
-            render_group.pushVolumeOutline(
-                &world_transform,
-                .fromMinMax(
-                    sim.getSimRelativePosition(world_sim.sim_region, room.min_pos),
-                    sim.getSimRelativePosition(world_sim.sim_region, room.max_pos),
-                ),
-                .new(1, 1, 0, 1),
-                0.01,
-            );
+        if (false) {
+            var room_index: u32 = 0;
+            while (room_index < world_mode.world.room_count) : (room_index += 1) {
+                const room: *WorldRoom = &world_mode.world.rooms[room_index];
+                render_group.pushVolumeOutline(
+                    &world_transform,
+                    .fromMinMax(
+                        sim.mapIntoSimSpace(world_sim.sim_region, room.min_pos),
+                        sim.mapIntoSimSpace(world_sim.sim_region, room.max_pos),
+                    ),
+                    .new(1, 1, 0, 1),
+                    0.01,
+                );
+            }
         }
     }
 

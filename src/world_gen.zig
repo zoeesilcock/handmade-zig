@@ -36,10 +36,12 @@ pub const WorldGenerator = struct {
     memory: memory.MemoryArena,
     temp_memory: memory.MemoryArena,
 
+    world: *World,
+    tile_dimension: Vector3,
+
     first_room: ?*GenRoom,
     first_connection: ?*GenConnection,
 
-    creation_region: ?*SimRegion,
     entropy: *random.Series,
 };
 
@@ -250,8 +252,18 @@ fn setSize(gen: *WorldGenerator, spec: *GenRoomSpec, dim_x: i32, dim_y: i32, opt
     spec.required_dimension = .{ dim_x, dim_y, dim_z };
 }
 
-fn beginWorldGen() *WorldGenerator {
+fn beginWorldGen(world: *World) *WorldGenerator {
     const gen: *WorldGenerator = memory.bootstrapPushStruct(WorldGenerator, "memory", null, null);
+    gen.world = world;
+
+    const tile_side_in_meters: f32 = 1.4;
+    const tile_depth_in_meters = world.chunk_dimension_in_meters.z();
+    gen.tile_dimension = .new(
+        tile_side_in_meters,
+        tile_side_in_meters,
+        tile_depth_in_meters,
+    );
+
     return gen;
 }
 
@@ -746,7 +758,7 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
 pub fn createWorldNew(world: *World) GenResult {
     var result: GenResult = .{ .initial_camera_position = undefined };
 
-    var gen: *WorldGenerator = beginWorldGen();
+    var gen: *WorldGenerator = beginWorldGen(world);
     gen.entropy = &world.game_entropy;
 
     const orphanage: GenOrphanage = createOrphanage(gen);
@@ -761,7 +773,7 @@ pub fn createWorldNew(world: *World) GenResult {
     const hero_room: GenVolume = orphanage.hero_bedroom.?.volume;
 
     result.initial_camera_position = room_gen.chunkPositionFromTilePosition(
-        world,
+        gen,
         @divFloor(hero_room.min[X] + hero_room.max[X], 2),
         @divFloor(hero_room.min[Y] + hero_room.max[Y], 2),
         @divFloor(hero_room.min[Z] + hero_room.max[Z], 2),

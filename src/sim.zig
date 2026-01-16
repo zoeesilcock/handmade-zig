@@ -310,7 +310,7 @@ fn addEntityToHash(sim_region: *SimRegion, entity: *Entity) void {
     markEntityOccupied(sim_region, entry);
 }
 
-pub fn getSimRelativePosition(sim_region: *SimRegion, position: WorldPosition) Vector3 {
+pub fn mapIntoSimSpace(sim_region: *SimRegion, position: WorldPosition) Vector3 {
     return world.subtractPositions(sim_region.world, &position, &sim_region.origin);
 }
 
@@ -382,7 +382,7 @@ pub fn beginWorldChange(
                         .chunk_z = chunk_z,
                         .offset = .zero(),
                     };
-                    const chunk_delta: Vector3 = getSimRelativePosition(sim_region, chunk_position);
+                    const chunk_delta: Vector3 = mapIntoSimSpace(sim_region, chunk_position);
                     const first_block: ?*world.WorldEntityBlock = chunk.first_block;
                     var last_block: ?*world.WorldEntityBlock = first_block;
                     var opt_block: ?*world.WorldEntityBlock = first_block;
@@ -803,7 +803,7 @@ pub fn updateCameraForEntityMovement(
         const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
         const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
         var target_position: Vector3 = simulation_center;
-        var target_offset_z: f32 = 16;
+        var target_offset_z: f32 = in_room.camera_offset.z();
 
         if (opt_special_camera) |special_camera| {
             if (camera.time_in_special > special_camera.camera_min_time) {

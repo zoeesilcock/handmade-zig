@@ -170,53 +170,6 @@ pub const Entity = extern struct {
 
     auto_boost_to: TraversableReference,
 
-    pub fn addPiece(
-        self: *Entity,
-        asset_type: AssetTypeId,
-        height: f32,
-        offset: Vector3,
-        color: Color,
-        opt_movement_flags: ?u32,
-    ) void {
-        self.addPieceV2(asset_type, .new(0, height), offset, color, opt_movement_flags);
-    }
-
-    pub fn addPieceLight(
-        self: *Entity,
-        radius: f32,
-        offset: Vector3,
-        emission: f32,
-        color: Color3,
-    ) void {
-        self.addPieceV2(
-            .None,
-            .new(radius, emission),
-            offset,
-            color.toColor(1),
-            @intFromEnum(EntityVisiblePieceFlag.Light),
-        );
-    }
-
-    pub fn addPieceV2(
-        self: *Entity,
-        asset_type: AssetTypeId,
-        dimension: Vector2,
-        offset: Vector3,
-        color: Color,
-        opt_movement_flags: ?u32,
-    ) void {
-        std.debug.assert(self.piece_count < self.pieces.len);
-
-        var piece: *EntityVisiblePiece = &self.pieces[self.piece_count];
-        self.piece_count += 1;
-
-        piece.asset_type = asset_type;
-        piece.dimension = dimension;
-        piece.offset = offset;
-        piece.color = color;
-        piece.flags = opt_movement_flags orelse 0;
-    }
-
     pub fn isDeleted(self: *const Entity) bool {
         return self.hasFlag(EntityFlags.Deleted.toInt());
     }
@@ -572,17 +525,20 @@ pub fn updateAndRenderEntities(
                     if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Light) != 0) {
                         render_group.pushCubeLight(
                             entity_transform.offset_position.plus(piece.offset),
-                            piece.dimension.x(),
+                            Vector3.new(1, 1, 1).scaledTo(piece.dimension.x()),
                             piece.color.rgb(),
-                            piece.dimension.y(),
+                            piece.color.a(),
                             @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
                         render_group.pushCube(
                             render_group.commands.white_bitmap,
                             entity_transform.offset_position.plus(piece.offset),
-                            piece.dimension.x(),
-                            piece.dimension.y(),
+                            .new(
+                                piece.dimension.x(),
+                                piece.dimension.x(),
+                                piece.dimension.y(),
+                            ),
                             piece.color,
                             null,
                             @ptrCast(&entity.lighting[piece_index]),

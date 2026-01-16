@@ -813,8 +813,7 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         opt_id: ?file_formats.BitmapId,
         position: Vector3,
-        radius: f32,
-        height: f32,
+        radius: Vector3,
         color: Color,
     ) void {
         if (opt_id) |id| {
@@ -823,7 +822,6 @@ pub const RenderGroup = extern struct {
                     bitmap,
                     position,
                     radius,
-                    height,
                     color,
                 );
             } else {
@@ -836,15 +834,14 @@ pub const RenderGroup = extern struct {
     pub fn pushCubeLight(
         self: *RenderGroup,
         position: Vector3,
-        radius: f32,
+        radius: Vector3,
         color: Color3,
         emission: f32,
         opt_light_store: ?*LightingPointState,
     ) void {
         self.pushCube(
             self.commands.white_bitmap,
-            position.plus(.new(0, 0, 0.5 * radius)),
-            radius,
+            position,
             radius,
             color.toColor(1),
             emission,
@@ -856,8 +853,7 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         bitmap: ?*LoadedBitmap,
         position: Vector3,
-        radius: f32,
-        height: f32,
+        radius: Vector3,
         color: Color,
         opt_emission: ?f32,
         opt_light_store_in: ?*LightingPointState,
@@ -873,12 +869,12 @@ pub const RenderGroup = extern struct {
                 opt_light_store = null;
             }
 
-            const nx: f32 = position.x() - radius;
-            const px: f32 = position.x() + radius;
-            const ny: f32 = position.y() - radius;
-            const py: f32 = position.y() + radius;
-            const nz: f32 = position.z() - height;
-            const pz: f32 = position.z();
+            const nx: f32 = position.x() - radius.x();
+            const px: f32 = position.x() + radius.x();
+            const ny: f32 = position.y() - radius.y();
+            const py: f32 = position.y() + radius.y();
+            const nz: f32 = position.z() - radius.z();
+            const pz: f32 = position.z() + radius.z();
 
             const p0: Vector4 = .new(nx, ny, pz, 0);
             const p1: Vector4 = .new(px, ny, pz, 0);
