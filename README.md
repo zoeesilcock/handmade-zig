@@ -24,6 +24,11 @@ The asset files need to be packed using the asset packer before running the game
 zig build build-assets
 ```
 
+### PNG reader
+```
+zig build run-png-reader -Dpackage=PNGReader -- test/gimp_test.png
+```
+
 ## Hot reloading
 The game is split up into an executable for the runtime and a DLL that contains the actual game. This allows hot reloading for most of the game code. When the DLL is rebuilt, the game will automatically reload it.
 

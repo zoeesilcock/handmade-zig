@@ -15,6 +15,7 @@ const Package = enum {
     AssetBuilder,
     Preprocessor,
     Compressor,
+    PNGReader,
 };
 
 pub fn build(b: *std.Build) void {
@@ -54,6 +55,10 @@ pub fn build(b: *std.Build) void {
 
     if (package == .All or package == .Compressor) {
         addSimpleCompressor(b, build_options, target, optimize);
+    }
+
+    if (package == .All or package == .PNGReader) {
+        addPNGReader(b, build_options, target, optimize);
     }
 }
 
@@ -236,6 +241,36 @@ fn addSimplePreprocessor(
 
     // const output = run_simple_preprocessor.captureStdOut();
     // simple_preprocessor_run_step.dependOn(&b.addInstallFileWithDir(output, .prefix, "../src/generated.zig").step);
+}
+
+fn addPNGReader(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const png_reader_exe = b.addExecutable(.{
+        .name = "png-reader",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/png.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = false,
+        }),
+    });
+    png_reader_exe.stack_size = 0x400000; // 4MB.
+    png_reader_exe.root_module.addOptions("build_options", build_options);
+
+    b.installArtifact(png_reader_exe);
+
+    // Allow running the png reader from a build command.
+    const run_png_reader = b.addRunArtifact(png_reader_exe);
+    if (b.args) |args| {
+        run_png_reader.addArgs(args);
+    }
+    const png_reader_run_step = b.step("run-png-reader", "Run the png reader");
+    run_png_reader.setCwd(b.path("."));
+    png_reader_run_step.dependOn(&run_png_reader.step);
 }
 
 fn addSimpleCompressor(
