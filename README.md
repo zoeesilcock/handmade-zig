@@ -80,3 +80,7 @@ llvm-mca .\zig-out\bin\handmade-dll.asm -bottleneck-analysis -o .\zig-out\bin\ha
 * https://developer.nvidia.com/gpugems/gpugems3
 * https://developer.nvidia.com/gpugems/gpugems2
 * https://developer.nvidia.com/gpugems/gpugems
+
+### PNG
+* https://www.w3.org/TR/png-3/
+* https://www.rfc-editor.org/rfc/rfc1951
