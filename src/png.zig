@@ -1,6 +1,8 @@
 const std = @import("std");
 const shared = @import("shared.zig");
 
+const PNG_HUFFMAN_MAX_BIT_COUNT = 16;
+
 const Signature: [8]u8 = .{ 137, 80, 78, 71, 13, 10, 26, 10 };
 const Header = extern struct {
     signature: [8]u8,
@@ -39,17 +41,86 @@ const ChunkFooter = extern struct {
 };
 
 const Huffman = struct {
-    fn compute(self: *Huffman, input_count: u32, input: [*]u32) void {
-        _ = self;
-        _ = input_count;
-        _ = input;
+    max_code_length_in_bits: u32 = 0,
+    entry_count: u32 = 0,
+    entries: []HuffmanEntry = undefined,
+
+    fn compute(self: *Huffman, symbol_count: u32, symbol_code_length: [*]u32, opt_symbol_addend: ?u32) void {
+        const symbol_addend = opt_symbol_addend orelse 0;
+
+        var code_length_histogram: [PNG_HUFFMAN_MAX_BIT_COUNT]u32 = [1]u32{0} ** PNG_HUFFMAN_MAX_BIT_COUNT;
+        var symbol_index: u32 = 0;
+        while (symbol_index < symbol_count) : (symbol_index += 1) {
+            const count: u32 = symbol_code_length[symbol_index];
+            std.debug.assert(count <= code_length_histogram.len);
+            code_length_histogram[count] += 1;
+        }
+
+        var next_unused_code: [PNG_HUFFMAN_MAX_BIT_COUNT]u32 = undefined;
+        next_unused_code[0] = 0;
+        code_length_histogram[0] = 0;
+        var bit_index: u32 = 1;
+        while (bit_index < next_unused_code.len) : (bit_index += 1) {
+            next_unused_code[bit_index] =
+                (next_unused_code[bit_index - 1] + code_length_histogram[bit_index - 1]) << 1;
+        }
+
+        symbol_index = 0;
+        while (symbol_index < symbol_count) : (symbol_index += 1) {
+            const code_length_in_bits: u32 = symbol_code_length[symbol_index];
+            if (code_length_in_bits > 0) {
+                std.debug.assert(code_length_in_bits < next_unused_code.len);
+                const code: u32 = next_unused_code[code_length_in_bits];
+                next_unused_code[code_length_in_bits] += 1;
+
+                const arbitrary_bits: u32 = self.max_code_length_in_bits - code_length_in_bits;
+                const entry_count: u32 = (@as(u32, 1) << @as(u5, @intCast(arbitrary_bits)));
+
+                var entry_index: u32 = 0;
+                while (entry_index < entry_count) : (entry_index += 1) {
+                    const base_index: u32 = (entry_index << @as(u5, @intCast(code_length_in_bits))) | code;
+                    var index: u32 = 0;
+
+                    bit_index = 0;
+
+                    // TODO: We can actually just construct this bit pattern backwards, eventually. If this turns
+                    // out to be what they actually meant, which isn't clear.
+                    while (bit_index <= (self.max_code_length_in_bits / 2)) : (bit_index += 1) {
+                        const inverse: u5 = @intCast(self.max_code_length_in_bits - (bit_index + 1));
+                        index |= ((base_index >> @as(u5, @intCast(bit_index))) & 0x1) << inverse;
+                        index |= ((base_index >> inverse) & 0x1) << @as(u5, @intCast(bit_index));
+                    }
+
+                    var entry: *HuffmanEntry = &self.entries[index];
+
+                    const symbol: u32 = symbol_index + symbol_addend;
+                    entry.bits_used = @intCast(code_length_in_bits);
+                    entry.symbol = @intCast(symbol);
+
+                    std.debug.assert(entry.bits_used == code_length_in_bits);
+                    std.debug.assert(entry.symbol == symbol);
+                }
+            }
+        }
     }
 
     fn decode(self: *Huffman, input: *StreamingBuffer) u32 {
-        _ = self;
-        _ = input;
-        return 0;
+        const entry_index: u32 = input.peekBits(self.max_code_length_in_bits);
+        std.debug.assert(entry_index < self.entry_count);
+
+        const entry: HuffmanEntry = self.entries[entry_index];
+
+        const result: u32 = entry.symbol;
+        input.discardBits(entry.bits_used);
+        std.debug.assert(entry.bits_used != 0);
+
+        return result;
     }
+};
+
+const HuffmanEntry = struct {
+    symbol: u16,
+    bits_used: u16,
 };
 
 const StreamingChunk = struct {
@@ -65,6 +136,7 @@ const StreamingBuffer = struct {
 
     bit_count: u32 = 0,
     bit_buf: u32 = 0,
+    underflowed: bool = false,
 
     first: ?*StreamingChunk = null,
     last: ?*StreamingChunk = null,
@@ -73,7 +145,7 @@ const StreamingBuffer = struct {
         return @ptrCast(@alignCast(self.consumeSize(@sizeOf(T))));
     }
 
-    pub fn consumeBits(self: *StreamingBuffer, bit_count: u32) u32 {
+    pub fn peekBits(self: *StreamingBuffer, bit_count: u32) u32 {
         std.debug.assert(bit_count <= 32);
 
         var result: u32 = 0;
@@ -84,13 +156,20 @@ const StreamingBuffer = struct {
             self.bit_count += 8;
         }
 
-        if (self.bit_count >= bit_count) {
-            self.bit_count -= bit_count;
+        result = self.bit_buf & ((@as(u32, 1) << @as(u5, @intCast(bit_count))) - 1);
+        self.underflowed |= (self.bit_count < bit_count);
 
-            result = self.bit_buf & ((@as(u32, 1) << @as(u5, @intCast(bit_count))) - 1);
-            self.bit_buf >>= @as(u5, @intCast(bit_count));
-        }
+        return result;
+    }
 
+    pub fn discardBits(self: *StreamingBuffer, bit_count: u32) void {
+        self.bit_count -= bit_count;
+        self.bit_buf >>= @as(u5, @intCast(bit_count));
+    }
+
+    pub fn consumeBits(self: *StreamingBuffer, bit_count: u32) u32 {
+        const result: u32 = self.peekBits(bit_count);
+        self.discardBits(bit_count);
         return result;
     }
 
@@ -173,7 +252,17 @@ fn allocatePixels(allocator: std.mem.Allocator, width: u32, height: u32, bytes_p
 }
 
 fn allocateChunk(allocator: std.mem.Allocator) *StreamingChunk {
-    return @ptrCast(@alignCast(allocator.alloc(u8, @sizeOf(StreamingChunk)) catch unreachable));
+    return @ptrCast(@alignCast(allocator.alloc(StreamingChunk, 1) catch unreachable));
+}
+
+fn allocateHuffman(allocator: std.mem.Allocator, max_code_length_in_bits: u32) Huffman {
+    std.debug.assert(max_code_length_in_bits <= PNG_HUFFMAN_MAX_BIT_COUNT);
+
+    var result: Huffman = .{};
+    result.max_code_length_in_bits = max_code_length_in_bits;
+    result.entry_count = (@as(u32, 1) << @as(u5, @intCast(max_code_length_in_bits)));
+    result.entries = allocator.alloc(HuffmanEntry, result.entry_count) catch unreachable;
+    return result;
 }
 
 /// This is not meant to be fault tolerant. It only loads specifically what we expect, and is happy to crash otherwise.
@@ -284,8 +373,8 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                         } else if (btype == 3) {
                             std.log.err("BTYPE of {d} encountered.", .{btype});
                         } else {
-                            var literal_length_huffman: Huffman = .{};
-                            var distance_huffman: Huffman = .{};
+                            var literal_length_huffman: Huffman = allocateHuffman(allocator, 15);
+                            var distance_huffman: Huffman = allocateHuffman(allocator, 15);
 
                             if (btype == 2) {
                                 var hlit: u32 = compressed_data.consumeBits(5);
@@ -306,8 +395,8 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                     hclen_table[hclen_swizzle[index]] = compressed_data.consumeBits(3);
                                 }
 
-                                var dictionary_huffman: Huffman = .{};
-                                dictionary_huffman.compute(hclen, &hclen_table);
+                                var dictionary_huffman: Huffman = allocateHuffman(allocator, 8);
+                                dictionary_huffman.compute(hclen, &hclen_table, null);
 
                                 var literal_length_distance_table: [512]u32 = [1]u32{0} ** 512;
                                 var literal_length_count: u32 = 0;
@@ -326,7 +415,7 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                         std.debug.assert(literal_length_count > 0);
                                         repeat_value = literal_length_distance_table[literal_length_count - 1];
                                     } else if (encoded_length == 17) {
-                                        repeat_count = 3 + compressed_data.consumeBits(2);
+                                        repeat_count = 3 + compressed_data.consumeBits(3);
                                     } else if (encoded_length == 18) {
                                         repeat_count = 11 + compressed_data.consumeBits(7);
                                     } else {
@@ -341,8 +430,8 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
 
                                 std.debug.assert(literal_length_count == length_count);
 
-                                literal_length_huffman.compute(hlit, &literal_length_distance_table);
-                                distance_huffman.compute(hdist, @ptrCast(&literal_length_distance_table[hdist]));
+                                literal_length_huffman.compute(hlit, &literal_length_distance_table, null);
+                                distance_huffman.compute(hdist, @ptrCast(&literal_length_distance_table[hdist]), null);
                             } else {
                                 std.log.err("BTYPE of {d} encountered.", .{btype});
                             }
