@@ -75,7 +75,7 @@ const Huffman = struct {
                 next_unused_code[code_length_in_bits] += 1;
 
                 const arbitrary_bits: u32 = self.max_code_length_in_bits - code_length_in_bits;
-                const entry_count: u32 = (@as(u32, 1) << @as(u5, @intCast(arbitrary_bits)));
+                const entry_count: u32 = (@as(u32, 1) << @intCast(arbitrary_bits));
 
                 var entry_index: u32 = 0;
                 while (entry_index < entry_count) : (entry_index += 1) {
@@ -155,7 +155,7 @@ const StreamingBuffer = struct {
 
     pub fn discardBits(self: *StreamingBuffer, bit_count: u32) void {
         self.bit_count -= bit_count;
-        self.bit_buf >>= @as(u5, @intCast(bit_count));
+        self.bit_buf >>= @intCast(bit_count);
     }
 
     pub fn consumeBits(self: *StreamingBuffer, bit_count: u32) u32 {
@@ -352,6 +352,146 @@ const distance_extra = [_]HuffmanEntry{
 
 var reverse_bits: [1 << MAX_REVERSE_BITS_COUNT]u16 = undefined;
 
+fn filter1And2(x: []u8, a: []u8, channel: u32) u8 {
+    return x[channel] +% a[channel];
+}
+
+fn filter3(x: []u8, a: []u8, b: []u8, channel: u32) u8 {
+    const average: u32 = @divFloor(@as(u32, @intCast(a[channel])) + @as(u32, @intCast(b[channel])), 2);
+    return x[channel] + @as(u8, @intCast(average));
+}
+
+fn filter4(x: []u8, a_full: []u8, b_full: []u8, c_full: []u8, channel: u32) u8 {
+    const a: i32 = @intCast(a_full[channel]);
+    const b: i32 = @intCast(b_full[channel]);
+    const c: i32 = @intCast(c_full[channel]);
+    const p: i32 = a + b - c;
+
+    var pa: i32 = p - a;
+    if (pa < 0) pa = -pa;
+
+    var pb: i32 = p - b;
+    if (pb < 0) pb = -pb;
+
+    var pc: i32 = p - c;
+    if (pc < 0) pc = -pc;
+
+    var paeth: i32 = 0;
+    if (pa <= pb and pa <= pc) {
+        paeth = a;
+    } else if (pb <= pc) {
+        paeth = b;
+    } else {
+        paeth = c;
+    }
+
+    return x[channel] +% @as(u8, @intCast(paeth));
+}
+
+fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_pixels: []u8) void {
+    var zero: u32 = 0;
+    var prior_row: []u8 = @ptrCast(&zero);
+    var prior_row_advance: u32 = 0;
+    var source: []u8 = decompressed_pixels;
+    var dest: []u8 = final_pixels;
+
+    var y: u32 = 0;
+    while (y < height) : (y += 1) {
+        const filter: u8 = source[0];
+        source.ptr += 1;
+        const current_row: []u8 = dest;
+
+        switch (filter) {
+            0 => {
+                var x: u32 = 0;
+                while (x < width) : (x += 1) {
+                    @as([]u32, @ptrCast(@alignCast(dest)))[0] =
+                        @as([]u32, @ptrCast(@alignCast(source)))[0];
+                    dest.ptr += 4;
+                    source.ptr += 4;
+                }
+            },
+            1 => {
+                var a_pixel: u32 = 0;
+
+                var x: u32 = 0;
+                while (x < width) : (x += 1) {
+                    dest[0] = filter1And2(source, @as([]u8, @ptrCast(&a_pixel)), 0);
+                    dest[1] = filter1And2(source, @as([]u8, @ptrCast(&a_pixel)), 1);
+                    dest[2] = filter1And2(source, @as([]u8, @ptrCast(&a_pixel)), 2);
+                    dest[3] = filter1And2(source, @as([]u8, @ptrCast(&a_pixel)), 3);
+
+                    a_pixel = @as([]u32, @ptrCast(@alignCast(dest)))[0];
+
+                    dest.ptr += 4;
+                    source.ptr += 4;
+                }
+            },
+            2 => {
+                var b_pixel: []u8 = prior_row;
+                var x: u32 = 0;
+                while (x < width) : (x += 1) {
+                    dest[0] = filter1And2(source, b_pixel, 0);
+                    dest[1] = filter1And2(source, b_pixel, 1);
+                    dest[2] = filter1And2(source, b_pixel, 2);
+                    dest[3] = filter1And2(source, b_pixel, 3);
+
+                    b_pixel.ptr += prior_row_advance;
+                    dest.ptr += 4;
+                    source.ptr += 4;
+                }
+            },
+            3 => {
+                // TODO: This hasn't been tested yet.
+                std.debug.assert(false);
+
+                var a_pixel: u32 = 0;
+
+                var b_pixel: []u8 = prior_row;
+                var x: u32 = 0;
+                while (x < width) : (x += 1) {
+                    dest[0] = filter3(source, @as([]u8, @ptrCast(&a_pixel)), b_pixel, 0);
+                    dest[1] = filter3(source, @as([]u8, @ptrCast(&a_pixel)), b_pixel, 1);
+                    dest[2] = filter3(source, @as([]u8, @ptrCast(&a_pixel)), b_pixel, 2);
+                    dest[3] = filter3(source, @as([]u8, @ptrCast(&a_pixel)), b_pixel, 3);
+
+                    a_pixel = @as([]u32, @ptrCast(@alignCast(dest)))[0];
+
+                    b_pixel.ptr += prior_row_advance;
+                    dest.ptr += 4;
+                    source.ptr += 4;
+                }
+            },
+            4 => {
+                var a_pixel: u32 = 0;
+                var b_pixel: []u8 = prior_row;
+                var c_pixel: u32 = 0;
+
+                var x: u32 = 0;
+                while (x < width) : (x += 1) {
+                    dest[0] = filter4(source, @as([]u8, @ptrCast(&a_pixel)), b_pixel, @as([]u8, @ptrCast(&c_pixel)), 0);
+                    dest[1] = filter4(source, @as([]u8, @ptrCast(&a_pixel)), b_pixel, @as([]u8, @ptrCast(&c_pixel)), 1);
+                    dest[2] = filter4(source, @as([]u8, @ptrCast(&a_pixel)), b_pixel, @as([]u8, @ptrCast(&c_pixel)), 2);
+                    dest[3] = filter4(source, @as([]u8, @ptrCast(&a_pixel)), b_pixel, @as([]u8, @ptrCast(&c_pixel)), 3);
+
+                    c_pixel = @as([]u32, @ptrCast(@alignCast(b_pixel)))[0];
+                    a_pixel = @as([]u32, @ptrCast(@alignCast(dest)))[0];
+
+                    b_pixel.ptr += prior_row_advance;
+                    dest.ptr += 4;
+                    source.ptr += 4;
+                }
+            },
+            else => {
+                std.log.err("Unrecognized row filter: {d}.", .{filter});
+            },
+        }
+
+        prior_row = current_row;
+        prior_row_advance = 4;
+    }
+}
+
 /// This is not meant to be fault tolerant. It only loads specifically what we expect, and is happy to crash otherwise.
 fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
     var supported: bool = false;
@@ -361,6 +501,8 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
     while (r_index < reverse_bits.len) : (r_index += 1) {
         reverse_bits[r_index] = @intCast(reverseBits(r_index, MAX_REVERSE_BITS_COUNT));
     }
+
+    var final_pixels: ?[]u8 = null;
 
     if (at.consumeType(Header)) |header| {
         _ = header;
@@ -447,6 +589,7 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                 if (supported) {
                     std.log.info("Decompressing...", .{});
 
+                    final_pixels = allocatePixels(allocator, width, height, 4, null);
                     const decompressed_pixels: []u8 = allocatePixels(allocator, width, height, 4, 1);
                     var dest = decompressed_pixels;
 
@@ -459,18 +602,17 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                             compressed_data.flushByte();
                             var len: u16 = compressed_data.consumeType(u16).?.*;
                             const nlen: u16 = compressed_data.consumeType(u16).?.*;
-                            if (len != -@as(i32, @intCast(nlen))) {
+                            if (len != ~nlen) {
                                 std.log.err("LEN/NLEN mismatch.", .{});
                             }
 
-                            // TODO: Is this actually supposed to be swapped?
-                            endianSwapU16(&len);
-
-                            var source: [*]u8 = compressed_data.consumeSize(len).?;
-                            while (len > 0) : (len -= 1) {
-                                dest[0] = source[0];
-                                dest.ptr += 1;
-                                source += 1;
+                            var source: ?[*]u8 = compressed_data.consumeSize(len);
+                            if (source != null) {
+                                while (len > 0) : (len -= 1) {
+                                    dest[0] = source.?[0];
+                                    dest.ptr += 1;
+                                    source.? += 1;
+                                }
                             }
                         } else if (btype == 3) {
                             std.log.err("BTYPE of {d} encountered.", .{btype});
@@ -531,7 +673,10 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                 std.debug.assert(literal_length_count == length_count);
 
                                 literal_length_huffman.compute(hlit, &literal_length_distance_table, null);
-                                distance_huffman.compute(hdist, @ptrCast(&literal_length_distance_table[hdist]), null);
+                                distance_huffman.compute(hdist, @ptrCast(&literal_length_distance_table[hlit]), null);
+                            } else if (btype == 1) {
+                                // TODO: Seed he Huffman with the built-in Huffman tables.
+                                std.log.err("Fixed Huffman not yet handled.", .{});
                             } else {
                                 std.log.err("BTYPE of {d} encountered.", .{btype});
                             }
@@ -541,6 +686,7 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                 if (literal_length <= 255) {
                                     const out: u32 = literal_length & 0xff;
                                     dest[0] = @truncate(out);
+                                    dest.ptr += 1;
                                 } else if (literal_length >= 257) {
                                     const length_table_index: u32 = literal_length - 257;
                                     const length_table_entry: HuffmanEntry = length_extra[length_table_index];
@@ -548,7 +694,6 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                     if (length_table_entry.bits_used > 0) {
                                         const extra_bits: u32 =
                                             compressed_data.consumeBits(length_table_entry.bits_used);
-                                        // extra_bits = reverseBits(extra_bits, length_table_entry.bits_used);
                                         length += extra_bits;
                                     }
 
@@ -558,7 +703,6 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                     if (distance_table_entry.bits_used > 0) {
                                         const extra_bits: u32 =
                                             compressed_data.consumeBits(distance_table_entry.bits_used);
-                                        // extra_bits = reverseBits(extra_bits, distance_table_entry.bits_used);
                                         distance += extra_bits;
                                     }
 
@@ -576,6 +720,8 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                             }
                         }
                     }
+
+                    filterReconstruct(height, width, decompressed_pixels, final_pixels.?);
                 }
             }
         }
