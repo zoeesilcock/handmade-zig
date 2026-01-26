@@ -141,14 +141,13 @@ const StreamingBuffer = struct {
 
         var result: u32 = 0;
 
-        while (self.bit_count < bit_count and self.content_size > 0) {
+        while (self.bit_count < bit_count and !self.underflowed) {
             const byte: u32 = @intCast(self.consumeType(u8).?.*);
             self.bit_buf |= (byte << @as(u5, @intCast(self.bit_count)));
             self.bit_count += 8;
         }
 
         result = self.bit_buf & ((@as(u32, 1) << @as(u5, @intCast(bit_count))) - 1);
-        self.underflowed |= (self.bit_count < bit_count);
 
         return result;
     }
@@ -183,9 +182,12 @@ const StreamingBuffer = struct {
             self.contents.ptr += size;
             self.content_size -= size;
         } else {
-            self.content_size = 0;
             std.log.err("File underflow", .{});
+            self.content_size = 0;
+            self.underflowed = true;
         }
+
+        std.debug.assert(!self.underflowed);
 
         return result;
     }
@@ -339,7 +341,7 @@ const distance_extra = [_]HuffmanEntry{
     .{ .symbol = 513, .bits_used = 8 }, // 18
     .{ .symbol = 769, .bits_used = 8 }, // 19
     .{ .symbol = 1025, .bits_used = 9 }, // 20
-    .{ .symbol = 1573, .bits_used = 9 }, // 21
+    .{ .symbol = 1537, .bits_used = 9 }, // 21
     .{ .symbol = 2049, .bits_used = 10 }, // 22
     .{ .symbol = 3073, .bits_used = 10 }, // 23
     .{ .symbol = 4097, .bits_used = 11 }, // 24
@@ -358,7 +360,7 @@ fn filter1And2(x: []u8, a: []u8, channel: u32) u8 {
 
 fn filter3(x: []u8, a: []u8, b: []u8, channel: u32) u8 {
     const average: u32 = @divFloor(@as(u32, @intCast(a[channel])) + @as(u32, @intCast(b[channel])), 2);
-    return x[channel] + @as(u8, @intCast(average));
+    return x[channel] +% @as(u8, @intCast(average));
 }
 
 fn filter4(x: []u8, a_full: []u8, b_full: []u8, c_full: []u8, channel: u32) u8 {
@@ -405,8 +407,11 @@ fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_p
             0 => {
                 var x: u32 = 0;
                 while (x < width) : (x += 1) {
-                    @as([]u32, @ptrCast(@alignCast(dest)))[0] =
-                        @as([]u32, @ptrCast(@alignCast(source)))[0];
+                    dest[0] = source[0];
+                    dest[1] = source[1];
+                    dest[2] = source[2];
+                    dest[3] = source[3];
+
                     dest.ptr += 4;
                     source.ptr += 4;
                 }
@@ -442,9 +447,6 @@ fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_p
                 }
             },
             3 => {
-                // TODO: This hasn't been tested yet.
-                std.debug.assert(false);
-
                 var a_pixel: u32 = 0;
 
                 var b_pixel: []u8 = prior_row;
@@ -591,6 +593,8 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
 
                     final_pixels = allocatePixels(allocator, width, height, 4, null);
                     const decompressed_pixels: []u8 = allocatePixels(allocator, width, height, 4, 1);
+                    var decompressed_pixels_end: []u8 = decompressed_pixels;
+                    decompressed_pixels_end.ptr += (height * ((width * 4) + 1));
                     var dest = decompressed_pixels;
 
                     var bfinal: u32 = 0;
@@ -617,12 +621,15 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                         } else if (btype == 3) {
                             std.log.err("BTYPE of {d} encountered.", .{btype});
                         } else {
+                            var literal_length_distance_table: [512]u32 = undefined;
                             var literal_length_huffman: Huffman = allocateHuffman(allocator, 15);
                             var distance_huffman: Huffman = allocateHuffman(allocator, 15);
+                            var hlit: u32 = 0;
+                            var hdist: u32 = 0;
 
                             if (btype == 2) {
-                                var hlit: u32 = compressed_data.consumeBits(5);
-                                var hdist: u32 = compressed_data.consumeBits(5);
+                                hlit = compressed_data.consumeBits(5);
+                                hdist = compressed_data.consumeBits(5);
                                 var hclen: u32 = compressed_data.consumeBits(4);
 
                                 hlit += 257;
@@ -642,9 +649,9 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                 var dictionary_huffman: Huffman = allocateHuffman(allocator, 7);
                                 dictionary_huffman.compute(hclen_swizzle.len, &hclen_table, null);
 
-                                var literal_length_distance_table: [512]u32 = undefined;
                                 var literal_length_count: u32 = 0;
                                 const length_count: u32 = hlit + hdist;
+                                std.debug.assert(length_count <= literal_length_distance_table.len);
                                 while (literal_length_count < length_count) {
                                     var repeat_count: u32 = 1;
                                     var repeat_value: u32 = 0;
@@ -671,15 +678,32 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                 }
 
                                 std.debug.assert(literal_length_count == length_count);
-
-                                literal_length_huffman.compute(hlit, &literal_length_distance_table, null);
-                                distance_huffman.compute(hdist, @ptrCast(&literal_length_distance_table[hlit]), null);
                             } else if (btype == 1) {
-                                // TODO: Seed he Huffman with the built-in Huffman tables.
-                                std.log.err("Fixed Huffman not yet handled.", .{});
+                                hlit = 288;
+                                hdist = 32;
+                                const bit_counts = [_][2]u32{
+                                    .{ 143, 8 },
+                                    .{ 255, 9 },
+                                    .{ 279, 7 },
+                                    .{ 287, 8 },
+                                    .{ 319, 5 },
+                                };
+
+                                var bit_count_index: u32 = 0;
+                                var range_index: u32 = 0;
+                                while (range_index < bit_counts.len) : (range_index += 1) {
+                                    const bit_count: u32 = bit_counts[range_index][1];
+                                    const last_value: u32 = bit_counts[range_index][0];
+                                    while (bit_count_index <= last_value) : (bit_count_index += 1) {
+                                        literal_length_distance_table[bit_count_index] = bit_count;
+                                    }
+                                }
                             } else {
                                 std.log.err("BTYPE of {d} encountered.", .{btype});
                             }
+
+                            literal_length_huffman.compute(hlit, &literal_length_distance_table, null);
+                            distance_huffman.compute(hdist, @ptrCast(&literal_length_distance_table[hlit]), null);
 
                             while (true) {
                                 const literal_length: u32 = literal_length_huffman.decode(&compressed_data);
@@ -707,6 +731,8 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                                     }
 
                                     var source: [*]u8 = @ptrFromInt(@intFromPtr(dest.ptr) - distance);
+                                    std.debug.assert((@intFromPtr(source) + length) <= @intFromPtr(decompressed_pixels_end.ptr));
+                                    std.debug.assert((@intFromPtr(dest.ptr) + length) <= @intFromPtr(decompressed_pixels_end.ptr));
                                     std.debug.assert(@intFromPtr(source) >= @intFromPtr(decompressed_pixels.ptr));
 
                                     while (length > 0) : (length -= 1) {
@@ -721,6 +747,7 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
                         }
                     }
 
+                    std.debug.assert(@intFromPtr(dest.ptr) == @intFromPtr(decompressed_pixels_end.ptr));
                     filterReconstruct(height, width, decompressed_pixels, final_pixels.?);
                 }
             }
