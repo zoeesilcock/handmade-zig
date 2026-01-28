@@ -15,6 +15,7 @@ const Package = enum {
     AssetBuilder,
     Preprocessor,
     Compressor,
+    Raytracer,
     PNGReader,
 };
 
@@ -57,6 +58,10 @@ pub fn build(b: *std.Build) void {
         addSimpleCompressor(b, build_options, target, optimize);
     }
 
+    if (package == .All or package == .Raytracer) {
+        addRaytracer(b, build_options, target, optimize);
+    }
+
     if (package == .All or package == .PNGReader) {
         addPNGReader(b, build_options, target, optimize);
     }
@@ -72,6 +77,8 @@ fn addExecutable(
 ) void {
     const file_formats_module = b.addModule("file_formats", .{
         .root_source_file = b.path("src/file_formats.zig"),
+        .target = target,
+        .optimize = optimize,
     });
 
     const exe = b.addExecutable(.{
@@ -119,6 +126,8 @@ fn addLibrary(
 ) void {
     const file_formats_module = b.addModule("file_formats", .{
         .root_source_file = b.path("src/file_formats.zig"),
+        .target = target,
+        .optimize = optimize,
     });
 
     const lib_handmade = b.addLibrary(.{
@@ -178,9 +187,13 @@ fn addAssetBuilder(
 ) void {
     const shared_module = b.addModule("shared", .{
         .root_source_file = b.path("src/shared.zig"),
+        .target = target,
+        .optimize = optimize,
     });
     const file_formats_module = b.addModule("file_formats", .{
         .root_source_file = b.path("src/file_formats.zig"),
+        .target = target,
+        .optimize = optimize,
     });
 
     const asset_builder_exe = b.addExecutable(.{
@@ -241,6 +254,50 @@ fn addSimplePreprocessor(
 
     // const output = run_simple_preprocessor.captureStdOut();
     // simple_preprocessor_run_step.dependOn(&b.addInstallFileWithDir(output, .prefix, "../src/generated.zig").step);
+}
+
+fn addRaytracer(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const math_module = b.addModule("math", .{
+        .root_source_file = b.path("src/math.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const raytracer_exe = b.addExecutable(.{
+        .name = "handmade-ray",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/ray.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    raytracer_exe.stack_size = 0x400000; // 4MB.
+    raytracer_exe.root_module.addOptions("build_options", build_options);
+    raytracer_exe.root_module.addImport("math", math_module);
+
+    b.installArtifact(raytracer_exe);
+
+    // Allow running the raytracer from a build command.
+    const run_raytracer = b.addRunArtifact(raytracer_exe);
+    if (b.args) |args| {
+        run_raytracer.addArgs(args);
+    }
+    const raytracer_run_step = b.step("run-raytracer", "Run the raytracer");
+    run_raytracer.setCwd(b.path("test/"));
+    // raytracer_run_step.dependOn(&run_raytracer.step);
+
+    const open_file = b.addSystemCommand(&.{
+        "cmd", "/C", "start", "test.bmp",
+    });
+    open_file.setCwd(b.path("test/"));
+
+    open_file.step.dependOn(&run_raytracer.step);
+    raytracer_run_step.dependOn(&open_file.step);
 }
 
 fn addPNGReader(
