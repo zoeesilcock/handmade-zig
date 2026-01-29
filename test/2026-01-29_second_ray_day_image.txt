@@ -1,0 +1,4 @@
+Configuration: 32 cores with 576 40x40 (6k/tile) tiles.
+Quality: 1024 rays/pixel, 8 bounces per ray.
+Total bounces: 1851931291.
+Performance: 0.0000037ms/bounce.
