@@ -601,7 +601,11 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         }
 
         pub inline fn black() Self {
-            return Self.new(0, 0, 0, 1);
+            var result: Self = .{ .values = @splat(0) };
+            if (dimension_count == 4) {
+                result.values[3] = 1;
+            }
+            return result;
         }
 
         pub inline fn splat(value: ScalarType) Self {

@@ -72,6 +72,7 @@ const WorkOrder = struct {
     y_min: u32,
     one_past_x_max: u32,
     one_past_y_max: u32,
+    entropy: RandomSeries,
 };
 
 const Material = struct {
@@ -188,14 +189,6 @@ fn writeImage(image: ImageU32, output_file_name: []const u8) !void {
     }
 }
 
-fn randomUnilateral() f32 {
-    return @as(f32, @floatFromInt(c.rand())) / c.RAND_MAX;
-}
-
-fn randomBilateral() f32 {
-    return -1 + 2 * randomUnilateral();
-}
-
 fn exactLinearToSRGB(input: f32) f32 {
     var linear: f32 = input;
 
@@ -219,6 +212,413 @@ fn lockedAddAndReturnPreviousValue(value: *u64, addend: u64) u64 {
     return @atomicRmw(u64, value, .Add, addend, .seq_cst);
 }
 
+const RandomSeries = struct {
+    state: Lane_u32,
+
+    pub fn xorshift32(self: *RandomSeries) Lane_u32 {
+        var result = self.state;
+
+        result ^= result << @splat(13);
+        result ^= result >> @splat(17);
+        result ^= result << @splat(5);
+
+        self.state = result;
+
+        return result;
+    }
+
+    fn randomUnilateral(self: *RandomSeries) Lane_f32 {
+        return @as(Lane_f32, @floatFromInt(self.xorshift32())) /
+            @as(Lane_f32, @floatFromInt(@as(Lane_u32, @splat(std.math.maxInt(u32)))));
+    }
+
+    fn randomBilateral(self: *RandomSeries) Lane_f32 {
+        return @as(Lane_f32, @splat(-1)) + @as(Lane_f32, @splat(2)) * self.randomUnilateral();
+    }
+};
+
+const CastState = struct {
+    world: *World,
+    rays_per_pixel: u32,
+    max_bounce_count: u32,
+    series: RandomSeries = undefined,
+
+    camera_position: Vector3 = .zero(),
+    camera_x: Vector3 = .zero(),
+    camera_y: Vector3 = .zero(),
+    camera_z: Vector3 = .zero(),
+
+    film_width: f32 = 0,
+    film_height: f32 = 0,
+    film_half_width: f32 = 0,
+    film_half_height: f32 = 0,
+    film_center: Vector3 = .zero(),
+
+    half_pixel_width: f32 = 0,
+    half_pixel_height: f32 = 0,
+
+    film_x: f32 = 0,
+    film_y: f32 = 0,
+
+    // Out.
+    final_color: Color3 = .zero(),
+    bounces_computed: u64 = 0,
+};
+
+const LANE_WIDTH = 1;
+const Lane_f32 = @Vector(LANE_WIDTH, f32);
+const Lane_u32 = @Vector(LANE_WIDTH, u32);
+const Lane_bool = @Vector(LANE_WIDTH, bool);
+const Lane_Vector3 = extern struct {
+    x: Lane_f32,
+    y: Lane_f32,
+    z: Lane_f32,
+
+    pub fn new(in_x: Lane_f32, in_y: Lane_f32, in_z: Lane_f32) Lane_Vector3 {
+        return .{
+            .x = in_x,
+            .y = in_y,
+            .z = in_z,
+        };
+    }
+
+    pub fn splat(in: Vector3) Lane_Vector3 {
+        return .{
+            .x = @splat(in.x()),
+            .y = @splat(in.y()),
+            .z = @splat(in.z()),
+        };
+    }
+
+    pub fn plus(self: Lane_Vector3, b: Lane_Vector3) Lane_Vector3 {
+        return .{
+            .x = self.x + b.x,
+            .y = self.y + b.y,
+            .z = self.z + b.z,
+        };
+    }
+
+    pub fn minus(self: Lane_Vector3, b: Lane_Vector3) Lane_Vector3 {
+        return .{
+            .x = self.x - b.x,
+            .y = self.y - b.y,
+            .z = self.z - b.z,
+        };
+    }
+
+    pub fn scaledTo(self: Lane_Vector3, scalar: Lane_f32) Lane_Vector3 {
+        var result = self;
+        result.x *= scalar;
+        result.y *= scalar;
+        result.z *= scalar;
+        return result;
+    }
+
+    pub fn negated(self: Lane_Vector3) Lane_Vector3 {
+        const zero: Lane_f32 = @splat(0);
+        var result = self;
+        result.x = zero - self.x;
+        result.y = zero - self.y;
+        result.z = zero - self.z;
+        return result;
+    }
+
+    pub fn select(self: Lane_Vector3, mask: Lane_bool, b: Lane_Vector3) Lane_Vector3 {
+        return .{
+            .x = @select(f32, mask, b.x, self.z),
+            .y = @select(f32, mask, b.y, self.y),
+            .z = @select(f32, mask, b.z, self.z),
+        };
+    }
+
+    pub fn dotProduct(self: Lane_Vector3, other: Lane_Vector3) Lane_f32 {
+        return self.x * other.x + self.y * other.y + self.z * other.z;
+    }
+
+    pub fn lengthSquared(self: *const Lane_Vector3) Lane_f32 {
+        return self.dotProduct(self.*);
+    }
+
+    fn approxInvSquareRoot(input: Lane_f32) Lane_f32 {
+        return @as(Lane_f32, @splat(1)) / @sqrt(input);
+    }
+
+    pub fn normalizeOrZero(self: Lane_Vector3) Lane_Vector3 {
+        var result: Lane_Vector3 = self;
+
+        const length_squared: Lane_f32 = self.lengthSquared();
+        const normalized: Lane_Vector3 = self.scaledTo(approxInvSquareRoot(length_squared));
+        const limit: Lane_f32 = @splat(0.0001);
+        const mask: Lane_bool = (length_squared > (limit * limit));
+
+        result = result.select(mask, normalized);
+
+        return result;
+    }
+
+    pub inline fn lerp(min: Lane_Vector3, max: Lane_Vector3, time: Lane_f32) Lane_Vector3 {
+        const one: Lane_f32 = @splat(1);
+        return min.scaledTo(one - time).plus(max.scaledTo(time));
+    }
+};
+
+const Lane_Color3 = extern struct {
+    r: Lane_f32,
+    g: Lane_f32,
+    b: Lane_f32,
+
+    pub fn splat(in: Color3) Lane_Color3 {
+        return .{
+            .r = @splat(in.r()),
+            .g = @splat(in.g()),
+            .b = @splat(in.b()),
+        };
+    }
+
+    pub fn plus(self: Lane_Color3, b: Lane_Color3) Lane_Color3 {
+        return .{
+            .r = self.r + b.r,
+            .g = self.g + b.g,
+            .b = self.b + b.b,
+        };
+    }
+
+    pub fn scaledTo(self: Lane_Color3, scalar: Lane_f32) Lane_Color3 {
+        var result = self;
+        result.r *= scalar;
+        result.g *= scalar;
+        result.b *= scalar;
+        return result;
+    }
+
+    pub fn hadamardProduct(self: *const Lane_Color3, b: Lane_Color3) Lane_Color3 {
+        return Lane_Color3{
+            .r = self.r * b.r,
+            .g = self.g * b.g,
+            .b = self.b * b.b,
+        };
+    }
+};
+
+// const Lane_f32 = f32;
+// const Lane_u32 = u32;
+// const Lane_bool = u32;
+// const Lane_Vector3 = Vector3;
+// const Lane_Color3 = Color3;
+
+fn conditionalAssign(t: type, dest: *t, mask: Lane_bool, source: t) void {
+    switch (t) {
+        Lane_bool => {
+            const full_mask = @select(bool, mask, @as(Lane_bool, @splat(0xFFFFFFFF)), @as(Lane_bool, @splat(0)));
+            dest.* = ((~full_mask & dest.*) | (full_mask & source));
+        },
+        Lane_u32 => {
+            const full_mask = @select(u32, mask, @as(Lane_u32, @splat(0xFFFFFFFF)), @as(Lane_u32, @splat(0)));
+            dest.* = ((~full_mask & dest.*) | (full_mask & source));
+        },
+        Lane_f32 => {
+            conditionalAssign(Lane_u32, @ptrCast(dest), mask, @as(*const Lane_u32, @ptrCast(@constCast(&source))).*);
+        },
+        Lane_Vector3 => {
+            conditionalAssign(Lane_u32, @ptrCast(&dest.x), mask, @as(*const Lane_u32, @ptrCast(&source.x)).*);
+            conditionalAssign(Lane_u32, @ptrCast(&dest.y), mask, @as(*const Lane_u32, @ptrCast(&source.y)).*);
+            conditionalAssign(Lane_u32, @ptrCast(&dest.z), mask, @as(*const Lane_u32, @ptrCast(&source.z)).*);
+        },
+        Lane_Color3 => {
+            conditionalAssign(Lane_u32, @ptrCast(&dest.r), mask, @as(*const Lane_u32, @ptrCast(&source.r)).*);
+            conditionalAssign(Lane_u32, @ptrCast(&dest.g), mask, @as(*const Lane_u32, @ptrCast(&source.g)).*);
+            conditionalAssign(Lane_u32, @ptrCast(&dest.b), mask, @as(*const Lane_u32, @ptrCast(&source.b)).*);
+        },
+        else => {},
+    }
+}
+
+fn maskIsZeroed(lane_mask: Lane_bool) bool {
+    return !@reduce(.Or, lane_mask);
+}
+
+fn horizontalAddU32(a: Lane_u32) u32 {
+    const type_info = @typeInfo(@TypeOf(a));
+    const len = type_info.vector.len;
+    var result: u32 = 0;
+    inline for (0..len) |i| {
+        result += a[i];
+    }
+    return result;
+}
+
+fn horizontalAddF32(a: Lane_f32) f32 {
+    const type_info = @typeInfo(@TypeOf(a));
+    const len = type_info.vector.len;
+    var result: f32 = 0;
+    inline for (0..len) |i| {
+        result += a[i];
+    }
+    return result;
+}
+
+fn horizontalAddColor3(a: Lane_Color3) Color3 {
+    return .new(
+        horizontalAddF32(a.r),
+        horizontalAddF32(a.g),
+        horizontalAddF32(a.b),
+    );
+}
+
+fn castSampleRays(state: *CastState) void {
+    const world: *World = state.world;
+    const rays_per_pixel: Lane_u32 = @splat(state.rays_per_pixel);
+    const max_bounce_count: Lane_u32 = @splat(state.max_bounce_count);
+    const film_half_width: Lane_f32 = @splat(state.film_half_width);
+    const film_half_height: Lane_f32 = @splat(state.film_half_height);
+    const film_center: Lane_Vector3 = .splat(state.film_center);
+    const half_pixel_width: Lane_f32 = @splat(state.half_pixel_width);
+    const half_pixel_height: Lane_f32 = @splat(state.half_pixel_height);
+    const film_x: Lane_f32 = @splat(state.film_x + half_pixel_width[0]);
+    const film_y: Lane_f32 = @splat(state.film_y + half_pixel_height[0]);
+    const camera_x: Lane_Vector3 = .splat(state.camera_x);
+    const camera_y: Lane_Vector3 = .splat(state.camera_y);
+    const camera_position: Lane_Vector3 = .splat(state.camera_position);
+    var series: RandomSeries = state.series;
+
+    const zero: Lane_u32 = @splat(0);
+    const zero_f: Lane_f32 = @splat(0);
+    const two: Lane_f32 = @splat(2.0);
+    const four: Lane_f32 = @splat(4.0);
+
+    var bounces_computed: Lane_u32 = @splat(0);
+    var final_color: Lane_Color3 = .splat(.zero());
+
+    const lane_width: u32 = LANE_WIDTH;
+    const lane_ray_count: u32 = rays_per_pixel[0] / lane_width;
+    const contribution: f32 = 1.0 / @as(f32, @floatFromInt(rays_per_pixel[0]));
+    var ray_index: u32 = 0;
+    while (ray_index < lane_ray_count) : (ray_index += 1) {
+        const offset_x: Lane_f32 = film_x + series.randomBilateral() * half_pixel_width;
+        const offset_y: Lane_f32 = film_y + series.randomBilateral() * half_pixel_height;
+        const film_position: Lane_Vector3 = film_center.plus(
+            camera_x.scaledTo(offset_x * film_half_width),
+        ).plus(
+            camera_y.scaledTo(offset_y * film_half_height),
+        );
+        var ray_origin: Lane_Vector3 = camera_position;
+        var ray_direction: Lane_Vector3 = film_position.minus(camera_position).normalizeOrZero();
+
+        const tolerance: Lane_f32 = @splat(0.0001);
+        const min_hit_distance: Lane_f32 = @splat(0.001);
+
+        var sample: Lane_Color3 = .splat(.zero());
+        var attenuation: Lane_Color3 = .splat(.one());
+
+        var lane_mask: Lane_bool = @splat(true);
+
+        var bounce_count: u32 = 0;
+        while (bounce_count <= max_bounce_count[0]) : (bounce_count += 1) {
+            var hit_distance: Lane_f32 = @splat(std.math.floatMax(f32));
+            var hit_material_index: Lane_u32 = @splat(0);
+            var next_normal: Lane_Vector3 = .splat(.zero());
+
+            const lane_increment: Lane_u32 = @splat(1);
+            bounces_computed += (lane_increment & @intFromBool(lane_mask));
+
+            var plane_index: u32 = 0;
+            while (plane_index < world.plane_count) : (plane_index += 1) {
+                const plane: Plane = world.planes[plane_index];
+
+                const plane_normal: Lane_Vector3 = .splat(plane.normal);
+                const plane_distance: Lane_f32 = @splat(plane.distance);
+                const plane_material_index: Lane_u32 = @splat(plane.material_index);
+
+                const denominator: Lane_f32 = plane_normal.dotProduct(ray_direction);
+                const t: Lane_f32 =
+                    @as(Lane_f32, -plane_distance - plane_normal.dotProduct(ray_origin)) / denominator;
+
+                const denominator_mask: Lane_bool = ((denominator < -tolerance) | (denominator > tolerance));
+                const t_mask: Lane_bool = ((t > min_hit_distance) & (t < hit_distance));
+                const hit_mask: Lane_bool = denominator_mask & t_mask;
+
+                conditionalAssign(Lane_f32, &hit_distance, hit_mask, t);
+                conditionalAssign(Lane_u32, &hit_material_index, hit_mask, plane_material_index);
+                conditionalAssign(Lane_Vector3, &next_normal, hit_mask, plane_normal);
+            }
+
+            var sphere_index: u32 = 0;
+            while (sphere_index < world.sphere_count) : (sphere_index += 1) {
+                const sphere: Sphere = world.spheres[sphere_index];
+
+                const sphere_position: Lane_Vector3 = .splat(sphere.position);
+                const sphere_radius: Lane_f32 = @splat(sphere.radius);
+                const sphere_material_index: Lane_u32 = @splat(sphere.material_index);
+
+                const sphere_relative_ray_origin: Lane_Vector3 = ray_origin.minus(sphere_position);
+                const a: Lane_f32 = ray_direction.dotProduct(ray_direction);
+                const b: Lane_f32 = two * ray_direction.dotProduct(sphere_relative_ray_origin);
+                const sphere_c: Lane_f32 =
+                    sphere_relative_ray_origin.dotProduct(sphere_relative_ray_origin) - sphere_radius * sphere_radius;
+
+                const denominator: Lane_f32 = two * a;
+                const root_term: Lane_f32 = @sqrt(b * b - four * a * sphere_c);
+                const tp: Lane_f32 = (-b + root_term) / denominator;
+                const tn: Lane_f32 = (-b - root_term) / denominator;
+
+                const root_mask: Lane_bool = (root_term > tolerance);
+
+                var t = tp;
+                const pick_mask: Lane_bool = ((tn > min_hit_distance) & (tn < tp));
+                conditionalAssign(Lane_f32, &t, pick_mask, tn);
+
+                const t_mask: Lane_bool = ((t > min_hit_distance) & (t < hit_distance));
+                const hit_mask: Lane_bool = root_mask & t_mask;
+
+                conditionalAssign(Lane_f32, &hit_distance, hit_mask, t);
+                conditionalAssign(Lane_u32, &hit_material_index, hit_mask, sphere_material_index);
+                conditionalAssign(
+                    Lane_Vector3,
+                    &next_normal,
+                    hit_mask,
+                    ray_direction.scaledTo(t).plus(sphere_relative_ray_origin).normalizeOrZero(),
+                );
+            }
+
+            const material = world.materials[hit_material_index[0]];
+
+            const material_emit_color: Lane_Color3 = .splat(material.emit_color);
+            const material_reflect_color: Lane_Color3 = .splat(material.reflect_color);
+            const material_scatter: Lane_f32 = @splat(material.scatter);
+
+            sample = sample.plus(attenuation.hadamardProduct(material_emit_color));
+            lane_mask &= (hit_material_index != zero);
+
+            const negative_direction = ray_direction.negated();
+            const bla = negative_direction.dotProduct(next_normal);
+            const cosine_attenuation: Lane_f32 = @max(bla, zero_f);
+            attenuation = attenuation.hadamardProduct(material_reflect_color.scaledTo(cosine_attenuation));
+
+            ray_origin = ray_origin.plus(ray_direction.scaledTo(hit_distance));
+
+            const pure_bounce: Lane_Vector3 =
+                ray_direction.minus(next_normal.scaledTo(two * ray_direction.dotProduct(next_normal)));
+            const random_bounce: Lane_Vector3 =
+                next_normal.plus(.new(
+                    series.randomBilateral(),
+                    series.randomBilateral(),
+                    series.randomBilateral(),
+                )).normalizeOrZero();
+            ray_direction = random_bounce.lerp(pure_bounce, material_scatter).normalizeOrZero();
+
+            if (maskIsZeroed(lane_mask)) {
+                break;
+            }
+        }
+
+        final_color = final_color.plus(sample.scaledTo(@splat(contribution)));
+    }
+
+    state.bounces_computed += horizontalAddU32(bounces_computed);
+    state.final_color = horizontalAddColor3(final_color);
+    state.series = series;
+}
+
 pub fn renderTile(queue: *WorkQueue) bool {
     const work_order_index: u64 = lockedAddAndReturnPreviousValue(&queue.next_work_order_index, 1);
     if (work_order_index >= queue.work_order_count) {
@@ -226,145 +626,56 @@ pub fn renderTile(queue: *WorkQueue) bool {
     }
 
     const order: *WorkOrder = &queue.work_orders[work_order_index];
-    const world: *World = order.world;
+
     const image: *ImageU32 = order.image;
     const x_min: u32 = order.x_min;
     const y_min: u32 = order.y_min;
     const one_past_x_max: u32 = order.one_past_x_max;
     const one_past_y_max: u32 = order.one_past_y_max;
-
-    const camera_position: Vector3 = .new(0, -10, 1);
-    const camera_z: Vector3 = camera_position.normalized();
-    const camera_x: Vector3 = Vector3.new(0, 0, 1).crossProduct(camera_z).normalizeOrZero();
-    const camera_y: Vector3 = camera_z.crossProduct(camera_x).normalizeOrZero();
-
     const film_distance: f32 = 1;
-    var film_width: f32 = 1;
-    var film_height: f32 = 1;
 
+    var state: CastState = .{
+        .world = order.world,
+        .rays_per_pixel = queue.rays_per_pixel,
+        .max_bounce_count = queue.max_bounce_count,
+        .series = order.entropy,
+    };
+
+    state.camera_position = .new(0, -10, 1);
+    state.camera_z = state.camera_position.normalized();
+    state.camera_x = Vector3.new(0, 0, 1).crossProduct(state.camera_z).normalizeOrZero();
+    state.camera_y = state.camera_z.crossProduct(state.camera_x).normalizeOrZero();
+
+    state.film_width = 1;
+    state.film_height = 1;
     if (image.width > image.height) {
-        film_height = film_width * @as(f32, @floatFromInt(image.height)) / @as(f32, @floatFromInt(image.width));
+        state.film_height =
+            state.film_width * @as(f32, @floatFromInt(image.height)) / @as(f32, @floatFromInt(image.width));
     } else if (image.height > image.width) {
-        film_width = film_height * @as(f32, @floatFromInt(image.width)) / @as(f32, @floatFromInt(image.height));
+        state.film_width =
+            state.film_height * @as(f32, @floatFromInt(image.width)) / @as(f32, @floatFromInt(image.height));
     }
 
-    const film_half_width: f32 = 0.5 * film_width;
-    const film_half_height: f32 = 0.5 * film_height;
-    const film_center: Vector3 = camera_position.plus(camera_z.negated().scaledTo(film_distance));
+    state.film_half_width = 0.5 * state.film_width;
+    state.film_half_height = 0.5 * state.film_height;
+    state.film_center = state.camera_position.plus(state.camera_z.negated().scaledTo(film_distance));
 
-    const pixel_width: f32 = 0.5 / @as(f32, @floatFromInt(image.width));
-    const pixel_height: f32 = 0.5 / @as(f32, @floatFromInt(image.height));
+    state.half_pixel_width = 0.5 / @as(f32, @floatFromInt(image.width));
+    state.half_pixel_height = 0.5 / @as(f32, @floatFromInt(image.height));
 
-    var bounces_computed: u64 = 0;
+    state.bounces_computed = 0;
 
     var y: u32 = y_min;
     while (y < one_past_y_max) : (y += 1) {
         var out: []u32 = getPixelPointer(image, x_min, y);
-        const film_y: f32 = -1 + 2 * (@as(f32, @floatFromInt(y)) / @as(f32, @floatFromInt(image.height)));
+        state.film_y = -1 + 2 * (@as(f32, @floatFromInt(y)) / @as(f32, @floatFromInt(image.height)));
 
         var x: u32 = x_min;
         while (x < one_past_x_max) : (x += 1) {
-            const film_x: f32 = -1 + 2 * (@as(f32, @floatFromInt(x)) / @as(f32, @floatFromInt(image.width)));
+            state.film_x = -1 + 2 * (@as(f32, @floatFromInt(x)) / @as(f32, @floatFromInt(image.width)));
 
-            var final_color: Color3 = .zero();
-            const contribution: f32 = 1.0 / @as(f32, @floatFromInt(queue.rays_per_pixel));
-            var ray_index: u32 = 0;
-            while (ray_index <= queue.rays_per_pixel) : (ray_index += 1) {
-                const offset_x: f32 = film_x + randomBilateral() * pixel_width;
-                const offset_y: f32 = film_y + randomBilateral() * pixel_height;
-                const film_position: Vector3 = film_center.plus(
-                    camera_x.scaledTo(offset_x * film_half_width),
-                ).plus(
-                    camera_y.scaledTo(offset_y * film_half_height),
-                );
-                var ray_origin: Vector3 = camera_position;
-                var ray_direction: Vector3 = film_position.minus(camera_position).normalizeOrZero();
-
-                const tolerance: f32 = 0.0001;
-                const min_hit_distance: f32 = 0.001;
-
-                var sample: Color3 = .zero();
-                var attenuation: Color3 = .one();
-                var bounce_count: u32 = 0;
-                while (bounce_count <= queue.max_bounce_count) : (bounce_count += 1) {
-                    var hit_distance: f32 = std.math.floatMax(f32);
-                    var hit_material_index: u32 = 0;
-                    var next_normal: Vector3 = .zero();
-
-                    bounces_computed += 1;
-
-                    var plane_index: u32 = 0;
-                    while (plane_index < world.plane_count) : (plane_index += 1) {
-                        const plane: Plane = world.planes[plane_index];
-
-                        const denominator: f32 = plane.normal.dotProduct(ray_direction);
-                        if (@abs(denominator) > tolerance) {
-                            const t: f32 = (-plane.distance - plane.normal.dotProduct(ray_origin)) / denominator;
-                            if (t > min_hit_distance and t < hit_distance) {
-                                hit_distance = t;
-                                hit_material_index = plane.material_index;
-
-                                next_normal = plane.normal;
-                            }
-                        }
-                    }
-
-                    var sphere_index: u32 = 0;
-                    while (sphere_index < world.sphere_count) : (sphere_index += 1) {
-                        const sphere: Sphere = world.spheres[sphere_index];
-
-                        const sphere_relative_ray_origin: Vector3 = ray_origin.minus(sphere.position);
-                        const a: f32 = ray_direction.dotProduct(ray_direction);
-                        const b: f32 = 2.0 * ray_direction.dotProduct(sphere_relative_ray_origin);
-                        const sphere_c: f32 =
-                            sphere_relative_ray_origin.dotProduct(sphere_relative_ray_origin) - sphere.radius * sphere.radius;
-
-                        const denominator: f32 = 2.0 * a;
-                        const root_term: f32 = @sqrt(b * b - 4.0 * a * sphere_c);
-
-                        if (root_term > tolerance) {
-                            const tp: f32 = (-b + root_term) / denominator;
-                            const tn: f32 = (-b - root_term) / denominator;
-
-                            var t = tp;
-                            if (tn > min_hit_distance and tn < tp) {
-                                t = tn;
-                            }
-
-                            if (t > min_hit_distance and t < hit_distance) {
-                                hit_distance = t;
-                                hit_material_index = sphere.material_index;
-
-                                next_normal = ray_direction.scaledTo(t).plus(sphere_relative_ray_origin).normalizeOrZero();
-                            }
-                        }
-                    }
-
-                    if (hit_material_index > 0) {
-                        const material = world.materials[hit_material_index];
-
-                        sample = sample.plus(attenuation.hadamardProduct(material.emit_color));
-                        var cosine_attenuation: f32 = ray_direction.negated().dotProduct(next_normal);
-                        if (cosine_attenuation < 0) {
-                            cosine_attenuation = 0;
-                        }
-                        attenuation = attenuation.hadamardProduct(material.reflect_color.scaledTo(cosine_attenuation));
-
-                        ray_origin = ray_origin.plus(ray_direction.scaledTo(hit_distance));
-
-                        const pure_bounce: Vector3 =
-                            ray_direction.minus(next_normal.scaledTo(2 * ray_direction.dotProduct(next_normal)));
-                        const random_bounce: Vector3 =
-                            next_normal.plus(.new(randomBilateral(), randomBilateral(), randomBilateral())).normalizeOrZero();
-                        ray_direction = random_bounce.lerp(pure_bounce, material.scatter).normalizeOrZero();
-                    } else {
-                        const material = world.materials[hit_material_index];
-                        sample = sample.plus(attenuation.hadamardProduct(material.emit_color));
-                        break;
-                    }
-                }
-                final_color = final_color.plus(sample.scaledTo(contribution));
-            }
+            castSampleRays(&state);
+            const final_color: Color3 = state.final_color;
 
             const bmp_color: Color = .new(
                 255 * exactLinearToSRGB(final_color.r()),
@@ -379,7 +690,7 @@ pub fn renderTile(queue: *WorkQueue) bool {
         }
     }
 
-    _ = lockedAddAndReturnPreviousValue(&queue.bounces_computed, bounces_computed);
+    _ = lockedAddAndReturnPreviousValue(&queue.bounces_computed, state.bounces_computed);
     _ = lockedAddAndReturnPreviousValue(&queue.tile_retired_count, 1);
 
     return true;
@@ -424,10 +735,10 @@ pub fn main() !void {
     var image: ImageU32 = try allocateImage(1280, 720, allocator);
 
     const core_count: u32 = win32.getCPUCoreCount();
-    const tile_width: u32 = @divFloor(image.width, core_count);
-    const tile_height: u32 = tile_width;
-    // const tile_width: u32 = 64;
+    // const tile_width: u32 = @divFloor(image.width, core_count);
     // const tile_height: u32 = tile_width;
+    const tile_width: u32 = 64;
+    const tile_height: u32 = tile_width;
     const tile_count_x: u32 = @divFloor(image.width + tile_width - 1, tile_width);
     const tile_count_y: u32 = @divFloor(image.height + tile_height - 1, tile_height);
     const total_tile_count: u32 = tile_count_x * tile_count_y;
@@ -471,6 +782,7 @@ pub fn main() !void {
             order.y_min = y_min;
             order.one_past_x_max = one_past_x_max;
             order.one_past_y_max = one_past_y_max;
+            order.entropy = .{ .state = @splat(2397458 + tile_x * 12098 + tile_y * 23771) };
         }
     }
 
