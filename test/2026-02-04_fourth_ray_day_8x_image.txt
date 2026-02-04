@@ -1,0 +1,7 @@
+Configuration: 8 cores with 240 64x64 (16k/tile) tiles, 8-wide lanes.
+Quality: 1024 rays/pixel, 8 bounces per ray.
+Raycasting time: 3794ms.
+Used bounces: 1849728789.
+Total bounces: 2244552496.
+Wasted bounces: 394823707 (17.59).
+Performance: 0.0000021ms/bounce.
