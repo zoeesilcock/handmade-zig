@@ -193,6 +193,115 @@ const StreamingBuffer = struct {
     }
 };
 
+const ImageU32 = struct {
+    width: u32,
+    height: u32,
+    pixels: []u32,
+};
+
+const BitmapHeader = packed struct {
+    file_type: u16,
+    file_size: u32,
+    reserved1: u16,
+    reserved2: u16,
+    bitmap_offset: u32,
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bits_per_pxel: u16,
+    compression: u32,
+    size_of_bitmap: u32,
+    horz_resolution: i32,
+    vert_resolution: i32,
+    colors_used: u32,
+    colors_important: u32,
+};
+
+fn swapRAndB(color: u32) u32 {
+    const result: u32 = ((color & 0xff00ff00) |
+        ((color >> 16) & 0xff) |
+        ((color & 0xff) << 16));
+
+    return result;
+}
+
+fn writeBMPImageTopDownRGBA(width: u32, height: u32, pixels: []u32, output_file_name: []const u8) !void {
+    const output_pixel_size: u32 = 4 * width * height;
+    const header_size: u32 = @sizeOf(BitmapHeader) - 10;
+    const header: BitmapHeader = .{
+        .file_type = 0x4d42,
+        .file_size = header_size + @as(u32, @intCast(pixels.len)),
+        .reserved1 = 0,
+        .reserved2 = 0,
+        .bitmap_offset = header_size,
+        .size = header_size - 14,
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .planes = 1,
+        .bits_per_pxel = 32,
+        .compression = 0,
+        .size_of_bitmap = output_pixel_size,
+        .horz_resolution = 0,
+        .vert_resolution = 0,
+        .colors_used = 0,
+        .colors_important = 0,
+    };
+
+    const mid_point_y: u32 = @divFloor(@as(u32, @intCast(header.height + 1)), 2);
+    var row0: [*]u32 = pixels.ptr;
+    var row1: [*]u32 = row0 + (height - 1) * width;
+    var y: u32 = 0;
+    while (y < mid_point_y) : (y += 1) {
+        var pixel0: [*]u32 = row0;
+        var pixel1: [*]u32 = row1;
+        var x: u32 = 0;
+        while (x < width) : (x += 1) {
+            const color0: u32 = swapRAndB(pixel0[0]);
+            const color1: u32 = swapRAndB(pixel1[0]);
+
+            pixel0[0] = color1;
+            pixel1[0] = color0;
+            pixel0 += 1;
+            pixel1 += 1;
+        }
+
+        row0 += width;
+        row1 -= width;
+    }
+
+    if (false) {
+        const in_file_name: []const u8 = "reference.bmp";
+        if (std.fs.cwd().openFile(in_file_name, .{})) |file| {
+            defer file.close();
+
+            var buf: [1024]u8 = undefined;
+            var file_reader = file.reader(&buf);
+            const reader = &file_reader.interface;
+
+            const in_header: BitmapHeader = try reader.takeStruct(BitmapHeader, .little);
+            std.log.info("Header: {x}", .{in_header.file_type});
+        } else |err| {
+            std.log.err("Unable to open reference file '{s}': {s}", .{ in_file_name, @errorName(err) });
+        }
+    }
+
+    if (std.fs.cwd().createFile(output_file_name, .{})) |file| {
+        defer file.close();
+
+        var buf: [1024]u8 = undefined;
+        var file_writer = file.writer(&buf);
+        const writer = &file_writer.interface;
+
+        try writer.writeAll(std.mem.asBytes(&header)[0..header_size]);
+        try writer.writeAll(std.mem.sliceAsBytes(pixels));
+
+        try writer.flush();
+    } else |err| {
+        std.log.err("Unable to write output file '{s}': {s}", .{ output_file_name, @errorName(err) });
+    }
+}
+
 fn readEntireFile(file_name: [:0]const u8, allocator: std.mem.Allocator) !StreamingBuffer {
     var result = StreamingBuffer{};
 
@@ -495,7 +604,7 @@ fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_p
 }
 
 /// This is not meant to be fault tolerant. It only loads specifically what we expect, and is happy to crash otherwise.
-fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
+fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
     var supported: bool = false;
     var at: StreamingBuffer = file;
 
@@ -505,13 +614,13 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
     }
 
     var final_pixels: ?[]u8 = null;
+    var width: u32 = 0;
+    var height: u32 = 0;
 
     if (at.consumeType(Header)) |header| {
         _ = header;
 
         var compressed_data: StreamingBuffer = .{};
-        var width: u32 = 0;
-        var height: u32 = 0;
 
         while (at.content_size > 0) {
             if (at.consumeType(ChunkHeader)) |chunk_header| {
@@ -755,6 +864,14 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) void {
     }
 
     std.log.info("Supported: {s}", .{if (supported) "true" else "false"});
+
+    const result: ImageU32 = .{
+        .width = width,
+        .height = height,
+        .pixels = @ptrCast(@alignCast(final_pixels)),
+    };
+
+    return result;
 }
 
 pub fn main() !void {
@@ -765,14 +882,19 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len == 2) {
-        const file_name: [:0]const u8 = args[1];
-        std.log.info("Loading PNG {s}...", .{file_name});
+    if (args.len == 3) {
+        const in_file_name: [:0]const u8 = args[1];
+        const out_file_name: [:0]const u8 = args[2];
+        std.log.info("Loading PNG {s}...", .{in_file_name});
 
-        const file: StreamingBuffer = try readEntireFile(file_name, allocator);
+        const file: StreamingBuffer = try readEntireFile(in_file_name, allocator);
 
-        parsePNG(file, allocator);
+        const image: ImageU32 = parsePNG(file, allocator);
+
+        std.log.info("Writing BMP {s}...", .{out_file_name});
+
+        try writeBMPImageTopDownRGBA(image.width, image.height, image.pixels, out_file_name);
     } else {
-        std.log.info("Usage: {s} (png file to load)", .{args[0]});
+        std.log.info("Usage: {s} (png file to load) (bmp file to write)", .{args[0]});
     }
 }
