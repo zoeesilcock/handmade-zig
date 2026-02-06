@@ -16,7 +16,7 @@ const Package = enum {
     Preprocessor,
     Compressor,
     Raytracer,
-    PNGReader,
+    TestPNG,
 };
 
 pub fn build(b: *std.Build) void {
@@ -62,8 +62,8 @@ pub fn build(b: *std.Build) void {
         addRaytracer(b, build_options, target, optimize);
     }
 
-    if (package == .All or package == .PNGReader) {
-        addPNGReader(b, build_options, target, optimize);
+    if (package == .All or package == .TestPNG) {
+        addTestPNG(b, build_options, target, optimize);
     }
 }
 
@@ -300,34 +300,40 @@ fn addRaytracer(
     raytracer_run_step.dependOn(&open_file.step);
 }
 
-fn addPNGReader(
+fn addTestPNG(
     b: *std.Build,
     build_options: *std.Build.Step.Options,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const png_reader_exe = b.addExecutable(.{
-        .name = "png-reader",
+    const png_module = b.addModule("png", .{
+        .root_source_file = b.path("src/png.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const test_png_exe = b.addExecutable(.{
+        .name = "test-png",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/png.zig"),
+            .root_source_file = b.path("tools/test_png.zig"),
             .target = target,
             .optimize = optimize,
             .link_libc = false,
         }),
     });
-    png_reader_exe.stack_size = 0x400000; // 4MB.
-    png_reader_exe.root_module.addOptions("build_options", build_options);
+    test_png_exe.stack_size = 0x400000; // 4MB.
+    test_png_exe.root_module.addOptions("build_options", build_options);
+    test_png_exe.root_module.addImport("png", png_module);
 
-    b.installArtifact(png_reader_exe);
+    b.installArtifact(test_png_exe);
 
     // Allow running the png reader from a build command.
-    const run_png_reader = b.addRunArtifact(png_reader_exe);
+    const run_test_png = b.addRunArtifact(test_png_exe);
     if (b.args) |args| {
-        run_png_reader.addArgs(args);
+        run_test_png.addArgs(args);
     }
-    const png_reader_run_step = b.step("run-png-reader", "Run the png reader");
-    run_png_reader.setCwd(b.path("."));
-    png_reader_run_step.dependOn(&run_png_reader.step);
+    const test_png_run_step = b.step("run-test-png", "Run the png reader");
+    run_test_png.setCwd(b.path("."));
+    test_png_run_step.dependOn(&run_test_png.step);
 }
 
 fn addSimpleCompressor(

@@ -1,10 +1,20 @@
 const std = @import("std");
 const shared = @import("shared.zig");
+pub const stream = @import("stream.zig");
+
+// Types.
+const Stream = stream.Stream;
+const StreamChunk = stream.Chunk;
 
 const PNG_HUFFMAN_MAX_BIT_COUNT = 16;
-const MAX_REVERSE_BITS_COUNT = 13;
-
 const Signature: [8]u8 = .{ 137, 80, 78, 71, 13, 10, 26, 10 };
+
+pub const ImageU32 = struct {
+    width: u32,
+    height: u32,
+    pixels: []u32,
+};
+
 const Header = extern struct {
     signature: [8]u8,
 };
@@ -95,7 +105,7 @@ const Huffman = struct {
         }
     }
 
-    fn decode(self: *Huffman, input: *StreamingBuffer) u32 {
+    fn decode(self: *Huffman, input: *Stream) u32 {
         const entry_index: u32 = input.peekBits(self.max_code_length_in_bits);
         std.debug.assert(entry_index < self.entry_count);
 
@@ -113,213 +123,6 @@ const HuffmanEntry = struct {
     symbol: u16,
     bits_used: u16,
 };
-
-const StreamingChunk = struct {
-    content_size: u32 = 0,
-    contents: [:0]align(1) u8 = undefined,
-
-    next: ?*StreamingChunk = null,
-};
-
-const StreamingBuffer = struct {
-    content_size: u32 = 0,
-    contents: [:0]align(1) u8 = undefined,
-
-    bit_count: u32 = 0,
-    bit_buf: u32 = 0,
-    underflowed: bool = false,
-
-    first: ?*StreamingChunk = null,
-    last: ?*StreamingChunk = null,
-
-    pub fn consumeType(self: *StreamingBuffer, T: type) ?*T {
-        return @ptrCast(@alignCast(self.consumeSize(@sizeOf(T))));
-    }
-
-    pub fn peekBits(self: *StreamingBuffer, bit_count: u32) u32 {
-        std.debug.assert(bit_count <= 32);
-
-        var result: u32 = 0;
-
-        while (self.bit_count < bit_count and !self.underflowed) {
-            const byte: u32 = @intCast(self.consumeType(u8).?.*);
-            self.bit_buf |= (byte << @as(u5, @intCast(self.bit_count)));
-            self.bit_count += 8;
-        }
-
-        result = self.bit_buf & ((@as(u32, 1) << @as(u5, @intCast(bit_count))) - 1);
-
-        return result;
-    }
-
-    pub fn discardBits(self: *StreamingBuffer, bit_count: u32) void {
-        self.bit_count -= bit_count;
-        self.bit_buf >>= @intCast(bit_count);
-    }
-
-    pub fn consumeBits(self: *StreamingBuffer, bit_count: u32) u32 {
-        const result: u32 = self.peekBits(bit_count);
-        self.discardBits(bit_count);
-        return result;
-    }
-
-    pub fn flushByte(self: *StreamingBuffer) void {
-        self.bit_count = 0;
-        self.bit_buf = 0;
-    }
-
-    pub fn consumeSize(self: *StreamingBuffer, size: u32) ?[*]u8 {
-        var result: ?[*]u8 = null;
-        if (self.content_size == 0 and self.first != null) {
-            const this: *StreamingChunk = self.first.?;
-            self.content_size = this.content_size;
-            self.contents = this.contents;
-            self.first = this.next;
-        }
-
-        if (self.content_size >= size) {
-            result = self.contents.ptr;
-            self.contents.ptr += size;
-            self.content_size -= size;
-        } else {
-            std.log.err("File underflow", .{});
-            self.content_size = 0;
-            self.underflowed = true;
-        }
-
-        std.debug.assert(!self.underflowed);
-
-        return result;
-    }
-};
-
-const ImageU32 = struct {
-    width: u32,
-    height: u32,
-    pixels: []u32,
-};
-
-const BitmapHeader = packed struct {
-    file_type: u16,
-    file_size: u32,
-    reserved1: u16,
-    reserved2: u16,
-    bitmap_offset: u32,
-    size: u32,
-    width: i32,
-    height: i32,
-    planes: u16,
-    bits_per_pxel: u16,
-    compression: u32,
-    size_of_bitmap: u32,
-    horz_resolution: i32,
-    vert_resolution: i32,
-    colors_used: u32,
-    colors_important: u32,
-};
-
-fn swapRAndB(color: u32) u32 {
-    const result: u32 = ((color & 0xff00ff00) |
-        ((color >> 16) & 0xff) |
-        ((color & 0xff) << 16));
-
-    return result;
-}
-
-fn writeBMPImageTopDownRGBA(width: u32, height: u32, pixels: []u32, output_file_name: []const u8) !void {
-    const output_pixel_size: u32 = 4 * width * height;
-    const header_size: u32 = @sizeOf(BitmapHeader) - 10;
-    const header: BitmapHeader = .{
-        .file_type = 0x4d42,
-        .file_size = header_size + @as(u32, @intCast(pixels.len)),
-        .reserved1 = 0,
-        .reserved2 = 0,
-        .bitmap_offset = header_size,
-        .size = header_size - 14,
-        .width = @intCast(width),
-        .height = @intCast(height),
-        .planes = 1,
-        .bits_per_pxel = 32,
-        .compression = 0,
-        .size_of_bitmap = output_pixel_size,
-        .horz_resolution = 0,
-        .vert_resolution = 0,
-        .colors_used = 0,
-        .colors_important = 0,
-    };
-
-    const mid_point_y: u32 = @divFloor(@as(u32, @intCast(header.height + 1)), 2);
-    var row0: [*]u32 = pixels.ptr;
-    var row1: [*]u32 = row0 + (height - 1) * width;
-    var y: u32 = 0;
-    while (y < mid_point_y) : (y += 1) {
-        var pixel0: [*]u32 = row0;
-        var pixel1: [*]u32 = row1;
-        var x: u32 = 0;
-        while (x < width) : (x += 1) {
-            const color0: u32 = swapRAndB(pixel0[0]);
-            const color1: u32 = swapRAndB(pixel1[0]);
-
-            pixel0[0] = color1;
-            pixel1[0] = color0;
-            pixel0 += 1;
-            pixel1 += 1;
-        }
-
-        row0 += width;
-        row1 -= width;
-    }
-
-    if (false) {
-        const in_file_name: []const u8 = "reference.bmp";
-        if (std.fs.cwd().openFile(in_file_name, .{})) |file| {
-            defer file.close();
-
-            var buf: [1024]u8 = undefined;
-            var file_reader = file.reader(&buf);
-            const reader = &file_reader.interface;
-
-            const in_header: BitmapHeader = try reader.takeStruct(BitmapHeader, .little);
-            std.log.info("Header: {x}", .{in_header.file_type});
-        } else |err| {
-            std.log.err("Unable to open reference file '{s}': {s}", .{ in_file_name, @errorName(err) });
-        }
-    }
-
-    if (std.fs.cwd().createFile(output_file_name, .{})) |file| {
-        defer file.close();
-
-        var buf: [1024]u8 = undefined;
-        var file_writer = file.writer(&buf);
-        const writer = &file_writer.interface;
-
-        try writer.writeAll(std.mem.asBytes(&header)[0..header_size]);
-        try writer.writeAll(std.mem.sliceAsBytes(pixels));
-
-        try writer.flush();
-    } else |err| {
-        std.log.err("Unable to write output file '{s}': {s}", .{ output_file_name, @errorName(err) });
-    }
-}
-
-fn readEntireFile(file_name: [:0]const u8, allocator: std.mem.Allocator) !StreamingBuffer {
-    var result = StreamingBuffer{};
-
-    if (std.fs.cwd().openFile(file_name, .{})) |file| {
-        defer file.close();
-
-        _ = try file.seekFromEnd(0);
-        result.content_size = @as(u32, @intCast(file.getPos() catch 0));
-        _ = try file.seekTo(0);
-
-        const buffer = try file.readToEndAllocOptions(allocator, std.math.maxInt(u32), null, .@"32", 0);
-        result.contents = buffer;
-    } else |err| {
-        std.log.err("Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
-    }
-
-    return result;
-}
 
 fn endianSwap(value: *align(1) u32) void {
     if (false) {
@@ -380,10 +183,6 @@ fn allocatePixels(
 ) []u8 {
     const extra_bytes: u32 = opt_extra_bytes orelse 0;
     return allocator.alloc(u8, width * height * bytes_per_pixel + (extra_bytes * height)) catch unreachable;
-}
-
-fn allocateChunk(allocator: std.mem.Allocator) *StreamingChunk {
-    return @ptrCast(@alignCast(allocator.alloc(StreamingChunk, 1) catch unreachable));
 }
 
 fn allocateHuffman(allocator: std.mem.Allocator, max_code_length_in_bits: u32) Huffman {
@@ -461,8 +260,6 @@ const distance_extra = [_]HuffmanEntry{
     .{ .symbol = 24577, .bits_used = 13 }, // 29
 };
 
-var reverse_bits: [1 << MAX_REVERSE_BITS_COUNT]u16 = undefined;
-
 fn filter1And2(x: []u8, a: []u8, channel: u32) u8 {
     return x[channel] +% a[channel];
 }
@@ -499,7 +296,7 @@ fn filter4(x: []u8, a_full: []u8, b_full: []u8, c_full: []u8, channel: u32) u8 {
     return x[channel] +% @as(u8, @intCast(paeth));
 }
 
-fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_pixels: []u8) void {
+fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_pixels: []u8, errors: ?*Stream) void {
     var zero: u32 = 0;
     var prior_row: []u8 = @ptrCast(&zero);
     var prior_row_advance: u32 = 0;
@@ -594,7 +391,7 @@ fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_p
                 }
             },
             else => {
-                std.log.err("Unrecognized row filter: {d}.", .{filter});
+                stream.output(errors, @src(), "Unrecognized row filter: {d}.", .{filter});
             },
         }
 
@@ -604,14 +401,10 @@ fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_p
 }
 
 /// This is not meant to be fault tolerant. It only loads specifically what we expect, and is happy to crash otherwise.
-fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
-    var supported: bool = false;
-    var at: StreamingBuffer = file;
+pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) ImageU32 {
+    var at: Stream = file;
 
-    var r_index: u16 = 0;
-    while (r_index < reverse_bits.len) : (r_index += 1) {
-        reverse_bits[r_index] = @intCast(reverseBits(r_index, MAX_REVERSE_BITS_COUNT));
-    }
+    var supported: bool = false;
 
     var final_pixels: ?[]u8 = null;
     var width: u32 = 0;
@@ -620,7 +413,7 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
     if (at.consumeType(Header)) |header| {
         _ = header;
 
-        var compressed_data: StreamingBuffer = .{};
+        var compressed_data: Stream = .{};
 
         while (at.content_size > 0) {
             if (at.consumeType(ChunkHeader)) |chunk_header| {
@@ -632,19 +425,19 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
                     endianSwap(&chunk_footer.crc);
 
                     if (chunk_header.chunkTypeU32() == fourcc("IHDR")) {
-                        std.log.info("IHDR", .{});
+                        stream.output(info, @src(), "IHDR", .{});
 
                         const ihdr: *IHeader = @ptrCast(@alignCast(chunk_data));
                         endianSwap(&ihdr.width);
                         endianSwap(&ihdr.height);
 
-                        std.log.info("    width: {d}", .{ihdr.width});
-                        std.log.info("    height: {d}", .{ihdr.height});
-                        std.log.info("    bit_depth: {d}", .{ihdr.bit_depth});
-                        std.log.info("    color_type: {d}", .{ihdr.color_type});
-                        std.log.info("    compression_method: {d}", .{ihdr.compression_method});
-                        std.log.info("    filter_method: {d}", .{ihdr.filter_method});
-                        std.log.info("    interlace_method: {d}", .{ihdr.interlace_method});
+                        stream.output(info, @src(), "    width: {d}", .{ihdr.width});
+                        stream.output(info, @src(), "    height: {d}", .{ihdr.height});
+                        stream.output(info, @src(), "    bit_depth: {d}", .{ihdr.bit_depth});
+                        stream.output(info, @src(), "    color_type: {d}", .{ihdr.color_type});
+                        stream.output(info, @src(), "    compression_method: {d}", .{ihdr.compression_method});
+                        stream.output(info, @src(), "    filter_method: {d}", .{ihdr.filter_method});
+                        stream.output(info, @src(), "    interlace_method: {d}", .{ihdr.interlace_method});
 
                         if (ihdr.bit_depth == 8 and
                             ihdr.color_type == 6 and
@@ -657,9 +450,9 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
                             supported = true;
                         }
                     } else if (chunk_header.chunkTypeU32() == fourcc("IDAT")) {
-                        std.log.info("IDAT {d}", .{chunk_header.length});
+                        stream.output(info, @src(), "IDAT {d}", .{chunk_header.length});
 
-                        const chunk: *StreamingChunk = allocateChunk(allocator);
+                        const chunk: *StreamChunk = .allocate(allocator);
                         chunk.content_size = chunk_header.length;
                         chunk.contents = @ptrCast(chunk_data.?[0..chunk_header.length]);
                         chunk.next = null;
@@ -680,7 +473,7 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
         }
 
         if (supported) {
-            std.log.info("Examining ZLIB headers...", .{});
+            stream.output(info, @src(), "Examining ZLIB headers...", .{});
 
             if (compressed_data.consumeType(IDataHeader)) |idat_header| {
                 const cm: u8 = idat_header.zlib_method_flags & 0xf;
@@ -689,16 +482,16 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
                 const fdict: u8 = (idat_header.additional_flags >> 5) & 0x1;
                 const flevel: u8 = idat_header.additional_flags >> 6;
 
-                std.log.info("    cm: {d}", .{cm});
-                std.log.info("    cinfo: {d}", .{cinfo});
-                std.log.info("    fcheck: {d}", .{fcheck});
-                std.log.info("    fdict: {d}", .{fdict});
-                std.log.info("    flevel: {d}", .{flevel});
+                stream.output(info, @src(), "    cm: {d}", .{cm});
+                stream.output(info, @src(), "    cinfo: {d}", .{cinfo});
+                stream.output(info, @src(), "    fcheck: {d}", .{fcheck});
+                stream.output(info, @src(), "    fdict: {d}", .{fdict});
+                stream.output(info, @src(), "    flevel: {d}", .{flevel});
 
                 supported = (cm == 8 and fdict == 0);
 
                 if (supported) {
-                    std.log.info("Decompressing...", .{});
+                    stream.output(info, @src(), "Decompressing...", .{});
 
                     final_pixels = allocatePixels(allocator, width, height, 4, null);
                     const decompressed_pixels: []u8 = allocatePixels(allocator, width, height, 4, 1);
@@ -708,27 +501,40 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
 
                     var bfinal: u32 = 0;
                     while (bfinal == 0) {
+                        std.debug.assert(@intFromPtr(dest.ptr) <= @intFromPtr(decompressed_pixels_end.ptr));
+
                         bfinal = compressed_data.consumeBits(1);
                         const btype: u32 = compressed_data.consumeBits(2);
 
                         if (btype == 0) {
                             compressed_data.flushByte();
-                            var len: u16 = compressed_data.consumeType(u16).?.*;
-                            const nlen: u16 = compressed_data.consumeType(u16).?.*;
+                            var len: u16 = @intCast(compressed_data.consumeBits(16));
+                            const nlen: u16 = @intCast(compressed_data.consumeBits(16));
                             if (len != ~nlen) {
-                                std.log.err("LEN/NLEN mismatch.", .{});
+                                stream.output(compressed_data.errors, @src(), "LEN/NLEN mismatch.", .{});
                             }
 
-                            var source: ?[*]u8 = compressed_data.consumeSize(len);
-                            if (source != null) {
-                                while (len > 0) : (len -= 1) {
-                                    dest[0] = source.?[0];
-                                    dest.ptr += 1;
-                                    source.? += 1;
+                            while (len > 0) {
+                                compressed_data.refillIfNecessary();
+
+                                var use_len: u16 = len;
+                                if (use_len > compressed_data.content_size) {
+                                    use_len = @intCast(compressed_data.content_size);
                                 }
+
+                                var source: ?[*]u8 = compressed_data.consumeSize(use_len);
+                                if (source != null) {
+                                    while (use_len > 0) : (use_len -= 1) {
+                                        dest[0] = source.?[0];
+                                        dest.ptr += 1;
+                                        source.? += 1;
+                                    }
+                                }
+
+                                len -= use_len;
                             }
                         } else if (btype == 3) {
-                            std.log.err("BTYPE of {d} encountered.", .{btype});
+                            stream.output(compressed_data.errors, @src(), "BTYPE of {d} encountered.", .{btype});
                         } else {
                             var literal_length_distance_table: [512]u32 = undefined;
                             var literal_length_huffman: Huffman = allocateHuffman(allocator, 15);
@@ -777,7 +583,7 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
                                     } else if (encoded_length == 18) {
                                         repeat_count = 11 + compressed_data.consumeBits(7);
                                     } else {
-                                        std.log.err("Encoded length of {d} encountered.", .{encoded_length});
+                                        stream.output(compressed_data.errors, @src(), "Encoded length of {d} encountered.", .{encoded_length});
                                     }
 
                                     while (repeat_count > 0) : (repeat_count -= 1) {
@@ -808,7 +614,7 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
                                     }
                                 }
                             } else {
-                                std.log.err("BTYPE of {d} encountered.", .{btype});
+                                stream.output(compressed_data.errors, @src(), "BTYPE of {d} encountered.", .{btype});
                             }
 
                             literal_length_huffman.compute(hlit, &literal_length_distance_table, null);
@@ -857,13 +663,13 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
                     }
 
                     std.debug.assert(@intFromPtr(dest.ptr) == @intFromPtr(decompressed_pixels_end.ptr));
-                    filterReconstruct(height, width, decompressed_pixels, final_pixels.?);
+                    filterReconstruct(height, width, decompressed_pixels, final_pixels.?, compressed_data.errors);
                 }
             }
         }
     }
 
-    std.log.info("Supported: {s}", .{if (supported) "true" else "false"});
+    stream.output(info, @src(), "Supported: {s}", .{if (supported) "true" else "false"});
 
     const result: ImageU32 = .{
         .width = width,
@@ -872,29 +678,4 @@ fn parsePNG(file: StreamingBuffer, allocator: std.mem.Allocator) ImageU32 {
     };
 
     return result;
-}
-
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena.allocator();
-    defer arena.deinit();
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    if (args.len == 3) {
-        const in_file_name: [:0]const u8 = args[1];
-        const out_file_name: [:0]const u8 = args[2];
-        std.log.info("Loading PNG {s}...", .{in_file_name});
-
-        const file: StreamingBuffer = try readEntireFile(in_file_name, allocator);
-
-        const image: ImageU32 = parsePNG(file, allocator);
-
-        std.log.info("Writing BMP {s}...", .{out_file_name});
-
-        try writeBMPImageTopDownRGBA(image.width, image.height, image.pixels, out_file_name);
-    } else {
-        std.log.info("Usage: {s} (png file to load) (bmp file to write)", .{args[0]});
-    }
 }

@@ -16,7 +16,9 @@ zig build -fwine -Dtarget=x86_64-windows && (cd data && ../zig-out/bin/handmade-
 ```
 
 ## Assets
-Graphical assets are not included as they are not created by me. They need to be added to the `data/` directory manually. We currently expect the assets found in this location of the pre-order data: `handmade_hero_legacy_art.zip/v0_hhas`.
+Graphical and audio assets are not included as they are not created by me. The following assets from the pre-order data need to be present to run the game:
+* `handmade_hero_legacy_art.zip/v0_hhas` to be in the `/data` directory.
+* `handmade_hero_legacy_art.zip/png_art_packs` to be in the `/art` directory.
 
 ### Packing the assets
 The asset files need to be packed using the asset packer before running the game. The current version of the asset builder doesn't produce files compatible with the game anymore since we made the reader compatible with asset files created by Casey, use the original files from `handmade_hero_legacy_art.zip/v0_hhas`.
