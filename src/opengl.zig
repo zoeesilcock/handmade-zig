@@ -591,7 +591,7 @@ const shader_header_code =
     \\
     \\float clamp01MapToRange(float min, float max, float value) {
     \\  float range = max - min;
-    \\  float result = clamp((value - min) / range, 0, 1);
+    \\  float result = clamp((value - min) / range, 0.0, 1.0);
     \\  return result;
     \\}
     \\
@@ -606,8 +606,8 @@ const shader_header_code =
     \\vec2 UnpackNormal2(vec2 Normal)
     \\{
     \\  vec2 Result;
-    \\  Result.x = -1f + 2.0f * Normal.x;
-    \\  Result.y = -1f + 2.0f * Normal.y;
+    \\  Result.x = -1.0f + 2.0f * Normal.x;
+    \\  Result.y = -1.0f + 2.0f * Normal.y;
     \\  return Result;
     \\}
     \\
@@ -762,14 +762,14 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\  LightDirection.y = LightData1.a;
         \\  LightDirection.z =
         \\    sqrt(1.0f - (LightDirection.x * LightDirection.x + LightDirection.y * LightDirection.y));
-        \\  if (LightColor.r < 0)
+        \\  if (LightColor.r < 0.0)
         \\  {
         \\    LightColor.r = -LightColor.r;
         \\    LightDirection.z = -LightDirection.z;
         \\  }
         \\
         \\  float Contribution = 1.0f / (1.0f + LengthSq(LightPosition - WorldPosition));
-        \\  float DirectionalFalloff = clamp(dot(LightDirection.rgb, WorldNormal), 0, 1);
+        \\  float DirectionalFalloff = clamp(dot(LightDirection.rgb, WorldNormal), 0.0, 1.0);
         \\
         \\  RunningSum.rgb += Contribution * DirectionalFalloff * LightColor.rgb;
         \\  RunningSum.a += Contribution;
@@ -777,7 +777,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\
         \\vec3 SumLight()
         \\{
-        \\  RunningSum = vec4(0, 0, 0, 0);
+        \\  RunningSum = vec4(0.0, 0.0, 0.0, 0.0);
         \\
         \\  FetchAndSum(FragLightIndex + 0);
         \\  FetchAndSum(FragLightIndex + 1);
@@ -832,9 +832,9 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\    }
         \\#endif
         \\
-        \\    SurfaceReflection.r = clamp(SurfaceReflection.r, 0, 1);
-        \\    SurfaceReflection.g = clamp(SurfaceReflection.g, 0, 1);
-        \\    SurfaceReflection.b = clamp(SurfaceReflection.b, 0, 1);
+        \\    SurfaceReflection.r = clamp(SurfaceReflection.r, 0.0, 1.0);
+        \\    SurfaceReflection.g = clamp(SurfaceReflection.g, 0.0, 1.0);
+        \\    SurfaceReflection.b = clamp(SurfaceReflection.b, 0.0, 1.0);
         \\
         \\    BlendUnitColor[0] = SurfaceReflection;
         \\  }
@@ -930,7 +930,7 @@ fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
         \\
         \\vec3 LightPeel(vec3 Peel, vec4 NormalPosition, vec3 LightNormal, vec3 LightColor, vec3 ToCamera)
         \\{
-        \\  LightNormal = vec3(0, 0, -1);
+        \\  LightNormal = vec3(0.0, 0.0, -1.0);
         \\
         \\  vec3 ToLight = -LightNormal;
         \\  vec3 ReflectionNormal = UnpackNormal3(NormalPosition.xy);
@@ -970,9 +970,9 @@ fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
         \\  vec3 LightNormalPosition = texture(LightNormalPositionSampler, FragUV).rgb;
         \\  vec3 LightNormal = ExtendNormalZ(LightNormalPosition.xy);
         \\
-        \\  vec3 ToCamera = vec3(0, 0, 1); // TODO: Actually compute this!
+        \\  vec3 ToCamera = vec3(0.0, 0.0, 1.0); // TODO: Actually compute this!
         \\
-        \\  LightColor = clamp(LightColor / MaxLightIntensity, 0, 1);
+        \\  LightColor = clamp(LightColor / MaxLightIntensity, 0.0, 1.0);
         \\  LightColor = sqrt(sqrt(LightColor));
         \\
         \\#if ShaderSimTexReadSRGB
@@ -1087,9 +1087,9 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
         \\
         \\  gl_FragDepth = 0.5 * (DepthMin + DepthMax);
         \\
-        \\  vec4 CombinedColor = vec4(0, 0, 0, 0);
-        \\  vec4 CombinedEmission = vec4(0, 0, 0, 0);
-        \\  vec4 CombinedNormalPosition = vec4(0, 0, 0, 0);
+        \\  vec4 CombinedColor = vec4(0.0, 0.0, 0.0, 0.0);
+        \\  vec4 CombinedEmission = vec4(0.0, 0.0, 0.0, 0.0);
+        \\  vec4 CombinedNormalPosition = vec4(0.0, 0.0, 0.0, 0.0);
         \\  for (int SampleIndex = 0;
         \\       SampleIndex < SampleCount;
         \\       ++SampleIndex)
@@ -1141,16 +1141,16 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
         \\  }
         \\  BlendUnitColor.a = 1;
         \\  if (UniqueCount == 1) {
-        \\    BlendUnitColor.rgb = vec3(0, 0, 0);
+        \\    BlendUnitColor.rgb = vec3(0.0, 0.0, 0.0);
         \\  }
         \\  if (UniqueCount == 2) {
-        \\    BlendUnitColor.rgb = vec3(0, 1, 0);
+        \\    BlendUnitColor.rgb = vec3(0.0, 1.0, 0.0);
         \\  }
         \\  if (UniqueCount == 3) {
-        \\    BlendUnitColor.rgb = vec3(1, 1, 0);
+        \\    BlendUnitColor.rgb = vec3(1.0, 1.0, 0.0);
         \\  }
         \\  if (UniqueCount >= 4) {
-        \\    BlendUnitColor.rgb = vec3(1, 0, 0);
+        \\    BlendUnitColor.rgb = vec3(1.0, 0.0, 0.0);
         \\  }
         \\#endif
         \\}
@@ -1239,10 +1239,10 @@ fn compileFakeSeedLightingProgram(program: *FakeSeedLightingProgram) void {
         \\
         \\layout(location = 0) out vec4 BlendUnitColor[4];
         \\
-        \\vec3 FrontEmission = vec3(0, 0, 0);
-        \\vec3 BackEmission = vec3(0, 0, 0);
+        \\vec3 FrontEmission = vec3(0.0, 0.0, 0.0);
+        \\vec3 BackEmission = vec3(0.0, 0.0, 0.0);
         \\vec3 SurfaceColor = vec3(0.7f, 0.7f, 0.7f);
-        \\vec3 NormalPosition = vec3(0, 1, -10);
+        \\vec3 NormalPosition = vec3(0.0, 1.0, -10.0);
         \\
         \\void Light(vec2 LightPosition,
         \\           float LightRadius,
@@ -1260,15 +1260,15 @@ fn compileFakeSeedLightingProgram(program: *FakeSeedLightingProgram) void {
         \\  {
         \\     FrontEmission = LightFrontEmission;
         \\     BackEmission = LightBackEmission;
-        \\     SurfaceColor = vec3(0, 0, 0);
+        \\     SurfaceColor = vec3(0.0, 0.0, 0.0);
         \\     NormalPosition = LightNormalPosition;
         \\  }
         \\}
         \\
         \\void main(void)
         \\{
-        \\  Light(LightPosition.xy,                 10.0f, vec3(100, 0, 0),  vec3(0, 100, 0),  vec3(1, 0, 0));
-        \\  Light(LightPosition.xy + vec2(0.5f, 0), 10.0f, vec3(0, 10, 0),  vec3(0, 0, 10),  vec3(0, 1, 1));
+        \\  Light(LightPosition.xy,                 10.0f, vec3(100.0, 0.0, 0.0),  vec3(0.0, 100.0, 0.0),  vec3(1.0, 0.0, 0.0));
+        \\  Light(LightPosition.xy + vec2(0.5f, 0.0), 10.0f, vec3(0.0, 10.0, 0.0),  vec3(0.0, 0.0, 10.0),  vec3(0.0, 1.0, 1.0));
         \\
         \\  BlendUnitColor[0].rgb = FrontEmission;
         \\  BlendUnitColor[1].rgb = BackEmission;
@@ -1347,7 +1347,7 @@ fn compileDepthPeelToLightingProgram(program: *OpenGLProgramCommon) void {
         \\  float Lp1 = NormalPositionLight.w;
         \\
         \\  vec3 FrontEmission = MaxLightIntensity * EmissionRGB;
-        \\  vec3 BackEmission = vec3(0, 0, 0);
+        \\  vec3 BackEmission = vec3(0.0, 0.0, 0.0);
         \\  vec3 SurfaceColor = SurfaceReflectionRGB;
         \\  vec3 NormalPosition = vec3(Normal.x, Normal.y, Depth);
         \\
@@ -1529,10 +1529,10 @@ fn compileMultiGridLightDownProgram(program: *MultiGridLightDownProgram) void {
         \\
         \\void main(void)
         \\{
-        \\  light_value Left = ParentSample(FragUV + vec2(-SourceUVStep.x, 0));
-        \\  light_value Right = ParentSample(FragUV + vec2(SourceUVStep.x, 0));
-        \\  light_value Up = ParentSample(FragUV + vec2(0, -SourceUVStep.y));
-        \\  light_value Down = ParentSample(FragUV + vec2(0, SourceUVStep.y));
+        \\  light_value Left = ParentSample(FragUV + vec2(-SourceUVStep.x, 0.0));
+        \\  light_value Right = ParentSample(FragUV + vec2(SourceUVStep.x, 0.0));
+        \\  light_value Up = ParentSample(FragUV + vec2(0.0, -SourceUVStep.y));
+        \\  light_value Down = ParentSample(FragUV + vec2(0.0, SourceUVStep.y));
         \\
         \\  vec3 RefC = texture(OurSurfaceColorTexture, FragUV).rgb;
         \\  vec3 OurNormalPosition = texture(OurNormalPositionTexture, FragUV).rgb;
