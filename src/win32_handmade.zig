@@ -313,38 +313,103 @@ pub const Game = struct {
 };
 
 const Win32PlatformFileGroup = extern struct {
-    find_handle: win32.FindFileHandle,
-    find_data: win32.WIN32_FIND_DATAW,
-};
-
-const Win32PlatformFileHandle = extern struct {
-    win32_handle: win32.HANDLE,
+    arena: MemoryArena,
 };
 
 fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shared.PlatformFileGroup {
-    var result = shared.PlatformFileGroup{};
-    var win32_file_group: *Win32PlatformFileGroup = undefined;
-
-    if (win32.VirtualAlloc(
+    var result: shared.PlatformFileGroup = .{};
+    var win32_file_group: *Win32PlatformFileGroup = memory.bootstrapPushStruct(
+        Win32PlatformFileGroup,
+        "arena",
         null,
-        @sizeOf(Win32PlatformFileGroup),
-        win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-        win32.PAGE_READWRITE,
-    )) |space| {
-        win32_file_group = @ptrCast(@alignCast(space));
-    }
+        null,
+    );
     result.platform = win32_file_group;
 
-    const wildcard: [:0]const u16 = switch (file_type) {
-        shared.PlatformFileTypes.AssetFile => win32.L("*.hha"),
-        shared.PlatformFileTypes.SaveGameFile => win32.L("*.hhs"),
-    };
+    var stem: [*:0]const u16 = win32.L("");
+    var wildcard: [:0]const u16 = win32.L("");
+    switch (file_type) {
+        shared.PlatformFileTypes.AssetFile => {
+            stem = win32.L("data\\");
+            wildcard = win32.L("data\\*.hha");
+        },
+        shared.PlatformFileTypes.SaveGameFile => {
+            stem = win32.L("data\\");
+            wildcard = win32.L("data\\*.hhs");
+        },
+        shared.PlatformFileTypes.PNG => {
+            stem = win32.L("art\\");
+            wildcard = win32.L("art\\*.png");
+        },
+        shared.PlatformFileTypes.WAV => {
+            stem = win32.L("sound\\");
+            wildcard = win32.L("sound\\*.wav");
+        },
+    }
+
+    var stem_size: usize = 0;
+    var scan_stem: [*:0]const u16 = stem;
+    while (scan_stem[0] != 0) : (scan_stem += 1) {
+        stem_size += 1;
+    }
 
     var find_data: win32.WIN32_FIND_DATAW = undefined;
     var find_handle = win32.FindFirstFileW(wildcard, &find_data);
 
     while (@as(*anyopaque, @ptrCast(&find_handle)) != win32.INVALID_HANDLE_VALUE) {
         result.file_count += 1;
+        var info: *shared.PlatformFileInfo = win32_file_group.arena.pushStruct(
+            shared.PlatformFileInfo,
+            .aligned(@alignOf(shared.PlatformFileInfo), false),
+        );
+        info.next = result.first_file_info;
+        info.file_date =
+            (@as(u64, @intCast(find_data.ftLastWriteTime.dwHighDateTime)) << @as(u64, 32)) |
+            @as(u64, @intCast(find_data.ftLastWriteTime.dwLowDateTime));
+        info.file_size =
+            (@as(u64, @intCast(find_data.nFileSizeHigh)) << @as(u64, 32)) | @as(u64, @intCast(find_data.nFileSizeLow));
+
+        const base_name_begin: [*:0]const u16 = @ptrCast(&find_data.cFileName);
+        var base_name_end: ?[*:0]const u16 = null;
+
+        var scan: [*:0]const u16 = base_name_begin;
+        while (scan[0] != 0) : (scan += 1) {
+            if (scan[0] == '.') {
+                base_name_end = scan;
+            }
+        }
+
+        if (base_name_end == null) {
+            base_name_end = scan;
+        }
+
+        const base_name_size: usize = base_name_end.? - base_name_begin;
+        const base_name_storage: usize = 4 * base_name_size + 1;
+        info.base_name = @ptrCast(win32_file_group.arena.pushSize(base_name_storage + 1, null));
+        const base_name_utf8_size: usize = @intCast(win32.WideCharToMultiByte(
+            win32.CP_UTF8,
+            0,
+            base_name_begin,
+            @intCast(base_name_size),
+            @ptrCast(info.base_name),
+            @intCast(base_name_storage),
+            null,
+            null,
+        ));
+        info.base_name[base_name_utf8_size] = 0;
+
+        const c_file_name_size: usize = (scan - &find_data.cFileName) + 1;
+        info.platform =
+            win32_file_group.arena.pushArray(stem_size + c_file_name_size, u16, .aligned(@alignOf(u16), false));
+        _ = memory.copyArray(stem_size, u16, @ptrCast(@constCast(stem)), info.platform);
+        _ = memory.copyArray(
+            c_file_name_size,
+            u16,
+            &find_data.cFileName,
+            @ptrFromInt(@intFromPtr(info.platform) + stem_size * @sizeOf(u16)),
+        );
+
+        result.first_file_info = info;
 
         if (win32.FindNextFileW(find_handle, &find_data) == 0) {
             break;
@@ -353,57 +418,50 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
 
     _ = win32.FindClose(find_handle);
 
-    win32_file_group.find_handle = win32.FindFirstFileW(wildcard, &win32_file_group.find_data);
-
     return result;
 }
 
 fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.c) void {
     const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
-
-    _ = win32.FindClose(win32_file_group.find_handle);
-    _ = win32.VirtualFree(win32_file_group, 0, win32.MEM_RELEASE);
+    win32_file_group.arena.clear();
 }
 
-fn openNextFile(file_group: *shared.PlatformFileGroup) callconv(.c) shared.PlatformFileHandle {
+fn openFile(
+    file_group: *shared.PlatformFileGroup,
+    file_info: *shared.PlatformFileInfo,
+) callconv(.c) shared.PlatformFileHandle {
+    _ = file_group;
+
     var result = shared.PlatformFileHandle{};
-    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
 
-    if (@as(*anyopaque, @ptrCast(&win32_file_group.find_handle)) != win32.INVALID_HANDLE_VALUE) {
-        const file_name = win32_file_group.find_data.cFileName;
+    std.debug.assert(@sizeOf(win32.HANDLE) <= @sizeOf(*anyopaque));
 
-        if (win32.VirtualAlloc(
-            null,
-            @sizeOf(Win32PlatformFileHandle),
-            win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-            win32.PAGE_READWRITE,
-        )) |space| {
-            const win32_handle: *Win32PlatformFileHandle = @ptrCast(@alignCast(space));
-            result.platform = win32_handle;
-            win32_handle.win32_handle = win32.CreateFileW(
-                @ptrCast(&file_name),
-                win32.FILE_GENERIC_READ,
-                win32.FILE_SHARE_READ,
-                null,
-                win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
-                win32.FILE_FLAGS_AND_ATTRIBUTES{},
-                null,
-            );
-            result.no_errors = (win32_handle.win32_handle != win32.INVALID_HANDLE_VALUE);
-
-            if (win32.FindNextFileW(win32_file_group.find_handle, &win32_file_group.find_data) == 0) {
-                _ = win32.FindClose(win32_file_group.find_handle);
-                win32_file_group.find_handle = -1;
-            }
-        }
-    }
+    const file_name: [*:0]const u16 = @ptrCast(@alignCast(file_info.platform));
+    const win32_handle: win32.HANDLE = win32.CreateFileW(
+        file_name,
+        win32.FILE_GENERIC_READ,
+        win32.FILE_SHARE_READ,
+        null,
+        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+        win32.FILE_FLAGS_AND_ATTRIBUTES{},
+        null,
+    );
+    result.no_errors = (win32_handle != win32.INVALID_HANDLE_VALUE);
+    result.platform = win32_handle;
 
     return result;
 }
 
+fn closeFile(file_handle: *shared.PlatformFileHandle) callconv(.c) void {
+    const win32_handle: win32.HANDLE = @ptrCast(file_handle.platform);
+    if (win32_handle != win32.INVALID_HANDLE_VALUE) {
+        _ = win32.CloseHandle(win32_handle);
+    }
+}
+
 fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void {
     if (shared.defaultNoFileErrors(source)) {
-        const handle: *Win32PlatformFileHandle = @ptrCast(@alignCast(source.platform));
+        const win32_handle: win32.HANDLE = @ptrCast(source.platform);
 
         var overlapped = win32.OVERLAPPED{
             .Internal = 0,
@@ -421,7 +479,7 @@ fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, 
 
         var bytes_read: u32 = undefined;
         const read_result = win32.ReadFile(
-            handle.win32_handle,
+            win32_handle,
             dest,
             file_size32,
             &bytes_read,
@@ -2427,7 +2485,8 @@ pub export fn wWinMain(
 
         .getAllFilesOfTypeBegin = getAllFilesOfTypeBegin,
         .getAllFilesOfTypeEnd = getAllFilesOfTypeEnd,
-        .openNextFile = openNextFile,
+        .openFile = openFile,
+        .closeFile = closeFile,
         .readDataFromFile = readDataFromFile,
         .fileError = fileError,
 

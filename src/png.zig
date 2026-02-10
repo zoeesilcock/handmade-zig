@@ -1,10 +1,12 @@
 const std = @import("std");
-const shared = @import("shared.zig");
+pub const shared = @import("shared.zig");
+pub const memory = @import("memory.zig");
 pub const stream = @import("stream.zig");
 
 // Types.
 const Stream = stream.Stream;
 const StreamChunk = stream.Chunk;
+const MemoryArena = memory.MemoryArena;
 
 const PNG_HUFFMAN_MAX_BIT_COUNT = 16;
 const Signature: [8]u8 = .{ 137, 80, 78, 71, 13, 10, 26, 10 };
@@ -175,23 +177,24 @@ fn fourcc(string: []const u8) u32 {
 }
 
 fn allocatePixels(
-    allocator: std.mem.Allocator,
+    arena: *MemoryArena,
     width: u32,
     height: u32,
     bytes_per_pixel: u32,
     opt_extra_bytes: ?u32,
 ) []u8 {
     const extra_bytes: u32 = opt_extra_bytes orelse 0;
-    return allocator.alloc(u8, width * height * bytes_per_pixel + (extra_bytes * height)) catch unreachable;
+    const size: u32 = width * height * bytes_per_pixel + (extra_bytes * height);
+    return arena.pushSize(size, null)[0..size];
 }
 
-fn allocateHuffman(allocator: std.mem.Allocator, max_code_length_in_bits: u32) Huffman {
+fn allocateHuffman(arena: *MemoryArena, max_code_length_in_bits: u32) Huffman {
     std.debug.assert(max_code_length_in_bits <= PNG_HUFFMAN_MAX_BIT_COUNT);
 
     var result: Huffman = .{};
     result.max_code_length_in_bits = max_code_length_in_bits;
     result.entry_count = (@as(u32, 1) << @as(u5, @intCast(max_code_length_in_bits)));
-    result.entries = allocator.alloc(HuffmanEntry, result.entry_count) catch unreachable;
+    result.entries = arena.pushArray(result.entry_count, HuffmanEntry, null)[0..result.entry_count];
     return result;
 }
 
@@ -391,7 +394,7 @@ fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_p
                 }
             },
             else => {
-                stream.output(errors, @src(), "Unrecognized row filter: {d}.", .{filter});
+                stream.output(errors, @src(), "Unrecognized row filter: %d.\n", .{filter});
             },
         }
 
@@ -401,7 +404,7 @@ fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_p
 }
 
 /// This is not meant to be fault tolerant. It only loads specifically what we expect, and is happy to crash otherwise.
-pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) ImageU32 {
+pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
     var at: Stream = file;
 
     var supported: bool = false;
@@ -413,7 +416,7 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
     if (at.consumeType(Header)) |header| {
         _ = header;
 
-        var compressed_data: Stream = .{};
+        var compressed_data: Stream = .onDemandMemoryStream(arena, file.errors);
 
         while (at.content_size > 0) {
             if (at.consumeType(ChunkHeader)) |chunk_header| {
@@ -425,19 +428,19 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
                     endianSwap(&chunk_footer.crc);
 
                     if (chunk_header.chunkTypeU32() == fourcc("IHDR")) {
-                        stream.output(info, @src(), "IHDR", .{});
+                        stream.output(info, @src(), "IHDR\n", .{});
 
                         const ihdr: *IHeader = @ptrCast(@alignCast(chunk_data));
                         endianSwap(&ihdr.width);
                         endianSwap(&ihdr.height);
 
-                        stream.output(info, @src(), "    width: {d}", .{ihdr.width});
-                        stream.output(info, @src(), "    height: {d}", .{ihdr.height});
-                        stream.output(info, @src(), "    bit_depth: {d}", .{ihdr.bit_depth});
-                        stream.output(info, @src(), "    color_type: {d}", .{ihdr.color_type});
-                        stream.output(info, @src(), "    compression_method: {d}", .{ihdr.compression_method});
-                        stream.output(info, @src(), "    filter_method: {d}", .{ihdr.filter_method});
-                        stream.output(info, @src(), "    interlace_method: {d}", .{ihdr.interlace_method});
+                        stream.output(info, @src(), "    width: %u\n", .{ihdr.width});
+                        stream.output(info, @src(), "    height: %u\n", .{ihdr.height});
+                        stream.output(info, @src(), "    bit_depth: %u\n", .{ihdr.bit_depth});
+                        stream.output(info, @src(), "    color_type: %u\n", .{ihdr.color_type});
+                        stream.output(info, @src(), "    compression_method: %u\n", .{ihdr.compression_method});
+                        stream.output(info, @src(), "    filter_method: %u\n", .{ihdr.filter_method});
+                        stream.output(info, @src(), "    interlace_method: %u\n", .{ihdr.interlace_method});
 
                         if (ihdr.bit_depth == 8 and
                             ihdr.color_type == 6 and
@@ -450,30 +453,19 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
                             supported = true;
                         }
                     } else if (chunk_header.chunkTypeU32() == fourcc("IDAT")) {
-                        stream.output(info, @src(), "IDAT {d}", .{chunk_header.length});
+                        stream.output(info, @src(), "IDAT (%u)\n", .{chunk_header.length});
 
-                        const chunk: *StreamChunk = .allocate(allocator);
-                        chunk.content_size = chunk_header.length;
-                        chunk.contents = @ptrCast(chunk_data.?[0..chunk_header.length]);
-                        chunk.next = null;
-
-                        // Casey's "ridiculous" version.
-                        // compressed_data.last =
-                        //     ((if (compressed_data.last != null) compressed_data.last.?.next else compressed_data.first) = chunk);
-
-                        if (compressed_data.last != null) {
-                            compressed_data.last.?.next = chunk;
-                        } else {
-                            compressed_data.first = chunk;
-                        }
-                        compressed_data.last = chunk;
+                        _ = compressed_data.appendChunk(
+                            chunk_header.length,
+                            @ptrCast(chunk_data.?[0..chunk_header.length]),
+                        );
                     }
                 }
             }
         }
 
         if (supported) {
-            stream.output(info, @src(), "Examining ZLIB headers...", .{});
+            stream.output(info, @src(), "Examining ZLIB headers...\n", .{});
 
             if (compressed_data.consumeType(IDataHeader)) |idat_header| {
                 const cm: u8 = idat_header.zlib_method_flags & 0xf;
@@ -482,19 +474,19 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
                 const fdict: u8 = (idat_header.additional_flags >> 5) & 0x1;
                 const flevel: u8 = idat_header.additional_flags >> 6;
 
-                stream.output(info, @src(), "    cm: {d}", .{cm});
-                stream.output(info, @src(), "    cinfo: {d}", .{cinfo});
-                stream.output(info, @src(), "    fcheck: {d}", .{fcheck});
-                stream.output(info, @src(), "    fdict: {d}", .{fdict});
-                stream.output(info, @src(), "    flevel: {d}", .{flevel});
+                stream.output(info, @src(), "    cm: %u\n", .{cm});
+                stream.output(info, @src(), "    cinfo: %u\n", .{cinfo});
+                stream.output(info, @src(), "    fcheck: %u\n", .{fcheck});
+                stream.output(info, @src(), "    fdict: %u\n", .{fdict});
+                stream.output(info, @src(), "    flevel: %u\n", .{flevel});
 
                 supported = (cm == 8 and fdict == 0);
 
                 if (supported) {
-                    stream.output(info, @src(), "Decompressing...", .{});
+                    stream.output(info, @src(), "Decompressing...\n", .{});
 
-                    final_pixels = allocatePixels(allocator, width, height, 4, null);
-                    const decompressed_pixels: []u8 = allocatePixels(allocator, width, height, 4, 1);
+                    final_pixels = allocatePixels(arena, width, height, 4, null);
+                    const decompressed_pixels: []u8 = allocatePixels(arena, width, height, 4, 1);
                     var decompressed_pixels_end: []u8 = decompressed_pixels;
                     decompressed_pixels_end.ptr += (height * ((width * 4) + 1));
                     var dest = decompressed_pixels;
@@ -511,7 +503,7 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
                             var len: u16 = @intCast(compressed_data.consumeBits(16));
                             const nlen: u16 = @intCast(compressed_data.consumeBits(16));
                             if (len != ~nlen) {
-                                stream.output(compressed_data.errors, @src(), "LEN/NLEN mismatch.", .{});
+                                stream.output(compressed_data.errors, @src(), "LEN/NLEN mismatch.\n", .{});
                             }
 
                             while (len > 0) {
@@ -534,11 +526,11 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
                                 len -= use_len;
                             }
                         } else if (btype == 3) {
-                            stream.output(compressed_data.errors, @src(), "BTYPE of {d} encountered.", .{btype});
+                            stream.output(compressed_data.errors, @src(), "BTYPE of %u encountered.\n", .{btype});
                         } else {
                             var literal_length_distance_table: [512]u32 = undefined;
-                            var literal_length_huffman: Huffman = allocateHuffman(allocator, 15);
-                            var distance_huffman: Huffman = allocateHuffman(allocator, 15);
+                            var literal_length_huffman: Huffman = allocateHuffman(arena, 15);
+                            var distance_huffman: Huffman = allocateHuffman(arena, 15);
                             var hlit: u32 = 0;
                             var hdist: u32 = 0;
 
@@ -561,7 +553,7 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
                                     hclen_table[hclen_swizzle[index]] = compressed_data.consumeBits(3);
                                 }
 
-                                var dictionary_huffman: Huffman = allocateHuffman(allocator, 7);
+                                var dictionary_huffman: Huffman = allocateHuffman(arena, 7);
                                 dictionary_huffman.compute(hclen_swizzle.len, &hclen_table, null);
 
                                 var literal_length_count: u32 = 0;
@@ -583,7 +575,7 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
                                     } else if (encoded_length == 18) {
                                         repeat_count = 11 + compressed_data.consumeBits(7);
                                     } else {
-                                        stream.output(compressed_data.errors, @src(), "Encoded length of {d} encountered.", .{encoded_length});
+                                        stream.output(compressed_data.errors, @src(), "Encoded length of %u encountered.\n", .{encoded_length});
                                     }
 
                                     while (repeat_count > 0) : (repeat_count -= 1) {
@@ -614,7 +606,7 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
                                     }
                                 }
                             } else {
-                                stream.output(compressed_data.errors, @src(), "BTYPE of {d} encountered.", .{btype});
+                                stream.output(compressed_data.errors, @src(), "BTYPE of %u encountered.\n", .{btype});
                             }
 
                             literal_length_huffman.compute(hlit, &literal_length_distance_table, null);
@@ -669,7 +661,7 @@ pub fn parsePNG(file: Stream, info: ?*Stream, allocator: std.mem.Allocator) Imag
         }
     }
 
-    stream.output(info, @src(), "Supported: {s}", .{if (supported) "true" else "false"});
+    stream.output(info, @src(), "Supported: %s\n", .{if (supported) "true" else "false"});
 
     const result: ImageU32 = .{
         .width = width,

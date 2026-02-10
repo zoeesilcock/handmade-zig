@@ -113,7 +113,7 @@ fn addExecutable(
     // Allow running main executable from build command.
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the application");
-    run_exe.setCwd(b.path("data/"));
+    run_exe.setCwd(b.path("."));
     run_step.dependOn(&run_exe.step);
 }
 
@@ -311,13 +311,14 @@ fn addTestPNG(
         .target = target,
         .optimize = optimize,
     });
+    png_module.addOptions("build_options", build_options);
     const test_png_exe = b.addExecutable(.{
         .name = "test-png",
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/test_png.zig"),
             .target = target,
             .optimize = optimize,
-            .link_libc = false,
+            .link_libc = true,
         }),
     });
     test_png_exe.stack_size = 0x400000; // 4MB.

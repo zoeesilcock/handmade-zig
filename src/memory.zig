@@ -282,6 +282,10 @@ pub fn copy(size: MemoryIndex, source_init: *anyopaque, dest_init: *anyopaque) *
     return dest_init;
 }
 
+pub fn copyArray(count: MemoryIndex, comptime T: type, source: *anyopaque, dest: *anyopaque) [*]T {
+    return @ptrCast(@alignCast(copy(count * @sizeOf(T), source, dest)));
+}
+
 pub fn bootstrapPushStruct(
     comptime T: type,
     comptime arena_member: []const u8,

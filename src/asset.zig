@@ -32,6 +32,7 @@ const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const PlatformFileHandle = shared.PlatformFileHandle;
+const PlatformFileInfo = shared.PlatformFileInfo;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
 
@@ -191,10 +192,13 @@ pub const Assets = struct {
             assets.files = arena.pushArray(assets.file_count, AssetFile, null);
 
             var file_index: u32 = 0;
-            while (file_index < assets.file_count) : (file_index += 1) {
+            var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
+            while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
+                std.debug.assert(file_index < file_group.file_count);
                 const file: [*]AssetFile = assets.files + file_index;
+                defer file_index += 1;
 
-                const file_handle = shared.platform.openNextFile(&file_group);
+                const file_handle = shared.platform.openFile(&file_group, file_info);
                 file[0].font_bitmap_id_offset = 0;
                 file[0].tag_base = assets.tag_count;
                 file[0].asset_base = assets.asset_count;

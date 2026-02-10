@@ -577,8 +577,13 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                         if (fields_info.len > arg_index) {
                             var value: [*]const u8 = "";
                             inline for (fields_info, 0..) |field, i| {
-                                if (i == arg_index and field.type == [*:0]const u8) {
-                                    value = @field(args, field.name);
+                                if (i == arg_index) {
+                                    if (field.type == [*:0]const u8) {
+                                        value = @field(args, field.name);
+                                    } else if (field.type == [:0]const u8) {
+                                        value = @field(args, field.name).ptr;
+                                    }
+
                                     temp = @constCast(value);
 
                                     if (precision_specified) {
@@ -750,14 +755,25 @@ pub const PlatformFileHandle = extern struct {
     }
 };
 
+pub const PlatformFileInfo = extern struct {
+    next: ?*PlatformFileInfo,
+    file_date: u64,
+    file_size: u64,
+    base_name: [*:0]u8,
+    platform: *anyopaque = undefined,
+};
+
 pub const PlatformFileGroup = extern struct {
     file_count: u32 = 0,
+    first_file_info: *PlatformFileInfo = undefined,
     platform: *anyopaque = undefined,
 };
 
 pub const PlatformFileTypes = enum(u32) {
     AssetFile,
     SaveGameFile,
+    PNG,
+    WAV,
 };
 
 pub const PlatformMemoryBlockFlags = enum(u64) {
@@ -795,7 +811,8 @@ const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(
 
 const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.c) PlatformFileGroup;
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.c) void;
-const openNextFileType: type = fn (file_group: *PlatformFileGroup) callconv(.c) PlatformFileHandle;
+const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFileInfo) callconv(.c) PlatformFileHandle;
+const closeFileType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) void;
 const readDataFromFileType: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
 const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) bool;
 const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.c) void;
@@ -820,7 +837,8 @@ pub const Platform = if (INTERNAL) extern struct {
 
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
-    openNextFile: *const openNextFileType = undefined,
+    openFile: *const openFileType = undefined,
+    closeFile: *const closeFileType = undefined,
     readDataFromFile: *const readDataFromFileType = undefined,
     noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
     fileError: *const fileErrorType = undefined,
@@ -840,7 +858,8 @@ pub const Platform = if (INTERNAL) extern struct {
 
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
-    openNextFile: *const openNextFileType = undefined,
+    openFile: *const openFileType = undefined,
+    closeFile: *const closeFileType = undefined,
     readDataFromFile: *const readDataFromFileType = undefined,
     noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
     fileError: *const fileErrorType = undefined,

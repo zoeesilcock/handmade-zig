@@ -1,11 +1,19 @@
 const std = @import("std");
 const png = @import("png");
+const shared = png.shared;
 const stream = png.stream;
+const memory = png.memory;
+const c = @cImport({
+    @cInclude("stdlib.h");
+    @cInclude("string.h");
+});
 
 // Types.
 const Stream = stream.Stream;
 const StreamChunk = stream.Chunk;
 const ImageU32 = png.ImageU32;
+const MemoryArena = memory.MemoryArena;
+const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 
 const BitmapHeader = packed struct {
     file_type: u16,
@@ -175,7 +183,7 @@ fn writeBMPImageTopDownRGBA(
 
         try writer.flush();
     } else |err| {
-        stream.output(errors, @src(), "Unable to write output file '{s}': {s}", .{ output_file_name, @errorName(err) });
+        stream.output(errors, @src(), "Unable to write output file '%s': %s\n", .{ output_file_name, @errorName(err) });
     }
 }
 
@@ -184,16 +192,43 @@ fn dumpStreamToWriter(source: *Stream, dest: *std.Io.Writer) !void {
     while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
         try dest.print("{s} ({d}): ", .{ chunk.file_name, chunk.line });
         try dest.writeAll(chunk.contents);
+        try dest.flush();
+    }
+}
+
+fn crtAllocateMemory(size: memory.MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBlock {
+    _ = flags;
+
+    const total_size: usize = @sizeOf(PlatformMemoryBlock) + size;
+    var block: [*]PlatformMemoryBlock = @ptrCast(@alignCast(c.malloc(total_size)));
+    _ = c.memset(block, 0, total_size);
+
+    block[0].size = size;
+    block[0].base = @ptrCast(block + 1);
+
+    return @ptrCast(block);
+}
+
+fn crtDeallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.c) void {
+    if (opt_platform_block) |block| {
+        c.free(block);
     }
 }
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena.allocator();
-    defer arena.deinit();
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena_allocator.allocator();
+    defer arena_allocator.deinit();
 
-    var info_stream: Stream = .onDemandMemoryStream(allocator);
-    var error_stream: Stream = .onDemandMemoryStream(allocator);
+    shared.platform = shared.Platform{
+        .allocateMemory = crtAllocateMemory,
+        .deallocateMemory = crtDeallocateMemory,
+    };
+
+    var arena: MemoryArena = .{};
+
+    var error_stream: Stream = .onDemandMemoryStream(&arena, null);
+    var info_stream: Stream = .onDemandMemoryStream(&arena, &error_stream);
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
@@ -203,11 +238,11 @@ pub fn main() !void {
         const out_file_name_rgb: [:0]const u8 = args[2];
         const out_file_name_alpha: [:0]const u8 = args[3];
 
-        stream.output(&info_stream, @src(), "Loading PNG {s}...", .{in_file_name});
+        stream.output(&info_stream, @src(), "Loading PNG %s...\n", .{in_file_name});
         const file: Stream = try readEntireFile(in_file_name, allocator, &error_stream);
-        const image: ImageU32 = png.parsePNG(file, &info_stream, allocator);
+        const image: ImageU32 = png.parsePNG(&arena, file, &info_stream);
 
-        stream.output(&info_stream, @src(), "Writing BMP {s}...", .{out_file_name_rgb});
+        stream.output(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_rgb});
         try writeBMPImageTopDownRGBA(
             image.width,
             image.height,
@@ -216,6 +251,7 @@ pub fn main() !void {
             @intFromEnum(PixelOp.SwapRedAndBlue), // | @intFromEnum(PixelOp.MultiplyAlpha),
             &error_stream,
         );
+        stream.output(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_alpha});
         try writeBMPImageTopDownRGBA(
             image.width,
             image.height,
@@ -228,7 +264,7 @@ pub fn main() !void {
         stream.output(
             &error_stream,
             @src(),
-            "Usage: {s} (png file to load) (bmp file to write RGB to) (bmp file to write alpha to)",
+            "Usage: %s (png file to load) (bmp file to write RGB to) (bmp file to write alpha to)\n",
             .{args[0]},
         );
     }
@@ -239,9 +275,11 @@ pub fn main() !void {
     var stdout_writer = stdout.interface;
     try stdout_writer.writeAll("Info:\n");
     try dumpStreamToWriter(&info_stream, &stdout_writer);
+    try stdout_writer.flush();
 
     try stdout_writer.writeAll("Errors:\n");
     const stderr = std.fs.File.stderr().writer(&buf);
     var stderr_writer = stderr.interface;
     try dumpStreamToWriter(&error_stream, &stderr_writer);
+    try stderr_writer.flush();
 }

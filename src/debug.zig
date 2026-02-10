@@ -1064,6 +1064,9 @@ fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *D
                     @as([*:0]const u8, @ptrCast(if (event.data.bool) "true" else "false")),
                 });
             },
+            .u8 => {
+                at += shared.formatString(end - at, at, "%u", .{event.data.u8});
+            },
             .u16 => {
                 at += shared.formatString(end - at, at, "%u", .{event.data.u16});
             },

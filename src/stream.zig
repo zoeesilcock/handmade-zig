@@ -1,23 +1,25 @@
 const std = @import("std");
+const memory = @import("memory.zig");
+const shared = @import("shared.zig");
+
+// Types.
+const MemoryArena = memory.MemoryArena;
 
 pub const Chunk = struct {
     file_name: [:0]const u8,
     line: u32,
 
-    content_size: u32 = 0,
+    content_size: usize = 0,
     contents: [:0]align(1) u8 = undefined,
 
     next: ?*Chunk = null,
-
-    pub fn allocate(allocator: std.mem.Allocator) *Chunk {
-        return @ptrCast(@alignCast(allocator.alloc(Chunk, 1) catch unreachable));
-    }
 };
 
 pub const Stream = struct {
+    arena: ?*MemoryArena = null,
     errors: ?*Stream = null,
 
-    content_size: u32 = 0,
+    content_size: usize = 0,
     contents: [:0]align(1) u8 = undefined,
 
     bit_count: u32 = 0,
@@ -27,9 +29,11 @@ pub const Stream = struct {
     first: ?*Chunk = null,
     last: ?*Chunk = null,
 
-    pub fn onDemandMemoryStream(allocator: std.mem.Allocator) Stream {
-        _ = allocator;
-        return .{};
+    pub fn onDemandMemoryStream(arena: ?*MemoryArena, errors: ?*Stream) Stream {
+        return .{
+            .arena = arena,
+            .errors = errors,
+        };
     }
 
     pub fn consumeType(self: *Stream, T: type) ?*T {
@@ -69,6 +73,7 @@ pub const Stream = struct {
     }
 
     pub fn refillIfNecessary(self: *Stream) void {
+        // TODO: Use a free list to recycle chunks?
         if (self.content_size == 0 and self.first != null) {
             const this: *Chunk = self.first.?;
             self.content_size = this.content_size;
@@ -77,7 +82,7 @@ pub const Stream = struct {
         }
     }
 
-    pub fn consumeSize(self: *Stream, size: u32) ?[*]u8 {
+    pub fn consumeSize(self: *Stream, size: usize) ?[*]u8 {
         var result: ?[*]u8 = null;
 
         self.refillIfNecessary();
@@ -96,16 +101,41 @@ pub const Stream = struct {
 
         return result;
     }
+
+    pub fn appendChunk(self: *Stream, size: usize, contents: [:0]align(1) u8) *Chunk {
+        const chunk: *Chunk = self.arena.?.pushStruct(Chunk, .aligned(@alignOf(Chunk), false));
+        chunk.content_size = size;
+        chunk.contents = contents;
+        chunk.contents.len = size;
+        chunk.next = null;
+
+        // Casey's "ridiculous" version.
+        // self.last = ((if (self.last != null) self.last.?.next else self.first) = chunk);
+
+        if (self.last != null) {
+            self.last.?.next = chunk;
+        } else {
+            self.first = chunk;
+        }
+        self.last = chunk;
+
+        return chunk;
+    }
 };
 
 pub fn output(
-    self: ?*Stream,
+    output_stream: ?*Stream,
     comptime source: std.builtin.SourceLocation,
     comptime format: []const u8,
     args: anytype,
 ) void {
-    _ = self;
-    _ = source;
-    _ = format;
-    _ = args;
+    if (output_stream) |stream| {
+        var buffer: [1024]u8 = undefined;
+        const size: usize = shared.formatString(buffer.len, @ptrCast(&buffer), @ptrCast(format), args);
+
+        const contents = stream.arena.?.pushCopy(size, &buffer);
+        var chunk = stream.appendChunk(size, @ptrCast(contents));
+        chunk.line = source.line;
+        chunk.file_name = source.file;
+    }
 }
