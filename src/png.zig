@@ -418,7 +418,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
 
         var compressed_data: Stream = .onDemandMemoryStream(arena, file.errors);
 
-        while (at.content_size > 0) {
+        while (at.contents.count > 0) {
             if (at.consumeType(ChunkHeader)) |chunk_header| {
                 endianSwap(&chunk_header.length);
 
@@ -510,8 +510,8 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                                 compressed_data.refillIfNecessary();
 
                                 var use_len: u16 = len;
-                                if (use_len > compressed_data.content_size) {
-                                    use_len = @intCast(compressed_data.content_size);
+                                if (use_len > compressed_data.contents.count) {
+                                    use_len = @intCast(compressed_data.contents.count);
                                 }
 
                                 var source: ?[*]u8 = compressed_data.consumeSize(use_len);

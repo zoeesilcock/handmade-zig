@@ -57,6 +57,27 @@ pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
 pub const SLOW = @import("build_options").slow;
 
+pub const String = Buffer;
+pub const Buffer = struct {
+    count: usize = 0,
+    data: [*]u8 = undefined,
+
+    pub fn advance(self: *Buffer, count: usize) ?[*]u8 {
+        var result: ?[*]u8 = null;
+
+        if (self.count >= count) {
+            result = self.data;
+            self.data += count;
+            self.count -= count;
+        } else {
+            self.data += self.count;
+            self.count = 0;
+        }
+
+        return result;
+    }
+};
+
 // Helper functions.
 pub fn notImplemented() void {
     if (INTERNAL) {
@@ -235,6 +256,20 @@ pub inline fn stringsWithOneLengthAreEqual(a: [*]const u8, a_length: MemoryIndex
     }
 
     return result;
+}
+
+pub fn toLowercase(character: u8) u8 {
+    var result: u8 = character;
+
+    if (result >= 'A' and result <= 'Z') {
+        result += 'a' - 'A';
+    }
+
+    return result;
+}
+
+pub fn updateStringHash(hash_value: *u32, value: u8) void {
+    hash_value.* %= 65599 * hash_value.* + value;
 }
 
 pub fn isEndOfLine(char: u32) bool {

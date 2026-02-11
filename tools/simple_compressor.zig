@@ -412,7 +412,13 @@ fn readEntireFileIntoMemory(file_name: []const u8, allocator: std.mem.Allocator)
         result.file_size = try file.getPos();
         _ = try file.seekTo(0);
 
-        const buffer = try file.readToEndAllocOptions(allocator, std.math.maxInt(u32), null, @alignOf(u32), 0);
+        const buffer = try file.readToEndAllocOptions(
+            allocator,
+            std.math.maxInt(u32),
+            null,
+            .fromByteUnits(@alignOf(u32)),
+            0,
+        );
         result.contents = buffer;
     } else |err| {
         std.log.err("Cannot open input file '{s}': {s}", .{ file_name, @errorName(err) });

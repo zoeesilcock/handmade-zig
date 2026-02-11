@@ -9,8 +9,7 @@ pub const Chunk = struct {
     file_name: [:0]const u8,
     line: u32,
 
-    content_size: usize = 0,
-    contents: [:0]align(1) u8 = undefined,
+    contents: shared.Buffer = .{},
 
     next: ?*Chunk = null,
 };
@@ -19,8 +18,7 @@ pub const Stream = struct {
     arena: ?*MemoryArena = null,
     errors: ?*Stream = null,
 
-    content_size: usize = 0,
-    contents: [:0]align(1) u8 = undefined,
+    contents: shared.Buffer = .{},
 
     bit_count: u32 = 0,
     bit_buf: u32 = 0,
@@ -74,26 +72,19 @@ pub const Stream = struct {
 
     pub fn refillIfNecessary(self: *Stream) void {
         // TODO: Use a free list to recycle chunks?
-        if (self.content_size == 0 and self.first != null) {
+        if (self.contents.count == 0 and self.first != null) {
             const this: *Chunk = self.first.?;
-            self.content_size = this.content_size;
             self.contents = this.contents;
             self.first = this.next;
         }
     }
 
     pub fn consumeSize(self: *Stream, size: usize) ?[*]u8 {
-        var result: ?[*]u8 = null;
-
         self.refillIfNecessary();
 
-        if (self.content_size >= size) {
-            result = self.contents.ptr;
-            self.contents.ptr += size;
-            self.content_size -= size;
-        } else {
+        const result: ?[*]u8 = self.contents.advance(size);
+        if (result == null) {
             output(self.errors, @src(), "File underflow", .{});
-            self.content_size = 0;
             self.underflowed = true;
         }
 
@@ -104,9 +95,8 @@ pub const Stream = struct {
 
     pub fn appendChunk(self: *Stream, size: usize, contents: [:0]align(1) u8) *Chunk {
         const chunk: *Chunk = self.arena.?.pushStruct(Chunk, .aligned(@alignOf(Chunk), false));
-        chunk.content_size = size;
-        chunk.contents = contents;
-        chunk.contents.len = size;
+        chunk.contents.count = size;
+        chunk.contents.data = @ptrCast(contents);
         chunk.next = null;
 
         // Casey's "ridiculous" version.

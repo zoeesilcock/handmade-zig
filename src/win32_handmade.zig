@@ -398,6 +398,12 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
         ));
         info.base_name[base_name_utf8_size] = 0;
 
+        // This will not be technically correct if you use Unicode file names.
+        var lower: [*:0]u8 = info.base_name;
+        while (lower[0] != 0) : (lower += 1) {
+            lower[0] = shared.toLowercase(lower[0]);
+        }
+
         const c_file_name_size: usize = (scan - &find_data.cFileName) + 1;
         info.platform =
             win32_file_group.arena.pushArray(stem_size + c_file_name_size, u16, .aligned(@alignOf(u16), false));

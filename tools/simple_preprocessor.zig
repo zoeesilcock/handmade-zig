@@ -118,7 +118,7 @@ const Tokenizer = struct {
                 // else if (isNumber(c)) {
                 //     parseNumber();
                 // }
-            }
+            },
         }
 
         return token;
@@ -194,8 +194,7 @@ const Tokenizer = struct {
 
     pub fn parseStruct(self: *Tokenizer, name_token: Token) void {
         if (self.requireToken(.OpenBrace)) {
-
-            std.debug.print("pub const {s}Members = [_]MemberDefinition{{\n", .{ name_token.text[0..name_token.text_length] });
+            std.debug.print("pub const {s}Members = [_]MemberDefinition{{\n", .{name_token.text[0..name_token.text_length]});
             while (true) {
                 const member_token: Token = self.getToken();
 
@@ -225,7 +224,7 @@ const Tokenizer = struct {
             while (parsing) {
                 var token: Token = self.getToken();
 
-                switch(token.token_type) {
+                switch (token.token_type) {
                     .Asterisk => {
                         is_pointer = true;
                         // opt_previous_token = token;
@@ -236,7 +235,8 @@ const Tokenizer = struct {
                             if (opt_previous_token) |previous_token| {
                                 if (previous_token.token_type == .Asterisk or
                                     previous_token.token_type == .Colon or
-                                    previous_token.token_type == .Period) {
+                                    previous_token.token_type == .Period)
+                                {
                                     opt_member_type_token = token;
                                 }
                             }
@@ -274,7 +274,7 @@ const Tokenizer = struct {
         } else {
             var is_pointer: bool = false;
             const token: Token = self.getToken();
-            switch(token.token_type) {
+            switch (token.token_type) {
                 .Asterisk => {
                     is_pointer = true;
                     self.parseMember(token);
@@ -282,7 +282,7 @@ const Tokenizer = struct {
                 else => {},
             }
 
-            std.debug.print("shared.debugValue({s});\n", .{ member_name_token.text[0..member_name_token.text_length] });
+            std.debug.print("shared.debugValue({s});\n", .{member_name_token.text[0..member_name_token.text_length]});
             self.eatAllUntil(',');
         }
     }
@@ -326,17 +326,17 @@ pub fn main() anyerror!void {
                 },
                 else => {
                     // std.debug.print("{d}: {s}\n", .{ @intFromEnum(token.token_type), token.text[0..token.text_length] });
-                }
+                },
             }
         }
     }
 
-    std.debug.print("pub fn dumpKnownStruct(member_ptr: *anyopaque, member: *const MemberDefinition, next_indent_level: u32) void {{\n", .{ });
+    std.debug.print("pub fn dumpKnownStruct(member_ptr: *anyopaque, member: *const MemberDefinition, next_indent_level: u32) void {{\n", .{});
     std.debug.print("    var buffer: [128]u8 = undefined;\n", .{});
     std.debug.print("    switch(member.field_type) {{\n", .{});
     var opt_meta: ?*MetaStruct = first_meta_struct;
     while (opt_meta) |meta| : (opt_meta = meta.next) {
-        std.debug.print("        .{s} => {{\n", .{ meta.name });
+        std.debug.print("        .{s} => {{\n", .{meta.name});
         std.debug.print("            debug.textLine(std.fmt.bufPrintZ(&buffer, \"{{s}}\", .{{ member.field_name }}) catch \"unknown\");\n", .{});
         std.debug.print("            debug.debugDumpStruct(member_ptr, @ptrCast(&{s}Members), {s}Members.len, next_indent_level);\n", .{ meta.name, meta.name });
         std.debug.print("        }},\n", .{});
@@ -361,7 +361,13 @@ fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFil
         result.content_size = @as(u32, @intCast(file.getPos() catch 0));
         _ = file.seekTo(0) catch undefined;
 
-        const buffer = file.readToEndAllocOptions(allocator, std.math.maxInt(u32), null, @alignOf(u32), 0) catch "";
+        const buffer = file.readToEndAllocOptions(
+            allocator,
+            std.math.maxInt(u32),
+            null,
+            .fromByteUnits(@alignOf(u32)),
+            0,
+        ) catch "";
         result.contents = buffer;
     } else |err| {
         std.debug.print("Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
@@ -369,4 +375,3 @@ fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFil
 
     return result;
 }
-

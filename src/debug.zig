@@ -510,7 +510,7 @@ pub const DebugState = struct {
                 pipe_count += 1;
             }
 
-            result.hash_value %= 65599 * result.hash_value + scan[0];
+            shared.updateStringHash(&result.hash_value, scan[0]);
         }
         if (false) {
             result.name_length = @intCast((@intFromPtr(scan) - @intFromPtr(guid)) - result.name_starts_at);

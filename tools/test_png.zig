@@ -43,11 +43,11 @@ fn readEntireFile(file_name: [:0]const u8, allocator: std.mem.Allocator, errors:
         defer file.close();
 
         _ = try file.seekFromEnd(0);
-        result.content_size = @as(u32, @intCast(file.getPos() catch 0));
+        result.contents.count = @as(u32, @intCast(file.getPos() catch 0));
         _ = try file.seekTo(0);
 
         const buffer = try file.readToEndAllocOptions(allocator, std.math.maxInt(u32), null, .@"32", 0);
-        result.contents = buffer;
+        result.contents.data = @ptrCast(buffer);
     } else |err| {
         stream.output(result.errors, @src(), "Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
     }
@@ -59,6 +59,7 @@ const PixelOp = enum(u32) {
     SwapRedAndBlue = 0x1,
     ReplaceAlpha = 0x2,
     MultiplyAlpha = 0x4,
+    Invert = 0x8,
 };
 
 fn swapRedAndBlue(color: u32) u32 {
@@ -113,6 +114,7 @@ fn writeBMPImageTopDownRGBA(
     const replace_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.ReplaceAlpha)) != 0;
     const swap_red_and_blue: bool = (pixel_ops & @intFromEnum(PixelOp.SwapRedAndBlue)) != 0;
     const multiply_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.MultiplyAlpha)) != 0;
+    const invert: bool = (pixel_ops & @intFromEnum(PixelOp.Invert)) != 0;
 
     const header_size: u32 = @sizeOf(BitmapHeader) - 10;
     const header: BitmapHeader = .{
@@ -161,8 +163,13 @@ fn writeBMPImageTopDownRGBA(
                 color1 = multiplyAlpha(color1);
             }
 
-            pixel0[0] = color1;
-            pixel1[0] = color0;
+            if (invert) {
+                pixel0[0] = color1;
+                pixel1[0] = color0;
+            } else {
+                pixel0[0] = color0;
+                pixel1[0] = color1;
+            }
             pixel0 += 1;
             pixel1 += 1;
         }
@@ -191,7 +198,7 @@ fn dumpStreamToWriter(source: *Stream, dest: *std.Io.Writer) !void {
     var opt_chunk: ?*StreamChunk = source.first;
     while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
         try dest.print("{s} ({d}): ", .{ chunk.file_name, chunk.line });
-        try dest.writeAll(chunk.contents);
+        try dest.writeAll(chunk.contents.data[0..chunk.contents.count]);
         try dest.flush();
     }
 }
@@ -248,7 +255,7 @@ pub fn main() !void {
             image.height,
             image.pixels,
             out_file_name_rgb,
-            @intFromEnum(PixelOp.SwapRedAndBlue), // | @intFromEnum(PixelOp.MultiplyAlpha),
+            @intFromEnum(PixelOp.SwapRedAndBlue) | @intFromEnum(PixelOp.Invert), // | @intFromEnum(PixelOp.MultiplyAlpha),
             &error_stream,
         );
         stream.output(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_alpha});

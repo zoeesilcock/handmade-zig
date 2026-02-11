@@ -3,6 +3,7 @@ const memory = @import("memory.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
 const render = @import("render.zig");
+const png = @import("png.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
 const file_formats = @import("file_formats");
@@ -15,7 +16,10 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Color = math.Color;
 const TransientState = shared.TransientState;
+const String = shared.String;
+const Buffer = shared.Buffer;
 const MemoryArena = memory.MemoryArena;
+const TemporaryMemory = memory.TemporaryMemory;
 const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
 const ArenaBootstrapParams = memory.ArenaBootstrapParams;
@@ -33,6 +37,7 @@ const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const PlatformFileHandle = shared.PlatformFileHandle;
 const PlatformFileInfo = shared.PlatformFileInfo;
+const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
 
@@ -46,6 +51,7 @@ const Asset = struct {
 
     hha: HHAAsset,
     file_index: u32,
+    asset_index_in_file: u32,
 };
 
 const AssetHeaderType = enum(u32) {
@@ -55,6 +61,8 @@ const AssetHeaderType = enum(u32) {
     Font,
 };
 
+// TODO. At some point we should move to fixed size blocks, perhaps one for cutscene plates and one for in-game
+// artworks, like a 256x256, 1024x1024, and 2048x1024 grouping.
 const AssetMemoryHeader = extern struct {
     next: ?*AssetMemoryHeader,
     previous: ?*AssetMemoryHeader,
@@ -119,6 +127,14 @@ const AssetMemoryBlock = extern struct {
     size: MemoryIndex,
 };
 
+const SourceFile = struct {
+    next_in_hash: ?*SourceFile,
+    base_name: [*:0]u8,
+    file_date: u64,
+
+    asset_indices: [8][8]u32 = [1][8]u32{[1]u32{0} ** 8} ** 8, // Note: [Y][X], asset index in the Assets.assets array.
+};
+
 pub const Assets = struct {
     non_restored_memory: MemoryArena,
     texture_op_queue: *shared.PlatformTextureOpQueue,
@@ -141,6 +157,8 @@ pub const Assets = struct {
     assets: [*]Asset,
 
     asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
+
+    source_file_hash: [256]?*SourceFile = [1]?*SourceFile{null} ** 256,
 
     pub fn allocate(
         memory_size: MemoryIndex,
@@ -1228,4 +1246,96 @@ fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callcon
     doLoadAssetWorkDirectly(work);
 
     handmade.endTaskWithMemory(work.task);
+}
+
+fn updateAssetPackageFromPNG(
+    assets: *Assets,
+    file: *SourceFile,
+    contents: Buffer,
+    temp_arena: *MemoryArena,
+) bool {
+    _ = assets;
+    _ = file;
+    _ = contents;
+    _ = temp_arena;
+
+    // TODO: Not implemented yet.
+    // png.parsePNG(temp_arena, file_stream, info);
+
+    return false;
+}
+
+pub fn checkForArtChanges(assets: *Assets) void {
+    var file_group = shared.platform.getAllFilesOfTypeBegin(.AssetFile);
+    defer shared.platform.getAllFilesOfTypeEnd(&file_group);
+
+    var made_changes: bool = false;
+    var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
+    while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
+        var piece_count: u32 = 0;
+        var pieces: [3]String = undefined;
+
+        var anchor: [*]u8 = file_info.base_name;
+        var hash_value: u32 = 0;
+        var scan: [*]u8 = file_info.base_name;
+        while (true) : (scan += 1) {
+            if (scan[0] == '_' or scan[0] == 0) {
+                if (piece_count < pieces.len) {
+                    var string: *Buffer = &pieces[piece_count];
+                    piece_count += 1;
+                    string.count = scan - anchor;
+                    string.data = anchor;
+                }
+
+                anchor = scan + 1;
+            }
+
+            if (scan[0] == 0) {
+                break;
+            }
+
+            shared.updateStringHash(&hash_value, scan[0]);
+        }
+
+        var match: ?*SourceFile = null;
+        var opt_source_file: ?*SourceFile = assets.source_file_hash[hash_value];
+        while (opt_source_file) |source_file| : (opt_source_file = source_file.next_in_hash) {
+            if (shared.stringsAreEqual(source_file.base_name, file_info.base_name)) {
+                match = source_file;
+                break;
+            }
+        }
+
+        if (match == null) {
+            match = assets.non_restored_memory.pushStruct(SourceFile, null);
+            match.?.base_name = @constCast(assets.non_restored_memory.pushString(file_info.base_name));
+            match.?.next_in_hash = assets.source_file_hash[hash_value];
+            assets.source_file_hash[hash_value] = match;
+        }
+
+        std.debug.assert(match != null);
+
+        if (match.?.file_date != file_info.file_date) {
+            const temp_memory: TemporaryMemory = assets.non_restored_memory.beginTemporaryMemory();
+            defer temp_memory.arena.clear();
+            defer assets.non_restored_memory.endTemporaryMemory(temp_memory);
+
+            var handle: PlatformFileHandle = shared.platform.openFile(&file_group, @constCast(file_info));
+            var file_buffer: Buffer = .{
+                .count = file_info.file_size,
+            };
+
+            file_buffer.data = temp_memory.arena.pushSize(file_buffer.count, null);
+
+            shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
+            shared.platform.closeFile(&handle);
+
+            match.?.file_date = file_info.file_date;
+            made_changes = updateAssetPackageFromPNG(assets, match.?, file_buffer, temp_memory.arena);
+        }
+    }
+
+    if (made_changes) {
+        // TODO: Update asset information file here.
+    }
 }
