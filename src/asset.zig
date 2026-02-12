@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
+const stream = @import("stream.zig");
 const render = @import("render.zig");
 const png = @import("png.zig");
 const handmade = @import("handmade.zig");
@@ -18,6 +19,7 @@ const Color = math.Color;
 const TransientState = shared.TransientState;
 const String = shared.String;
 const Buffer = shared.Buffer;
+const Stream = stream.Stream;
 const MemoryArena = memory.MemoryArena;
 const TemporaryMemory = memory.TemporaryMemory;
 const MemoryIndex = memory.MemoryIndex;
@@ -62,7 +64,7 @@ const AssetHeaderType = enum(u32) {
 };
 
 // TODO. At some point we should move to fixed size blocks, perhaps one for cutscene plates and one for in-game
-// artworks, like a 256x256, 1024x1024, and 2048x1024 grouping.
+// artworks, like a 64x64, 1024x1024, and 2048x1024 grouping.
 const AssetMemoryHeader = extern struct {
     next: ?*AssetMemoryHeader,
     previous: ?*AssetMemoryHeader,
@@ -133,6 +135,8 @@ const SourceFile = struct {
     file_date: u64,
 
     asset_indices: [8][8]u32 = [1][8]u32{[1]u32{0} ** 8} ** 8, // Note: [Y][X], asset index in the Assets.assets array.
+
+    errors: Stream,
 };
 
 pub const Assets = struct {
@@ -1078,6 +1082,30 @@ pub const Assets = struct {
 
         return result;
     }
+
+    pub fn reserveAsset(self: *Assets) u32 {
+        _ = self;
+        return 0;
+    }
+
+    pub fn reserveData(self: *Assets, asset_file: *AssetFile, data_size: u32) u64 {
+        _ = self;
+        _ = asset_file;
+        _ = data_size;
+        return 0;
+    }
+
+    fn writeAsset(self: *Assets, asset_index: u32) void {
+        _ = self;
+        _ = asset_index;
+    }
+
+    fn writeAssetData(asset_file: *AssetFile, data_offset: u64, data_size: u32, pixel_buffer: [*]u32) void {
+        _ = asset_file;
+        _ = data_offset;
+        _ = data_size;
+        _ = pixel_buffer;
+    }
 };
 
 pub const WritableBitmap = struct {
@@ -1248,19 +1276,161 @@ fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callcon
     handmade.endTaskWithMemory(work.task);
 }
 
+fn processTiledImport(assets: *Assets, file: *SourceFile, image: png.ImageU32, temp_arena: *MemoryArena) void {
+    const border_dimension: u32 = 8;
+    const tile_dimension: u32 = 1024;
+
+    const pixel_buffer: [*]u32 = temp_arena.pushArray(tile_dimension * tile_dimension, u32, null);
+
+    const x_count_max: u32 = file.asset_indices[0].len;
+    const y_count_max: u32 = file.asset_indices.len;
+
+    var x_count: u32 = image.width / tile_dimension;
+    if (x_count > x_count_max) {
+        stream.output(&file.errors, @src(), "Tile column count of %u exceeds maximum of %u columns.", .{
+            x_count,
+            x_count_max,
+        });
+        x_count = x_count_max;
+    }
+    var y_count: u32 = image.height / tile_dimension;
+    if (y_count > y_count_max) {
+        stream.output(&file.errors, @src(), "Tile row count of %u exceeds maximum of %u rows.", .{
+            y_count,
+            y_count_max,
+        });
+        y_count = y_count_max;
+    }
+
+    var y_index: u32 = 0;
+    while (y_index < y_count) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < x_count) : (x_index += 1) {
+            var min_x: u32 = std.math.minInt(u32);
+            var max_x: u32 = std.math.maxInt(u32);
+            var min_y: u32 = std.math.minInt(u32);
+            var max_y: u32 = std.math.maxInt(u32);
+
+            var dest_pixel: [*]u32 = pixel_buffer;
+            var source_row: [*]u32 = image.pixels.ptr +
+                (y_index * tile_dimension * image.width + x_index * tile_dimension);
+
+            var y: u32 = 0;
+            while (y < tile_dimension) : (y += 1) {
+                var source_pixel: [*]u32 = source_row;
+
+                var x: u32 = 0;
+                while (x < tile_dimension) : (x += 1) {
+                    const source_color: u32 = source_pixel[0];
+                    source_pixel += 1;
+
+                    if (source_color & 0xff000000 != 0) {
+                        min_x = @min(min_x, x);
+                        max_x = @max(max_x, x);
+                        min_y = @min(min_y, y);
+                        max_y = @max(max_y, y);
+                    }
+
+                    dest_pixel[0] = source_color;
+                    dest_pixel += 1;
+                }
+
+                source_row += image.width;
+            }
+
+            if (min_x <= max_x) {
+                // There was something in this tile.
+                if (min_x < border_dimension) {
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into left %u-pixel border.", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (max_x >= (tile_dimension - border_dimension)) {
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into right %u-pixel border.", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (min_y < border_dimension) {
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into top %u-pixel border.", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (max_y >= (tile_dimension - border_dimension)) {
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into bottom %u-pixel border.", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                var hha_asset: HHAAsset = .{
+                    .info = .{
+                        .bitmap = .{
+                            .alignment_percentage = .{ 0.5, 0.5 },
+                        },
+                    },
+                };
+                var asset_index: u32 = file.asset_indices[y_index][x_index];
+                if (asset_index != 0) {
+                    const asset: *Asset = &assets.assets[asset_index];
+                    hha_asset = asset.hha;
+                } else {
+                    asset_index = assets.reserveAsset();
+                }
+
+                std.debug.assert(asset_index != 0);
+
+                const asset_data_size: u32 = 4 * tile_dimension * tile_dimension;
+                var asset: *Asset = &assets.assets[asset_index];
+                const asset_file: *AssetFile = &assets.files[asset.file_index];
+                if (hha_asset.data_offset == 0 or
+                    (hha_asset.info.bitmap.dim[0] != tile_dimension or
+                        hha_asset.info.bitmap.dim[1] != tile_dimension))
+                {
+                    hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
+                }
+
+                // TODO: Translate the tile index into tags based on the name of this file,
+                // probably using something passed into this routine.
+                // hha_asset.first_tag_index = 0;
+                // hha_asset.one_past_last_tag_index = 0;
+                hha_asset.info.bitmap.dim[0] = tile_dimension;
+                hha_asset.info.bitmap.dim[1] = tile_dimension;
+
+                asset.hha = hha_asset;
+
+                file.asset_indices[y_index][x_index] = asset_index;
+
+                Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, pixel_buffer);
+                assets.writeAsset(asset_index);
+            }
+        }
+    }
+}
+
 fn updateAssetPackageFromPNG(
     assets: *Assets,
     file: *SourceFile,
     contents: Buffer,
     temp_arena: *MemoryArena,
 ) bool {
-    _ = assets;
-    _ = file;
-    _ = contents;
-    _ = temp_arena;
+    const content_stream: Stream = .makeReadStream(contents, &file.errors);
+    const image = png.parsePNG(temp_arena, content_stream, null);
 
-    // TODO: Not implemented yet.
-    // png.parsePNG(temp_arena, file_stream, info);
+    // if () {
+    processTiledImport(assets, file, image, temp_arena);
+    // } else {
+    //     processFlatImport();
+    // }
 
     return false;
 }
@@ -1297,6 +1467,8 @@ pub fn checkForArtChanges(assets: *Assets) void {
             shared.updateStringHash(&hash_value, scan[0]);
         }
 
+        hash_value = @mod(hash_value, @as(u32, @intCast(assets.source_file_hash.len)));
+
         var match: ?*SourceFile = null;
         var opt_source_file: ?*SourceFile = assets.source_file_hash[hash_value];
         while (opt_source_file) |source_file| : (opt_source_file = source_file.next_in_hash) {
@@ -1311,6 +1483,8 @@ pub fn checkForArtChanges(assets: *Assets) void {
             match.?.base_name = @constCast(assets.non_restored_memory.pushString(file_info.base_name));
             match.?.next_in_hash = assets.source_file_hash[hash_value];
             assets.source_file_hash[hash_value] = match;
+
+            match.?.errors = .onDemandMemoryStream(&assets.non_restored_memory, null);
         }
 
         std.debug.assert(match != null);

@@ -3,6 +3,7 @@ const memory = @import("memory.zig");
 const shared = @import("shared.zig");
 
 // Types.
+const Buffer = shared.Buffer;
 const MemoryArena = memory.MemoryArena;
 
 pub const Chunk = struct {
@@ -26,6 +27,13 @@ pub const Stream = struct {
 
     first: ?*Chunk = null,
     last: ?*Chunk = null,
+
+    pub fn makeReadStream(contents: Buffer, errors: ?*Stream) Stream {
+        return .{
+            .contents = contents,
+            .errors = errors,
+        };
+    }
 
     pub fn onDemandMemoryStream(arena: ?*MemoryArena, errors: ?*Stream) Stream {
         return .{

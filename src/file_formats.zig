@@ -86,9 +86,9 @@ pub const HHAAssetType = extern struct {
 };
 
 pub const HHAAsset = extern struct {
-    data_offset: u64 align(1),
-    first_tag_index: u32,
-    one_past_last_tag_index: u32,
+    data_offset: u64 align(1) = 0,
+    first_tag_index: u32 = 0,
+    one_past_last_tag_index: u32 = 0,
     info: extern union {
         bitmap: HHABitmap,
         sound: HHASound,
@@ -97,8 +97,8 @@ pub const HHAAsset = extern struct {
 };
 
 pub const HHABitmap = extern struct {
-    dim: [2]u32,
-    alignment_percentage: [2]f32,
+    dim: [2]u32 = [1]u32{0} ** 2,
+    alignment_percentage: [2]f32 = [1]f32{0} ** 2,
 
     // Data looks like this:
     //

@@ -9,6 +9,7 @@ const c = @cImport({
 });
 
 // Types.
+const Buffer = shared.Buffer;
 const Stream = stream.Stream;
 const StreamChunk = stream.Chunk;
 const ImageU32 = png.ImageU32;
@@ -35,20 +36,24 @@ const BitmapHeader = packed struct {
 };
 
 fn readEntireFile(file_name: [:0]const u8, allocator: std.mem.Allocator, errors: *Stream) !Stream {
-    var result = Stream{
-        .errors = errors,
-    };
+    var buffer: Buffer = .{};
 
+    var open_error: ?std.fs.File.OpenError = null;
     if (std.fs.cwd().openFile(file_name, .{})) |file| {
         defer file.close();
 
         _ = try file.seekFromEnd(0);
-        result.contents.count = @as(u32, @intCast(file.getPos() catch 0));
+        buffer.count = @as(u32, @intCast(file.getPos() catch 0));
         _ = try file.seekTo(0);
 
-        const buffer = try file.readToEndAllocOptions(allocator, std.math.maxInt(u32), null, .@"32", 0);
-        result.contents.data = @ptrCast(buffer);
+        const file_contents = try file.readToEndAllocOptions(allocator, std.math.maxInt(u32), null, .@"32", 0);
+        buffer.data = @ptrCast(file_contents);
     } else |err| {
+        open_error = err;
+    }
+
+    const result: Stream = .makeReadStream(buffer, errors);
+    if (open_error) |err| {
         stream.output(result.errors, @src(), "Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
     }
 
