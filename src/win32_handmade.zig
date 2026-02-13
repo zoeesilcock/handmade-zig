@@ -465,9 +465,9 @@ fn closeFile(file_handle: *shared.PlatformFileHandle) callconv(.c) void {
     }
 }
 
-fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void {
-    if (shared.defaultNoFileErrors(source)) {
-        const win32_handle: win32.HANDLE = @ptrCast(source.platform);
+fn readDataFromFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void {
+    if (shared.defaultNoFileErrors(handle)) {
+        const win32_handle: win32.HANDLE = @ptrCast(handle.platform);
 
         var overlapped = win32.OVERLAPPED{
             .Internal = 0,
@@ -497,7 +497,44 @@ fn readDataFromFile(source: *shared.PlatformFileHandle, offset: u64, size: u64, 
         } else {
             const error_number = win32.GetLastError();
             std.debug.print("Error loading file: {d}\n", .{@intFromEnum(error_number)});
-            fileError(source, "Read file failed.");
+            fileError(handle, "Read file failed.");
+        }
+    }
+}
+
+fn writeDataToFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, source: *anyopaque) callconv(.c) void {
+    if (shared.defaultNoFileErrors(handle)) {
+        const win32_handle: win32.HANDLE = @ptrCast(handle.platform);
+
+        var overlapped = win32.OVERLAPPED{
+            .Internal = 0,
+            .InternalHigh = 0,
+            .hEvent = null,
+            .Anonymous = .{
+                .Anonymous = .{
+                    .Offset = @as(u32, @intCast((offset >> 0) & 0xFFFFFFFF)),
+                    .OffsetHigh = @as(u32, @intCast((offset >> 32) & 0xFFFFFFFF)),
+                },
+            },
+        };
+
+        const file_size32 = shared.safeTruncateI64(@intCast(size));
+
+        var bytes_written: u32 = undefined;
+        const read_result = win32.WriteFile(
+            win32_handle,
+            source,
+            file_size32,
+            &bytes_written,
+            &overlapped,
+        );
+
+        if (read_result != 0 and bytes_written == file_size32) {
+            // File read successfully.
+        } else {
+            const error_number = win32.GetLastError();
+            std.debug.print("Error loading file: {d}\n", .{@intFromEnum(error_number)});
+            fileError(handle, "Read file failed.");
         }
     }
 }
@@ -2494,6 +2531,7 @@ pub export fn wWinMain(
         .openFile = openFile,
         .closeFile = closeFile,
         .readDataFromFile = readDataFromFile,
+        .writeDataToFile = writeDataToFile,
         .fileError = fileError,
 
         .allocateMemory = allocateMemory,

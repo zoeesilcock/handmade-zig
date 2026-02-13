@@ -12,6 +12,9 @@ const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 const gl = @import("opengl.zig").gl;
 
+// Build options.
+const INTERNAL = shared.INTERNAL;
+
 // Types.
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -54,6 +57,8 @@ const Asset = struct {
     hha: HHAAsset,
     file_index: u32,
     asset_index_in_file: u32,
+
+    next_of_type: u32,
 };
 
 const AssetHeaderType = enum(u32) {
@@ -77,11 +82,6 @@ const AssetMemoryHeader = extern struct {
         sound: LoadedSound,
         font: LoadedFont,
     },
-};
-
-const AssetType = struct {
-    first_asset_index: u32 = 0,
-    one_past_last_asset_index: u32 = 0,
 };
 
 pub const AssetVector = struct {
@@ -116,6 +116,19 @@ const AssetFile = struct {
     tag_base: u32,
     asset_base: u32,
     font_bitmap_id_offset: u32,
+    high_water_mark: u64,
+    modified: bool,
+
+    pub fn retractWaterMark(self: *AssetFile, count: u64, offset: u64, size: u64) bool {
+        var result: bool = false;
+
+        if (offset == self.high_water_mark - (count * size)) {
+            self.high_water_mark = offset;
+            result = true;
+        }
+
+        return result;
+    }
 };
 
 const AssetMemoryBlockFlags = enum(u32) {
@@ -153,14 +166,16 @@ pub const Assets = struct {
 
     file_count: u32,
     files: [*]AssetFile,
+    default_append_hha_index: u32,
 
     tag_count: u32,
     tags: [*]HHATag,
 
+    max_asset_count: u32,
     asset_count: u32,
     assets: [*]Asset,
 
-    asset_types: [ASSET_TYPE_ID_COUNT]AssetType = [1]AssetType{AssetType{}} ** ASSET_TYPE_ID_COUNT,
+    first_asset_of_type: [ASSET_TYPE_ID_COUNT]u32,
 
     source_file_hash: [256]?*SourceFile = [1]?*SourceFile{null} ** 256,
 
@@ -210,13 +225,13 @@ pub const Assets = struct {
             var file_group = shared.platform.getAllFilesOfTypeBegin(.AssetFile);
             defer shared.platform.getAllFilesOfTypeEnd(&file_group);
 
-            assets.file_count = file_group.file_count;
+            assets.file_count = file_group.file_count + 1;
             assets.files = arena.pushArray(assets.file_count, AssetFile, null);
 
-            var file_index: u32 = 0;
+            var file_index: u32 = 1;
             var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
             while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
-                std.debug.assert(file_index < file_group.file_count);
+                std.debug.assert(file_index < assets.file_count);
                 const file: [*]AssetFile = assets.files + file_index;
                 defer file_index += 1;
 
@@ -270,95 +285,92 @@ pub const Assets = struct {
                 } else {
                     std.debug.assert(true);
                 }
-            }
-        }
 
-        assets.assets = arena.pushArray(assets.asset_count, Asset, ArenaPushParams.aligned(@alignOf(Asset), true));
-        assets.tags = arena.pushArray(assets.tag_count, HHATag, null);
-
-        memory.zeroStruct(HHATag, @ptrCast(assets.tags));
-
-        // Load tags.
-        {
-            var file_index: u32 = 0;
-            while (file_index < assets.file_count) : (file_index += 1) {
-                const file: [*]AssetFile = assets.files + file_index;
-                if (shared.platform.noFileErrors(&file[0].handle)) {
-                    // Skip the first tag, since it is null.
-                    const tag_array_size = @sizeOf(HHATag) * (file[0].header.tag_count - 1);
-                    shared.platform.readDataFromFile(
-                        &file[0].handle,
-                        file[0].header.tags + @sizeOf(HHATag),
-                        tag_array_size,
-                        assets.tags + file[0].tag_base,
-                    );
+                file[0].high_water_mark = file_info.file_size;
+                while (file[0].retractWaterMark(file[0].header.tag_count, file[0].header.tags, @sizeOf(HHATag)) or
+                    file[0].retractWaterMark(file[0].header.asset_type_count, file[0].header.asset_types, @sizeOf(HHAAssetType)) or
+                    file[0].retractWaterMark(file[0].header.asset_count, file[0].header.assets, @sizeOf(HHAAsset)))
+                {
+                    // Do nothing
                 }
             }
         }
+
+        assets.max_asset_count = assets.asset_count;
+        if (INTERNAL) {
+            assets.max_asset_count += 65536;
+        }
+        assets.assets = arena.pushArray(assets.max_asset_count, Asset, ArenaPushParams.aligned(@alignOf(Asset), true));
+        assets.tags = arena.pushArray(assets.tag_count, HHATag, null);
+
+        memory.zeroStruct(HHATag, @ptrCast(assets.tags));
 
         var asset_count: u32 = 0;
         memory.zeroStruct(Asset, @ptrCast(assets.assets + asset_count));
         asset_count += 1;
 
         // Load assets.
-        var dest_type_id: u32 = 0;
-        while (dest_type_id < ASSET_TYPE_ID_COUNT) : (dest_type_id += 1) {
-            var dest_type = &assets.asset_types[dest_type_id];
+        var file_index: u32 = 1;
+        while (file_index < assets.file_count) : (file_index += 1) {
+            const file: [*]AssetFile = assets.files + file_index;
 
-            dest_type.first_asset_index = asset_count;
+            if (shared.platform.noFileErrors(&file[0].handle)) {
+                const tag_array_size = @sizeOf(HHATag) * (file[0].header.tag_count - 1);
+                shared.platform.readDataFromFile(
+                    &file[0].handle,
+                    file[0].header.tags + @sizeOf(HHATag),
+                    tag_array_size,
+                    assets.tags + file[0].tag_base,
+                );
 
-            var file_index: u32 = 0;
-            while (file_index < assets.file_count) : (file_index += 1) {
-                const file: [*]AssetFile = assets.files + file_index;
+                const asset_index_base: u32 = asset_count;
+                var source_index: u32 = 0;
+                while (source_index < file[0].header.asset_type_count) : (source_index += 1) {
+                    const source_type: [*]HHAAssetType = file[0].asset_type_array + source_index;
+                    if (source_type[0].type_id == AssetTypeId.FontGlyph.toInt()) {
+                        file[0].font_bitmap_id_offset = asset_count - source_type[0].first_asset_index;
+                    }
 
-                if (shared.platform.noFileErrors(&file[0].handle)) {
-                    var source_index: u32 = 0;
-                    while (source_index < file[0].header.asset_type_count) : (source_index += 1) {
-                        const source_type: [*]HHAAssetType = file[0].asset_type_array + source_index;
-                        if (source_type[0].type_id == dest_type_id) {
-                            if (source_type[0].type_id == AssetTypeId.FontGlyph.toInt()) {
-                                file[0].font_bitmap_id_offset = asset_count - source_type[0].first_asset_index;
-                            }
+                    const asset_count_for_type =
+                        source_type[0].one_past_last_asset_index - source_type[0].first_asset_index;
 
-                            const asset_count_for_type =
-                                source_type[0].one_past_last_asset_index - source_type[0].first_asset_index;
+                    const temp_mem = transient_state.arena.beginTemporaryMemory();
+                    defer transient_state.arena.endTemporaryMemory(temp_mem);
+                    const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(asset_count_for_type, HHAAsset, null);
 
-                            const temp_mem = transient_state.arena.beginTemporaryMemory();
-                            defer transient_state.arena.endTemporaryMemory(temp_mem);
-                            const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(asset_count_for_type, HHAAsset, null);
+                    shared.platform.readDataFromFile(
+                        &file[0].handle,
+                        file[0].header.assets + source_type[0].first_asset_index * @sizeOf(HHAAsset),
+                        asset_count_for_type * @sizeOf(HHAAsset),
+                        hha_asset_array,
+                    );
 
-                            shared.platform.readDataFromFile(
-                                &file[0].handle,
-                                file[0].header.assets + source_type[0].first_asset_index * @sizeOf(HHAAsset),
-                                asset_count_for_type * @sizeOf(HHAAsset),
-                                hha_asset_array,
-                            );
+                    // Rebase tag indexes.
+                    var asset_index: u32 = 0;
+                    while (asset_index < asset_count_for_type) : (asset_index += 1) {
+                        const hha_asset = hha_asset_array + asset_index;
 
-                            // Rebase tag indexes.
-                            var asset_index: u32 = 0;
-                            while (asset_index < asset_count_for_type) : (asset_index += 1) {
-                                const hha_asset = hha_asset_array + asset_index;
+                        std.debug.assert(asset_count < assets.asset_count);
+                        const global_asset_index: u32 = asset_count;
+                        asset_count += 1;
+                        const asset = assets.assets + global_asset_index;
 
-                                std.debug.assert(asset_count < assets.asset_count);
-                                const asset = assets.assets + asset_count;
-                                asset_count += 1;
+                        asset[0].next_of_type = assets.first_asset_of_type[source_type[0].type_id];
+                        assets.first_asset_of_type[source_type[0].type_id] = global_asset_index;
 
-                                asset[0].file_index = file_index;
-                                asset[0].hha = hha_asset[0];
+                        asset[0].file_index = file_index;
+                        asset[0].asset_index_in_file = global_asset_index - asset_index_base;
+                        asset[0].hha = hha_asset[0];
 
-                                if (asset[0].hha.first_tag_index == 0) {
-                                    asset[0].hha.one_past_last_tag_index = 0;
-                                } else {
-                                    asset[0].hha.first_tag_index += (file[0].tag_base - 1);
-                                    asset[0].hha.one_past_last_tag_index += (file[0].tag_base - 1);
-                                }
-                            }
+                        if (asset[0].hha.first_tag_index == 0) {
+                            asset[0].hha.one_past_last_tag_index = 0;
+                        } else {
+                            asset[0].hha.first_tag_index += (file[0].tag_base - 1);
+                            asset[0].hha.one_past_last_tag_index += (file[0].tag_base - 1);
                         }
                     }
                 }
             }
-
-            dest_type.one_past_last_asset_index = asset_count;
         }
 
         std.debug.assert(asset_count == assets.asset_count);
@@ -581,31 +593,26 @@ pub const Assets = struct {
         TimedBlock.beginFunction(@src(), .GetFirstAsset);
         defer TimedBlock.endFunction(@src(), .GetFirstAsset);
 
-        var result: ?u32 = null;
-        const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
-
-        if (asset_type.first_asset_index != asset_type.one_past_last_asset_index) {
-            result = asset_type.first_asset_index;
-        }
+        const result: ?u32 = self.first_asset_of_type[type_id.toInt()];
 
         return result;
     }
 
-    pub fn getRandomAsset(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?u32 {
-        TimedBlock.beginFunction(@src(), .GetRandomAsset);
-        defer TimedBlock.endFunction(@src(), .GetRandomAsset);
-
-        var result: ?u32 = null;
-        const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
-
-        if (asset_type.first_asset_index != asset_type.one_past_last_asset_index) {
-            const count: u32 = asset_type.one_past_last_asset_index - asset_type.first_asset_index;
-            const choice = series.randomChoice(count);
-            result = asset_type.first_asset_index + choice;
-        }
-
-        return result;
-    }
+    // pub fn getRandomAsset(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?u32 {
+    //     TimedBlock.beginFunction(@src(), .GetRandomAsset);
+    //     defer TimedBlock.endFunction(@src(), .GetRandomAsset);
+    //
+    //     var result: ?u32 = null;
+    //     const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
+    //
+    //     if (asset_type.first_asset_index != asset_type.one_past_last_asset_index) {
+    //         const count: u32 = asset_type.one_past_last_asset_index - asset_type.first_asset_index;
+    //         const choice = series.randomChoice(count);
+    //         result = asset_type.first_asset_index + choice;
+    //     }
+    //
+    //     return result;
+    // }
 
     pub fn getBestMatchAsset(
         self: *Assets,
@@ -618,10 +625,9 @@ pub const Assets = struct {
 
         var result: ?u32 = null;
         var best_diff: f32 = std.math.floatMax(f32);
-        const asset_type: *AssetType = &self.asset_types[type_id.toInt()];
 
-        var asset_index: u32 = asset_type.first_asset_index;
-        while (asset_index < asset_type.one_past_last_asset_index) : (asset_index += 1) {
+        var asset_index: u32 = self.first_asset_of_type[type_id.toInt()];
+        while (asset_index != 0) {
             const asset = self.assets[asset_index];
 
             var total_weighted_diff: f32 = 0;
@@ -643,6 +649,8 @@ pub const Assets = struct {
                 best_diff = total_weighted_diff;
                 result = asset_index;
             }
+
+            asset_index = asset.next_of_type;
         }
 
         return result;
@@ -796,15 +804,15 @@ pub const Assets = struct {
         return result;
     }
 
-    pub fn getRandomBitmap(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?BitmapId {
-        var result: ?BitmapId = null;
-
-        if (self.getRandomAsset(type_id, series)) |slot_id| {
-            result = BitmapId{ .value = slot_id };
-        }
-
-        return result;
-    }
+    // pub fn getRandomBitmap(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?BitmapId {
+    //     var result: ?BitmapId = null;
+    //
+    //     if (self.getRandomAsset(type_id, series)) |slot_id| {
+    //         result = BitmapId{ .value = slot_id };
+    //     }
+    //
+    //     return result;
+    // }
 
     pub fn getBestMatchBitmap(
         self: *Assets,
@@ -930,15 +938,15 @@ pub const Assets = struct {
         return result;
     }
 
-    pub fn getRandomSound(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?SoundId {
-        var result: ?SoundId = null;
-
-        if (self.getRandomAsset(type_id, series)) |slot_id| {
-            result = SoundId{ .value = slot_id };
-        }
-
-        return result;
-    }
+    // pub fn getRandomSound(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?SoundId {
+    //     var result: ?SoundId = null;
+    //
+    //     if (self.getRandomAsset(type_id, series)) |slot_id| {
+    //         result = SoundId{ .value = slot_id };
+    //     }
+    //
+    //     return result;
+    // }
 
     pub fn getBestMatchSound(
         self: *Assets,
@@ -1084,27 +1092,67 @@ pub const Assets = struct {
     }
 
     pub fn reserveAsset(self: *Assets) u32 {
-        _ = self;
-        return 0;
+        var result: u32 = 0;
+
+        if (self.asset_count < self.max_asset_count) {
+            result = self.asset_count;
+            self.asset_count += 1;
+        }
+
+        return result;
     }
 
-    pub fn reserveData(self: *Assets, asset_file: *AssetFile, data_size: u32) u64 {
+    pub fn reserveData(self: *Assets, file: *AssetFile, data_size: u32) u64 {
         _ = self;
-        _ = asset_file;
-        _ = data_size;
-        return 0;
+        const result: u64 = file.high_water_mark;
+        file.modified = true;
+        file.high_water_mark += data_size;
+        return result;
     }
 
-    fn writeAsset(self: *Assets, asset_index: u32) void {
-        _ = self;
-        _ = asset_index;
+    fn writeAssetData(file: *AssetFile, data_offset: u64, data_size: u32, data: [*]u32) void {
+        file.modified = true;
+        shared.platform.writeDataToFile(&file.handle, data_offset, data_size, data);
     }
 
-    fn writeAssetData(asset_file: *AssetFile, data_offset: u64, data_size: u32, pixel_buffer: [*]u32) void {
-        _ = asset_file;
-        _ = data_offset;
-        _ = data_size;
-        _ = pixel_buffer;
+    pub fn writeModificationsToHHA(self: *Assets, file_index: u32, temp_arena: *MemoryArena) void {
+        const file: *AssetFile = &self.files[file_index];
+        file.modified = false;
+
+        const asset_count: u32 = 0;
+        const tag_count: u32 = 0;
+        var asset_index: u32 = 0;
+        while (asset_index < self.asset_count) : (asset_index += 1) {
+            const asset: *Asset = &self.assets[asset_index];
+            _ = asset;
+        }
+
+        const tag_array_size: u64 = tag_count * @sizeOf(HHATag);
+        const asset_types_array_size: u64 = asset_count * @sizeOf(HHAAssetType);
+        const assets_array_size: u64 = asset_count * @sizeOf(HHAAsset);
+
+        file.header.tag_count = tag_count;
+        file.header.asset_type_count = asset_count;
+        file.header.asset_count = asset_count;
+
+        file.header.tags = file.high_water_mark;
+        file.header.asset_types = file.header.tags + tag_array_size;
+        file.header.assets = file.header.asset_types + asset_types_array_size;
+
+        const tags: [*]HHATag = temp_arena.pushArray(tag_count, HHATag, null);
+        const asset_types: [*]HHAAssetType = temp_arena.pushArray(asset_count, HHAAssetType, null);
+        const assets: [*]HHAAsset = temp_arena.pushArray(asset_count, HHAAsset, null);
+
+        asset_index = 0;
+        while (asset_index < self.asset_count) : (asset_index += 1) {
+            const asset: *Asset = &self.assets[asset_index];
+            _ = asset;
+        }
+
+        shared.platform.writeDataToFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
+        shared.platform.writeDataToFile(&file.handle, file.header.tags, tag_array_size, tags);
+        shared.platform.writeDataToFile(&file.handle, file.header.asset_types, asset_types_array_size, asset_types);
+        shared.platform.writeDataToFile(&file.handle, file.header.assets, assets_array_size, assets);
     }
 };
 
@@ -1387,31 +1435,38 @@ fn processTiledImport(assets: *Assets, file: *SourceFile, image: png.ImageU32, t
                     asset_index = assets.reserveAsset();
                 }
 
-                std.debug.assert(asset_index != 0);
+                if (asset_index != 0) {
+                    const asset_data_size: u32 = 4 * tile_dimension * tile_dimension;
+                    var asset: *Asset = &assets.assets[asset_index];
+                    if (asset.file_index == 0) {
+                        asset.file_index = assets.default_append_hha_index;
+                    }
 
-                const asset_data_size: u32 = 4 * tile_dimension * tile_dimension;
-                var asset: *Asset = &assets.assets[asset_index];
-                const asset_file: *AssetFile = &assets.files[asset.file_index];
-                if (hha_asset.data_offset == 0 or
-                    (hha_asset.info.bitmap.dim[0] != tile_dimension or
-                        hha_asset.info.bitmap.dim[1] != tile_dimension))
-                {
-                    hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
+                    std.debug.assert(asset.file_index != 0);
+
+                    const asset_file: *AssetFile = &assets.files[asset.file_index];
+                    if (hha_asset.data_offset == 0 or
+                        (hha_asset.info.bitmap.dim[0] != tile_dimension or
+                            hha_asset.info.bitmap.dim[1] != tile_dimension))
+                    {
+                        hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
+                    }
+
+                    // TODO: Translate the tile index into tags based on the name of this file,
+                    // probably using something passed into this routine.
+                    // hha_asset.first_tag_index = 0;
+                    // hha_asset.one_past_last_tag_index = 0;
+                    hha_asset.info.bitmap.dim[0] = tile_dimension;
+                    hha_asset.info.bitmap.dim[1] = tile_dimension;
+
+                    asset.hha = hha_asset;
+
+                    file.asset_indices[y_index][x_index] = asset_index;
+
+                    Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, pixel_buffer);
+                } else {
+                    stream.output(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!", .{});
                 }
-
-                // TODO: Translate the tile index into tags based on the name of this file,
-                // probably using something passed into this routine.
-                // hha_asset.first_tag_index = 0;
-                // hha_asset.one_past_last_tag_index = 0;
-                hha_asset.info.bitmap.dim[0] = tile_dimension;
-                hha_asset.info.bitmap.dim[1] = tile_dimension;
-
-                asset.hha = hha_asset;
-
-                file.asset_indices[y_index][x_index] = asset_index;
-
-                Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, pixel_buffer);
-                assets.writeAsset(asset_index);
             }
         }
     }
@@ -1436,80 +1491,94 @@ fn updateAssetPackageFromPNG(
 }
 
 pub fn checkForArtChanges(assets: *Assets) void {
-    var file_group = shared.platform.getAllFilesOfTypeBegin(.AssetFile);
-    defer shared.platform.getAllFilesOfTypeEnd(&file_group);
+    if (assets.default_append_hha_index != 0) {
+        var file_group = shared.platform.getAllFilesOfTypeBegin(.AssetFile);
+        defer shared.platform.getAllFilesOfTypeEnd(&file_group);
 
-    var made_changes: bool = false;
-    var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
-    while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
-        var piece_count: u32 = 0;
-        var pieces: [3]String = undefined;
+        // TODO: Do a sweep mark to set all assets to "unseen", then mark each one we see so we can detect
+        // when files have been deleted.
 
-        var anchor: [*]u8 = file_info.base_name;
-        var hash_value: u32 = 0;
-        var scan: [*]u8 = file_info.base_name;
-        while (true) : (scan += 1) {
-            if (scan[0] == '_' or scan[0] == 0) {
-                if (piece_count < pieces.len) {
-                    var string: *Buffer = &pieces[piece_count];
-                    piece_count += 1;
-                    string.count = scan - anchor;
-                    string.data = anchor;
+        var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
+        while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
+            var piece_count: u32 = 0;
+            var pieces: [3]String = undefined;
+
+            var anchor: [*]u8 = file_info.base_name;
+            var hash_value: u32 = 0;
+            var scan: [*]u8 = file_info.base_name;
+            while (true) : (scan += 1) {
+                if (scan[0] == '_' or scan[0] == 0) {
+                    if (piece_count < pieces.len) {
+                        var string: *Buffer = &pieces[piece_count];
+                        piece_count += 1;
+                        string.count = scan - anchor;
+                        string.data = anchor;
+                    }
+
+                    anchor = scan + 1;
                 }
 
-                anchor = scan + 1;
+                if (scan[0] == 0) {
+                    break;
+                }
+
+                shared.updateStringHash(&hash_value, scan[0]);
             }
 
-            if (scan[0] == 0) {
-                break;
+            hash_value = @mod(hash_value, @as(u32, @intCast(assets.source_file_hash.len)));
+
+            var match: ?*SourceFile = null;
+            var opt_source_file: ?*SourceFile = assets.source_file_hash[hash_value];
+            while (opt_source_file) |source_file| : (opt_source_file = source_file.next_in_hash) {
+                if (shared.stringsAreEqual(source_file.base_name, file_info.base_name)) {
+                    match = source_file;
+                    break;
+                }
             }
 
-            shared.updateStringHash(&hash_value, scan[0]);
-        }
+            if (match == null) {
+                match = assets.non_restored_memory.pushStruct(SourceFile, null);
+                match.?.base_name = @constCast(assets.non_restored_memory.pushString(file_info.base_name));
+                match.?.next_in_hash = assets.source_file_hash[hash_value];
+                assets.source_file_hash[hash_value] = match;
 
-        hash_value = @mod(hash_value, @as(u32, @intCast(assets.source_file_hash.len)));
+                match.?.errors = .onDemandMemoryStream(&assets.non_restored_memory, null);
+            }
 
-        var match: ?*SourceFile = null;
-        var opt_source_file: ?*SourceFile = assets.source_file_hash[hash_value];
-        while (opt_source_file) |source_file| : (opt_source_file = source_file.next_in_hash) {
-            if (shared.stringsAreEqual(source_file.base_name, file_info.base_name)) {
-                match = source_file;
-                break;
+            std.debug.assert(match != null);
+
+            if (match.?.file_date != file_info.file_date) {
+                const temp_memory: TemporaryMemory = assets.non_restored_memory.beginTemporaryMemory();
+                defer temp_memory.arena.clear();
+                defer assets.non_restored_memory.endTemporaryMemory(temp_memory);
+
+                stream.output(&match.?.errors, @src(), "/**** REIMPORTED ****/\n", .{});
+
+                var handle: PlatformFileHandle = shared.platform.openFile(&file_group, @constCast(file_info));
+                var file_buffer: Buffer = .{
+                    .count = file_info.file_size,
+                };
+
+                file_buffer.data = temp_memory.arena.pushSize(file_buffer.count, null);
+
+                shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
+                shared.platform.closeFile(&handle);
+
+                match.?.file_date = file_info.file_date;
+                _ = updateAssetPackageFromPNG(assets, match.?, file_buffer, temp_memory.arena);
             }
         }
 
-        if (match == null) {
-            match = assets.non_restored_memory.pushStruct(SourceFile, null);
-            match.?.base_name = @constCast(assets.non_restored_memory.pushString(file_info.base_name));
-            match.?.next_in_hash = assets.source_file_hash[hash_value];
-            assets.source_file_hash[hash_value] = match;
+        var file_index: u32 = 1;
+        while (file_index < assets.file_count) : (file_index += 1) {
+            const file: *AssetFile = @ptrCast(assets.files + file_index);
+            if (file.modified) {
+                const temp_memory: TemporaryMemory = assets.non_restored_memory.beginTemporaryMemory();
+                defer temp_memory.arena.clear();
+                defer assets.non_restored_memory.endTemporaryMemory(temp_memory);
 
-            match.?.errors = .onDemandMemoryStream(&assets.non_restored_memory, null);
+                assets.writeModificationsToHHA(file_index, temp_memory.arena);
+            }
         }
-
-        std.debug.assert(match != null);
-
-        if (match.?.file_date != file_info.file_date) {
-            const temp_memory: TemporaryMemory = assets.non_restored_memory.beginTemporaryMemory();
-            defer temp_memory.arena.clear();
-            defer assets.non_restored_memory.endTemporaryMemory(temp_memory);
-
-            var handle: PlatformFileHandle = shared.platform.openFile(&file_group, @constCast(file_info));
-            var file_buffer: Buffer = .{
-                .count = file_info.file_size,
-            };
-
-            file_buffer.data = temp_memory.arena.pushSize(file_buffer.count, null);
-
-            shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
-            shared.platform.closeFile(&handle);
-
-            match.?.file_date = file_info.file_date;
-            made_changes = updateAssetPackageFromPNG(assets, match.?, file_buffer, temp_memory.arena);
-        }
-    }
-
-    if (made_changes) {
-        // TODO: Update asset information file here.
     }
 }

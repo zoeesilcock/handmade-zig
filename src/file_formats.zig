@@ -68,6 +68,10 @@ pub const HHAHeader = extern struct {
     tags: u64 = undefined, // [tag_count]HHATag
     asset_types: u64 = undefined, // [asset_type_count]HHAAssetType
     assets: u64 = undefined, // [asset_count]HHAAsset
+
+    // TODO: Right now we have a situation where we are no longer making contiguous asset type blocks - so it would be
+    // better to switch to just having asset type IDs stored directly in the HHAAsset, because it's just burning space
+    // and cycles to store it in the AssetTypes array.
 };
 
 fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {

@@ -848,7 +848,8 @@ const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callc
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.c) void;
 const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFileInfo) callconv(.c) PlatformFileHandle;
 const closeFileType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) void;
-const readDataFromFileType: type = fn (source: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
+const readDataFromFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
+const writeDataToFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, source: *anyopaque) callconv(.c) void;
 const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) bool;
 const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.c) void;
 
@@ -875,6 +876,7 @@ pub const Platform = if (INTERNAL) extern struct {
     openFile: *const openFileType = undefined,
     closeFile: *const closeFileType = undefined,
     readDataFromFile: *const readDataFromFileType = undefined,
+    writeDataToFile: *const writeDataToFileType = undefined,
     noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
     fileError: *const fileErrorType = undefined,
 
@@ -896,6 +898,7 @@ pub const Platform = if (INTERNAL) extern struct {
     openFile: *const openFileType = undefined,
     closeFile: *const closeFileType = undefined,
     readDataFromFile: *const readDataFromFileType = undefined,
+    writeDataToFile: *const writeDataToFileType = undefined,
     noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
     fileError: *const fileErrorType = undefined,
 
