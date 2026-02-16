@@ -272,7 +272,7 @@ fn addPlayer(
 
         room_gen.addPiece(head, .Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
 
-        room_gen.addPiece(glove, .Sword, hero_scale * 0.25, .new(0, 0, 0), color, null);
+        room_gen.addPiece(glove, .Hand, hero_scale * 0.25, .new(0, 0, 0), color, null);
     }
 
     room_gen.placeEntity(sim_region, glove, position);

@@ -62,6 +62,8 @@ pub const Buffer = struct {
     count: usize = 0,
     data: [*]u8 = undefined,
 
+    pub const empty: String = .{};
+
     pub fn advance(self: *Buffer, count: usize) ?[*]u8 {
         var result: ?[*]u8 = null;
 
@@ -75,6 +77,10 @@ pub const Buffer = struct {
         }
 
         return result;
+    }
+
+    pub fn toSlice(self: *Buffer) []const u8 {
+        return self.data[0..self.count];
     }
 };
 
@@ -256,6 +262,14 @@ pub inline fn stringsWithOneLengthAreEqual(a: [*]const u8, a_length: MemoryIndex
     }
 
     return result;
+}
+
+pub fn stringBufferEquals(a: String, b: [*:0]const u8) bool {
+    return stringsWithOneLengthAreEqual(a.data, a.count, b);
+}
+
+pub fn stringBuffersEqual(a: String, b: String) bool {
+    return stringsWithOneLengthAreEqual(a.data, a.count, b.data, b.count);
 }
 
 pub fn toLowercase(character: u8) u8 {
@@ -841,12 +855,17 @@ pub const DebugPlatformMemoryStats = extern struct {
     total_used: MemoryIndex = 0,
 };
 
+pub const OpenFileModeFlags = enum(u32) {
+    Read = 0x1,
+    Write = 0x2,
+};
+
 const addQueueEntryType: type = fn (queue: *PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: *anyopaque) callconv(.c) void;
 const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(.c) void;
 
 const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.c) PlatformFileGroup;
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.c) void;
-const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFileInfo) callconv(.c) PlatformFileHandle;
+const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFileInfo, mode_flags: u32) callconv(.c) PlatformFileHandle;
 const closeFileType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) void;
 const readDataFromFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
 const writeDataToFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, source: *anyopaque) callconv(.c) void;

@@ -13,6 +13,7 @@ const Package = enum {
     Executable,
     Library,
     AssetBuilder,
+    HHAEdit,
     Preprocessor,
     Compressor,
     Raytracer,
@@ -48,6 +49,10 @@ pub fn build(b: *std.Build) void {
 
     if (package == .All or package == .AssetBuilder) {
         addAssetBuilder(b, build_options, target, optimize);
+    }
+
+    if (package == .All or package == .HHAEdit) {
+        addHHAEdit(b, build_options, target, optimize);
     }
 
     if (package == .All or package == .Preprocessor) {
@@ -224,6 +229,52 @@ fn addAssetBuilder(
     const asset_builder_run_step = b.step("build-assets", "Run the test asset builder");
     run_asset_builder.setCwd(b.path("data/"));
     asset_builder_run_step.dependOn(&run_asset_builder.step);
+}
+
+fn addHHAEdit(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const shared_module = b.addModule("shared", .{
+        .root_source_file = b.path("src/shared.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const file_formats_module = b.addModule("file_formats", .{
+        .root_source_file = b.path("src/file_formats.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const hha_edit_exe = b.addExecutable(.{
+        .name = "hha-edit",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/hha_edit.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    hha_edit_exe.stack_size = 0x100000; // 1MB.
+    hha_edit_exe.root_module.addOptions("build_options", build_options);
+    hha_edit_exe.root_module.addImport("shared", shared_module);
+    hha_edit_exe.root_module.addImport("file_formats", file_formats_module);
+
+    const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
+    hha_edit_exe.root_module.addImport("win32", zigwin32);
+
+    b.installArtifact(hha_edit_exe);
+
+    // Allow running asset builder from build command.
+    const run_hha_edit = b.addRunArtifact(hha_edit_exe);
+    if (b.args) |args| {
+        run_hha_edit.addArgs(args);
+    }
+    const hha_edit_run_step = b.step("hha-edit", "Run the HHA edit tool");
+    run_hha_edit.setCwd(b.path("data/"));
+    hha_edit_run_step.dependOn(&run_hha_edit.step);
 }
 
 fn addSimplePreprocessor(

@@ -187,6 +187,12 @@ pub export fn updateAndRender(
     TimedBlock.beginFunction(@src(), .GameUpdateAndRender);
     defer TimedBlock.endFunction(@src(), .GameUpdateAndRender);
 
+    // Clamp the delta time for the frame so that we don't have too high or too low frame rates in any circumstance.
+    if (input.frame_delta_time > 0.1) {
+        input.frame_delta_time = 0.1;
+    } else if (input.frame_delta_time < 0.001) {
+        input.frame_delta_time = 0.001;
+    }
     input.frame_delta_time *= (config.global_config.Simulation_TimestepPercentage / 100);
 
     var state: *State = game_memory.game_state orelse undefined;

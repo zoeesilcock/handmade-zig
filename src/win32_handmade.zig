@@ -435,20 +435,32 @@ fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.c) void
 fn openFile(
     file_group: *shared.PlatformFileGroup,
     file_info: *shared.PlatformFileInfo,
+    mode_flags: u32,
 ) callconv(.c) shared.PlatformFileHandle {
     _ = file_group;
 
     var result = shared.PlatformFileHandle{};
-
     std.debug.assert(@sizeOf(win32.HANDLE) <= @sizeOf(*anyopaque));
+
+    var handle_permissions: std.os.windows.DWORD = 0;
+    var handle_creation: std.os.windows.DWORD = 0;
+    if (mode_flags & @intFromEnum(shared.OpenFileModeFlags.Read) != 0) {
+        handle_permissions |= @bitCast(win32.FILE_GENERIC_READ);
+        handle_creation = @intFromEnum(win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING);
+    }
+
+    if (mode_flags & @intFromEnum(shared.OpenFileModeFlags.Write) != 0) {
+        handle_permissions |= @bitCast(win32.FILE_GENERIC_WRITE);
+        handle_creation = @intFromEnum(win32.FILE_CREATION_DISPOSITION.OPEN_ALWAYS);
+    }
 
     const file_name: [*:0]const u16 = @ptrCast(@alignCast(file_info.platform));
     const win32_handle: win32.HANDLE = win32.CreateFileW(
         file_name,
-        win32.FILE_GENERIC_READ,
+        @bitCast(handle_permissions),
         win32.FILE_SHARE_READ,
         null,
-        win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
+        @enumFromInt(handle_creation),
         win32.FILE_FLAGS_AND_ATTRIBUTES{},
         null,
     );
@@ -533,8 +545,8 @@ fn writeDataToFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, s
             // File read successfully.
         } else {
             const error_number = win32.GetLastError();
-            std.debug.print("Error loading file: {d}\n", .{@intFromEnum(error_number)});
-            fileError(handle, "Read file failed.");
+            std.debug.print("Error writing to file: {d}\n", .{@intFromEnum(error_number)});
+            fileError(handle, "Write to file failed.");
         }
     }
 }

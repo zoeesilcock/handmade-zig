@@ -48,6 +48,8 @@ pub const AssetTypeId = enum(u32) {
     Music,
     Puhp,
 
+    Hand,
+
     OpeningCutscene,
 
     pub fn toInt(self: AssetTypeId) u32 {
