@@ -1,12 +1,13 @@
 const std = @import("std");
 const shared = @import("shared");
 const file_formats = @import("file_formats");
+const file_formats_v0 = @import("file_formats_v0");
 const math = shared.math;
 const intrinsics = shared.intrinsics;
 
 pub const UNICODE = true;
 const USE_FONTS_FROM_WINDOWS = true;
-const ASSET_TYPE_ID_COUNT = file_formats.ASSET_TYPE_ID_COUNT;
+const ASSET_TYPE_ID_COUNT = file_formats_v0.ASSET_TYPE_ID_COUNT;
 
 const ONE_PAST_MAX_FONT_CODE_POINT: u33 = 0x10FFFF + 1;
 const MAX_FONT_WIDTH: u32 = 1024;
@@ -21,12 +22,12 @@ const c = @cImport({
 const win32 = @import("win32");
 
 // Types.
-const AssetTypeId = file_formats.AssetTypeId;
+const HHAHeader = file_formats_v0.HHAHeaderV0;
+const AssetTypeId = file_formats_v0.AssetTypeIdV0;
+const HHAAssetType = file_formats_v0.HHAAssetTypeV0;
 const AssetFontType = file_formats.AssetFontType;
 const AssetTagId = file_formats.AssetTagId;
-const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
-const HHAAssetType = file_formats.HHAAssetType;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
 const HHASoundChain = file_formats.HHASoundChain;
@@ -57,7 +58,7 @@ fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFil
         const buffer = file.readToEndAlloc(allocator, std.math.maxInt(u32)) catch "";
         result.contents = buffer;
     } else |err| {
-        std.debug.print("Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
+        std.log.err("Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
     }
 
     return result;
@@ -147,7 +148,10 @@ fn loadBMP(
 
                 texel = math.linear1ToSRGB255(texel);
 
-                source_dest[0] = texel.packColorBGRA();
+                source_dest[0] = ((@as(u32, @intFromFloat(texel.a() + 0.5)) << 24) |
+                    (@as(u32, @intFromFloat(texel.r() + 0.5)) << 16) |
+                    (@as(u32, @intFromFloat(texel.g() + 0.5)) << 8) |
+                    (@as(u32, @intFromFloat(texel.b() + 0.5)) << 0));
 
                 source_dest += 1;
             }
@@ -415,7 +419,10 @@ fn loadGlyphBMP(
                         _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
                         texel = math.linear1ToSRGB255(texel);
 
-                        dest[0] = texel.packColorBGRA();
+                        dest[0] = ((@as(u32, @intFromFloat(texel.a() + 0.5)) << 24) |
+                            (@as(u32, @intFromFloat(texel.r() + 0.5)) << 16) |
+                            (@as(u32, @intFromFloat(texel.g() + 0.5)) << 8) |
+                            (@as(u32, @intFromFloat(texel.b() + 0.5)) << 0));
 
                         dest += 1;
                         source += 1;
@@ -453,7 +460,7 @@ fn loadGlyphBMP(
                 }
             }
         } else {
-            std.debug.print("Failed to generate glyph: {d}\n", .{code_point});
+            std.log.err("Failed to generate glyph: {d}\n", .{code_point});
             return null;
         }
     } else {
@@ -1191,10 +1198,10 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
     if (std.fs.cwd().openFile(file_name, .{ .mode = .write_only })) |file| {
         opt_out = file;
     } else |err| {
-        std.debug.print("Unable to open '{s}': {s}", .{ file_name, @errorName(err) });
+        std.log.err("Unable to open '{s}': {s}", .{ file_name, @errorName(err) });
 
         opt_out = std.fs.cwd().createFile(file_name, .{}) catch |create_err| {
-            std.debug.print("Unable to create '{s}': {s}", .{ file_name, @errorName(create_err) });
+            std.log.err("Unable to create '{s}': {s}", .{ file_name, @errorName(create_err) });
             std.process.exit(1);
         };
     }
@@ -1220,14 +1227,14 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
 
         var bytes_written: usize = 0;
         bytes_written += try out.write(std.mem.asBytes(&header));
-        // std.debug.print("Bytes written after header: {d}\n", .{ bytes_written });
-        // std.debug.print("Tags: Expected: {d}, actual: {d}\n", .{header.tags, bytes_written});
+        // std.log.info("Bytes written after header: {d}\n", .{ bytes_written });
+        // std.log.info("Tags: Expected: {d}, actual: {d}\n", .{header.tags, bytes_written});
         bytes_written += try out.write(std.mem.asBytes(&result.tags)[0..tag_array_size]);
-        // std.debug.print("Bytes written after tags: {d}\n", .{ bytes_written });
-        // std.debug.print("Asset types: Expected: {d}, actual: {d}\n", .{header.asset_types, bytes_written});
+        // std.log.info("Bytes written after tags: {d}\n", .{ bytes_written });
+        // std.log.info("Asset types: Expected: {d}, actual: {d}\n", .{header.asset_types, bytes_written});
         bytes_written += try out.write(std.mem.asBytes(&result.asset_types));
-        // std.debug.print("Bytes written after asset types: {d}\n", .{ bytes_written });
-        // std.debug.print("Assets: Expected: {d}, actual: {d}\n", .{header.assets, bytes_written});
+        // std.log.info("Bytes written after asset types: {d}\n", .{ bytes_written });
+        // std.log.info("Assets: Expected: {d}, actual: {d}\n", .{header.assets, bytes_written});
 
         try out.seekBy(asset_array_size);
         var asset_index: u32 = 1;
@@ -1272,8 +1279,8 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
                         const size: usize = @as(usize, @intCast(bmp.width)) * @as(usize, @intCast(bmp.height * 4));
                         const bytes: []const u8 = @as([*]const u8, @ptrCast(bmp.memory.?))[0..size];
                         bytes_written += try out.write(bytes);
-                        // std.debug.print("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
-                        // std.debug.print("Bytes written after bmp: {d}\n", .{ bytes_written });
+                        // std.log.info("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
+                        // std.log.info("Bytes written after bmp: {d}\n", .{bytes_written});
                     }
                 },
                 .Sound => {
@@ -1288,8 +1295,8 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
                         const size: usize = dest.info.sound.sample_count * @sizeOf(i16);
                         const bytes: []const u8 = @as([*]const u8, @ptrCast(wav.samples[channel_index].?))[0..size];
                         bytes_written += try out.write(bytes);
-                        // std.debug.print("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
-                        // std.debug.print("Bytes written after wav: {d}\n", .{ bytes_written });
+                        // std.log.info("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
+                        // std.log.info("Bytes written after wav: {d}\n", .{ bytes_written });
                     }
                 },
             }
@@ -1297,6 +1304,6 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
         try out.seekTo(header.assets);
         bytes_written += try out.write(std.mem.asBytes(&result.assets)[0..asset_array_size]);
 
-        std.debug.print("Bytes written: {s} {d}\n", .{ file_name, bytes_written });
+        std.log.info("Bytes written: {s} {d}\n", .{ file_name, bytes_written });
     }
 }

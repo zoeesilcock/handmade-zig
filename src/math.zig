@@ -695,7 +695,7 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         }
 
         pub inline fn packColorBGRA(self: Self) u32 {
-            return ((intrinsics.roundReal32ToUInt32(self.a() + 0.5) << 24) |
+            return ((intrinsics.roundReal32ToUInt32(self.a()) << 24) |
                 (intrinsics.roundReal32ToUInt32(self.r()) << 16) |
                 (intrinsics.roundReal32ToUInt32(self.g()) << 8) |
                 (intrinsics.roundReal32ToUInt32(self.b()) << 0));

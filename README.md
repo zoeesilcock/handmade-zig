@@ -21,14 +21,22 @@ Graphical and audio assets are not included as they are not created by me. The f
 * `handmade_hero_legacy_art.zip/png_art_packs` to be in the `/art` directory.
 
 ### Packing the assets
-The asset files need to be packed using the asset packer before running the game. The current version of the asset builder doesn't produce files compatible with the game anymore since we made the reader compatible with asset files created by Casey, use the original files from `handmade_hero_legacy_art.zip/v0_hhas`.
+The asset builder can be used to generate HHA files based on the early data located at `handmade_hero_legacy_art/early_data`, they are expected to be in the `/data` directory.
 ```
-zig build build-assets
+zig build build-assets -Dpackage=AssetBuilder
 ```
 
 ### PNG reader
 ```
 zig build run-png-reader -Dpackage=PNGReader -- test/gimp_test.png
+```
+
+### HHA edit
+The HHA edit tool can be used to create new empty HHA files.
+```
+zig build hha-edit -Dpackage=HHAEdit -- -create local.hha
+zig build hha-edit -Dpackage=HHAEdit -- -info test.hha
+zig build hha-edit -Dpackage=HHAEdit -- -rewrite source.hha dest.hha
 ```
 
 ## Hot reloading

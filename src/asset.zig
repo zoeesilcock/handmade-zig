@@ -8,6 +8,7 @@ const png = @import("png.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
 const file_formats = @import("file_formats");
+const file_formats_v0 = @import("file_formats_v0");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 const gl = @import("opengl.zig").gl;
@@ -24,14 +25,13 @@ const String = shared.String;
 const Buffer = shared.Buffer;
 const Stream = stream.Stream;
 const MemoryArena = memory.MemoryArena;
-const TemporaryMemory = memory.TemporaryMemory;
 const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
 const ArenaBootstrapParams = memory.ArenaBootstrapParams;
 const Platform = shared.Platform;
-const HHAHeader = file_formats.HHAHeader;
+const HHAHeader = file_formats_v0.HHAHeaderV0;
 const HHATag = file_formats.HHATag;
-const HHAAssetType = file_formats.HHAAssetType;
+const HHAAssetType = file_formats_v0.HHAAssetTypeV0;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
@@ -46,10 +46,12 @@ const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = render.TextureOp;
 
-pub const AssetTypeId = file_formats.AssetTypeId;
+pub const AssetTypeId = file_formats_v0.AssetTypeIdV0;
 pub const AssetTagId = file_formats.AssetTagId;
-pub const ASSET_TYPE_ID_COUNT = file_formats.ASSET_TYPE_ID_COUNT;
+pub const ASSET_TYPE_ID_COUNT = file_formats_v0.ASSET_TYPE_ID_COUNT;
 const ASSET_IMPORT_GRID_MAX = 8;
+const HHA_VERSION = file_formats_v0.HHA_VERSION;
+const HHA_MAGIC_VALUE = file_formats_v0.HHA_MAGIC_VALUE;
 
 const ImportGridTag = struct {
     type_id: AssetTypeId,
@@ -261,24 +263,7 @@ pub const Assets = struct {
                 file[0].asset_base = assets.asset_count;
                 file[0].handle = file_handle;
 
-                var offset: u32 = 0;
-                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.magic_value);
-                offset += @sizeOf(u32);
-                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.version);
-                offset += @sizeOf(u32);
-                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.tag_count);
-                offset += @sizeOf(u32);
-                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.asset_type_count);
-                offset += @sizeOf(u32);
-                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u32), &file[0].header.asset_count);
-                offset += @sizeOf(u32);
-
-                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u64), &file[0].header.tags);
-                offset += @sizeOf(u64);
-                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u64), &file[0].header.asset_types);
-                offset += @sizeOf(u64);
-                shared.platform.readDataFromFile(&file[0].handle, offset, @sizeOf(u64), &file[0].header.assets);
-                offset += @sizeOf(u64);
+                shared.platform.readDataFromFile(&file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
 
                 const asset_type_array_size: u32 = file[0].header.asset_type_count * @sizeOf(HHAAssetType);
                 if (asset_type_array_size > 0) {
@@ -291,11 +276,11 @@ pub const Assets = struct {
                     );
                 }
 
-                if (file[0].header.magic_value != file_formats.HHA_MAGIC_VALUE) {
+                if (file[0].header.magic_value != HHA_MAGIC_VALUE) {
                     shared.platform.fileError(&file[0].handle, "HHA file has an invalid magic value.");
                 }
 
-                if (file[0].header.version > file_formats.HHA_VERSION) {
+                if (file[0].header.version > HHA_VERSION) {
                     shared.platform.fileError(&file[0].handle, "HHA file is of a later version.");
                 }
 
@@ -1188,12 +1173,15 @@ pub const Assets = struct {
             }
         }
 
+        const asset_type_count: u32 = asset_count;
+        asset_count += 1; // Account for the null at index 0.
+
         const tag_array_size: u64 = tag_count * @sizeOf(HHATag);
-        const asset_types_array_size: u64 = asset_count * @sizeOf(HHAAssetType);
+        const asset_types_array_size: u64 = asset_type_count * @sizeOf(HHAAssetType);
         const assets_array_size: u64 = asset_count * @sizeOf(HHAAsset);
 
         file.header.tag_count = tag_count;
-        file.header.asset_type_count = asset_count;
+        file.header.asset_type_count = asset_type_count;
         file.header.asset_count = asset_count;
 
         file.header.tags = file.high_water_mark;
@@ -1201,25 +1189,25 @@ pub const Assets = struct {
         file.header.assets = file.header.asset_types + asset_types_array_size;
 
         const tags: [*]HHATag = temp_arena.pushArray(tag_count, HHATag, null);
-        const asset_types: [*]HHAAssetType = temp_arena.pushArray(asset_count, HHAAssetType, null);
+        const asset_types: [*]HHAAssetType = temp_arena.pushArray(asset_type_count, HHAAssetType, null);
         const assets: [*]HHAAsset = temp_arena.pushArray(asset_count, HHAAsset, null);
 
         var dest_type: [*]HHAAssetType = asset_types;
-        memory.zeroStruct(HHATag, &tags[0]);
         var tag_index_in_file: u32 = 1;
-        var asset_index_in_file: u32 = 0;
+        var asset_index_in_file: u32 = 1;
 
         var type_id: u32 = 0;
         while (type_id < self.first_asset_of_type.len) : (type_id += 1) {
             asset_index = self.first_asset_of_type[type_id];
-            while (asset_index < self.asset_count) {
+            while (asset_index > 0) {
                 const source: *Asset = &self.assets[asset_index];
                 if (source.file_index == file_index) {
                     var dest: [*]HHAAsset = assets + asset_index_in_file;
 
                     dest_type[0].type_id = type_id;
                     dest_type[0].first_asset_index = asset_index_in_file;
-                    dest_type[0].one_past_last_asset_index = dest_type[0].first_asset_index;
+                    dest_type[0].one_past_last_asset_index = dest_type[0].first_asset_index + 1;
+                    dest_type += 1;
 
                     dest[0] = source.hha;
                     var tag_index: u32 = dest[0].first_tag_index;
@@ -1234,6 +1222,10 @@ pub const Assets = struct {
                 asset_index = source.next_of_type;
             }
         }
+
+        std.debug.assert(tag_index_in_file == tag_count);
+        std.debug.assert(asset_index_in_file == asset_count);
+        std.debug.assert(dest_type == asset_types + asset_type_count);
 
         shared.platform.writeDataToFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
         shared.platform.writeDataToFile(&file.handle, file.header.tags, tag_array_size, tags);
@@ -1456,10 +1448,10 @@ fn processTiledImport(
         var x_index: u32 = 0;
         while (x_index < x_count) : (x_index += 1) {
             const grid_tags: ImportGridTag = grid_tag_array.tags[y_index][x_index];
-            var min_x: u32 = std.math.minInt(u32);
-            var max_x: u32 = std.math.maxInt(u32);
-            var min_y: u32 = std.math.minInt(u32);
-            var max_y: u32 = std.math.maxInt(u32);
+            var min_x: u32 = std.math.maxInt(u32);
+            var max_x: u32 = std.math.minInt(u32);
+            var min_y: u32 = std.math.maxInt(u32);
+            var max_y: u32 = std.math.minInt(u32);
 
             var dest_pixel: [*]u32 = pixel_buffer;
             var source_row: [*]u32 = image.pixels.ptr +
@@ -1659,9 +1651,8 @@ pub fn checkForArtChanges(assets: *Assets) void {
 
             if (match.?.file_date != file_info.file_date) {
                 if (shared.stringBufferEquals(pieces[0], "hand")) {
-                    const temp_memory: TemporaryMemory = assets.non_restored_memory.beginTemporaryMemory();
-                    defer temp_memory.arena.clear();
-                    defer assets.non_restored_memory.endTemporaryMemory(temp_memory);
+                    var temp_arena: MemoryArena = .{};
+                    defer temp_arena.clear();
 
                     stream.output(&match.?.errors, @src(), "/**** REIMPORTED ****/\n", .{});
 
@@ -1674,7 +1665,7 @@ pub fn checkForArtChanges(assets: *Assets) void {
                         .count = file_info.file_size,
                     };
 
-                    file_buffer.data = temp_memory.arena.pushSize(file_buffer.count, null);
+                    file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
 
                     shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
                     shared.platform.closeFile(&handle);
@@ -1695,7 +1686,7 @@ pub fn checkForArtChanges(assets: *Assets) void {
                         }
                     }
 
-                    _ = updateAssetPackageFromPNG(assets, &tags, match.?, file_buffer, temp_memory.arena);
+                    _ = updateAssetPackageFromPNG(assets, &tags, match.?, file_buffer, &temp_arena);
                 }
             }
         }
@@ -1704,11 +1695,10 @@ pub fn checkForArtChanges(assets: *Assets) void {
         while (file_index < assets.file_count) : (file_index += 1) {
             const file: *AssetFile = @ptrCast(assets.files + file_index);
             if (file.modified) {
-                const temp_memory: TemporaryMemory = assets.non_restored_memory.beginTemporaryMemory();
-                defer temp_memory.arena.clear();
-                defer assets.non_restored_memory.endTemporaryMemory(temp_memory);
+                var temp_arena: MemoryArena = .{};
+                defer temp_arena.clear();
 
-                assets.writeModificationsToHHA(file_index, temp_memory.arena);
+                assets.writeModificationsToHHA(file_index, &temp_arena);
             }
         }
     }

@@ -1,5 +1,5 @@
 pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
-pub const HHA_VERSION = 0;
+pub const HHA_VERSION = 1;
 
 pub const AssetFontType = enum(u32) {
     Default = 0,
@@ -16,90 +16,79 @@ pub const AssetTagId = enum(u32) {
     ShotIndex,
     LayerIndex,
 
+    // 0 everywhere, except if you are trying to override an existing asset,
+    // in which case you set it to it's Primacy + 1.
+    Primacy,
+
+    DataType,
+
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
     }
 };
-pub const AssetTypeId = enum(u32) {
+
+pub const AssetDataTypeId = enum(u32) {
     None,
 
-    // Bitmaps.
-    Shadow,
-    Tree,
-    Sword,
-    Rock,
-
-    Grass,
-    Tuft,
-    Stone,
-
-    Head,
-    Cape,
-    Torso,
-
+    Sprite,
     Font,
     FontGlyph,
-
-    // Sounds.
-    Bloop,
-    Crack,
-    Drop,
-    Glide,
-    Music,
-    Puhp,
-
-    Hand,
-
-    OpeningCutscene,
-
-    pub fn toInt(self: AssetTypeId) u32 {
-        return @intFromEnum(self);
-    }
+    Sound,
 };
-
-pub const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeId).@"enum".fields.len;
 
 pub const HHAHeader = extern struct {
-    magic_value: u32 = HHA_MAGIC_VALUE,
-    version: u32 = HHA_VERSION,
+    magic_value: u32 align(1) = HHA_MAGIC_VALUE,
+    version: u32 align(1) = HHA_VERSION,
 
-    tag_count: u32,
-    asset_type_count: u32,
-    asset_count: u32,
+    tag_count: u32 align(1),
+    asset_count: u32 align(1),
 
-    tags: u64 = undefined, // [tag_count]HHATag
-    asset_types: u64 = undefined, // [asset_type_count]HHAAssetType
-    assets: u64 = undefined, // [asset_count]HHAAsset
+    reserved32: [12]u32 align(1) = [1]u32{0} ** 12,
 
-    // TODO: Right now we have a situation where we are no longer making contiguous asset type blocks - so it would be
-    // better to switch to just having asset type IDs stored directly in the HHAAsset, because it's just burning space
-    // and cycles to store it in the AssetTypes array.
+    tags: u64 align(1) = undefined, // [tag_count]HHATag
+    assets: u64 align(1) = undefined, // [asset_count]HHAAsset
+    annotations: u64 align(1) = undefined, // [asset_count]HHAAnnotation
+
+    reserved64: [5]u64 align(1) = [1]u64{0} ** 5,
 };
 
-fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {
+pub fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {
     return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, c << 16) | @as(u32, d << 24);
 }
 
 pub const HHATag = extern struct {
-    id: u32,
-    value: f32,
+    id: u32 align(1) = 0,
+    value: f32 align(1) = 0,
 };
 
-pub const HHAAssetType = extern struct {
-    type_id: u32 = 0,
-    first_asset_index: u32 = 0,
-    one_past_last_asset_index: u32 = 0,
+pub const HHAAnnotation = extern struct {
+    source_file_date: u64 align(1) = 0,
+    source_file_checksum: u64 align(1) = 0,
+    source_file_base_name_offset: u64 align(1) = 0,
+    asset_name_offset: u64 align(1) = 0,
+    asset_description_offset: u64 align(1) = 0,
+    author_offset: u64 align(1) = 0,
+    reserved: [2]u64 align(1) = [1]u64{0} ** 2,
+
+    source_file_base_name_count: u32 align(1) = 0,
+    asset_name_count: u32 align(1) = 0,
+    asset_description_count: u32 align(1) = 0,
+    author_count: u32 align(1) = 0,
+
+    sprite_sheet_x: u32 align(1) = 0,
+    sprite_sheet_y: u32 align(1) = 0,
+    reserved32: [2]u32 align(1) = [1]u32{0} ** 2,
 };
 
 pub const HHAAsset = extern struct {
     data_offset: u64 align(1) = 0,
-    first_tag_index: u32 = 0,
-    one_past_last_tag_index: u32 = 0,
+    first_tag_index: u32 align(1) = 0,
+    one_past_last_tag_index: u32 align(1) = 0,
     info: extern union {
         bitmap: HHABitmap,
         sound: HHASound,
         font: HHAFont,
-    },
+    } = undefined,
 };
 
 pub const HHABitmap = extern struct {
