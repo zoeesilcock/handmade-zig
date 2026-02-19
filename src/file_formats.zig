@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 1;
 
@@ -20,20 +22,16 @@ pub const AssetTagId = enum(u32) {
     // in which case you set it to it's Primacy + 1.
     Primacy,
 
-    DataType,
-
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
     }
 };
 
-pub const AssetDataTypeId = enum(u32) {
+pub const HHAAssetType = enum(u32) {
     None,
-
-    Sprite,
-    Font,
-    FontGlyph,
+    Bitmap,
     Sound,
+    Font,
 };
 
 pub const HHAHeader = extern struct {
@@ -51,15 +49,21 @@ pub const HHAHeader = extern struct {
 
     reserved64: [5]u64 align(1) = [1]u64{0} ** 5,
 };
+comptime {
+    std.debug.assert(@sizeOf(HHAHeader) == (16 * 4 + 8 * 8));
+}
 
 pub fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {
     return @as(u32, a << 0) | @as(u32, b << 8) | @as(u32, c << 16) | @as(u32, d << 24);
 }
 
 pub const HHATag = extern struct {
-    id: u32 align(1) = 0,
+    id: AssetTagId align(1) = .Smoothness,
     value: f32 align(1) = 0,
 };
+comptime {
+    std.debug.assert(@sizeOf(HHATag) == (2 * 4));
+}
 
 pub const HHAAnnotation = extern struct {
     source_file_date: u64 align(1) = 0,
@@ -68,7 +72,7 @@ pub const HHAAnnotation = extern struct {
     asset_name_offset: u64 align(1) = 0,
     asset_description_offset: u64 align(1) = 0,
     author_offset: u64 align(1) = 0,
-    reserved: [2]u64 align(1) = [1]u64{0} ** 2,
+    reserved: [6]u64 align(1) = [1]u64{0} ** 6,
 
     source_file_base_name_count: u32 align(1) = 0,
     asset_name_count: u32 align(1) = 0,
@@ -79,17 +83,27 @@ pub const HHAAnnotation = extern struct {
     sprite_sheet_y: u32 align(1) = 0,
     reserved32: [2]u32 align(1) = [1]u32{0} ** 2,
 };
+comptime {
+    std.debug.assert(@sizeOf(HHAAnnotation) == (16 * 8));
+}
 
 pub const HHAAsset = extern struct {
     data_offset: u64 align(1) = 0,
+    data_size: u32 align(1) = 0,
     first_tag_index: u32 align(1) = 0,
     one_past_last_tag_index: u32 align(1) = 0,
+    type: HHAAssetType align(1) = .None,
+
     info: extern union {
         bitmap: HHABitmap,
         sound: HHASound,
         font: HHAFont,
+        max_union_size: [13]u64,
     } = undefined,
 };
+comptime {
+    std.debug.assert(@sizeOf(HHAAsset) == (16 * 8));
+}
 
 pub const HHABitmap = extern struct {
     dim: [2]u32 = [1]u32{0} ** 2,

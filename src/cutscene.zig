@@ -4,8 +4,8 @@ const rendergroup = @import("rendergroup.zig");
 const render = @import("render.zig");
 const shared = @import("shared.zig");
 const world_mode = @import("world_mode.zig");
-const file_formats = @import("file_formats");
-const file_formats_v0 = @import("file_formats_v0");
+const file_formats = shared.file_formats;
+const file_formats_v0 = @import("file_formats_v0.zig");
 const std = @import("std");
 
 const INTERNAL = shared.INTERNAL;

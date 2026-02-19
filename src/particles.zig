@@ -7,7 +7,7 @@ const math = @import("math.zig");
 const simd = @import("simd.zig");
 const random = @import("random.zig");
 const memory = @import("memory.zig");
-const file_formats = @import("file_formats");
+const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 

@@ -4,7 +4,7 @@ const asset = @import("asset.zig");
 const math = @import("math.zig");
 const simd = @import("simd.zig");
 const intrinsics = @import("intrinsics.zig");
-const file_formats = @import("file_formats");
+const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 

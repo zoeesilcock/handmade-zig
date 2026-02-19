@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 // Defaults.
-const FORCE_RELEASE_MODE = false;
+const FORCE_RELEASE_MODE = true;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
 const SLOW_DEFAULT = true;
@@ -85,11 +85,6 @@ fn addExecutable(
         .target = target,
         .optimize = optimize,
     });
-    const file_formats_v0_module = b.addModule("file_formats_v0", .{
-        .root_source_file = b.path("src/file_formats_v0.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
 
     const exe = b.addExecutable(.{
         .name = "handmade-zig",
@@ -103,8 +98,6 @@ fn addExecutable(
     exe.stack_size = 0x100000; // 1MB.
     exe.root_module.addOptions("build_options", build_options);
     exe.root_module.addImport("file_formats", file_formats_module);
-    exe.root_module.addImport("file_formats_v0", file_formats_v0_module);
-    file_formats_v0_module.addImport("file_formats", file_formats_module);
 
     if (!internal) {
         exe.subsystem = .Windows;
@@ -141,11 +134,6 @@ fn addLibrary(
         .target = target,
         .optimize = optimize,
     });
-    const file_formats_v0_module = b.addModule("file_formats_v0", .{
-        .root_source_file = b.path("src/file_formats_v0.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
 
     const lib_handmade = b.addLibrary(.{
         .name = "handmade",
@@ -161,8 +149,6 @@ fn addLibrary(
     lib_handmade.stack_size = 0x100000; // 1MB.
     lib_handmade.root_module.addOptions("build_options", build_options);
     lib_handmade.root_module.addImport("file_formats", file_formats_module);
-    lib_handmade.root_module.addImport("file_formats_v0", file_formats_v0_module);
-    file_formats_v0_module.addImport("file_formats", file_formats_module);
 
     const lib_check = b.addLibrary(.{
         .name = "handmade",
@@ -214,11 +200,6 @@ fn addAssetBuilder(
         .target = target,
         .optimize = optimize,
     });
-    const file_formats_v0_module = b.addModule("file_formats_v0", .{
-        .root_source_file = b.path("src/file_formats_v0.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
 
     const asset_builder_exe = b.addExecutable(.{
         .name = "test-asset-builder",
@@ -233,8 +214,7 @@ fn addAssetBuilder(
     asset_builder_exe.root_module.addOptions("build_options", build_options);
     asset_builder_exe.root_module.addImport("shared", shared_module);
     asset_builder_exe.root_module.addImport("file_formats", file_formats_module);
-    asset_builder_exe.root_module.addImport("file_formats_v0", file_formats_v0_module);
-    file_formats_v0_module.addImport("file_formats", file_formats_module);
+    shared_module.addImport("file_formats", file_formats_module);
 
     const stb_dep = b.dependency("stb", .{});
     asset_builder_exe.addIncludePath(stb_dep.path(""));
@@ -268,11 +248,6 @@ fn addHHAEdit(
         .target = target,
         .optimize = optimize,
     });
-    const file_formats_v0_module = b.addModule("file_formats_v0", .{
-        .root_source_file = b.path("src/file_formats_v0.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
 
     const hha_edit_exe = b.addExecutable(.{
         .name = "hha-edit",
@@ -287,8 +262,7 @@ fn addHHAEdit(
     hha_edit_exe.root_module.addOptions("build_options", build_options);
     hha_edit_exe.root_module.addImport("shared", shared_module);
     hha_edit_exe.root_module.addImport("file_formats", file_formats_module);
-    hha_edit_exe.root_module.addImport("file_formats_v0", file_formats_v0_module);
-    file_formats_v0_module.addImport("file_formats", file_formats_module);
+    shared_module.addImport("file_formats", file_formats_module);
 
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     hha_edit_exe.root_module.addImport("win32", zigwin32);

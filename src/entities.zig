@@ -8,7 +8,7 @@ const render = @import("render.zig");
 const particles = @import("particles.zig");
 const rendergroup = @import("rendergroup.zig");
 const lighting = @import("lighting.zig");
-const file_formats = @import("file_formats");
+const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 

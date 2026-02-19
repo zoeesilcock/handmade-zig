@@ -4,6 +4,11 @@ pub const HHA_MAGIC_VALUE = file_formats.hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 0;
 pub const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeIdV0).@"enum".fields.len;
 
+// Types.
+const HHABitmap = file_formats.HHABitmap;
+const HHASound = file_formats.HHASound;
+const HHAFont = file_formats.HHAFont;
+
 pub const AssetTypeIdV0 = enum(u32) {
     None,
 
@@ -62,4 +67,15 @@ pub const HHAHeaderV0 = extern struct {
     // TODO: Right now we have a situation where we are no longer making contiguous asset type blocks - so it would be
     // better to switch to just having asset type IDs stored directly in the HHAAsset, because it's just burning space
     // and cycles to store it in the AssetTypes array.
+};
+
+pub const HHAAssetV0 = extern struct {
+    data_offset: u64 align(1) = 0,
+    first_tag_index: u32 align(1) = 0,
+    one_past_last_tag_index: u32 align(1) = 0,
+    info: extern union {
+        bitmap: HHABitmap,
+        sound: HHASound,
+        font: HHAFont,
+    } = undefined,
 };

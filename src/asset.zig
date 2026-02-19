@@ -7,8 +7,8 @@ const render = @import("render.zig");
 const png = @import("png.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
-const file_formats = @import("file_formats");
-const file_formats_v0 = @import("file_formats_v0");
+const file_formats = shared.file_formats;
+const file_formats_v0 = shared.file_formats_v0;
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 const gl = @import("opengl.zig").gl;
@@ -83,7 +83,7 @@ const AssetHeaderType = enum(u32) {
 
 // TODO. At some point we should move to fixed size blocks, perhaps one for cutscene plates and one for in-game
 // artworks, like a 64x64, 1024x1024, and 2048x1024 grouping.
-const AssetMemoryHeader = extern struct {
+pub const AssetMemoryHeader = extern struct {
     next: ?*AssetMemoryHeader,
     previous: ?*AssetMemoryHeader,
     asset_type: AssetHeaderType,
@@ -400,7 +400,7 @@ pub const Assets = struct {
             while (direction_tag_index < assets.direction_tag.len) : (direction_tag_index += 1) {
                 assets.direction_tag[direction_tag_index] = assets.reserveTag(1);
                 var tag: *HHATag = &assets.tags[assets.direction_tag[direction_tag_index]];
-                tag.id = @intFromEnum(AssetTagId.FacingDirection);
+                tag.id = AssetTagId.FacingDirection;
                 tag.value = math.TAU32 / @as(f32, @floatFromInt(assets.direction_tag.len));
             }
 
@@ -667,13 +667,13 @@ pub const Assets = struct {
             while (tag_index < asset.hha.one_past_last_tag_index) : (tag_index += 1) {
                 const tag: *HHATag = &self.tags[tag_index];
 
-                const a: f32 = match_vector.e[tag.id];
+                const a: f32 = match_vector.e[tag.id.toInt()];
                 const b: f32 = tag.value;
                 const d0 = intrinsics.absoluteValue(a - b);
-                const d1 = intrinsics.absoluteValue((a - (self.tag_range[tag.id] * intrinsics.signOfF32(a))) - b);
+                const d1 = intrinsics.absoluteValue((a - (self.tag_range[tag.id.toInt()] * intrinsics.signOfF32(a))) - b);
                 const difference = @min(d0, d1);
 
-                const weighted = weight_vector.e[tag.id] * intrinsics.absoluteValue(difference);
+                const weighted = weight_vector.e[tag.id.toInt()] * intrinsics.absoluteValue(difference);
                 total_weighted_diff += weighted;
             }
 

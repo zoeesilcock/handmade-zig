@@ -16,8 +16,9 @@ const brains = @import("brains.zig");
 const rendergroup = @import("rendergroup.zig");
 const render = @import("render.zig");
 const lighting = @import("lighting.zig");
-const file_formats = @import("file_formats");
-const asset = @import("asset.zig");
+pub const file_formats = @import("file_formats");
+pub const file_formats_v0 = @import("file_formats_v0.zig");
+pub const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const cutscene = @import("cutscene.zig");
 const random = @import("random.zig");
@@ -62,7 +63,18 @@ pub const Buffer = struct {
     count: usize = 0,
     data: [*]u8 = undefined,
 
-    pub const empty: String = .{};
+    pub const empty: Buffer = .{};
+
+    pub fn fromSlice(slice: []const u8) Buffer {
+        return .{
+            .count = slice.len,
+            .data = @constCast(slice.ptr),
+        };
+    }
+
+    pub fn toSlice(self: *Buffer) []const u8 {
+        return self.data[0..self.count];
+    }
 
     pub fn advance(self: *Buffer, count: usize) ?[*]u8 {
         var result: ?[*]u8 = null;
@@ -77,10 +89,6 @@ pub const Buffer = struct {
         }
 
         return result;
-    }
-
-    pub fn toSlice(self: *Buffer) []const u8 {
-        return self.data[0..self.count];
     }
 };
 

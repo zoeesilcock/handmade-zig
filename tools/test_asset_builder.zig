@@ -1,7 +1,7 @@
 const std = @import("std");
 const shared = @import("shared");
-const file_formats = @import("file_formats");
-const file_formats_v0 = @import("file_formats_v0");
+const file_formats = shared.file_formats;
+const file_formats_v0 = shared.file_formats_v0;
 const math = shared.math;
 const intrinsics = shared.intrinsics;
 
@@ -962,7 +962,7 @@ pub const Assets = struct {
         const tag: *HHATag = &self.tags[self.tag_count];
         self.tag_count += 1;
 
-        tag.id = tag_id.toInt();
+        tag.id = tag_id;
         tag.value = value;
     }
 

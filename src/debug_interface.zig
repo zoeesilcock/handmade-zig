@@ -3,7 +3,7 @@ const memory = @import("memory.zig");
 const math = @import("math.zig");
 const asset = @import("asset.zig");
 const debug = @import("debug.zig");
-const file_formats = @import("file_formats");
+const file_formats = shared.file_formats;
 const config = @import("config.zig");
 const std = @import("std");
 
