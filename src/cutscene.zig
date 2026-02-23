@@ -5,7 +5,6 @@ const render = @import("render.zig");
 const shared = @import("shared.zig");
 const world_mode = @import("world_mode.zig");
 const file_formats = shared.file_formats;
-const file_formats_v0 = @import("file_formats_v0.zig");
 const std = @import("std");
 
 const INTERNAL = shared.INTERNAL;
@@ -14,7 +13,7 @@ const CUTSCENE_WARMUP_SECONDS: f32 = 2;
 const TransientState = shared.TransientState;
 const Assets = asset.Assets;
 const AssetTagId = file_formats.AssetTagId;
-const AssetTypeId = file_formats_v0.AssetTypeIdV0;
+const AssetTypeId = asset.AssetTypeId;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;

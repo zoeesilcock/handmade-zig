@@ -11,6 +11,7 @@ const String = shared.String;
 const HHAHeaderV0 = file_formats_v0.HHAHeaderV0;
 const HHAAssetTypeV0 = file_formats_v0.HHAAssetTypeV0;
 const HHAAssetV0 = file_formats_v0.HHAAssetV0;
+const AssetTypeIdV0 = file_formats_v0.AssetTypeIdV0;
 
 const HHAHeader = file_formats.HHAHeader;
 const HHAAssetType = file_formats.HHAAssetType;
@@ -51,10 +52,8 @@ pub fn myLogFn(
 const LoadedHHAAnnotation = struct {
     source_file_date: u64 align(1) = 0,
     source_file_checksum: u64 align(1) = 0,
-    reserved: [6]u64 align(1) = [1]u64{0} ** 6,
     sprite_sheet_x: u32 align(1) = 0,
     sprite_sheet_y: u32 align(1) = 0,
-    reserved32: [2]u32 align(1) = [1]u32{0} ** 2,
 
     source_file_base_name: String = .empty,
     asset_name: String = .empty,
@@ -90,36 +89,61 @@ fn readEntireFile(file: std.fs.File, allocator: std.mem.Allocator) ![]const u8 {
     return result;
 }
 
-const type_from_id = [_]struct { HHAAssetType, []const u8 }{
-    .{ .None, "NONE" },
+const type_from_id = [_]struct { HHAAssetType, AssetTypeIdV0 }{
+    .{ .None, .None },
 
-    .{ .Bitmap, "Shadow" },
-    .{ .Bitmap, "Tree" },
-    .{ .Bitmap, "Sword" },
-    .{ .Bitmap, "Rock" },
+    .{ .Bitmap, .Shadow },
+    .{ .Bitmap, .Tree },
+    .{ .Bitmap, .Sword },
+    .{ .Bitmap, .Rock },
 
-    .{ .Bitmap, "Grass" },
-    .{ .Bitmap, "Tuft" },
-    .{ .Bitmap, "Stone" },
+    .{ .Bitmap, .Grass },
+    .{ .Bitmap, .Tuft },
+    .{ .Bitmap, .Stone },
 
-    .{ .Bitmap, "Head" },
-    .{ .Bitmap, "Cape" },
-    .{ .Bitmap, "Torso" },
+    .{ .Bitmap, .Head },
+    .{ .Bitmap, .Cape },
+    .{ .Bitmap, .Torso },
 
-    .{ .Font, "Font" },
-    .{ .Bitmap, "FontGlyph" },
+    .{ .Font, .Font },
+    .{ .Bitmap, .FontGlyph },
 
-    .{ .Sound, "Bloop" },
-    .{ .Sound, "Crack" },
-    .{ .Sound, "Drop" },
-    .{ .Sound, "Glide" },
-    .{ .Sound, "Music" },
-    .{ .Sound, "Puhp" },
+    .{ .Sound, .Bloop },
+    .{ .Sound, .Crack },
+    .{ .Sound, .Drop },
+    .{ .Sound, .Glide },
+    .{ .Sound, .Music },
+    .{ .Sound, .Puhp },
 
-    .{ .Bitmap, "OpeningCutscene" },
+    .{ .Bitmap, .OpeningCutscene },
 
-    .{ .Bitmap, "Hand" },
+    .{ .Bitmap, .Hand },
 };
+
+fn removeExtension(file_name: *String) void {
+    var new_count: usize = file_name.count;
+    var index: usize = 0;
+    while (index < file_name.count) : (index += 1) {
+        if (file_name.data[index] == '.') {
+            new_count = index;
+        } else if (file_name.data[index] == '/' or file_name.data[index] == '\\') {
+            new_count = file_name.count;
+        }
+    }
+    file_name.count = new_count;
+}
+
+fn removePath(file_name: *String) void {
+    var new_start: usize = 0;
+    var index: usize = 0;
+    while (index < file_name.count) : (index += 1) {
+        if (file_name.data[index] == '/' or file_name.data[index] == '\\') {
+            new_start = index + 1;
+        }
+    }
+    file_name.data += new_start;
+    file_name.count -= new_start;
+}
 
 fn readHHAV0(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
     _ = source_file;
@@ -129,24 +153,27 @@ fn readHHAV0(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Alloc
     const source_asset_types: [*]HHAAssetTypeV0 = @ptrFromInt(@intFromPtr(hha.data_store.ptr) + header.asset_types);
     const source_assets: [*]HHAAssetV0 = @ptrFromInt(@intFromPtr(hha.data_store.ptr) + header.assets);
 
-    hha.tag_count = header.tag_count;
+    hha.tag_count = header.tag_count + header.asset_count - 1;
     hha.tags = @ptrCast(allocator.alloc(HHATag, hha.tag_count) catch unreachable);
 
     hha.asset_count = header.asset_count;
     hha.assets = @ptrCast(allocator.alloc(HHAAsset, hha.asset_count) catch unreachable);
     hha.annotations = @ptrCast(allocator.alloc(LoadedHHAAnnotation, hha.asset_count) catch unreachable);
 
-    const default_annotation: LoadedHHAAnnotation = .{
+    var default_annotation: LoadedHHAAnnotation = .{
         .source_file_base_name = .fromSlice(hha.source_file_name),
         .asset_name = .fromSlice("UNKNOWN"),
         .asset_description = .fromSlice("imported by readHHAV0"),
         .author = .fromSlice("hha-edit.exe"),
     };
+    removePath(&default_annotation.source_file_base_name);
+    removeExtension(&default_annotation.source_file_base_name);
 
     hha.annotations[0] = .{};
     hha.assets[0] = .{};
     hha.tags[0] = .{};
 
+    var dest_tag_index: u32 = 1;
     var asset_type_index: u32 = 0;
     while (asset_type_index < header.asset_type_count) : (asset_type_index += 1) {
         const asset_type: HHAAssetTypeV0 = source_asset_types[asset_type_index];
@@ -162,9 +189,18 @@ fn readHHAV0(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Alloc
             dest_asset.* = .{};
 
             if (asset_index < hha.asset_count) {
+                dest_asset.first_tag_index = dest_tag_index;
+                var tag_index: u32 = source_asset.first_tag_index;
+                while (tag_index < source_asset.one_past_last_tag_index) : (tag_index += 1) {
+                    hha.tags[dest_tag_index] = source_tags[tag_index];
+                    dest_tag_index += 1;
+                }
+                hha.tags[dest_tag_index].id = .BasicCategory;
+                hha.tags[dest_tag_index].value = @floatFromInt(asset_type.type_id);
+                dest_tag_index += 1;
+                dest_asset.one_past_last_tag_index = dest_tag_index;
+
                 dest_asset.data_offset = source_asset.data_offset;
-                dest_asset.first_tag_index = source_asset.first_tag_index;
-                dest_asset.one_past_last_tag_index = source_asset.one_past_last_tag_index;
                 dest_asset.type = type_info[0];
 
                 switch (dest_asset.type) {
@@ -196,18 +232,68 @@ fn readHHAV0(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Alloc
             }
 
             hha.annotations[asset_index] = default_annotation;
-            hha.annotations[asset_index].asset_name = .fromSlice(type_info[1]);
+            hha.annotations[asset_index].asset_name = .fromSlice(@tagName(type_info[1]));
         }
     }
-
-    var tag_index: u32 = 1;
-    while (tag_index < header.tag_count) : (tag_index += 1) {
-        hha.tags[tag_index] = source_tags[tag_index];
-    }
 }
-fn readHHAV1(source_file: std.fs.File, dest: *LoadedHHA) void {
+
+fn refString(d: [*]const u8, count: u32, offset: u64) String {
+    return .{
+        .count = count,
+        .data = @constCast(d + offset),
+    };
+}
+
+fn readHHAV1(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
     _ = source_file;
-    _ = dest;
+
+    const header: *const HHAHeader = @ptrCast(hha.data_store);
+    const d: [*]const u8 = @ptrCast(hha.data_store.ptr);
+
+    hha.tag_count = header.tag_count;
+    hha.tags = @ptrCast(@constCast(d + header.tags));
+
+    hha.asset_count = header.asset_count;
+    hha.assets = @ptrCast(@alignCast(@constCast(d + header.assets)));
+
+    if (header.annotations != 0) {
+        hha.annotations = @ptrCast(allocator.alloc(LoadedHHAAnnotation, hha.asset_count) catch undefined);
+
+        var annotation_index: u32 = 0;
+        while (annotation_index < hha.asset_count) : (annotation_index += 1) {
+            const source_annotation: [*]HHAAnnotation =
+                @as([*]HHAAnnotation, @ptrCast(@constCast(d + header.annotations))) + annotation_index;
+            const dest_annotation: [*]LoadedHHAAnnotation = hha.annotations + annotation_index;
+
+            dest_annotation[0].source_file_date = source_annotation[0].source_file_date;
+            dest_annotation[0].source_file_checksum = source_annotation[0].source_file_checksum;
+            dest_annotation[0].sprite_sheet_x = source_annotation[0].sprite_sheet_x;
+            dest_annotation[0].sprite_sheet_y = source_annotation[0].sprite_sheet_y;
+
+            dest_annotation[0].source_file_base_name = refString(
+                d,
+                source_annotation[0].source_file_base_name_count,
+                source_annotation[0].source_file_base_name_offset,
+            );
+            dest_annotation[0].asset_name = refString(
+                d,
+                source_annotation[0].asset_name_count,
+                source_annotation[0].asset_name_offset,
+            );
+            dest_annotation[0].asset_description = refString(
+                d,
+                source_annotation[0].asset_description_count,
+                source_annotation[0].asset_description_offset,
+            );
+            dest_annotation[0].author = refString(
+                d,
+                source_annotation[0].author_count,
+                source_annotation[0].author_offset,
+            );
+        }
+
+        hha.had_annotations = true;
+    }
 }
 
 fn readHHA(source_file_name: []const u8, allocator: std.mem.Allocator) ?*LoadedHHA {
@@ -228,8 +314,8 @@ fn readHHA(source_file_name: []const u8, allocator: std.mem.Allocator) ?*LoadedH
             if (result.?.source_version == 0) {
                 readHHAV0(source_file, result.?, allocator);
                 result.?.valid = true;
-            } else if (result.?.source_version == 0) {
-                readHHAV1(source_file, result.?);
+            } else if (result.?.source_version == 1) {
+                readHHAV1(source_file, result.?, allocator);
                 result.?.valid = true;
             } else {
                 std.log.err("Unrecognized HHA version: {d}", .{result.?.source_version});
@@ -244,12 +330,114 @@ fn readHHA(source_file_name: []const u8, allocator: std.mem.Allocator) ?*LoadedH
     return result;
 }
 
-fn writeHHA(opt_source: ?*LoadedHHA, dest_file_name: []const u8) void {
+fn writeBlock(size: u32, source: *anyopaque, dest_file: *const std.fs.File) u64 {
+    const result: u64 = dest_file.getPos() catch unreachable;
+
+    const bytes: [*]const u8 = @ptrCast(source);
+    dest_file.writeAll(bytes[0..size]) catch unreachable;
+
+    return result;
+}
+
+fn writeString(string: String, count: *align(1) u32, dest_file: *const std.fs.File) u64 {
+    count.* = @intCast(string.count);
+    const result: u64 = writeBlock(@intCast(string.count), string.data, dest_file);
+    return result;
+}
+
+fn writeHHAV1(
+    source: *LoadedHHA,
+    dest_file: *const std.fs.File,
+    allocator: std.mem.Allocator,
+    include_annotations: bool,
+) void {
+    var header: HHAHeader = .{};
+
+    header.tag_count = source.tag_count;
+    header.asset_count = source.asset_count;
+
+    const dest_tags_size: u32 = source.tag_count * @sizeOf(HHATag);
+    const dest_assets_size: u32 = source.asset_count * @sizeOf(HHAAsset);
+    const dest_annotations_size: u32 = source.asset_count * @sizeOf(HHAAnnotation);
+
+    const dest_tags: [*]HHATag = @ptrCast(allocator.alloc(HHATag, header.tag_count) catch undefined);
+    const dest_assets: [*]HHAAsset = @ptrCast(allocator.alloc(HHAAsset, header.asset_count) catch undefined);
+    const dest_annotations: [*]HHAAnnotation = @ptrCast(allocator.alloc(HHAAnnotation, header.asset_count) catch undefined);
+
+    const header_size: u32 = @sizeOf(HHAHeader);
+    dest_file.seekTo(header_size) catch unreachable;
+
+    var tag_index: u32 = 0;
+    while (tag_index < source.tag_count) : (tag_index += 1) {
+        const source_tag: *HHATag = &source.tags[tag_index];
+        const dest_tag: *HHATag = &dest_tags[tag_index];
+        dest_tag.* = source_tag.*;
+    }
+
+    var asset_index: u32 = 0;
+    while (asset_index < source.asset_count) : (asset_index += 1) {
+        const source_asset: *HHAAsset = &source.assets[asset_index];
+        const source_annotation: *LoadedHHAAnnotation = &source.annotations[asset_index];
+
+        const dest_asset: *HHAAsset = &dest_assets[asset_index];
+        const dest_annotation: *HHAAnnotation = &dest_annotations[asset_index];
+
+        dest_asset.* = source_asset.*;
+        dest_asset.data_offset = writeBlock(
+            dest_asset.data_size,
+            @ptrFromInt(@intFromPtr(source.data_store.ptr) + source_asset.data_offset),
+            dest_file,
+        );
+
+        dest_annotation.* = .{
+            .source_file_date = source_annotation.source_file_date,
+            .source_file_checksum = source_annotation.source_file_checksum,
+            .sprite_sheet_x = source_annotation.sprite_sheet_x,
+            .sprite_sheet_y = source_annotation.sprite_sheet_y,
+        };
+
+        dest_annotation.source_file_base_name_offset = writeString(
+            source_annotation.source_file_base_name,
+            &dest_annotation.source_file_base_name_count,
+            dest_file,
+        );
+
+        dest_annotation.asset_name_offset = writeString(
+            source_annotation.asset_name,
+            &dest_annotation.asset_name_count,
+            dest_file,
+        );
+
+        dest_annotation.asset_description_offset = writeString(
+            source_annotation.asset_description,
+            &dest_annotation.asset_description_count,
+            dest_file,
+        );
+
+        dest_annotation.author_offset = writeString(
+            source_annotation.author,
+            &dest_annotation.author_count,
+            dest_file,
+        );
+    }
+
+    header.tags = writeBlock(dest_tags_size, dest_tags, dest_file);
+    header.assets = writeBlock(dest_assets_size, dest_assets, dest_file);
+    if (include_annotations) {
+        header.annotations = writeBlock(dest_annotations_size, dest_annotations, dest_file);
+    }
+
+    dest_file.seekTo(0) catch unreachable;
+    const check_header_location: u64 = writeBlock(header_size, &header, dest_file);
+    std.debug.assert(check_header_location == 0);
+}
+
+fn writeHHA(opt_source: ?*LoadedHHA, dest_file_name: []const u8, allocator: std.mem.Allocator) void {
     if (!fileExists(dest_file_name)) {
         if (opt_source) |source| {
             if (source.valid) {
-                if (std.fs.cwd().createFile(dest_file_name, .{})) |dest| {
-                    _ = dest;
+                if (std.fs.cwd().createFile(dest_file_name, .{})) |dest_file| {
+                    writeHHAV1(source, &dest_file, allocator, true);
                 } else |err| {
                     std.log.err("Unable to open file {s} for writing. {s}", .{ dest_file_name, @errorName(err) });
                 }
@@ -299,7 +487,13 @@ fn printContents(hha: *LoadedHHA) void {
     while (asset_index < hha.asset_count) : (asset_index += 1) {
         const hha_asset: *HHAAsset = @ptrCast(hha.assets + asset_index);
         const an: *LoadedHHAAnnotation = @ptrCast(hha.annotations + asset_index);
-        std.log.info("        [{d}]:", .{asset_index});
+        std.log.info("        [{d}] {s} {s} {d},{d}", .{
+            asset_index,
+            an.asset_name.toSlice(),
+            an.source_file_base_name.toSlice(),
+            an.sprite_sheet_x,
+            an.sprite_sheet_y,
+        });
 
         if (an.asset_description.count > 0) {
             std.log.info("            Description: {s}", .{an.asset_description.toSlice()});
@@ -387,13 +581,17 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
+    var print_usage: bool = false;
+
     if (args.len == 4) {
         if (std.mem.eql(u8, args[1], "-rewrite")) {
             const source_file_name: []const u8 = args[2];
             const dest_file_name: []const u8 = args[3];
 
             const hha: ?*LoadedHHA = readHHA(source_file_name, allocator);
-            writeHHA(hha, dest_file_name);
+            writeHHA(hha, dest_file_name, allocator);
+        } else {
+            print_usage = true;
         }
     } else if (args.len == 3) {
         if (std.mem.eql(u8, args[1], "-info")) {
@@ -436,8 +634,14 @@ pub fn main() !void {
             } else {
                 std.log.err("File {s} already exists.", .{file_name});
             }
+        } else {
+            print_usage = true;
         }
     } else {
+        print_usage = true;
+    }
+
+    if (print_usage) {
         std.log.err("Usage: {s} -create (dest.hha)", .{args[0]});
         std.log.err("Usage: {s} -rewrite (source.hha) (dest.hha)", .{args[0]});
         std.log.err("Usage: {s} -info (source.hha)", .{args[0]});

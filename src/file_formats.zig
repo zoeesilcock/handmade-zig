@@ -22,6 +22,8 @@ pub const AssetTagId = enum(u32) {
     // in which case you set it to it's Primacy + 1.
     Primacy,
 
+    BasicCategory,
+
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
     }
@@ -38,8 +40,8 @@ pub const HHAHeader = extern struct {
     magic_value: u32 align(1) = HHA_MAGIC_VALUE,
     version: u32 align(1) = HHA_VERSION,
 
-    tag_count: u32 align(1),
-    asset_count: u32 align(1),
+    tag_count: u32 align(1) = 0,
+    asset_count: u32 align(1) = 0,
 
     reserved32: [12]u32 align(1) = [1]u32{0} ** 12,
 

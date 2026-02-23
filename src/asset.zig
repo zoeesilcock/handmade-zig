@@ -29,10 +29,11 @@ const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
 const ArenaBootstrapParams = memory.ArenaBootstrapParams;
 const Platform = shared.Platform;
-const HHAHeader = file_formats_v0.HHAHeaderV0;
+const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
-const HHAAssetType = file_formats_v0.HHAAssetTypeV0;
+const HHAAssetType = file_formats.HHAAssetType;
 const HHAAsset = file_formats.HHAAsset;
+const HHAAnnotation = file_formats.HHAAnnotation;
 const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
 const HHAFont = file_formats.HHAFont;
@@ -50,8 +51,8 @@ pub const AssetTypeId = file_formats_v0.AssetTypeIdV0;
 pub const AssetTagId = file_formats.AssetTagId;
 pub const ASSET_TYPE_ID_COUNT = file_formats_v0.ASSET_TYPE_ID_COUNT;
 const ASSET_IMPORT_GRID_MAX = 8;
-const HHA_VERSION = file_formats_v0.HHA_VERSION;
-const HHA_MAGIC_VALUE = file_formats_v0.HHA_MAGIC_VALUE;
+const HHA_VERSION = file_formats.HHA_VERSION;
+const HHA_MAGIC_VALUE = file_formats.HHA_MAGIC_VALUE;
 
 const ImportGridTag = struct {
     type_id: AssetTypeId,
@@ -125,10 +126,8 @@ const AssetMemorySize = struct {
 const AssetFile = struct {
     handle: PlatformFileHandle,
     header: HHAHeader,
-    asset_type_array: [*]HHAAssetType,
     tag_base: u32,
     asset_base: u32,
-    font_bitmap_id_offset: u32,
     high_water_mark: u64,
     modified: bool,
 
@@ -258,23 +257,11 @@ pub const Assets = struct {
                 defer file_index += 1;
 
                 const file_handle = shared.platform.openFile(&file_group, file_info, open_flags);
-                file[0].font_bitmap_id_offset = 0;
                 file[0].tag_base = assets.tag_count;
-                file[0].asset_base = assets.asset_count;
+                file[0].asset_base = assets.asset_count - 1;
                 file[0].handle = file_handle;
 
                 shared.platform.readDataFromFile(&file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
-
-                const asset_type_array_size: u32 = file[0].header.asset_type_count * @sizeOf(HHAAssetType);
-                if (asset_type_array_size > 0) {
-                    file[0].asset_type_array = @ptrCast(@alignCast(arena.pushSize(asset_type_array_size, null)));
-                    shared.platform.readDataFromFile(
-                        &file[0].handle,
-                        file[0].header.asset_types,
-                        asset_type_array_size,
-                        file[0].asset_type_array,
-                    );
-                }
 
                 if (file[0].header.magic_value != HHA_MAGIC_VALUE) {
                     shared.platform.fileError(&file[0].handle, "HHA file has an invalid magic value.");
@@ -299,7 +286,7 @@ pub const Assets = struct {
 
                 file[0].high_water_mark = file_info.file_size;
                 while (file[0].retractWaterMark(file[0].header.tag_count, file[0].header.tags, @sizeOf(HHATag)) or
-                    file[0].retractWaterMark(file[0].header.asset_type_count, file[0].header.asset_types, @sizeOf(HHAAssetType)) or
+                    file[0].retractWaterMark(file[0].header.asset_count, file[0].header.annotations, @sizeOf(HHAAnnotation)) or
                     file[0].retractWaterMark(file[0].header.asset_count, file[0].header.assets, @sizeOf(HHAAsset)))
                 {
                     // Do nothing
@@ -344,31 +331,23 @@ pub const Assets = struct {
                     );
                 }
 
-                const asset_index_base: u32 = asset_count;
-                var source_index: u32 = 0;
-                while (source_index < file[0].header.asset_type_count) : (source_index += 1) {
-                    const source_type: [*]HHAAssetType = file[0].asset_type_array + source_index;
-                    if (source_type[0].type_id == AssetTypeId.FontGlyph.toInt()) {
-                        file[0].font_bitmap_id_offset = asset_count - source_type[0].first_asset_index;
-                    }
-
-                    const asset_count_for_type =
-                        source_type[0].one_past_last_asset_index - source_type[0].first_asset_index;
+                if (file[0].header.asset_count > 0) {
+                    const file_asset_count: u32 = file[0].header.asset_count - 1;
 
                     const temp_mem = transient_state.arena.beginTemporaryMemory();
                     defer transient_state.arena.endTemporaryMemory(temp_mem);
-                    const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(asset_count_for_type, HHAAsset, null);
+                    const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(file_asset_count, HHAAsset, null);
 
                     shared.platform.readDataFromFile(
                         &file[0].handle,
-                        file[0].header.assets + source_type[0].first_asset_index * @sizeOf(HHAAsset),
-                        asset_count_for_type * @sizeOf(HHAAsset),
+                        file[0].header.assets + @sizeOf(HHAAsset),
+                        file_asset_count * @sizeOf(HHAAsset),
                         hha_asset_array,
                     );
 
                     // Rebase tag indexes.
                     var asset_index: u32 = 0;
-                    while (asset_index < asset_count_for_type) : (asset_index += 1) {
+                    while (asset_index < file_asset_count) : (asset_index += 1) {
                         const hha_asset = hha_asset_array + asset_index;
 
                         std.debug.assert(asset_count < assets.asset_count);
@@ -376,10 +355,8 @@ pub const Assets = struct {
                         asset_count += 1;
                         const asset = assets.assets + global_asset_index;
 
-                        assets.setAssetType(global_asset_index, @enumFromInt(source_type[0].type_id));
-
                         asset[0].file_index = file_index;
-                        asset[0].asset_index_in_file = global_asset_index - asset_index_base;
+                        asset[0].asset_index_in_file = global_asset_index - file[0].asset_base;
                         asset[0].hha = hha_asset[0];
 
                         if (asset[0].hha.first_tag_index == 0) {
@@ -388,6 +365,16 @@ pub const Assets = struct {
                             asset[0].hha.first_tag_index += (file[0].tag_base - 1);
                             asset[0].hha.one_past_last_tag_index += (file[0].tag_base - 1);
                         }
+
+                        var type_id: AssetTypeId = .None;
+                        var asset_tag_index: u32 = asset[0].hha.first_tag_index;
+                        while (asset_tag_index < asset[0].hha.one_past_last_tag_index) : (asset_tag_index += 1) {
+                            if (assets.tags[asset_tag_index].id == .BasicCategory) {
+                                type_id = @enumFromInt(@as(u32, @intFromFloat(assets.tags[asset_tag_index].value)));
+                            }
+                        }
+
+                        assets.setAssetType(global_asset_index, type_id);
                     }
                 }
             }
@@ -1032,7 +1019,7 @@ pub const Assets = struct {
                         asset.header = self.acquireAssetMemory(shared.align16(size_total), id.value, .Font);
 
                         var font: *LoadedFont = @ptrCast(@alignCast(&asset.header.?.data.font));
-                        font.bitmap_id_offset = self.getFile(asset.file_index).font_bitmap_id_offset;
+                        font.bitmap_id_offset = self.getFile(asset.file_index).asset_base;
                         font.glyphs = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
                         font.horizontal_advance =
                             @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.glyphs)) + glyphs_size));
@@ -1159,78 +1146,81 @@ pub const Assets = struct {
     }
 
     pub fn writeModificationsToHHA(self: *Assets, file_index: u32, temp_arena: *MemoryArena) void {
-        const file: *AssetFile = &self.files[file_index];
-        file.modified = false;
-
-        var asset_count: u32 = 0;
-        var tag_count: u32 = 1; // First tag entry is skipped as the null tag!
-        var asset_index: u32 = 0;
-        while (asset_index < self.asset_count) : (asset_index += 1) {
-            const asset: *Asset = &self.assets[asset_index];
-            if (asset.file_index == file_index) {
-                asset_count += 1;
-                tag_count += (asset.hha.one_past_last_tag_index - asset.hha.first_tag_index);
-            }
-        }
-
-        const asset_type_count: u32 = asset_count;
-        asset_count += 1; // Account for the null at index 0.
-
-        const tag_array_size: u64 = tag_count * @sizeOf(HHATag);
-        const asset_types_array_size: u64 = asset_type_count * @sizeOf(HHAAssetType);
-        const assets_array_size: u64 = asset_count * @sizeOf(HHAAsset);
-
-        file.header.tag_count = tag_count;
-        file.header.asset_type_count = asset_type_count;
-        file.header.asset_count = asset_count;
-
-        file.header.tags = file.high_water_mark;
-        file.header.asset_types = file.header.tags + tag_array_size;
-        file.header.assets = file.header.asset_types + asset_types_array_size;
-
-        const tags: [*]HHATag = temp_arena.pushArray(tag_count, HHATag, null);
-        const asset_types: [*]HHAAssetType = temp_arena.pushArray(asset_type_count, HHAAssetType, null);
-        const assets: [*]HHAAsset = temp_arena.pushArray(asset_count, HHAAsset, null);
-
-        var dest_type: [*]HHAAssetType = asset_types;
-        var tag_index_in_file: u32 = 1;
-        var asset_index_in_file: u32 = 1;
-
-        var type_id: u32 = 0;
-        while (type_id < self.first_asset_of_type.len) : (type_id += 1) {
-            asset_index = self.first_asset_of_type[type_id];
-            while (asset_index > 0) {
-                const source: *Asset = &self.assets[asset_index];
-                if (source.file_index == file_index) {
-                    var dest: [*]HHAAsset = assets + asset_index_in_file;
-
-                    dest_type[0].type_id = type_id;
-                    dest_type[0].first_asset_index = asset_index_in_file;
-                    dest_type[0].one_past_last_asset_index = dest_type[0].first_asset_index + 1;
-                    dest_type += 1;
-
-                    dest[0] = source.hha;
-                    var tag_index: u32 = dest[0].first_tag_index;
-                    while (tag_index < dest[0].one_past_last_tag_index) : (tag_index += 1) {
-                        tags[tag_index_in_file] = self.tags[tag_index];
-                        tag_index_in_file += 1;
-                    }
-
-                    asset_index_in_file += 1;
-                }
-
-                asset_index = source.next_of_type;
-            }
-        }
-
-        std.debug.assert(tag_index_in_file == tag_count);
-        std.debug.assert(asset_index_in_file == asset_count);
-        std.debug.assert(dest_type == asset_types + asset_type_count);
-
-        shared.platform.writeDataToFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
-        shared.platform.writeDataToFile(&file.handle, file.header.tags, tag_array_size, tags);
-        shared.platform.writeDataToFile(&file.handle, file.header.asset_types, asset_types_array_size, asset_types);
-        shared.platform.writeDataToFile(&file.handle, file.header.assets, assets_array_size, assets);
+        _ = self;
+        _ = file_index;
+        _ = temp_arena;
+        // const file: *AssetFile = &self.files[file_index];
+        // file.modified = false;
+        //
+        // var asset_count: u32 = 0;
+        // var tag_count: u32 = 1; // First tag entry is skipped as the null tag!
+        // var asset_index: u32 = 0;
+        // while (asset_index < self.asset_count) : (asset_index += 1) {
+        //     const asset: *Asset = &self.assets[asset_index];
+        //     if (asset.file_index == file_index) {
+        //         asset_count += 1;
+        //         tag_count += (asset.hha.one_past_last_tag_index - asset.hha.first_tag_index);
+        //     }
+        // }
+        //
+        // const asset_type_count: u32 = asset_count;
+        // asset_count += 1; // Account for the null at index 0.
+        //
+        // const tag_array_size: u64 = tag_count * @sizeOf(HHATag);
+        // const asset_types_array_size: u64 = asset_type_count * @sizeOf(HHAAssetType);
+        // const assets_array_size: u64 = asset_count * @sizeOf(HHAAsset);
+        //
+        // file.header.tag_count = tag_count;
+        // file.header.asset_type_count = asset_type_count;
+        // file.header.asset_count = asset_count;
+        //
+        // file.header.tags = file.high_water_mark;
+        // file.header.asset_types = file.header.tags + tag_array_size;
+        // file.header.assets = file.header.asset_types + asset_types_array_size;
+        //
+        // const tags: [*]HHATag = temp_arena.pushArray(tag_count, HHATag, null);
+        // const asset_types: [*]HHAAssetType = temp_arena.pushArray(asset_type_count, HHAAssetType, null);
+        // const assets: [*]HHAAsset = temp_arena.pushArray(asset_count, HHAAsset, null);
+        //
+        // var dest_type: [*]HHAAssetType = asset_types;
+        // var tag_index_in_file: u32 = 1;
+        // var asset_index_in_file: u32 = 1;
+        //
+        // var type_id: u32 = 0;
+        // while (type_id < self.first_asset_of_type.len) : (type_id += 1) {
+        //     asset_index = self.first_asset_of_type[type_id];
+        //     while (asset_index > 0) {
+        //         const source: *Asset = &self.assets[asset_index];
+        //         if (source.file_index == file_index) {
+        //             var dest: [*]HHAAsset = assets + asset_index_in_file;
+        //
+        //             dest_type[0].type_id = type_id;
+        //             dest_type[0].first_asset_index = asset_index_in_file;
+        //             dest_type[0].one_past_last_asset_index = dest_type[0].first_asset_index + 1;
+        //             dest_type += 1;
+        //
+        //             dest[0] = source.hha;
+        //             var tag_index: u32 = dest[0].first_tag_index;
+        //             while (tag_index < dest[0].one_past_last_tag_index) : (tag_index += 1) {
+        //                 tags[tag_index_in_file] = self.tags[tag_index];
+        //                 tag_index_in_file += 1;
+        //             }
+        //
+        //             asset_index_in_file += 1;
+        //         }
+        //
+        //         asset_index = source.next_of_type;
+        //     }
+        // }
+        //
+        // std.debug.assert(tag_index_in_file == tag_count);
+        // std.debug.assert(asset_index_in_file == asset_count);
+        // std.debug.assert(dest_type == asset_types + asset_type_count);
+        //
+        // shared.platform.writeDataToFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
+        // shared.platform.writeDataToFile(&file.handle, file.header.tags, tag_array_size, tags);
+        // shared.platform.writeDataToFile(&file.handle, file.header.asset_types, asset_types_array_size, asset_types);
+        // shared.platform.writeDataToFile(&file.handle, file.header.assets, assets_array_size, assets);
     }
 
     pub fn setAssetType(self: *Assets, asset_index: u32, type_id: AssetTypeId) void {

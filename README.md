@@ -20,6 +20,8 @@ Graphical and audio assets are not included as they are not created by me. The f
 * `handmade_hero_legacy_art.zip/v0_hhas` to be in the `/data` directory.
 * `handmade_hero_legacy_art.zip/png_art_packs` to be in the `/art` directory.
 
+Until we reach `v2_hhas` the .hha files in `/data` need to be rewritten using `hha-edit -- rewrite`, see below.
+
 ### Packing the assets
 The asset builder can be used to generate HHA files based on the early data located at `handmade_hero_legacy_art/early_data`, they are expected to be in the `/data` directory.
 ```
@@ -37,6 +39,7 @@ The HHA edit tool can be used to create new empty HHA files.
 zig build hha-edit -Dpackage=HHAEdit -- -create local.hha
 zig build hha-edit -Dpackage=HHAEdit -- -info test.hha
 zig build hha-edit -Dpackage=HHAEdit -- -rewrite source.hha dest.hha
+zig build hha-edit -Dpackage=HHAEdit -- -dump source.hha dest.hha
 ```
 
 ## Hot reloading
