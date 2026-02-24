@@ -6,6 +6,7 @@ const debug_interface = @import("debug_interface.zig");
 const DebugTable = debug_interface.DebugTable;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
+const String = shared.String;
 
 pub const MemoryIndex = usize;
 
@@ -158,25 +159,28 @@ pub const MemoryArena = extern struct {
         return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, params))));
     }
 
-    pub fn pushString(self: *MemoryArena, source: [*:0]const u8) [*:0]const u8 {
-        var size: u32 = 0;
-
-        var char_index: u32 = 0;
-        while (source[char_index] != 0) : (char_index += 1) {
-            size += 1;
-        }
+    pub fn pushStringZ(self: *MemoryArena, source: [*:0]const u8) [*:0]const u8 {
+        var size: u32 = shared.stringLength(source);
 
         // Include the sentinel.
         size += 1;
 
         var dest = self.pushSize(size, ArenaPushParams.noClear());
 
-        char_index = 0;
+        var char_index: u32 = 0;
         while (char_index < size) : (char_index += 1) {
             dest[char_index] = source[char_index];
         }
 
         return @ptrCast(dest);
+    }
+
+    pub fn pushString(self: *MemoryArena, source: [*:0]const u8) String {
+        var result: String = .{
+            .count = shared.stringLength(source),
+        };
+        result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source))));
+        return result;
     }
 
     pub fn pushAndNullTerminateString(self: *MemoryArena, length: u32, source: [*:0]const u8) [*:0]const u8 {

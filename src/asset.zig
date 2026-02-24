@@ -61,6 +61,9 @@ const ImportGridTag = struct {
 };
 
 const ImportGridTags = struct {
+    name: String = .empty,
+    description: String = .empty,
+    author: String = .empty,
     tags: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]ImportGridTag,
 };
 
@@ -69,6 +72,8 @@ const Asset = struct {
     header: ?*AssetMemoryHeader,
 
     hha: HHAAsset,
+    annotation: HHAAnnotation,
+
     file_index: u32,
     asset_index_in_file: u32,
 
@@ -129,6 +134,7 @@ const AssetFile = struct {
     tag_base: u32,
     asset_base: u32,
     high_water_mark: u64,
+    allow_editing: bool,
     modified: bool,
 
     pub fn retractWaterMark(self: *AssetFile, count: u64, offset: u64, size: u64) bool {
@@ -156,14 +162,48 @@ const AssetMemoryBlock = extern struct {
 
 const SourceFile = struct {
     next_in_hash: ?*SourceFile,
-    base_name: [*:0]u8,
+    base_name: String,
     file_date: u64,
+    file_checksum: u64,
 
     // Note: [Y][X], asset index in the Assets.assets array.
     asset_indices: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]u32 =
         [1][ASSET_IMPORT_GRID_MAX]u32{[1]u32{0} ** ASSET_IMPORT_GRID_MAX} ** ASSET_IMPORT_GRID_MAX,
 
     errors: Stream,
+
+    pub fn getOrCreateFromHashValue(assets: *Assets, unmodded_hash_value: u32, base_name: [*:0]const u8) *SourceFile {
+        const hash_value: u32 = @mod(unmodded_hash_value, @as(u32, @intCast(assets.source_file_hash.len)));
+
+        var match: ?*SourceFile = null;
+        var opt_source_file: ?*SourceFile = assets.source_file_hash[hash_value];
+        while (opt_source_file) |source_file| : (opt_source_file = source_file.next_in_hash) {
+            if (shared.stringsAreEqual(@ptrCast(source_file.base_name.data), base_name)) {
+                match = source_file;
+                break;
+            }
+        }
+
+        if (match == null) {
+            match = assets.non_restored_memory.pushStruct(SourceFile, .aligned(@alignOf(SourceFile), true));
+            match.?.base_name = assets.non_restored_memory.pushString(base_name);
+            match.?.next_in_hash = assets.source_file_hash[hash_value];
+            assets.source_file_hash[hash_value] = match;
+
+            match.?.errors = .onDemandMemoryStream(&assets.non_restored_memory, null);
+        }
+
+        return match.?;
+    }
+
+    pub fn getOrCreateFromDate(assets: *Assets, base_name: [*:0]u8, file_date: u64, file_checksum: u64) *SourceFile {
+        var result: *SourceFile = .getOrCreateFromHashValue(assets, shared.stringHashOfZ(base_name), base_name);
+        if (result.file_date == 0 or result.file_date > file_date) {
+            result.file_date = file_date;
+            result.file_checksum = file_checksum;
+        }
+        return result;
+    }
 };
 
 pub const Assets = struct {
@@ -253,47 +293,48 @@ pub const Assets = struct {
             var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
             while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
                 std.debug.assert(file_index < assets.file_count);
-                const file: [*]AssetFile = assets.files + file_index;
+                const file: *AssetFile = &assets.files[file_index];
                 defer file_index += 1;
 
                 const file_handle = shared.platform.openFile(&file_group, file_info, open_flags);
-                file[0].tag_base = assets.tag_count;
-                file[0].asset_base = assets.asset_count - 1;
-                file[0].handle = file_handle;
+                file.tag_base = assets.tag_count;
+                file.asset_base = assets.asset_count - 1;
+                file.handle = file_handle;
 
-                shared.platform.readDataFromFile(&file[0].handle, 0, @sizeOf(HHAHeader), &file[0].header);
+                shared.platform.readDataFromFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
 
-                if (file[0].header.magic_value != HHA_MAGIC_VALUE) {
-                    shared.platform.fileError(&file[0].handle, "HHA file has an invalid magic value.");
+                if (file.header.magic_value != HHA_MAGIC_VALUE) {
+                    shared.platform.fileError(&file.handle, "HHA file has an invalid magic value.");
                 }
 
-                if (file[0].header.version > HHA_VERSION) {
-                    shared.platform.fileError(&file[0].handle, "HHA file is of a later version.");
+                if (file.header.version > HHA_VERSION) {
+                    shared.platform.fileError(&file.handle, "HHA file is of a later version.");
                 }
 
-                if (shared.platform.noFileErrors(&file[0].handle)) {
+                if (shared.platform.noFileErrors(&file.handle)) {
                     // The first asset and tag slot in every HHA is a null,
                     // so we don't count it as something we will need space for.
-                    if (file[0].header.tag_count > 0) {
-                        assets.tag_count += (file[0].header.tag_count - 1);
+                    if (file.header.tag_count > 0) {
+                        assets.tag_count += (file.header.tag_count - 1);
                     }
-                    if (file[0].header.asset_count > 0) {
-                        assets.asset_count += (file[0].header.asset_count - 1);
+                    if (file.header.asset_count > 0) {
+                        assets.asset_count += (file.header.asset_count - 1);
                     }
                 } else {
                     std.debug.assert(true);
                 }
 
-                file[0].high_water_mark = file_info.file_size;
-                while (file[0].retractWaterMark(file[0].header.tag_count, file[0].header.tags, @sizeOf(HHATag)) or
-                    file[0].retractWaterMark(file[0].header.asset_count, file[0].header.annotations, @sizeOf(HHAAnnotation)) or
-                    file[0].retractWaterMark(file[0].header.asset_count, file[0].header.assets, @sizeOf(HHAAsset)))
+                file.high_water_mark = file_info.file_size;
+                while (file.retractWaterMark(file.header.tag_count, file.header.tags, @sizeOf(HHATag)) or
+                    file.retractWaterMark(file.header.asset_count, file.header.annotations, @sizeOf(HHAAnnotation)) or
+                    file.retractWaterMark(file.header.asset_count, file.header.assets, @sizeOf(HHAAsset)))
                 {
                     // Do nothing
                 }
 
                 if (INTERNAL) {
                     if (shared.stringsAreEqual(file_info.base_name, "local")) {
+                        file.allow_editing = true;
                         assets.default_append_hha_index = file_index;
                     }
                 }
@@ -315,60 +356,120 @@ pub const Assets = struct {
         memory.zeroStruct(Asset, @ptrCast(assets.assets + asset_count));
         asset_count += 1;
 
+        var null_annotation: HHAAnnotation = .{};
+
         // Load assets.
         var file_index: u32 = 1;
         while (file_index < assets.file_count) : (file_index += 1) {
-            const file: [*]AssetFile = assets.files + file_index;
+            const file: *AssetFile = &assets.files[file_index];
 
-            if (shared.platform.noFileErrors(&file[0].handle)) {
-                if (file[0].header.tag_count > 0) {
-                    const tag_array_size = @sizeOf(HHATag) * (file[0].header.tag_count - 1);
+            if (shared.platform.noFileErrors(&file.handle)) {
+                if (file.header.tag_count > 0) {
+                    const tag_array_size = @sizeOf(HHATag) * (file.header.tag_count - 1);
                     shared.platform.readDataFromFile(
-                        &file[0].handle,
-                        file[0].header.tags + @sizeOf(HHATag),
+                        &file.handle,
+                        file.header.tags + @sizeOf(HHATag),
                         tag_array_size,
-                        assets.tags + file[0].tag_base,
+                        assets.tags + file.tag_base,
                     );
                 }
 
-                if (file[0].header.asset_count > 0) {
-                    const file_asset_count: u32 = file[0].header.asset_count - 1;
+                if (file.header.asset_count > 0) {
+                    const file_asset_count: u32 = file.header.asset_count - 1;
 
                     const temp_mem = transient_state.arena.beginTemporaryMemory();
                     defer transient_state.arena.endTemporaryMemory(temp_mem);
-                    const hha_asset_array: [*]HHAAsset = transient_state.arena.pushArray(file_asset_count, HHAAsset, null);
+                    const hha_asset_array: [*]HHAAsset =
+                        transient_state.arena.pushArray(file_asset_count, HHAAsset, null);
+                    var hha_annotation_array: ?[*]HHAAnnotation =
+                        transient_state.arena.pushArray(file_asset_count, HHAAnnotation, null);
 
                     shared.platform.readDataFromFile(
-                        &file[0].handle,
-                        file[0].header.assets + @sizeOf(HHAAsset),
+                        &file.handle,
+                        file.header.assets + @sizeOf(HHAAsset),
                         file_asset_count * @sizeOf(HHAAsset),
                         hha_asset_array,
                     );
 
+                    if (file.header.annotations != 0) {
+                        shared.platform.readDataFromFile(
+                            &file.handle,
+                            file.header.annotations + @sizeOf(HHAAnnotation),
+                            file_asset_count * @sizeOf(HHAAnnotation),
+                            hha_annotation_array.?,
+                        );
+                    } else {
+                        hha_annotation_array = null;
+                    }
+
                     // Rebase tag indexes.
                     var asset_index: u32 = 0;
                     while (asset_index < file_asset_count) : (asset_index += 1) {
-                        const hha_asset = hha_asset_array + asset_index;
+                        const hha_asset: [*]HHAAsset = hha_asset_array + asset_index;
+                        var hha_annotation: *HHAAnnotation = @ptrCast(&null_annotation);
+                        if (hha_annotation_array) |annotations| {
+                            hha_annotation = &annotations[asset_index];
+                        }
 
                         std.debug.assert(asset_count < assets.asset_count);
                         const global_asset_index: u32 = asset_count;
                         asset_count += 1;
-                        const asset = assets.assets + global_asset_index;
+                        const asset: *Asset = &assets.assets[global_asset_index];
 
-                        asset[0].file_index = file_index;
-                        asset[0].asset_index_in_file = global_asset_index - file[0].asset_base;
-                        asset[0].hha = hha_asset[0];
+                        asset.file_index = file_index;
+                        asset.asset_index_in_file = global_asset_index - file.asset_base;
+                        asset.hha = hha_asset[0];
+                        asset.annotation = hha_annotation.*;
 
-                        if (asset[0].hha.first_tag_index == 0) {
-                            asset[0].hha.one_past_last_tag_index = 0;
+                        if (asset.hha.first_tag_index == 0) {
+                            asset.hha.one_past_last_tag_index = 0;
                         } else {
-                            asset[0].hha.first_tag_index += (file[0].tag_base - 1);
-                            asset[0].hha.one_past_last_tag_index += (file[0].tag_base - 1);
+                            asset.hha.first_tag_index += (file.tag_base - 1);
+                            asset.hha.one_past_last_tag_index += (file.tag_base - 1);
+                        }
+
+                        if (file.allow_editing) {
+                            // TODO: This is very inefficent, and we could modify the file format to keep a separate
+                            // array of file names (or we could has file names based on their location in the file as
+                            // well, and only read them once). But at the moment we just read the source name directly,
+                            // because we don't care how long it takes in the "editing" mode of the game anyway.
+
+                            const source_file_name_count: u32 = hha_annotation.source_file_base_name_count;
+                            const source_file_name: [*:0]u8 =
+                                @ptrCast(transient_state.arena.pushArray(source_file_name_count + 1, u8, null));
+                            shared.platform.readDataFromFile(
+                                &file.handle,
+                                hha_annotation.source_file_base_name_offset,
+                                source_file_name_count,
+                                source_file_name,
+                            );
+                            source_file_name[source_file_name_count] = 0;
+
+                            const grid_x: u32 = hha_annotation.sprite_sheet_x;
+                            const grid_y: u32 = hha_annotation.sprite_sheet_y;
+                            const source_file: *SourceFile = .getOrCreateFromDate(
+                                assets,
+                                source_file_name,
+                                hha_annotation.source_file_date,
+                                hha_annotation.source_file_checksum,
+                            );
+                            const grid_asset_index: *u32 = &source_file.asset_indices[grid_y][grid_x];
+                            if (grid_asset_index.* == 0) {
+                                grid_asset_index.* = global_asset_index;
+                            } else {
+                                const conflict: *Asset = &assets.assets[grid_asset_index.*];
+                                stream.output(
+                                    &source_file.errors,
+                                    @src(),
+                                    "{s}({d},{d}): Asset {d} and {d} occupy same slot in spritesheet and cannot be edited properly.\n",
+                                    .{ source_file_name, grid_x, grid_y, asset.asset_index_in_file, conflict.asset_index_in_file },
+                                );
+                            }
                         }
 
                         var type_id: AssetTypeId = .None;
-                        var asset_tag_index: u32 = asset[0].hha.first_tag_index;
-                        while (asset_tag_index < asset[0].hha.one_past_last_tag_index) : (asset_tag_index += 1) {
+                        var asset_tag_index: u32 = asset.hha.first_tag_index;
+                        while (asset_tag_index < asset.hha.one_past_last_tag_index) : (asset_tag_index += 1) {
                             if (assets.tags[asset_tag_index].id == .BasicCategory) {
                                 type_id = @enumFromInt(@as(u32, @intFromFloat(assets.tags[asset_tag_index].value)));
                             }
@@ -1145,82 +1246,88 @@ pub const Assets = struct {
         shared.platform.writeDataToFile(&file.handle, data_offset, data_size, data);
     }
 
+    pub fn writeAssetString(
+        self: *Assets,
+        file: *AssetFile,
+        source: String,
+        count: *align(1) u32,
+        offset: *align(1) u64,
+    ) void {
+        if (source.count > count.*) {
+            offset.* = self.reserveData(file, @intCast(source.count));
+        }
+
+        count.* = @intCast(source.count);
+        writeAssetData(file, offset.*, count.*, @ptrCast(@alignCast(source.data)));
+    }
+
     pub fn writeModificationsToHHA(self: *Assets, file_index: u32, temp_arena: *MemoryArena) void {
-        _ = self;
-        _ = file_index;
-        _ = temp_arena;
-        // const file: *AssetFile = &self.files[file_index];
-        // file.modified = false;
-        //
-        // var asset_count: u32 = 0;
-        // var tag_count: u32 = 1; // First tag entry is skipped as the null tag!
-        // var asset_index: u32 = 0;
-        // while (asset_index < self.asset_count) : (asset_index += 1) {
-        //     const asset: *Asset = &self.assets[asset_index];
-        //     if (asset.file_index == file_index) {
-        //         asset_count += 1;
-        //         tag_count += (asset.hha.one_past_last_tag_index - asset.hha.first_tag_index);
-        //     }
-        // }
-        //
-        // const asset_type_count: u32 = asset_count;
-        // asset_count += 1; // Account for the null at index 0.
-        //
-        // const tag_array_size: u64 = tag_count * @sizeOf(HHATag);
-        // const asset_types_array_size: u64 = asset_type_count * @sizeOf(HHAAssetType);
-        // const assets_array_size: u64 = asset_count * @sizeOf(HHAAsset);
-        //
-        // file.header.tag_count = tag_count;
-        // file.header.asset_type_count = asset_type_count;
-        // file.header.asset_count = asset_count;
-        //
-        // file.header.tags = file.high_water_mark;
-        // file.header.asset_types = file.header.tags + tag_array_size;
-        // file.header.assets = file.header.asset_types + asset_types_array_size;
-        //
-        // const tags: [*]HHATag = temp_arena.pushArray(tag_count, HHATag, null);
-        // const asset_types: [*]HHAAssetType = temp_arena.pushArray(asset_type_count, HHAAssetType, null);
-        // const assets: [*]HHAAsset = temp_arena.pushArray(asset_count, HHAAsset, null);
-        //
-        // var dest_type: [*]HHAAssetType = asset_types;
-        // var tag_index_in_file: u32 = 1;
-        // var asset_index_in_file: u32 = 1;
-        //
-        // var type_id: u32 = 0;
-        // while (type_id < self.first_asset_of_type.len) : (type_id += 1) {
-        //     asset_index = self.first_asset_of_type[type_id];
-        //     while (asset_index > 0) {
-        //         const source: *Asset = &self.assets[asset_index];
-        //         if (source.file_index == file_index) {
-        //             var dest: [*]HHAAsset = assets + asset_index_in_file;
-        //
-        //             dest_type[0].type_id = type_id;
-        //             dest_type[0].first_asset_index = asset_index_in_file;
-        //             dest_type[0].one_past_last_asset_index = dest_type[0].first_asset_index + 1;
-        //             dest_type += 1;
-        //
-        //             dest[0] = source.hha;
-        //             var tag_index: u32 = dest[0].first_tag_index;
-        //             while (tag_index < dest[0].one_past_last_tag_index) : (tag_index += 1) {
-        //                 tags[tag_index_in_file] = self.tags[tag_index];
-        //                 tag_index_in_file += 1;
-        //             }
-        //
-        //             asset_index_in_file += 1;
-        //         }
-        //
-        //         asset_index = source.next_of_type;
-        //     }
-        // }
-        //
-        // std.debug.assert(tag_index_in_file == tag_count);
-        // std.debug.assert(asset_index_in_file == asset_count);
-        // std.debug.assert(dest_type == asset_types + asset_type_count);
-        //
-        // shared.platform.writeDataToFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
-        // shared.platform.writeDataToFile(&file.handle, file.header.tags, tag_array_size, tags);
-        // shared.platform.writeDataToFile(&file.handle, file.header.asset_types, asset_types_array_size, asset_types);
-        // shared.platform.writeDataToFile(&file.handle, file.header.assets, assets_array_size, assets);
+        const file: *AssetFile = &self.files[file_index];
+
+        std.debug.assert(file.allow_editing);
+        file.modified = false;
+
+        var asset_count: u32 = 0;
+        var tag_count: u32 = 1; // First tag entry is skipped as the null tag!
+        var asset_index: u32 = 0;
+        while (asset_index < self.asset_count) : (asset_index += 1) {
+            const asset: *Asset = &self.assets[asset_index];
+            if (asset.file_index == file_index) {
+                asset_count += 1;
+                tag_count += (asset.hha.one_past_last_tag_index - asset.hha.first_tag_index);
+            }
+        }
+
+        asset_count += 1; // Account for the null Asset at index 0.
+
+        const tag_array_size: u64 = tag_count * @sizeOf(HHATag);
+        const assets_array_size: u64 = asset_count * @sizeOf(HHAAsset);
+        const annotation_array_size: u64 = asset_count * @sizeOf(HHAAnnotation);
+
+        file.header.tag_count = tag_count;
+        file.header.asset_count = asset_count;
+
+        file.header.tags = file.high_water_mark;
+        file.header.assets = file.header.tags + tag_array_size;
+        file.header.annotations = file.header.assets + assets_array_size;
+
+        const tags: [*]HHATag = temp_arena.pushArray(tag_count, HHATag, null);
+        const assets: [*]HHAAsset = temp_arena.pushArray(asset_count, HHAAsset, null);
+        const annotations: [*]HHAAnnotation = temp_arena.pushArray(asset_count, HHAAnnotation, null);
+
+        var tag_index_in_file: u32 = 1;
+        var asset_index_in_file: u32 = 1;
+
+        var global_asset_index: u32 = 1;
+        while (global_asset_index < self.asset_count) : (global_asset_index += 1) {
+            const source: *Asset = &self.assets[global_asset_index];
+            if (source.file_index == file_index) {
+                const dest: *HHAAsset = &assets[asset_index_in_file];
+                const dest_annotation: *HHAAnnotation = &annotations[asset_index_in_file];
+                source.asset_index_in_file = asset_index_in_file;
+
+                dest_annotation.* = source.annotation;
+
+                dest.* = source.hha;
+                dest.first_tag_index = tag_index_in_file;
+                var tag_index: u32 = dest.first_tag_index;
+                while (tag_index < dest.one_past_last_tag_index) : (tag_index += 1) {
+                    tags[tag_index_in_file] = self.tags[tag_index];
+                    tag_index_in_file += 1;
+                }
+                dest.one_past_last_tag_index = tag_index_in_file;
+
+                asset_index_in_file += 1;
+            }
+        }
+
+        std.debug.assert(tag_index_in_file == tag_count);
+        std.debug.assert(asset_index_in_file == asset_count);
+
+        shared.platform.writeDataToFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
+        shared.platform.writeDataToFile(&file.handle, file.header.tags, tag_array_size, tags);
+        shared.platform.writeDataToFile(&file.handle, file.header.assets, assets_array_size, assets);
+        shared.platform.writeDataToFile(&file.handle, file.header.annotations, annotation_array_size, annotations);
     }
 
     pub fn setAssetType(self: *Assets, asset_index: u32, type_id: AssetTypeId) void {
@@ -1531,10 +1638,8 @@ fn processTiledImport(
                         std.debug.assert(asset.file_index != 0);
 
                         const asset_file: *AssetFile = &assets.files[asset.file_index];
-                        if (hha_asset.data_offset == 0 or
-                            (hha_asset.info.bitmap.dim[0] != tile_dimension or
-                                hha_asset.info.bitmap.dim[1] != tile_dimension))
-                        {
+                        if (hha_asset.data_offset == 0 or hha_asset.data_size != asset_data_size) {
+                            hha_asset.data_size = asset_data_size;
                             hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
                         }
 
@@ -1548,6 +1653,35 @@ fn processTiledImport(
                         hha_asset.one_past_last_tag_index = grid_tags.one_past_last_tag_index;
 
                         asset.hha = hha_asset;
+                        asset.annotation.source_file_date = file.file_date;
+                        asset.annotation.source_file_checksum = file.file_checksum;
+                        asset.annotation.sprite_sheet_x = x_index;
+                        asset.annotation.sprite_sheet_y = y_index;
+
+                        assets.writeAssetString(
+                            asset_file,
+                            grid_tag_array.name,
+                            &asset.annotation.asset_name_count,
+                            &asset.annotation.asset_name_offset,
+                        );
+                        assets.writeAssetString(
+                            asset_file,
+                            grid_tag_array.description,
+                            &asset.annotation.asset_description_count,
+                            &asset.annotation.asset_description_offset,
+                        );
+                        assets.writeAssetString(
+                            asset_file,
+                            grid_tag_array.author,
+                            &asset.annotation.author_count,
+                            &asset.annotation.author_offset,
+                        );
+                        assets.writeAssetString(
+                            asset_file,
+                            file.base_name,
+                            &asset.annotation.source_file_base_name_count,
+                            &asset.annotation.source_file_base_name_offset,
+                        );
 
                         file.asset_indices[y_index][x_index] = asset_index;
 
@@ -1617,34 +1751,14 @@ pub fn checkForArtChanges(assets: *Assets) void {
                 shared.updateStringHash(&hash_value, scan[0]);
             }
 
-            hash_value = @mod(hash_value, @as(u32, @intCast(assets.source_file_hash.len)));
+            const match: *SourceFile = .getOrCreateFromHashValue(assets, hash_value, file_info.base_name);
 
-            var match: ?*SourceFile = null;
-            var opt_source_file: ?*SourceFile = assets.source_file_hash[hash_value];
-            while (opt_source_file) |source_file| : (opt_source_file = source_file.next_in_hash) {
-                if (shared.stringsAreEqual(source_file.base_name, file_info.base_name)) {
-                    match = source_file;
-                    break;
-                }
-            }
-
-            if (match == null) {
-                match = assets.non_restored_memory.pushStruct(SourceFile, .aligned(@alignOf(SourceFile), true));
-                match.?.base_name = @constCast(assets.non_restored_memory.pushString(file_info.base_name));
-                match.?.next_in_hash = assets.source_file_hash[hash_value];
-                assets.source_file_hash[hash_value] = match;
-
-                match.?.errors = .onDemandMemoryStream(&assets.non_restored_memory, null);
-            }
-
-            std.debug.assert(match != null);
-
-            if (match.?.file_date != file_info.file_date) {
+            if (match.file_date != file_info.file_date) {
                 if (shared.stringBufferEquals(pieces[0], "hand")) {
                     var temp_arena: MemoryArena = .{};
                     defer temp_arena.clear();
 
-                    stream.output(&match.?.errors, @src(), "/**** REIMPORTED ****/\n", .{});
+                    stream.output(&match.errors, @src(), "/**** REIMPORTED ****/\n", .{});
 
                     var handle: PlatformFileHandle = shared.platform.openFile(
                         &file_group,
@@ -1660,7 +1774,11 @@ pub fn checkForArtChanges(assets: *Assets) void {
                     shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
                     shared.platform.closeFile(&handle);
 
-                    match.?.file_date = file_info.file_date;
+                    // We update this first, because assets that get packed from here on out need to be able to stamp
+                    // themselves with the right data.
+                    match.file_date = file_info.file_date;
+                    match.file_checksum = shared.checksumOf(file_buffer);
+
                     var tags: ImportGridTags = .{ .tags = undefined };
 
                     var y_index: u32 = 0;
@@ -1676,7 +1794,7 @@ pub fn checkForArtChanges(assets: *Assets) void {
                         }
                     }
 
-                    _ = updateAssetPackageFromPNG(assets, &tags, match.?, file_buffer, &temp_arena);
+                    _ = updateAssetPackageFromPNG(assets, &tags, match, file_buffer, &temp_arena);
                 }
             }
         }

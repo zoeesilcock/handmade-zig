@@ -236,6 +236,15 @@ pub inline fn stringsAreEqual(a: [*:0]const u8, b: [*:0]const u8) bool {
     return result;
 }
 
+test "stringsAreEqual" {
+    try std.testing.expectEqual(true, stringsAreEqual("abc", "abc"));
+    try std.testing.expectEqual(true, stringsAreEqual("", ""));
+
+    try std.testing.expectEqual(false, stringsAreEqual("cba", "abc"));
+    try std.testing.expectEqual(false, stringsAreEqual("abc", "abcd"));
+    try std.testing.expectEqual(false, stringsAreEqual("abcd", "abc"));
+}
+
 pub inline fn stringsWithLengthAreEqual(a: [*:0]const u8, a_length: MemoryIndex, b: [*:0]const u8, b_length: MemoryIndex) bool {
     var result: bool = a_length == b_length;
 
@@ -292,6 +301,35 @@ pub fn toLowercase(character: u8) u8 {
 
 pub fn updateStringHash(hash_value: *u32, value: u8) void {
     hash_value.* %= 65599 * hash_value.* + value;
+}
+
+pub fn stringHashOfZ(z: [*:0]const u8) u32 {
+    var hash_value: u32 = 0;
+    var string: [*:0]const u8 = z;
+
+    while (string[0] != 0) {
+        updateStringHash(&hash_value, string[0]);
+        string += 1;
+    }
+
+    return hash_value;
+}
+
+pub fn stringHashOf(string: String) u32 {
+    var hash_value: u32 = 0;
+
+    var index: u32 = 0;
+    while (index < string.count) : (index += 1) {
+        updateStringHash(&hash_value, string.data[index]);
+    }
+
+    return hash_value;
+}
+
+pub fn checksumOf(buffer: Buffer) u64 {
+    // TODO: Add a full hash here.
+    const result: u64 = stringHashOf(buffer);
+    return result;
 }
 
 pub fn isEndOfLine(char: u32) bool {
@@ -766,15 +804,6 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
     }
 
     return dest.at - dest_init;
-}
-
-test "stringsAreEqual" {
-    try std.testing.expectEqual(true, stringsAreEqual("abc", "abc"));
-    try std.testing.expectEqual(true, stringsAreEqual("", ""));
-
-    try std.testing.expectEqual(false, stringsAreEqual("cba", "abc"));
-    try std.testing.expectEqual(false, stringsAreEqual("abc", "abcd"));
-    try std.testing.expectEqual(false, stringsAreEqual("abcd", "abc"));
 }
 
 // Platform.

@@ -562,11 +562,11 @@ pub const DebugState = struct {
             );
 
             result.?.guid = event.guid;
-            result.?.guid = self.debug_arena.pushString(event.guid);
+            result.?.guid = self.debug_arena.pushStringZ(event.guid);
             result.?.file_name_count = parsed_name.file_name_count;
             result.?.line_number = parsed_name.line_number;
             result.?.next_in_hash = self.element_hash[index];
-            result.?.name = self.debug_arena.pushString(event.name);
+            result.?.name = self.debug_arena.pushStringZ(event.name);
             result.?.type = event.event_type;
             self.element_hash[index] = result;
 
