@@ -375,6 +375,7 @@ fn Vector4Type(comptime ScalarType: type) type {
         pub const normalizeOrZero = Shared.normalizeOrZero;
         pub const packColorBGRA255 = Shared.packColorBGRA255;
         pub const packColorBGRA = Shared.packColorBGRA;
+        pub const unpackColorBGRA = Shared.unpackColorBGRA;
         pub const packColorRGBA = Shared.packColorRGBA;
         pub const unpackColorRGBA = Shared.unpackColorRGBA;
         pub const toGL = Shared.toGL;
@@ -580,6 +581,7 @@ fn Color4Type(comptime ScalarType: type) type {
         pub const normalizeOrZero = Shared.normalizeOrZero;
         pub const packColorBGRA255 = Shared.packColorBGRA255;
         pub const packColorBGRA = Shared.packColorBGRA;
+        pub const unpackColorBGRA = Shared.unpackColorBGRA;
         pub const packColorRGBA = Shared.packColorRGBA;
         pub const unpackColorRGBA = Shared.unpackColorRGBA;
         pub const toGL = Shared.toGL;
@@ -1481,6 +1483,14 @@ pub inline fn linear1ToSRGB255(color: Color) Color {
         255.0 * @sqrt(color.b()),
         255.0 * color.a(),
     );
+}
+
+pub fn swapRedAndBlue(color: u32) u32 {
+    const result: u32 = ((color & 0xff00ff00) |
+        ((color >> 16) & 0xff) |
+        ((color & 0xff) << 16));
+
+    return result;
 }
 
 pub inline fn isInRange(min: f32, value: f32, max: f32) bool {

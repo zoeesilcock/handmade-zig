@@ -486,10 +486,13 @@ pub const Assets = struct {
         if (INTERNAL) {
             var direction_tag_index: u32 = 0;
             while (direction_tag_index < assets.direction_tag.len) : (direction_tag_index += 1) {
-                assets.direction_tag[direction_tag_index] = assets.reserveTag(1);
-                var tag: *HHATag = &assets.tags[assets.direction_tag[direction_tag_index]];
-                tag.id = AssetTagId.FacingDirection;
-                tag.value = math.TAU32 / @as(f32, @floatFromInt(assets.direction_tag.len));
+                assets.direction_tag[direction_tag_index] = assets.reserveTag(2);
+                var tag: [*]HHATag = assets.tags + assets.direction_tag[direction_tag_index];
+                tag[0].id = AssetTagId.FacingDirection;
+                tag[0].value = math.TAU32 / @as(f32, @floatFromInt(assets.direction_tag.len));
+                tag += 1;
+                tag[0].id = AssetTagId.BasicCategory;
+                tag[0].value = @floatFromInt(@as(u32, @intFromEnum(AssetTypeId.Hand)));
             }
 
             checkForArtChanges(assets);
@@ -1267,7 +1270,7 @@ pub const Assets = struct {
         std.debug.assert(file.allow_editing);
         file.modified = false;
 
-        var asset_count: u32 = 0;
+        var asset_count: u32 = 1; // First asset entry is skipped as the null asset!
         var tag_count: u32 = 1; // First tag entry is skipped as the null tag!
         var asset_index: u32 = 0;
         while (asset_index < self.asset_count) : (asset_index += 1) {
@@ -1277,8 +1280,6 @@ pub const Assets = struct {
                 tag_count += (asset.hha.one_past_last_tag_index - asset.hha.first_tag_index);
             }
         }
-
-        asset_count += 1; // Account for the null Asset at index 0.
 
         const tag_array_size: u64 = tag_count * @sizeOf(HHATag);
         const assets_array_size: u64 = asset_count * @sizeOf(HHAAsset);
@@ -1310,8 +1311,8 @@ pub const Assets = struct {
 
                 dest.* = source.hha;
                 dest.first_tag_index = tag_index_in_file;
-                var tag_index: u32 = dest.first_tag_index;
-                while (tag_index < dest.one_past_last_tag_index) : (tag_index += 1) {
+                var tag_index: u32 = source.hha.first_tag_index;
+                while (tag_index < source.hha.one_past_last_tag_index) : (tag_index += 1) {
                     tags[tag_index_in_file] = self.tags[tag_index];
                     tag_index_in_file += 1;
                 }
@@ -1550,35 +1551,42 @@ fn processTiledImport(
             var min_y: u32 = std.math.maxInt(u32);
             var max_y: u32 = std.math.minInt(u32);
 
-            var dest_pixel: [*]u32 = pixel_buffer;
-            var source_row: [*]u32 = image.pixels.ptr +
-                (y_index * tile_dimension * image.width + x_index * tile_dimension);
+            {
+                var dest_pixel: [*]u32 = pixel_buffer;
+                var source_row: [*]u32 = image.pixels.ptr +
+                    (y_index * tile_dimension * image.width + x_index * tile_dimension);
 
-            var y: u32 = 0;
-            while (y < tile_dimension) : (y += 1) {
-                var source_pixel: [*]u32 = source_row;
+                var y: u32 = 0;
+                while (y < tile_dimension) : (y += 1) {
+                    var source_pixel: [*]u32 = source_row;
 
-                var x: u32 = 0;
-                while (x < tile_dimension) : (x += 1) {
-                    const source_color: u32 = source_pixel[0];
-                    source_pixel += 1;
+                    var x: u32 = 0;
+                    while (x < tile_dimension) : (x += 1) {
+                        const source_color: u32 = source_pixel[0];
+                        source_pixel += 1;
 
-                    if (source_color & 0xff000000 != 0) {
-                        min_x = @min(min_x, x);
-                        max_x = @max(max_x, x);
-                        min_y = @min(min_y, y);
-                        max_y = @max(max_y, y);
+                        if (source_color & 0xff000000 != 0) {
+                            min_x = @min(min_x, x);
+                            max_x = @max(max_x, x);
+                            min_y = @min(min_y, y);
+                            max_y = @max(max_y, y);
+                        }
+
+                        var color: Color = .unpackColorBGRA(math.swapRedAndBlue(source_color));
+                        color = math.sRGB255ToLinear1(color);
+                        _ = color.setRGB(color.rgb().scaledTo(color.a()));
+                        color = math.linear1ToSRGB255(color);
+                        dest_pixel[0] = Color.packColorBGRA(color);
+                        dest_pixel += 1;
                     }
 
-                    dest_pixel[0] = source_color;
-                    dest_pixel += 1;
+                    source_row += image.width;
                 }
-
-                source_row += image.width;
             }
 
             if (min_x <= max_x) {
                 // There was something in this tile.
+
                 if (min_x < border_dimension) {
                     stream.output(&file.errors, @src(), "Tile %u, &u extends into left %u-pixel border.", .{
                         x_index,
@@ -1611,6 +1619,49 @@ fn processTiledImport(
                     });
                 }
 
+                var sprite_dimension: u32 = tile_dimension;
+
+                // Downsample by 2x.
+                var downsample: u32 = 0;
+                while (downsample < 1) : (downsample += 1) {
+                    const previous_dimension: u32 = sprite_dimension;
+                    sprite_dimension = sprite_dimension / 2;
+
+                    var dest_pixel: [*]u32 = pixel_buffer;
+                    var source_pixel0: [*]u32 = pixel_buffer;
+                    var source_pixel1: [*]u32 = source_pixel0 + previous_dimension;
+
+                    var y: u32 = 0;
+                    while (y < sprite_dimension) : (y += 1) {
+                        var x: u32 = 0;
+                        while (x < sprite_dimension) : (x += 1) {
+                            var pixel_00: Color = .unpackColorBGRA(source_pixel0[0]);
+                            source_pixel0 += 1;
+                            var pixel_10: Color = .unpackColorBGRA(source_pixel0[0]);
+                            source_pixel0 += 1;
+                            var pixel_01: Color = .unpackColorBGRA(source_pixel1[0]);
+                            source_pixel1 += 1;
+                            var pixel_11: Color = .unpackColorBGRA(source_pixel1[0]);
+                            source_pixel1 += 1;
+
+                            pixel_00 = math.sRGB255ToLinear1(pixel_00);
+                            pixel_10 = math.sRGB255ToLinear1(pixel_10);
+                            pixel_01 = math.sRGB255ToLinear1(pixel_01);
+                            pixel_11 = math.sRGB255ToLinear1(pixel_11);
+
+                            var color: Color = pixel_00.plus(pixel_10).plus(pixel_01).plus(pixel_11).scaledTo(0.25);
+
+                            color = math.linear1ToSRGB255(color);
+
+                            dest_pixel[0] = Color.packColorBGRA(color);
+                            dest_pixel += 1;
+                        }
+
+                        source_pixel0 += previous_dimension;
+                        source_pixel1 += previous_dimension;
+                    }
+                }
+
                 if (grid_tags.type_id != .None) {
                     var hha_asset: HHAAsset = .{
                         .info = .{
@@ -1629,7 +1680,7 @@ fn processTiledImport(
                     }
 
                     if (asset_index != 0) {
-                        const asset_data_size: u32 = 4 * tile_dimension * tile_dimension;
+                        const asset_data_size: u32 = 4 * sprite_dimension * sprite_dimension;
                         var asset: *Asset = &assets.assets[asset_index];
                         if (asset.file_index == 0) {
                             asset.file_index = assets.default_append_hha_index;
@@ -1638,19 +1689,20 @@ fn processTiledImport(
                         std.debug.assert(asset.file_index != 0);
 
                         const asset_file: *AssetFile = &assets.files[asset.file_index];
-                        if (hha_asset.data_offset == 0 or hha_asset.data_size != asset_data_size) {
-                            hha_asset.data_size = asset_data_size;
+                        if (hha_asset.data_offset == 0 or hha_asset.data_size < asset_data_size) {
                             hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
                         }
+                        hha_asset.data_size = asset_data_size;
 
                         // TODO: Translate the tile index into tags based on the name of this file,
                         // probably using something passed into this routine.
                         // hha_asset.first_tag_index = 0;
                         // hha_asset.one_past_last_tag_index = 0;
-                        hha_asset.info.bitmap.dim[0] = tile_dimension;
-                        hha_asset.info.bitmap.dim[1] = tile_dimension;
+                        hha_asset.info.bitmap.dim[0] = sprite_dimension;
+                        hha_asset.info.bitmap.dim[1] = sprite_dimension;
                         hha_asset.first_tag_index = grid_tags.first_tag_index;
                         hha_asset.one_past_last_tag_index = grid_tags.one_past_last_tag_index;
+                        hha_asset.type = .Bitmap;
 
                         asset.hha = hha_asset;
                         asset.annotation.source_file_date = file.file_date;
@@ -1777,7 +1829,7 @@ pub fn checkForArtChanges(assets: *Assets) void {
                     // We update this first, because assets that get packed from here on out need to be able to stamp
                     // themselves with the right data.
                     match.file_date = file_info.file_date;
-                    match.file_checksum = shared.checksumOf(file_buffer);
+                    match.file_checksum = shared.checksumOf(file_buffer, null);
 
                     var tags: ImportGridTags = .{ .tags = undefined };
 
@@ -1789,7 +1841,7 @@ pub fn checkForArtChanges(assets: *Assets) void {
                             if (x_index == 0 and y_index < assets.direction_tag.len) {
                                 tag.type_id = .Hand;
                                 tag.first_tag_index = assets.direction_tag[y_index];
-                                tag.one_past_last_tag_index = tag.first_tag_index + 1;
+                                tag.one_past_last_tag_index = tag.first_tag_index + 2;
                             }
                         }
                     }

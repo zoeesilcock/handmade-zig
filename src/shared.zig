@@ -326,9 +326,66 @@ pub fn stringHashOf(string: String) u32 {
     return hash_value;
 }
 
-pub fn checksumOf(buffer: Buffer) u64 {
-    // TODO: Add a full hash here.
-    const result: u64 = stringHashOf(buffer);
+/// This is based on the 128-bit MurmurHash from MurmurHash3.
+fn murmurHashUpdate(h_in: u64, k_in: u64) u64 {
+    const c1: u64 = 0xff51afd7ed558ccd;
+    const c2: u64 = 0xc4ceb9fe1a85ec53;
+
+    const r1: u64 = 31;
+    const r2: u64 = 27;
+    const m1: u64 = 5;
+    const n1: u64 = 0x52dce729;
+
+    var h: u64 = h_in;
+    var k: u64 = k_in;
+
+    k *%= c1;
+    k = std.math.rotl(u64, k, r1);
+    k *%= c2;
+
+    h ^= k;
+    h = std.math.rotl(u64, h, r2);
+    h = h *% m1 +% n1;
+
+    return h;
+}
+
+/// This is based on the 128-bit MurmurHash from MurmurHash3.
+fn murmurHashFinalize(h_in: u64) u64 {
+    var h: u64 = h_in;
+
+    h ^= h >> 33;
+    h *%= 0xff51afd7ed558ccd;
+    h ^= h >> 33;
+    h *%= 0xc4ceb9fe1a85ec53;
+    h ^= h >> 33;
+
+    return h;
+}
+
+pub fn checksumOf(buffer: Buffer, opt_seed: ?u64) u64 {
+    // TODO: This would require a different implementation on big-endian machines.
+    var result: u64 = opt_seed orelse 1234;
+
+    const count64: u64 = buffer.count / @sizeOf(u64);
+    const count8: u64 = buffer.count - (count64 * @sizeOf(u64));
+
+    // TODO: This may be unaligned, we may need to move to an aligned location first.
+    var at: [*]u64 = @ptrCast(@alignCast(buffer.data));
+    var index: u64 = 0;
+    while (index < count64) : (index += 1) {
+        result = murmurHashUpdate(result, at[0]);
+        at += 1;
+    }
+
+    if (count8 > 0) {
+        var residual: u64 = 0;
+        _ = memory.copy(count8, at, &residual);
+        result = murmurHashUpdate(result, residual);
+    }
+
+    result = murmurHashFinalize(result);
+
     return result;
 }
 
@@ -842,7 +899,7 @@ pub const PlatformFileHandle = extern struct {
 };
 
 pub const PlatformFileInfo = extern struct {
-    next: ?*PlatformFileInfo,
+    next: ?*PlatformFileInfo = null,
     file_date: u64,
     file_size: u64,
     base_name: [*:0]u8,
@@ -851,7 +908,7 @@ pub const PlatformFileInfo = extern struct {
 
 pub const PlatformFileGroup = extern struct {
     file_count: u32 = 0,
-    first_file_info: *PlatformFileInfo = undefined,
+    first_file_info: ?*PlatformFileInfo = null,
     platform: *anyopaque = undefined,
 };
 

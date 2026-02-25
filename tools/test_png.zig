@@ -3,6 +3,7 @@ const png = @import("png");
 const shared = png.shared;
 const stream = png.stream;
 const memory = png.memory;
+const math = shared.math;
 const c = @cImport({
     @cInclude("stdlib.h");
     @cInclude("string.h");
@@ -66,14 +67,6 @@ const PixelOp = enum(u32) {
     MultiplyAlpha = 0x4,
     Invert = 0x8,
 };
-
-fn swapRedAndBlue(color: u32) u32 {
-    const result: u32 = ((color & 0xff00ff00) |
-        ((color >> 16) & 0xff) |
-        ((color & 0xff) << 16));
-
-    return result;
-}
 
 fn replaceAlpha(color: u32) u32 {
     const alpha = color >> 24;
@@ -154,8 +147,8 @@ fn writeBMPImageTopDownRGBA(
             var color1: u32 = pixel1[0];
 
             if (swap_red_and_blue) {
-                color0 = swapRedAndBlue(color0);
-                color1 = swapRedAndBlue(color1);
+                color0 = math.swapRedAndBlue(color0);
+                color1 = math.swapRedAndBlue(color1);
             }
 
             if (replace_alpha) {
