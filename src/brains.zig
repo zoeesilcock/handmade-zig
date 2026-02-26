@@ -6,7 +6,7 @@ const sim = @import("sim.zig");
 const math = @import("math.zig");
 const intrinsics = @import("intrinsics.zig");
 const debug_interface = @import("debug_interface.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 
 var global_config = &@import("config.zig").global_config;
 
@@ -18,7 +18,7 @@ const SimRegion = sim.SimRegion;
 const ClosestEntity = sim.ClosestEntity;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
-const RenderGroup = rendergroup.RenderGroup;
+const RenderGroup = renderer.RenderGroup;
 const DebugInterface = debug_interface.DebugInterface;
 
 //

@@ -1,9 +1,26 @@
+//! Software renderer.
+//!
+//! 1: Everywhere outside the renderer, Y always goes upward, X to the right.
+//!
+//! 2: All bitmaps including the render target are assumed to be bottom-up (meaning that the first row pointer points
+//! to the bottom-most row when viewed on the screen).
+//!
+//! 3: It is mandatory that all inputs to the renderer are in world coordinates (meters), not pixels. If for some
+//! reason something absolutely has to be specified in pixels, that will be explicitly marked in the API, but
+//! this should occur exceedingly sparingly.
+//!
+//! 4: Z is a special coordinate because it is broken up into discrete slices, and the renderer actually understands
+//! these slices. Z slices are what control the scaling of things, whereas Z offsets inside a slice are what control
+//! Y offsetting.
+//!
+//! 5: All color values specified to the renderer using the Color and Color3 types are in non-premultiplied alpha.
+//!
 const std = @import("std");
 const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const math = @import("math.zig");
 const simd = @import("simd.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
 const sort = @import("sort.zig");
@@ -11,10 +28,8 @@ const debug_interface = @import("debug_interface.zig");
 
 // TODO: How would we import other platforms here?
 const platform = @import("win32_handmade.zig");
-var show_lighting_samples: bool = false;
 
-const INTERNAL = shared.INTERNAL;
-
+// Types.
 const Vector2 = math.Vector2;
 const Vector2i = math.Vector2i;
 const Vector3 = math.Vector3;
@@ -27,13 +42,13 @@ const Color = math.Color;
 const Color3 = math.Color3;
 const MemoryArena = memory.MemoryArena;
 const ArenaPushParams = memory.ArenaPushParams;
-const RenderCommands = shared.RenderCommands;
-const RenderGroup = rendergroup.RenderGroup;
-const RenderEntryHeader = rendergroup.RenderEntryHeader;
-const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
-const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
-const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
-const EnvironmentMap = rendergroup.EnvironmentMap;
+const RenderCommands = renderer.RenderCommands;
+const RenderGroup = renderer.RenderGroup;
+const RenderEntryHeader = renderer.RenderEntryHeader;
+const RenderEntryBitmap = renderer.RenderEntryBitmap;
+const RenderEntryRectangle = renderer.RenderEntryRectangle;
+const RenderEntrySaturation = renderer.RenderEntrySaturation;
+// const EnvironmentMap = renderer.EnvironmentMap;
 const LoadedBitmap = asset.LoadedBitmap;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
@@ -49,45 +64,6 @@ pub const TileRenderWork = struct {
     commands: *RenderCommands,
     render_targets: [*]LoadedBitmap,
     clip_rect: Rectangle2i,
-};
-
-const TextureOpAllocate = struct {
-    width: i32,
-    height: i32,
-    data: *anyopaque,
-    result_handle: *u32,
-};
-
-const TextureOpDeallocate = struct {
-    handle: u32,
-};
-
-pub const TextureOp = struct {
-    next: ?*TextureOp = null,
-    is_allocate: bool,
-
-    op: union {
-        allocate: TextureOpAllocate,
-        deallocate: TextureOpDeallocate,
-    },
-};
-
-pub const ManualSortKey = extern struct {
-    always_in_front_of: u32 = 0,
-    always_behind: u32 = 0,
-};
-
-pub const CameraParams = struct {
-    focal_length: f32 = 0,
-
-    pub fn get(width_in_pixels: u32, focal_length: f32) CameraParams {
-        _ = width_in_pixels;
-
-        var result: CameraParams = .{};
-        result.focal_length = focal_length;
-
-        return result;
-    }
 };
 
 pub fn softwareRenderCommands(
@@ -1127,227 +1103,227 @@ pub fn drawRectangleQuickly(
     }
 }
 
-pub fn drawRectangleSlowly(
-    draw_buffer: *LoadedBitmap,
-    origin: Vector2,
-    x_axis: Vector2,
-    y_axis: Vector2,
-    color: Color,
-    texture: *LoadedBitmap,
-    opt_normal_map: ?*LoadedBitmap,
-    top: *EnvironmentMap,
-    middle: *EnvironmentMap,
-    bottom: *EnvironmentMap,
-    pixels_to_meters: f32,
-) void {
-    // TimedBlock.beginFunction(@src(), .DrawRectangleSlowly);
-    // defer TimedBlock.endFunction(@src(), .DrawRectangleSlowly);
-
-    const y_axis_length = y_axis.length();
-    const x_axis_length = x_axis.length();
-    const normal_x_axis = x_axis.scaledTo(y_axis_length / x_axis_length);
-    const normal_y_axis = y_axis.scaledTo(x_axis_length / y_axis_length);
-    const normal_z_scale = 0.5 * (x_axis_length + y_axis_length);
-
-    const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
-    const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
-    const points: [4]Vector2 = .{
-        origin,
-        origin.plus(x_axis),
-        origin.plus(x_axis).plus(y_axis),
-        origin.plus(y_axis),
-    };
-
-    const width_max = draw_buffer.width - 1;
-    const height_max = draw_buffer.height - 1;
-    const inv_width_max: f32 = 1.0 / @as(f32, @floatFromInt(width_max));
-    const inv_height_max: f32 = 1.0 / @as(f32, @floatFromInt(height_max));
-    var y_min: i32 = height_max;
-    var y_max: i32 = 0;
-    var x_min: i32 = width_max;
-    var x_max: i32 = 0;
-
-    const origin_z: f32 = 0.0;
-    const origin_y: f32 = (origin.plus(x_axis.scaledTo(0.5).plus(y_axis.scaledTo(0.5)))).y();
-    const fixed_cast_y = inv_height_max * origin_y;
-
-    for (points) |point| {
-        const floor_x = intrinsics.floorReal32ToInt32(point.x());
-        const ceil_x = intrinsics.ceilReal32ToInt32(point.x());
-        const floor_y = intrinsics.floorReal32ToInt32(point.y());
-        const ceil_y = intrinsics.ceilReal32ToInt32(point.y());
-
-        if (x_min > floor_x) {
-            x_min = floor_x;
-        }
-        if (y_min > floor_y) {
-            y_min = floor_y;
-        }
-        if (x_max < ceil_x) {
-            x_max = ceil_x;
-        }
-        if (y_max < ceil_y) {
-            y_max = ceil_y;
-        }
-    }
-
-    if (x_min < 0) {
-        x_min = 0;
-    }
-    if (y_min < 0) {
-        y_min = 0;
-    }
-    if (x_max > width_max) {
-        x_max = width_max;
-    }
-    if (y_max > height_max) {
-        y_max = height_max;
-    }
-
-    var row: [*]u8 = @ptrCast(draw_buffer.memory);
-    row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
-
-    // TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
-    // defer TimedBlock.endBlock(@src(), .ProcessPixel);
-
-    var step_y: i32 = y_min;
-    while (step_y < y_max) : (step_y += 1) {
-        var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
-
-        var step_x: i32 = x_min;
-        while (step_x < x_max) : (step_x += 1) {
-            const pixel_position = Vector2.newI(step_x, step_y);
-            const d = pixel_position.minus(origin);
-
-            const edge0 = d.dotProduct(x_axis.perp().negated());
-            const edge1 = d.minus(x_axis).dotProduct(y_axis.perp().negated());
-            const edge2 = d.minus(x_axis).minus(y_axis).dotProduct(x_axis.perp());
-            const edge3 = d.minus(y_axis).dotProduct(y_axis.perp());
-
-            if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
-                // For items that are standing up.
-                var screen_space_uv = Vector2.new(
-                    inv_width_max * @as(f32, @floatFromInt(step_x)),
-                    fixed_cast_y,
-                );
-                var z_diff: f32 = pixels_to_meters * (@as(f32, @floatFromInt(step_y)) - origin_y);
-
-                if (false) {
-                    // For items that are lying down on the ground.
-                    screen_space_uv = Vector2.new(
-                        inv_width_max * @as(f32, @floatFromInt(step_x)),
-                        inv_height_max * @as(f32, @floatFromInt(step_y)),
-                    );
-                    z_diff = 0;
-                }
-
-                const u = d.dotProduct(x_axis) * inv_x_axis_length_squared;
-                const v = d.dotProduct(y_axis) * inv_y_axis_length_squared;
-
-                // std.debug.assert(u >= 0 and u <= 1.0);
-                // std.debug.assert(v >= 0 and v <= 1.0);
-
-                const texel_x: f32 = 1 + (u * @as(f32, @floatFromInt(texture.width - 2)));
-                const texel_y: f32 = 1 + (v * @as(f32, @floatFromInt(texture.height - 2)));
-
-                const texel_rounded_x: i32 = @intFromFloat(texel_x);
-                const texel_rounded_y: i32 = @intFromFloat(texel_y);
-
-                const texel_fraction_x: f32 = texel_x - @as(f32, @floatFromInt(texel_rounded_x));
-                const texel_fraction_y: f32 = texel_y - @as(f32, @floatFromInt(texel_rounded_y));
-
-                std.debug.assert(texel_rounded_x >= 0 and texel_rounded_x <= texture.width);
-                std.debug.assert(texel_rounded_y >= 0 and texel_rounded_y <= texture.height);
-
-                const texel_sample = bilinearSample(texture, texel_rounded_x, texel_rounded_y);
-                var texel = sRGBBilinearBlend(texel_sample, texel_fraction_x, texel_fraction_y);
-
-                if (opt_normal_map) |normal_map| {
-                    const normal_sample = bilinearSample(normal_map, texel_rounded_x, texel_rounded_y);
-                    const normal_a = Color.unpackClorBGRA(normal_sample.a);
-                    const normal_b = Color.unpackClorBGRA(normal_sample.b);
-                    const normal_c = Color.unpackClorBGRA(normal_sample.c);
-                    const normal_d = Color.unpackClorBGRA(normal_sample.d);
-                    var normal = normal_a.lerp(normal_b, texel_fraction_x).lerp(
-                        normal_c.lerp(normal_d, texel_fraction_x),
-                        texel_fraction_y,
-                    ).toVector4();
-
-                    normal = unscaleAndBiasNormal(normal);
-
-                    _ = normal.setXY(normal_x_axis.scaledTo(normal.x()).plus(normal_y_axis.scaledTo(normal.y())));
-                    _ = normal.setZ(normal.z() * normal_z_scale);
-                    _ = normal.setXYZ(normal.xyz().normalized());
-
-                    // The eye vector is always asumed to be 0, 0, 1.
-                    var bounce_direction = normal.xyz().scaledTo(2.0 * normal.z());
-                    _ = bounce_direction.setZ(bounce_direction.z() - 1.0);
-                    _ = bounce_direction.setZ(-bounce_direction.z());
-
-                    const z_position = origin_z + z_diff;
-                    var opt_far_map: ?*EnvironmentMap = null;
-                    const env_map_blend: f32 = bounce_direction.y();
-                    var far_map_blend: f32 = 0;
-                    if (env_map_blend < -0.5) {
-                        opt_far_map = bottom;
-                        far_map_blend = -1.0 - 2.0 * env_map_blend;
-                    } else if (env_map_blend > 0.5) {
-                        opt_far_map = top;
-                        far_map_blend = 2.0 * (env_map_blend - 0.5);
-                    }
-
-                    far_map_blend *= far_map_blend;
-                    far_map_blend *= far_map_blend;
-
-                    var light_color = Color3.zero();
-                    _ = middle;
-
-                    if (opt_far_map) |far_map| {
-                        const distance_from_map_in_z = far_map.z_position - z_position;
-                        const far_map_color = sampleEnvironmentMap(
-                            far_map,
-                            screen_space_uv,
-                            bounce_direction,
-                            normal.w(),
-                            distance_from_map_in_z,
-                        );
-                        light_color = light_color.lerp(far_map_color, far_map_blend);
-                    }
-
-                    _ = texel.setRGB(texel.rgb().plus(light_color.scaledTo(texel.a())));
-
-                    if (false) {
-                        // Draw bounce direction.
-                        _ = texel.setRGB(bounce_direction.scaledTo(0.5).plus(Vector3.splat(0.5)).toColor3());
-                        _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
-                    }
-
-                    // texel = Color.new(
-                    //     normal.x() * 0.5 + 0.5,
-                    //     normal.y() * 0.5 + 0.5,
-                    //     normal.z() * 0.5 + 0.5,
-                    //     1.0,
-                    // );
-                }
-
-                texel = texel.hadamardProduct(color);
-                _ = texel.setRGB(texel.rgb().clamp01());
-
-                var dest = Color.unpackClorBGRA(pixel[0]);
-                dest = math.sRGB255ToLinear1(dest);
-
-                const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
-                const blended255 = math.linear1ToSRGB255(blended);
-
-                pixel[0] = blended255.packColorBGRA();
-            }
-
-            pixel += 1;
-        }
-
-        row += @as(usize, @intCast(draw_buffer.pitch));
-    }
-}
+// pub fn drawRectangleSlowly(
+//     draw_buffer: *LoadedBitmap,
+//     origin: Vector2,
+//     x_axis: Vector2,
+//     y_axis: Vector2,
+//     color: Color,
+//     texture: *LoadedBitmap,
+//     opt_normal_map: ?*LoadedBitmap,
+//     top: *EnvironmentMap,
+//     middle: *EnvironmentMap,
+//     bottom: *EnvironmentMap,
+//     pixels_to_meters: f32,
+// ) void {
+//     // TimedBlock.beginFunction(@src(), .DrawRectangleSlowly);
+//     // defer TimedBlock.endFunction(@src(), .DrawRectangleSlowly);
+//
+//     const y_axis_length = y_axis.length();
+//     const x_axis_length = x_axis.length();
+//     const normal_x_axis = x_axis.scaledTo(y_axis_length / x_axis_length);
+//     const normal_y_axis = y_axis.scaledTo(x_axis_length / y_axis_length);
+//     const normal_z_scale = 0.5 * (x_axis_length + y_axis_length);
+//
+//     const inv_x_axis_length_squared = 1.0 / x_axis.lengthSquared();
+//     const inv_y_axis_length_squared = 1.0 / y_axis.lengthSquared();
+//     const points: [4]Vector2 = .{
+//         origin,
+//         origin.plus(x_axis),
+//         origin.plus(x_axis).plus(y_axis),
+//         origin.plus(y_axis),
+//     };
+//
+//     const width_max = draw_buffer.width - 1;
+//     const height_max = draw_buffer.height - 1;
+//     const inv_width_max: f32 = 1.0 / @as(f32, @floatFromInt(width_max));
+//     const inv_height_max: f32 = 1.0 / @as(f32, @floatFromInt(height_max));
+//     var y_min: i32 = height_max;
+//     var y_max: i32 = 0;
+//     var x_min: i32 = width_max;
+//     var x_max: i32 = 0;
+//
+//     const origin_z: f32 = 0.0;
+//     const origin_y: f32 = (origin.plus(x_axis.scaledTo(0.5).plus(y_axis.scaledTo(0.5)))).y();
+//     const fixed_cast_y = inv_height_max * origin_y;
+//
+//     for (points) |point| {
+//         const floor_x = intrinsics.floorReal32ToInt32(point.x());
+//         const ceil_x = intrinsics.ceilReal32ToInt32(point.x());
+//         const floor_y = intrinsics.floorReal32ToInt32(point.y());
+//         const ceil_y = intrinsics.ceilReal32ToInt32(point.y());
+//
+//         if (x_min > floor_x) {
+//             x_min = floor_x;
+//         }
+//         if (y_min > floor_y) {
+//             y_min = floor_y;
+//         }
+//         if (x_max < ceil_x) {
+//             x_max = ceil_x;
+//         }
+//         if (y_max < ceil_y) {
+//             y_max = ceil_y;
+//         }
+//     }
+//
+//     if (x_min < 0) {
+//         x_min = 0;
+//     }
+//     if (y_min < 0) {
+//         y_min = 0;
+//     }
+//     if (x_max > width_max) {
+//         x_max = width_max;
+//     }
+//     if (y_max > height_max) {
+//         y_max = height_max;
+//     }
+//
+//     var row: [*]u8 = @ptrCast(draw_buffer.memory);
+//     row += @as(u32, @intCast((x_min * shared.BITMAP_BYTES_PER_PIXEL) + (y_min * draw_buffer.pitch)));
+//
+//     // TimedBlock.beginWithCount(@src(), .ProcessPixel, @intCast((x_max - x_min + 1) * (y_max - y_min + 1)));
+//     // defer TimedBlock.endBlock(@src(), .ProcessPixel);
+//
+//     var step_y: i32 = y_min;
+//     while (step_y < y_max) : (step_y += 1) {
+//         var pixel = @as([*]u32, @ptrCast(@alignCast(row)));
+//
+//         var step_x: i32 = x_min;
+//         while (step_x < x_max) : (step_x += 1) {
+//             const pixel_position = Vector2.newI(step_x, step_y);
+//             const d = pixel_position.minus(origin);
+//
+//             const edge0 = d.dotProduct(x_axis.perp().negated());
+//             const edge1 = d.minus(x_axis).dotProduct(y_axis.perp().negated());
+//             const edge2 = d.minus(x_axis).minus(y_axis).dotProduct(x_axis.perp());
+//             const edge3 = d.minus(y_axis).dotProduct(y_axis.perp());
+//
+//             if (edge0 < 0 and edge1 < 0 and edge2 < 0 and edge3 < 0) {
+//                 // For items that are standing up.
+//                 var screen_space_uv = Vector2.new(
+//                     inv_width_max * @as(f32, @floatFromInt(step_x)),
+//                     fixed_cast_y,
+//                 );
+//                 var z_diff: f32 = pixels_to_meters * (@as(f32, @floatFromInt(step_y)) - origin_y);
+//
+//                 if (false) {
+//                     // For items that are lying down on the ground.
+//                     screen_space_uv = Vector2.new(
+//                         inv_width_max * @as(f32, @floatFromInt(step_x)),
+//                         inv_height_max * @as(f32, @floatFromInt(step_y)),
+//                     );
+//                     z_diff = 0;
+//                 }
+//
+//                 const u = d.dotProduct(x_axis) * inv_x_axis_length_squared;
+//                 const v = d.dotProduct(y_axis) * inv_y_axis_length_squared;
+//
+//                 // std.debug.assert(u >= 0 and u <= 1.0);
+//                 // std.debug.assert(v >= 0 and v <= 1.0);
+//
+//                 const texel_x: f32 = 1 + (u * @as(f32, @floatFromInt(texture.width - 2)));
+//                 const texel_y: f32 = 1 + (v * @as(f32, @floatFromInt(texture.height - 2)));
+//
+//                 const texel_rounded_x: i32 = @intFromFloat(texel_x);
+//                 const texel_rounded_y: i32 = @intFromFloat(texel_y);
+//
+//                 const texel_fraction_x: f32 = texel_x - @as(f32, @floatFromInt(texel_rounded_x));
+//                 const texel_fraction_y: f32 = texel_y - @as(f32, @floatFromInt(texel_rounded_y));
+//
+//                 std.debug.assert(texel_rounded_x >= 0 and texel_rounded_x <= texture.width);
+//                 std.debug.assert(texel_rounded_y >= 0 and texel_rounded_y <= texture.height);
+//
+//                 const texel_sample = bilinearSample(texture, texel_rounded_x, texel_rounded_y);
+//                 var texel = sRGBBilinearBlend(texel_sample, texel_fraction_x, texel_fraction_y);
+//
+//                 if (opt_normal_map) |normal_map| {
+//                     const normal_sample = bilinearSample(normal_map, texel_rounded_x, texel_rounded_y);
+//                     const normal_a = Color.unpackClorBGRA(normal_sample.a);
+//                     const normal_b = Color.unpackClorBGRA(normal_sample.b);
+//                     const normal_c = Color.unpackClorBGRA(normal_sample.c);
+//                     const normal_d = Color.unpackClorBGRA(normal_sample.d);
+//                     var normal = normal_a.lerp(normal_b, texel_fraction_x).lerp(
+//                         normal_c.lerp(normal_d, texel_fraction_x),
+//                         texel_fraction_y,
+//                     ).toVector4();
+//
+//                     normal = unscaleAndBiasNormal(normal);
+//
+//                     _ = normal.setXY(normal_x_axis.scaledTo(normal.x()).plus(normal_y_axis.scaledTo(normal.y())));
+//                     _ = normal.setZ(normal.z() * normal_z_scale);
+//                     _ = normal.setXYZ(normal.xyz().normalized());
+//
+//                     // The eye vector is always asumed to be 0, 0, 1.
+//                     var bounce_direction = normal.xyz().scaledTo(2.0 * normal.z());
+//                     _ = bounce_direction.setZ(bounce_direction.z() - 1.0);
+//                     _ = bounce_direction.setZ(-bounce_direction.z());
+//
+//                     const z_position = origin_z + z_diff;
+//                     var opt_far_map: ?*EnvironmentMap = null;
+//                     const env_map_blend: f32 = bounce_direction.y();
+//                     var far_map_blend: f32 = 0;
+//                     if (env_map_blend < -0.5) {
+//                         opt_far_map = bottom;
+//                         far_map_blend = -1.0 - 2.0 * env_map_blend;
+//                     } else if (env_map_blend > 0.5) {
+//                         opt_far_map = top;
+//                         far_map_blend = 2.0 * (env_map_blend - 0.5);
+//                     }
+//
+//                     far_map_blend *= far_map_blend;
+//                     far_map_blend *= far_map_blend;
+//
+//                     var light_color = Color3.zero();
+//                     _ = middle;
+//
+//                     if (opt_far_map) |far_map| {
+//                         const distance_from_map_in_z = far_map.z_position - z_position;
+//                         const far_map_color = sampleEnvironmentMap(
+//                             far_map,
+//                             screen_space_uv,
+//                             bounce_direction,
+//                             normal.w(),
+//                             distance_from_map_in_z,
+//                         );
+//                         light_color = light_color.lerp(far_map_color, far_map_blend);
+//                     }
+//
+//                     _ = texel.setRGB(texel.rgb().plus(light_color.scaledTo(texel.a())));
+//
+//                     if (false) {
+//                         // Draw bounce direction.
+//                         _ = texel.setRGB(bounce_direction.scaledTo(0.5).plus(Vector3.splat(0.5)).toColor3());
+//                         _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
+//                     }
+//
+//                     // texel = Color.new(
+//                     //     normal.x() * 0.5 + 0.5,
+//                     //     normal.y() * 0.5 + 0.5,
+//                     //     normal.z() * 0.5 + 0.5,
+//                     //     1.0,
+//                     // );
+//                 }
+//
+//                 texel = texel.hadamardProduct(color);
+//                 _ = texel.setRGB(texel.rgb().clamp01());
+//
+//                 var dest = Color.unpackClorBGRA(pixel[0]);
+//                 dest = math.sRGB255ToLinear1(dest);
+//
+//                 const blended = dest.scaledTo(1.0 - texel.a()).plus(texel);
+//                 const blended255 = math.linear1ToSRGB255(blended);
+//
+//                 pixel[0] = blended255.packColorBGRA();
+//             }
+//
+//             pixel += 1;
+//         }
+//
+//         row += @as(usize, @intCast(draw_buffer.pitch));
+//     }
+// }
 
 pub fn drawRectangleOutline(
     draw_buffer: *LoadedBitmap,
@@ -1572,69 +1548,58 @@ inline fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color 
     );
 }
 
-inline fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
-    const inv_255: f32 = 1.0 / 255.0;
-
-    return Vector4.new(
-        -1.0 + 2.0 * (inv_255 * normal.x()),
-        -1.0 + 2.0 * (inv_255 * normal.y()),
-        -1.0 + 2.0 * (inv_255 * normal.z()),
-        inv_255 * normal.w(),
-    );
-}
-
 /// Sample from environment map, used when calculating light impact on a normal map.
 ///
 /// * screen_space_uv tells us where the ray is being cast from in normalized screen coordinates.
 /// * sample_direction tells us what direction the cast is going.
 /// * roughness says which LODs of the map we sample from.
 /// * distance_from_map_in_z says how far the map is from the sample point in Z, given in meters.
-inline fn sampleEnvironmentMap(
-    map: *EnvironmentMap,
-    screen_space_uv: Vector2,
-    sample_direction: Vector3,
-    roughness: f32,
-    distance_from_map_in_z: f32,
-) Color3 {
-    // Pick which LOD to sample from.
-    const lod_index: u32 = @intFromFloat(roughness * @as(f32, @floatFromInt(map.lod.len - 1)) + 0.5);
-    std.debug.assert(lod_index < map.lod.len);
-    var lod = map.lod[lod_index];
-
-    // Calculate the distance to the map and the scaling factor for meters to UVs.
-    const uvs_per_meter = 0.1;
-    const coefficient = (uvs_per_meter * distance_from_map_in_z) / sample_direction.y();
-    const offset = Vector2.new(sample_direction.x(), sample_direction.z()).scaledTo(coefficient);
-
-    // Find the intersection point and clamp it to a valid range.
-    var uv = screen_space_uv.plus(offset).clamp01();
-
-    // Bilinear sample.
-    const map_x: f32 = (uv.x() * @as(f32, @floatFromInt(lod.width - 2)));
-    const map_y: f32 = (uv.y() * @as(f32, @floatFromInt(lod.height - 2)));
-
-    const rounded_x: i32 = @intFromFloat(map_x);
-    const rounded_y: i32 = @intFromFloat(map_y);
-
-    const fraction_x: f32 = map_x - @as(f32, @floatFromInt(rounded_x));
-    const fraction_y: f32 = map_y - @as(f32, @floatFromInt(rounded_y));
-
-    std.debug.assert(rounded_x >= 0 and rounded_x < lod.width);
-    std.debug.assert(rounded_y >= 0 and rounded_y < lod.height);
-
-    if (show_lighting_samples) {
-        // Debug where we are sampling from on the environment map.
-        const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
-        const texture_base = shared.incrementPointer(lod.memory.?, test_offset);
-        const texel_pointer: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));
-        texel_pointer[0] = Color.new(255, 255, 255, 255).packColorBGRA255();
-    }
-
-    const sample = bilinearSample(&lod, rounded_x, rounded_y);
-    const result = sRGBBilinearBlend(sample, fraction_x, fraction_y).rgb();
-
-    return result;
-}
+// inline fn sampleEnvironmentMap(
+//     map: *EnvironmentMap,
+//     screen_space_uv: Vector2,
+//     sample_direction: Vector3,
+//     roughness: f32,
+//     distance_from_map_in_z: f32,
+// ) Color3 {
+//     // Pick which LOD to sample from.
+//     const lod_index: u32 = @intFromFloat(roughness * @as(f32, @floatFromInt(map.lod.len - 1)) + 0.5);
+//     std.debug.assert(lod_index < map.lod.len);
+//     var lod = map.lod[lod_index];
+//
+//     // Calculate the distance to the map and the scaling factor for meters to UVs.
+//     const uvs_per_meter = 0.1;
+//     const coefficient = (uvs_per_meter * distance_from_map_in_z) / sample_direction.y();
+//     const offset = Vector2.new(sample_direction.x(), sample_direction.z()).scaledTo(coefficient);
+//
+//     // Find the intersection point and clamp it to a valid range.
+//     var uv = screen_space_uv.plus(offset).clamp01();
+//
+//     // Bilinear sample.
+//     const map_x: f32 = (uv.x() * @as(f32, @floatFromInt(lod.width - 2)));
+//     const map_y: f32 = (uv.y() * @as(f32, @floatFromInt(lod.height - 2)));
+//
+//     const rounded_x: i32 = @intFromFloat(map_x);
+//     const rounded_y: i32 = @intFromFloat(map_y);
+//
+//     const fraction_x: f32 = map_x - @as(f32, @floatFromInt(rounded_x));
+//     const fraction_y: f32 = map_y - @as(f32, @floatFromInt(rounded_y));
+//
+//     std.debug.assert(rounded_x >= 0 and rounded_x < lod.width);
+//     std.debug.assert(rounded_y >= 0 and rounded_y < lod.height);
+//
+//     if (show_lighting_samples) {
+//         // Debug where we are sampling from on the environment map.
+//         const test_offset: i32 = @intCast((rounded_x * @sizeOf(u32)) + (rounded_y * lod.pitch));
+//         const texture_base = shared.incrementPointer(lod.memory.?, test_offset);
+//         const texel_pointer: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));
+//         texel_pointer[0] = Color.new(255, 255, 255, 255).packColorBGRA255();
+//     }
+//
+//     const sample = bilinearSample(&lod, rounded_x, rounded_y);
+//     const result = sRGBBilinearBlend(sample, fraction_x, fraction_y).rgb();
+//
+//     return result;
+// }
 
 inline fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample {
     const offset: i32 = @intCast((x * @sizeOf(u32)) + (y * texture.pitch));
@@ -1656,43 +1621,4 @@ inline fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample 
         .c = texel_pointer_c[0],
         .d = texel_pointer_d[0],
     };
-}
-
-pub fn aspectRatioFit(render_width: u32, render_height: u32, window_width: u32, window_height: u32) Rectangle2i {
-    var result: Rectangle2i = .fromMinMax(.zero(), .zero());
-
-    if (render_width > 0 and render_height > 0 and window_width > 0 and window_height > 0) {
-        const optimal_window_width: f32 =
-            @as(f32, @floatFromInt(window_height)) *
-            (@as(f32, @floatFromInt(render_width)) / @as(f32, @floatFromInt(render_height)));
-        const optimal_window_height: f32 =
-            @as(f32, @floatFromInt(window_width)) *
-            (@as(f32, @floatFromInt(render_height)) / @as(f32, @floatFromInt(render_width)));
-
-        if (optimal_window_width > @as(f32, @floatFromInt(window_width))) {
-            // Width-constrained display, top and bottom black bars.
-            _ = result.min.setX(0);
-            _ = result.max.setX(@intCast(window_width));
-
-            const empty: f32 = @as(f32, @floatFromInt(window_height)) - optimal_window_height;
-            const half_empty: i32 = intrinsics.roundReal32ToInt32(0.5 * empty);
-            const use_height: i32 = intrinsics.roundReal32ToInt32(optimal_window_height);
-
-            _ = result.min.setY(half_empty);
-            _ = result.max.setY(result.min.y() + use_height);
-        } else {
-            // Height-constrained display, left and right black bars.
-            _ = result.min.setY(0);
-            _ = result.max.setY(@intCast(window_height));
-
-            const empty: f32 = @as(f32, @floatFromInt(window_width)) - optimal_window_width;
-            const half_empty: i32 = intrinsics.roundReal32ToInt32(0.5 * empty);
-            const use_width: i32 = intrinsics.roundReal32ToInt32(optimal_window_width);
-
-            _ = result.min.setX(half_empty);
-            _ = result.max.setX(result.min.x() + use_width);
-        }
-    }
-
-    return result;
 }

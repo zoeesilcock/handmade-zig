@@ -9,8 +9,7 @@ const entities = @import("entities.zig");
 const brains = @import("brains.zig");
 const asset = @import("asset.zig");
 const audio = @import("audio.zig");
-const render = @import("render.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
 const particles = @import("particles.zig");
 const random = @import("random.zig");
@@ -40,14 +39,14 @@ const WorldRoom = world.WorldRoom;
 const LoadedBitmap = asset.LoadedBitmap;
 const PlayingSound = audio.PlayingSound;
 const BitmapId = file_formats.BitmapId;
-const RenderGroup = rendergroup.RenderGroup;
-const ObjectTransform = rendergroup.ObjectTransform;
-const TransientClipRect = rendergroup.TransientClipRect;
+const RenderGroup = renderer.RenderGroup;
+const ObjectTransform = renderer.ObjectTransform;
+const TransientClipRect = renderer.TransientClipRect;
 const LightingSolution = lighting.LightingSolution;
 const LightingTextures = lighting.LightingTextures;
 const LightingPointState = lighting.LightingPointState;
 const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
-const CameraParams = render.CameraParams;
+const CameraParams = renderer.CameraParams;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
@@ -457,7 +456,7 @@ pub fn updateAndRenderWorld(
             camera_o.getColumn(1),
             camera_o.getColumn(2),
             camera_ot,
-            @intFromEnum(rendergroup.CameraTransformFlag.IsDebug),
+            @intFromEnum(renderer.CameraTransformFlag.IsDebug),
             near_clip_plane,
             far_clip_plane,
             false,
@@ -525,8 +524,8 @@ pub fn updateAndRenderWorld(
         lighting.generateLightingPattern(&world_mode.test_lighting, world_mode.lighting_pattern);
     }
 
-    render_group.enableLighting(light_bounds);
-    render_group.pushLighting(&world_mode.test_textures);
+    const light_memory: TemporaryMemory = transient_state.arena.beginTemporaryMemory();
+    render_group.pushLighting(&transient_state.arena, &world_mode.test_textures, light_bounds);
 
     if (false) {
         var sim_work: [16]WorldSimWork = undefined;
@@ -712,6 +711,7 @@ pub fn updateAndRenderWorld(
     }
 
     endSim(&transient_state.arena, &world_sim);
+    transient_state.arena.endTemporaryMemory(light_memory);
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;
@@ -758,8 +758,8 @@ fn renderTest(
                 const min_position = Vector2.newU(x, y);
                 const max_position = min_position.plus(checker_dimension);
                 const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
-                rendergroup.drawRectangle(lod, min_position, max_position, color, clip_rect, true);
-                rendergroup.drawRectangle(lod, min_position, max_position, color, clip_rect, false);
+                renderer.drawRectangle(lod, min_position, max_position, color, clip_rect, true);
+                renderer.drawRectangle(lod, min_position, max_position, color, clip_rect, false);
                 checker_on = !checker_on;
             }
 

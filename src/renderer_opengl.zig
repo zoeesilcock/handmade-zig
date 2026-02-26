@@ -1,13 +1,12 @@
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const intrinsics = @import("intrinsics.zig");
-const render = @import("render.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
 const sort = @import("sort.zig");
 const debug_interface = @import("debug_interface.zig");
-const platform = @import("win32_handmade.zig");
 const std = @import("std");
 
 pub const GL_NUM_EXTENSIONS = 0x821D;
@@ -164,38 +163,6 @@ pub const GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS = 0x8B4D;
 pub const GL_TEXTURE_MIN_LOD = 0x813A;
 pub const GL_TEXTURE_MAX_LOD = 0x813B;
 
-// Windows specific.
-pub const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
-pub const WGL_CONTEXT_MINOR_VERSION_ARB = 0x2092;
-pub const WGL_CONTEXT_LAYER_PLANE_ARB = 0x2093;
-pub const WGL_CONTEXT_FLAGS_ARB = 0x2094;
-pub const WGL_CONTEXT_PROFILE_MASK_ARB = 0x9126;
-
-pub const WGL_CONTEXT_DEBUG_BIT_ARB = 0x0001;
-pub const WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB = 0x0002;
-
-pub const WGL_CONTEXT_CORE_PROFILE_BIT_ARB = 0x00000001;
-pub const WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB = 0x00000002;
-
-pub const ERROR_INVALID_VERSION_ARB = 0x2095;
-pub const ERROR_INVALID_PROFILE_ARB = 0x2096;
-
-pub const WGL_DRAW_TO_WINDOW_ARB = 0x2001;
-pub const WGL_ACCELERATION_ARB = 0x2003;
-pub const WGL_FULL_ACCELERATION_ARB = 0x2027;
-pub const WGL_SUPPORT_OPENGL_ARB = 0x2010;
-pub const WGL_DOUBLE_BUFFER_ARB = 0x2011;
-pub const WGL_PIXEL_TYPE_ARB = 0x2013;
-pub const WGL_TYPE_RGBA_ARB = 0x202B;
-pub const WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB = 0x20A9;
-
-pub const WGL_RED_BITS_ARB = 0x2015;
-pub const WGL_GREEN_BITS_ARB = 0x2017;
-pub const WGL_BLUE_BITS_ARB = 0x2019;
-pub const WGL_ALPHA_BITS_ARB = 0x201B;
-pub const WGL_ACCUM_BITS_ARB = 0x201D;
-pub const WGL_DEPTH_BITS_ARB = 0x2022;
-
 const ALL_COLOR_ATTACHMENTS = [_]u32{
     GL_COLOR_ATTACHMENT0,
     GL_COLOR_ATTACHMENT1,
@@ -237,20 +204,20 @@ const INTERNAL = shared.INTERNAL;
 const ALLOW_GPU_SRGB = false;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 
-const RenderCommands = shared.RenderCommands;
-const RenderSettings = shared.RenderSettings;
-const TexturedVertex = shared.TexturedVertex;
-const RenderGroup = rendergroup.RenderGroup;
-const RenderSetup = rendergroup.RenderSetup;
-const RenderEntryHeader = rendergroup.RenderEntryHeader;
-const RenderEntryTexturedQuads = rendergroup.RenderEntryTexturedQuads;
-const RenderEntryLightingTransfer = rendergroup.RenderEntryLightingTransfer;
-const RenderEntryBeginPeels = rendergroup.RenderEntryBeginPeels;
-const RenderEntryFullClear = rendergroup.RenderEntryFullClear;
-const RenderEntryBitmap = rendergroup.RenderEntryBitmap;
-const RenderEntryCube = rendergroup.RenderEntryCube;
-const RenderEntryRectangle = rendergroup.RenderEntryRectangle;
-const RenderEntrySaturation = rendergroup.RenderEntrySaturation;
+const RenderCommands = renderer.RenderCommands;
+const RenderSettings = renderer.RenderSettings;
+const TexturedVertex = renderer.TexturedVertex;
+const RenderGroup = renderer.RenderGroup;
+const RenderSetup = renderer.RenderSetup;
+const RenderEntryHeader = renderer.RenderEntryHeader;
+const RenderEntryTexturedQuads = renderer.RenderEntryTexturedQuads;
+const RenderEntryLightingTransfer = renderer.RenderEntryLightingTransfer;
+const RenderEntryBeginPeels = renderer.RenderEntryBeginPeels;
+const RenderEntryFullClear = renderer.RenderEntryFullClear;
+const RenderEntryBitmap = renderer.RenderEntryBitmap;
+const RenderEntryCube = renderer.RenderEntryCube;
+const RenderEntryRectangle = renderer.RenderEntryRectangle;
+const RenderEntrySaturation = renderer.RenderEntrySaturation;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
@@ -261,10 +228,9 @@ const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
 const TimedBlock = debug_interface.TimedBlock;
-const TextureOp = render.TextureOp;
-const SpriteFlag = render.SpriteFlag;
-const SpriteEdge = render.SpriteEdge;
-const zeroStruct = @import("memory.zig").zeroStruct;
+const TextureOp = renderer.TextureOp;
+const SpriteFlag = renderer.SpriteFlag;
+const SpriteEdge = renderer.SpriteEdge;
 
 const debug_color_table = shared.debug_color_table;
 var global_config = &@import("config.zig").global_config;
@@ -296,6 +262,7 @@ fn glDebugProc(
 
 // TODO: How do we import OpenGL on other platforms here?
 pub const gl = @import("win32").graphics.open_gl;
+const platform = @import("win32_opengl.zig");
 
 const OpenGLProgramCommon = struct {
     program_handle: u32 = 0,
@@ -364,8 +331,8 @@ const FramebufferFlags = enum(u32) {
 };
 
 const LightBuffer = struct {
-    width: i32,
-    height: i32,
+    width: i32 = 0,
+    height: i32 = 0,
 
     write_all_framebuffer: u32 = 0,
     write_emission_framebuffer: u32 = 0,
@@ -1861,7 +1828,7 @@ fn changeToSettings(settings: *RenderSettings) void {
         gl.glDeleteTextures(1, &light_buffer.back_emission_texture);
         gl.glDeleteTextures(1, &light_buffer.surface_color_texture);
         gl.glDeleteTextures(1, &light_buffer.normal_position_texture);
-        zeroStruct(LightBuffer, light_buffer);
+        light_buffer.* = .{};
     }
     freeProgram(&open_gl.z_bias_no_depth_peel.common);
     freeProgram(&open_gl.z_bias_depth_peel.common);
@@ -2523,7 +2490,7 @@ pub fn renderCommands(
 }
 
 pub fn manageTextures(first_op: ?*TextureOp) void {
-    var opt_op: ?*render.TextureOp = first_op;
+    var opt_op: ?*renderer.TextureOp = first_op;
     while (opt_op) |op| : (opt_op = op.next) {
         if (op.is_allocate) {
             op.op.allocate.result_handle.* = allocateTexture(
@@ -2706,7 +2673,7 @@ pub fn displayBitmap(
     gl.glMatrixMode(gl.GL_MODELVIEW);
     gl.glLoadIdentity();
 
-    shared.notImplemented();
+    types.notImplemented();
 
     // TODO: This has to be worked out specifically for doing the full-screen draw.
     gl.glMatrixMode(gl.GL_PROJECTION);

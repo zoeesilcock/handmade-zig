@@ -1,5 +1,6 @@
 const std = @import("std");
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const debug_interface = @import("debug_interface.zig");
 
 // Types.
@@ -124,7 +125,7 @@ pub const MemoryArena = extern struct {
                     @intFromEnum(PlatformMemoryBlockFlags.UnderflowCheck)) != 0)
             {
                 self.minimum_block_size = 0;
-                aligned_size = shared.alignPow2(@intCast(size), params.alignment);
+                aligned_size = types.alignPow2(@intCast(size), params.alignment);
             } else if (self.minimum_block_size == 0) {
                 self.minimum_block_size = 1024 * 1024;
             }

@@ -1,6 +1,6 @@
 const math = @import("math.zig");
 const box_mod = @import("box.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
 const simd = @import("simd.zig");
 const shared = @import("shared.zig");
@@ -24,8 +24,8 @@ const V3_4x = simd.V3_4x;
 const F32_4x = simd.F32_4x;
 const U32_4x = simd.U32_4x;
 const Bool_4x = simd.Bool_4x;
-const RenderGroup = rendergroup.RenderGroup;
-const RenderCommands = shared.RenderCommands;
+const RenderGroup = renderer.RenderGroup;
+const RenderCommands = renderer.RenderCommands;
 const LoadedBitmap = asset.LoadedBitmap;
 const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
@@ -943,10 +943,10 @@ pub fn lightingTest(
         solution.debug_line_count = 0;
     }
     solution.box_reference_count = 0;
-    solution.box_count = @intCast(group.commands.light_box_count);
+    solution.box_count = @intCast(group.light_box_count);
     const original_box_count: u32 = solution.box_count;
-    solution.boxes = group.commands.light_boxes;
-    solution.point_count = group.commands.light_point_index;
+    solution.boxes = group.light_boxes;
+    solution.point_count = group.light_point_index;
     solution.extended_point_count = solution.point_count;
 
     const t_update: f32 = 0.05;
@@ -1019,7 +1019,7 @@ pub fn lightingTest(
 
     buildSpatialPartitionForLighting(solution);
 
-    DebugInterface.debugValue(@src(), &group.commands.light_box_count, "LightBoxCount");
+    DebugInterface.debugValue(@src(), &group.light_box_count, "LightBoxCount");
     DebugInterface.debugValue(@src(), &solution.box_count, "BoxCount");
     DebugInterface.debugValue(@src(), &solution.point_count, "PointCount");
 
@@ -1362,6 +1362,8 @@ pub fn outputLightingPoints(
 }
 
 pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, dest: *LightingTextures) void {
+    _ = group;
+
     TimedBlock.beginFunction(@src(), .OutputLightingTextures);
     defer TimedBlock.endFunction(@src(), .OutputLightingTextures);
 
@@ -1384,6 +1386,4 @@ pub fn outputLightingTextures(group: *RenderGroup, solution: *LightingSolution, 
         dest.light_data0[point.pack_index] = .new(position.x(), position.y(), position.z(), direction.x());
         dest.light_data1[point.pack_index] = .new(color.r(), color.g(), color.b(), direction.y());
     }
-
-    group.pushLighting(dest);
 }

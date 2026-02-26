@@ -1,9 +1,10 @@
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const memory = @import("memory.zig");
 const math = @import("math.zig");
 const random = @import("random.zig");
 const stream = @import("stream.zig");
-const render = @import("render.zig");
+const renderer = @import("renderer.zig");
 const png = @import("png.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
@@ -11,7 +12,7 @@ const file_formats = shared.file_formats;
 const file_formats_v0 = shared.file_formats_v0;
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
-const gl = @import("opengl.zig").gl;
+const gl = @import("renderer_opengl.zig").gl;
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
@@ -45,7 +46,7 @@ const PlatformFileHandle = shared.PlatformFileHandle;
 const PlatformFileInfo = shared.PlatformFileInfo;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const TimedBlock = debug_interface.TimedBlock;
-const TextureOp = render.TextureOp;
+const TextureOp = renderer.TextureOp;
 
 pub const AssetTypeId = file_formats_v0.AssetTypeIdV0;
 pub const AssetTagId = file_formats.AssetTagId;
@@ -820,13 +821,13 @@ pub const Assets = struct {
                         const info = asset.hha.info.bitmap;
 
                         var size = AssetMemorySize{};
-                        const width = shared.safeTruncateUInt32ToUInt16(info.dim[0]);
-                        const height = shared.safeTruncateUInt32ToUInt16(info.dim[1]);
+                        const width = types.safeTruncateUInt32ToUInt16(info.dim[0]);
+                        const height = types.safeTruncateUInt32ToUInt16(info.dim[1]);
                         size.section = 4 * width;
                         size.data = size.section * height;
                         size.total = size.data + @sizeOf(AssetMemoryHeader);
 
-                        asset.header = self.acquireAssetMemory(shared.align16(size.total), id.value, .Bitmap);
+                        asset.header = self.acquireAssetMemory(types.align16(size.total), id.value, .Bitmap);
 
                         var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
 
@@ -834,7 +835,7 @@ pub const Assets = struct {
                         bitmap.width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1]));
                         bitmap.width = width;
                         bitmap.height = height;
-                        bitmap.pitch = shared.safeTruncateUInt32ToUInt16(size.section);
+                        bitmap.pitch = types.safeTruncateUInt32ToUInt16(size.section);
                         bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
                         bitmap.texture_handle = undefined;
 
@@ -990,7 +991,7 @@ pub const Assets = struct {
                     size.data = info.channel_count * size.section;
                     size.total = size.data + @sizeOf(AssetMemoryHeader);
 
-                    asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(shared.align16(size.total), id.value, .Sound)));
+                    asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(types.align16(size.total), id.value, .Sound)));
                     const sound = &asset.header.?.data.sound;
 
                     sound.sample_count = info.sample_count;
@@ -1120,7 +1121,7 @@ pub const Assets = struct {
                         const size_data: u32 = glyphs_size + horizontal_advance_size;
                         const size_total: u32 = size_data + @sizeOf(AssetMemoryHeader) + unicode_map_size;
 
-                        asset.header = self.acquireAssetMemory(shared.align16(size_total), id.value, .Font);
+                        asset.header = self.acquireAssetMemory(types.align16(size_total), id.value, .Font);
 
                         var font: *LoadedFont = @ptrCast(@alignCast(&asset.header.?.data.font));
                         font.bitmap_id_offset = self.getFile(asset.file_index).asset_base;

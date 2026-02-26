@@ -1,41 +1,27 @@
-//! Software renderer.
-//!
-//! 1: Everywhere outside the renderer, Y always goes upward, X to the right.
-//!
-//! 2: All bitmaps including the render target are assumed to be bottom-up (meaning that the first row pointer points
-//! to the bottom-most row when viewed on the screen).
-//!
-//! 3: It is mandatory that all inputs to the renderer are in world coordinates (meters), not pixels. If for some
-//! reason something absolutely has to be specified in pixels, that will be explicitly marked in the API, but
-//! this should occur exceedingly sparingly.
-//!
-//! 4: Z is a special coordinate because it is broken up into discrete slices, and the renderer actually understands
-//! these slices. Z slices are what control the scaling of things, whereas Z offsets inside a slice are what control
-//! Y offsetting.
-//!
-//! 5: All color values specified to the renderer using the Color and Color3 types are in non-premultiplied alpha.
-//!
-
+const std = @import("std");
 const shared = @import("shared.zig");
+const memory = @import("memory.zig");
 const math = @import("math.zig");
-const render = @import("render.zig");
-const lighting = @import("lighting.zig");
+const simd = @import("simd.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
-const memory = @import("memory.zig");
+const sort = @import("sort.zig");
+const lighting = @import("lighting.zig");
 const config = @import("config.zig");
 const file_formats = shared.file_formats;
-const sort = @import("sort.zig");
 const debug_interface = @import("debug_interface.zig");
-const std = @import("std");
+
+// TODO: How would we import other platforms here?
+const platform = @import("win32_handmade.zig");
+var show_lighting_samples: bool = false;
 
 const INTERNAL = shared.INTERNAL;
 const SLOW = shared.SLOW;
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
-
 var global_config = &@import("config.zig").global_config;
 
 // Types.
+const MemoryArena = memory.MemoryArena;
 const Vector2 = math.Vector2;
 const Vector2i = math.Vector2i;
 const Vector3 = math.Vector3;
@@ -47,13 +33,11 @@ const Rectangle3 = math.Rectangle3;
 const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
 const MatrixInverse4x4 = math.MatrixInverse4x4;
-const LoadedBitmap = asset.LoadedBitmap;
+pub const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
-const RenderCommands = shared.RenderCommands;
 const ArenaPushParams = shared.ArenaPushParams;
-const TexturedVertex = shared.TexturedVertex;
 const LightingTextures = lighting.LightingTextures;
 const LightingSurface = shared.LightingSurface;
 const LightingPoint = lighting.LightingPoint;
@@ -69,8 +53,132 @@ const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
 const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
 const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
 const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
-const ManualSortKey = render.ManualSortKey;
-const SpriteFlag = render.SpriteFlag;
+
+pub const TexturedVertex = extern struct {
+    position: Vector4,
+    light_uv: Vector2,
+    uv: Vector2, // TODO: Convert this down to 8-bit?
+    color: u32, // Packed RGBA in memory order (ABGR in little endian).
+
+    // TODO: Doesn't need to be per-vertex - move this into its own per-primitive buffer.
+    normal: Vector3,
+    light_index: u16 = 0,
+};
+
+pub const RenderSettings = extern struct {
+    width: u32 = 0,
+    height: u32 = 0,
+    depth_peel_count_hint: u32 = 0,
+    multisampling_hint: bool = false,
+    pixelation_hint: bool = false,
+    multisample_debug: bool = false,
+    lighting_disabled: bool = false,
+
+    pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
+        const type_info = @typeInfo(@TypeOf(self.*));
+        inline for (type_info.@"struct".fields) |struct_field| {
+            if (@field(self, struct_field.name) != @field(b, struct_field.name)) {
+                return false;
+            }
+        }
+        return true;
+
+        // return self.width == b.width and
+        //     self.height == b.height and
+        //     self.depth_peel_count_hint == b.depth_peel_count_hint and
+        //     self.multisampling_hint == b.multisampling_hint and
+        //     self.pixelation_hint == b.pixelation_hint;
+    }
+};
+
+pub const RenderCommands = extern struct {
+    settings: RenderSettings = .{},
+
+    max_push_buffer_size: u32,
+    push_buffer_base: [*]u8,
+    push_buffer_data_at: [*]u8,
+
+    max_vertex_count: u32,
+    vertex_count: u32,
+    vertex_array: [*]TexturedVertex,
+    quad_bitmaps: [*]?*LoadedBitmap,
+    white_bitmap: ?*LoadedBitmap,
+
+    pub fn default(
+        max_push_buffer_size: u32,
+        push_buffer: *anyopaque,
+        width: u32,
+        height: u32,
+        max_vertex_count: u32,
+        vertex_array: [*]TexturedVertex,
+        bitmap_array: [*]?*LoadedBitmap,
+        white_bitmap: *LoadedBitmap,
+    ) RenderCommands {
+        return RenderCommands{
+            .settings = .{
+                .width = width,
+                .height = height,
+                .depth_peel_count_hint = 4,
+                .multisampling_hint = true,
+                .pixelation_hint = false,
+            },
+
+            .max_push_buffer_size = max_push_buffer_size,
+            .push_buffer_base = @ptrCast(push_buffer),
+            .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer)),
+
+            .max_vertex_count = max_vertex_count,
+            .vertex_count = 0,
+            .vertex_array = vertex_array,
+            .quad_bitmaps = bitmap_array,
+            .white_bitmap = white_bitmap,
+        };
+    }
+
+    pub fn reset(self: *RenderCommands) void {
+        self.push_buffer_data_at = self.push_buffer_base;
+        self.vertex_count = 0;
+    }
+};
+
+const TextureOpAllocate = struct {
+    width: i32,
+    height: i32,
+    data: *anyopaque,
+    result_handle: *u32,
+};
+
+const TextureOpDeallocate = struct {
+    handle: u32,
+};
+
+pub const TextureOp = struct {
+    next: ?*TextureOp = null,
+    is_allocate: bool,
+
+    op: union {
+        allocate: TextureOpAllocate,
+        deallocate: TextureOpDeallocate,
+    },
+};
+
+pub const ManualSortKey = extern struct {
+    always_in_front_of: u32 = 0,
+    always_behind: u32 = 0,
+};
+
+pub const CameraParams = struct {
+    focal_length: f32 = 0,
+
+    pub fn get(width_in_pixels: u32, focal_length: f32) CameraParams {
+        _ = width_in_pixels;
+
+        var result: CameraParams = .{};
+        result.focal_length = focal_length;
+
+        return result;
+    }
+};
 
 pub const UsedBitmapDim = struct {
     basis_position: Vector3 = undefined,
@@ -79,10 +187,10 @@ pub const UsedBitmapDim = struct {
     position: Vector3 = undefined,
 };
 
-pub const EnvironmentMap = extern struct {
-    lod: [4]LoadedBitmap,
-    z_position: f32,
-};
+// pub const EnvironmentMap = extern struct {
+//     lod: [4]LoadedBitmap,
+//     z_position: f32,
+// };
 
 pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
@@ -213,8 +321,12 @@ pub const RenderGroup = extern struct {
     assets: *asset.Assets,
 
     screen_dimensions: Vector2,
+
     lighting_enabled: bool,
     light_bounds: Rectangle3,
+    light_box_count: u32,
+    light_boxes: [*]LightingBox,
+    light_point_index: u16,
 
     debug_tag: u32,
 
@@ -246,6 +358,9 @@ pub const RenderGroup = extern struct {
             .current_quads = undefined,
             .lighting_enabled = false,
             .light_bounds = .zero(),
+            .light_box_count = 0,
+            .light_boxes = undefined,
+            .light_point_index = 0,
         };
 
         var initial_setup: RenderSetup = .{
@@ -266,11 +381,6 @@ pub const RenderGroup = extern struct {
 
         // TODO:
         // self.commands.missing_resource_count += self.missing_resource_count
-    }
-
-    pub fn enableLighting(self: *RenderGroup, lighting_bounds: Rectangle3) void {
-        self.lighting_enabled = true;
-        self.light_bounds = lighting_bounds;
     }
 
     pub fn allResourcesPresent(self: *RenderGroup) bool {
@@ -304,7 +414,7 @@ pub const RenderGroup = extern struct {
         // defer TimedBlock.endFunction(@src(), .PushRenderElement);
 
         // This depends on the name of this file, if the file name changes the magic number may need to be adjusted.
-        const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[12..]);
+        const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[9..]);
         return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, @alignOf(T))));
     }
 
@@ -434,8 +544,17 @@ pub const RenderGroup = extern struct {
 
     pub fn pushLighting(
         self: *RenderGroup,
+        temp_arena: *MemoryArena,
         source: *LightingTextures,
+        lighting_bounds: Rectangle3,
     ) void {
+        std.debug.assert(self.light_box_count == 0);
+
+        self.lighting_enabled = true;
+        self.light_bounds = lighting_bounds;
+        self.light_boxes = temp_arena.pushArray(LIGHT_DATA_WIDTH, LightingBox, null);
+        self.light_point_index = 1;
+
         if (self.pushRenderElement(RenderEntryLightingTransfer)) |dest| {
             dest.light_data0 = &source.light_data0;
             dest.light_data1 = &source.light_data1;
@@ -909,15 +1028,15 @@ pub const RenderGroup = extern struct {
 
                 if (cube_bounds.intersects(&self.light_bounds)) {
                     light_count = LIGHT_POINTS_PER_CHUNK / 6;
-                    light_index = self.commands.light_point_index;
+                    light_index = self.light_point_index;
                     std.debug.assert(light_index != 0);
-                    self.commands.light_point_index += LIGHT_POINTS_PER_CHUNK;
+                    self.light_point_index += LIGHT_POINTS_PER_CHUNK;
 
-                    std.debug.assert(self.commands.light_point_index <= LIGHT_DATA_WIDTH);
+                    std.debug.assert(self.light_point_index <= LIGHT_DATA_WIDTH);
 
-                    var light_box: [*]LightingBox = self.commands.light_boxes + self.commands.light_box_count;
-                    self.commands.light_box_count += 1;
-                    std.debug.assert(self.commands.light_box_count <= LIGHT_DATA_WIDTH);
+                    var light_box: [*]LightingBox = self.light_boxes + self.light_box_count;
+                    self.light_box_count += 1;
+                    std.debug.assert(self.light_box_count <= LIGHT_DATA_WIDTH);
 
                     light_box[0].position = max_corner.plus(min_corner).scaledTo(0.5);
                     light_box[0].radius = max_corner.minus(min_corner).scaledTo(0.5);
@@ -1387,3 +1506,14 @@ pub const RenderGroup = extern struct {
         }
     }
 };
+
+inline fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
+    const inv_255: f32 = 1.0 / 255.0;
+
+    return Vector4.new(
+        -1.0 + 2.0 * (inv_255 * normal.x()),
+        -1.0 + 2.0 * (inv_255 * normal.y()),
+        -1.0 + 2.0 * (inv_255 * normal.z()),
+        inv_255 * normal.w(),
+    );
+}

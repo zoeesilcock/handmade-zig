@@ -8,13 +8,13 @@ pub const BITMAP_BYTES_PER_PIXEL = 4;
 pub const intrinsics = @import("intrinsics.zig");
 pub const math = @import("math.zig");
 const memory = @import("memory.zig");
+const types = @import("types.zig");
 const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
-const rendergroup = @import("rendergroup.zig");
-const render = @import("render.zig");
+const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
 pub const file_formats = @import("file_formats");
 pub const file_formats_v0 = @import("file_formats_v0.zig");
@@ -40,6 +40,7 @@ const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
+const RenderCommands = renderer.RenderCommands;
 const PlayingSound = audio.PlayingSound;
 const DebugTable = debug_interface.DebugTable;
 const EntityId = entities.EntityId;
@@ -49,6 +50,7 @@ const MemoryIndex = memory.MemoryIndex;
 const TemporaryMemory = memory.TemporaryMemory;
 const LightingBox = lighting.LightingBox;
 const LightingPoint = lighting.LightingPoint;
+const TicketMutex = types.TicketMutex;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
 const LIGHT_CHUNK_COUNT = lighting.LIGHT_CHUNK_COUNT;
@@ -91,124 +93,6 @@ pub const Buffer = struct {
         return result;
     }
 };
-
-// Helper functions.
-pub fn notImplemented() void {
-    if (INTERNAL) {
-        std.debug.assert(true);
-    } else {
-        unreachable;
-    }
-}
-
-pub inline fn kilobytes(value: u32) u64 {
-    return value * 1024;
-}
-
-pub inline fn megabytes(value: u32) u64 {
-    return kilobytes(value) * 1024;
-}
-
-pub inline fn gigabytes(value: u32) u64 {
-    return megabytes(value) * 1024;
-}
-
-pub inline fn terabytes(value: u32) u64 {
-    return gigabytes(value) * 1024;
-}
-
-pub inline fn incrementPointer(pointer: anytype, offset: i32) @TypeOf(pointer) {
-    return if (offset >= 0)
-        pointer + @as(usize, @intCast(offset))
-    else
-        pointer - @abs(offset);
-}
-
-pub fn rdtsc() u64 {
-    var hi: u32 = 0;
-    var low: u32 = 0;
-
-    asm (
-        \\rdtsc
-        : [low] "={eax}" (low),
-          [hi] "={edx}" (hi),
-    );
-    return (@as(u64, hi) << 32) | @as(u64, low);
-}
-
-pub fn getThreadId() u32 {
-    const thread_local_storage_ptr = asm (
-        \\movq %%gs:0x30, %[ret]
-        : [ret] "=ret" (-> *anyopaque),
-    );
-    const thread_id: *u32 = @ptrFromInt(@intFromPtr(thread_local_storage_ptr) + 0x48);
-
-    return thread_id.*;
-}
-
-pub const TicketMutex = extern struct {
-    ticket: u64,
-    serving: u64,
-
-    pub fn begin(self: *TicketMutex) void {
-        const ticket = @atomicRmw(u64, &self.ticket, .Add, 1, .seq_cst);
-        while (ticket != self.serving) {
-            // TODO: This isn't implemented in Zig yet:
-            // mm_pause();
-        }
-    }
-
-    pub fn end(self: *TicketMutex) void {
-        _ = @atomicRmw(u64, &self.serving, .Add, 1, .seq_cst);
-    }
-};
-
-pub const PlatformTextureOpQueue = extern struct {
-    mutex: TicketMutex = undefined,
-
-    first: ?*render.TextureOp = null,
-    last: ?*render.TextureOp = null,
-    first_free: ?*render.TextureOp = null,
-};
-
-pub inline fn alignPow2(value: u32, alignment: u32) u32 {
-    return (value + (alignment - 1)) & ~@as(u32, alignment - 1);
-}
-
-pub inline fn align4(value: u32) u32 {
-    return (value + 3) & ~@as(u32, 3);
-}
-
-pub inline fn align8(value: u32) u32 {
-    return (value + 7) & ~@as(u32, 7);
-}
-
-pub inline fn align16(value: u32) u32 {
-    return (value + 15) & ~@as(u32, 15);
-}
-
-pub inline fn safeTruncateI64(value: i64) u32 {
-    std.debug.assert(value <= 0xFFFFFFFF);
-    return @as(u32, @intCast(value));
-}
-
-pub inline fn safeTruncateUInt32ToUInt16(value: u32) u16 {
-    std.debug.assert(value <= 65535);
-    std.debug.assert(value >= 0);
-    return @as(u16, @intCast(value));
-}
-
-pub inline fn safeTruncateToUInt16(value: i32) u16 {
-    std.debug.assert(value <= 65535);
-    std.debug.assert(value >= 0);
-    return @as(u16, @intCast(value));
-}
-
-pub inline fn safeTruncateToInt16(value: i32) i16 {
-    std.debug.assert(value <= 32767);
-    std.debug.assert(value >= -32768);
-    return @as(u16, @intCast(value));
-}
 
 pub inline fn stringLength(opt_string: ?[*:0]const u8) u32 {
     var count: u32 = 0;
@@ -888,6 +772,14 @@ pub const PlatformWorkQueue = extern struct {
     entries: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{}} ** 256,
 };
 
+pub const PlatformTextureOpQueue = extern struct {
+    mutex: TicketMutex = undefined,
+
+    first: ?*renderer.TextureOp = null,
+    last: ?*renderer.TextureOp = null,
+    first_free: ?*renderer.TextureOp = null,
+};
+
 pub const PlatformFileHandle = extern struct {
     no_errors: bool = false,
     platform: *anyopaque = undefined,
@@ -1049,112 +941,6 @@ pub const debug_color_table: [11]Color3 = .{
     Color3.new(0.5, 1, 0),
     Color3.new(0, 1, 0.5),
     Color3.new(0.5, 0, 1),
-};
-
-pub const TexturedVertex = extern struct {
-    position: Vector4,
-    light_uv: Vector2,
-    uv: Vector2, // TODO: Convert this down to 8-bit?
-    color: u32, // Packed RGBA in memory order (ABGR in little endian).
-
-    // TODO: Doesn't need to be per-vertex - move this into its own per-primitive buffer.
-    normal: Vector3,
-    light_index: u16 = 0,
-};
-
-pub const RenderSettings = extern struct {
-    width: u32 = 0,
-    height: u32 = 0,
-    depth_peel_count_hint: u32 = 0,
-    multisampling_hint: bool = false,
-    pixelation_hint: bool = false,
-    multisample_debug: bool = false,
-    lighting_disabled: bool = false,
-
-    pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
-        const type_info = @typeInfo(@TypeOf(self.*));
-        inline for (type_info.@"struct".fields) |struct_field| {
-            if (@field(self, struct_field.name) != @field(b, struct_field.name)) {
-                return false;
-            }
-        }
-        return true;
-
-        // return self.width == b.width and
-        //     self.height == b.height and
-        //     self.depth_peel_count_hint == b.depth_peel_count_hint and
-        //     self.multisampling_hint == b.multisampling_hint and
-        //     self.pixelation_hint == b.pixelation_hint;
-    }
-};
-
-pub const RenderCommands = extern struct {
-    settings: RenderSettings = .{},
-
-    max_push_buffer_size: u32,
-    push_buffer_base: [*]u8,
-    push_buffer_data_at: [*]u8,
-
-    max_vertex_count: u32,
-    vertex_count: u32,
-    vertex_array: [*]TexturedVertex,
-    quad_bitmaps: [*]?*LoadedBitmap,
-    white_bitmap: ?*LoadedBitmap,
-
-    light_box_count: u32,
-    light_boxes: [*]LightingBox,
-
-    light_point_index: u16,
-
-    pub fn default(
-        max_push_buffer_size: u32,
-        push_buffer: *anyopaque,
-        width: u32,
-        height: u32,
-        max_vertex_count: u32,
-        vertex_array: [*]TexturedVertex,
-        bitmap_array: [*]?*LoadedBitmap,
-        white_bitmap: *LoadedBitmap,
-        light_boxes: [*]LightingBox,
-    ) RenderCommands {
-        return RenderCommands{
-            .settings = .{
-                .width = width,
-                .height = height,
-                .depth_peel_count_hint = 4,
-                .multisampling_hint = true,
-                .pixelation_hint = false,
-            },
-
-            .max_push_buffer_size = max_push_buffer_size,
-            .push_buffer_base = @ptrCast(push_buffer),
-            .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer)),
-
-            .max_vertex_count = max_vertex_count,
-            .vertex_count = 0,
-            .vertex_array = vertex_array,
-            .quad_bitmaps = bitmap_array,
-            .white_bitmap = white_bitmap,
-
-            .light_box_count = 0,
-            .light_boxes = light_boxes,
-
-            .light_point_index = 0,
-        };
-    }
-
-    pub fn reset(self: *RenderCommands) void {
-        self.push_buffer_data_at = self.push_buffer_base;
-        self.vertex_count = 0;
-        self.light_box_count = 0;
-    }
-};
-
-pub const OffscreenBuffer = extern struct {
-    memory: ?*anyopaque = undefined,
-    width: i32 = 0,
-    height: i32 = 0,
-    pitch: usize = 0,
 };
 
 pub const SoundOutputBuffer = extern struct {
@@ -1359,9 +1145,9 @@ pub const TransientState = struct {
     assets: *Assets,
     main_generation_id: u32,
 
-    env_map_width: i32,
-    env_map_height: i32,
-    env_maps: [3]rendergroup.EnvironmentMap = [1]rendergroup.EnvironmentMap{undefined} ** 3,
+    // env_map_width: i32,
+    // env_map_height: i32,
+    // env_maps: [3]renderer.EnvironmentMap = [1]renderer.EnvironmentMap{undefined} ** 3,
 
     // TODO: Potentially remove this, it is just for asset locking.
     next_generation_id: u32,

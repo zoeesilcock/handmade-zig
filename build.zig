@@ -18,6 +18,7 @@ const Package = enum {
     Compressor,
     Raytracer,
     TestPNG,
+    RendererTest,
 };
 
 pub fn build(b: *std.Build) void {
@@ -69,6 +70,10 @@ pub fn build(b: *std.Build) void {
 
     if (package == .All or package == .TestPNG) {
         addTestPNG(b, build_options, target, optimize);
+    }
+
+    if (package == .All or package == .RendererTest) {
+        addRendererTest(b, build_options, target, optimize, internal);
     }
 }
 
@@ -418,4 +423,47 @@ fn addSimpleCompressor(
     const simple_preprocessor_run_step = b.step("simple-compressor", "Run the compressor");
     run_simple_compressor.setCwd(b.path("."));
     simple_preprocessor_run_step.dependOn(&run_simple_compressor.step);
+}
+
+fn addRendererTest(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    internal: bool,
+) void {
+    const file_formats_module = b.addModule("file_formats", .{
+        .root_source_file = b.path("src/file_formats.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "renderer-test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/win32_renderer_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    exe.stack_size = 0x100000; // 1MB.
+    exe.root_module.addOptions("build_options", build_options);
+    exe.root_module.addImport("file_formats", file_formats_module);
+
+    if (!internal) {
+        exe.subsystem = .Windows;
+    }
+
+    // Add the win32 API wrapper.
+    const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
+    exe.root_module.addImport("win32", zigwin32);
+
+    b.installArtifact(exe);
+
+    // Allow running main executable from build command.
+    const run_exe = b.addRunArtifact(exe);
+    const run_step = b.step("run-renderer-test", "Run the renderer test");
+    run_exe.setCwd(b.path("."));
+    run_step.dependOn(&run_exe.step);
 }

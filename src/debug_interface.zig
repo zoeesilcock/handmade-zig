@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const memory = @import("memory.zig");
 const math = @import("math.zig");
 const asset = @import("asset.zig");
@@ -169,10 +170,10 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         std.debug.assert(event_index < shared.global_debug_table.events[0].len);
 
         var event: *DebugEvent = &shared.global_debug_table.events[array_index][event_index];
-        event.clock = shared.rdtsc();
+        event.clock = types.rdtsc();
         event.event_type = event_type;
         event.core_index = 0;
-        event.thread_id = @truncate(shared.getThreadId());
+        event.thread_id = @truncate(types.getThreadId());
         event.guid = guid;
         event.name = name;
 

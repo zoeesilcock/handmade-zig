@@ -1,7 +1,7 @@
 const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const asset = @import("asset.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 const math = @import("math.zig");
 const config = @import("config.zig");
 const sim = @import("sim.zig");
@@ -34,9 +34,9 @@ const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
 const SortEntry = sort.SortEntry;
-const ObjectTransform = rendergroup.ObjectTransform;
-const RenderGroup = rendergroup.RenderGroup;
-const TransientClipRect = rendergroup.TransientClipRect;
+const ObjectTransform = renderer.ObjectTransform;
+const RenderGroup = renderer.RenderGroup;
+const TransientClipRect = renderer.TransientClipRect;
 
 const textOutAt = debug_ui.textOutAt;
 const basicTextElement = debug_ui.basicTextElement;
@@ -2218,7 +2218,7 @@ fn debugInit(
 
 fn debugStart(
     debug_state: *DebugState,
-    commands: *shared.RenderCommands,
+    commands: *renderer.RenderCommands,
     assets: *asset.Assets,
     main_generation_id: u32,
     width: i32,
@@ -2254,7 +2254,7 @@ fn debugStart(
         .new(0, 2 / @as(f32, @floatFromInt(width)), 0),
         .new(0, 0, 1),
         .zero(),
-        @intFromEnum(rendergroup.CameraTransformFlag.IsOrthographic),
+        @intFromEnum(renderer.CameraTransformFlag.IsOrthographic),
         -10000,
         10000,
         null,
@@ -2395,7 +2395,7 @@ fn getMainGenerationID(game_memory: *shared.Memory) u32 {
 pub fn frameEnd(
     game_memory: *shared.Memory,
     input: shared.GameInput,
-    commands: *shared.RenderCommands,
+    commands: *renderer.RenderCommands,
 ) callconv(.c) void {
     memory.zeroStruct(DebugEvent, &shared.global_debug_table.edit_event);
 

@@ -2,7 +2,7 @@ const asset = @import("asset.zig");
 const math = @import("math.zig");
 const debug = @import("debug.zig");
 const debug_interface = @import("debug_interface.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 const std = @import("std");
 
 // Types.
@@ -20,9 +20,9 @@ const DebugLineBuffer = debug.DebugLineBuffer;
 const DebugVariableLink = debug.DebugVariableLink;
 const DebugId = debug_interface.DebugId;
 const DebugType = debug_interface.DebugType;
-const ObjectTransform = rendergroup.ObjectTransform;
-const RenderGroup = rendergroup.RenderGroup;
-const TransientClipRect = rendergroup.TransientClipRect;
+const ObjectTransform = renderer.ObjectTransform;
+const RenderGroup = renderer.RenderGroup;
+const TransientClipRect = renderer.TransientClipRect;
 
 const DebugTextOp = enum {
     DrawText,

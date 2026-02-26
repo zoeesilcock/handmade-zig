@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const memory = @import("memory.zig");
 const brains = @import("brains.zig");
 const intrinsics = @import("intrinsics.zig");
@@ -26,7 +27,7 @@ const EntityReference = entities.EntityReference;
 const StoredEntityReference = entities.StoredEntityReference;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
-const TicketMutex = shared.TicketMutex;
+const TicketMutex = types.TicketMutex;
 const BrainId = brains.BrainId;
 const ReservedBrainId = brains.ReservedBrainId;
 const EntityId = entities.EntityId;

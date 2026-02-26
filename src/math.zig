@@ -1496,3 +1496,42 @@ pub fn swapRedAndBlue(color: u32) u32 {
 pub inline fn isInRange(min: f32, value: f32, max: f32) bool {
     return min <= value and value <= max;
 }
+
+pub fn aspectRatioFit(render_width: u32, render_height: u32, window_width: u32, window_height: u32) Rectangle2i {
+    var result: Rectangle2i = .fromMinMax(.zero(), .zero());
+
+    if (render_width > 0 and render_height > 0 and window_width > 0 and window_height > 0) {
+        const optimal_window_width: f32 =
+            @as(f32, @floatFromInt(window_height)) *
+            (@as(f32, @floatFromInt(render_width)) / @as(f32, @floatFromInt(render_height)));
+        const optimal_window_height: f32 =
+            @as(f32, @floatFromInt(window_width)) *
+            (@as(f32, @floatFromInt(render_height)) / @as(f32, @floatFromInt(render_width)));
+
+        if (optimal_window_width > @as(f32, @floatFromInt(window_width))) {
+            // Width-constrained display, top and bottom black bars.
+            _ = result.min.setX(0);
+            _ = result.max.setX(@intCast(window_width));
+
+            const empty: f32 = @as(f32, @floatFromInt(window_height)) - optimal_window_height;
+            const half_empty: i32 = intrinsics.roundReal32ToInt32(0.5 * empty);
+            const use_height: i32 = intrinsics.roundReal32ToInt32(optimal_window_height);
+
+            _ = result.min.setY(half_empty);
+            _ = result.max.setY(result.min.y() + use_height);
+        } else {
+            // Height-constrained display, left and right black bars.
+            _ = result.min.setY(0);
+            _ = result.max.setY(@intCast(window_height));
+
+            const empty: f32 = @as(f32, @floatFromInt(window_width)) - optimal_window_width;
+            const half_empty: i32 = intrinsics.roundReal32ToInt32(0.5 * empty);
+            const use_width: i32 = intrinsics.roundReal32ToInt32(optimal_window_width);
+
+            _ = result.min.setX(half_empty);
+            _ = result.max.setX(result.min.x() + use_width);
+        }
+    }
+
+    return result;
+}

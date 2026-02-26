@@ -1,5 +1,5 @@
 const intrinsics = @import("intrinsics.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 const entities = @import("entities.zig");
 const asset = @import("asset.zig");
 const shared = @import("shared.zig");
@@ -16,8 +16,8 @@ const Vector3 = math.Vector3;
 const Color = math.Color;
 const V3_4x = simd.V3_4x;
 const V4_4x = simd.V4_4x;
-const RenderGroup = rendergroup.RenderGroup;
-const ObjectTransform = rendergroup.ObjectTransform;
+const RenderGroup = renderer.RenderGroup;
+const ObjectTransform = renderer.ObjectTransform;
 const EntityId = entities.EntityId;
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const Assets = asset.Assets;

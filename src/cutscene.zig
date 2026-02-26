@@ -1,7 +1,6 @@
 const asset = @import("asset.zig");
 const math = @import("math.zig");
-const rendergroup = @import("rendergroup.zig");
-const render = @import("render.zig");
+const renderer = @import("renderer.zig");
 const shared = @import("shared.zig");
 const world_mode = @import("world_mode.zig");
 const file_formats = shared.file_formats;
@@ -19,9 +18,9 @@ const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Matrix4x4 = math.Matrix4x4;
 const Color = math.Color;
-const ObjectTransform = rendergroup.ObjectTransform;
-const RenderGroup = rendergroup.RenderGroup;
-const CameraParams = render.CameraParams;
+const ObjectTransform = renderer.ObjectTransform;
+const RenderGroup = renderer.RenderGroup;
+const CameraParams = renderer.CameraParams;
 
 const SceneLayerFlags = enum(u32) {
     AtInfinity = 0x1,

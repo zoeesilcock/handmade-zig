@@ -6,7 +6,6 @@ const debug_interface = @import("debug_interface.zig");
 const INTERNAL = shared.INTERNAL;
 
 const Rectangle2 = math.Rectangle2;
-const RenderCommands = shared.RenderCommands;
 const TimedBlock = debug_interface.TimedBlock;
 const MemoryArena = shared.MemoryArena;
 

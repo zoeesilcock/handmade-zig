@@ -1,10 +1,11 @@
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const memory = @import("memory.zig");
 const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
-const rendergroup = @import("rendergroup.zig");
+const renderer = @import("renderer.zig");
 const asset = @import("asset.zig");
 const file_formats = shared.file_formats;
 const audio = @import("audio.zig");
@@ -108,7 +109,7 @@ const State = shared.State;
 const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
-const RenderGroup = rendergroup.RenderGroup;
+const RenderGroup = renderer.RenderGroup;
 const Assets = asset.Assets;
 const AssetTypeId = asset.AssetTypeId;
 const AssetTagId = file_formats.AssetTagId;
@@ -124,7 +125,7 @@ pub export fn updateAndRender(
     platform: shared.Platform,
     game_memory: *shared.Memory,
     input: *shared.GameInput,
-    render_commands: *shared.RenderCommands,
+    render_commands: *renderer.RenderCommands,
 ) void {
     shared.platform = platform;
 
@@ -229,7 +230,7 @@ pub export fn updateAndRender(
         }
 
         transient_state.assets = Assets.allocate(
-            shared.megabytes(256),
+            types.megabytes(256),
             transient_state,
             &game_memory.texture_op_queue,
         );
@@ -252,23 +253,23 @@ pub export fn updateAndRender(
             false,
         );
 
-        makeSphereNormalMap(&state.test_normal, 0, 1, 1);
-        makeSphereDiffuseMap(&state.test_diffuse, 1, 1);
+        // makeSphereNormalMap(&state.test_normal, 0, 1, 1);
+        // makeSphereDiffuseMap(&state.test_diffuse, 1, 1);
         // makePyramidNormalMap(&state.test_normal, 0);
 
-        transient_state.env_map_width = 512;
-        transient_state.env_map_height = 256;
+        // transient_state.env_map_width = 512;
+        // transient_state.env_map_height = 256;
 
-        for (&transient_state.env_maps) |*map| {
-            var width: i32 = transient_state.env_map_width;
-            var height: i32 = transient_state.env_map_height;
-
-            for (&map.lod) |*lod| {
-                lod.* = makeEmptyBitmap(&transient_state.arena, width, height, false);
-                width >>= 1;
-                height >>= 1;
-            }
-        }
+        // for (&transient_state.env_maps) |*map| {
+        //     var width: i32 = transient_state.env_map_width;
+        //     var height: i32 = transient_state.env_map_height;
+        //
+        //     for (&map.lod) |*lod| {
+        //         lod.* = makeEmptyBitmap(&transient_state.arena, width, height, false);
+        //         width >>= 1;
+        //         height >>= 1;
+        //     }
+        // }
     }
 
     DebugInterface.debugBeginDataBlock(@src(), "Memory");
@@ -367,7 +368,7 @@ pub export fn updateAndRender(
     transient_state.arena.checkArena();
 }
 
-pub export fn debugFrameEnd(game_memory: *shared.Memory, input: shared.GameInput, commands: *shared.RenderCommands) void {
+pub export fn debugFrameEnd(game_memory: *shared.Memory, input: shared.GameInput, commands: *renderer.RenderCommands) void {
     shared.debugFrameEnd(game_memory, input, commands);
 }
 
@@ -422,8 +423,8 @@ fn makeEmptyBitmap(arena: *MemoryArena, width: i32, height: i32, clear_to_zero: 
     result.alignment_percentage = Vector2.splat(0.5);
     result.width_over_height = math.safeRatio1(@floatFromInt(width), @floatFromInt(height));
 
-    result.width = shared.safeTruncateToUInt16(width);
-    result.height = shared.safeTruncateToUInt16(height);
+    result.width = types.safeTruncateToUInt16(width);
+    result.height = types.safeTruncateToUInt16(height);
     result.pitch = result.width * shared.BITMAP_BYTES_PER_PIXEL;
 
     const total_bitmap_size: u32 =
