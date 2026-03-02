@@ -1,66 +1,66 @@
 const std = @import("std");
 
-pub inline fn signOf(value: i32) i32 {
+pub fn signOf(value: i32) i32 {
     return if (value >= 0) 1 else -1;
 }
 
-pub inline fn signOfF32(value: f32) f32 {
+pub fn signOfF32(value: f32) f32 {
     return if (value >= 0) 1 else -1;
 }
 
-pub inline fn squareRoot(value: f32) f32 {
+pub fn squareRoot(value: f32) f32 {
     return @sqrt(value);
 }
 
-pub inline fn reciprocalSquareRoot(value: f32) f32 {
+pub fn reciprocalSquareRoot(value: f32) f32 {
     return 1.0 / squareRoot(value);
 }
 
-pub inline fn absoluteValue(value: f32) f32 {
+pub fn absoluteValue(value: f32) f32 {
     return @abs(value);
 }
 
-pub inline fn rotateLeft(value: u32, amount: i32) u32 {
+pub fn rotateLeft(value: u32, amount: i32) u32 {
     return std.math.rotl(u32, value, amount);
 }
 
-pub inline fn rotateRight(value: u32, amount: i32) u32 {
+pub fn rotateRight(value: u32, amount: i32) u32 {
     return std.math.rotr(u32, value, amount);
 }
 
-pub inline fn roundReal32ToInt32(value: f32) i32 {
+pub fn roundReal32ToInt32(value: f32) i32 {
     return @intFromFloat(@round(value));
 }
 
-pub inline fn roundReal32ToUInt32(value: f32) u32 {
+pub fn roundReal32ToUInt32(value: f32) u32 {
     return @intFromFloat(@round(value));
 }
 
-pub inline fn floorReal32ToInt32(value: f32) i32 {
+pub fn floorReal32ToInt32(value: f32) i32 {
     return @intFromFloat(@floor(value));
 }
 
-pub inline fn floorReal32ToUInt32(value: f32) u32 {
+pub fn floorReal32ToUInt32(value: f32) u32 {
     return @intFromFloat(@floor(value));
 }
 
-pub inline fn ceilReal32ToInt32(value: f32) i32 {
+pub fn ceilReal32ToInt32(value: f32) i32 {
     return @intFromFloat(@ceil(value));
 }
 
-pub inline fn ceilReal32ToUInt32(value: f32) u32 {
+pub fn ceilReal32ToUInt32(value: f32) u32 {
     return @intFromFloat(@ceil(value));
 }
 
-pub inline fn sin(angle: f32) f32 {
+pub fn sin(angle: f32) f32 {
     return @sin(angle);
 }
 
-pub inline fn cos(angle: f32) f32 {
+pub fn cos(angle: f32) f32 {
     return @cos(angle);
 }
 
-pub inline fn atan2(y: f32, x: f32) f32 {
+pub fn atan2(y: f32, x: f32) f32 {
     return std.math.atan2(y, x);
 }
 

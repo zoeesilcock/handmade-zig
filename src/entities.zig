@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const world = @import("world.zig");
 const brains = @import("brains.zig");
 const asset = @import("asset.zig");
+const asset_rendering = @import("asset_rendering.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
 const particles = @import("particles.zig");
@@ -37,8 +38,8 @@ const BitmapId = file_formats.BitmapId;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 const LightingPoint = lighting.LightingPoint;
-const LightingPointState = lighting.LightingPointState;
-const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
+const LightingPointState = renderer.LightingPointState;
+const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 
 const ENTITY_MAX_PIECE_COUNT = 4;
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
@@ -522,7 +523,8 @@ pub fn updateAndRenderEntities(
                     }
 
                     if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Light) != 0) {
-                        render_group.pushCubeLight(
+                        asset_rendering.pushCubeLight(
+                            render_group,
                             entity_transform.offset_position.plus(piece.offset),
                             Vector3.new(1, 1, 1).scaledTo(piece.dimension.x()),
                             piece.color.rgb(),
@@ -543,7 +545,8 @@ pub fn updateAndRenderEntities(
                             @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else {
-                        render_group.pushBitmapId(
+                        asset_rendering.pushBitmapId(
+                            render_group,
                             &entity_transform,
                             bitmap_id,
                             piece.dimension.y(),

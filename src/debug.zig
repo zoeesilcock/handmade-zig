@@ -1,6 +1,7 @@
 const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const asset = @import("asset.zig");
+const asset_rendering = @import("asset_rendering.zig");
 const renderer = @import("renderer.zig");
 const math = @import("math.zig");
 const config = @import("config.zig");
@@ -1632,7 +1633,15 @@ fn drawDebugElement(
             const opt_event: ?*DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else null;
             if (opt_event) |event| {
                 if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
-                    var dim = render_group.getBitmapDim(&no_transform, bitmap, bitmap_scale, Vector3.zero(), 0, null, null);
+                    var dim = asset_rendering.getBitmapDim(
+                        &no_transform,
+                        bitmap,
+                        bitmap_scale,
+                        Vector3.zero(),
+                        0,
+                        null,
+                        null,
+                    );
                     _ = view.data.inline_block.dimension.setX(dim.size.x());
                     opt_bitmap = bitmap;
                 }
@@ -1646,7 +1655,8 @@ fn drawDebugElement(
             render_group.pushRectangle2(&debug_state.backing_transform, layout_element.bounds, 0, Color.black());
 
             if (opt_bitmap) |bitmap| {
-                render_group.pushBitmap(
+                asset_rendering.pushBitmap(
+                    render_group,
                     &debug_state.backing_transform,
                     bitmap,
                     bitmap_scale,
@@ -2229,7 +2239,7 @@ fn debugStart(
 
     debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id, width, height);
 
-    if (debug_state.render_group.pushFont(debug_state.font_id)) |font| {
+    if (asset_rendering.pushFont(&debug_state.render_group, debug_state.font_id)) |font| {
         debug_state.debug_font = font;
         debug_state.debug_font_info = debug_state.render_group.assets.getFontInfo(debug_state.font_id);
     }

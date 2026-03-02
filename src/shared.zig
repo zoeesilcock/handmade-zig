@@ -48,11 +48,10 @@ const BrainId = brains.BrainId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const TemporaryMemory = memory.TemporaryMemory;
-const LightingBox = lighting.LightingBox;
+const LightingBox = renderer.LightingBox;
 const LightingPoint = lighting.LightingPoint;
-const TicketMutex = types.TicketMutex;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
-const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
+const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const LIGHT_CHUNK_COUNT = lighting.LIGHT_CHUNK_COUNT;
 
 // Build options.
@@ -94,7 +93,7 @@ pub const Buffer = struct {
     }
 };
 
-pub inline fn stringLength(opt_string: ?[*:0]const u8) u32 {
+pub fn stringLength(opt_string: ?[*:0]const u8) u32 {
     var count: u32 = 0;
     if (opt_string) |string| {
         var scan = string;
@@ -105,7 +104,7 @@ pub inline fn stringLength(opt_string: ?[*:0]const u8) u32 {
     return count;
 }
 
-pub inline fn stringsAreEqual(a: [*:0]const u8, b: [*:0]const u8) bool {
+pub fn stringsAreEqual(a: [*:0]const u8, b: [*:0]const u8) bool {
     var result: bool = a == b;
 
     var a_scan = a;
@@ -129,7 +128,7 @@ test "stringsAreEqual" {
     try std.testing.expectEqual(false, stringsAreEqual("abcd", "abc"));
 }
 
-pub inline fn stringsWithLengthAreEqual(a: [*:0]const u8, a_length: MemoryIndex, b: [*:0]const u8, b_length: MemoryIndex) bool {
+pub fn stringsWithLengthAreEqual(a: [*:0]const u8, a_length: MemoryIndex, b: [*:0]const u8, b_length: MemoryIndex) bool {
     var result: bool = a_length == b_length;
 
     if (result) {
@@ -144,7 +143,7 @@ pub inline fn stringsWithLengthAreEqual(a: [*:0]const u8, a_length: MemoryIndex,
     return result;
 }
 
-pub inline fn stringsWithOneLengthAreEqual(a: [*]const u8, a_length: MemoryIndex, opt_b: ?[*:0]const u8) bool {
+pub fn stringsWithOneLengthAreEqual(a: [*]const u8, a_length: MemoryIndex, opt_b: ?[*:0]const u8) bool {
     var result: bool = false;
 
     if (opt_b) |b| {
@@ -772,14 +771,6 @@ pub const PlatformWorkQueue = extern struct {
     entries: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{}} ** 256,
 };
 
-pub const PlatformTextureOpQueue = extern struct {
-    mutex: TicketMutex = undefined,
-
-    first: ?*renderer.TextureOp = null,
-    last: ?*renderer.TextureOp = null,
-    first_free: ?*renderer.TextureOp = null,
-};
-
 pub const PlatformFileHandle = extern struct {
     no_errors: bool = false,
     platform: *anyopaque = undefined,
@@ -1072,7 +1063,7 @@ pub const Memory = struct {
 
     high_priority_queue: *PlatformWorkQueue,
     low_priority_queue: *PlatformWorkQueue,
-    texture_op_queue: PlatformTextureOpQueue = .{},
+    texture_queue: *renderer.TextureQueue = undefined,
 
     executable_reloaded: bool = false,
 };
@@ -1144,10 +1135,6 @@ pub const TransientState = struct {
 
     assets: *Assets,
     main_generation_id: u32,
-
-    // env_map_width: i32,
-    // env_map_height: i32,
-    // env_maps: [3]renderer.EnvironmentMap = [1]renderer.EnvironmentMap{undefined} ** 3,
 
     // TODO: Potentially remove this, it is just for asset locking.
     next_generation_id: u32,

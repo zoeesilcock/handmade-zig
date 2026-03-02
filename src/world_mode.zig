@@ -8,6 +8,7 @@ const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
 const asset = @import("asset.zig");
+const asset_rendering = @import("asset_rendering.zig");
 const audio = @import("audio.zig");
 const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
@@ -44,8 +45,8 @@ const ObjectTransform = renderer.ObjectTransform;
 const TransientClipRect = renderer.TransientClipRect;
 const LightingSolution = lighting.LightingSolution;
 const LightingTextures = lighting.LightingTextures;
-const LightingPointState = lighting.LightingPointState;
-const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
+const LightingPointState = renderer.LightingPointState;
+const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const CameraParams = renderer.CameraParams;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
@@ -525,7 +526,7 @@ pub fn updateAndRenderWorld(
     }
 
     const light_memory: TemporaryMemory = transient_state.arena.beginTemporaryMemory();
-    render_group.pushLighting(&transient_state.arena, &world_mode.test_textures, light_bounds);
+    asset_rendering.pushLighting(render_group, &transient_state.arena, &world_mode.test_textures, light_bounds);
 
     if (false) {
         var sim_work: [16]WorldSimWork = undefined;

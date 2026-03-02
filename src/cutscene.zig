@@ -3,6 +3,7 @@ const math = @import("math.zig");
 const renderer = @import("renderer.zig");
 const shared = @import("shared.zig");
 const world_mode = @import("world_mode.zig");
+const asset_rendering = @import("asset_rendering.zig");
 const file_formats = shared.file_formats;
 const std = @import("std");
 
@@ -438,7 +439,17 @@ fn renderLayeredScene(
                 if (INTERNAL) {
                     render_group.debug_tag = layer_index;
                 }
-                render_group.pushBitmapId(&transform, layer_image, layer.height, Vector3.zero(), color, null, null, null);
+                asset_rendering.pushBitmapId(
+                    render_group,
+                    &transform,
+                    layer_image,
+                    layer.height,
+                    Vector3.zero(),
+                    color,
+                    null,
+                    null,
+                    null,
+                );
             } else {
                 assets.prefetchBitmap(layer_image);
             }

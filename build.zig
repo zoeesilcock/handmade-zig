@@ -437,7 +437,6 @@ fn addRendererTest(
         .target = target,
         .optimize = optimize,
     });
-
     const exe = b.addExecutable(.{
         .name = "renderer-test",
         .root_module = b.createModule(.{
@@ -453,6 +452,8 @@ fn addRendererTest(
 
     if (!internal) {
         exe.subsystem = .Windows;
+    } else {
+        exe.subsystem = .Console;
     }
 
     // Add the win32 API wrapper.

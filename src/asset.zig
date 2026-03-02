@@ -47,6 +47,7 @@ const PlatformFileInfo = shared.PlatformFileInfo;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
+const RendererTexture = renderer.RendererTexture;
 
 pub const AssetTypeId = file_formats_v0.AssetTypeIdV0;
 pub const AssetTagId = file_formats.AssetTagId;
@@ -209,7 +210,7 @@ const SourceFile = struct {
 
 pub const Assets = struct {
     non_restored_memory: MemoryArena,
-    texture_op_queue: *shared.PlatformTextureOpQueue,
+    texture_queue: *renderer.TextureQueue,
 
     transient_state: *TransientState,
 
@@ -239,7 +240,7 @@ pub const Assets = struct {
     pub fn allocate(
         memory_size: MemoryIndex,
         transient_state: *shared.TransientState,
-        texture_op_queue: *shared.PlatformTextureOpQueue,
+        texture_queue: *renderer.TextureQueue,
     ) *Assets {
         TimedBlock.beginFunction(@src(), .AllocateGameAssets);
         defer TimedBlock.endFunction(@src(), .AllocateGameAssets);
@@ -252,7 +253,7 @@ pub const Assets = struct {
         );
         var arena: *MemoryArena = &assets.non_restored_memory;
 
-        assets.texture_op_queue = texture_op_queue;
+        assets.texture_queue = texture_queue;
         assets.transient_state = transient_state;
         assets.memory_sentinel = AssetMemoryBlock{
             .flags = 0,
@@ -651,11 +652,11 @@ pub const Assets = struct {
                                 .is_allocate = false,
                                 .op = .{
                                     .deallocate = .{
-                                        .handle = header.?.data.bitmap.texture_handle,
+                                        .texture = header.?.data.bitmap.texture_handle,
                                     },
                                 },
                             };
-                            addOp(self.texture_op_queue, &op);
+                            renderer.addOp(self.texture_queue, &op);
                         }
 
                         opt_block = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(@alignCast(asset.header))) - 1);
@@ -837,7 +838,7 @@ pub const Assets = struct {
                         bitmap.height = height;
                         bitmap.pitch = types.safeTruncateUInt32ToUInt16(size.section);
                         bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
-                        bitmap.texture_handle = undefined;
+                        bitmap.texture_handle = .empty;
 
                         var work = LoadAssetWork{
                             .task = undefined,
@@ -848,7 +849,7 @@ pub const Assets = struct {
                             .destination = @ptrCast(bitmap.memory),
                             .finalize_operation = .Bitmap,
                             .final_state = AssetState.Loaded.toInt(),
-                            .texture_op_queue = self.texture_op_queue,
+                            .texture_queue = self.texture_queue,
                         };
 
                         if (opt_task) |task| {
@@ -1015,7 +1016,7 @@ pub const Assets = struct {
                     work.destination = sound_memory;
                     work.finalize_operation = .None;
                     work.final_state = AssetState.Loaded.toInt();
-                    work.texture_op_queue = null;
+                    work.texture_queue = null;
 
                     shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
@@ -1142,7 +1143,7 @@ pub const Assets = struct {
                             .destination = @ptrCast(font.glyphs),
                             .finalize_operation = .Font,
                             .final_state = AssetState.Loaded.toInt(),
-                            .texture_op_queue = null,
+                            .texture_queue = null,
                         };
 
                         if (opt_task) |task| {
@@ -1354,11 +1355,7 @@ pub const LoadedBitmap = extern struct {
     width: u16 = 0,
     height: u16 = 0,
     pitch: u16 = 0,
-    texture_handle: u32 = undefined,
-
-    pub fn getPitch(self: *LoadedSound) i16 {
-        return self.width;
-    }
+    texture_handle: RendererTexture,
 };
 
 pub const LoadedSound = extern struct {
@@ -1422,31 +1419,8 @@ const LoadAssetWork = struct {
     finalize_operation: FinalizeLoadAssetOperation,
     final_state: u32,
 
-    texture_op_queue: ?*shared.PlatformTextureOpQueue,
+    texture_queue: ?*renderer.TextureQueue,
 };
-
-fn addOp(queue: *shared.PlatformTextureOpQueue, source: *const TextureOp) void {
-    queue.mutex.begin();
-
-    std.debug.assert(queue.first_free != null);
-
-    const dest: *TextureOp = queue.first_free.?;
-    queue.first_free = dest.next;
-
-    dest.* = source.*;
-
-    std.debug.assert(dest.next == null);
-
-    if (queue.last != null) {
-        queue.last.?.next = dest;
-        queue.last = dest;
-    } else {
-        queue.first = dest;
-        queue.last = dest;
-    }
-
-    queue.mutex.end();
-}
 
 fn doLoadAssetWorkDirectly(
     work: *LoadAssetWork,
@@ -1483,12 +1457,12 @@ fn doLoadAssetWorkDirectly(
                             .width = bitmap.width,
                             .height = bitmap.height,
                             .data = @ptrCast(bitmap.memory),
-                            .result_handle = &bitmap.texture_handle,
+                            .result_texture = &bitmap.texture_handle,
                         },
                     },
                 };
 
-                addOp(work.texture_op_queue.?, &op);
+                renderer.addOp(work.texture_queue.?, &op);
             },
         }
     }

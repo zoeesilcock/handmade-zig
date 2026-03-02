@@ -10,39 +10,39 @@ pub fn notImplemented() void {
     }
 }
 
-pub inline fn kilobytes(value: u32) u64 {
+pub fn kilobytes(value: u32) u64 {
     return value * 1024;
 }
 
-pub inline fn megabytes(value: u32) u64 {
+pub fn megabytes(value: u32) u64 {
     return kilobytes(value) * 1024;
 }
 
-pub inline fn gigabytes(value: u32) u64 {
+pub fn gigabytes(value: u32) u64 {
     return megabytes(value) * 1024;
 }
 
-pub inline fn terabytes(value: u32) u64 {
+pub fn terabytes(value: u32) u64 {
     return gigabytes(value) * 1024;
 }
 
-pub inline fn alignPow2(value: u32, alignment: u32) u32 {
+pub fn alignPow2(value: u32, alignment: u32) u32 {
     return (value + (alignment - 1)) & ~@as(u32, alignment - 1);
 }
 
-pub inline fn align4(value: u32) u32 {
+pub fn align4(value: u32) u32 {
     return (value + 3) & ~@as(u32, 3);
 }
 
-pub inline fn align8(value: u32) u32 {
+pub fn align8(value: u32) u32 {
     return (value + 7) & ~@as(u32, 7);
 }
 
-pub inline fn align16(value: u32) u32 {
+pub fn align16(value: u32) u32 {
     return (value + 15) & ~@as(u32, 15);
 }
 
-pub inline fn incrementPointer(pointer: anytype, offset: i32) @TypeOf(pointer) {
+pub fn incrementPointer(pointer: anytype, offset: i32) @TypeOf(pointer) {
     return if (offset >= 0)
         pointer + @as(usize, @intCast(offset))
     else
@@ -88,24 +88,24 @@ pub const TicketMutex = extern struct {
     }
 };
 
-pub inline fn safeTruncateI64(value: i64) u32 {
+pub fn safeTruncateI64(value: i64) u32 {
     std.debug.assert(value <= 0xFFFFFFFF);
     return @as(u32, @intCast(value));
 }
 
-pub inline fn safeTruncateUInt32ToUInt16(value: u32) u16 {
+pub fn safeTruncateUInt32ToUInt16(value: u32) u16 {
     std.debug.assert(value <= 65535);
     std.debug.assert(value >= 0);
     return @as(u16, @intCast(value));
 }
 
-pub inline fn safeTruncateToUInt16(value: i32) u16 {
+pub fn safeTruncateToUInt16(value: i32) u16 {
     std.debug.assert(value <= 65535);
     std.debug.assert(value >= 0);
     return @as(u16, @intCast(value));
 }
 
-pub inline fn safeTruncateToInt16(value: i32) i16 {
+pub fn safeTruncateToInt16(value: i32) i16 {
     std.debug.assert(value <= 32767);
     std.debug.assert(value >= -32768);
     return @as(u16, @intCast(value));

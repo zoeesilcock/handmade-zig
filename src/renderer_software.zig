@@ -48,8 +48,6 @@ const RenderEntryHeader = renderer.RenderEntryHeader;
 const RenderEntryBitmap = renderer.RenderEntryBitmap;
 const RenderEntryRectangle = renderer.RenderEntryRectangle;
 const RenderEntrySaturation = renderer.RenderEntrySaturation;
-// const EnvironmentMap = renderer.EnvironmentMap;
-const LoadedBitmap = asset.LoadedBitmap;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 
@@ -60,16 +58,23 @@ const BilinearSample = struct {
     d: u32,
 };
 
+pub const SoftwareTexture = extern struct {
+    memory: ?[*]u8,
+    width: u16 = 0,
+    height: u16 = 0,
+    pitch: u16 = 0,
+};
+
 pub const TileRenderWork = struct {
     commands: *RenderCommands,
-    render_targets: [*]LoadedBitmap,
+    render_targets: [*]SoftwareTexture,
     clip_rect: Rectangle2i,
 };
 
 pub fn softwareRenderCommands(
     render_queue: *shared.PlatformWorkQueue,
     commands: *RenderCommands,
-    final_output_target: *LoadedBitmap,
+    final_output_target: *SoftwareTexture,
     temp_arena: *MemoryArena,
 ) void {
     TimedBlock.beginFunction(@src(), .TiledRenderToOutput);
@@ -87,10 +92,10 @@ pub fn softwareRenderCommands(
     _ = temp_arena;
 
     // const render_target_count: u32 = commands.max_render_target_index + 1;
-    // const render_targets: [*]LoadedBitmap = temp_arena.pushArray(
+    // const render_targets: [*]SoftwareTexture = temp_arena.pushArray(
     //     render_target_count,
-    //     LoadedBitmap,
-    //     .alignedNoClear(@alignOf(LoadedBitmap)),
+    //     SoftwareTexture,
+    //     .alignedNoClear(@alignOf(SoftwareTexture)),
     // );
     // render_targets[0] = final_output_target.*;
     //
@@ -98,7 +103,7 @@ pub fn softwareRenderCommands(
     //
     // var target_index: u32 = 1;
     // while (target_index <= render_target_count) : (target_index += 1) {
-    //     const target: *LoadedBitmap = @ptrCast(render_targets + target_index);
+    //     const target: *SoftwareTexture = @ptrCast(render_targets + target_index);
     //     target.* = final_output_target.*;
     //     const buffer_size: memory.MemoryIndex =
     //         @as(memory.MemoryIndex, @intCast(target.pitch)) *
@@ -169,7 +174,7 @@ pub fn doTileRenderWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) ca
 
 pub fn renderCommandsToBitmap(
     commands: *RenderCommands,
-    render_targets: [*]LoadedBitmap,
+    render_targets: [*]SoftwareTexture,
     base_clip_rect: Rectangle2i,
 ) void {
     _ = commands;
@@ -183,7 +188,7 @@ pub fn renderCommandsToBitmap(
     //
     // var clip_rect_index: u32 = 0xffffffff;
     // var clip_rect: Rectangle2i = base_clip_rect;
-    // var output_target: *LoadedBitmap = @ptrCast(render_targets);
+    // var output_target: *SoftwareTexture = @ptrCast(render_targets);
     //
     // // Clear.
     // var target_index: u32 = 0;
@@ -272,7 +277,7 @@ pub fn renderCommandsToBitmap(
     // },
     //         .RenderEntryBlendRenderTarget => {
     //             const entry: *RenderEntryBlendRenderTarget = @ptrCast(@alignCast(data));
-    //             const source_target: *LoadedBitmap = &render_targets[entry.source_target_index];
+    //             const source_target: *SoftwareTexture = &render_targets[entry.source_target_index];
     //             blendRenderTarget(clip_rect, output_target, entry.alpha, source_target);
     //         },
     //         else => {
@@ -284,7 +289,7 @@ pub fn renderCommandsToBitmap(
 
 fn clearRectangle(
     rect_in: Rectangle2i,
-    dest_target: *LoadedBitmap,
+    dest_target: *SoftwareTexture,
     color: Color,
 ) void {
     var rect: Rectangle2i = rect_in;
@@ -386,9 +391,9 @@ fn clearRectangle(
 
 fn blendRenderTarget(
     rect_in: Rectangle2i,
-    dest_target: *LoadedBitmap,
+    dest_target: *SoftwareTexture,
     alpha: f32,
-    source_target: *LoadedBitmap,
+    source_target: *SoftwareTexture,
 ) void {
     var rect: Rectangle2i = rect_in;
 
@@ -573,7 +578,7 @@ fn blendRenderTarget(
 }
 
 pub fn drawRectangle(
-    draw_buffer: *LoadedBitmap,
+    draw_buffer: *SoftwareTexture,
     min: Vector2,
     max: Vector2,
     color_in: Color,
@@ -761,7 +766,7 @@ pub fn drawRectangle(
     }
 }
 
-fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
+fn changeSaturation(draw_buffer: *SoftwareTexture, level: f32) void {
     // TimedBlock.beginFunction(@src(), .ChangeSaturation);
     // defer TimedBlock.endFunction(@src(), .ChangeSaturation);
 
@@ -788,12 +793,12 @@ fn changeSaturation(draw_buffer: *LoadedBitmap, level: f32) void {
 }
 
 pub fn drawRectangleQuickly(
-    draw_buffer: *LoadedBitmap,
+    draw_buffer: *SoftwareTexture,
     origin: Vector2,
     x_axis: Vector2,
     y_axis: Vector2,
     color_in: Color,
-    texture: *LoadedBitmap,
+    texture: *SoftwareTexture,
     pixels_to_meters: f32,
     clip_rect: Rectangle2i,
 ) void {
@@ -1104,13 +1109,13 @@ pub fn drawRectangleQuickly(
 }
 
 // pub fn drawRectangleSlowly(
-//     draw_buffer: *LoadedBitmap,
+//     draw_buffer: *SoftwareTexture,
 //     origin: Vector2,
 //     x_axis: Vector2,
 //     y_axis: Vector2,
 //     color: Color,
-//     texture: *LoadedBitmap,
-//     opt_normal_map: ?*LoadedBitmap,
+//     texture: *SoftwareTexture,
+//     opt_normal_map: ?*SoftwareTexture,
 //     top: *EnvironmentMap,
 //     middle: *EnvironmentMap,
 //     bottom: *EnvironmentMap,
@@ -1326,7 +1331,7 @@ pub fn drawRectangleQuickly(
 // }
 
 pub fn drawRectangleOutline(
-    draw_buffer: *LoadedBitmap,
+    draw_buffer: *SoftwareTexture,
     min: Vector2,
     max: Vector2,
     color: Color,
@@ -1366,8 +1371,8 @@ pub fn drawRectangleOutline(
 }
 
 pub fn drawBitmap(
-    draw_buffer: *LoadedBitmap,
-    bitmap: *const LoadedBitmap,
+    draw_buffer: *SoftwareTexture,
+    bitmap: *const SoftwareTexture,
     real_x: f32,
     real_y: f32,
     in_alpha: f32,
@@ -1449,8 +1454,8 @@ pub fn drawBitmap(
 }
 
 pub fn drawBitmapMatte(
-    draw_buffer: *LoadedBitmap,
-    bitmap: *LoadedBitmap,
+    draw_buffer: *SoftwareTexture,
+    bitmap: *SoftwareTexture,
     real_x: f32,
     real_y: f32,
     in_alpha: f32,
@@ -1531,7 +1536,7 @@ pub fn drawBitmapMatte(
     }
 }
 
-inline fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color {
+fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color {
     var texel_a = Color.unpackClorBGRA(texel_sample.a);
     var texel_b = Color.unpackClorBGRA(texel_sample.b);
     var texel_c = Color.unpackClorBGRA(texel_sample.c);
@@ -1554,7 +1559,7 @@ inline fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color 
 /// * sample_direction tells us what direction the cast is going.
 /// * roughness says which LODs of the map we sample from.
 /// * distance_from_map_in_z says how far the map is from the sample point in Z, given in meters.
-// inline fn sampleEnvironmentMap(
+// fn sampleEnvironmentMap(
 //     map: *EnvironmentMap,
 //     screen_space_uv: Vector2,
 //     sample_direction: Vector3,
@@ -1601,7 +1606,7 @@ inline fn sRGBBilinearBlend(texel_sample: BilinearSample, x: f32, y: f32) Color 
 //     return result;
 // }
 
-inline fn bilinearSample(texture: *LoadedBitmap, x: i32, y: i32) BilinearSample {
+fn bilinearSample(texture: *SoftwareTexture, x: i32, y: i32) BilinearSample {
     const offset: i32 = @intCast((x * @sizeOf(u32)) + (y * texture.pitch));
     const texture_base = shared.incrementPointer(texture.memory.?, offset);
     const texel_pointer_a: [*]align(@alignOf(u8)) u32 = @ptrCast(@alignCast(texture_base));

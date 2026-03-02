@@ -26,13 +26,16 @@ const U32_4x = simd.U32_4x;
 const Bool_4x = simd.Bool_4x;
 const RenderGroup = renderer.RenderGroup;
 const RenderCommands = renderer.RenderCommands;
+const RendererTexture = renderer.RendererTexture;
+const LightingPointState = renderer.LightingPointState;
+const LightingBox = renderer.LightingBox;
 const LoadedBitmap = asset.LoadedBitmap;
 const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
+const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 
 pub const LIGHT_TEST_ACCUMULATION_COUNT = 1024;
-pub const LIGHT_POINTS_PER_CHUNK = 24;
 pub const MAX_LIGHT_EMISSION = 25.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
@@ -106,35 +109,6 @@ const DebugLine = extern struct {
     from_position: Vector3,
     to_position: Vector3,
     color: Color,
-};
-
-pub const LightingSurface = extern struct {
-    position: Vector3,
-    normal: Vector3,
-    transparency: f32,
-    width: f32,
-    height: f32,
-    x_axis: Vector3,
-    y_axis: Vector3,
-    light_index: u16 = 0,
-    light_count: u16 = 0,
-};
-
-pub const LightingBox = extern struct {
-    storage: [*]LightingPointState,
-    position: Vector3,
-    radius: Vector3,
-    reflection_color: Color3,
-    transparency: f32,
-    emission: f32,
-    light_index: [7]u16 = [1]u16{0} ** 7,
-    child_count: u16 = 0,
-    first_child_index: u16,
-};
-
-pub const LightingPointState = extern struct {
-    last_pps: Color3,
-    last_direction: Vector3,
 };
 
 pub const LightingPoint = extern struct {
@@ -1081,12 +1055,12 @@ pub fn lightingTest(
     }
 
     _ = group.getCurrentQuads(solution.debug_line_count);
-    const bitmap: ?*LoadedBitmap = group.commands.white_bitmap;
+    const white_texture: RendererTexture = group.commands.white_bitmap;
     var debug_line_index: u32 = 0;
     while (debug_line_index < solution.debug_line_count) : (debug_line_index += 1) {
         const line: *DebugLine = &solution.debug_lines[debug_line_index];
 
-        group.pushLineSegment(bitmap, line.from_position, line.color, line.to_position, line.color, 0.01);
+        group.pushLineSegment(white_texture, line.from_position, line.color, line.to_position, line.color, 0.01);
     }
 
     const start_point: Vector3 = .new(0, 0, 1.05);
@@ -1145,7 +1119,7 @@ pub fn lightingTest(
                     if (dir.lengthSquared() <= 1.0) {
                         dir = dir.normalizeOrZero();
                         group.pushCube(
-                            bitmap,
+                            white_texture,
                             start_point.plus(dir),
                             0.01,
                             0.02,
@@ -1169,7 +1143,7 @@ pub fn lightingTest(
 
                     if (sqr < 0.5) {
                         group.pushCube(
-                            bitmap,
+                            white_texture,
                             start_point.plus(dir),
                             0.01,
                             0.02,
@@ -1193,7 +1167,7 @@ pub fn lightingTest(
                 const normal: Vector3 = solution.sample_points[0][point_index].getComponent(component_index);
 
                 group.pushCube(
-                    bitmap,
+                    white_texture,
                     start_point.plus(normal),
                     0.01,
                     0.02,
@@ -1211,7 +1185,7 @@ pub fn lightingTest(
             const color: Color = color_table[@mod(point_index / 4, color_table.len)];
             const normal: Vector3 = solution.sample_points[cluster_table[point_index]];
             group.pushLineSegment(
-                bitmap,
+                white_texture,
                 start_point.plus(normal),
                 color,
                 start_point.plus(normal.scaledTo(1.06)),
@@ -1231,7 +1205,7 @@ pub fn lightingTest(
 
             const color: Color = .new(1, 1, 0, 1);
             group.pushLineSegment(
-                bitmap,
+                white_texture,
                 position.plus(normal_a),
                 color,
                 position.plus(normal_b),
@@ -1249,7 +1223,7 @@ fn outputLightingPointsRecurse(
     depth: u32,
 ) void {
     if (depth == 0 or box.child_count == 0) {
-        const bitmap: ?*LoadedBitmap = group.commands.white_bitmap;
+        const white_texture: RendererTexture = group.commands.white_bitmap;
 
         var box_surface_index: u32 = 0;
         while (box_surface_index < 6) : (box_surface_index += 1) {
@@ -1310,7 +1284,7 @@ fn outputLightingPointsRecurse(
 
                 const uv: Vector2 = .zero();
                 group.pushQuad(
-                    bitmap,
+                    white_texture,
                     position0,
                     uv,
                     color0,

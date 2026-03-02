@@ -232,7 +232,7 @@ pub export fn updateAndRender(
         transient_state.assets = Assets.allocate(
             types.megabytes(256),
             transient_state,
-            &game_memory.texture_op_queue,
+            game_memory.texture_queue,
         );
 
         // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
@@ -318,6 +318,7 @@ pub export fn updateAndRender(
         .width = @intCast(render_commands.settings.width),
         .height = @intCast(render_commands.settings.height),
         .memory = undefined,
+        .texture_handle = .empty,
     };
 
     var rerun: bool = true;

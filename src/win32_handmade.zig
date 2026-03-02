@@ -66,12 +66,12 @@ const MemoryIndex = memory.MemoryIndex;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
 const RenderCommands = renderer.RenderCommands;
 const TexturedVertex = renderer.TexturedVertex;
+const RendererTexture = renderer.RendererTexture;
 const Rectangle2i = math.Rectangle2i;
 const TicketMutex = types.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
-const LoadedBitmap = asset.LoadedBitmap;
-const LightingBox = lighting.LightingBox;
+const LightingBox = renderer.LightingBox;
 const LightingPoint = lighting.LightingPoint;
 
 const std = @import("std");
@@ -722,7 +722,7 @@ const DebugFunctions = if (INTERNAL) struct {
     pub fn debugGetMemoryStats() callconv(.c) DebugPlatformMemoryStats {}
 };
 
-inline fn getLastWriteTime(file_name: [*:0]const u8) win32.FILETIME {
+fn getLastWriteTime(file_name: [*:0]const u8) win32.FILETIME {
     var last_write_time = win32.FILETIME{
         .dwLowDateTime = 0,
         .dwHighDateTime = 0,
@@ -1474,7 +1474,7 @@ fn displayBufferInWindow(
     // }
 
     if (software_rendering) {
-        var output_target: asset.LoadedBitmap = .{
+        var output_target: renderer_software.SoftwareTexture = .{
             .memory = @ptrCast(back_buffer.memory.?),
             .width = @intCast(back_buffer.width),
             .height = @intCast(back_buffer.height),
@@ -1632,13 +1632,13 @@ fn toggleFullscreen(window: win32.HWND) void {
     }
 }
 
-inline fn getWallClock() win32.LARGE_INTEGER {
+fn getWallClock() win32.LARGE_INTEGER {
     var result: win32.LARGE_INTEGER = undefined;
     _ = win32.QueryPerformanceCounter(&result);
     return result;
 }
 
-inline fn getSecondsElapsed(start: win32.LARGE_INTEGER, end: win32.LARGE_INTEGER) f32 {
+fn getSecondsElapsed(start: win32.LARGE_INTEGER, end: win32.LARGE_INTEGER) f32 {
     return @as(f32, @floatFromInt(end.QuadPart - start.QuadPart)) / @as(f32, @floatFromInt(perf_count_frequency));
 }
 
@@ -2202,8 +2202,9 @@ pub export fn wWinMain(
             };
 
             const texture_op_count: u32 = 1024;
-            var texture_op_queue: *shared.PlatformTextureOpQueue = &game_memory.texture_op_queue;
-            texture_op_queue.first_free = @ptrCast(@alignCast(win32.VirtualAlloc(
+            var texture_queue: renderer.TextureQueue = .{};
+            game_memory.texture_queue = &texture_queue;
+            texture_queue.first_free = @ptrCast(@alignCast(win32.VirtualAlloc(
                 null,
                 @sizeOf(renderer.TextureOp) * texture_op_count,
                 win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
@@ -2212,7 +2213,7 @@ pub export fn wWinMain(
 
             var texture_op_index: u32 = 0;
             while (texture_op_index < (texture_op_count - 1)) : (texture_op_index += 1) {
-                const first_free: [*]renderer.TextureOp = @ptrCast(game_memory.texture_op_queue.first_free.?);
+                const first_free: [*]renderer.TextureOp = @ptrCast(game_memory.texture_queue.first_free.?);
                 var op: [*]renderer.TextureOp = first_free + texture_op_index;
                 op[0].next = @ptrCast(first_free + texture_op_index + 1);
             }
@@ -2235,7 +2236,7 @@ pub export fn wWinMain(
                 running = true;
 
                 var frame_temp_arena: MemoryArena = .{};
-                const push_buffer_size: u32 = types.megabytes(64);
+                const push_buffer_size: u32 = @intCast(types.megabytes(64));
                 const push_buffer_block: ?*PlatformMemoryBlock = allocateMemory(
                     push_buffer_size,
                     @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
@@ -2249,10 +2250,10 @@ pub export fn wWinMain(
                 );
                 const vertex_array: [*]TexturedVertex = @ptrCast(@alignCast(vertex_array_block.?.base));
                 const bitmap_array_block: ?*PlatformMemoryBlock = allocateMemory(
-                    max_vertex_count * @sizeOf(LoadedBitmap),
+                    max_vertex_count * @sizeOf(RendererTexture),
                     @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
                 );
-                const bitmap_array: [*]?*LoadedBitmap = @ptrCast(@alignCast(bitmap_array_block.?.base));
+                const bitmap_array: [*]RendererTexture = @ptrCast(@alignCast(bitmap_array_block.?.base));
 
                 var render_commands: RenderCommands = RenderCommands.default(
                     push_buffer_size,
@@ -2262,7 +2263,7 @@ pub export fn wWinMain(
                     max_vertex_count,
                     vertex_array,
                     bitmap_array,
-                    &open_gl.white_bitmap,
+                    open_gl.white_bitmap,
                 );
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
@@ -2552,22 +2553,22 @@ pub export fn wWinMain(
                     TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     // Output game to screen.
-                    texture_op_queue.mutex.begin();
-                    const first_texture_op: ?*renderer.TextureOp = texture_op_queue.first;
-                    const last_texture_op: ?*renderer.TextureOp = texture_op_queue.last;
-                    texture_op_queue.first = null;
-                    texture_op_queue.last = null;
-                    texture_op_queue.mutex.end();
+                    texture_queue.mutex.begin();
+                    const first_texture_op: ?*renderer.TextureOp = texture_queue.first;
+                    const last_texture_op: ?*renderer.TextureOp = texture_queue.last;
+                    texture_queue.first = null;
+                    texture_queue.last = null;
+                    texture_queue.mutex.end();
 
                     if (first_texture_op != null) {
                         std.debug.assert(last_texture_op != null);
 
                         opengl.manageTextures(first_texture_op);
 
-                        texture_op_queue.mutex.begin();
-                        last_texture_op.?.next = texture_op_queue.first_free;
-                        texture_op_queue.first_free = first_texture_op;
-                        texture_op_queue.mutex.end();
+                        texture_queue.mutex.begin();
+                        last_texture_op.?.next = texture_queue.first_free;
+                        texture_queue.first_free = first_texture_op;
+                        texture_queue.mutex.end();
                     }
 
                     displayBufferInWindow(

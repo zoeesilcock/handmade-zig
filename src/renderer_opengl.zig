@@ -207,6 +207,7 @@ const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 const RenderCommands = renderer.RenderCommands;
 const RenderSettings = renderer.RenderSettings;
 const TexturedVertex = renderer.TexturedVertex;
+const RendererTexture = renderer.RendererTexture;
 const RenderGroup = renderer.RenderGroup;
 const RenderSetup = renderer.RenderSetup;
 const RenderEntryHeader = renderer.RenderEntryHeader;
@@ -219,7 +220,6 @@ const RenderEntryCube = renderer.RenderEntryCube;
 const RenderEntryRectangle = renderer.RenderEntryRectangle;
 const RenderEntrySaturation = renderer.RenderEntrySaturation;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
-const LoadedBitmap = asset.LoadedBitmap;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -363,8 +363,8 @@ const OpenGL = struct {
 
     reserved_blit_texture: u32 = 0,
 
-    white_bitmap: LoadedBitmap = undefined,
     white: [4][4]u32 = undefined,
+    white_bitmap: RendererTexture = undefined,
 
     multisampling: bool = false,
     depth_peel_count: u32 = 0,
@@ -540,15 +540,7 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     open_gl.white = [1][4]u32{
         [1]u32{0xffffffff} ** 4,
     } ** 4;
-    open_gl.white_bitmap = .{
-        .memory = @ptrCast(&open_gl.white),
-        .alignment_percentage = .new(0.5, 0.5),
-        .width_over_height = 1,
-        .width = 4,
-        .height = 4,
-        .pitch = 16,
-        .texture_handle = allocateTexture(1, 1, &open_gl.white),
-    };
+    open_gl.white_bitmap = allocateTexture(1, 1, &open_gl.white);
 }
 
 const shader_header_code =
@@ -811,9 +803,6 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\  }
         \\}
     ;
-
-    // TODO: Why is our clear color much darker than Casey's?
-    // TODO: Why does the bottom half of the level flicker between lit and unlit?
 
     const program_handle = createProgram(
         @ptrCast(defines[0..defines_length]),
@@ -2343,15 +2332,8 @@ pub fn renderCommands(
 
                 var vertex_index: u32 = entry.vertex_array_offset;
                 while (vertex_index < (entry.vertex_array_offset + 4 * entry.quad_count)) : (vertex_index += 4) {
-                    const opt_bitmap: ?*LoadedBitmap = commands.quad_bitmaps[vertex_index >> 2];
-
-                    // TODO: This assertion shouldn't fire, but it does. The issue originates in debug_ui.textOp.
-                    // std.debug.assert(opt_bitmap != null);
-
-                    if (opt_bitmap) |bitmap| {
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, bitmap.texture_handle);
-                    }
-
+                    const texture: RendererTexture = commands.quad_bitmaps[vertex_index >> 2];
+                    gl.glBindTexture(gl.GL_TEXTURE_2D, @intCast(texture.handle));
                     platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, @intCast(vertex_index), 4);
                 }
                 gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
@@ -2493,18 +2475,19 @@ pub fn manageTextures(first_op: ?*TextureOp) void {
     var opt_op: ?*renderer.TextureOp = first_op;
     while (opt_op) |op| : (opt_op = op.next) {
         if (op.is_allocate) {
-            op.op.allocate.result_handle.* = allocateTexture(
+            op.op.allocate.result_texture.* = allocateTexture(
                 op.op.allocate.width,
                 op.op.allocate.height,
                 op.op.allocate.data,
             );
         } else {
-            gl.glDeleteTextures(1, &op.op.deallocate.handle);
+            var handle: u32 = @intCast(op.op.deallocate.texture.handle);
+            gl.glDeleteTextures(1, &handle);
         }
     }
 }
 
-fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.c) u32 {
+fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.c) RendererTexture {
     var handle: u32 = 0;
 
     gl.glGenTextures(1, &handle);
@@ -2527,7 +2510,7 @@ fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.c) u32 
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 
-    return handle;
+    return .{ .handle = handle };
 }
 
 fn drawLineVertices(

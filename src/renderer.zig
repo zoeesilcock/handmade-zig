@@ -4,6 +4,7 @@ const memory = @import("memory.zig");
 const math = @import("math.zig");
 const simd = @import("simd.zig");
 const asset = @import("asset.zig");
+const types = @import("types.zig");
 const intrinsics = @import("intrinsics.zig");
 const sort = @import("sort.zig");
 const lighting = @import("lighting.zig");
@@ -33,26 +34,17 @@ const Rectangle3 = math.Rectangle3;
 const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
 const MatrixInverse4x4 = math.MatrixInverse4x4;
-pub const LoadedBitmap = asset.LoadedBitmap;
-const LoadedFont = asset.LoadedFont;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
+const TicketMutex = types.TicketMutex;
 const ArenaPushParams = shared.ArenaPushParams;
-const LightingTextures = lighting.LightingTextures;
-const LightingSurface = shared.LightingSurface;
-const LightingPoint = lighting.LightingPoint;
-const LightingPointState = lighting.LightingPointState;
-const LightingBox = lighting.LightingBox;
-const LightingIntermediate = shared.LightingIntermediate;
-const LightingTexel = shared.LightingTexel;
-const LightBoxSurface = lighting.LightBoxSurface;
-const LIGHT_POINTS_PER_CHUNK = lighting.LIGHT_POINTS_PER_CHUNK;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
-const MAX_LIGHT_EMISSION = lighting.MAX_LIGHT_EMISSION;
 const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
 const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
 const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
 const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
+
+pub const LIGHT_POINTS_PER_CHUNK = 24;
 
 pub const TexturedVertex = extern struct {
     position: Vector4,
@@ -63,6 +55,18 @@ pub const TexturedVertex = extern struct {
     // TODO: Doesn't need to be per-vertex - move this into its own per-primitive buffer.
     normal: Vector3,
     light_index: u16 = 0,
+};
+
+const TextureGroup = struct {
+    max_vertex_count: u32,
+    texture_count: u32,
+    dimension: [2]u32,
+};
+
+const MemoryLayout = struct {
+    max_push_buffer_size: u32,
+    texture_group_count: u32,
+    texture_groups: [*]TextureGroup,
 };
 
 pub const RenderSettings = extern struct {
@@ -91,6 +95,47 @@ pub const RenderSettings = extern struct {
     }
 };
 
+pub const RendererTexture = extern struct {
+    handle: u64,
+
+    pub const empty: RendererTexture = .{ .handle = 0 };
+};
+
+pub const LightingBox = extern struct {
+    storage: [*]LightingPointState,
+    position: Vector3,
+    radius: Vector3,
+    reflection_color: Color3,
+    transparency: f32,
+    emission: f32,
+    light_index: [7]u16 = [1]u16{0} ** 7,
+    child_count: u16 = 0,
+    first_child_index: u16,
+};
+
+pub const LightingPointState = extern struct {
+    last_pps: Color3,
+    last_direction: Vector3,
+};
+
+pub const TextureOp = struct {
+    next: ?*TextureOp = null,
+    is_allocate: bool,
+
+    op: union {
+        allocate: TextureOpAllocate,
+        deallocate: TextureOpDeallocate,
+    },
+};
+
+pub const TextureQueue = extern struct {
+    mutex: TicketMutex = undefined,
+
+    first: ?*TextureOp = null,
+    last: ?*TextureOp = null,
+    first_free: ?*TextureOp = null,
+};
+
 pub const RenderCommands = extern struct {
     settings: RenderSettings = .{},
 
@@ -101,8 +146,8 @@ pub const RenderCommands = extern struct {
     max_vertex_count: u32,
     vertex_count: u32,
     vertex_array: [*]TexturedVertex,
-    quad_bitmaps: [*]?*LoadedBitmap,
-    white_bitmap: ?*LoadedBitmap,
+    quad_bitmaps: [*]RendererTexture,
+    white_bitmap: RendererTexture,
 
     pub fn default(
         max_push_buffer_size: u32,
@@ -111,8 +156,8 @@ pub const RenderCommands = extern struct {
         height: u32,
         max_vertex_count: u32,
         vertex_array: [*]TexturedVertex,
-        bitmap_array: [*]?*LoadedBitmap,
-        white_bitmap: *LoadedBitmap,
+        bitmap_array: [*]RendererTexture,
+        white_bitmap: RendererTexture,
     ) RenderCommands {
         return RenderCommands{
             .settings = .{
@@ -145,21 +190,11 @@ const TextureOpAllocate = struct {
     width: i32,
     height: i32,
     data: *anyopaque,
-    result_handle: *u32,
+    result_texture: *RendererTexture,
 };
 
 const TextureOpDeallocate = struct {
-    handle: u32,
-};
-
-pub const TextureOp = struct {
-    next: ?*TextureOp = null,
-    is_allocate: bool,
-
-    op: union {
-        allocate: TextureOpAllocate,
-        deallocate: TextureOpDeallocate,
-    },
+    texture: RendererTexture,
 };
 
 pub const ManualSortKey = extern struct {
@@ -179,18 +214,6 @@ pub const CameraParams = struct {
         return result;
     }
 };
-
-pub const UsedBitmapDim = struct {
-    basis_position: Vector3 = undefined,
-    size: Vector2 = undefined,
-    alignment: Vector2 = undefined,
-    position: Vector3 = undefined,
-};
-
-// pub const EnvironmentMap = extern struct {
-//     lod: [4]LoadedBitmap,
-//     z_position: f32,
-// };
 
 pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
@@ -293,19 +316,18 @@ pub const ObjectTransform = extern struct {
             .scale = 1,
         };
     }
+    pub fn getRenderEntityBasisPosition(
+        object_transform: *const ObjectTransform,
+        original_position: Vector3,
+    ) Vector3 {
+        const position: Vector3 = original_position.xy().toVector3(0).plus(object_transform.offset_position);
+        return position;
+    }
 };
 
 const PushBufferResult = extern struct {
     header: ?*RenderEntryHeader = null,
 };
-
-fn getRenderEntityBasisPosition(
-    object_transform: *const ObjectTransform,
-    original_position: Vector3,
-) Vector3 {
-    const position: Vector3 = original_position.xy().toVector3(0).plus(object_transform.offset_position);
-    return position;
-}
 
 const RenderTransform = extern struct {
     position: Vector3 = .zero(),
@@ -409,7 +431,7 @@ pub const RenderGroup = extern struct {
         // TODO: Do we want the sort barrier again?
     }
 
-    fn pushRenderElement(self: *RenderGroup, comptime T: type) ?*T {
+    pub fn pushRenderElement(self: *RenderGroup, comptime T: type) ?*T {
         // TimedBlock.beginFunction(@src(), .PushRenderElement);
         // defer TimedBlock.endFunction(@src(), .PushRenderElement);
 
@@ -489,27 +511,6 @@ pub const RenderGroup = extern struct {
         return self.getCameraRectangleAtDistance(z);
     }
 
-    pub fn fitCameraDistanceToHalfDistance(
-        focal_length: f32,
-        monitor_half_dim_in_meters: f32,
-        half_dim_in_meters: f32,
-    ) f32 {
-        const result: f32 = (focal_length * half_dim_in_meters) / monitor_half_dim_in_meters;
-        return result;
-    }
-
-    pub fn fitCameraDistanceToHalfDimensionV2(
-        focal_length: f32,
-        monitor_half_dim_in_meters: f32,
-        half_dim_in_meters: Vector2,
-    ) Vector2 {
-        const result: Vector2 = .new(
-            fitCameraDistanceToHalfDistance(focal_length, monitor_half_dim_in_meters, half_dim_in_meters.x()),
-            fitCameraDistanceToHalfDistance(focal_length, monitor_half_dim_in_meters, half_dim_in_meters.y()),
-        );
-        return result;
-    }
-
     pub fn beginDepthPeel(self: *RenderGroup, color: Color) void {
         if (self.pushRenderElement(RenderEntryBeginPeels)) |entry| {
             // For sRGB mode, this color needs to be squared.
@@ -542,84 +543,6 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn pushLighting(
-        self: *RenderGroup,
-        temp_arena: *MemoryArena,
-        source: *LightingTextures,
-        lighting_bounds: Rectangle3,
-    ) void {
-        std.debug.assert(self.light_box_count == 0);
-
-        self.lighting_enabled = true;
-        self.light_bounds = lighting_bounds;
-        self.light_boxes = temp_arena.pushArray(LIGHT_DATA_WIDTH, LightingBox, null);
-        self.light_point_index = 1;
-
-        if (self.pushRenderElement(RenderEntryLightingTransfer)) |dest| {
-            dest.light_data0 = &source.light_data0;
-            dest.light_data1 = &source.light_data1;
-        }
-    }
-
-    pub fn getBitmapDim(
-        self: *RenderGroup,
-        object_transform: *const ObjectTransform,
-        bitmap: *const LoadedBitmap,
-        height: f32,
-        offset: Vector3,
-        align_coefficient: f32,
-        opt_x_axis: ?Vector2,
-        opt_y_axis: ?Vector2,
-    ) UsedBitmapDim {
-        _ = self;
-
-        const x_axis: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
-        const y_axis: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
-        var dim = UsedBitmapDim{};
-
-        if (false) {
-            dim.size = Vector2.new(height * bitmap.width_over_height, height);
-            dim.alignment = bitmap.alignment_percentage.hadamardProduct(dim.size).scaledTo(align_coefficient);
-            _ = dim.position.setZ(offset.z());
-            _ = dim.position.setXY(
-                offset.xy().minus(x_axis.scaledTo(dim.alignment.x())).minus(y_axis.scaledTo(dim.alignment.y())),
-            );
-            dim.basis_position = getRenderEntityBasisPosition(object_transform, dim.position);
-        } else {
-            dim.size = .new(
-                height * bitmap.width_over_height,
-                height,
-            );
-            dim.alignment = .new(
-                align_coefficient * bitmap.alignment_percentage.x() * dim.size.x(),
-                align_coefficient * bitmap.alignment_percentage.y() * dim.size.y(),
-            );
-            dim.position = .new(
-                offset.x() - dim.alignment.x() * x_axis.x() - dim.alignment.y() * y_axis.x(),
-                offset.y() - dim.alignment.y() * x_axis.y() - dim.alignment.y() * y_axis.y(),
-                offset.z(),
-            );
-            dim.basis_position = .new(
-                object_transform.offset_position.x() + dim.position.x(),
-                object_transform.offset_position.y() + dim.position.y(),
-                object_transform.offset_position.z() + dim.position.z(),
-            );
-        }
-
-        return dim;
-    }
-
-    fn storeColor(source: Color) Color {
-        var dest: Color = .white();
-
-        _ = dest.setA(source.a());
-        _ = dest.setR(dest.a() * source.r());
-        _ = dest.setG(dest.a() * source.g());
-        _ = dest.setB(dest.a() * source.b());
-
-        return dest;
-    }
-
     pub fn getCurrentQuads(self: *RenderGroup, quad_count: u32) ?*RenderEntryTexturedQuads {
         if (self.current_quads == null) {
             self.current_quads = @ptrCast(@alignCast(
@@ -644,7 +567,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushQuad(
         self: *RenderGroup,
-        bitmap: ?*LoadedBitmap,
+        texture: RendererTexture,
         p0: Vector4,
         uv0: Vector2,
         c0: u32,
@@ -677,7 +600,7 @@ pub const RenderGroup = extern struct {
         const vertex_index: u32 = commands.vertex_count;
         commands.vertex_count += 4;
 
-        commands.quad_bitmaps[vertex_index >> 2] = bitmap;
+        commands.quad_bitmaps[vertex_index >> 2] = texture;
         var vert: [*]TexturedVertex = commands.vertex_array + vertex_index;
 
         var e10 = p1.minus(p0);
@@ -721,7 +644,7 @@ pub const RenderGroup = extern struct {
 
     fn pushQuadUnpackedColors(
         self: *RenderGroup,
-        bitmap: ?*LoadedBitmap,
+        texture: RendererTexture,
         p0: Vector4,
         uv0: Vector2,
         c0: Color,
@@ -739,7 +662,7 @@ pub const RenderGroup = extern struct {
         opt_light_index: ?u16,
     ) void {
         self.pushQuad(
-            bitmap,
+            texture,
             p0,
             uv0,
             c0.scaledTo(255).packColorRGBA(),
@@ -760,7 +683,7 @@ pub const RenderGroup = extern struct {
 
     pub fn pushLineSegment(
         self: *RenderGroup,
-        bitmap: ?*LoadedBitmap,
+        texture: RendererTexture,
         from_position: Vector3,
         from_color: Color,
         to_position: Vector3,
@@ -800,7 +723,7 @@ pub const RenderGroup = extern struct {
         const c3: u32 = from_color_packed;
 
         self.pushQuad(
-            bitmap,
+            texture,
             p0,
             uv0,
             c0,
@@ -819,115 +742,6 @@ pub const RenderGroup = extern struct {
         );
     }
 
-    pub fn pushBitmap(
-        self: *RenderGroup,
-        object_transform: *ObjectTransform,
-        bitmap: *LoadedBitmap,
-        height: f32,
-        offset: Vector3,
-        color: Color,
-        align_coefficient: f32,
-        opt_x_axis: ?Vector2,
-        opt_y_axis: ?Vector2,
-    ) void {
-        if (bitmap.width > 0 and bitmap.height > 0) {
-            const x_axis2: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
-            const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
-            const dim = self.getBitmapDim(
-                object_transform,
-                bitmap,
-                height,
-                offset,
-                align_coefficient,
-                x_axis2,
-                y_axis2,
-            );
-
-            const size: Vector2 = dim.size;
-            if (self.getCurrentQuads(1)) |entry| {
-                entry.quad_count += 1;
-
-                const min_position: Vector3 = dim.basis_position;
-                var z_bias: f32 = 0;
-                const premultiplied_color: Color = storeColor(color);
-                var x_axis: Vector3 = x_axis2.toVector3(0).scaledTo(size.x());
-                var y_axis: Vector3 = y_axis2.toVector3(0).scaledTo(size.y());
-
-                if (object_transform.upright) {
-                    z_bias = 0.25 * height;
-                    // const x_axis0 = Vector3.new(x_axis2.x(), 0, x_axis2.y()).scaledTo(size.x());
-                    const y_axis0 = Vector3.new(y_axis2.x(), 0, y_axis2.y()).scaledTo(size.y());
-                    const x_axis1 =
-                        self.game_transform.x.scaledTo(x_axis2.x())
-                            .plus(self.game_transform.y.scaledTo(x_axis2.y())).scaledTo(size.x());
-                    const y_axis1 =
-                        self.game_transform.x.scaledTo(y_axis2.x())
-                            .plus(self.game_transform.y.scaledTo(y_axis2.y())).scaledTo(size.y());
-
-                    // x_axis = x_axis0.lerp(x_axis1, 0.8);
-                    // y_axis = y_axis0.lerp(y_axis1, 0.8);
-
-                    x_axis = x_axis1;
-                    y_axis = y_axis1;
-                    _ = y_axis.setZ(math.lerpf(y_axis0.z(), y_axis1.z(), 0.8));
-                }
-
-                const one_texel_u: f32 = 1 / @as(f32, @floatFromInt(bitmap.width));
-                const one_texel_v: f32 = 1 / @as(f32, @floatFromInt(bitmap.height));
-                const min_uv = Vector2.new(one_texel_u, one_texel_v);
-                const max_uv = Vector2.new(1 - one_texel_u, 1 - one_texel_v);
-
-                const vertex_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
-
-                const min_x_min_y: Vector4 = min_position.toVector4(0);
-                const min_x_max_y: Vector4 = min_position.plus(y_axis).toVector4(z_bias);
-                const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
-                const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(z_bias);
-
-                self.pushQuad(
-                    bitmap,
-                    min_x_min_y,
-                    .new(min_uv.x(), min_uv.y()),
-                    vertex_color,
-                    max_x_min_y,
-                    .new(max_uv.x(), min_uv.y()),
-                    vertex_color,
-                    max_x_max_y,
-                    .new(max_uv.x(), max_uv.y()),
-                    vertex_color,
-                    min_x_max_y,
-                    .new(min_uv.x(), max_uv.y()),
-                    vertex_color,
-                    null,
-                    null,
-                    null,
-                );
-            }
-        }
-    }
-
-    pub fn pushBitmapId(
-        self: *RenderGroup,
-        object_transform: *ObjectTransform,
-        opt_id: ?file_formats.BitmapId,
-        height: f32,
-        offset: Vector3,
-        color: Color,
-        opt_align_coefficient: ?f32,
-        opt_x_axis: ?Vector2,
-        opt_y_axis: ?Vector2,
-    ) void {
-        const align_coefficient: f32 = opt_align_coefficient orelse 1;
-        if (opt_id) |id| {
-            if (self.assets.getBitmap(id, self.generation_id)) |bitmap| {
-                self.pushBitmap(object_transform, bitmap, height, offset, color, align_coefficient, opt_x_axis, opt_y_axis);
-            } else {
-                self.assets.loadBitmap(id, false);
-                self.missing_resource_count += 1;
-            }
-        }
-    }
-
     pub fn pushCubeBitmapId(
         self: *RenderGroup,
         opt_id: ?file_formats.BitmapId,
@@ -938,7 +752,7 @@ pub const RenderGroup = extern struct {
         if (opt_id) |id| {
             if (self.assets.getBitmap(id, self.generation_id)) |bitmap| {
                 self.pushCube(
-                    bitmap,
+                    bitmap.texture_handle,
                     position,
                     radius,
                     color,
@@ -950,27 +764,9 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn pushCubeLight(
-        self: *RenderGroup,
-        position: Vector3,
-        radius: Vector3,
-        color: Color3,
-        emission: f32,
-        opt_light_store: ?*LightingPointState,
-    ) void {
-        self.pushCube(
-            self.commands.white_bitmap,
-            position,
-            radius,
-            color.toColor(1),
-            emission,
-            opt_light_store,
-        );
-    }
-
     pub fn pushCube(
         self: *RenderGroup,
-        bitmap: ?*LoadedBitmap,
+        texture: RendererTexture,
         position: Vector3,
         radius: Vector3,
         color: Color,
@@ -1057,7 +853,7 @@ pub const RenderGroup = extern struct {
 
             // Negative X.
             self.pushQuadUnpackedColors(
-                bitmap,
+                texture,
                 p7,
                 t0,
                 cb,
@@ -1078,7 +874,7 @@ pub const RenderGroup = extern struct {
 
             // Positive X.
             self.pushQuadUnpackedColors(
-                bitmap,
+                texture,
                 p1,
                 t0,
                 ct,
@@ -1099,7 +895,7 @@ pub const RenderGroup = extern struct {
 
             // Negative Y.
             self.pushQuadUnpackedColors(
-                bitmap,
+                texture,
                 p4,
                 t0,
                 cb,
@@ -1120,7 +916,7 @@ pub const RenderGroup = extern struct {
 
             // Positive Y.
             self.pushQuadUnpackedColors(
-                bitmap,
+                texture,
                 p2,
                 t0,
                 ct,
@@ -1141,7 +937,7 @@ pub const RenderGroup = extern struct {
 
             // Negative Z.
             self.pushQuadUnpackedColors(
-                bitmap,
+                texture,
                 p7,
                 t0,
                 bottom_color,
@@ -1162,7 +958,7 @@ pub const RenderGroup = extern struct {
 
             // Positive Z.
             self.pushQuadUnpackedColors(
-                bitmap,
+                texture,
                 p0,
                 t0,
                 top_color,
@@ -1183,24 +979,6 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn pushFont(
-        self: *RenderGroup,
-        opt_id: ?file_formats.FontId,
-    ) ?*LoadedFont {
-        var opt_font: ?*LoadedFont = null;
-
-        if (opt_id) |id| {
-            opt_font = self.assets.getFont(id, self.generation_id);
-
-            if (opt_font == null) {
-                self.assets.loadFont(id, false);
-                self.missing_resource_count += 1;
-            }
-        }
-
-        return opt_font;
-    }
-
     pub fn pushRectangle(
         self: *RenderGroup,
         object_transform: *const ObjectTransform,
@@ -1209,7 +987,7 @@ pub const RenderGroup = extern struct {
         color: Color,
     ) void {
         const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
-        const basis_position = getRenderEntityBasisPosition(object_transform, position);
+        const basis_position = object_transform.getRenderEntityBasisPosition(position);
 
         if (self.getCurrentQuads(6) != null) {
             const premultiplied_color: Color = storeColor(color);
@@ -1318,7 +1096,7 @@ pub const RenderGroup = extern struct {
         thickness: f32,
     ) void {
         if (self.getCurrentQuads(6) != null) {
-            const bitmap: ?*LoadedBitmap = self.commands.white_bitmap;
+            const texture: RendererTexture = self.commands.white_bitmap;
             const offset_position: Vector3 = object_transform.offset_position;
 
             const nx: f32 = offset_position.x() + rectangle.min.x();
@@ -1339,21 +1117,21 @@ pub const RenderGroup = extern struct {
 
             const line_color: Color = storeColor(color);
 
-            self.pushLineSegment(bitmap, p0, line_color, p1, line_color, thickness);
-            self.pushLineSegment(bitmap, p0, line_color, p3, line_color, thickness);
-            self.pushLineSegment(bitmap, p0, line_color, p4, line_color, thickness);
+            self.pushLineSegment(texture, p0, line_color, p1, line_color, thickness);
+            self.pushLineSegment(texture, p0, line_color, p3, line_color, thickness);
+            self.pushLineSegment(texture, p0, line_color, p4, line_color, thickness);
 
-            self.pushLineSegment(bitmap, p2, line_color, p1, line_color, thickness);
-            self.pushLineSegment(bitmap, p2, line_color, p3, line_color, thickness);
-            self.pushLineSegment(bitmap, p2, line_color, p6, line_color, thickness);
+            self.pushLineSegment(texture, p2, line_color, p1, line_color, thickness);
+            self.pushLineSegment(texture, p2, line_color, p3, line_color, thickness);
+            self.pushLineSegment(texture, p2, line_color, p6, line_color, thickness);
 
-            self.pushLineSegment(bitmap, p5, line_color, p1, line_color, thickness);
-            self.pushLineSegment(bitmap, p5, line_color, p4, line_color, thickness);
-            self.pushLineSegment(bitmap, p5, line_color, p6, line_color, thickness);
+            self.pushLineSegment(texture, p5, line_color, p1, line_color, thickness);
+            self.pushLineSegment(texture, p5, line_color, p4, line_color, thickness);
+            self.pushLineSegment(texture, p5, line_color, p6, line_color, thickness);
 
-            self.pushLineSegment(bitmap, p7, line_color, p3, line_color, thickness);
-            self.pushLineSegment(bitmap, p7, line_color, p4, line_color, thickness);
-            self.pushLineSegment(bitmap, p7, line_color, p6, line_color, thickness);
+            self.pushLineSegment(texture, p7, line_color, p3, line_color, thickness);
+            self.pushLineSegment(texture, p7, line_color, p4, line_color, thickness);
+            self.pushLineSegment(texture, p7, line_color, p6, line_color, thickness);
         }
     }
 
@@ -1507,7 +1285,18 @@ pub const RenderGroup = extern struct {
     }
 };
 
-inline fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
+pub fn storeColor(source: Color) Color {
+    var dest: Color = .white();
+
+    _ = dest.setA(source.a());
+    _ = dest.setR(dest.a() * source.r());
+    _ = dest.setG(dest.a() * source.g());
+    _ = dest.setB(dest.a() * source.b());
+
+    return dest;
+}
+
+fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
     const inv_255: f32 = 1.0 / 255.0;
 
     return Vector4.new(
@@ -1516,4 +1305,27 @@ inline fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
         -1.0 + 2.0 * (inv_255 * normal.z()),
         inv_255 * normal.w(),
     );
+}
+
+pub fn addOp(queue: *TextureQueue, source: *const TextureOp) void {
+    queue.mutex.begin();
+
+    std.debug.assert(queue.first_free != null);
+
+    const dest: *TextureOp = queue.first_free.?;
+    queue.first_free = dest.next;
+
+    dest.* = source.*;
+
+    std.debug.assert(dest.next == null);
+
+    if (queue.last != null) {
+        queue.last.?.next = dest;
+        queue.last = dest;
+    } else {
+        queue.first = dest;
+        queue.last = dest;
+    }
+
+    queue.mutex.end();
 }

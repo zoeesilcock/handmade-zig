@@ -991,7 +991,7 @@ pub fn main() anyerror!void {
     }
 }
 
-inline fn addFont(
+fn addFont(
     allocator: std.mem.Allocator,
     assets: *Assets,
     font_file: []const u8,

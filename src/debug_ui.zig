@@ -1,4 +1,5 @@
 const asset = @import("asset.zig");
+const asset_rendering = @import("asset_rendering.zig");
 const math = @import("math.zig");
 const debug = @import("debug.zig");
 const debug_interface = @import("debug_interface.zig");
@@ -569,7 +570,8 @@ pub fn textOp(
                             const bitamp_offset: Vector3 = Vector3.new(x, position.y(), z);
 
                             if (op == .DrawText) {
-                                render_group.pushBitmapId(
+                                asset_rendering.pushBitmapId(
+                                    render_group,
                                     &debug_state.shadow_transform,
                                     bitmap_id,
                                     bitmap_scale,
@@ -579,7 +581,8 @@ pub fn textOp(
                                     null,
                                     null,
                                 );
-                                render_group.pushBitmapId(
+                                asset_rendering.pushBitmapId(
+                                    render_group,
                                     &debug_state.text_transform,
                                     bitmap_id,
                                     bitmap_scale,
@@ -593,7 +596,7 @@ pub fn textOp(
                                 std.debug.assert(op == .SizeText);
 
                                 if (render_group.assets.getBitmap(bitmap_id, render_group.generation_id)) |bitmap| {
-                                    const dim = render_group.getBitmapDim(
+                                    const dim = asset_rendering.getBitmapDim(
                                         &ObjectTransform.defaultFlat(),
                                         bitmap,
                                         bitmap_scale,

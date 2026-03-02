@@ -2,6 +2,7 @@ const intrinsics = @import("intrinsics.zig");
 const renderer = @import("renderer.zig");
 const entities = @import("entities.zig");
 const asset = @import("asset.zig");
+const asset_rendering = @import("asset_rendering.zig");
 const shared = @import("shared.zig");
 const math = @import("math.zig");
 const simd = @import("simd.zig");
@@ -263,7 +264,7 @@ fn updateAndRenderFire(
             const p: Vector3 = .new(a.p.x[sub_index], a.p.y[sub_index], a.p.z[sub_index]);
             const c: Color = .new(a.c.r[sub_index], a.c.g[sub_index], a.c.b[sub_index], a.c.a[sub_index]);
             if (c.a() > 0) {
-                render_group.pushBitmapId(&transform, system.bitmap_id, 1, p, c, null, null, null);
+                asset_rendering.pushBitmapId(render_group, &transform, system.bitmap_id, 1, p, c, null, null, null);
             }
         }
     }
