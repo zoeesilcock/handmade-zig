@@ -42,6 +42,18 @@ zig build hha-edit -Dpackage=HHAEdit -- -rewrite source.hha dest.hha
 zig build hha-edit -Dpackage=HHAEdit -- -dump source.hha dest.hha
 ```
 
+### Renderer test
+This is a way to test the renderer standalone from the rest of the project.
+It expects some .bmp images in the `data/renderer_test` directory:
+* `test_cube_wall.bmp` (`block_orphanage_01.png` scaled down to 512x512px)
+* `test_cube_grass.bmp` (`block_forest_01.png` scaled down to 512x512px)
+* `test_sprite_head.bmp` (the last srpite in `character_krampus.png`, cropped and scaled down to 512x512px).
+* `test_sprite_tree.bmp` (the bottom left sprite in `obstacles_forest.png`, cropped and scaled down to 512px height).
+
+```
+zig build hha-edit -Dpackage=RendererTest run-renderer-test
+```
+
 ## Hot reloading
 The game is split up into an executable for the runtime and a DLL that contains the actual game. This allows hot reloading for most of the game code. When the DLL is rebuilt, the game will automatically reload it.
 

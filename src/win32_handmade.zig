@@ -2202,21 +2202,17 @@ pub export fn wWinMain(
             };
 
             const texture_op_count: u32 = 1024;
-            var texture_queue: renderer.TextureQueue = .{};
-            game_memory.texture_queue = &texture_queue;
-            texture_queue.first_free = @ptrCast(@alignCast(win32.VirtualAlloc(
-                null,
-                @sizeOf(renderer.TextureOp) * texture_op_count,
-                win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-                win32.PAGE_READWRITE,
-            )));
-
-            var texture_op_index: u32 = 0;
-            while (texture_op_index < (texture_op_count - 1)) : (texture_op_index += 1) {
-                const first_free: [*]renderer.TextureOp = @ptrCast(game_memory.texture_queue.first_free.?);
-                var op: [*]renderer.TextureOp = first_free + texture_op_index;
-                op[0].next = @ptrCast(first_free + texture_op_index + 1);
-            }
+            game_memory.texture_queue = &open_gl.texture_queue;
+            opengl.initTextureQueue(
+                game_memory.texture_queue,
+                texture_op_count,
+                @ptrCast(@alignCast(win32.VirtualAlloc(
+                    null,
+                    @sizeOf(renderer.TextureOp) * texture_op_count,
+                    win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+                    win32.PAGE_READWRITE,
+                ))),
+            );
 
             if (samples != null) {
                 // TODO: This currently doesn't support connecting controllers after the game has started.
@@ -2553,23 +2549,7 @@ pub export fn wWinMain(
                     TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     // Output game to screen.
-                    texture_queue.mutex.begin();
-                    const first_texture_op: ?*renderer.TextureOp = texture_queue.first;
-                    const last_texture_op: ?*renderer.TextureOp = texture_queue.last;
-                    texture_queue.first = null;
-                    texture_queue.last = null;
-                    texture_queue.mutex.end();
-
-                    if (first_texture_op != null) {
-                        std.debug.assert(last_texture_op != null);
-
-                        opengl.manageTextures(first_texture_op);
-
-                        texture_queue.mutex.begin();
-                        last_texture_op.?.next = texture_queue.first_free;
-                        texture_queue.first_free = first_texture_op;
-                        texture_queue.mutex.end();
-                    }
+                    opengl.manageTextures();
 
                     displayBufferInWindow(
                         &high_priority_queue,

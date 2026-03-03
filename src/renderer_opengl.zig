@@ -210,6 +210,8 @@ const TexturedVertex = renderer.TexturedVertex;
 const RendererTexture = renderer.RendererTexture;
 const RenderGroup = renderer.RenderGroup;
 const RenderSetup = renderer.RenderSetup;
+const TextureQueue = renderer.TextureQueue;
+const TextureOpList = renderer.TextureOpList;
 const RenderEntryHeader = renderer.RenderEntryHeader;
 const RenderEntryTexturedQuads = renderer.RenderEntryTexturedQuads;
 const RenderEntryLightingTransfer = renderer.RenderEntryLightingTransfer;
@@ -391,6 +393,8 @@ const OpenGL = struct {
 
     debug_light_buffer_index: i32 = 0,
     debug_light_buffer_texture_index: i32 = 0,
+
+    texture_queue: TextureQueue = .{},
 };
 
 pub var open_gl: OpenGL = .{};
@@ -2471,8 +2475,11 @@ pub fn renderCommands(
     }
 }
 
-pub fn manageTextures(first_op: ?*TextureOp) void {
-    var opt_op: ?*renderer.TextureOp = first_op;
+pub fn manageTextures() void {
+    const queue: *TextureQueue = &open_gl.texture_queue;
+    const pending: TextureOpList = renderer.dequeuePending(queue);
+
+    var opt_op: ?*renderer.TextureOp = pending.first;
     while (opt_op) |op| : (opt_op = op.next) {
         if (op.is_allocate) {
             op.op.allocate.result_texture.* = allocateTexture(
@@ -2484,6 +2491,19 @@ pub fn manageTextures(first_op: ?*TextureOp) void {
             var handle: u32 = @intCast(op.op.deallocate.texture.handle);
             gl.glDeleteTextures(1, &handle);
         }
+    }
+
+    renderer.enqueueFree(queue, pending);
+}
+
+pub fn initTextureQueue(queue: *TextureQueue, texture_op_count: u32, texture_ops: [*]TextureOp) void {
+    queue.first_free = @ptrCast(texture_ops);
+
+    var texture_op_index: u32 = 0;
+    while (texture_op_index < (texture_op_count - 1)) : (texture_op_index += 1) {
+        const first_free: [*]TextureOp = @ptrCast(queue.first_free.?);
+        var op: [*]renderer.TextureOp = first_free + texture_op_index;
+        op[0].next = @ptrCast(first_free + texture_op_index + 1);
     }
 }
 

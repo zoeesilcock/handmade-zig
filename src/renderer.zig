@@ -12,8 +12,6 @@ const config = @import("config.zig");
 const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
 
-// TODO: How would we import other platforms here?
-const platform = @import("win32_handmade.zig");
 var show_lighting_samples: bool = false;
 
 const INTERNAL = shared.INTERNAL;
@@ -118,6 +116,11 @@ pub const LightingPointState = extern struct {
     last_direction: Vector3,
 };
 
+pub const TextureOpList = extern struct {
+    first: ?*TextureOp = null,
+    last: ?*TextureOp = null,
+};
+
 pub const TextureOp = struct {
     next: ?*TextureOp = null,
     is_allocate: bool,
@@ -131,8 +134,7 @@ pub const TextureOp = struct {
 pub const TextureQueue = extern struct {
     mutex: TicketMutex = undefined,
 
-    first: ?*TextureOp = null,
-    last: ?*TextureOp = null,
+    pending: TextureOpList = .{},
     first_free: ?*TextureOp = null,
 };
 
@@ -800,10 +802,20 @@ pub const RenderGroup = extern struct {
             const p6: Vector4 = .new(px, py, nz, 0);
             const p7: Vector4 = .new(nx, py, nz, 0);
 
-            const t0: Vector2 = .new(0, 0);
-            const t1: Vector2 = .new(1, 0);
-            const t2: Vector2 = .new(1, 1);
-            const t3: Vector2 = .new(0, 1);
+            const bot_t0: Vector2 = .new(0, 0);
+            const bot_t1: Vector2 = .new(0.25, 0);
+            const bot_t2: Vector2 = .new(0.25, 0.25);
+            const bot_t3: Vector2 = .new(0, 0.25);
+
+            const mid_t0: Vector2 = .new(0, 0.25);
+            const mid_t1: Vector2 = .new(0.25, 0.25);
+            const mid_t2: Vector2 = .new(0.25, 0.75);
+            const mid_t3: Vector2 = .new(0, 0.75);
+
+            const top_t0: Vector2 = .new(0, 0.75);
+            const top_t1: Vector2 = .new(0.25, 0.75);
+            const top_t2: Vector2 = .new(0.25, 1);
+            const top_t3: Vector2 = .new(0, 1);
 
             // const top_color: Color = storeColor(color);
             // const bottom_color: Color = .new(0, 0, 0, top_color.a());
@@ -855,16 +867,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p7,
-                t0,
+                mid_t0,
                 cb,
                 p4,
-                t1,
+                mid_t1,
                 cb,
-                p0,
-                t2,
+                p0, //
+                mid_t2,
                 ct,
-                p3,
-                t3,
+                p3, //
+                mid_t3,
                 ct,
                 opt_emission,
                 light_count,
@@ -875,17 +887,17 @@ pub const RenderGroup = extern struct {
             // Positive X.
             self.pushQuadUnpackedColors(
                 texture,
-                p1,
-                t0,
+                p1, //
+                mid_t3,
                 ct,
                 p5,
-                t1,
+                mid_t0,
                 cb,
                 p6,
-                t2,
+                mid_t1,
                 cb,
-                p2,
-                t3,
+                p2, //
+                mid_t2,
                 ct,
                 opt_emission,
                 light_count,
@@ -897,16 +909,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p4,
-                t0,
+                mid_t0,
                 cb,
                 p5,
-                t1,
+                mid_t1,
                 cb,
-                p1,
-                t2,
+                p1, //
+                mid_t2,
                 ct,
-                p0,
-                t3,
+                p0, //
+                mid_t3,
                 ct,
                 opt_emission,
                 light_count,
@@ -917,17 +929,17 @@ pub const RenderGroup = extern struct {
             // Positive Y.
             self.pushQuadUnpackedColors(
                 texture,
-                p2,
-                t0,
+                p2, //
+                mid_t3,
                 ct,
                 p6,
-                t1,
+                mid_t0,
                 cb,
                 p7,
-                t2,
+                mid_t1,
                 cb,
-                p3,
-                t3,
+                p3, //
+                mid_t2,
                 ct,
                 opt_emission,
                 light_count,
@@ -939,16 +951,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p7,
-                t0,
+                bot_t0,
                 bottom_color,
                 p6,
-                t1,
+                bot_t1,
                 bottom_color,
                 p5,
-                t2,
+                bot_t2,
                 bottom_color,
                 p4,
-                t3,
+                bot_t3,
                 bottom_color,
                 opt_emission,
                 light_count,
@@ -960,16 +972,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p0,
-                t0,
+                top_t0,
                 top_color,
                 p1,
-                t1,
+                top_t1,
                 top_color,
                 p2,
-                t2,
+                top_t2,
                 top_color,
                 p3,
-                t3,
+                top_t3,
                 top_color,
                 opt_emission,
                 light_count,
@@ -1132,6 +1144,75 @@ pub const RenderGroup = extern struct {
             self.pushLineSegment(texture, p7, line_color, p3, line_color, thickness);
             self.pushLineSegment(texture, p7, line_color, p4, line_color, thickness);
             self.pushLineSegment(texture, p7, line_color, p6, line_color, thickness);
+        }
+    }
+
+    pub fn pushSprite(
+        self: *RenderGroup,
+        texture: RendererTexture,
+        upright: bool,
+        ground_position: Vector3,
+        size: Vector2,
+        min_uv: Vector2,
+        max_uv: Vector2,
+        opt_color: ?Color,
+        opt_x_axis: ?Vector2,
+        opt_y_axis: ?Vector2,
+    ) void {
+        if (self.getCurrentQuads(1)) |entry| {
+            entry.quad_count += 1;
+
+            const color: Color = opt_color orelse .white();
+            const x_axis2: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
+            const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
+
+            var z_bias: f32 = 0;
+            const premultiplied_color: Color = storeColor(color);
+            var x_axis: Vector3 = x_axis2.toVector3(0).scaledTo(size.x());
+            var y_axis: Vector3 = y_axis2.toVector3(0).scaledTo(size.y());
+
+            if (upright) {
+                z_bias = size.y();
+                const x_axis0 = Vector3.new(x_axis2.x(), 0, x_axis2.y()).scaledTo(size.x());
+                const y_axis0 = Vector3.new(y_axis2.x(), 0, y_axis2.y()).scaledTo(size.y());
+                const x_axis1 =
+                    self.game_transform.x.scaledTo(x_axis2.x())
+                        .plus(self.game_transform.y.scaledTo(x_axis2.y())).scaledTo(size.x());
+                const y_axis1 =
+                    self.game_transform.x.scaledTo(y_axis2.x())
+                        .plus(self.game_transform.y.scaledTo(y_axis2.y())).scaledTo(size.y());
+
+                x_axis = x_axis0.lerp(x_axis1, 0.25);
+                y_axis = y_axis0.lerp(y_axis1, 0.25);
+                z_bias = 0.25 * size.y();
+            }
+
+            const vertex_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+
+            const min_position: Vector3 = ground_position.minus(x_axis.scaledTo(0.5));
+            const min_x_min_y: Vector4 = min_position.toVector4(0);
+            const min_x_max_y: Vector4 = min_position.plus(y_axis).toVector4(z_bias);
+            const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
+            const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(z_bias);
+
+            self.pushQuad(
+                texture,
+                min_x_min_y,
+                .new(min_uv.x(), min_uv.y()),
+                vertex_color,
+                max_x_min_y,
+                .new(max_uv.x(), min_uv.y()),
+                vertex_color,
+                max_x_max_y,
+                .new(max_uv.x(), max_uv.y()),
+                vertex_color,
+                min_x_max_y,
+                .new(min_uv.x(), max_uv.y()),
+                vertex_color,
+                null,
+                null,
+                null,
+            );
         }
     }
 
@@ -1307,6 +1388,24 @@ fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
     );
 }
 
+pub fn dequeuePending(queue: *TextureQueue) TextureOpList {
+    queue.mutex.begin();
+    const result: TextureOpList = queue.pending;
+    queue.pending.first = null;
+    queue.pending.last = null;
+    queue.mutex.end();
+    return result;
+}
+
+pub fn enqueueFree(queue: *TextureQueue, list: TextureOpList) void {
+    if (list.last != null) {
+        queue.mutex.begin();
+        list.last.?.next = queue.first_free;
+        queue.first_free = list.first;
+        queue.mutex.end();
+    }
+}
+
 pub fn addOp(queue: *TextureQueue, source: *const TextureOp) void {
     queue.mutex.begin();
 
@@ -1319,12 +1418,12 @@ pub fn addOp(queue: *TextureQueue, source: *const TextureOp) void {
 
     std.debug.assert(dest.next == null);
 
-    if (queue.last != null) {
-        queue.last.?.next = dest;
-        queue.last = dest;
+    if (queue.pending.last != null) {
+        queue.pending.last.?.next = dest;
+        queue.pending.last = dest;
     } else {
-        queue.first = dest;
-        queue.last = dest;
+        queue.pending.first = dest;
+        queue.pending.last = dest;
     }
 
     queue.mutex.end();

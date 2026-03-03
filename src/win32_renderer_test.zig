@@ -7,6 +7,15 @@ const renderer = @import("renderer.zig");
 const opengl = @import("renderer_opengl.zig");
 const wgl = @import("win32_opengl.zig");
 
+const c = @cImport({
+    @cInclude("stdlib.h");
+});
+
+const WINDOW_DECORATION_WIDTH = 16;
+const WINDOW_DECORATION_HEIGHT = 39;
+const WINDOW_WIDTH = 1920;
+const WINDOW_HEIGHT = 1080;
+
 // Build options.
 pub const INTERNAL = @import("build_options").internal;
 
@@ -21,6 +30,7 @@ const RenderGroup = renderer.RenderGroup;
 const TexturedVertex = renderer.TexturedVertex;
 const RendererTexture = renderer.RendererTexture;
 const CameraParams = renderer.CameraParams;
+const TextureOp = renderer.TextureOp;
 
 const EntireFile = struct {
     content_size: u32 = 0,
@@ -56,6 +66,25 @@ const LoadedBitmap = extern struct {
     pitch: i32 = 0,
 };
 
+const TestSceneElement = enum(u32) {
+    Grass,
+    Tree,
+    Wall,
+};
+
+const TEST_SCENE_DIM_X = 40;
+const TEST_SCENE_DIM_Y = 50;
+
+const TestScene = struct {
+    min_position: Vector3 = .zero(),
+    elements: [TEST_SCENE_DIM_Y][TEST_SCENE_DIM_X]TestSceneElement =
+        [1][TEST_SCENE_DIM_X]TestSceneElement{[1]TestSceneElement{.Grass} ** TEST_SCENE_DIM_X} ** TEST_SCENE_DIM_Y,
+    grass_texture: RendererTexture = .empty,
+    wall_texture: RendererTexture = .empty,
+    tree_texture: RendererTexture = .empty,
+    head_texture: RendererTexture = .empty,
+};
+
 // Globals.
 var running: bool = false;
 var open_gl = &opengl.open_gl;
@@ -80,55 +109,11 @@ fn windowProcedure(
             _ = win32.EndPaint(window, &paint);
         },
         else => {
-            result = win32.DefWindowProcW(window, message, w_param, l_param);
+            result = win32.DefWindowProcA(window, message, w_param, l_param);
         },
     }
 
     return result;
-}
-
-fn processPendingMessages() void {
-    var message: win32.MSG = undefined;
-    while (true) {
-        const skip_messages = [_]u32{
-            // win32.WM_PAINT,
-            // Ignoring WM_MOUSEMOVE lead to performance issues.
-            // win32.WM_MOUSEMOVE,
-            // Guard against an unknown message which spammed the game on Casey's machine.
-            0x738,
-            0xffffffff,
-        };
-
-        var got_message: bool = false;
-        var last_message: u32 = 0;
-        for (skip_messages) |skip| {
-            got_message = win32.PeekMessageW(
-                &message,
-                null,
-                last_message,
-                skip - 1,
-                win32.PM_REMOVE,
-            ) != 0;
-
-            if (got_message) {
-                break;
-            }
-
-            last_message = skip +% 1;
-        }
-
-        if (!got_message) {
-            break;
-        }
-
-        switch (message.message) {
-            win32.WM_QUIT => running = false,
-            else => {
-                _ = win32.TranslateMessage(&message);
-                _ = win32.DispatchMessageW(&message);
-            },
-        }
-    }
 }
 
 fn allocateMemory(size: usize) ?*anyopaque {
@@ -164,7 +149,7 @@ fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFil
 fn loadBMP(
     file_name: []const u8,
     allocator: std.mem.Allocator,
-) ?LoadedBitmap {
+) RendererTexture {
     var result: ?LoadedBitmap = null;
     const read_result = readEntireFile(file_name, allocator);
 
@@ -226,7 +211,273 @@ fn loadBMP(
 
     result.?.pitch = result.?.width * 4;
 
-    return result;
+    var texture: RendererTexture = .empty;
+    const texture_op: TextureOp = .{
+        .is_allocate = true,
+        .op = .{
+            .allocate = .{
+                .width = result.?.width,
+                .height = result.?.height,
+                .data = result.?.memory.?,
+                .result_texture = &texture,
+            },
+        },
+    };
+    renderer.addOp(&open_gl.texture_queue, &texture_op);
+    opengl.manageTextures();
+
+    return texture;
+}
+
+fn placeRandom(scene: *TestScene, element: TestSceneElement, count: u32) void {
+    var placed: u32 = 0;
+    while (placed < count) {
+        const x: u32 = 1 + @mod(@as(u32, @intCast(c.rand())), TEST_SCENE_DIM_X - 1);
+        const y: u32 = 1 + @mod(@as(u32, @intCast(c.rand())), TEST_SCENE_DIM_Y - 1);
+
+        var occupants: u32 = 0;
+        var test_y: u32 = y - 1;
+        while (test_y <= y + 1) : (test_y += 1) {
+            var test_x: u32 = x - 1;
+            while (test_x <= x + 1) : (test_x += 1) {
+                if (scene.elements[test_y][test_x] != .Grass) {
+                    occupants += 1;
+                }
+            }
+        }
+
+        if (occupants == 0) {
+            scene.elements[y][x] = element;
+            placed += 1;
+        }
+    }
+}
+
+fn initTestScene(
+    scene: *TestScene,
+    grass_texture: RendererTexture,
+    wall_texture: RendererTexture,
+    tree_texture: RendererTexture,
+    head_texture: RendererTexture,
+) void {
+    scene.grass_texture = grass_texture;
+    scene.wall_texture = wall_texture;
+    scene.tree_texture = tree_texture;
+    scene.head_texture = head_texture;
+
+    scene.min_position = .new(
+        -0.5 * @as(f32, @floatFromInt(TEST_SCENE_DIM_X)),
+        -0.5 * @as(f32, @floatFromInt(TEST_SCENE_DIM_Y)),
+        0,
+    );
+
+    placeRandom(scene, .Tree, 90);
+    placeRandom(scene, .Wall, 50);
+}
+
+fn pushSimpleScene(
+    group: *RenderGroup,
+    scene: *TestScene,
+) void {
+    c.srand(1234);
+
+    var y: u32 = 0;
+    while (y < TEST_SCENE_DIM_Y) : (y += 1) {
+        var x: u32 = 0;
+        while (x < TEST_SCENE_DIM_X) : (x += 1) {
+            const element: TestSceneElement = scene.elements[y][x];
+            const z: f32 = 0.4 * @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX));
+            const r: f32 = 0.5 + 0.5 * @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX));
+            const z_radius: f32 = 2;
+            const color: Color = .new(r, 1, 1, 1);
+            const position: Vector3 = scene.min_position.plus(.new(@floatFromInt(x), @floatFromInt(y), z));
+
+            group.pushCube(
+                scene.grass_texture,
+                position,
+                .new(0.5, 0.5, z_radius),
+                color,
+                null,
+                null,
+            );
+
+            const ground_position: Vector3 = position.plus(.new(0, 0, z_radius));
+            if (element == .Tree) {
+                group.pushSprite(
+                    scene.tree_texture,
+                    true,
+                    ground_position,
+                    .new(2, 2.5),
+                    .zero(),
+                    .one(),
+                    null,
+                    null,
+                    null,
+                );
+            } else if (element == .Wall) {
+                const wall_radius: f32 = 1;
+                group.pushCube(
+                    scene.wall_texture,
+                    ground_position.plus(.new(0, 0, wall_radius)),
+                    .new(0.5, 0.5, wall_radius),
+                    color,
+                    null,
+                    null,
+                );
+            }
+        }
+    }
+
+    group.pushSprite(scene.head_texture, true, .new(0, 2, 3), .new(4, 4), .zero(), .one(), null, null, null);
+}
+
+fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
+    if (lp_parameter) |parameter| {
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = gpa.allocator();
+
+        var perf_count_frequency: i64 = 0;
+        var performance_frequency: win32.LARGE_INTEGER = undefined;
+        _ = win32.QueryPerformanceFrequency(&performance_frequency);
+        perf_count_frequency = performance_frequency.QuadPart;
+
+        var last_counter: win32.LARGE_INTEGER = undefined;
+        _ = win32.QueryPerformanceCounter(&last_counter);
+
+        const window: win32.HWND = @ptrCast(@alignCast(parameter));
+        const window_dc = win32.GetDC(window);
+        _ = wgl.initOpenGL(window_dc);
+
+        const push_buffer_size: u32 = @intCast(types.megabytes(64));
+        const push_buffer: [*]u8 = @ptrCast(allocateMemory(push_buffer_size));
+
+        const max_vertex_count: u32 = 65536;
+        const vertex_array: [*]TexturedVertex =
+            @ptrCast(@alignCast(allocateMemory(max_vertex_count * @sizeOf(TexturedVertex))));
+        const bitmap_array: [*]RendererTexture =
+            @ptrCast(@alignCast(allocateMemory(max_vertex_count * @sizeOf(RendererTexture))));
+
+        const texture_op_count: u32 = 1024;
+        opengl.initTextureQueue(
+            &open_gl.texture_queue,
+            texture_op_count,
+            @ptrCast(@alignCast(allocateMemory(@sizeOf(renderer.TextureOp) * texture_op_count))),
+        );
+
+        const grass_texture: RendererTexture = loadBMP("test_cube_grass.bmp", allocator);
+        const wall_texture: RendererTexture = loadBMP("test_cube_wall.bmp", allocator);
+        const tree_texture: RendererTexture = loadBMP("test_sprite_tree.bmp", allocator);
+        const head_texture: RendererTexture = loadBMP("test_sprite_head.bmp", allocator);
+        var scene: TestScene = .{};
+        initTestScene(&scene, grass_texture, wall_texture, tree_texture, head_texture);
+
+        const camera_pitch: f32 = 0.3 * math.PI32;
+        var camera_orbit: f32 = 0;
+        const camera_dolly: f32 = 20;
+        const camera_drop_shift: f32 = -1;
+        const camera_focal_length: f32 = 3;
+
+        const near_clip_plane: f32 = 0.2;
+        const far_clip_plane: f32 = 1000;
+
+        var camera_shift_t: f32 = 0;
+
+        var min_spf: f32 = std.math.floatMax(f32);
+        var max_spf: f32 = 0;
+        var display_counter: u32 = 0;
+
+        while (running) {
+            var client_rect: win32.RECT = undefined;
+            _ = win32.GetClientRect(window, &client_rect);
+            const window_width: i32 = client_rect.right - client_rect.left;
+            const window_height: i32 = client_rect.bottom - client_rect.top;
+
+            const fog: bool = false;
+
+            const draw_region: Rectangle2i =
+                math.aspectRatioFit(16, 9, @intCast(window_width), @intCast(window_height));
+
+            const camera: CameraParams = .get(@intCast(draw_region.getWidth()), camera_focal_length);
+
+            if (camera_shift_t > math.TAU32) {
+                camera_shift_t -= math.TAU32;
+            }
+            var camera_offset: Vector3 = .new(0, 0, camera_drop_shift);
+
+            if (false) {
+                camera_offset =
+                    camera_offset.plus(Vector3.new(@cos(camera_shift_t), -0.2 + @sin(camera_shift_t), 0).scaledTo(10));
+            } else {
+                camera_orbit = camera_shift_t;
+            }
+
+            var render_commands: RenderCommands = RenderCommands.default(
+                push_buffer_size,
+                push_buffer,
+                @intCast(draw_region.getWidth()),
+                @intCast(draw_region.getHeight()),
+                max_vertex_count,
+                vertex_array,
+                bitmap_array,
+                open_gl.white_bitmap,
+            );
+
+            var camera_o: Matrix4x4 =
+                Matrix4x4.zRotation(camera_orbit).times(.xRotation(camera_pitch));
+            const camera_ot: Vector3 = camera_o.timesV(.new(0, 0, camera_dolly));
+
+            var group: RenderGroup = .begin(
+                undefined,
+                &render_commands,
+                1,
+                draw_region.getWidth(),
+                draw_region.getHeight(),
+            );
+            group.setCameraTransform(
+                camera.focal_length,
+                camera_o.getColumn(0),
+                camera_o.getColumn(1),
+                camera_o.getColumn(2),
+                camera_ot.plus(camera_offset),
+                0,
+                near_clip_plane,
+                far_clip_plane,
+                fog,
+            );
+
+            const background_color: Color = .new(0.15, 0.15, 0.15, 0);
+            group.beginDepthPeel(background_color);
+            pushSimpleScene(&group, &scene);
+            group.endDepthPeel();
+            group.end();
+
+            opengl.renderCommands(&render_commands, draw_region, window_width, window_height);
+            _ = win32.SwapBuffers(window_dc);
+
+            var end_counter: win32.LARGE_INTEGER = undefined;
+            _ = win32.QueryPerformanceCounter(&end_counter);
+            const seconds_elapsed: f32 =
+                @as(f32, @floatFromInt(end_counter.QuadPart - last_counter.QuadPart)) /
+                @as(f32, @floatFromInt(perf_count_frequency));
+
+            camera_shift_t += 0.1 * seconds_elapsed;
+            last_counter = end_counter;
+
+            min_spf = @min(min_spf, seconds_elapsed);
+            max_spf = @max(max_spf, seconds_elapsed);
+
+            if (display_counter == 300) {
+                std.log.info("Min: {d:.02}ms, Max: {d:.02}ms", .{ 1000 * min_spf, 1000 * max_spf });
+                min_spf = std.math.floatMax(f32);
+                max_spf = 0;
+                display_counter = 0;
+            }
+
+            display_counter += 1;
+        }
+    }
+
+    return 0;
 }
 
 /// This is needed for it to work when lib_c is linked.
@@ -249,14 +500,6 @@ pub export fn WinMain(
     _ = cmd_line;
     _ = cmd_show;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    var perf_count_frequency: i64 = 0;
-    var performance_frequency: win32.LARGE_INTEGER = undefined;
-    _ = win32.QueryPerformanceFrequency(&performance_frequency);
-    perf_count_frequency = performance_frequency.QuadPart;
-
     const window_class: win32.WNDCLASSW = .{
         .style = .{ .HREDRAW = 1, .VREDRAW = 1, .OWNDC = 1 },
         .lpfnWndProc = windowProcedure,
@@ -265,13 +508,10 @@ pub export fn WinMain(
         .hInstance = instance,
         .hIcon = null,
         .hCursor = win32.LoadCursorW(null, win32.IDC_ARROW),
-        .hbrBackground = win32.GetStockObject(win32.BLACK_BRUSH),
+        .hbrBackground = null,
         .lpszMenuName = null,
         .lpszClassName = win32.L("HandmadeZigRendererTestWindowClass"),
     };
-
-    var last_counter: win32.LARGE_INTEGER = undefined;
-    _ = win32.QueryPerformanceCounter(&last_counter);
 
     if (win32.RegisterClassW(&window_class) != 0) {
         const opt_window_handle: ?win32.HWND = win32.CreateWindowExW(
@@ -289,110 +529,36 @@ pub export fn WinMain(
             },
             win32.CW_USEDEFAULT,
             win32.CW_USEDEFAULT,
-            win32.CW_USEDEFAULT,
-            win32.CW_USEDEFAULT,
+            WINDOW_WIDTH + WINDOW_DECORATION_WIDTH,
+            WINDOW_HEIGHT + WINDOW_DECORATION_HEIGHT,
             null,
             null,
             instance,
             null,
         );
 
-        if (opt_window_handle) |window_handle| {
-            const window_dc = win32.GetDC(window_handle);
-            _ = wgl.initOpenGL(window_dc);
+        if (opt_window_handle) |window| {
             running = true;
 
-            const push_buffer_size: u32 = @intCast(types.megabytes(64));
-            const push_buffer: [*]u8 = @ptrCast(allocateMemory(push_buffer_size));
-
-            const max_vertex_count: u32 = 65536;
-            const vertex_array: [*]TexturedVertex =
-                @ptrCast(@alignCast(allocateMemory(max_vertex_count * @sizeOf(TexturedVertex))));
-            const bitmap_array: [*]RendererTexture =
-                @ptrCast(@alignCast(allocateMemory(max_vertex_count * @sizeOf(RendererTexture))));
-
-            const cube_texture = loadBMP("cube_test.bmp", allocator);
-            _ = cube_texture;
+            var thread_id: std.os.windows.DWORD = undefined;
+            const thread_handle = win32.CreateThread(
+                null,
+                types.megabytes(16),
+                renderLoop,
+                @ptrCast(window),
+                win32.THREAD_CREATE_RUN_IMMEDIATELY,
+                &thread_id,
+            );
+            _ = win32.CloseHandle(thread_handle);
 
             while (running) {
-                processPendingMessages();
-
-                var client_rect: win32.RECT = undefined;
-                _ = win32.GetClientRect(window_handle, &client_rect);
-                const window_width: i32 = client_rect.right - client_rect.left;
-                const window_height: i32 = client_rect.bottom - client_rect.top;
-
-                const draw_region: Rectangle2i =
-                    math.aspectRatioFit(16, 9, @intCast(window_width), @intCast(window_height));
-
-                var render_commands: RenderCommands = RenderCommands.default(
-                    push_buffer_size,
-                    push_buffer,
-                    @intCast(draw_region.getWidth()),
-                    @intCast(draw_region.getHeight()),
-                    max_vertex_count,
-                    vertex_array,
-                    bitmap_array,
-                    open_gl.white_bitmap,
-                );
-
-                const camera: CameraParams = .get(@intCast(draw_region.getWidth()), 1);
-
-                const camera_offset: Vector3 = .zero();
-                const camera_pitch: f32 = 0.1 * math.PI32;
-                const camera_orbit: f32 = 0;
-                const camera_dolly: f32 = 10;
-
-                const near_clip_plane: f32 = 0.2;
-                const far_clip_plane: f32 = 1000;
-
-                var camera_o: Matrix4x4 =
-                    Matrix4x4.zRotation(camera_orbit).times(.xRotation(camera_pitch));
-                const camera_ot: Vector3 =
-                    camera_o.timesV(camera_offset.plus(.new(0, 0, camera_dolly)));
-
-                var group: RenderGroup = .begin(
-                    undefined,
-                    &render_commands,
-                    1,
-                    draw_region.getWidth(),
-                    draw_region.getHeight(),
-                );
-                group.setCameraTransform(
-                    camera.focal_length,
-                    camera_o.getColumn(0),
-                    camera_o.getColumn(1),
-                    camera_o.getColumn(2),
-                    camera_ot,
-                    0,
-                    near_clip_plane,
-                    far_clip_plane,
-                    true,
-                );
-
-                const background_color: Color = .new(0.15, 0.15, 0.15, 0);
-                group.beginDepthPeel(background_color);
-                group.pushCube(
-                    open_gl.white_bitmap,
-                    .zero(),
-                    .new(1, 1, 2),
-                    .new(1, 1, 1, 1),
-                    null,
-                    null,
-                );
-                group.endDepthPeel();
-                group.end();
-
-                opengl.renderCommands(&render_commands, draw_region, window_width, window_height);
-                _ = win32.SwapBuffers(window_dc);
-
-                var end_counter: win32.LARGE_INTEGER = undefined;
-                _ = win32.QueryPerformanceCounter(&end_counter);
-                const seconds_elapsed: f32 =
-                    @as(f32, @floatFromInt(end_counter.QuadPart - last_counter.QuadPart)) /
-                    @as(f32, @floatFromInt(perf_count_frequency));
-                _ = seconds_elapsed;
-                last_counter = end_counter;
+                var message: win32.MSG = undefined;
+                if (win32.GetMessageA(&message, null, 0, 0) > 0) {
+                    _ = win32.TranslateMessage(&message);
+                    _ = win32.DispatchMessageA(&message);
+                } else {
+                    running = false;
+                }
             }
         }
     }
