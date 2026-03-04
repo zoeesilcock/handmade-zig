@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const memory = @import("memory.zig");
 const asset = @import("asset.zig");
 const asset_rendering = @import("asset_rendering.zig");
@@ -28,7 +29,6 @@ const Vector4 = math.Vector4;
 const Color = math.Color;
 const Color3 = math.Color3;
 const Matrix4x4 = math.Matrix4x4;
-const Rectangle2i = math.Rectangle2i;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const MemoryArena = memory.MemoryArena;
@@ -150,7 +150,7 @@ pub const DebugState = struct {
     debug_arena: MemoryArena,
     per_frame_arena: MemoryArena,
 
-    default_clip_rect: Rectangle2i,
+    default_clip_rect: Rectangle2,
     render_group: RenderGroup,
     debug_font: ?*asset.LoadedFont,
     debug_font_info: ?*file_formats.HHAFont,
@@ -517,7 +517,7 @@ pub const DebugState = struct {
             result.name_length = @intCast((@intFromPtr(scan) - @intFromPtr(guid)) - result.name_starts_at);
             result.name = guid + result.name_starts_at;
         } else {
-            result.name_length = shared.stringLength(proper_name);
+            result.name_length = types.stringLength(proper_name);
             result.name = proper_name;
         }
         return result;
@@ -2237,7 +2237,7 @@ fn debugStart(
     TimedBlock.beginFunction(@src(), .DebugStart);
     defer TimedBlock.endFunction(@src(), .DebugStart);
 
-    debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id, width, height);
+    debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id);
 
     if (asset_rendering.pushFont(&debug_state.render_group, debug_state.font_id)) |font| {
         debug_state.debug_font = font;
@@ -2364,11 +2364,13 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
-    const mouse_position: Vector2 = group.unproject(
-        &group.game_transform,
-        Vector2.new(input.mouse_x, input.mouse_y),
-        0,
-    ).xy();
+
+    const mouse_clip_position = RenderGroup.clipSpaceFromPixelSpace(
+        debug_state.global_width,
+        debug_state.global_height,
+        .new(input.mouse_x, input.mouse_y),
+    );
+    const mouse_position: Vector2 = group.unproject(&group.game_transform, mouse_clip_position, 0).xy();
 
     debug_state.mouse_text_layout = Layout.begin(debug_state, mouse_position, mouse_position);
     drawTrees(debug_state, mouse_position);

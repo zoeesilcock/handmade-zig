@@ -478,7 +478,7 @@ pub fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
 
             optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
             if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
-                _ = wglSwapIntervalEXT(0);
+                _ = wglSwapIntervalEXT(1);
             }
 
             opengl.init(info, open_gl.supports_srgb_frame_buffer);
@@ -488,6 +488,10 @@ pub fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
     }
 
     return opengl_rc;
+}
+
+pub fn setVSync(enabled: bool) void {
+    _ = optWglSwapIntervalEXT.?(if (enabled) 1 else 0);
 }
 
 pub fn outputLastGLError(title: []const u8) void {

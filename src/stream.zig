@@ -1,16 +1,17 @@
 const std = @import("std");
 const memory = @import("memory.zig");
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 
 // Types.
-const Buffer = shared.Buffer;
+const Buffer = types.Buffer;
 const MemoryArena = memory.MemoryArena;
 
 pub const Chunk = struct {
     file_name: [:0]const u8,
     line: u32,
 
-    contents: shared.Buffer = .{},
+    contents: Buffer = .{},
 
     next: ?*Chunk = null,
 };
@@ -19,7 +20,7 @@ pub const Stream = struct {
     arena: ?*MemoryArena = null,
     errors: ?*Stream = null,
 
-    contents: shared.Buffer = .{},
+    contents: Buffer = .{},
 
     bit_count: u32 = 0,
     bit_buf: u32 = 0,

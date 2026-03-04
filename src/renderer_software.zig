@@ -526,12 +526,12 @@ fn blendRenderTarget(
                     const source_a: F32_4x = @floatFromInt((original_source >> shift_24) & mask_ff);
 
                     // Go from sRGB to linear brightness space.
-                    dest_r = math.square_v4(dest_r);
-                    dest_g = math.square_v4(dest_g);
-                    dest_b = math.square_v4(dest_b);
-                    source_r = math.square_v4(source_r);
-                    source_g = math.square_v4(source_g);
-                    source_b = math.square_v4(source_b);
+                    dest_r = math.squareV4(dest_r);
+                    dest_g = math.squareV4(dest_g);
+                    dest_b = math.squareV4(dest_b);
+                    source_r = math.squareV4(source_r);
+                    source_g = math.squareV4(source_g);
+                    source_b = math.squareV4(source_b);
 
                     // Destination blend.
                     const pixel_alpha_4x: F32_4x = alpha_4x * (source_a * inv_255);
@@ -722,9 +722,9 @@ pub fn drawRectangle(
                     texela = @min(one_255, texela);
 
                     // Go from sRGB to linear brightness space.
-                    dest_r = math.square_v4(dest_r);
-                    dest_g = math.square_v4(dest_g);
-                    dest_b = math.square_v4(dest_b);
+                    dest_r = math.squareV4(dest_r);
+                    dest_g = math.squareV4(dest_g);
+                    dest_b = math.squareV4(dest_b);
 
                     // Destination blend.
                     const inv_texel_a = one - (inv_255 * texela);
@@ -1025,21 +1025,21 @@ pub fn drawRectangleQuickly(
                 const dest_a: F32_4x = @floatFromInt((original_dest >> shift_24) & mask_ff);
 
                 // Convert texture from sRGB to linear brightness space.
-                texel_a_r = math.square_v4(texel_a_r);
-                texel_a_g = math.square_v4(texel_a_g);
-                texel_a_b = math.square_v4(texel_a_b);
+                texel_a_r = math.squareV4(texel_a_r);
+                texel_a_g = math.squareV4(texel_a_g);
+                texel_a_b = math.squareV4(texel_a_b);
 
-                texel_b_r = math.square_v4(texel_b_r);
-                texel_b_g = math.square_v4(texel_b_g);
-                texel_b_b = math.square_v4(texel_b_b);
+                texel_b_r = math.squareV4(texel_b_r);
+                texel_b_g = math.squareV4(texel_b_g);
+                texel_b_b = math.squareV4(texel_b_b);
 
-                texel_c_r = math.square_v4(texel_c_r);
-                texel_c_g = math.square_v4(texel_c_g);
-                texel_c_b = math.square_v4(texel_c_b);
+                texel_c_r = math.squareV4(texel_c_r);
+                texel_c_g = math.squareV4(texel_c_g);
+                texel_c_b = math.squareV4(texel_c_b);
 
-                texel_d_r = math.square_v4(texel_d_r);
-                texel_d_g = math.square_v4(texel_d_g);
-                texel_d_b = math.square_v4(texel_d_b);
+                texel_d_r = math.squareV4(texel_d_r);
+                texel_d_g = math.squareV4(texel_d_g);
+                texel_d_b = math.squareV4(texel_d_b);
 
                 // Bilinear texture blend.
                 var texelr = l0 * texel_a_r + l1 * texel_b_r + l2 * texel_c_r + l3 * texel_d_r;
@@ -1064,9 +1064,9 @@ pub fn drawRectangleQuickly(
                 texela = @min(one_255, texela);
 
                 // Go from sRGB to linear brightness space.
-                dest_r = math.square_v4(dest_r);
-                dest_g = math.square_v4(dest_g);
-                dest_b = math.square_v4(dest_b);
+                dest_r = math.squareV4(dest_r);
+                dest_g = math.squareV4(dest_g);
+                dest_b = math.squareV4(dest_b);
 
                 // Destination blend.
                 const inv_texel_a = one - (inv_255 * texela);

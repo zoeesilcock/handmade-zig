@@ -49,6 +49,7 @@ It expects some .bmp images in the `data/renderer_test` directory:
 * `test_cube_grass.bmp` (`block_forest_01.png` scaled down to 512x512px)
 * `test_sprite_head.bmp` (the last srpite in `character_krampus.png`, cropped and scaled down to 512x512px).
 * `test_sprite_tree.bmp` (the bottom left sprite in `obstacles_forest.png`, cropped and scaled down to 512px height).
+* `test_cover_grass.bmp` (the top left sprite in `cover_forest.png`, cropped to 512x512px).
 
 ```
 zig build hha-edit -Dpackage=RendererTest run-renderer-test

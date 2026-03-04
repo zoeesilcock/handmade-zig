@@ -5,103 +5,61 @@ pub const MAX_CONTROLLER_COUNT: u8 = 5;
 pub const HIT_POINT_SUB_COUNT = 4;
 pub const BITMAP_BYTES_PER_PIXEL = 4;
 
-pub const intrinsics = @import("intrinsics.zig");
 pub const math = @import("math.zig");
+pub const types = @import("types.zig");
+pub const intrinsics = @import("intrinsics.zig");
 const memory = @import("memory.zig");
-const types = @import("types.zig");
 const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
-const sim = @import("sim.zig");
-const entities = @import("entities.zig");
 const brains = @import("brains.zig");
 const renderer = @import("renderer.zig");
-const lighting = @import("lighting.zig");
 pub const file_formats = @import("file_formats");
 pub const file_formats_v0 = @import("file_formats_v0.zig");
 pub const asset = @import("asset.zig");
 const audio = @import("audio.zig");
 const cutscene = @import("cutscene.zig");
-const random = @import("random.zig");
 const debug = @import("debug.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
 // Types.
 const Vector2 = math.Vector2;
-const Vector3 = math.Vector3;
-const Vector4 = math.Vector4;
-const Rectangle2 = math.Rectangle2;
-const Rectangle3 = math.Rectangle3;
-const Color = math.Color;
 const Color3 = math.Color3;
+const Buffer = types.Buffer;
+const String = types.String;
 const LoadedBitmap = asset.LoadedBitmap;
-const LoadedSound = asset.LoadedSound;
 const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
-const SoundId = file_formats.SoundId;
-const FontId = file_formats.FontId;
 const RenderCommands = renderer.RenderCommands;
 const PlayingSound = audio.PlayingSound;
 const DebugTable = debug_interface.DebugTable;
-const EntityId = entities.EntityId;
 const BrainId = brains.BrainId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const TemporaryMemory = memory.TemporaryMemory;
-const LightingBox = renderer.LightingBox;
-const LightingPoint = lighting.LightingPoint;
-const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
-const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
-const LIGHT_CHUNK_COUNT = lighting.LIGHT_CHUNK_COUNT;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
 pub const SLOW = @import("build_options").slow;
 
-pub const String = Buffer;
-pub const Buffer = struct {
-    count: usize = 0,
-    data: [*]u8 = undefined,
+pub fn copy(size: MemoryIndex, source_init: *anyopaque, dest_init: *anyopaque) *anyopaque {
+    var source: [*]u8 = @ptrCast(source_init);
+    var dest: [*]u8 = @ptrCast(dest_init);
 
-    pub const empty: Buffer = .{};
+    var index: MemoryIndex = size;
+    while (index > 0) : (index -= 1) {
+        dest[0] = source[0];
 
-    pub fn fromSlice(slice: []const u8) Buffer {
-        return .{
-            .count = slice.len,
-            .data = @constCast(slice.ptr),
-        };
+        source += 1;
+        dest += 1;
     }
 
-    pub fn toSlice(self: *Buffer) []const u8 {
-        return self.data[0..self.count];
-    }
+    return dest_init;
+}
 
-    pub fn advance(self: *Buffer, count: usize) ?[*]u8 {
-        var result: ?[*]u8 = null;
-
-        if (self.count >= count) {
-            result = self.data;
-            self.data += count;
-            self.count -= count;
-        } else {
-            self.data += self.count;
-            self.count = 0;
-        }
-
-        return result;
-    }
-};
-
-pub fn stringLength(opt_string: ?[*:0]const u8) u32 {
-    var count: u32 = 0;
-    if (opt_string) |string| {
-        var scan = string;
-        while (scan[0] != 0) : (scan += 1) {
-            count += 1;
-        }
-    }
-    return count;
+pub fn copyArray(count: MemoryIndex, comptime T: type, source: *anyopaque, dest: *anyopaque) [*]T {
+    return @ptrCast(@alignCast(copy(count * @sizeOf(T), source, dest)));
 }
 
 pub fn stringsAreEqual(a: [*:0]const u8, b: [*:0]const u8) bool {
@@ -263,7 +221,7 @@ pub fn checksumOf(buffer: Buffer, opt_seed: ?u64) u64 {
 
     if (count8 > 0) {
         var residual: u64 = 0;
-        _ = memory.copy(count8, at, &residual);
+        _ = copy(count8, at, &residual);
         result = murmurHashUpdate(result, residual);
     }
 
@@ -628,7 +586,7 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                                             temp_dest.size += 1;
                                         }
                                     } else {
-                                        temp_dest.size = stringLength(@ptrCast(value));
+                                        temp_dest.size = types.stringLength(@ptrCast(value));
                                     }
 
                                     temp_dest.at = @constCast(value + temp_dest.size);
@@ -670,7 +628,7 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                 }
 
                 if ((temp_dest.at - temp) > 0) {
-                    const prefix_length: i32 = @as(i32, @intCast(stringLength(@ptrCast(prefix))));
+                    const prefix_length: i32 = @as(i32, @intCast(types.stringLength(@ptrCast(prefix))));
                     var use_precision: i32 = precision;
                     if (is_float or !precision_specified) {
                         use_precision = @intCast(temp_dest.at - temp);

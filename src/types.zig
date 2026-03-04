@@ -2,6 +2,51 @@ const std = @import("std");
 
 pub const INTERNAL = @import("build_options").internal;
 
+pub const String = Buffer;
+pub const Buffer = struct {
+    count: usize = 0,
+    data: [*]u8 = undefined,
+
+    pub const empty: Buffer = .{};
+
+    pub fn fromSlice(slice: []const u8) Buffer {
+        return .{
+            .count = slice.len,
+            .data = @constCast(slice.ptr),
+        };
+    }
+
+    pub fn toSlice(self: *Buffer) []const u8 {
+        return self.data[0..self.count];
+    }
+
+    pub fn advance(self: *Buffer, count: usize) ?[*]u8 {
+        var result: ?[*]u8 = null;
+
+        if (self.count >= count) {
+            result = self.data;
+            self.data += count;
+            self.count -= count;
+        } else {
+            self.data += self.count;
+            self.count = 0;
+        }
+
+        return result;
+    }
+};
+
+pub fn stringLength(opt_string: ?[*:0]const u8) u32 {
+    var count: u32 = 0;
+    if (opt_string) |string| {
+        var scan = string;
+        while (scan[0] != 0) : (scan += 1) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
 pub fn notImplemented() void {
     if (INTERNAL) {
         std.debug.assert(true);

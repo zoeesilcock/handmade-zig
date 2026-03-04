@@ -279,8 +279,8 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
         const c_file_name_size: usize = (scan - &find_data.cFileName) + 1;
         info.platform =
             win32_file_group.arena.pushArray(stem_size + c_file_name_size, u16, .aligned(@alignOf(u16), false));
-        _ = memory.copyArray(stem_size, u16, @ptrCast(@constCast(stem)), info.platform);
-        _ = memory.copyArray(
+        _ = shared.copyArray(stem_size, u16, @ptrCast(@constCast(stem)), info.platform);
+        _ = shared.copyArray(
             c_file_name_size,
             u16,
             &find_data.cFileName,

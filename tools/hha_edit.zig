@@ -1,13 +1,14 @@
 const std = @import("std");
 const shared = @import("shared");
 const asset = shared.asset;
+const types = shared.types;
 const file_formats = shared.file_formats;
 const file_formats_v0 = shared.file_formats_v0;
 const math = shared.math;
 const intrinsics = shared.intrinsics;
 
 // Types.
-const String = shared.String;
+const String = types.String;
 const HHAHeaderV0 = file_formats_v0.HHAHeaderV0;
 const HHAAssetTypeV0 = file_formats_v0.HHAAssetTypeV0;
 const HHAAssetV0 = file_formats_v0.HHAAssetV0;

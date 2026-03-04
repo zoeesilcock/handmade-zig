@@ -7,7 +7,7 @@ const debug_interface = @import("debug_interface.zig");
 const DebugTable = debug_interface.DebugTable;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
-const String = shared.String;
+const String = types.String;
 
 pub const MemoryIndex = usize;
 
@@ -161,7 +161,7 @@ pub const MemoryArena = extern struct {
     }
 
     pub fn pushStringZ(self: *MemoryArena, source: [*:0]const u8) [*:0]const u8 {
-        var size: u32 = shared.stringLength(source);
+        var size: u32 = types.stringLength(source);
 
         // Include the sentinel.
         size += 1;
@@ -178,7 +178,7 @@ pub const MemoryArena = extern struct {
 
     pub fn pushString(self: *MemoryArena, source: [*:0]const u8) String {
         var result: String = .{
-            .count = shared.stringLength(source),
+            .count = types.stringLength(source),
         };
         result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source))));
         return result;
@@ -197,7 +197,7 @@ pub const MemoryArena = extern struct {
     }
 
     pub fn pushCopy(self: *MemoryArena, size: MemoryIndex, source: *anyopaque) *anyopaque {
-        return copy(size, source, @ptrCast(self.pushSize(size, null)));
+        return shared.copy(size, source, @ptrCast(self.pushSize(size, null)));
     }
 
     pub fn beginTemporaryMemory(self: *MemoryArena) TemporaryMemory {
@@ -270,25 +270,6 @@ pub fn zeroStruct(comptime T: type, ptr: *T) void {
 
 pub fn zeroArray(count: u32, ptr: *anyopaque) void {
     zeroSize(@sizeOf(ptr) * count, ptr);
-}
-
-pub fn copy(size: MemoryIndex, source_init: *anyopaque, dest_init: *anyopaque) *anyopaque {
-    var source: [*]u8 = @ptrCast(source_init);
-    var dest: [*]u8 = @ptrCast(dest_init);
-
-    var index: MemoryIndex = size;
-    while (index > 0) : (index -= 1) {
-        dest[0] = source[0];
-
-        source += 1;
-        dest += 1;
-    }
-
-    return dest_init;
-}
-
-pub fn copyArray(count: MemoryIndex, comptime T: type, source: *anyopaque, dest: *anyopaque) [*]T {
-    return @ptrCast(@alignCast(copy(count * @sizeOf(T), source, dest)));
 }
 
 pub fn bootstrapPushStruct(

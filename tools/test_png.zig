@@ -4,13 +4,14 @@ const shared = png.shared;
 const stream = png.stream;
 const memory = png.memory;
 const math = shared.math;
+const types = shared.types;
 const c = @cImport({
     @cInclude("stdlib.h");
     @cInclude("string.h");
 });
 
 // Types.
-const Buffer = shared.Buffer;
+const Buffer = types.Buffer;
 const Stream = stream.Stream;
 const StreamChunk = stream.Chunk;
 const ImageU32 = png.ImageU32;

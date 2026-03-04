@@ -1353,12 +1353,18 @@ pub fn square(a: f32) f32 {
     return a * a;
 }
 
-pub fn square_v4(vector: @Vector(4, f32)) @Vector(4, f32) {
+pub fn squareV4(vector: @Vector(4, f32)) @Vector(4, f32) {
     return vector * vector;
 }
 
 pub fn lerpf(min: f32, max: f32, time: f32) f32 {
     return (1.0 - time) * min + time * max;
+}
+
+pub fn lerpI32Binormal(a: i32, b: i32, time_binormal: f32) i32 {
+    const time: f32 = 0.5 + 0.5 * time_binormal;
+    const result: f32 = lerpf(@floatFromInt(a), @floatFromInt(b), time);
+    return @intFromFloat(result);
 }
 
 pub fn sin01(time: f32) f32 {

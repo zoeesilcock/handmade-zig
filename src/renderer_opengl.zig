@@ -2296,13 +2296,12 @@ pub fn renderCommands(
                     debug_setup = setup;
                 }
 
-                var clip_rect: Rectangle2i = setup.clip_rect;
-                gl.glScissor(
-                    clip_rect.min.x(),
-                    clip_rect.min.y(),
-                    clip_rect.max.x() - clip_rect.min.x(),
-                    clip_rect.max.y() - clip_rect.min.y(),
-                );
+                var clip_rect: Rectangle2 = setup.clip_rect;
+                const clip_min_x: i32 = math.lerpI32Binormal(0, render_width, clip_rect.min.x());
+                const clip_min_y: i32 = math.lerpI32Binormal(0, render_height, clip_rect.min.y());
+                const clip_max_x: i32 = math.lerpI32Binormal(0, render_width, clip_rect.max.x());
+                const clip_max_y: i32 = math.lerpI32Binormal(0, render_height, clip_rect.max.y());
+                gl.glScissor(clip_min_x, clip_min_y, clip_max_x - clip_min_x, clip_max_y - clip_min_y);
 
                 platform.optGLBufferData.?(
                     GL_ARRAY_BUFFER,

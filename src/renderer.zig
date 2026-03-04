@@ -141,15 +141,15 @@ pub const TextureQueue = extern struct {
 pub const RenderCommands = extern struct {
     settings: RenderSettings = .{},
 
-    max_push_buffer_size: u32,
-    push_buffer_base: [*]u8,
-    push_buffer_data_at: [*]u8,
+    max_push_buffer_size: u32 = 0,
+    push_buffer_base: [*]u8 = undefined,
+    push_buffer_data_at: [*]u8 = undefined,
 
-    max_vertex_count: u32,
-    vertex_count: u32,
-    vertex_array: [*]TexturedVertex,
-    quad_bitmaps: [*]RendererTexture,
-    white_bitmap: RendererTexture,
+    max_vertex_count: u32 = 0,
+    vertex_count: u32 = 0,
+    vertex_array: [*]TexturedVertex = undefined,
+    quad_bitmaps: [*]RendererTexture = undefined,
+    white_bitmap: RendererTexture = undefined,
 
     pub fn default(
         max_push_buffer_size: u32,
@@ -251,7 +251,7 @@ pub const RenderEntryLightingTransfer = extern struct {
 };
 
 pub const RenderSetup = extern struct {
-    clip_rect: Rectangle2i = .zero(),
+    clip_rect: Rectangle2 = .zero(),
     render_target_index: u32 = 0,
     projection: Matrix4x4 = .identity(),
     camera_position: Vector3 = .zero(),
@@ -265,7 +265,7 @@ pub const RenderSetup = extern struct {
 
 pub const TransientClipRect = extern struct {
     render_group: *RenderGroup,
-    old_clip_rect: Rectangle2i,
+    old_clip_rect: Rectangle2,
 
     pub fn init(render_group: *RenderGroup) TransientClipRect {
         const result: TransientClipRect = .{
@@ -275,7 +275,7 @@ pub const TransientClipRect = extern struct {
         return result;
     }
 
-    pub fn initWith(render_group: *RenderGroup, new_clip_rect: Rectangle2i) TransientClipRect {
+    pub fn initWith(render_group: *RenderGroup, new_clip_rect: Rectangle2) TransientClipRect {
         const result: TransientClipRect = .{
             .render_group = render_group,
             .old_clip_rect = render_group.last_setup.clip_rect,
@@ -344,8 +344,6 @@ const RenderTransform = extern struct {
 pub const RenderGroup = extern struct {
     assets: *asset.Assets,
 
-    screen_dimensions: Vector2,
-
     lighting_enabled: bool,
     light_bounds: Rectangle3,
     light_box_count: u32,
@@ -369,12 +367,9 @@ pub const RenderGroup = extern struct {
         assets: *asset.Assets,
         commands: *RenderCommands,
         generation_id: u32,
-        pixel_width: i32,
-        pixel_height: i32,
     ) RenderGroup {
         var result: RenderGroup = .{
             .assets = assets,
-            .screen_dimensions = .newI(pixel_width, pixel_height),
             .debug_tag = undefined,
             .missing_resource_count = 0,
             .generation_id = generation_id,
@@ -393,7 +388,7 @@ pub const RenderGroup = extern struct {
             .clip_alpha_start_distance = 0,
             .clip_alpha_end_distance = 1,
             .fog_color = .new(math.square(0.15), math.square(0.15), math.square(0.15)),
-            .clip_rect = .fromMinDimension(.zero(), .new(pixel_width, pixel_height)),
+            .clip_rect = .fromMinMax(.new(-1, -1), .new(1, 1)),
         };
         result.pushSetup(&initial_setup);
 
@@ -473,23 +468,31 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
+    pub fn clipSpaceFromPixelSpace(pixel_dimension_x: f32, pixel_dimension_y: f32, screen_space_xy: Vector2) Vector2 {
+        const pixel_dimensions: Vector2 = .new(pixel_dimension_x, pixel_dimension_y);
+        const center: Vector2 = pixel_dimensions.scaledTo(0.5);
+
+        var clip_space_xy: Vector2 = screen_space_xy.minus(center);
+        _ = clip_space_xy.setX(clip_space_xy.x() * 2 / pixel_dimensions.x());
+        _ = clip_space_xy.setY(clip_space_xy.y() * 2 / pixel_dimensions.y());
+
+        return clip_space_xy;
+    }
+
     // Renderer API.
     pub fn unproject(
         self: *RenderGroup,
         render_transform: *RenderTransform,
-        pixels_xy: Vector2,
+        clip_space_xy_in: Vector2,
         world_distance_from_camera_z: f32,
     ) Vector3 {
+        _ = self;
+
         var probe_z: Vector4 =
             render_transform.position.minus(render_transform.z.scaledTo(world_distance_from_camera_z)).toVector4(1);
         probe_z = render_transform.projection.forward.timesV4(probe_z);
 
-        const screen_center: Vector2 = self.screen_dimensions.scaledTo(0.5);
-
-        var clip_space_xy: Vector2 = pixels_xy.minus(screen_center);
-        _ = clip_space_xy.setX(clip_space_xy.x() * 2 / self.screen_dimensions.x());
-        _ = clip_space_xy.setY(clip_space_xy.y() * 2 / self.screen_dimensions.y());
-
+        var clip_space_xy: Vector2 = clip_space_xy_in;
         _ = clip_space_xy.setX(clip_space_xy.x() * probe_z.w());
         _ = clip_space_xy.setY(clip_space_xy.y() * probe_z.w());
 
@@ -503,8 +506,8 @@ pub const RenderGroup = extern struct {
         var transform: ObjectTransform = .defaultFlat();
         _ = transform.offset_position.setZ(-distance_from_camera);
 
-        const min_corner = self.unproject(&self.game_transform, .zero(), distance_from_camera);
-        const max_corner = self.unproject(&self.game_transform, self.screen_dimensions, distance_from_camera);
+        const min_corner = self.unproject(&self.game_transform, .new(-1, -1), distance_from_camera);
+        const max_corner = self.unproject(&self.game_transform, .new(1, 1), distance_from_camera);
 
         return Rectangle3.fromMinMax(min_corner, max_corner);
     }
@@ -564,6 +567,8 @@ pub const RenderGroup = extern struct {
             result = null;
         }
 
+        std.debug.assert(result != null);
+
         return result;
     }
 
@@ -601,6 +606,7 @@ pub const RenderGroup = extern struct {
 
         const vertex_index: u32 = commands.vertex_count;
         commands.vertex_count += 4;
+        std.debug.assert(vertex_index <= commands.max_vertex_count);
 
         commands.quad_bitmaps[vertex_index >> 2] = texture;
         var vert: [*]TexturedVertex = commands.vertex_array + vertex_index;
@@ -1159,9 +1165,7 @@ pub const RenderGroup = extern struct {
         opt_x_axis: ?Vector2,
         opt_y_axis: ?Vector2,
     ) void {
-        if (self.getCurrentQuads(1)) |entry| {
-            entry.quad_count += 1;
-
+        if (self.getCurrentQuads(1)) |_| {
             const color: Color = opt_color orelse .white();
             const x_axis2: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
             const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
@@ -1224,7 +1228,7 @@ pub const RenderGroup = extern struct {
         self.current_quads = null;
     }
 
-    fn getScreenPoint(
+    fn getClipSpacePoint(
         self: *RenderGroup,
         object_transform: *ObjectTransform,
         world_position: Vector3,
@@ -1232,9 +1236,6 @@ pub const RenderGroup = extern struct {
         var position: Vector4 =
             self.last_setup.projection.timesV(world_position.plus(object_transform.offset_position)).toVector4(1);
         _ = position.setXYZ(position.xyz().dividedByF(position.w()));
-
-        _ = position.setX(self.screen_dimensions.x() * 0.5 * (position.x() + 1));
-        _ = position.setY(self.screen_dimensions.y() * 0.5 * (position.y() + 1));
 
         return position.xy();
     }
@@ -1244,20 +1245,11 @@ pub const RenderGroup = extern struct {
         object_transform: *ObjectTransform,
         offset: Vector3,
         dimension: Vector2,
-    ) Rectangle2i {
-        const min_corner: Vector2 = self.getScreenPoint(object_transform, offset);
-        const max_corner: Vector2 = self.getScreenPoint(object_transform, offset.plus(dimension.toVector3(0)));
+    ) Rectangle2 {
+        const min_corner: Vector2 = self.getClipSpacePoint(object_transform, offset);
+        const max_corner: Vector2 = self.getClipSpacePoint(object_transform, offset.plus(dimension.toVector3(0)));
 
-        return .fromMinMax(
-            .new(
-                intrinsics.roundReal32ToInt32(min_corner.x()),
-                intrinsics.roundReal32ToInt32(min_corner.y()),
-            ),
-            .new(
-                intrinsics.roundReal32ToInt32(max_corner.x()),
-                intrinsics.roundReal32ToInt32(max_corner.y()),
-            ),
-        );
+        return .fromMinMax(min_corner, max_corner);
     }
 
     pub fn getClipRectByRectangle(
@@ -1265,7 +1257,7 @@ pub const RenderGroup = extern struct {
         object_transform: *ObjectTransform,
         rectangle: Rectangle2,
         z: f32,
-    ) Rectangle2i {
+    ) Rectangle2 {
         return self.getClipRectByTransform(
             object_transform,
             rectangle.min.toVector3(z),
