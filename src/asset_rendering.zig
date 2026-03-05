@@ -177,7 +177,7 @@ pub fn pushBitmapId(
 ) void {
     const align_coefficient: f32 = opt_align_coefficient orelse 1;
     if (opt_id) |id| {
-        if (group.assets.getBitmap(id, group.generation_id)) |bitmap| {
+        if (group.assets.getBitmap(id)) |bitmap| {
             pushBitmap(
                 group,
                 object_transform,
@@ -203,7 +203,7 @@ pub fn pushFont(
     var opt_font: ?*LoadedFont = null;
 
     if (opt_id) |id| {
-        opt_font = group.assets.getFont(id, group.generation_id);
+        opt_font = group.assets.getFont(id);
 
         if (opt_font == null) {
             group.assets.loadFont(id, false);
@@ -235,10 +235,11 @@ pub fn pushCubeLight(
 pub fn pushLighting(
     group: *RenderGroup,
     temp_arena: *MemoryArena,
-    source: *LightingTextures,
     lighting_bounds: Rectangle3,
-) void {
+) *LightingTextures {
     std.debug.assert(group.light_box_count == 0);
+
+    var source: *LightingTextures = temp_arena.pushStruct(LightingTextures, null);
 
     group.lighting_enabled = true;
     group.light_bounds = lighting_bounds;
@@ -249,4 +250,6 @@ pub fn pushLighting(
         dest.light_data0 = &source.light_data0;
         dest.light_data1 = &source.light_data1;
     }
+
+    return source;
 }

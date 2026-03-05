@@ -1014,7 +1014,6 @@ pub const ControllerButtonState = extern struct {
 // Game state.
 pub const Memory = struct {
     game_state: ?*State = null,
-    transient_state: ?*TransientState = null,
 
     debug_table: *DebugTable,
     debug_state: ?*debug.DebugState = null,
@@ -1031,7 +1030,18 @@ pub const State = struct {
     audio_arena: MemoryArena = undefined,
     mode_arena: MemoryArena = undefined,
 
+    frame_arena_temp: TemporaryMemory = undefined,
+    frame_arena: MemoryArena = undefined, // Cleared once per frame.
+
     controlled_heroes: [MAX_CONTROLLER_COUNT]ControlledHero = [1]ControlledHero{undefined} ** MAX_CONTROLLER_COUNT,
+
+    is_initialized: bool = false,
+
+    high_priority_queue: *PlatformWorkQueue,
+    low_priority_queue: *PlatformWorkQueue,
+    tasks: [4]TaskWithMemory = [1]TaskWithMemory{undefined} ** 4,
+
+    assets: *Assets,
 
     current_mode: GameMode = undefined,
     mode: union {
@@ -1043,18 +1053,15 @@ pub const State = struct {
     audio_state: audio.AudioState = undefined,
     music: *PlayingSound = undefined,
 
-    test_diffuse: LoadedBitmap,
-    test_normal: LoadedBitmap,
-
-    pub fn setGameMode(self: *State, transient_state: *TransientState, game_mode: GameMode) void {
+    pub fn setGameMode(self: *State, game_mode: GameMode) void {
         var need_to_wait: bool = false;
         var task_index: u32 = 0;
-        while (task_index < transient_state.tasks.len) : (task_index += 1) {
-            need_to_wait = need_to_wait or transient_state.tasks[task_index].depends_on_game_mode;
+        while (task_index < self.tasks.len) : (task_index += 1) {
+            need_to_wait = need_to_wait or self.tasks[task_index].depends_on_game_mode;
         }
 
         if (need_to_wait) {
-            platform.completeAllQueuedWork(transient_state.low_priority_queue);
+            platform.completeAllQueuedWork(self.low_priority_queue);
         }
 
         self.mode_arena.clear();
@@ -1081,24 +1088,6 @@ pub const TaskWithMemory = struct {
     arena: MemoryArena,
 
     memory_flush: TemporaryMemory,
-};
-
-pub const TransientState = struct {
-    is_initialized: bool = false,
-    arena: MemoryArena = undefined,
-
-    high_priority_queue: *PlatformWorkQueue,
-    low_priority_queue: *PlatformWorkQueue,
-    tasks: [4]TaskWithMemory = [1]TaskWithMemory{undefined} ** 4,
-
-    assets: *Assets,
-    main_generation_id: u32,
-
-    // TODO: Potentially remove this, it is just for asset locking.
-    next_generation_id: u32,
-    operation_lock: u32,
-    in_flight_generation_count: u32,
-    in_flight_generations: [16]u32,
 };
 
 pub const GroundBuffer = extern struct {

@@ -212,7 +212,7 @@ pub const Assets = struct {
     non_restored_memory: MemoryArena,
     texture_queue: *renderer.TextureQueue,
 
-    transient_state: *TransientState,
+    game_state: *shared.State,
 
     memory_sentinel: AssetMemoryBlock,
 
@@ -237,9 +237,11 @@ pub const Assets = struct {
     source_file_hash: [256]?*SourceFile = [1]?*SourceFile{null} ** 256,
     direction_tag: [4]u32,
 
+    operation_lock: u32,
+
     pub fn allocate(
         memory_size: MemoryIndex,
-        transient_state: *shared.TransientState,
+        game_state: *shared.State,
         texture_queue: *renderer.TextureQueue,
     ) *Assets {
         TimedBlock.beginFunction(@src(), .AllocateGameAssets);
@@ -254,7 +256,7 @@ pub const Assets = struct {
         var arena: *MemoryArena = &assets.non_restored_memory;
 
         assets.texture_queue = texture_queue;
-        assets.transient_state = transient_state;
+        assets.game_state = game_state;
         assets.memory_sentinel = AssetMemoryBlock{
             .flags = 0,
             .size = 0,
@@ -379,12 +381,12 @@ pub const Assets = struct {
                 if (file.header.asset_count > 0) {
                     const file_asset_count: u32 = file.header.asset_count - 1;
 
-                    const temp_mem = transient_state.arena.beginTemporaryMemory();
-                    defer transient_state.arena.endTemporaryMemory(temp_mem);
+                    const temp_mem = game_state.frame_arena.beginTemporaryMemory();
+                    defer game_state.frame_arena.endTemporaryMemory(temp_mem);
                     const hha_asset_array: [*]HHAAsset =
-                        transient_state.arena.pushArray(file_asset_count, HHAAsset, null);
+                        game_state.frame_arena.pushArray(file_asset_count, HHAAsset, null);
                     var hha_annotation_array: ?[*]HHAAnnotation =
-                        transient_state.arena.pushArray(file_asset_count, HHAAnnotation, null);
+                        game_state.frame_arena.pushArray(file_asset_count, HHAAnnotation, null);
 
                     shared.platform.readDataFromFile(
                         &file.handle,
@@ -438,7 +440,7 @@ pub const Assets = struct {
 
                             const source_file_name_count: u32 = hha_annotation.source_file_base_name_count;
                             const source_file_name: [*:0]u8 =
-                                @ptrCast(transient_state.arena.pushArray(source_file_name_count + 1, u8, null));
+                                @ptrCast(game_state.frame_arena.pushArray(source_file_name_count + 1, u8, null));
                             shared.platform.readDataFromFile(
                                 &file.handle,
                                 hha_annotation.source_file_base_name_offset,
@@ -503,48 +505,6 @@ pub const Assets = struct {
         return assets;
     }
 
-    pub fn beginGeneration(self: *Assets) u32 {
-        self.beginAssetLock();
-        defer self.endAssetLock();
-
-        std.debug.assert(self.transient_state.in_flight_generation_count < self.transient_state.in_flight_generations.len);
-
-        const result = self.transient_state.next_generation_id;
-        self.transient_state.next_generation_id +%= 1;
-
-        self.transient_state.in_flight_generations[self.transient_state.in_flight_generation_count] = result;
-        self.transient_state.in_flight_generation_count += 1;
-
-        return result;
-    }
-
-    pub fn endGeneration(self: *Assets, generation_id: u32) void {
-        self.beginAssetLock();
-        defer self.endAssetLock();
-
-        var index: u32 = 0;
-        while (index < self.transient_state.in_flight_generation_count) : (index += 1) {
-            if (self.transient_state.in_flight_generations[index] == generation_id) {
-                self.transient_state.in_flight_generation_count -= 1;
-                self.transient_state.in_flight_generations[index] = self.transient_state.in_flight_generations[self.transient_state.in_flight_generation_count];
-            }
-        }
-    }
-
-    fn generationHasCompleted(self: *Assets, check_id: u32) bool {
-        var result = true;
-
-        var index: u32 = 0;
-        while (index < self.transient_state.in_flight_generation_count) : (index += 1) {
-            if (self.transient_state.in_flight_generations[index] == check_id) {
-                result = false;
-                break;
-            }
-        }
-
-        return result;
-    }
-
     fn insertBlock(_: *Assets, previous: *AssetMemoryBlock, size: u64, block_memory: *anyopaque) *AssetMemoryBlock {
         std.debug.assert(size > @sizeOf(AssetMemoryBlock));
         var block: *AssetMemoryBlock = @ptrCast(@alignCast(block_memory));
@@ -597,14 +557,14 @@ pub const Assets = struct {
 
     fn beginAssetLock(self: *Assets) void {
         while (true) {
-            if (@cmpxchgStrong(u32, &self.transient_state.operation_lock, 0, 1, .seq_cst, .seq_cst) == null) {
+            if (@cmpxchgStrong(u32, &self.operation_lock, 0, 1, .seq_cst, .seq_cst) == null) {
                 break;
             }
         }
     }
 
     fn endAssetLock(self: *Assets) void {
-        self.transient_state.operation_lock = 0;
+        self.operation_lock = 0;
     }
 
     fn acquireAssetMemory(self: *Assets, size: u32, new_asset_index: u32, asset_type: AssetHeaderType) ?*AssetMemoryHeader {
@@ -640,9 +600,7 @@ pub const Assets = struct {
                 var header: ?*AssetMemoryHeader = self.loaded_asset_sentinel.previous;
                 while (header != null and header.? != &self.loaded_asset_sentinel) : (header = header.?.previous) {
                     var asset: *Asset = &self.assets[header.?.asset_index];
-                    if (asset.state >= AssetState.Loaded.toInt() and
-                        self.generationHasCompleted(asset.header.?.generation_id))
-                    {
+                    if (asset.state >= AssetState.Loaded.toInt()) {
                         std.debug.assert(asset.state == AssetState.Loaded.toInt());
 
                         self.removeAssetHeaderFromList(header.?);
@@ -815,7 +773,7 @@ pub const Assets = struct {
                     var opt_task: ?*shared.TaskWithMemory = null;
 
                     if (!immediate) {
-                        opt_task = handmade.beginTaskWithMemory(self.transient_state, false);
+                        opt_task = handmade.beginTaskWithMemory(self.game_state, false);
                     }
 
                     if (immediate or opt_task != null) {
@@ -861,7 +819,7 @@ pub const Assets = struct {
                             );
                             task_work.* = work;
                             shared.platform.addQueueEntry(
-                                self.transient_state.low_priority_queue,
+                                self.game_state.low_priority_queue,
                                 doLoadAssetWork,
                                 task_work,
                             );
@@ -880,7 +838,7 @@ pub const Assets = struct {
         }
     }
 
-    fn getAsset(self: *Assets, id: u32, generation_id: u32) ?*AssetMemoryHeader {
+    fn getAsset(self: *Assets, id: u32) ?*AssetMemoryHeader {
         std.debug.assert(id <= self.asset_count);
         const asset = &self.assets[id];
 
@@ -894,20 +852,16 @@ pub const Assets = struct {
                 result = header;
                 self.removeAssetHeaderFromList(result.?);
                 self.insertAssetHeaderAtFront(result.?);
-
-                if (header.generation_id < generation_id) {
-                    header.generation_id = generation_id;
-                }
             }
         }
 
         return result;
     }
 
-    pub fn getBitmap(self: *Assets, id: BitmapId, generation_id: u32) ?*LoadedBitmap {
+    pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
         var result: ?*LoadedBitmap = null;
 
-        if (self.getAsset(id.value, generation_id)) |header| {
+        if (self.getAsset(id.value)) |header| {
             result = &header.data.bitmap;
         }
 
@@ -984,7 +938,7 @@ pub const Assets = struct {
                 .seq_cst,
                 .seq_cst,
             ) == null) {
-                if (handmade.beginTaskWithMemory(self.transient_state, false)) |task| {
+                if (handmade.beginTaskWithMemory(self.game_state, false)) |task| {
                     const info = asset.hha.info.sound;
 
                     var size = AssetMemorySize{};
@@ -1018,7 +972,7 @@ pub const Assets = struct {
                     work.final_state = AssetState.Loaded.toInt();
                     work.texture_queue = null;
 
-                    shared.platform.addQueueEntry(self.transient_state.low_priority_queue, doLoadAssetWork, work);
+                    shared.platform.addQueueEntry(self.game_state.low_priority_queue, doLoadAssetWork, work);
                 } else {
                     @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
                 }
@@ -1026,10 +980,10 @@ pub const Assets = struct {
         }
     }
 
-    pub fn getSound(self: *Assets, id: SoundId, generation_id: u32) ?*LoadedSound {
+    pub fn getSound(self: *Assets, id: SoundId) ?*LoadedSound {
         var result: ?*LoadedSound = null;
 
-        if (self.getAsset(id.value, generation_id)) |header| {
+        if (self.getAsset(id.value)) |header| {
             result = &header.data.sound;
         }
 
@@ -1110,7 +1064,7 @@ pub const Assets = struct {
                     var opt_task: ?*shared.TaskWithMemory = null;
 
                     if (!immediate) {
-                        opt_task = handmade.beginTaskWithMemory(self.transient_state, false);
+                        opt_task = handmade.beginTaskWithMemory(self.game_state, false);
                     }
 
                     if (immediate or opt_task != null) {
@@ -1155,7 +1109,7 @@ pub const Assets = struct {
                             );
                             task_work.* = work;
                             shared.platform.addQueueEntry(
-                                self.transient_state.low_priority_queue,
+                                self.game_state.low_priority_queue,
                                 doLoadAssetWork,
                                 task_work,
                             );
@@ -1181,10 +1135,10 @@ pub const Assets = struct {
         self.loadFont(opt_id);
     }
 
-    pub fn getFont(self: *Assets, id: FontId, generation_id: u32) ?*LoadedFont {
+    pub fn getFont(self: *Assets, id: FontId) ?*LoadedFont {
         var result: ?*LoadedFont = null;
 
-        if (self.getAsset(id.value, generation_id)) |header| {
+        if (self.getAsset(id.value)) |header| {
             result = &header.data.font;
         }
 

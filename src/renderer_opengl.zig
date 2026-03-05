@@ -761,7 +761,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
         \\{
         \\#if DepthPeel
         \\  float ClipDepth = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
-        \\  if (gl_FragCoord.z <= ClipDepth)
+        \\  if (gl_FragCoord.z < ClipDepth + 0.000001) // This epsilon was needed on an AMD GPU.
         \\  {
         \\    discard;
         \\  }
@@ -2160,6 +2160,27 @@ fn computeLightTransport() void {
     }
 }
 
+pub fn manageTextures() void {
+    const queue: *TextureQueue = &open_gl.texture_queue;
+    const pending: TextureOpList = renderer.dequeuePending(queue);
+
+    var opt_op: ?*renderer.TextureOp = pending.first;
+    while (opt_op) |op| : (opt_op = op.next) {
+        if (op.is_allocate) {
+            op.op.allocate.result_texture.* = allocateTexture(
+                op.op.allocate.width,
+                op.op.allocate.height,
+                op.op.allocate.data,
+            );
+        } else {
+            var handle: u32 = @intCast(op.op.deallocate.texture.handle);
+            gl.glDeleteTextures(1, &handle);
+        }
+    }
+
+    renderer.enqueueFree(queue, pending);
+}
+
 pub fn renderCommands(
     commands: *RenderCommands,
     draw_region: Rectangle2i,
@@ -2472,27 +2493,8 @@ pub fn renderCommands(
         );
         gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
     }
-}
 
-pub fn manageTextures() void {
-    const queue: *TextureQueue = &open_gl.texture_queue;
-    const pending: TextureOpList = renderer.dequeuePending(queue);
-
-    var opt_op: ?*renderer.TextureOp = pending.first;
-    while (opt_op) |op| : (opt_op = op.next) {
-        if (op.is_allocate) {
-            op.op.allocate.result_texture.* = allocateTexture(
-                op.op.allocate.width,
-                op.op.allocate.height,
-                op.op.allocate.data,
-            );
-        } else {
-            var handle: u32 = @intCast(op.op.deallocate.texture.handle);
-            gl.glDeleteTextures(1, &handle);
-        }
-    }
-
-    renderer.enqueueFree(queue, pending);
+    manageTextures();
 }
 
 pub fn initTextureQueue(queue: *TextureQueue, texture_op_count: u32, texture_ops: [*]TextureOp) void {

@@ -104,9 +104,9 @@ const Rectangle2i = math.Rectangle2i;
 const Color = math.Color;
 const Color3 = math.Color3;
 const MemoryArena = memory.MemoryArena;
+const TemporaryMemory = memory.TemporaryMemory;
 const ArenaPushParams = memory.ArenaPushParams;
 const State = shared.State;
-const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const AddLowEntityResult = shared.AddLowEntityResult;
 const RenderGroup = renderer.RenderGroup;
@@ -207,86 +207,37 @@ pub export fn updateAndRender(
         game_memory.game_state = state;
 
         state.audio_state.initialize(&state.audio_arena);
-    }
 
-    // Transient initialization.
-    var transient_state: *TransientState = game_memory.transient_state orelse undefined;
-    if (game_memory.transient_state == null) {
-        transient_state = memory.bootstrapPushStruct(
-            TransientState,
-            "arena",
-            null,
-            ArenaPushParams.aligned(@alignOf(TransientState), true),
-        );
-        game_memory.transient_state = transient_state;
-
-        transient_state.high_priority_queue = game_memory.high_priority_queue;
-        transient_state.low_priority_queue = game_memory.low_priority_queue;
+        state.high_priority_queue = game_memory.high_priority_queue;
+        state.low_priority_queue = game_memory.low_priority_queue;
 
         var task_index: u32 = 0;
-        while (task_index < transient_state.tasks.len) : (task_index += 1) {
-            var task: *shared.TaskWithMemory = &transient_state.tasks[task_index];
+        while (task_index < state.tasks.len) : (task_index += 1) {
+            var task: *shared.TaskWithMemory = &state.tasks[task_index];
             task.being_used = false;
         }
 
-        transient_state.assets = Assets.allocate(
-            types.megabytes(256),
-            transient_state,
-            game_memory.texture_queue,
-        );
+        state.assets = Assets.allocate(types.megabytes(256), state, game_memory.texture_queue);
 
-        // if (state.audio_state.playSound(transient_state.assets.getFirstSound(.Music))) |music| {
-        //     state.music = music;
-        // }
-
-        state.test_diffuse = makeEmptyBitmap(&transient_state.arena, 256, 256, false);
-        // render.drawRectangle(
-        //     &state.test_diffuse,
-        //     Vector2.zero(),
-        //     Vector2.newI(state.test_diffuse.width, state.test_diffuse.height),
-        //     Color.new(0.5, 0.5, 0.5, 1),
-        // );
-        state.test_normal = makeEmptyBitmap(
-            &transient_state.arena,
-            state.test_diffuse.width,
-            state.test_diffuse.height,
-            false,
-        );
-
-        // makeSphereNormalMap(&state.test_normal, 0, 1, 1);
-        // makeSphereDiffuseMap(&state.test_diffuse, 1, 1);
-        // makePyramidNormalMap(&state.test_normal, 0);
-
-        // transient_state.env_map_width = 512;
-        // transient_state.env_map_height = 256;
-
-        // for (&transient_state.env_maps) |*map| {
-        //     var width: i32 = transient_state.env_map_width;
-        //     var height: i32 = transient_state.env_map_height;
-        //
-        //     for (&map.lod) |*lod| {
-        //         lod.* = makeEmptyBitmap(&transient_state.arena, width, height, false);
-        //         width >>= 1;
-        //         height >>= 1;
-        //     }
-        // }
+        state.frame_arena_temp = state.frame_arena.beginTemporaryMemory();
     }
+
+    state.frame_arena.endTemporaryMemory(state.frame_arena_temp);
+    std.debug.assert(state.frame_arena.current_block == null);
+    state.frame_arena.checkArena();
+
+    state.frame_arena_temp = state.frame_arena.beginTemporaryMemory();
 
     DebugInterface.debugBeginDataBlock(@src(), "Memory");
     {
         DebugInterface.debugValue(@src(), &state.mode_arena, "ModeArena");
         DebugInterface.debugValue(@src(), &state.audio_arena, "AudioArena");
-        DebugInterface.debugValue(@src(), &transient_state.arena, "TransientArena");
+        DebugInterface.debugValue(@src(), &state.frame_arena, "FrameArena");
     }
     DebugInterface.debugEndDataBlock(@src());
 
-    if (transient_state.main_generation_id != 0) {
-        transient_state.assets.endGeneration(transient_state.main_generation_id);
-    }
-    transient_state.main_generation_id = transient_state.assets.beginGeneration();
-
     if (state.current_mode == .None) {
-        cutscene.playIntroCutscene(state, transient_state);
+        cutscene.playIntroCutscene(state);
 
         // This automatically skips the intro cutscene.
         if (global_config.Game_SkipIntro) {
@@ -302,23 +253,6 @@ pub export fn updateAndRender(
     //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
     // }
 
-    // Create the piece group.
-    const render_memory = transient_state.arena.beginTemporaryMemory();
-    var render_group_ = RenderGroup.begin(
-        transient_state.assets,
-        render_commands,
-        transient_state.main_generation_id,
-    );
-    var render_group = &render_group_;
-
-    // TODO: Replace this with a specification of the size of the render area.
-    var draw_buffer: LoadedBitmap = .{
-        .width = @intCast(render_commands.settings.width),
-        .height = @intCast(render_commands.settings.height),
-        .memory = undefined,
-        .texture_handle = .empty,
-    };
-
     var rerun: bool = true;
     while (rerun) {
         switch (state.current_mode) {
@@ -326,9 +260,7 @@ pub export fn updateAndRender(
             .TitleScreen => {
                 rerun = cutscene.updateAndRenderTitleScreen(
                     state,
-                    transient_state,
-                    render_group,
-                    &draw_buffer,
+                    render_commands,
                     input,
                     state.mode.title_screen,
                 );
@@ -336,9 +268,7 @@ pub export fn updateAndRender(
             .Cutscene => {
                 rerun = cutscene.updateAndRenderCutscene(
                     state,
-                    transient_state,
-                    render_group,
-                    &draw_buffer,
+                    render_commands,
                     input,
                     state.mode.cutscene,
                 );
@@ -347,24 +277,17 @@ pub export fn updateAndRender(
                 rerun = world_mode.updateAndRenderWorld(
                     state,
                     state.mode.world,
-                    transient_state,
                     input,
-                    render_group,
-                    &draw_buffer,
+                    render_commands,
                 );
             },
         }
     }
-
-    render_group.end();
-
-    transient_state.arena.endTemporaryMemory(render_memory);
-
     if (state.current_mode == .World) {
         state.mode.world.world.arena.checkArena();
     }
 
-    transient_state.arena.checkArena();
+    state.mode_arena.checkArena();
 }
 
 pub export fn debugFrameEnd(game_memory: *shared.Memory, input: shared.GameInput, commands: *renderer.RenderCommands) void {
@@ -376,19 +299,17 @@ pub export fn getSoundSamples(
     sound_buffer: *shared.SoundOutputBuffer,
 ) void {
     if (game_memory.game_state) |state| {
-        if (game_memory.transient_state) |transient_state| {
-            state.audio_state.outputPlayingSounds(sound_buffer, transient_state.assets, &transient_state.arena);
-            // audio.outputSineWave(sound_buffer, shared.MIDDLE_C, state);
-        }
+        state.audio_state.outputPlayingSounds(sound_buffer, state.assets, &state.frame_arena);
+        // audio.outputSineWave(sound_buffer, shared.MIDDLE_C, state);
     }
 }
 
-pub fn beginTaskWithMemory(transient_state: *TransientState, depends_on_game_mode: bool) ?*shared.TaskWithMemory {
+pub fn beginTaskWithMemory(game_state: *State, depends_on_game_mode: bool) ?*shared.TaskWithMemory {
     var found_task: ?*shared.TaskWithMemory = null;
 
     var task_index: u32 = 0;
-    while (task_index < transient_state.tasks.len) : (task_index += 1) {
-        var task = &transient_state.tasks[task_index];
+    while (task_index < game_state.tasks.len) : (task_index += 1) {
+        var task = &game_state.tasks[task_index];
 
         if (!task.being_used) {
             task.being_used = true;

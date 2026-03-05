@@ -207,9 +207,7 @@ pub const ManualSortKey = extern struct {
 pub const CameraParams = struct {
     focal_length: f32 = 0,
 
-    pub fn get(width_in_pixels: u32, focal_length: f32) CameraParams {
-        _ = width_in_pixels;
-
+    pub fn get(focal_length: f32) CameraParams {
         var result: CameraParams = .{};
         result.focal_length = focal_length;
 
@@ -341,6 +339,17 @@ const RenderTransform = extern struct {
     projection: MatrixInverse4x4 = .{},
 };
 
+pub const RenderGroupFlags = enum(u32) {
+    ClearColor = 0x1,
+    ClearDepth = 0x2,
+    HandleTransparency = 0x4,
+
+    pub const default: u32 =
+        @intFromEnum(RenderGroupFlags.ClearColor) |
+        @intFromEnum(RenderGroupFlags.ClearDepth) |
+        @intFromEnum(RenderGroupFlags.HandleTransparency);
+};
+
 pub const RenderGroup = extern struct {
     assets: *asset.Assets,
 
@@ -352,27 +361,59 @@ pub const RenderGroup = extern struct {
 
     debug_tag: u32,
 
+    flags: u32,
     missing_resource_count: u32,
 
     last_setup: RenderSetup = .{},
     game_transform: RenderTransform = .{},
     debug_transform: RenderTransform = .{},
 
-    generation_id: u32,
     commands: *RenderCommands,
 
     current_quads: ?*RenderEntryTexturedQuads,
 
+    pub fn beginDepthPeel_(self: *RenderGroup, color: Color) void {
+        if (self.pushRenderElement(RenderEntryBeginPeels)) |entry| {
+            // For sRGB mode, this color needs to be squared.
+            entry.clear_color = color;
+            self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
+        }
+    }
+
+    pub fn endDepthPeel_(self: *RenderGroup) void {
+        _ = self.pushRenderElement_(0, .RenderEntryEndPeels, @alignOf(u32));
+    }
+
+    pub fn pushDepthClear_(self: *RenderGroup) void {
+        _ = self.pushRenderElement_(
+            0,
+            .RenderEntryDepthClear,
+            @alignOf(u32),
+        );
+    }
+
+    pub fn pushFullClear_(self: *RenderGroup, color: Color) void {
+        if (self.pushRenderElement(RenderEntryFullClear)) |entry| {
+            // For sRGB mode, this color needs to be squared.
+            entry.clear_color = color;
+            self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
+        }
+    }
+
     pub fn begin(
         assets: *asset.Assets,
         commands: *RenderCommands,
-        generation_id: u32,
+        opt_flags: ?u32,
+        opt_clear_color: ?Color,
     ) RenderGroup {
-        var result: RenderGroup = .{
+        const flags: u32 = opt_flags orelse RenderGroupFlags.default;
+        const clear_color: Color = opt_clear_color orelse .zero();
+
+        var self: RenderGroup = .{
             .assets = assets,
             .debug_tag = undefined,
+            .flags = flags,
             .missing_resource_count = 0,
-            .generation_id = generation_id,
             .commands = commands,
             .current_quads = undefined,
             .lighting_enabled = false,
@@ -390,13 +431,29 @@ pub const RenderGroup = extern struct {
             .fog_color = .new(math.square(0.15), math.square(0.15), math.square(0.15)),
             .clip_rect = .fromMinMax(.new(-1, -1), .new(1, 1)),
         };
-        result.pushSetup(&initial_setup);
+        self.pushSetup(&initial_setup);
 
-        return result;
+        if ((flags & @intFromEnum(RenderGroupFlags.HandleTransparency)) != 0) {
+            std.debug.assert((flags & @intFromEnum(RenderGroupFlags.ClearColor)) != 0);
+            std.debug.assert((flags & @intFromEnum(RenderGroupFlags.ClearDepth)) != 0);
+            self.beginDepthPeel_(clear_color);
+        } else {
+            if ((flags & @intFromEnum(RenderGroupFlags.ClearColor)) != 0) {
+                std.debug.assert((flags & @intFromEnum(RenderGroupFlags.ClearDepth)) != 0);
+
+                self.pushFullClear_(clear_color);
+            } else if ((flags & @intFromEnum(RenderGroupFlags.ClearDepth)) != 0) {
+                self.pushDepthClear_();
+            }
+        }
+
+        return self;
     }
 
     pub fn end(self: *RenderGroup) void {
-        _ = self;
+        if ((self.flags & @intFromEnum(RenderGroupFlags.HandleTransparency)) != 0) {
+            self.endDepthPeel_();
+        }
 
         // TODO:
         // self.commands.missing_resource_count += self.missing_resource_count
@@ -514,38 +571,6 @@ pub const RenderGroup = extern struct {
 
     pub fn getCameraRectangleAtTarget(self: *RenderGroup, z: f32) Rectangle3 {
         return self.getCameraRectangleAtDistance(z);
-    }
-
-    pub fn beginDepthPeel(self: *RenderGroup, color: Color) void {
-        if (self.pushRenderElement(RenderEntryBeginPeels)) |entry| {
-            // For sRGB mode, this color needs to be squared.
-            entry.clear_color = color;
-            self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
-        }
-    }
-
-    pub fn endDepthPeel(self: *RenderGroup) void {
-        _ = self.pushRenderElement_(
-            0,
-            .RenderEntryEndPeels,
-            @alignOf(u32),
-        );
-    }
-
-    pub fn pushDepthClear(self: *RenderGroup) void {
-        _ = self.pushRenderElement_(
-            0,
-            .RenderEntryDepthClear,
-            @alignOf(u32),
-        );
-    }
-
-    pub fn pushFullClear(self: *RenderGroup, color: Color) void {
-        if (self.pushRenderElement(RenderEntryFullClear)) |entry| {
-            // For sRGB mode, this color needs to be squared.
-            entry.clear_color = color;
-            self.last_setup.fog_color = .new(math.square(color.r()), math.square(color.g()), math.square(color.b()));
-        }
     }
 
     pub fn getCurrentQuads(self: *RenderGroup, quad_count: u32) ?*RenderEntryTexturedQuads {
@@ -758,7 +783,7 @@ pub const RenderGroup = extern struct {
         color: Color,
     ) void {
         if (opt_id) |id| {
-            if (self.assets.getBitmap(id, self.generation_id)) |bitmap| {
+            if (self.assets.getBitmap(id)) |bitmap| {
                 self.pushCube(
                     bitmap.texture_handle,
                     position,

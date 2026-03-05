@@ -34,13 +34,14 @@ const Color = math.Color;
 const State = shared.State;
 const ControlledHero = shared.ControlledHero;
 const GameInputMouseButton = shared.GameInputMouseButton;
-const TransientState = shared.TransientState;
 const WorldPosition = world.WorldPosition;
 const WorldRoom = world.WorldRoom;
 const LoadedBitmap = asset.LoadedBitmap;
 const PlayingSound = audio.PlayingSound;
 const BitmapId = file_formats.BitmapId;
 const RenderGroup = renderer.RenderGroup;
+const RenderCommands = renderer.RenderCommands;
+const RenderGroupFlags = renderer.RenderGroupFlags;
 const ObjectTransform = renderer.ObjectTransform;
 const TransientClipRect = renderer.TransientClipRect;
 const LightingSolution = lighting.LightingSolution;
@@ -114,7 +115,6 @@ pub const GameModeWorld = struct {
     show_lighting: bool,
     lighting_pattern: u32,
     test_lighting: LightingSolution,
-    test_textures: LightingTextures,
 };
 
 const WorldSim = struct {
@@ -156,8 +156,8 @@ pub const PairwiseCollisionRule = extern struct {
     next_in_hash: ?*PairwiseCollisionRule,
 };
 
-pub fn playWorld(state: *State, transient_state: *TransientState) void {
-    state.setGameMode(transient_state, .World);
+pub fn playWorld(state: *State) void {
+    state.setGameMode(.World);
 
     var world_mode: *GameModeWorld = state.mode_arena.pushStruct(
         GameModeWorld,
@@ -168,7 +168,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
 
     world_mode.particle_cache =
         state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false));
-    particles.initParticleCache(world_mode.particle_cache, transient_state.assets);
+    particles.initParticleCache(world_mode.particle_cache, state.assets);
 
     world_mode.effects_entropy = .seed(1234, null, null, null);
     world_mode.typical_floor_height = 5;
@@ -180,7 +180,7 @@ pub fn playWorld(state: *State, transient_state: *TransientState) void {
     world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
     state.mode = .{ .world = world_mode };
 
-    world_gen.createWorld(world_mode, transient_state);
+    world_gen.createWorld(world_mode);
 }
 
 fn checkForJoiningPlayers(
@@ -386,10 +386,8 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
 pub fn updateAndRenderWorld(
     state: *shared.State,
     world_mode: *GameModeWorld,
-    transient_state: *TransientState,
     input: *shared.GameInput,
-    render_group: *RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
+    render_commands: *RenderCommands,
 ) bool {
     TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
     defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
@@ -397,7 +395,7 @@ pub fn updateAndRenderWorld(
     const result = false;
 
     var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
-    const camera: CameraParams = .get(draw_buffer.width, 1);
+    const camera: CameraParams = .get(1);
     const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
     const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
     if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Left.toInt()].isDown()) {
@@ -421,7 +419,12 @@ pub fn updateAndRenderWorld(
     world_mode.camera_dolly = 0;
 
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
-    render_group.beginDepthPeel(background_color);
+    var render_group = RenderGroup.begin(
+        state.assets,
+        render_commands,
+        RenderGroupFlags.default,
+        background_color,
+    );
 
     const near_clip_plane: f32 = if (world_mode.use_debug_camera) 0.2 else 3;
     const far_clip_plane: f32 = if (world_mode.use_debug_camera) 1000 + 2.0 * world_mode.debug_camera_dolly else 100;
@@ -525,8 +528,8 @@ pub fn updateAndRenderWorld(
         lighting.generateLightingPattern(&world_mode.test_lighting, world_mode.lighting_pattern);
     }
 
-    const light_memory: TemporaryMemory = transient_state.arena.beginTemporaryMemory();
-    asset_rendering.pushLighting(render_group, &transient_state.arena, &world_mode.test_textures, light_bounds);
+    const light_textures: *LightingTextures =
+        asset_rendering.pushLighting(&render_group, &state.frame_arena, light_bounds);
 
     if (false) {
         var sim_work: [16]WorldSimWork = undefined;
@@ -546,18 +549,18 @@ pub fn updateAndRenderWorld(
                 work.delta_time = input.frame_delta_time;
 
                 if (true) {
-                    shared.platform.addQueueEntry(transient_state.high_priority_queue, &doWorldSim, work);
+                    shared.platform.addQueueEntry(state.high_priority_queue, &doWorldSim, work);
                 } else {
-                    doWorldSim(transient_state.high_priority_queue, work);
+                    doWorldSim(state.high_priority_queue, work);
                 }
             }
         }
 
-        shared.platform.completeAllQueuedWork(transient_state.high_priority_queue);
+        shared.platform.completeAllQueuedWork(state.high_priority_queue);
     }
 
     var world_sim: WorldSim = beginSim(
-        &transient_state.arena,
+        &state.frame_arena,
         world_mode.world,
         world_mode.camera.simulation_center,
         sim_bounds,
@@ -570,10 +573,10 @@ pub fn updateAndRenderWorld(
             &world_sim,
             &world_mode.world.game_entropy,
             input.frame_delta_time,
-            transient_state.assets,
+            state.assets,
             state,
             input,
-            render_group,
+            &render_group,
             world_mode.particle_cache,
         );
 
@@ -607,7 +610,7 @@ pub fn updateAndRenderWorld(
         particles.updateAndRenderParticleSystem(
             world_mode.particle_cache,
             input.frame_delta_time,
-            render_group,
+            &render_group,
             frame_to_frame_camera_delta_position.negated(),
         );
 
@@ -698,21 +701,28 @@ pub fn updateAndRenderWorld(
         }
     }
 
-    render_group.endDepthPeel();
-
     if (world_mode.updating_lighting) {
-        lighting.lightingTest(render_group, &world_mode.test_lighting, transient_state.high_priority_queue);
-
-        if (world_mode.show_lighting) {
-            render_group.pushFullClear(background_color);
-            lighting.outputLightingPoints(render_group, &world_mode.test_lighting, &world_mode.test_textures);
-        } else {
-            lighting.outputLightingTextures(render_group, &world_mode.test_lighting, &world_mode.test_textures);
+        lighting.lightingTest(&render_group, &world_mode.test_lighting, state.high_priority_queue);
+        if (!world_mode.show_lighting) {
+            lighting.outputLightingTextures(&render_group, &world_mode.test_lighting, light_textures);
         }
     }
 
-    endSim(&transient_state.arena, &world_sim);
-    transient_state.arena.endTemporaryMemory(light_memory);
+    render_group.end();
+
+    if (world_mode.updating_lighting and world_mode.show_lighting) {
+        render_group = RenderGroup.begin(
+            state.assets,
+            render_commands,
+            @intFromEnum(RenderGroupFlags.ClearColor) | @intFromEnum(RenderGroupFlags.ClearDepth),
+            .new(0.5, 0.5, 0.5, 0),
+        );
+
+        lighting.outputLightingPoints(&render_group, &world_mode.test_lighting, light_textures);
+        render_group.end();
+    }
+
+    endSim(&state.frame_arena, &world_sim);
 
     var heores_exist: bool = false;
     var controlled_hero_index: u32 = 0;
@@ -724,132 +734,132 @@ pub fn updateAndRenderWorld(
     }
 
     if (!heores_exist) {
-        cutscene.playTitleScreen(state, transient_state);
+        cutscene.playTitleScreen(state);
     }
 
     return result;
 }
 
-fn renderTest(
-    world_mode: *GameModeWorld,
-    transient_state: TransientState,
-    input: *shared.GameInput,
-    render_group: *RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
-) void {
-    const map_colors: [3]Color = .{
-        Color.new(1, 0, 0, 1),
-        Color.new(0, 1, 0, 1),
-        Color.new(0, 0, 1, 1),
-    };
-
-    const checker_width = 16;
-    const checker_height = 16;
-    const checker_dimension = Vector2.new(checker_width, checker_height);
-    for (&transient_state.env_maps, 0..) |*map, map_index| {
-        const lod: *LoadedBitmap = &map.lod[0];
-        const clip_rect: Rectangle2i = Rectangle2i.new(0, 0, lod.width, lod.height);
-
-        var row_checker_on = false;
-        var y: u32 = 0;
-        while (y < lod.height) : (y += checker_height) {
-            var checker_on = row_checker_on;
-            var x: u32 = 0;
-            while (x < lod.width) : (x += checker_width) {
-                const min_position = Vector2.newU(x, y);
-                const max_position = min_position.plus(checker_dimension);
-                const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
-                renderer.drawRectangle(lod, min_position, max_position, color, clip_rect, true);
-                renderer.drawRectangle(lod, min_position, max_position, color, clip_rect, false);
-                checker_on = !checker_on;
-            }
-
-            row_checker_on = !row_checker_on;
-        }
-    }
-    transient_state.env_maps[0].z_position = -1.5;
-    transient_state.env_maps[1].z_position = 0;
-    transient_state.env_maps[2].z_position = 1.5;
-
-    world_mode.time += input.frame_delta_time;
-    const angle = 0.1 * world_mode.time;
-    // const angle: f32 = 0;
-
-    const screen_center = Vector2.new(
-        0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
-        0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
-    );
-    const origin = screen_center;
-    const scale = 100.0;
-
-    var x_axis = Vector2.zero();
-    var y_axis = Vector2.zero();
-
-    // const displacement = Vector2.zero();
-    const displacement = Vector2.new(
-        100.0 * intrinsics.cos(5.0 * angle),
-        100.0 * intrinsics.sin(3.0 * angle),
-    );
-
-    if (true) {
-        x_axis = Vector2.new(intrinsics.cos(10 * angle), intrinsics.sin(10 * angle)).scaledTo(scale);
-        y_axis = x_axis.perp();
-    } else if (false) {
-        x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
-        y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
-    } else {
-        x_axis = Vector2.new(scale, 0);
-        y_axis = Vector2.new(0, scale);
-    }
-
-    const color = Color.new(1, 1, 1, 1);
-    // const color_angle = 5.0 * angle;
-    // const color =
-    //     Color.new(
-    //     0.5 + 0.5 * intrinsics.sin(color_angle),
-    //     0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
-    //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
-    //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
-    // );
-
-    _ = render_group.pushCoordinateSystem(
-        origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(displacement),
-        x_axis,
-        y_axis,
-        color,
-        &world_mode.test_diffuse,
-        &world_mode.test_normal,
-        &transient_state.env_maps[2],
-        &transient_state.env_maps[1],
-        &transient_state.env_maps[0],
-    );
-
-    var map_position = Vector2.zero();
-    for (&transient_state.env_maps) |*map| {
-        const lod: *LoadedBitmap = &map.lod[0];
-
-        x_axis = Vector2.newI(lod.width, 0).scaledTo(0.5);
-        y_axis = Vector2.newI(0, lod.height).scaledTo(0.5);
-
-        _ = render_group.pushCoordinateSystem(
-            map_position,
-            x_axis,
-            y_axis,
-            Color.new(1, 1, 1, 1),
-            lod,
-            null,
-            undefined,
-            undefined,
-            undefined,
-        );
-
-        map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
-    }
-
-    if (false) {
-        render_group.pushSaturation(0.5 + 0.5 * intrinsics.sin(10.0 * world_mode.time));
-    }
-
-    render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer);
-    render_group.endRender();
-}
+// fn renderTest(
+//     world_mode: *GameModeWorld,
+//     transient_state: TransientState,
+//     input: *shared.GameInput,
+//     render_group: *RenderGroup,
+//     draw_buffer: *asset.LoadedBitmap,
+// ) void {
+//     const map_colors: [3]Color = .{
+//         Color.new(1, 0, 0, 1),
+//         Color.new(0, 1, 0, 1),
+//         Color.new(0, 0, 1, 1),
+//     };
+//
+//     const checker_width = 16;
+//     const checker_height = 16;
+//     const checker_dimension = Vector2.new(checker_width, checker_height);
+//     for (&transient_state.env_maps, 0..) |*map, map_index| {
+//         const lod: *LoadedBitmap = &map.lod[0];
+//         const clip_rect: Rectangle2i = Rectangle2i.new(0, 0, lod.width, lod.height);
+//
+//         var row_checker_on = false;
+//         var y: u32 = 0;
+//         while (y < lod.height) : (y += checker_height) {
+//             var checker_on = row_checker_on;
+//             var x: u32 = 0;
+//             while (x < lod.width) : (x += checker_width) {
+//                 const min_position = Vector2.newU(x, y);
+//                 const max_position = min_position.plus(checker_dimension);
+//                 const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
+//                 renderer.drawRectangle(lod, min_position, max_position, color, clip_rect, true);
+//                 renderer.drawRectangle(lod, min_position, max_position, color, clip_rect, false);
+//                 checker_on = !checker_on;
+//             }
+//
+//             row_checker_on = !row_checker_on;
+//         }
+//     }
+//     transient_state.env_maps[0].z_position = -1.5;
+//     transient_state.env_maps[1].z_position = 0;
+//     transient_state.env_maps[2].z_position = 1.5;
+//
+//     world_mode.time += input.frame_delta_time;
+//     const angle = 0.1 * world_mode.time;
+//     // const angle: f32 = 0;
+//
+//     const screen_center = Vector2.new(
+//         0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
+//         0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
+//     );
+//     const origin = screen_center;
+//     const scale = 100.0;
+//
+//     var x_axis = Vector2.zero();
+//     var y_axis = Vector2.zero();
+//
+//     // const displacement = Vector2.zero();
+//     const displacement = Vector2.new(
+//         100.0 * intrinsics.cos(5.0 * angle),
+//         100.0 * intrinsics.sin(3.0 * angle),
+//     );
+//
+//     if (true) {
+//         x_axis = Vector2.new(intrinsics.cos(10 * angle), intrinsics.sin(10 * angle)).scaledTo(scale);
+//         y_axis = x_axis.perp();
+//     } else if (false) {
+//         x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
+//         y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
+//     } else {
+//         x_axis = Vector2.new(scale, 0);
+//         y_axis = Vector2.new(0, scale);
+//     }
+//
+//     const color = Color.new(1, 1, 1, 1);
+//     // const color_angle = 5.0 * angle;
+//     // const color =
+//     //     Color.new(
+//     //     0.5 + 0.5 * intrinsics.sin(color_angle),
+//     //     0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
+//     //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
+//     //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
+//     // );
+//
+//     _ = render_group.pushCoordinateSystem(
+//         origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(displacement),
+//         x_axis,
+//         y_axis,
+//         color,
+//         &world_mode.test_diffuse,
+//         &world_mode.test_normal,
+//         &transient_state.env_maps[2],
+//         &transient_state.env_maps[1],
+//         &transient_state.env_maps[0],
+//     );
+//
+//     var map_position = Vector2.zero();
+//     for (&transient_state.env_maps) |*map| {
+//         const lod: *LoadedBitmap = &map.lod[0];
+//
+//         x_axis = Vector2.newI(lod.width, 0).scaledTo(0.5);
+//         y_axis = Vector2.newI(0, lod.height).scaledTo(0.5);
+//
+//         _ = render_group.pushCoordinateSystem(
+//             map_position,
+//             x_axis,
+//             y_axis,
+//             Color.new(1, 1, 1, 1),
+//             lod,
+//             null,
+//             undefined,
+//             undefined,
+//             undefined,
+//         );
+//
+//         map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
+//     }
+//
+//     if (false) {
+//         render_group.pushSaturation(0.5 + 0.5 * intrinsics.sin(10.0 * world_mode.time));
+//     }
+//
+//     render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer);
+//     render_group.endRender();
+// }

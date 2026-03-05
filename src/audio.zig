@@ -119,9 +119,6 @@ pub const AudioState = struct {
         const mixer_memory = temp_arena.beginTemporaryMemory();
         defer temp_arena.endTemporaryMemory(mixer_memory);
 
-        const generation_id: u32 = assets.beginGeneration();
-        defer assets.endGeneration(generation_id);
-
         std.debug.assert((sound_buffer.sample_count & 3) == 0);
         const chunk_count = sound_buffer.sample_count / 4;
 
@@ -165,7 +162,7 @@ pub const AudioState = struct {
                 var dest1 = real_channel1;
 
                 while (total_chunks_to_mix > 0 and !sound_finished) {
-                    const opt_loaded_sound = assets.getSound(playing_sound.id, generation_id);
+                    const opt_loaded_sound = assets.getSound(playing_sound.id);
                     if (opt_loaded_sound) |loaded_sound| {
                         const next_sound_in_chain = assets.getNextSoundInChain(playing_sound.id);
                         assets.prefetchSound(next_sound_in_chain);

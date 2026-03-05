@@ -10,7 +10,6 @@ const std = @import("std");
 const INTERNAL = shared.INTERNAL;
 const CUTSCENE_WARMUP_SECONDS: f32 = 2;
 
-const TransientState = shared.TransientState;
 const Assets = asset.Assets;
 const AssetTagId = file_formats.AssetTagId;
 const AssetTypeId = asset.AssetTypeId;
@@ -21,6 +20,8 @@ const Matrix4x4 = math.Matrix4x4;
 const Color = math.Color;
 const ObjectTransform = renderer.ObjectTransform;
 const RenderGroup = renderer.RenderGroup;
+const RenderGroupFlags = renderer.RenderGroupFlags;
+const RenderCommands = renderer.RenderCommands;
 const CameraParams = renderer.CameraParams;
 
 const SceneLayerFlags = enum(u32) {
@@ -240,7 +241,7 @@ const cutscenes = [_]Cutscene{
     Cutscene{ .scene_count = intro_cutscene.len, .scenes = @ptrCast(intro_cutscene) },
 };
 
-fn checkForMetaInput(state: *shared.State, transient_state: *TransientState, input: *shared.GameInput) bool {
+fn checkForMetaInput(state: *shared.State, input: *shared.GameInput) bool {
     var result: bool = false;
 
     for (&input.controllers) |controller| {
@@ -248,7 +249,7 @@ fn checkForMetaInput(state: *shared.State, transient_state: *TransientState, inp
             input.quit_requested = true;
             break;
         } else if (controller.start_button.wasPressed()) {
-            world_mode.playWorld(state, transient_state);
+            world_mode.playWorld(state);
             result = true;
             break;
         }
@@ -257,8 +258,8 @@ fn checkForMetaInput(state: *shared.State, transient_state: *TransientState, inp
     return result;
 }
 
-pub fn playTitleScreen(state: *shared.State, transient_state: *TransientState) void {
-    state.setGameMode(transient_state, .TitleScreen);
+pub fn playTitleScreen(state: *shared.State) void {
+    state.setGameMode(.TitleScreen);
 
     var title_screen: *GameModeTitleScreen = state.mode_arena.pushStruct(GameModeTitleScreen, null);
     title_screen.time = 0;
@@ -268,30 +269,36 @@ pub fn playTitleScreen(state: *shared.State, transient_state: *TransientState) v
 
 pub fn updateAndRenderTitleScreen(
     state: *shared.State,
-    transient_state: *shared.TransientState,
-    render_group: *RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
+    render_commands: *RenderCommands,
     input: *shared.GameInput,
     title_screen: *GameModeTitleScreen,
 ) bool {
-    const result = checkForMetaInput(state, transient_state, input);
-    _ = draw_buffer;
+    const result = checkForMetaInput(state, input);
 
     if (!result) {
-        render_group.pushFullClear(Color.new(1, 0.25, 0.25, 0));
+        const background_color: Color = .new(1, 0.25, 0.25, 0);
+        var render_group = RenderGroup.begin(
+            state.assets,
+            render_commands,
+            RenderGroupFlags.default,
+            // @intFromEnum(RenderGroupFlags.ClearColor) | @intFromEnum(RenderGroupFlags.ClearDepth),
+            background_color,
+        );
 
         if (title_screen.time > 10) {
-            playIntroCutscene(state, transient_state);
+            playIntroCutscene(state);
         } else {
             title_screen.time += input.frame_delta_time;
         }
+
+        render_group.end();
     }
 
     return result;
 }
 
-pub fn playIntroCutscene(state: *shared.State, transient_state: *TransientState) void {
-    state.setGameMode(transient_state, .Cutscene);
+pub fn playIntroCutscene(state: *shared.State) void {
+    state.setGameMode(.Cutscene);
 
     var cutscene: *GameModeCutscene = state.mode_arena.pushStruct(GameModeCutscene, null);
     cutscene.cutscene_id = .Intro;
@@ -302,26 +309,35 @@ pub fn playIntroCutscene(state: *shared.State, transient_state: *TransientState)
 
 pub fn updateAndRenderCutscene(
     state: *shared.State,
-    transient_state: *shared.TransientState,
-    render_group: ?*RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
+    render_commands: *RenderCommands,
     input: *shared.GameInput,
     cutscene: *GameModeCutscene,
 ) bool {
-    const assets: *Assets = transient_state.assets;
-    const result = checkForMetaInput(state, transient_state, input);
+    const assets: *Assets = state.assets;
+    const result = checkForMetaInput(state, input);
 
     if (!result) {
+        const background_color: Color = .new(1, 0.25, 0.25, 0);
+        var render_group = RenderGroup.begin(
+            state.assets,
+            render_commands,
+            RenderGroupFlags.default,
+            // @intFromEnum(RenderGroupFlags.ClearDepth),
+            background_color,
+        );
+
         // Prefetch assets for the next shot.
-        _ = renderCutsceneAtTime(assets, null, draw_buffer, cutscene, cutscene.time + CUTSCENE_WARMUP_SECONDS);
+        _ = renderCutsceneAtTime(assets, null, cutscene, cutscene.time + CUTSCENE_WARMUP_SECONDS);
 
         // Render the current shot.
-        const cutscene_still_running = renderCutsceneAtTime(assets, render_group, draw_buffer, cutscene, cutscene.time);
+        const cutscene_still_running = renderCutsceneAtTime(assets, &render_group, cutscene, cutscene.time);
         if (!cutscene_still_running) {
-            playTitleScreen(state, transient_state);
+            playTitleScreen(state);
         } else {
             cutscene.time += input.frame_delta_time;
         }
+
+        render_group.end();
     }
 
     return result;
@@ -330,7 +346,6 @@ pub fn updateAndRenderCutscene(
 fn renderCutsceneAtTime(
     assets: *asset.Assets,
     render_group: ?*RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
     cutscene: *GameModeCutscene,
     cutscene_time: f32,
 ) bool {
@@ -345,7 +360,7 @@ fn renderCutsceneAtTime(
 
         if (cutscene_time >= time_start and cutscene_time < time_end) {
             const normal_time = math.clamp01MapToRange(time_start, time_end, cutscene_time);
-            renderLayeredScene(assets, render_group, draw_buffer, scene, normal_time);
+            renderLayeredScene(assets, render_group, scene, normal_time);
             cutscene_still_running = true;
         }
 
@@ -358,12 +373,9 @@ fn renderCutsceneAtTime(
 fn renderLayeredScene(
     assets: *asset.Assets,
     opt_render_group: ?*RenderGroup,
-    draw_buffer: *asset.LoadedBitmap,
     scene: *const LayeredScene,
     normal_time: f32,
 ) void {
-    _ = draw_buffer;
-
     const focal_length: f32 = 0.78;
     const camera_offset: Vector3 = scene.camera_start.lerp(scene.camera_end, normal_time);
     var scene_fade_value: f32 = 1;
@@ -385,10 +397,6 @@ fn renderLayeredScene(
             1000,
             null,
         );
-
-        if (scene.layers.len == 0) {
-            render_group.pushFullClear(Color.new(0, 0, 0, 0));
-        }
     }
 
     var match_vector = asset.AssetVector{};

@@ -37,6 +37,7 @@ const ArenaPushParams = memory.ArenaPushParams;
 const SortEntry = sort.SortEntry;
 const ObjectTransform = renderer.ObjectTransform;
 const RenderGroup = renderer.RenderGroup;
+const RenderGroupFlags = renderer.RenderGroupFlags;
 const TransientClipRect = renderer.TransientClipRect;
 
 const textOutAt = debug_ui.textOutAt;
@@ -1632,7 +1633,7 @@ fn drawDebugElement(
 
             const opt_event: ?*DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else null;
             if (opt_event) |event| {
-                if (render_group.assets.getBitmap(event.data.BitmapId, render_group.generation_id)) |bitmap| {
+                if (render_group.assets.getBitmap(event.data.BitmapId)) |bitmap| {
                     var dim = asset_rendering.getBitmapDim(
                         &no_transform,
                         bitmap,
@@ -2230,14 +2231,13 @@ fn debugStart(
     debug_state: *DebugState,
     commands: *renderer.RenderCommands,
     assets: *asset.Assets,
-    main_generation_id: u32,
     width: i32,
     height: i32,
 ) void {
     TimedBlock.beginFunction(@src(), .DebugStart);
     defer TimedBlock.endFunction(@src(), .DebugStart);
 
-    debug_state.render_group = RenderGroup.begin(assets, commands, main_generation_id);
+    debug_state.render_group = RenderGroup.begin(assets, commands, @intFromEnum(RenderGroupFlags.ClearDepth), null);
 
     if (asset_rendering.pushFont(&debug_state.render_group, debug_state.font_id)) |font| {
         debug_state.debug_font = font;
@@ -2269,7 +2269,6 @@ fn debugStart(
         10000,
         null,
     );
-    debug_state.render_group.pushDepthClear();
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();
     debug_state.shadow_transform = ObjectTransform.defaultFlat();
@@ -2348,18 +2347,20 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
             }
         }
 
-        const cur_kilocycles: u32 = @intCast(cur_duration / 1000);
-        const min_kilocycles: u32 = @intCast(min_duration / 1000);
-        const max_kilocycles: u32 = @intCast(max_duration / 1000);
-        const avg_kilocycles: u32 =
-            @intFromFloat(math.safeRatio0(@floatFromInt(total_duration), @floatFromInt((1000 * total_count))));
+        if (max_duration > 0) {
+            const cur_kilocycles: u32 = @intCast(cur_duration / 1000);
+            const min_kilocycles: u32 = @intCast(min_duration / 1000);
+            const max_kilocycles: u32 = @intCast(max_duration / 1000);
+            const avg_kilocycles: u32 =
+                @intFromFloat(math.safeRatio0(@floatFromInt(total_duration), @floatFromInt((1000 * total_count))));
 
-        _ = shared.formatString(
-            debug_state.function_info_size,
-            debug_state.function_info,
-            "%s: %dkcy cur | %dkcy min | %dkcy avg | %dkcy max",
-            .{ hud_element.name, cur_kilocycles, min_kilocycles, avg_kilocycles, max_kilocycles },
-        );
+            _ = shared.formatString(
+                debug_state.function_info_size,
+                debug_state.function_info,
+                "%s: %dkcy cur | %dkcy min | %dkcy avg | %dkcy max",
+                .{ hud_element.name, cur_kilocycles, min_kilocycles, avg_kilocycles, max_kilocycles },
+            );
+        }
     }
 
     const group: *RenderGroup = &debug_state.render_group;
@@ -2387,21 +2388,11 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
 fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {
     var assets: ?*asset.Assets = null;
 
-    if (game_memory.transient_state) |transient_state| {
-        assets = transient_state.assets;
+    if (game_memory.game_state) |state| {
+        assets = state.assets;
     }
 
     return assets;
-}
-
-fn getMainGenerationID(game_memory: *shared.Memory) u32 {
-    var result: u32 = 0;
-
-    if (game_memory.transient_state) |transient_state| {
-        result = transient_state.main_generation_id;
-    }
-
-    return result;
 }
 
 pub fn frameEnd(
@@ -2432,7 +2423,6 @@ pub fn frameEnd(
                 debug_state,
                 commands,
                 assets,
-                getMainGenerationID(game_memory),
                 @intCast(commands.settings.width),
                 @intCast(commands.settings.height),
             );

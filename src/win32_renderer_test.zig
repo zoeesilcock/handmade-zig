@@ -26,6 +26,7 @@ const Matrix4x4 = math.Matrix4x4;
 const Rectangle2i = math.Rectangle2i;
 const RenderCommands = renderer.RenderCommands;
 const RenderGroup = renderer.RenderGroup;
+const RenderGroupFlags = renderer.RenderGroupFlags;
 const TexturedVertex = renderer.TexturedVertex;
 const RendererTexture = renderer.RendererTexture;
 const CameraParams = renderer.CameraParams;
@@ -294,7 +295,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             const draw_region: Rectangle2i =
                 math.aspectRatioFit(16, 9, @intCast(window_width), @intCast(window_height));
 
-            const camera: CameraParams = .get(@intCast(draw_region.getWidth()), camera_focal_length);
+            const camera: CameraParams = .get(camera_focal_length);
 
             if (camera_shift_t > math.TAU32) {
                 camera_shift_t -= math.TAU32;
@@ -324,11 +325,8 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
                 open_gl.white_bitmap,
             );
 
-            var group: RenderGroup = .begin(
-                undefined,
-                &render_commands,
-                1,
-            );
+            const background_color: Color = .new(0.15, 0.15, 0.15, 0);
+            var group: RenderGroup = .begin(undefined, &render_commands, RenderGroupFlags.default, background_color);
             group.setCameraTransform(
                 camera.focal_length,
                 camera_o.getColumn(0),
@@ -340,11 +338,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
                 far_clip_plane,
                 fog,
             );
-
-            const background_color: Color = .new(0.15, 0.15, 0.15, 0);
-            group.beginDepthPeel(background_color);
             pushSimpleScene(&group, &scene);
-            group.endDepthPeel();
             group.end();
 
             opengl.renderCommands(&render_commands, draw_region, window_width, window_height);

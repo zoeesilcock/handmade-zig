@@ -595,7 +595,7 @@ pub fn textOp(
                             } else {
                                 std.debug.assert(op == .SizeText);
 
-                                if (render_group.assets.getBitmap(bitmap_id, render_group.generation_id)) |bitmap| {
+                                if (render_group.assets.getBitmap(bitmap_id)) |bitmap| {
                                     const dim = asset_rendering.getBitmapDim(
                                         &ObjectTransform.defaultFlat(),
                                         bitmap,

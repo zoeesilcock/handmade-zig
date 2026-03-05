@@ -785,9 +785,7 @@ pub fn createWorldNew(world: *World) GenResult {
     return result;
 }
 
-pub fn createWorld(world_mode: *world_mode_mod.GameModeWorld, transient_state: *TransientState) void {
-    _ = transient_state;
-
+pub fn createWorld(world_mode: *world_mode_mod.GameModeWorld) void {
     const generated: GenResult = createWorldNew(world_mode.world);
 
     world_mode.camera.position = generated.initial_camera_position;
