@@ -2366,11 +2366,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     const group: *RenderGroup = &debug_state.render_group;
     debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
 
-    const mouse_clip_position = RenderGroup.clipSpaceFromPixelSpace(
-        debug_state.global_width,
-        debug_state.global_height,
-        .new(input.mouse_x, input.mouse_y),
-    );
+    const mouse_clip_position: Vector2 = input.clip_space_mouse_position.xy();
     const mouse_position: Vector2 = group.unproject(&group.game_transform, mouse_clip_position, 0).xy();
 
     debug_state.mouse_text_layout = Layout.begin(debug_state, mouse_position, mouse_position);

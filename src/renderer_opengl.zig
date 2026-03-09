@@ -2,6 +2,7 @@ const shared = @import("shared.zig");
 const types = @import("types.zig");
 const intrinsics = @import("intrinsics.zig");
 const renderer = @import("renderer.zig");
+const wgl = @import("win32_opengl.zig");
 const lighting = @import("lighting.zig");
 const asset = @import("asset.zig");
 const math = @import("math.zig");
@@ -204,6 +205,7 @@ const INTERNAL = shared.INTERNAL;
 const ALLOW_GPU_SRGB = false;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
 
+const PlatformRenderer = renderer.PlatformRenderer;
 const RenderCommands = renderer.RenderCommands;
 const RenderSettings = renderer.RenderSettings;
 const TexturedVertex = renderer.TexturedVertex;
@@ -266,7 +268,7 @@ fn glDebugProc(
 pub const gl = @import("win32").graphics.open_gl;
 const platform = @import("win32_opengl.zig");
 
-const OpenGLProgramCommon = struct {
+const OpenGLProgramCommon = extern struct {
     program_handle: u32 = 0,
 
     vert_position_id: i32 = 0,
@@ -279,7 +281,7 @@ const OpenGLProgramCommon = struct {
     samplers: [16]i32 = [1]i32{0} ** 16,
 };
 
-const ZBiasProgram = struct {
+const ZBiasProgram = extern struct {
     common: OpenGLProgramCommon,
 
     transform_id: i32 = 0,
@@ -293,19 +295,13 @@ const ZBiasProgram = struct {
     alpha_threshold_id: i32 = 0,
 };
 
-const ResolveMultisampleProgram = struct {
+const ResolveMultisampleProgram = extern struct {
     common: OpenGLProgramCommon,
 
     sample_count_id: i32 = 0,
 };
 
-const FakeSeedLightingProgram = struct {
-    common: OpenGLProgramCommon,
-
-    debug_light_position_id: i32 = 0,
-};
-
-const MultiGridLightDownProgram = struct {
+const MultiGridLightDownProgram = extern struct {
     common: OpenGLProgramCommon,
 
     source_uv_step: i32 = 0,
@@ -319,7 +315,7 @@ const ColorHandleType = enum(u32) {
 
 const COLOR_HANDLE_COUNT = @typeInfo(ColorHandleType).@"enum".fields.len;
 
-const Framebuffer = struct {
+const Framebuffer = extern struct {
     framebuffer_handle: u32 = 0,
     color_handle: [COLOR_HANDLE_COUNT]u32 = undefined,
     depth_handle: u32 = 0,
@@ -332,7 +328,7 @@ const FramebufferFlags = enum(u32) {
     Float = 0x8,
 };
 
-const LightBuffer = struct {
+const LightBuffer = extern struct {
     width: i32 = 0,
     height: i32 = 0,
 
@@ -346,7 +342,9 @@ const LightBuffer = struct {
     normal_position_texture: u32 = 0, // This is Normal.x, Normal.z, Depth.
 };
 
-const OpenGL = struct {
+pub const OpenGL = extern struct {
+    header: PlatformRenderer = .{ .renderer_type = .OpenGL },
+
     current_settings: RenderSettings = .{},
 
     max_color_attachments: i32 = 0,
@@ -380,10 +378,7 @@ const OpenGL = struct {
     peel_composite: OpenGLProgramCommon = undefined, // Composite all passes.
     final_stretch: OpenGLProgramCommon = undefined,
     resolve_multisample: ResolveMultisampleProgram = undefined,
-    fake_seed_lighting: FakeSeedLightingProgram = undefined,
     depth_peel_to_lighting: OpenGLProgramCommon = undefined,
-    multi_grid_light_up: OpenGLProgramCommon = undefined,
-    multi_grid_light_down: MultiGridLightDownProgram = undefined,
 
     light_data0: u32 = 0,
     light_data1: u32 = 0,
@@ -394,10 +389,14 @@ const OpenGL = struct {
     debug_light_buffer_index: i32 = 0,
     debug_light_buffer_texture_index: i32 = 0,
 
-    texture_queue: TextureQueue = .{},
-};
+    push_buffer_memory: [65536]u8 = undefined,
 
-pub var open_gl: OpenGL = .{};
+    vertex_array: [*]TexturedVertex = undefined,
+    bitmap_array: [*]RendererTexture = undefined,
+
+    max_vertex_count: u32,
+    render_commands: RenderCommands,
+};
 
 pub const Info = struct {
     is_modern_context: bool,
@@ -478,7 +477,17 @@ fn colorUB(color: u32) void {
     );
 }
 
-pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
+pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void {
+    open_gl.header.renderer_type = .OpenGL;
+
+    open_gl.current_settings.depth_peel_count_hint = 4;
+    open_gl.current_settings.multisampling_hint = true;
+    open_gl.current_settings.pixelation_hint = false;
+    open_gl.current_settings.multisample_debug = false;
+
+    open_gl.shader_sim_tex_read_srgb = true;
+    open_gl.shader_sim_tex_write_srgb = true;
+
     gl.glGenTextures(1, &open_gl.reserved_blit_texture);
 
     gl.glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &open_gl.max_color_attachments);
@@ -544,7 +553,7 @@ pub fn init(info: Info, framebuffer_supports_sRGB: bool) void {
     open_gl.white = [1][4]u32{
         [1]u32{0xffffffff} ** 4,
     } ** 4;
-    open_gl.white_bitmap = allocateTexture(1, 1, &open_gl.white);
+    open_gl.white_bitmap = allocateTexture(open_gl, 1, 1, &open_gl.white);
 }
 
 const shader_header_code =
@@ -587,7 +596,7 @@ const shader_header_code =
     \\}
 ;
 
-fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabled: bool) void {
+fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: bool, lighting_disabled: bool) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -837,7 +846,7 @@ fn compileZBiasProgram(program: *ZBiasProgram, depth_peel: bool, lighting_disabl
     program.alpha_threshold_id = platform.optGLGetUniformLocation.?(program_handle, "AlphaThreshold");
 }
 
-fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
+fn compilePeelCompositeProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -992,7 +1001,7 @@ fn compilePeelCompositeProgram(program: *OpenGLProgramCommon) void {
     });
 }
 
-fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
+fn compileResolveMultisampleProgram(open_gl: *OpenGL, program: *ResolveMultisampleProgram) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -1127,7 +1136,7 @@ fn compileResolveMultisampleProgram(program: *ResolveMultisampleProgram) void {
     program.sample_count_id = platform.optGLGetUniformLocation.?(program_handle, "SampleCount");
 }
 
-fn compileFinalStretchProgram(program: *OpenGLProgramCommon) void {
+fn compileFinalStretchProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) void {
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -1176,75 +1185,6 @@ fn compileFinalStretchProgram(program: *OpenGLProgramCommon) void {
         program,
     );
     linkSamplers(program, &.{"ImageSampler"});
-}
-
-fn compileFakeSeedLightingProgram(program: *FakeSeedLightingProgram) void {
-    var defines: [1024]u8 = undefined;
-    const defines_length = shared.formatString(defines.len, &defines,
-        \\#version 330
-        \\#extension GL_ARB_explicit_attrib_location : enable
-    , .{});
-    const vertex_code =
-        \\// Vertex code
-        \\in vec4 VertP;
-        \\
-        \\void main(void)
-        \\{
-        \\  gl_Position = VertP;
-        \\}
-    ;
-    const fragment_code =
-        \\// Fragment code
-        \\uniform vec3 LightPosition;
-        \\
-        \\layout(location = 0) out vec4 BlendUnitColor[4];
-        \\
-        \\vec3 FrontEmission = vec3(0.0, 0.0, 0.0);
-        \\vec3 BackEmission = vec3(0.0, 0.0, 0.0);
-        \\vec3 SurfaceColor = vec3(0.7f, 0.7f, 0.7f);
-        \\vec3 NormalPosition = vec3(0.0, 1.0, -10.0);
-        \\
-        \\void Light(vec2 LightPosition,
-        \\           float LightRadius,
-        \\           vec3 LightFrontEmission,
-        \\           vec3 LightBackEmission,
-        \\           vec3 LightNormalPosition
-        \\)
-        \\{
-        \\  vec2 ThisPosition = gl_FragCoord.xy;
-        \\  vec2 LP = LightPosition * 0.025f * vec2(1920.0f, 1080.0f) + 0.25f * vec2(1920.0f, 1080.0f);
-        \\
-        \\  vec2 DeltaToLight = ThisPosition - LP;
-        \\  float DistanceToLight = length(DeltaToLight);
-        \\  if (DistanceToLight < LightRadius)
-        \\  {
-        \\     FrontEmission = LightFrontEmission;
-        \\     BackEmission = LightBackEmission;
-        \\     SurfaceColor = vec3(0.0, 0.0, 0.0);
-        \\     NormalPosition = LightNormalPosition;
-        \\  }
-        \\}
-        \\
-        \\void main(void)
-        \\{
-        \\  Light(LightPosition.xy,                 10.0f, vec3(100.0, 0.0, 0.0),  vec3(0.0, 100.0, 0.0),  vec3(1.0, 0.0, 0.0));
-        \\  Light(LightPosition.xy + vec2(0.5f, 0.0), 10.0f, vec3(0.0, 10.0, 0.0),  vec3(0.0, 0.0, 10.0),  vec3(0.0, 1.0, 1.0));
-        \\
-        \\  BlendUnitColor[0].rgb = FrontEmission;
-        \\  BlendUnitColor[1].rgb = BackEmission;
-        \\  BlendUnitColor[2].rgb = SurfaceColor;
-        \\  BlendUnitColor[3].rgb = NormalPosition;
-        \\}
-    ;
-
-    const program_handle = createProgram(
-        @ptrCast(defines[0..defines_length]),
-        shader_header_code,
-        vertex_code,
-        fragment_code,
-        &program.common,
-    );
-    program.debug_light_position_id = platform.optGLGetUniformLocation.?(program_handle, "LightPosition");
 }
 
 fn compileDepthPeelToLightingProgram(program: *OpenGLProgramCommon) void {
@@ -1328,214 +1268,6 @@ fn compileDepthPeelToLightingProgram(program: *OpenGLProgramCommon) void {
     linkSamplers(program, &.{ "DepthSampler", "SurfaceReflectionSampler", "EmissionSampler", "NormalPositionSampler" });
 }
 
-fn compileMultiGridLightUpProgram(program: *OpenGLProgramCommon) void {
-    var defines: [1024]u8 = undefined;
-    const defines_length = shared.formatString(
-        defines.len,
-        &defines,
-        \\#version 330
-        \\#extension GL_ARB_explicit_attrib_location : enable
-    ,
-        .{},
-    );
-    const vertex_code =
-        \\// Vertex code
-        \\in vec4 VertP;
-        \\in vec2 VertUV;
-        \\
-        \\smooth out vec2 FragUV;
-        \\
-        \\void main(void)
-        \\{
-        \\  gl_Position = VertP;
-        \\  FragUV = VertUV;
-        \\}
-    ;
-    const fragment_code =
-        \\// Fragment code
-        \\uniform sampler2D SourceFrontEmissionTexture;
-        \\uniform sampler2D SourceBackEmissionTexture;
-        \\uniform sampler2D SourceSurfaceColorTexture;
-        \\uniform sampler2D SourceNormalPositionTexture;
-        \\
-        \\smooth in vec2 FragUV;
-        \\
-        \\layout(location = 0) out vec4 BlendUnitColor[4];
-        \\
-        \\vec3 ManualSample(sampler2D Sampler)
-        \\{
-        \\  vec3 Result = texture(Sampler, FragUV).rgb;
-        \\  return Result;
-        \\}
-        \\
-        \\void main(void)
-        \\{
-        \\  vec3 SourceFrontEmission = ManualSample(SourceFrontEmissionTexture).rgb;
-        \\  vec3 SourceBackEmission = ManualSample(SourceBackEmissionTexture).rgb;
-        \\  vec3 SourceSurfaceColor = ManualSample(SourceSurfaceColorTexture).rgb;
-        \\  vec3 SourceNormalPosition = ManualSample(SourceNormalPositionTexture).rgb;
-        \\
-        \\  vec3 FrontEmission = SourceFrontEmission;
-        \\  vec3 BackEmission = SourceBackEmission;
-        \\  vec3 SurfaceColor = SourceSurfaceColor;
-        \\  vec3 NormalPosition = SourceNormalPosition;
-        \\
-        \\  BlendUnitColor[0].rgb = FrontEmission;
-        \\  BlendUnitColor[1].rgb = BackEmission;
-        \\  BlendUnitColor[2].rgb = SurfaceColor;
-        \\  BlendUnitColor[3].rgb = NormalPosition;
-        \\}
-    ;
-
-    _ = createProgram(
-        @ptrCast(defines[0..defines_length]),
-        shader_header_code,
-        vertex_code,
-        fragment_code,
-        program,
-    );
-    linkSamplers(program, &.{
-        "SourceFrontEmissionTexture",
-        "SourceBackEmissionTexture",
-        "SourceSurfaceColorTexture",
-        "SourceNormalPositionTexture",
-    });
-}
-
-fn compileMultiGridLightDownProgram(program: *MultiGridLightDownProgram) void {
-    var defines: [1024]u8 = undefined;
-    const defines_length = shared.formatString(
-        defines.len,
-        &defines,
-        \\#version 330
-        \\#extension GL_ARB_explicit_attrib_location : enable
-    ,
-        .{},
-    );
-    const vertex_code =
-        \\// Vertex code
-        \\in vec4 VertP;
-        \\in vec2 VertUV;
-        \\
-        \\smooth out vec2 FragUV;
-        \\
-        \\void main(void)
-        \\{
-        \\  gl_Position = VertP;
-        \\  FragUV = VertUV;
-        \\}
-    ;
-    const fragment_code =
-        \\// Fragment code
-        \\
-        \\uniform sampler2D ParentFrontEmissionTexture;
-        \\uniform sampler2D ParentBackEmissionTexture;
-        \\uniform sampler2D ParentNormalPositionTexture;
-        \\
-        \\uniform sampler2D OurSurfaceColorTexture;
-        \\uniform sampler2D OurNormalPositionTexture;
-        \\
-        \\uniform vec2 SourceUVStep;
-        \\
-        \\smooth in vec2 FragUV;
-        \\
-        \\layout(location = 0) out vec4 BlendUnitColor[2];
-        \\
-        \\struct light_value
-        \\{
-        \\  vec3 FrontEmission;
-        \\  vec3 BackEmission;
-        \\  vec3 Position;
-        \\  vec3 Normal;
-        \\};
-        \\
-        \\vec3 ReconstructPosition(vec3 NormalPosition, vec2 UV)
-        \\{
-        \\  vec3 Result = vec3(UV.x, UV.y, NormalPosition.z); // TODO: Compute the X and Y from the fragment coordinate.
-        \\  return Result;
-        \\}
-        \\
-        \\vec3 ReconstructNormal(vec3 NormalPosition)
-        \\{
-        \\  vec3 Result = ExtendNormalZ(NormalPosition.xy);
-        \\  return Result;
-        \\}
-        \\
-        \\light_value ParentSample(vec2 UV)
-        \\{
-        \\  light_value Result;
-        \\  Result.FrontEmission = texture(ParentFrontEmissionTexture, UV).rgb;
-        \\  Result.BackEmission = texture(ParentBackEmissionTexture, UV).rgb;
-        \\  vec3 NormalPosition = texture(ParentNormalPositionTexture, UV).rgb;
-        \\  Result.Position = ReconstructPosition(NormalPosition, UV);
-        \\  Result.Normal = ReconstructNormal(NormalPosition);
-        \\  return Result;
-        \\}
-        \\
-        \\vec3 TransferLight(vec3 LightPosition,
-        \\                   vec3 LightNormal,
-        \\                   vec3 LightEmission,
-        \\                   vec3 ReflectorPosition,
-        \\                   vec3 ReflectorNormal,
-        \\                   vec3 ReflectorColor)
-        \\{
-        \\  float Facing = 1.0f; // clamp(-dot(LightNormal, ReflectorNormal), 0, 1);
-        \\  vec3 Distance = LightPosition - ReflectorPosition;
-        \\  float DistanceSq = dot(Distance, Distance);
-        \\  float Falloff = 1.0f / (1.0f + 100.0f * DistanceSq);
-        \\  vec3 Result = Facing * Falloff * ReflectorColor * LightEmission;
-        \\  return Result;
-        \\}
-        \\
-        \\void main(void)
-        \\{
-        \\  light_value Left = ParentSample(FragUV + vec2(-SourceUVStep.x, 0.0));
-        \\  light_value Right = ParentSample(FragUV + vec2(SourceUVStep.x, 0.0));
-        \\  light_value Up = ParentSample(FragUV + vec2(0.0, -SourceUVStep.y));
-        \\  light_value Down = ParentSample(FragUV + vec2(0.0, SourceUVStep.y));
-        \\
-        \\  vec3 RefC = texture(OurSurfaceColorTexture, FragUV).rgb;
-        \\  vec3 OurNormalPosition = texture(OurNormalPositionTexture, FragUV).rgb;
-        \\  vec3 RefP = ReconstructPosition(OurNormalPosition, FragUV);
-        \\  vec3 RefN = ReconstructNormal(OurNormalPosition);
-        \\
-        \\  vec3 DestFrontEmission = (
-        \\      TransferLight(Left.Position, Left.Normal, Left.FrontEmission, RefP, RefN, RefC) +
-        \\      TransferLight(Right.Position, Right.Normal, Right.FrontEmission, RefP, RefN, RefC) +
-        \\      TransferLight(Up.Position, Up.Normal, Up.FrontEmission, RefP, RefN, RefC) +
-        \\      TransferLight(Down.Position, Down.Normal, Down.FrontEmission, RefP, RefN, RefC)
-        \\  );
-        \\  vec3 DestBackEmission = (
-        \\      TransferLight(Left.Position, Left.Normal, Left.BackEmission, RefP, RefN, RefC) +
-        \\      TransferLight(Right.Position, Right.Normal, Right.BackEmission, RefP, RefN, RefC) +
-        \\      TransferLight(Up.Position, Up.Normal, Up.BackEmission, RefP, RefN, RefC) +
-        \\      TransferLight(Down.Position, Down.Normal, Down.BackEmission, RefP, RefN, RefC)
-        \\  );
-        \\
-        \\  BlendUnitColor[0].rgb = DestFrontEmission;
-        \\  BlendUnitColor[1].rgb = vec3(-dot(RefN, Left.Normal)); //DestBackEmission;
-        \\}
-    ;
-
-    const program_handle = createProgram(
-        @ptrCast(defines[0..defines_length]),
-        shader_header_code,
-        vertex_code,
-        fragment_code,
-        &program.common,
-    );
-    linkSamplers(&program.common, &.{
-        "ParentFrontEmissionTexture",
-        "ParentBackEmissionTexture",
-        "ParentNormalPositionTexture",
-        "OurSurfaceColorTexture",
-        "OurNormalPositionTexture",
-    });
-
-    program.source_uv_step =
-        platform.optGLGetUniformLocation.?(program_handle, "SourceUVStep");
-}
-
 fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *RenderSetup, alpha_threshold: f32) void {
     useProgramBegin(&program.common);
 
@@ -1550,15 +1282,10 @@ fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *RenderSetup, alpha_thres
     platform.optGLUniform1f.?(program.alpha_threshold_id, alpha_threshold);
 }
 
-fn useResolveMultisampleProgramBegin(program: *ResolveMultisampleProgram) void {
+fn useResolveMultisampleProgramBegin(open_gl: *OpenGL, program: *ResolveMultisampleProgram) void {
     useProgramBegin(&program.common);
 
     platform.optGLUniform1i.?(program.sample_count_id, open_gl.max_multi_sample_count);
-}
-
-fn useFakeSeedLightingProgramBegin(program: *FakeSeedLightingProgram, setup: *RenderSetup) void {
-    _ = setup;
-    useProgramBegin(&program.common);
 }
 
 fn useMultiGridLightDownProgramBegin(program: *MultiGridLightDownProgram, source_uv_step: Vector2) void {
@@ -1668,7 +1395,7 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     }
 }
 
-fn framebufferTexImage(slot: u32, format: i32, filter_type: i32, width: i32, height: i32) u32 {
+fn framebufferTexImage(open_gl: *OpenGL, slot: u32, format: i32, filter_type: i32, width: i32, height: i32) u32 {
     var result: u32 = 0;
     gl.glGenTextures(1, @ptrCast(&result));
     gl.glBindTexture(slot, result);
@@ -1704,7 +1431,7 @@ fn framebufferTexImage(slot: u32, format: i32, filter_type: i32, width: i32, hei
     return result;
 }
 
-fn createFrameBuffer(width: i32, height: i32, flags: u32, color_buffer_count: u32) Framebuffer {
+fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, color_buffer_count: u32) Framebuffer {
     var result: Framebuffer = .{};
     const multisampled: bool = (flags & @intFromEnum(FramebufferFlags.Multisampled)) != 0;
     const filtered: bool = (flags & @intFromEnum(FramebufferFlags.Filtered)) != 0;
@@ -1723,6 +1450,7 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32, color_buffer_count: u3
     var color_index: u32 = 0;
     while (color_index < color_buffer_count) : (color_index += 1) {
         result.color_handle[color_index] = framebufferTexImage(
+            open_gl,
             slot,
             if (color_index == 0) open_gl.default_framebuffer_texture_format else gl.GL_RGBA8,
             filter_type,
@@ -1741,7 +1469,7 @@ fn createFrameBuffer(width: i32, height: i32, flags: u32, color_buffer_count: u3
     std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
     if (has_depth) {
-        result.depth_handle = framebufferTexImage(slot, DEPTH_COMPONENT_TYPE, filter_type, width, height);
+        result.depth_handle = framebufferTexImage(open_gl, slot, DEPTH_COMPONENT_TYPE, filter_type, width, height);
         platform.optGLFrameBufferTexture2DEXT.?(
             GL_FRAMEBUFFER,
             GL_DEPTH_ATTACHMENT,
@@ -1771,7 +1499,7 @@ fn bindFrameBuffer(framebuffer: ?*Framebuffer, render_width: i32, render_height:
     }
 }
 
-fn getDepthPeelReadBuffer(index: u32) *Framebuffer {
+fn getDepthPeelReadBuffer(open_gl: *OpenGL, index: u32) *Framebuffer {
     var peel_buffer: *Framebuffer = &open_gl.depth_peel_buffers[index];
     if (open_gl.multisampling) {
         peel_buffer = &open_gl.depth_peel_resolve_buffers[index];
@@ -1804,7 +1532,7 @@ fn freeProgram(program: *OpenGLProgramCommon) void {
     program.program_handle = 0;
 }
 
-fn changeToSettings(settings: *RenderSettings) void {
+fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     // Free all dynamic resources.
     freeFramebuffer(&open_gl.resolve_frame_buffer);
     var depth_peel_index: u32 = 0;
@@ -1828,10 +1556,7 @@ fn changeToSettings(settings: *RenderSettings) void {
     freeProgram(&open_gl.peel_composite);
     freeProgram(&open_gl.final_stretch);
     freeProgram(&open_gl.resolve_multisample.common);
-    freeProgram(&open_gl.fake_seed_lighting.common);
     freeProgram(&open_gl.depth_peel_to_lighting);
-    freeProgram(&open_gl.multi_grid_light_up);
-    freeProgram(&open_gl.multi_grid_light_down.common);
 
     gl.glDeleteTextures(1, &open_gl.light_data0);
     gl.glDeleteTextures(1, &open_gl.light_data1);
@@ -1859,21 +1584,19 @@ fn changeToSettings(settings: *RenderSettings) void {
         open_gl.depth_peel_count = open_gl.depth_peel_buffers.len;
     }
 
-    compileZBiasProgram(&open_gl.z_bias_no_depth_peel, false, open_gl.current_settings.lighting_disabled);
-    compileZBiasProgram(&open_gl.z_bias_depth_peel, true, open_gl.current_settings.lighting_disabled);
-    compilePeelCompositeProgram(&open_gl.peel_composite);
-    compileFinalStretchProgram(&open_gl.final_stretch);
-    compileResolveMultisampleProgram(&open_gl.resolve_multisample);
-    compileFakeSeedLightingProgram(&open_gl.fake_seed_lighting);
+    compileZBiasProgram(open_gl, &open_gl.z_bias_no_depth_peel, false, open_gl.current_settings.lighting_disabled);
+    compileZBiasProgram(open_gl, &open_gl.z_bias_depth_peel, true, open_gl.current_settings.lighting_disabled);
+    compilePeelCompositeProgram(open_gl, &open_gl.peel_composite);
+    compileFinalStretchProgram(open_gl, &open_gl.final_stretch);
+    compileResolveMultisampleProgram(open_gl, &open_gl.resolve_multisample);
     compileDepthPeelToLightingProgram(&open_gl.depth_peel_to_lighting);
-    compileMultiGridLightUpProgram(&open_gl.multi_grid_light_up);
-    compileMultiGridLightDownProgram(&open_gl.multi_grid_light_down);
 
-    open_gl.resolve_frame_buffer = createFrameBuffer(render_width, render_height, resolve_flags, 1);
+    open_gl.resolve_frame_buffer = createFrameBuffer(open_gl, render_width, render_height, resolve_flags, 1);
 
     depth_peel_index = 0;
     while (depth_peel_index < open_gl.depth_peel_count) : (depth_peel_index += 1) {
         open_gl.depth_peel_buffers[depth_peel_index] = createFrameBuffer(
+            open_gl,
             render_width,
             render_height,
             depth_peel_flags,
@@ -1882,6 +1605,7 @@ fn changeToSettings(settings: *RenderSettings) void {
 
         if (open_gl.multisampling) {
             open_gl.depth_peel_resolve_buffers[depth_peel_index] = createFrameBuffer(
+                open_gl,
                 render_width,
                 render_height,
                 multisampled_resolve_flags,
@@ -1906,6 +1630,7 @@ fn changeToSettings(settings: *RenderSettings) void {
         light_buffer.height = texture_height;
 
         light_buffer.front_emission_texture = framebufferTexImage(
+            open_gl,
             gl.GL_TEXTURE_2D,
             GL_RGB32F,
             filter_type,
@@ -1913,6 +1638,7 @@ fn changeToSettings(settings: *RenderSettings) void {
             texture_height,
         );
         light_buffer.back_emission_texture = framebufferTexImage(
+            open_gl,
             gl.GL_TEXTURE_2D,
             GL_RGB32F,
             filter_type,
@@ -1920,6 +1646,7 @@ fn changeToSettings(settings: *RenderSettings) void {
             texture_height,
         );
         light_buffer.surface_color_texture = framebufferTexImage(
+            open_gl,
             gl.GL_TEXTURE_2D,
             GL_RGB32F,
             filter_type,
@@ -1927,6 +1654,7 @@ fn changeToSettings(settings: *RenderSettings) void {
             texture_height,
         );
         light_buffer.normal_position_texture = framebufferTexImage(
+            open_gl,
             gl.GL_TEXTURE_2D,
             GL_RGB32F,
             filter_type,
@@ -2016,6 +1744,8 @@ fn changeToSettings(settings: *RenderSettings) void {
     gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
     gl.glBindTexture(GL_TEXTURE_3D, 0);
+
+    wgl.setVSync(open_gl, open_gl.current_settings.request_vsync);
 }
 
 fn beginScreenFill(framebuffer_handle: u32, width: i32, height: i32) void {
@@ -2043,10 +1773,10 @@ fn endScreenFill() void {
     gl.glDepthFunc(gl.GL_LEQUAL);
 }
 
-fn resolveMultisample(from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
+fn resolveMultisample(open_gl: *OpenGL, from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
     beginScreenFill(to.framebuffer_handle, width, height);
 
-    useResolveMultisampleProgramBegin(&open_gl.resolve_multisample);
+    useResolveMultisampleProgramBegin(open_gl, &open_gl.resolve_multisample);
 
     platform.optGLActiveTexture.?(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, from.depth_handle);
@@ -2071,103 +1801,14 @@ fn bindTexture(slot: u32, target: u32, handle: u32) void {
     gl.glBindTexture(target, handle);
 }
 
-fn fakeSeedLighting(setup: *RenderSetup) void {
-    const light_buffer: *LightBuffer = &open_gl.light_buffers[0];
-    beginScreenFill(light_buffer.write_all_framebuffer, light_buffer.width, light_buffer.height);
-
-    useFakeSeedLightingProgramBegin(&open_gl.fake_seed_lighting, setup);
-    platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
-    useProgramEnd(&open_gl.fake_seed_lighting.common);
-
-    endScreenFill();
-}
-
-fn computeLightTransport() void {
-    // Import depth peel results.
-    {
-        const source: *Framebuffer = &open_gl.depth_peel_resolve_buffers[0];
-        const dest: *LightBuffer = &open_gl.light_buffers[0];
-        beginScreenFill(dest.write_all_framebuffer, dest.width, dest.height);
-
-        useProgramBegin(&open_gl.depth_peel_to_lighting);
-        bindTexture(GL_TEXTURE0, gl.GL_TEXTURE_2D, source.depth_handle);
-        bindTexture(GL_TEXTURE1, gl.GL_TEXTURE_2D, source.color_handle[@intFromEnum(ColorHandleType.SurfaceReflection)]);
-        bindTexture(GL_TEXTURE2, gl.GL_TEXTURE_2D, source.color_handle[@intFromEnum(ColorHandleType.Emission)]);
-        bindTexture(GL_TEXTURE3, gl.GL_TEXTURE_2D, source.color_handle[@intFromEnum(ColorHandleType.NormalPositionLight)]);
-
-        platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
-        useProgramEnd(&open_gl.depth_peel_to_lighting);
-
-        endScreenFill();
-    }
-
-    // Upward phase - build succesively less detailed light buffers.
-    {
-        var dest_light_buffer_index: u32 = 1;
-        while (dest_light_buffer_index < open_gl.light_buffer_count) : (dest_light_buffer_index += 1) {
-            const source_light_buffer_index: u32 = dest_light_buffer_index - 1;
-
-            const source: *LightBuffer = &open_gl.light_buffers[source_light_buffer_index];
-            const dest: *LightBuffer = &open_gl.light_buffers[dest_light_buffer_index];
-
-            beginScreenFill(dest.write_all_framebuffer, dest.width, dest.height);
-
-            useProgramBegin(&open_gl.multi_grid_light_up);
-            bindTexture(GL_TEXTURE0, gl.GL_TEXTURE_2D, source.front_emission_texture);
-            bindTexture(GL_TEXTURE1, gl.GL_TEXTURE_2D, source.back_emission_texture);
-            bindTexture(GL_TEXTURE2, gl.GL_TEXTURE_2D, source.surface_color_texture);
-            bindTexture(GL_TEXTURE3, gl.GL_TEXTURE_2D, source.normal_position_texture);
-
-            platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
-            useProgramEnd(&open_gl.multi_grid_light_up);
-
-            endScreenFill();
-        }
-        platform.optGLActiveTexture.?(GL_TEXTURE0);
-    }
-
-    // Downward phase - transfer light from less-detailed light buffers to higher-detailed ones.
-    {
-        var source_light_buffer_index: u32 = open_gl.light_buffer_count - 1;
-        while (source_light_buffer_index > 0) : (source_light_buffer_index -= 1) {
-            const dest_light_buffer_index: u32 = source_light_buffer_index - 1;
-
-            const source: *LightBuffer = &open_gl.light_buffers[source_light_buffer_index];
-            const dest: *LightBuffer = &open_gl.light_buffers[dest_light_buffer_index];
-
-            const source_uv_step = Vector2.newI(@divFloor(1, source.width), @divFloor(1, source.height));
-
-            beginScreenFill(dest.write_emission_framebuffer, dest.width, dest.height);
-
-            gl.glEnable(gl.GL_BLEND);
-            gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE);
-
-            useMultiGridLightDownProgramBegin(&open_gl.multi_grid_light_down, source_uv_step);
-            bindTexture(GL_TEXTURE0, gl.GL_TEXTURE_2D, source.front_emission_texture);
-            bindTexture(GL_TEXTURE1, gl.GL_TEXTURE_2D, source.back_emission_texture);
-            bindTexture(GL_TEXTURE2, gl.GL_TEXTURE_2D, source.normal_position_texture);
-            bindTexture(GL_TEXTURE3, gl.GL_TEXTURE_2D, dest.surface_color_texture);
-            bindTexture(GL_TEXTURE4, gl.GL_TEXTURE_2D, dest.normal_position_texture);
-
-            platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
-            useProgramEnd(&open_gl.multi_grid_light_down.common);
-
-            endScreenFill();
-
-            gl.glDisable(gl.GL_BLEND);
-        }
-        platform.optGLActiveTexture.?(GL_TEXTURE0);
-    }
-}
-
-pub fn manageTextures() void {
-    const queue: *TextureQueue = &open_gl.texture_queue;
+pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
     const pending: TextureOpList = renderer.dequeuePending(queue);
 
-    var opt_op: ?*renderer.TextureOp = pending.first;
+    var opt_op: ?*TextureOp = pending.first;
     while (opt_op) |op| : (opt_op = op.next) {
         if (op.is_allocate) {
             op.op.allocate.result_texture.* = allocateTexture(
+                open_gl,
                 op.op.allocate.width,
                 op.op.allocate.height,
                 op.op.allocate.data,
@@ -2181,12 +1822,40 @@ pub fn manageTextures() void {
     renderer.enqueueFree(queue, pending);
 }
 
-pub fn renderCommands(
-    commands: *RenderCommands,
-    draw_region: Rectangle2i,
+pub fn beginFrame(
+    open_gl: *OpenGL,
     window_width: i32,
     window_height: i32,
-) callconv(.c) void {
+    draw_region: Rectangle2i,
+) callconv(.c) *RenderCommands {
+    var commands: *RenderCommands = &open_gl.render_commands;
+
+    commands.settings = open_gl.current_settings;
+    commands.settings.width = @intCast(draw_region.getWidth());
+    commands.settings.height = @intCast(draw_region.getHeight());
+
+    commands.window_width = window_width;
+    commands.window_height = window_height;
+    commands.draw_region = draw_region;
+
+    commands.max_push_buffer_size = open_gl.push_buffer_memory.len * @sizeOf(u8);
+    commands.push_buffer_base = &open_gl.push_buffer_memory;
+    commands.push_buffer_data_at = &open_gl.push_buffer_memory;
+    commands.max_vertex_count = open_gl.max_vertex_count;
+    commands.vertex_count = 0;
+    commands.vertex_array = open_gl.vertex_array;
+    commands.quad_bitmaps = open_gl.bitmap_array;
+    commands.white_bitmap = open_gl.white_bitmap;
+
+    return commands;
+}
+
+pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
+    std.debug.assert(open_gl.header.renderer_type == .OpenGL);
+    const draw_region: Rectangle2i = commands.draw_region;
+    const window_width: i32 = commands.window_width;
+    const window_height: i32 = commands.window_height;
+
     gl.glDepthMask(gl.GL_TRUE);
     gl.glColorMask(gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE);
     gl.glDepthFunc(gl.GL_LEQUAL);
@@ -2204,7 +1873,7 @@ pub fn renderCommands(
 
     const settings: *RenderSettings = &commands.settings;
     if (!settings.equals(&open_gl.current_settings)) {
-        changeToSettings(settings);
+        changeToSettings(open_gl, settings);
     }
 
     const use_render_targets: bool = platform.optGLBindFramebufferEXT != null;
@@ -2269,7 +1938,7 @@ pub fn renderCommands(
                     const to: *Framebuffer = &open_gl.depth_peel_resolve_buffers[on_peel_index];
 
                     if (true) {
-                        resolveMultisample(from, to, render_width, render_height);
+                        resolveMultisample(open_gl, from, to, render_width, render_height);
                     } else {
                         platform.optGLBindFramebufferEXT.?(GL_READ_FRAMEBUFFER, from.framebuffer_handle);
                         platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, to.framebuffer_handle);
@@ -2297,7 +1966,7 @@ pub fn renderCommands(
                 } else {
                     std.debug.assert(on_peel_index == max_render_target_index);
 
-                    const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(0);
+                    const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, 0);
                     bindFrameBuffer(peel_buffer, render_width, render_height);
                     on_peel_index = 0;
                 }
@@ -2334,7 +2003,7 @@ pub fn renderCommands(
                 var program: *ZBiasProgram = &open_gl.z_bias_no_depth_peel;
                 var alpha_threshold: f32 = 0.01;
                 if (peeling) {
-                    const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(on_peel_index - 1);
+                    const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, on_peel_index - 1);
 
                     program = &open_gl.z_bias_depth_peel;
                     platform.optGLActiveTexture.?(GL_TEXTURE1);
@@ -2385,8 +2054,6 @@ pub fn renderCommands(
     gl.glDisable(gl.GL_DEPTH_TEST);
     gl.glDisable(gl.GL_BLEND);
 
-    // computeLightTransport();
-
     platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, open_gl.resolve_frame_buffer.framebuffer_handle);
     gl.glViewport(0, 0, render_width, render_height);
     gl.glScissor(0, 0, render_width, render_height);
@@ -2408,7 +2075,7 @@ pub fn renderCommands(
     var texture_bind_index: u32 = GL_TEXTURE0;
     var peel_index: u32 = 0;
     while (peel_index <= max_render_target_index) : (peel_index += 1) {
-        const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(peel_index);
+        const peel_buffer: *Framebuffer = getDepthPeelReadBuffer(open_gl, peel_index);
         platform.optGLActiveTexture.?(texture_bind_index);
         texture_bind_index += 1;
         gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle[@intFromEnum(ColorHandleType.SurfaceReflection)]);
@@ -2493,22 +2160,9 @@ pub fn renderCommands(
         );
         gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
     }
-
-    manageTextures();
 }
 
-pub fn initTextureQueue(queue: *TextureQueue, texture_op_count: u32, texture_ops: [*]TextureOp) void {
-    queue.first_free = @ptrCast(texture_ops);
-
-    var texture_op_index: u32 = 0;
-    while (texture_op_index < (texture_op_count - 1)) : (texture_op_index += 1) {
-        const first_free: [*]TextureOp = @ptrCast(queue.first_free.?);
-        var op: [*]renderer.TextureOp = first_free + texture_op_index;
-        op[0].next = @ptrCast(first_free + texture_op_index + 1);
-    }
-}
-
-fn allocateTexture(width: i32, height: i32, data: ?*anyopaque) callconv(.c) RendererTexture {
+fn allocateTexture(open_gl: *OpenGL, width: i32, height: i32, data: ?*anyopaque) callconv(.c) RendererTexture {
     var handle: u32 = 0;
 
     gl.glGenTextures(1, &handle);

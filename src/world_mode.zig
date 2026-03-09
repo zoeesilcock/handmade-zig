@@ -396,14 +396,14 @@ pub fn updateAndRenderWorld(
 
     var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
     const camera: CameraParams = .get(1);
-    const mouse_position: Vector2 = Vector2.new(input.mouse_x, input.mouse_y);
+    const mouse_position: Vector2 = input.clip_space_mouse_position.xy();
     const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
     if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Left.toInt()].isDown()) {
-        const rotation_speed: f32 = 0.001 * math.PI32;
+        const rotation_speed: f32 = 0.8 * math.PI32;
         world_mode.debug_camera_orbit -= rotation_speed * d_mouse_p.x();
         world_mode.debug_camera_pitch += rotation_speed * d_mouse_p.y();
     } else if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Middle.toInt()].isDown()) {
-        const zoom_speed: f32 = (camera_offset.z() + world_mode.debug_camera_dolly) * 0.005;
+        const zoom_speed: f32 = (camera_offset.z() + world_mode.debug_camera_dolly) * 3;
         world_mode.debug_camera_dolly -= zoom_speed * d_mouse_p.y();
     }
 

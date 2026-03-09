@@ -1,13 +1,24 @@
 const std = @import("std");
 const win32 = @import("win32").everything;
+const math = @import("math.zig");
+const types = @import("types.zig");
 const shared = @import("shared.zig");
+const renderer = @import("renderer.zig");
 const opengl = @import("renderer_opengl.zig");
 
 const gl = @cImport({
     @cInclude("GL/glcorearb.h");
 });
 
-var open_gl = &opengl.open_gl;
+// Types.
+const OpenGL = opengl.OpenGL;
+const TextureQueue = renderer.TextureQueue;
+const TexturedVertex = renderer.TexturedVertex;
+const RendererTexture = renderer.RendererTexture;
+const RenderCommands = renderer.RenderCommands;
+const PlatformRenderer = renderer.PlatformRenderer;
+const PlatformRendererType = renderer.PlatformRendererType;
+const Rectangle2i = math.Rectangle2i;
 
 const INTERNAL = shared.INTERNAL;
 
@@ -181,7 +192,7 @@ const opengl_attribs = [_:0]c_int{
     0,
 };
 
-fn setPixelFormat(window_dc: win32.HDC) void {
+fn setPixelFormat(open_gl: *OpenGL, window_dc: win32.HDC) void {
     var suggested_pixel_format_index: c_int = 0;
     var extended_pick: c_uint = 0;
 
@@ -269,7 +280,7 @@ fn setPixelFormat(window_dc: win32.HDC) void {
     }
 }
 
-fn loadWglExtensions() void {
+fn loadWglExtensions(open_gl: *OpenGL) void {
     const window_class: win32.WNDCLASSW = .{
         .style = .{ .HREDRAW = 1, .VREDRAW = 1 },
         .lpfnWndProc = win32.DefWindowProcW,
@@ -301,7 +312,7 @@ fn loadWglExtensions() void {
 
         if (opt_window) |dummy_window| {
             if (win32.GetDC(dummy_window)) |dummy_window_dc| {
-                setPixelFormat(dummy_window_dc);
+                setPixelFormat(open_gl, dummy_window_dc);
 
                 const opengl_rc = win32.wglCreateContext(dummy_window_dc);
                 if (win32.wglMakeCurrent(dummy_window_dc, opengl_rc) != 0) {
@@ -346,13 +357,14 @@ fn loadWglExtensions() void {
     }
 }
 
-pub fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
+pub fn initOpenGL(opt_window_dc: ?win32.HDC, max_quad_count_per_frame: u32) *OpenGL {
+    const open_gl: *OpenGL = @ptrCast(@alignCast(rendererAllocate(@sizeOf(OpenGL))));
     var opengl_rc: ?win32.HGLRC = null;
 
-    loadWglExtensions();
+    loadWglExtensions(open_gl);
 
     if (opt_window_dc) |window_dc| {
-        setPixelFormat(window_dc);
+        setPixelFormat(open_gl, window_dc);
 
         var is_modern_context: bool = true;
 
@@ -481,17 +493,115 @@ pub fn initOpenGL(opt_window_dc: ?win32.HDC) ?win32.HGLRC {
                 _ = wglSwapIntervalEXT(1);
             }
 
-            opengl.init(info, open_gl.supports_srgb_frame_buffer);
+            opengl.init(open_gl, info, open_gl.supports_srgb_frame_buffer);
         } else {
             outputLastGLError("Failed to make modern context current");
         }
     }
 
-    return opengl_rc;
+    const max_vertex_count: u32 = max_quad_count_per_frame * 4;
+    open_gl.max_vertex_count = max_vertex_count;
+    open_gl.vertex_array = @ptrCast(@alignCast(rendererAllocate(max_vertex_count * @sizeOf(TexturedVertex))));
+    open_gl.bitmap_array = @ptrCast(@alignCast(rendererAllocate(max_vertex_count * @sizeOf(RendererTexture))));
+
+    return open_gl;
 }
 
-pub fn setVSync(enabled: bool) void {
-    _ = optWglSwapIntervalEXT.?(if (enabled) 1 else 0);
+pub fn allocateRenderer(
+    renderer_type: PlatformRendererType,
+    max_quad_count_per_frame: u32,
+    opt_window_dc: ?win32.HDC,
+) ?*PlatformRenderer {
+    var result: ?*PlatformRenderer = null;
+
+    switch (renderer_type) {
+        .Software => {
+            types.notImplemented();
+        },
+        .OpenGL => {
+            result = @ptrCast(initOpenGL(opt_window_dc, max_quad_count_per_frame));
+        },
+        .Direct3D => {
+            types.notImplemented();
+        },
+        .Metal => {
+            std.log.err("Metal doesn't run on Win32!", .{});
+        },
+    }
+
+    return result;
+}
+
+pub fn processTextureQueue(platform_renderer: *PlatformRenderer, texture_queue: *TextureQueue) void {
+    switch (platform_renderer.renderer_type) {
+        .Software => {
+            types.notImplemented();
+        },
+        .OpenGL => {
+            opengl.manageTextures(@ptrCast(@alignCast(platform_renderer)), texture_queue);
+        },
+        .Direct3D => {
+            types.notImplemented();
+        },
+        else => {
+            unreachable;
+        },
+    }
+}
+
+pub fn beginFrame(
+    platform_renderer: *PlatformRenderer,
+    window_width: i32,
+    window_height: i32,
+    draw_region: Rectangle2i,
+) ?*RenderCommands {
+    var result: ?*RenderCommands = null;
+    switch (platform_renderer.renderer_type) {
+        .Software => {
+            types.notImplemented();
+        },
+        .OpenGL => {
+            result = opengl.beginFrame(
+                @ptrCast(@alignCast(platform_renderer)),
+                window_width,
+                window_height,
+                draw_region,
+            );
+        },
+        .Direct3D => {
+            types.notImplemented();
+        },
+        else => {
+            unreachable;
+        },
+    }
+    return result;
+}
+
+pub fn endFrame(platform_renderer: *PlatformRenderer, frame: *RenderCommands) void {
+    switch (platform_renderer.renderer_type) {
+        .Software => {
+            types.notImplemented();
+        },
+        .OpenGL => {
+            const open_gl: *OpenGL = @ptrCast(@alignCast(platform_renderer));
+            opengl.endFrame(open_gl, frame);
+            _ = win32.SwapBuffers(win32.wglGetCurrentDC());
+        },
+        .Direct3D => {
+            types.notImplemented();
+        },
+        else => {
+            unreachable;
+        },
+    }
+}
+
+pub fn setVSync(open_gl: *OpenGL, enabled: bool) void {
+    _ = open_gl;
+    if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {
+        _ = wglSwapIntervalEXT(if (enabled) 1 else 0);
+    }
 }
 
 pub fn outputLastGLError(title: []const u8) void {
@@ -520,3 +630,64 @@ fn outputLastError(title: []const u8) void {
         win32.OutputDebugStringA(@ptrCast(buffer[0..length]));
     }
 }
+
+fn rendererAllocate(size: usize) ?*anyopaque {
+    const result = win32.VirtualAlloc(
+        null,
+        size,
+        win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
+        win32.PAGE_READWRITE,
+    );
+
+    return result;
+}
+
+// fn displayBufferInWindow(
+//     render_queue: *shared.PlatformWorkQueue,
+//     commands: *RenderCommands,
+//     device_context: ?win32.HDC,
+//     draw_region: Rectangle2i,
+//     temp_arena: *MemoryArena,
+//     window_width: i32,
+//     window_height: i32,
+// ) void {
+//     var temporary_memory: memory.TemporaryMemory = undefined;
+//     if (DEBUG) {
+//         // TODO: Unclear why this has to be avoided in release mode.
+//         temporary_memory = temp_arena.beginTemporaryMemory();
+//     }
+//
+//     // TODO: Do we want to check for resources like before?
+//     // if (render_group.allResourcesPresent()) {
+//     //     render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
+//     // }
+//
+//     if (software_rendering) {
+//         var output_target: renderer_software.SoftwareTexture = .{
+//             .memory = @ptrCast(back_buffer.memory.?),
+//             .width = @intCast(back_buffer.width),
+//             .height = @intCast(back_buffer.height),
+//             .pitch = @intCast(back_buffer.pitch),
+//         };
+//         renderer_software.softwareRenderCommands(render_queue, commands, &output_target, temp_arena);
+//
+//         const clear_color: math.Color = .black();
+//         opengl.displayBitmap(
+//             back_buffer.width,
+//             back_buffer.height,
+//             draw_region,
+//             output_target.pitch,
+//             back_buffer.memory,
+//             clear_color,
+//             open_gl.reserved_blit_texture,
+//         );
+//     } else {
+//         TimedBlock.beginBlock(@src(), .OpenGLRenderCommands);
+//         opengl.renderCommands(commands, draw_region, window_width, window_height);
+//         TimedBlock.endBlock(@src(), .OpenGLRenderCommands);
+//     }
+//
+//     if (DEBUG) {
+//         temp_arena.endTemporaryMemory(temporary_memory);
+//     }
+// }

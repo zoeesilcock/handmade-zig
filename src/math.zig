@@ -1422,6 +1422,10 @@ pub fn clamp01MapToRange(min: f32, max: f32, value: f32) f32 {
     return result;
 }
 
+pub fn clampBinormalMapToRange(min: f32, max: f32, value: f32) f32 {
+    return -1.0 + 2.0 * clamp01MapToRange(min, max, value);
+}
+
 pub fn clampAboveZero(value: f32) f32 {
     return if (value < 0) 0 else value;
 }

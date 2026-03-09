@@ -16,7 +16,6 @@ pub const INTERNAL = @import("build_options").internal;
 
 // Globals.
 var running: bool = false;
-var open_gl = &opengl.open_gl;
 
 // Types.
 const Color = math.Color;
@@ -29,8 +28,10 @@ const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const TexturedVertex = renderer.TexturedVertex;
 const RendererTexture = renderer.RendererTexture;
+const TextureQueue = renderer.TextureQueue;
 const CameraParams = renderer.CameraParams;
 const TextureOp = renderer.TextureOp;
+const PlatformRenderer = renderer.PlatformRenderer;
 
 const TEST_SCENE_DIM_X = 40;
 const TEST_SCENE_DIM_Y = 50;
@@ -52,12 +53,13 @@ const TestScene = struct {
     cover_texture: RendererTexture = .empty,
 };
 
-fn initTestScene(scene: *TestScene, allocator: std.mem.Allocator) void {
-    scene.grass_texture = loadBMP("test_cube_grass.bmp", allocator);
-    scene.wall_texture = loadBMP("test_cube_wall.bmp", allocator);
-    scene.tree_texture = loadBMP("test_sprite_tree.bmp", allocator);
-    scene.head_texture = loadBMP("test_sprite_head.bmp", allocator);
-    scene.cover_texture = loadBMP("test_cover_grass.bmp", allocator);
+fn initTestScene(texture_queue: *TextureQueue, scene: *TestScene, allocator: std.mem.Allocator) void {
+    loadBMP(texture_queue, "test_cube_grass.bmp", allocator, &scene.grass_texture);
+    loadBMP(texture_queue, "test_cube_wall.bmp", allocator, &scene.wall_texture);
+    loadBMP(texture_queue, "test_sprite_tree.bmp", allocator, &scene.tree_texture);
+    loadBMP(texture_queue, "test_sprite_head.bmp", allocator, &scene.head_texture);
+    loadBMP(texture_queue, "test_cover_grass.bmp", allocator, &scene.cover_texture);
+
     scene.min_position = .new(
         -0.5 * @as(f32, @floatFromInt(TEST_SCENE_DIM_X)),
         -0.5 * @as(f32, @floatFromInt(TEST_SCENE_DIM_Y)),
@@ -95,7 +97,11 @@ fn countOccupantsIn3x3(scene: *TestScene, center_x: u32, center_y: u32) u32 {
 }
 
 fn isEmpty(scene: *TestScene, x: u32, y: u32) bool {
-    return (scene.elements[y][x] == .Grass);
+    var result: bool = false;
+    if (y < scene.elements.len and x < scene.elements[0].len) {
+        result = (scene.elements[y][x] == .Grass);
+    }
+    return result;
 }
 
 fn placeRandomInUnoccupied(scene: *TestScene, element: TestSceneElement, count: u32) void {
@@ -194,7 +200,7 @@ fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
                 );
             } else {
                 var cover_index: u32 = 0;
-                while (cover_index < 5) : (cover_index += 1) {
+                while (cover_index < 3) : (cover_index += 1) {
                     const displacement: Vector2 = Vector2.new(
                         @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX)),
                         @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX)),
@@ -230,42 +236,28 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const allocator = gpa.allocator();
 
-        // Initialize OpenGL so that we can render to our window. The win32 startup code is contained within
-        // `win32_opengl.zig`, so we get the DC for our window and pass that to its `initOpenGL` function so it can
-        // do all the startup for us.
-        const opengl_dc = win32.GetDC(window);
-        _ = wgl.initOpenGL(opengl_dc);
-
-        // Ask for no vsync in case we get better timings. We may still get vsync due to either the Windows compositor
-        // or the GPU settings.
-        wgl.setVSync(false);
-
-        // Allocate memory that we're going to use for queueing render commands. The sizes used here depend entirely
-        // on how much and what kind of rendering the app does.
-        const push_buffer_size: u32 = @intCast(types.megabytes(64));
-        const push_buffer: [*]u8 = @ptrCast(allocateMemory(push_buffer_size));
-
-        const max_vertex_count: u32 = 10 * 65536;
-        const vertex_array: [*]TexturedVertex =
-            @ptrCast(@alignCast(allocateMemory(max_vertex_count * @sizeOf(TexturedVertex))));
-        const bitmap_array: [*]RendererTexture =
-            @ptrCast(@alignCast(allocateMemory(max_vertex_count * @sizeOf(RendererTexture))));
-
         // Allocate a set of operations for submitting textures. We allocate as many as we think we will want
         // in-flight at a given time. For this render test, we really only need a few, because we only load 5 or 6
         // textures. But in a real engine, you want to makesure you have as many ops allocated as textures you might
         // download during a single frame.
-        const texture_op_count: u32 = 256;
-        opengl.initTextureQueue(
-            &open_gl.texture_queue,
-            texture_op_count,
-            @ptrCast(@alignCast(allocateMemory(@sizeOf(renderer.TextureOp) * texture_op_count))),
-        );
+        var texture_queue: TextureQueue = .{};
+        var texture_op_memory: [256]TextureOp = undefined;
+        renderer.initTextureQueue(&texture_queue, @sizeOf(@TypeOf(texture_op_memory)), &texture_op_memory);
+
+        // Initialize OpenGL so that we can render to our window. The win32 startup code is contained within
+        // `win32_opengl.zig`, so we get the DC for our window and pass that to its `initOpenGL` function so it can
+        // do all the startup for us.
+        const max_quad_count_per_frame: u32 = 1 << 18;
+        const platform_renderer: *PlatformRenderer = wgl.allocateRenderer(
+            .OpenGL,
+            max_quad_count_per_frame,
+            win32.GetDC(window),
+        ).?;
 
         // Initialize the test scene. This has nothing to do with the renderer API, it's just a way of making a data
         // structure we can use later to figure out what we want to render ever frame.
         var scene: TestScene = .{};
-        initTestScene(&scene, allocator);
+        initTestScene(&texture_queue, &scene, allocator);
 
         // Setup some parameters that we use to animate the camera view.
         const camera_pitch: f32 = 0.3 * math.PI32; // Tilt of the camera.
@@ -314,19 +306,21 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
                 Matrix4x4.zRotation(camera_orbit).times(.xRotation(camera_pitch));
             const camera_ot: Vector3 = camera_o.timesV(.new(0, 0, camera_dolly));
 
-            var render_commands: RenderCommands = RenderCommands.default(
-                push_buffer_size,
-                push_buffer,
-                @intCast(draw_region.getWidth()),
-                @intCast(draw_region.getHeight()),
-                max_vertex_count,
-                vertex_array,
-                bitmap_array,
-                open_gl.white_bitmap,
-            );
+            wgl.processTextureQueue(platform_renderer, &texture_queue);
+
+            const frame: *RenderCommands = wgl.beginFrame(
+                platform_renderer,
+                window_width,
+                window_height,
+                draw_region,
+            ).?;
+
+            // Ask for no vsync in case we get better timings. We may still get vsync due to either the Windows
+            // compositor or the GPU settings.
+            frame.settings.request_vsync = false;
 
             const background_color: Color = .new(0.15, 0.15, 0.15, 0);
-            var group: RenderGroup = .begin(undefined, &render_commands, RenderGroupFlags.default, background_color);
+            var group: RenderGroup = .begin(undefined, frame, RenderGroupFlags.default, background_color);
             group.setCameraTransform(
                 camera.focal_length,
                 camera_o.getColumn(0),
@@ -341,8 +335,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             pushSimpleScene(&group, &scene);
             group.end();
 
-            opengl.renderCommands(&render_commands, draw_region, window_width, window_height);
-            _ = win32.SwapBuffers(opengl_dc);
+            wgl.endFrame(platform_renderer, frame);
 
             const seconds_elapsed: f32 = frame_stats.update();
             camera_shift_t += 0.1 * seconds_elapsed;
@@ -464,9 +457,11 @@ fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFil
 }
 
 fn loadBMP(
+    texture_queue: *TextureQueue,
     file_name: []const u8,
     allocator: std.mem.Allocator,
-) RendererTexture {
+    texture_handle: *RendererTexture,
+) void {
     var result: ?LoadedBitmap = null;
     const read_result = readEntireFile(file_name, allocator);
 
@@ -526,7 +521,6 @@ fn loadBMP(
 
     result.?.pitch = result.?.width * 4;
 
-    var texture: RendererTexture = .empty;
     const texture_op: TextureOp = .{
         .is_allocate = true,
         .op = .{
@@ -534,14 +528,11 @@ fn loadBMP(
                 .width = result.?.width,
                 .height = result.?.height,
                 .data = result.?.memory.?,
-                .result_texture = &texture,
+                .result_texture = texture_handle,
             },
         },
     };
-    renderer.addOp(&open_gl.texture_queue, &texture_op);
-    opengl.manageTextures();
-
-    return texture;
+    renderer.addOp(texture_queue, &texture_op);
 }
 
 fn allocateMemory(size: usize) ?*anyopaque {

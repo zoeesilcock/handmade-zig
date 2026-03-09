@@ -64,6 +64,9 @@ const DebugId = debug_interface.DebugId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
+const PlatformRenderer = renderer.PlatformRenderer;
+const TextureQueue = renderer.TextureQueue;
+const TextureOp = renderer.TextureOp;
 const RenderCommands = renderer.RenderCommands;
 const TexturedVertex = renderer.TexturedVertex;
 const RendererTexture = renderer.RendererTexture;
@@ -93,7 +96,6 @@ var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 var global_debug_table_: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
 var global_debug_table = &global_debug_table_;
-var open_gl = &opengl.open_gl;
 
 const OffscreenBuffer = struct {
     info: win32.BITMAPINFO = undefined,
@@ -817,7 +819,6 @@ fn processMouseInput(
     old_input: *shared.GameInput,
     new_input: *shared.GameInput,
     window: win32.HWND,
-    render_commands: *RenderCommands,
     draw_region: Rectangle2i,
     window_dimension: WindowDimension,
 ) void {
@@ -830,21 +831,19 @@ fn processMouseInput(
 
         const mouse_x: f32 = @as(f32, @floatFromInt(mouse_point.x));
         const mouse_y: f32 = @as(f32, @floatFromInt((window_dimension.height - 1) - mouse_point.y));
-        const mouse_u: f32 = math.clamp01MapToRange(
-            @as(f32, @floatFromInt(draw_region.min.x())),
-            @as(f32, @floatFromInt(draw_region.max.x())),
-            mouse_x,
+        new_input.clip_space_mouse_position = .new(
+            math.clampBinormalMapToRange(
+                @as(f32, @floatFromInt(draw_region.min.x())),
+                @as(f32, @floatFromInt(draw_region.max.x())),
+                mouse_x,
+            ),
+            math.clampBinormalMapToRange(
+                @as(f32, @floatFromInt(draw_region.min.y())),
+                @as(f32, @floatFromInt(draw_region.max.y())),
+                mouse_y,
+            ),
+            0, // TODO: Add mouse wheel support.
         );
-        const mouse_v: f32 = math.clamp01MapToRange(
-            @as(f32, @floatFromInt(draw_region.min.y())),
-            @as(f32, @floatFromInt(draw_region.max.y())),
-            mouse_y,
-        );
-
-        new_input.mouse_x = @as(f32, @floatFromInt(render_commands.settings.width)) * mouse_u;
-        new_input.mouse_y = @as(f32, @floatFromInt(render_commands.settings.height)) * mouse_v;
-
-        new_input.mouse_z = 0; // TODO: Add mouse wheel support.
 
         new_input.shift_down = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
         new_input.alt_down = win32.GetKeyState(@intFromEnum(win32.VK_MENU)) & (1 << 7) != 0;
@@ -1113,7 +1112,7 @@ fn processKeyboardInput(
 ) void {
     const vk_code = message.wParam;
     const alt_was_down: bool = if ((message.lParam & (1 << 29) != 0)) true else false;
-    const shift_was_down: bool = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
+    // const shift_was_down: bool = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
     const was_down: bool = if ((message.lParam & (1 << 30) != 0)) true else false;
     const is_down: bool = if ((message.lParam & (1 << 31) == 0)) true else false;
 
@@ -1185,24 +1184,6 @@ fn processKeyboardInput(
                         } else if (state.input_playing_index > 0) {
                             endInputPlayback(state);
                         }
-                    }
-                }
-            },
-            @intFromEnum(win32.VK_OEM_PLUS) => {
-                if (INTERNAL and is_down) {
-                    if (shift_was_down) {
-                        open_gl.debug_light_buffer_index += 1;
-                    } else {
-                        open_gl.debug_light_buffer_texture_index += 1;
-                    }
-                }
-            },
-            @intFromEnum(win32.VK_OEM_MINUS) => {
-                if (INTERNAL and is_down) {
-                    if (shift_was_down) {
-                        open_gl.debug_light_buffer_index -= 1;
-                    } else {
-                        open_gl.debug_light_buffer_texture_index -= 1;
                     }
                 }
             },
@@ -1451,61 +1432,6 @@ fn getGameBuffer() shared.OffscreenBuffer {
         .height = back_buffer.height,
         .pitch = back_buffer.pitch,
     };
-}
-
-fn displayBufferInWindow(
-    render_queue: *shared.PlatformWorkQueue,
-    commands: *RenderCommands,
-    device_context: ?win32.HDC,
-    draw_region: Rectangle2i,
-    temp_arena: *MemoryArena,
-    window_width: i32,
-    window_height: i32,
-) void {
-    var temporary_memory: memory.TemporaryMemory = undefined;
-    if (DEBUG) {
-        // TODO: Unclear why this has to be avoided in release mode.
-        temporary_memory = temp_arena.beginTemporaryMemory();
-    }
-
-    // TODO: Do we want to check for resources like before?
-    // if (render_group.allResourcesPresent()) {
-    //     render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer, &transient_state.arena);
-    // }
-
-    if (software_rendering) {
-        var output_target: renderer_software.SoftwareTexture = .{
-            .memory = @ptrCast(back_buffer.memory.?),
-            .width = @intCast(back_buffer.width),
-            .height = @intCast(back_buffer.height),
-            .pitch = @intCast(back_buffer.pitch),
-        };
-        renderer_software.softwareRenderCommands(render_queue, commands, &output_target, temp_arena);
-
-        const clear_color: math.Color = .black();
-        opengl.displayBitmap(
-            back_buffer.width,
-            back_buffer.height,
-            draw_region,
-            output_target.pitch,
-            back_buffer.memory,
-            clear_color,
-            open_gl.reserved_blit_texture,
-        );
-        _ = win32.SwapBuffers(device_context.?);
-    } else {
-        TimedBlock.beginBlock(@src(), .OpenGLRenderCommands);
-        opengl.renderCommands(commands, draw_region, window_width, window_height);
-        TimedBlock.endBlock(@src(), .OpenGLRenderCommands);
-
-        TimedBlock.beginBlock(@src(), .SwapBuffers);
-        _ = win32.SwapBuffers(device_context.?);
-        TimedBlock.endBlock(@src(), .SwapBuffers);
-    }
-
-    if (DEBUG) {
-        temp_arena.endTemporaryMemory(temporary_memory);
-    }
 }
 
 fn windowProcedure(
@@ -2141,8 +2067,15 @@ pub export fn wWinMain(
             if (!INTERNAL) {
                 toggleFullscreen(window_handle);
             }
-            const window_dc = win32.GetDC(window_handle);
-            _ = wgl.initOpenGL(window_dc);
+            const renderer_dc = win32.GetDC(window_handle);
+
+            var texture_queue: TextureQueue = .{};
+            var texture_op_memory: [256]TextureOp = undefined;
+            renderer.initTextureQueue(&texture_queue, @sizeOf(@TypeOf(texture_op_memory)), &texture_op_memory);
+
+            const max_quad_count_per_frame: u32 = 1 << 18;
+            const platform_renderer: *PlatformRenderer =
+                wgl.allocateRenderer(.OpenGL, max_quad_count_per_frame, renderer_dc).?;
 
             var high_priority_startups: [6]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 6;
             var high_priority_queue = shared.PlatformWorkQueue{};
@@ -2157,8 +2090,7 @@ pub export fn wWinMain(
             }
 
             var monitor_refresh_hz: i32 = 60;
-            const device_context = win32.GetDC(window_handle);
-            const device_refresh_rate = win32.GetDeviceCaps(device_context, win32.VREFRESH);
+            const device_refresh_rate = win32.GetDeviceCaps(renderer_dc, win32.VREFRESH);
             if (device_refresh_rate > 0) {
                 monitor_refresh_hz = device_refresh_rate;
             }
@@ -2199,20 +2131,8 @@ pub export fn wWinMain(
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
                 .debug_state = null,
+                .texture_queue = &texture_queue,
             };
-
-            const texture_op_count: u32 = 1024;
-            game_memory.texture_queue = &open_gl.texture_queue;
-            opengl.initTextureQueue(
-                game_memory.texture_queue,
-                texture_op_count,
-                @ptrCast(@alignCast(win32.VirtualAlloc(
-                    null,
-                    @sizeOf(renderer.TextureOp) * texture_op_count,
-                    win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-                    win32.PAGE_READWRITE,
-                ))),
-            );
 
             if (samples != null) {
                 // TODO: This currently doesn't support connecting controllers after the game has started.
@@ -2230,37 +2150,6 @@ pub export fn wWinMain(
                 global_debug_table.setEventRecording(game.is_valid);
 
                 running = true;
-
-                var frame_temp_arena: MemoryArena = .{};
-                const push_buffer_size: u32 = @intCast(types.megabytes(64));
-                const push_buffer_block: ?*PlatformMemoryBlock = allocateMemory(
-                    push_buffer_size,
-                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
-                );
-                const push_buffer = push_buffer_block.?.base;
-
-                const max_vertex_count: u32 = 65536;
-                const vertex_array_block: ?*PlatformMemoryBlock = allocateMemory(
-                    max_vertex_count * @sizeOf(TexturedVertex),
-                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
-                );
-                const vertex_array: [*]TexturedVertex = @ptrCast(@alignCast(vertex_array_block.?.base));
-                const bitmap_array_block: ?*PlatformMemoryBlock = allocateMemory(
-                    max_vertex_count * @sizeOf(RendererTexture),
-                    @intFromEnum(PlatformMemoryBlockFlags.NotRestored),
-                );
-                const bitmap_array: [*]RendererTexture = @ptrCast(@alignCast(bitmap_array_block.?.base));
-
-                var render_commands: RenderCommands = RenderCommands.default(
-                    push_buffer_size,
-                    push_buffer,
-                    @intCast(back_buffer.width),
-                    @intCast(back_buffer.height),
-                    max_vertex_count,
-                    vertex_array,
-                    bitmap_array,
-                    open_gl.white_bitmap,
-                );
 
                 _ = win32.ShowWindow(window_handle, win32.SW_SHOW);
 
@@ -2294,11 +2183,17 @@ pub export fn wWinMain(
                     // TimedBlock.beginBlock(@src(), .InputProcessing);
                     const window_dimension = getWindowDimension(window_handle);
                     const draw_region = math.aspectRatioFit(
-                        @intCast(render_commands.settings.width),
-                        @intCast(render_commands.settings.height),
+                        @intCast(back_buffer.width),
+                        @intCast(back_buffer.height),
                         @intCast(window_dimension.width),
                         @intCast(window_dimension.height),
                     );
+                    const frame: *RenderCommands = wgl.beginFrame(
+                        platform_renderer,
+                        window_dimension.width,
+                        window_dimension.height,
+                        draw_region,
+                    ).?;
 
                     TimedBlock.beginBlock(@src(), .ControllerClearing);
                     const old_keyboard_controller = &old_input.controllers[0];
@@ -2321,7 +2216,6 @@ pub export fn wWinMain(
                             old_input,
                             new_input,
                             window_handle,
-                            &render_commands,
                             draw_region,
                             window_dimension,
                         );
@@ -2345,16 +2239,14 @@ pub export fn wWinMain(
                             playbackInput(state, new_input);
 
                             new_input.mouse_buttons = temp.mouse_buttons;
-                            new_input.mouse_x = temp.mouse_x;
-                            new_input.mouse_y = temp.mouse_y;
-                            new_input.mouse_z = temp.mouse_z;
+                            new_input.clip_space_mouse_position = temp.clip_space_mouse_position;
                             new_input.shift_down = temp.shift_down;
                             new_input.alt_down = temp.alt_down;
                             new_input.control_down = temp.control_down;
                         }
 
                         // Send all input to game.
-                        game.updateAndRender.?(platform, &game_memory, new_input, &render_commands);
+                        game.updateAndRender.?(platform, &game_memory, new_input, frame);
 
                         if (new_input.quit_requested) {
                             running = false;
@@ -2499,7 +2391,7 @@ pub export fn wWinMain(
                         }
 
                         if (game.debugFrameEnd) |frameEndFn| {
-                            frameEndFn(&game_memory, new_input.*, &render_commands);
+                            frameEndFn(&game_memory, new_input.*, frame);
                         }
 
                         if (executable_needs_reloading) {
@@ -2549,18 +2441,8 @@ pub export fn wWinMain(
                     TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     // Output game to screen.
-                    opengl.manageTextures();
-
-                    displayBufferInWindow(
-                        &high_priority_queue,
-                        &render_commands,
-                        device_context,
-                        draw_region,
-                        &frame_temp_arena,
-                        window_dimension.width,
-                        window_dimension.height,
-                    );
-                    render_commands.reset();
+                    wgl.processTextureQueue(platform_renderer, game_memory.texture_queue);
+                    wgl.endFrame(platform_renderer, frame);
 
                     flip_wall_clock = getWallClock();
 

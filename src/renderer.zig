@@ -44,6 +44,17 @@ const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 
 pub const LIGHT_POINTS_PER_CHUNK = 24;
 
+pub const PlatformRendererType = enum(u32) {
+    Software,
+    OpenGL,
+    Direct3D,
+    Metal,
+};
+
+pub const PlatformRenderer = extern struct {
+    renderer_type: PlatformRendererType,
+};
+
 pub const TexturedVertex = extern struct {
     position: Vector4,
     light_uv: Vector2,
@@ -75,6 +86,7 @@ pub const RenderSettings = extern struct {
     pixelation_hint: bool = false,
     multisample_debug: bool = false,
     lighting_disabled: bool = false,
+    request_vsync: bool = true,
 
     pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
         const type_info = @typeInfo(@TypeOf(self.*));
@@ -141,6 +153,10 @@ pub const TextureQueue = extern struct {
 pub const RenderCommands = extern struct {
     settings: RenderSettings = .{},
 
+    window_width: i32,
+    window_height: i32,
+    draw_region: Rectangle2i,
+
     max_push_buffer_size: u32 = 0,
     push_buffer_base: [*]u8 = undefined,
     push_buffer_data_at: [*]u8 = undefined,
@@ -150,37 +166,6 @@ pub const RenderCommands = extern struct {
     vertex_array: [*]TexturedVertex = undefined,
     quad_bitmaps: [*]RendererTexture = undefined,
     white_bitmap: RendererTexture = undefined,
-
-    pub fn default(
-        max_push_buffer_size: u32,
-        push_buffer: *anyopaque,
-        width: u32,
-        height: u32,
-        max_vertex_count: u32,
-        vertex_array: [*]TexturedVertex,
-        bitmap_array: [*]RendererTexture,
-        white_bitmap: RendererTexture,
-    ) RenderCommands {
-        return RenderCommands{
-            .settings = .{
-                .width = width,
-                .height = height,
-                .depth_peel_count_hint = 4,
-                .multisampling_hint = true,
-                .pixelation_hint = false,
-            },
-
-            .max_push_buffer_size = max_push_buffer_size,
-            .push_buffer_base = @ptrCast(push_buffer),
-            .push_buffer_data_at = @ptrFromInt(@intFromPtr(push_buffer)),
-
-            .max_vertex_count = max_vertex_count,
-            .vertex_count = 0,
-            .vertex_array = vertex_array,
-            .quad_bitmaps = bitmap_array,
-            .white_bitmap = white_bitmap,
-        };
-    }
 
     pub fn reset(self: *RenderCommands) void {
         self.push_buffer_data_at = self.push_buffer_base;
@@ -1444,4 +1429,16 @@ pub fn addOp(queue: *TextureQueue, source: *const TextureOp) void {
     }
 
     queue.mutex.end();
+}
+
+pub fn initTextureQueue(queue: *TextureQueue, memory_size: usize, texture_ops_memory: *anyopaque) void {
+    const texture_op_count: usize = memory_size / @sizeOf(TextureOp);
+    queue.first_free = @ptrCast(@alignCast(texture_ops_memory));
+
+    var texture_op_index: usize = 0;
+    while (texture_op_index < (texture_op_count - 1)) : (texture_op_index += 1) {
+        const first_free: [*]TextureOp = @ptrCast(queue.first_free.?);
+        var op: [*]TextureOp = first_free + texture_op_index;
+        op[0].next = @ptrCast(first_free + texture_op_index + 1);
+    }
 }
