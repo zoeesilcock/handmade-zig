@@ -17,7 +17,6 @@ const TexturedVertex = renderer.TexturedVertex;
 const RendererTexture = renderer.RendererTexture;
 const RenderCommands = renderer.RenderCommands;
 const PlatformRenderer = renderer.PlatformRenderer;
-const PlatformRendererType = renderer.PlatformRendererType;
 const Rectangle2i = math.Rectangle2i;
 
 const INTERNAL = shared.INTERNAL;
@@ -359,6 +358,10 @@ fn loadWglExtensions(open_gl: *OpenGL) void {
 
 pub fn initOpenGL(opt_window_dc: ?win32.HDC, max_quad_count_per_frame: u32) *OpenGL {
     const open_gl: *OpenGL = @ptrCast(@alignCast(rendererAllocate(@sizeOf(OpenGL))));
+    open_gl.header.processTextureQueue = &processTextureQueue;
+    open_gl.header.beginFrame = &beginFrame;
+    open_gl.header.endFrame = &endFrame;
+
     var opengl_rc: ?win32.HGLRC = null;
 
     loadWglExtensions(open_gl);
@@ -507,94 +510,37 @@ pub fn initOpenGL(opt_window_dc: ?win32.HDC, max_quad_count_per_frame: u32) *Ope
     return open_gl;
 }
 
-pub fn allocateRenderer(
-    renderer_type: PlatformRendererType,
+pub export fn win32LoadRenderer(
     max_quad_count_per_frame: u32,
     opt_window_dc: ?win32.HDC,
-) ?*PlatformRenderer {
-    var result: ?*PlatformRenderer = null;
-
-    switch (renderer_type) {
-        .Software => {
-            types.notImplemented();
-        },
-        .OpenGL => {
-            result = @ptrCast(initOpenGL(opt_window_dc, max_quad_count_per_frame));
-        },
-        .Direct3D => {
-            types.notImplemented();
-        },
-        .Metal => {
-            std.log.err("Metal doesn't run on Win32!", .{});
-        },
-    }
-
+) callconv(.c) ?*PlatformRenderer {
+    const result: ?*PlatformRenderer = @ptrCast(initOpenGL(opt_window_dc, max_quad_count_per_frame));
     return result;
 }
 
-pub fn processTextureQueue(platform_renderer: *PlatformRenderer, texture_queue: *TextureQueue) void {
-    switch (platform_renderer.renderer_type) {
-        .Software => {
-            types.notImplemented();
-        },
-        .OpenGL => {
-            opengl.manageTextures(@ptrCast(@alignCast(platform_renderer)), texture_queue);
-        },
-        .Direct3D => {
-            types.notImplemented();
-        },
-        else => {
-            unreachable;
-        },
-    }
+fn processTextureQueue(platform_renderer: *PlatformRenderer, texture_queue: *TextureQueue) callconv(.c) void {
+    opengl.manageTextures(@ptrCast(@alignCast(platform_renderer)), texture_queue);
 }
 
-pub fn beginFrame(
+fn beginFrame(
     platform_renderer: *PlatformRenderer,
     window_width: i32,
     window_height: i32,
     draw_region: Rectangle2i,
-) ?*RenderCommands {
-    var result: ?*RenderCommands = null;
-    switch (platform_renderer.renderer_type) {
-        .Software => {
-            types.notImplemented();
-        },
-        .OpenGL => {
-            result = opengl.beginFrame(
-                @ptrCast(@alignCast(platform_renderer)),
-                window_width,
-                window_height,
-                draw_region,
-            );
-        },
-        .Direct3D => {
-            types.notImplemented();
-        },
-        else => {
-            unreachable;
-        },
-    }
+) callconv(.c) ?*RenderCommands {
+    const result: ?*RenderCommands = opengl.beginFrame(
+        @ptrCast(@alignCast(platform_renderer)),
+        window_width,
+        window_height,
+        draw_region,
+    );
     return result;
 }
 
-pub fn endFrame(platform_renderer: *PlatformRenderer, frame: *RenderCommands) void {
-    switch (platform_renderer.renderer_type) {
-        .Software => {
-            types.notImplemented();
-        },
-        .OpenGL => {
-            const open_gl: *OpenGL = @ptrCast(@alignCast(platform_renderer));
-            opengl.endFrame(open_gl, frame);
-            _ = win32.SwapBuffers(win32.wglGetCurrentDC());
-        },
-        .Direct3D => {
-            types.notImplemented();
-        },
-        else => {
-            unreachable;
-        },
-    }
+fn endFrame(platform_renderer: *PlatformRenderer, frame: *RenderCommands) callconv(.c) void {
+    const open_gl: *OpenGL = @ptrCast(@alignCast(platform_renderer));
+    opengl.endFrame(open_gl, frame);
+    _ = win32.SwapBuffers(win32.wglGetCurrentDC());
 }
 
 pub fn setVSync(open_gl: *OpenGL, enabled: bool) void {

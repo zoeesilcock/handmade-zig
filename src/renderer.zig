@@ -44,15 +44,22 @@ const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 
 pub const LIGHT_POINTS_PER_CHUNK = 24;
 
-pub const PlatformRendererType = enum(u32) {
-    Software,
-    OpenGL,
-    Direct3D,
-    Metal,
-};
+const processTextureQueueType = fn (
+    platform_renderer: *PlatformRenderer,
+    texture_queue: *TextureQueue,
+) callconv(.c) void;
+const beginFrameType = fn (
+    platform_renderer: *PlatformRenderer,
+    window_width: i32,
+    window_height: i32,
+    draw_region: Rectangle2i,
+) callconv(.c) ?*RenderCommands;
+const endFrameType = fn (platform_renderer: *PlatformRenderer, frame: *RenderCommands) callconv(.c) void;
 
 pub const PlatformRenderer = extern struct {
-    renderer_type: PlatformRendererType,
+    processTextureQueue: *const processTextureQueueType = undefined,
+    beginFrame: *const beginFrameType = undefined,
+    endFrame: *const endFrameType = undefined,
 };
 
 pub const TexturedVertex = extern struct {
@@ -189,17 +196,6 @@ pub const ManualSortKey = extern struct {
     always_behind: u32 = 0,
 };
 
-pub const CameraParams = struct {
-    focal_length: f32 = 0,
-
-    pub fn get(focal_length: f32) CameraParams {
-        var result: CameraParams = .{};
-        result.focal_length = focal_length;
-
-        return result;
-    }
-};
-
 pub const RenderEntryType = enum(u16) {
     RenderEntryTexturedQuads,
     RenderEntryFullClear,
@@ -246,6 +242,24 @@ pub const RenderSetup = extern struct {
     clip_alpha_end_distance: f32 = 0,
 };
 
+pub const FogParams = struct {
+    direction: Vector3 = .zero(),
+    start_distance: f32 = 0,
+    end_distance: f32 = 0,
+
+    pub const default: FogParams = .{};
+};
+
+pub const AlphaClipParams = struct {
+    delta_start_distance: f32,
+    delta_end_distance: f32,
+
+    pub const default: AlphaClipParams = .{
+        .delta_start_distance = -100,
+        .delta_end_distance = -99,
+    };
+};
+
 pub const TransientClipRect = extern struct {
     render_group: *RenderGroup,
     old_clip_rect: Rectangle2,
@@ -279,6 +293,8 @@ pub const TransientClipRect = extern struct {
 pub const CameraTransformFlag = enum(u32) {
     IsOrthographic = 0x1,
     IsDebug = 0x2,
+    UsesAlphaClip = 0x4,
+    UsesFog = 0x8,
 };
 
 pub const ObjectTransform = extern struct {
@@ -1297,6 +1313,7 @@ pub const RenderGroup = extern struct {
             null,
             null,
             null,
+            null,
         );
     }
 
@@ -1310,13 +1327,16 @@ pub const RenderGroup = extern struct {
         flags: u32,
         opt_near_clip_plane: ?f32,
         opt_far_clip_plane: ?f32,
-        opt_fog: ?bool,
+        opt_fog_params: ?*FogParams,
+        opt_alpha_clip_params: ?*AlphaClipParams,
     ) void {
-        const fog: bool = opt_fog orelse false;
         const near_clip_plane: f32 = opt_near_clip_plane orelse 0.1;
         const far_clip_plane: f32 = opt_far_clip_plane orelse 100;
+        const fog_params: *const FogParams = opt_fog_params orelse &.default;
+        const alpha_clip_params: *const AlphaClipParams = opt_alpha_clip_params orelse &.default;
         const is_ortho: bool = (flags & @intFromEnum(CameraTransformFlag.IsOrthographic)) != 0;
         const is_debug: bool = (flags & @intFromEnum(CameraTransformFlag.IsDebug)) != 0;
+
         const b: f32 = math.safeRatio1(
             @as(f32, @floatFromInt(self.commands.settings.width)),
             @as(f32, @floatFromInt(self.commands.settings.height)),
@@ -1331,17 +1351,11 @@ pub const RenderGroup = extern struct {
             proj = .perspectiveProjection(b, focal_length, near_clip_plane, far_clip_plane);
         }
 
-        if (fog) {
-            new_setup.fog_direction = camera_z.negated();
-            new_setup.fog_start_distance = 8;
-            new_setup.fog_end_distance = 20;
-            new_setup.clip_alpha_start_distance = near_clip_plane + 2;
-            new_setup.clip_alpha_end_distance = near_clip_plane + 2.25;
-        } else {
-            new_setup.fog_direction = .zero();
-            new_setup.clip_alpha_start_distance = near_clip_plane - 100;
-            new_setup.clip_alpha_end_distance = near_clip_plane - 99;
-        }
+        new_setup.fog_direction = fog_params.direction;
+        new_setup.fog_start_distance = fog_params.start_distance;
+        new_setup.fog_end_distance = fog_params.end_distance;
+        new_setup.clip_alpha_start_distance = near_clip_plane + alpha_clip_params.delta_start_distance;
+        new_setup.clip_alpha_end_distance = near_clip_plane + alpha_clip_params.delta_end_distance;
 
         render_transform.x = camera_x;
         render_transform.y = camera_y;

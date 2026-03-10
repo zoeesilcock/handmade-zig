@@ -22,7 +22,6 @@ const ObjectTransform = renderer.ObjectTransform;
 const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const RenderCommands = renderer.RenderCommands;
-const CameraParams = renderer.CameraParams;
 
 const SceneLayerFlags = enum(u32) {
     AtInfinity = 0x1,
@@ -395,6 +394,7 @@ fn renderLayeredScene(
             0,
             -0.1,
             1000,
+            null,
             null,
         );
     }

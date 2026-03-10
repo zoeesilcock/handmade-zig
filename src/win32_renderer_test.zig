@@ -4,8 +4,8 @@ const math = @import("math.zig");
 const types = @import("types.zig");
 const intrinsics = @import("intrinsics.zig");
 const renderer = @import("renderer.zig");
-const opengl = @import("renderer_opengl.zig");
-const wgl = @import("win32_opengl.zig");
+const cam = @import("camera.zig");
+const win32_renderer = @import("win32_renderer.zig");
 
 const c = @cImport({
     @cInclude("stdlib.h");
@@ -26,11 +26,10 @@ const Rectangle2i = math.Rectangle2i;
 const RenderCommands = renderer.RenderCommands;
 const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
-const TexturedVertex = renderer.TexturedVertex;
 const RendererTexture = renderer.RendererTexture;
 const TextureQueue = renderer.TextureQueue;
-const CameraParams = renderer.CameraParams;
 const TextureOp = renderer.TextureOp;
+const Camera = cam.Camera;
 const PlatformRenderer = renderer.PlatformRenderer;
 
 const TEST_SCENE_DIM_X = 40;
@@ -244,30 +243,18 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         var texture_op_memory: [256]TextureOp = undefined;
         renderer.initTextureQueue(&texture_queue, @sizeOf(@TypeOf(texture_op_memory)), &texture_op_memory);
 
-        // Initialize OpenGL so that we can render to our window. The win32 startup code is contained within
-        // `win32_opengl.zig`, so we get the DC for our window and pass that to its `initOpenGL` function so it can
-        // do all the startup for us.
+        // Load the renderer DLL and initialize the default renderer.
         const max_quad_count_per_frame: u32 = 1 << 18;
-        const platform_renderer: *PlatformRenderer = wgl.allocateRenderer(
-            .OpenGL,
-            max_quad_count_per_frame,
-            win32.GetDC(window),
-        ).?;
+        const platform_renderer: *PlatformRenderer =
+            win32_renderer.initDefaultRenderer(window, max_quad_count_per_frame);
 
         // Initialize the test scene. This has nothing to do with the renderer API, it's just a way of making a data
         // structure we can use later to figure out what we want to render ever frame.
         var scene: TestScene = .{};
         initTestScene(&texture_queue, &scene, allocator);
 
-        // Setup some parameters that we use to animate the camera view.
-        const camera_pitch: f32 = 0.3 * math.PI32; // Tilt of the camera.
-        var camera_orbit: f32 = 0; // Rotation of the camera around the subject.
-        const camera_dolly: f32 = 20; // Distance away from the subject.
-        const camera_drop_shift: f32 = -1; // Amount to drop the camera down from the center of the subject.
-        const camera_focal_length: f32 = 3; // Amount of perspective foreshortening.
-
-        const near_clip_plane: f32 = 0.2; // Closest you can be to the camera and still be seen.
-        const far_clip_plane: f32 = 1000; // Furthest you can be from the camera and still be seen.
+        // Get camera parameters for viewing a scene (at meter scale) from a reasonable 3rd-person perspective.
+        var camera: Camera = .standard;
 
         var camera_shift_t: f32 = 0; // Accumulator used in the rendering loop to animate the camera.
 
@@ -277,38 +264,38 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         var camera_is_panning: bool = false;
 
         while (running) {
+            // Get the size of the window.
             var client_rect: win32.RECT = undefined;
             _ = win32.GetClientRect(window, &client_rect);
             const window_width: i32 = client_rect.right - client_rect.left;
             const window_height: i32 = client_rect.bottom - client_rect.top;
 
-            const fog: bool = false;
-
+            // Fit to 16:9 drawing region. This is not necessary if you don't want a fixed aspect ratio, you can just
+            // use the whole thing.
             const draw_region: Rectangle2i =
                 math.aspectRatioFit(16, 9, @intCast(window_width), @intCast(window_height));
 
-            const camera: CameraParams = .get(camera_focal_length);
-
+            // Test rotation and panning by animating the camera location in two sequential circles: one orbit,
+            // then one panned circle with the orientation locked to forward.
             if (camera_shift_t > math.TAU32) {
                 camera_shift_t -= math.TAU32;
                 camera_is_panning = !camera_is_panning;
             }
-            var camera_offset: Vector3 = .new(0, 0, camera_drop_shift);
 
             if (camera_is_panning) {
-                camera_offset =
-                    camera_offset.plus(Vector3.new(@cos(camera_shift_t), -0.2 + @sin(camera_shift_t), 0).scaledTo(10));
+                camera.offset =
+                    camera.offset.plus(Vector3.new(@cos(camera_shift_t), -0.2 + @sin(camera_shift_t), 0).scaledTo(10));
             } else {
-                camera_orbit = camera_shift_t;
+                camera.orbit = camera_shift_t;
             }
 
-            var camera_o: Matrix4x4 =
-                Matrix4x4.zRotation(camera_orbit).times(.xRotation(camera_pitch));
-            const camera_ot: Vector3 = camera_o.timesV(.new(0, 0, camera_dolly));
+            // Before rendering, kick off any texture downloads we may need. This isn't really necessary per frame in
+            // this app because it doesn't stream textures in during rendering.
+            platform_renderer.processTextureQueue(platform_renderer, &texture_queue);
 
-            wgl.processTextureQueue(platform_renderer, &texture_queue);
-
-            const frame: *RenderCommands = wgl.beginFrame(
+            // Tell the rendere to being rendering a framethat occupies `draw_region` inside a window that is
+            // `window_width` by `window_height` in size.
+            const frame: *RenderCommands = platform_renderer.beginFrame(
                 platform_renderer,
                 window_width,
                 window_height,
@@ -319,23 +306,21 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             // compositor or the GPU settings.
             frame.settings.request_vsync = false;
 
+            // Draw a single render group, that starts with a clear screen.
             const background_color: Color = .new(0.15, 0.15, 0.15, 0);
             var group: RenderGroup = .begin(undefined, frame, RenderGroupFlags.default, background_color);
-            group.setCameraTransform(
-                camera.focal_length,
-                camera_o.getColumn(0),
-                camera_o.getColumn(1),
-                camera_o.getColumn(2),
-                camera_ot.plus(camera_offset),
-                0,
-                near_clip_plane,
-                far_clip_plane,
-                fog,
-            );
+
+            // Specify where to view the scene from.
+            camera.viewFromCamera(&group);
+
+            // Give the renderer everything that makes up our scene.
             pushSimpleScene(&group, &scene);
+
+            // Finish the render group.
             group.end();
 
-            wgl.endFrame(platform_renderer, frame);
+            // Tell the renderer to actually render the frame.
+            platform_renderer.endFrame(platform_renderer, frame);
 
             const seconds_elapsed: f32 = frame_stats.update();
             camera_shift_t += 0.1 * seconds_elapsed;

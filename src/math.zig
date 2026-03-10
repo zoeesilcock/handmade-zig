@@ -1286,6 +1286,17 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             };
         }
 
+        pub fn translation(t: Vector3) Matrix4x4 {
+            return .{
+                .values = .{
+                    .new(1, 0, 0, t.x()),
+                    .new(0, 1, 0, t.y()),
+                    .new(0, 0, 1, t.z()),
+                    .new(0, 0, 0, 1),
+                },
+            };
+        }
+
         pub fn transpose(self: Self) Self {
             var result: Self = .{};
 

@@ -40,21 +40,21 @@ const DEBUG_WINDOW_ACTIVE_OPACITY = 255;
 const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
-const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
 const DEBUG = shared.DEBUG;
 
+const std = @import("std");
+const math = @import("math.zig");
+const intrinsics = @import("intrinsics.zig");
+const win32 = @import("win32").everything;
+const win32_renderer = @import("win32_renderer.zig");
 const shared = @import("shared.zig");
 const types = @import("types.zig");
 const memory = @import("memory.zig");
-const renderer_software = @import("renderer_software.zig");
 const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
-const asset = @import("asset.zig");
-const sort = @import("sort.zig");
-const opengl = @import("renderer_opengl.zig");
 const debug_interface = @import("debug_interface.zig");
 
 // Types
@@ -68,20 +68,11 @@ const PlatformRenderer = renderer.PlatformRenderer;
 const TextureQueue = renderer.TextureQueue;
 const TextureOp = renderer.TextureOp;
 const RenderCommands = renderer.RenderCommands;
-const TexturedVertex = renderer.TexturedVertex;
-const RendererTexture = renderer.RendererTexture;
 const Rectangle2i = math.Rectangle2i;
 const TicketMutex = types.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const LightingBox = renderer.LightingBox;
-const LightingPoint = lighting.LightingPoint;
-
-const std = @import("std");
-const math = @import("math.zig");
-const intrinsics = @import("intrinsics.zig");
-const win32 = @import("win32").everything;
-const wgl = @import("win32_opengl.zig");
 
 // Globals.
 pub var platform: shared.Platform = undefined;
@@ -2075,7 +2066,7 @@ pub export fn wWinMain(
 
             const max_quad_count_per_frame: u32 = 1 << 18;
             const platform_renderer: *PlatformRenderer =
-                wgl.allocateRenderer(.OpenGL, max_quad_count_per_frame, renderer_dc).?;
+                win32_renderer.initDefaultRenderer(window_handle, max_quad_count_per_frame);
 
             var high_priority_startups: [6]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 6;
             var high_priority_queue = shared.PlatformWorkQueue{};
@@ -2188,7 +2179,7 @@ pub export fn wWinMain(
                         @intCast(window_dimension.width),
                         @intCast(window_dimension.height),
                     );
-                    const frame: *RenderCommands = wgl.beginFrame(
+                    const frame: *RenderCommands = platform_renderer.beginFrame(
                         platform_renderer,
                         window_dimension.width,
                         window_dimension.height,
@@ -2441,8 +2432,8 @@ pub export fn wWinMain(
                     TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     // Output game to screen.
-                    wgl.processTextureQueue(platform_renderer, game_memory.texture_queue);
-                    wgl.endFrame(platform_renderer, frame);
+                    platform_renderer.processTextureQueue(platform_renderer, game_memory.texture_queue);
+                    platform_renderer.endFrame(platform_renderer, frame);
 
                     flip_wall_clock = getWallClock();
 

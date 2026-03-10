@@ -2268,6 +2268,7 @@ fn debugStart(
         -10000,
         10000,
         null,
+        null,
     );
 
     debug_state.backing_transform = ObjectTransform.defaultFlat();

@@ -12,6 +12,7 @@ const Package = enum {
     Game,
     Executable,
     Library,
+    RendererLibrary,
     AssetBuilder,
     HHAEdit,
     Preprocessor,
@@ -46,6 +47,10 @@ pub fn build(b: *std.Build) void {
 
     if (package == .All or package == .Game or package == .Library) {
         addLibrary(b, build_options, target, optimize, package);
+    }
+
+    if (package == .All or package == .Game or package == .RendererLibrary) {
+        addRendererLibrary(b, build_options, target, optimize, package);
     }
 
     if (package == .All or package == .AssetBuilder) {
@@ -179,14 +184,40 @@ fn addLibrary(
     }
 
     b.installArtifact(lib_handmade);
+}
 
-    if (builtin.zig_version.minor < 13) {
-        // Copy the game library to the bin directory where the runtime expects it to be.
-        // From Zig version 0.13.0 this is done automatically.
-        const dll_copy_path = b.fmt("bin/{s}", .{lib_handmade.out_filename});
-        const install_dll = b.addInstallFileWithDir(lib_handmade.getEmittedBin(), .prefix, dll_copy_path);
-        b.getInstallStep().dependOn(&install_dll.step);
+fn addRendererLibrary(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    package: Package,
+) void {
+    const lib_renderer = b.addLibrary(.{
+        .name = "win32-handmade-opengl",
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/win32_opengl.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = false,
+        }),
+        .version = .{ .major = 0, .minor = 1, .patch = 0 },
+    });
+    lib_renderer.stack_size = 0x100000; // 1MB.
+    lib_renderer.root_module.addOptions("build_options", build_options);
+
+    // Add the win32 API wrapper.
+    const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
+    lib_renderer.root_module.addImport("win32", zigwin32);
+
+    if (package == .All) {
+        // Emit generated assembly of the library.
+        const lib_assembly_file = b.addInstallFile(lib_renderer.getEmittedAsm(), "bin/win32-handmade-opengl-dll.asm");
+        b.getInstallStep().dependOn(&lib_assembly_file.step);
     }
+
+    b.installArtifact(lib_renderer);
 }
 
 fn addAssetBuilder(

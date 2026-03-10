@@ -343,7 +343,7 @@ const LightBuffer = extern struct {
 };
 
 pub const OpenGL = extern struct {
-    header: PlatformRenderer = .{ .renderer_type = .OpenGL },
+    header: PlatformRenderer = .{},
 
     current_settings: RenderSettings = .{},
 
@@ -478,8 +478,6 @@ fn colorUB(color: u32) void {
 }
 
 pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void {
-    open_gl.header.renderer_type = .OpenGL;
-
     open_gl.current_settings.depth_peel_count_hint = 4;
     open_gl.current_settings.multisampling_hint = true;
     open_gl.current_settings.pixelation_hint = false;
@@ -1851,7 +1849,6 @@ pub fn beginFrame(
 }
 
 pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
-    std.debug.assert(open_gl.header.renderer_type == .OpenGL);
     const draw_region: Rectangle2i = commands.draw_region;
     const window_width: i32 = commands.window_width;
     const window_height: i32 = commands.window_height;

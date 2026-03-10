@@ -11,6 +11,7 @@ const asset = @import("asset.zig");
 const asset_rendering = @import("asset_rendering.zig");
 const audio = @import("audio.zig");
 const renderer = @import("renderer.zig");
+const cam = @import("camera.zig");
 const lighting = @import("lighting.zig");
 const particles = @import("particles.zig");
 const random = @import("random.zig");
@@ -48,7 +49,7 @@ const LightingSolution = lighting.LightingSolution;
 const LightingTextures = lighting.LightingTextures;
 const LightingPointState = renderer.LightingPointState;
 const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
-const CameraParams = renderer.CameraParams;
+const Camera = cam.Camera;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
 const AssetTagId = file_formats.AssetTagId;
@@ -395,7 +396,8 @@ pub fn updateAndRenderWorld(
     const result = false;
 
     var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
-    const camera: CameraParams = .get(1);
+    const focal_length: f32 = 1;
+
     const mouse_position: Vector2 = input.clip_space_mouse_position.xy();
     const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
     if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Left.toInt()].isDown()) {
@@ -438,16 +440,27 @@ pub fn updateAndRenderWorld(
     );
     var camera_ot: Vector3 =
         camera_o.timesV(camera_offset.plus(delta_from_sim).plus(.new(0, 0, world_mode.camera_dolly)));
+    const camera_z: Vector3 = camera_o.getColumn(2);
+    var fog: renderer.FogParams = .{
+        .direction = camera_z.negated(),
+        .start_distance = 8,
+        .end_distance = 20,
+    };
+    var alpha_clip: renderer.AlphaClipParams = .{
+        .delta_start_distance = 2,
+        .delta_end_distance = 2.25,
+    };
     render_group.setCameraTransform(
-        camera.focal_length,
+        focal_length,
         camera_o.getColumn(0),
         camera_o.getColumn(1),
-        camera_o.getColumn(2),
+        camera_z,
         camera_ot,
         0,
         near_clip_plane,
         far_clip_plane,
-        true,
+        &fog,
+        &alpha_clip,
     );
 
     if (world_mode.use_debug_camera) {
@@ -455,7 +468,7 @@ pub fn updateAndRenderWorld(
             Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
         camera_ot = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.debug_camera_dolly)));
         render_group.setCameraTransform(
-            camera.focal_length,
+            focal_length,
             camera_o.getColumn(0),
             camera_o.getColumn(1),
             camera_o.getColumn(2),
@@ -463,7 +476,8 @@ pub fn updateAndRenderWorld(
             @intFromEnum(renderer.CameraTransformFlag.IsDebug),
             near_clip_plane,
             far_clip_plane,
-            false,
+            null,
+            null,
         );
     }
 
