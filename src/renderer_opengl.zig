@@ -2024,7 +2024,16 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 while (vertex_index < (entry.vertex_array_offset + 4 * entry.quad_count)) : (vertex_index += 4) {
                     const texture: RendererTexture = commands.quad_bitmaps[vertex_index >> 2];
                     gl.glBindTexture(gl.GL_TEXTURE_2D, @intCast(texture.handle));
-                    platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, @intCast(vertex_index), 4);
+
+                    if (false) {
+                        platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, @intCast(vertex_index), 4);
+                    } else {
+                        var indices = [_]u32{
+                            vertex_index + 0, vertex_index + 1, vertex_index + 2,
+                            vertex_index + 1, vertex_index + 3, vertex_index + 2,
+                        };
+                        platform.optGLDrawElements.?(gl.GL_TRIANGLES, 6, gl.GL_UNSIGNED_INT, &indices);
+                    }
                 }
                 gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 

@@ -227,6 +227,7 @@ pub fn pushCubeLight(
         position,
         radius,
         color.toColor(1),
+        null,
         emission,
         opt_light_store,
     );

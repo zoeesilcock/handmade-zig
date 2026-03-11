@@ -35,10 +35,63 @@ const PlatformRenderer = renderer.PlatformRenderer;
 const TEST_SCENE_DIM_X = 40;
 const TEST_SCENE_DIM_Y = 50;
 
+pub const wall_uv: renderer.CubeUVLayout = .{
+    .bot_t0 = .new(0, 0),
+    .bot_t1 = .new(0.25, 0),
+    .bot_t2 = .new(0.25, 0.25),
+    .bot_t3 = .new(0, 0.25),
+
+    .mid_t0 = [1]Vector2{.new(0.5, 0.25)} ** 4,
+    .mid_t1 = [1]Vector2{.new(0.75, 0.25)} ** 4,
+    .mid_t2 = [1]Vector2{.new(0.75, 0.75)} ** 4,
+    .mid_t3 = [1]Vector2{.new(0.5, 0.75)} ** 4,
+
+    .top_t0 = .new(0, 0.75),
+    .top_t1 = .new(0.25, 0.75),
+    .top_t2 = .new(0.25, 1),
+    .top_t3 = .new(0, 1),
+};
+
+pub const wall_start_uv: renderer.CubeUVLayout = .{
+    .bot_t0 = .new(0, 0),
+    .bot_t1 = .new(0.25, 0),
+    .bot_t2 = .new(0.25, 0.25),
+    .bot_t3 = .new(0, 0.25),
+
+    .mid_t0 = [1]Vector2{.new(0.25, 0.25)} ** 4,
+    .mid_t1 = [1]Vector2{.new(0.5, 0.25)} ** 4,
+    .mid_t2 = [1]Vector2{.new(0.5, 0.75)} ** 4,
+    .mid_t3 = [1]Vector2{.new(0.25, 0.75)} ** 4,
+
+    .top_t0 = .new(0, 0.75),
+    .top_t1 = .new(0.25, 0.75),
+    .top_t2 = .new(0.25, 1),
+    .top_t3 = .new(0, 1),
+};
+
+pub const wall_end_uv: renderer.CubeUVLayout = .{
+    .bot_t0 = .new(0, 0),
+    .bot_t1 = .new(0.25, 0),
+    .bot_t2 = .new(0.25, 0.25),
+    .bot_t3 = .new(0, 0.25),
+
+    .mid_t0 = [1]Vector2{.new(0.75, 0.25)} ** 4,
+    .mid_t1 = [1]Vector2{.new(1, 0.25)} ** 4,
+    .mid_t2 = [1]Vector2{.new(1, 0.75)} ** 4,
+    .mid_t3 = [1]Vector2{.new(0.75, 0.75)} ** 4,
+
+    .top_t0 = .new(0, 0.75),
+    .top_t1 = .new(0.25, 0.75),
+    .top_t2 = .new(0.25, 1),
+    .top_t3 = .new(0, 1),
+};
+
 const TestSceneElement = enum(u32) {
     Grass,
     Tree,
     Wall,
+    WallStart,
+    WallEnd,
 };
 
 const TestScene = struct {
@@ -129,8 +182,15 @@ fn placeRectangularWall(scene: *TestScene, min_x: u32, min_y: u32, max_x: u32, m
                     break;
                 }
             } else {
-                scene.elements[min_y][x] = .Wall;
-                scene.elements[max_y][x] = .Wall;
+                var element_type: TestSceneElement = .Wall;
+                if (x == min_x) {
+                    element_type = .WallStart;
+                } else if (x == max_x) {
+                    element_type = .WallEnd;
+                }
+
+                scene.elements[min_y][x] = element_type;
+                scene.elements[max_y][x] = element_type;
             }
         }
 
@@ -154,13 +214,20 @@ fn placeRectangularWall(scene: *TestScene, min_x: u32, min_y: u32, max_x: u32, m
 fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
     c.srand(1234);
 
+    const wall_radius: f32 = 1;
     var y: u32 = 0;
     while (y < TEST_SCENE_DIM_Y) : (y += 1) {
         var x: u32 = 0;
         while (x < TEST_SCENE_DIM_X) : (x += 1) {
             const element: TestSceneElement = scene.elements[y][x];
-            const z: f32 = 0.4 * @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX));
-            const r: f32 = 0.5 + 0.5 * @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX));
+            var z: f32 = 0.4 * @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX));
+            var r: f32 = 0.5 + 0.5 * @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX));
+
+            if (element == .Wall or element == .WallStart or element == .WallEnd) {
+                z = 0.4;
+                r = 1;
+            }
+
             const z_radius: f32 = 2;
             const color: Color = .new(r, 1, 1, 1);
             const position: Vector3 = scene.min_position.plus(.new(@floatFromInt(x), @floatFromInt(y), z));
@@ -172,46 +239,67 @@ fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
                 color,
                 null,
                 null,
+                null,
             );
 
             const ground_position: Vector3 = position.plus(.new(0, 0, z_radius));
             if (element == .Tree) {
-                group.pushSprite(
+                group.pushUpright(
                     scene.tree_texture,
-                    true,
                     ground_position,
                     .new(2, 2.5),
-                    .zero(),
-                    .one(),
+                    .white(),
+                    null,
+                    null,
                     null,
                     null,
                     null,
                 );
             } else if (element == .Wall) {
-                const wall_radius: f32 = 1;
                 group.pushCube(
                     scene.wall_texture,
                     ground_position.plus(.new(0, 0, wall_radius)),
                     .new(0.5, 0.5, wall_radius),
                     color,
+                    &wall_uv,
+                    null,
+                    null,
+                );
+            } else if (element == .WallStart) {
+                group.pushCube(
+                    scene.wall_texture,
+                    ground_position.plus(.new(0, 0, wall_radius)),
+                    .new(0.5, 0.5, wall_radius),
+                    color,
+                    &wall_start_uv,
+                    null,
+                    null,
+                );
+            } else if (element == .WallEnd) {
+                group.pushCube(
+                    scene.wall_texture,
+                    ground_position.plus(.new(0, 0, wall_radius)),
+                    .new(0.5, 0.5, wall_radius),
+                    color,
+                    &wall_end_uv,
                     null,
                     null,
                 );
             } else {
                 var cover_index: u32 = 0;
-                while (cover_index < 3) : (cover_index += 1) {
+                while (cover_index < 60) : (cover_index += 1) {
                     const displacement: Vector2 = Vector2.new(
                         @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX)),
                         @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX)),
                     ).minus(.new(0.4, 0.4)).scaledTo(0.8);
 
-                    group.pushSprite(
+                    group.pushUpright(
                         scene.cover_texture,
-                        true,
                         ground_position.plus(displacement.toVector3(0)),
                         .new(0.4, 0.4),
-                        .zero(),
-                        .one(),
+                        null,
+                        null,
+                        null,
                         null,
                         null,
                         null,
@@ -221,7 +309,7 @@ fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
         }
     }
 
-    group.pushSprite(scene.head_texture, true, .new(0, 2, 3), .new(4, 4), .zero(), .one(), null, null, null);
+    group.pushUpright(scene.head_texture, .new(0, 2, 3), .new(4, 4), null, null, null, null, null, null);
 }
 
 fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
@@ -261,7 +349,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         // The camera goes through two animation tests in the loop.
         // First it does a rotation around the scene (camera_is_panning == false) with no panning.
         // Thene it does a pand around the scene (camera_is_panning == true) with no rotation.
-        var camera_is_panning: bool = false;
+        var camera_is_panning: bool = true;
 
         while (running) {
             // Get the size of the window.
@@ -283,8 +371,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             }
 
             if (camera_is_panning) {
-                camera.offset =
-                    camera.offset.plus(Vector3.new(@cos(camera_shift_t), -0.2 + @sin(camera_shift_t), 0).scaledTo(10));
+                camera.offset = Vector3.new(@cos(camera_shift_t), -0.2 + @sin(camera_shift_t), 0).scaledTo(10);
             } else {
                 camera.orbit = camera_shift_t;
             }

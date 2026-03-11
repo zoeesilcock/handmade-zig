@@ -153,6 +153,8 @@ const GLBindVertexArray: type = fn (array: u32) callconv(.winapi) void;
 pub var optGLBindVertexArray: ?*const GLBindVertexArray = null;
 const GLDrawArrays: type = fn (mode: u32, first: i32, count: i32) callconv(.winapi) void;
 pub var optGLDrawArrays: ?*const GLDrawArrays = null;
+const GLDrawElements: type = fn (mode: u32, count: i32, index_type: u32, indices: ?*anyopaque) callconv(.winapi) void;
+pub var optGLDrawElements: ?*const GLDrawElements = null;
 const GLDebugProcArb = ?*const fn (source: u32, message_type: u32, id: u32, severity: u32, length: i32, message: [*]const u8, user_param: ?*const anyopaque) callconv(.winapi) void;
 const GLDebugMessageCallbackARB: type = fn (callback: GLDebugProcArb, user_param: ?*const anyopaque) callconv(.winapi) void;
 pub var optGLDebugMessageCallbackARB: ?*const GLDebugMessageCallbackARB = null;
@@ -434,6 +436,7 @@ pub fn initOpenGL(opt_window_dc: ?win32.HDC, max_quad_count_per_frame: u32) *Ope
             optGLGenVertexArrays = @ptrCast(win32.wglGetProcAddress("glGenVertexArrays"));
             optGLBindVertexArray = @ptrCast(win32.wglGetProcAddress("glBindVertexArray"));
             optGLDrawArrays = @ptrCast(win32.wglGetProcAddress("glDrawArrays"));
+            optGLDrawElements = @ptrCast(win32.wglGetProcAddress("glDrawElements"));
             optGLDebugMessageCallbackARB = @ptrCast(win32.wglGetProcAddress("glDebugMessageCallbackARB"));
             optGLDebugMessageControlARB = @ptrCast(win32.wglGetProcAddress("glDebugMessageControlARB"));
             optGLGenBuffers = @ptrCast(win32.wglGetProcAddress("glGenBuffers"));

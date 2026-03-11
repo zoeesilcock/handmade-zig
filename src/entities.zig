@@ -542,6 +542,7 @@ pub fn updateAndRenderEntities(
                             ),
                             piece.color,
                             null,
+                            null,
                             @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else {

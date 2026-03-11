@@ -1126,6 +1126,7 @@ pub fn lightingTest(
                             .new(1, 1, 0, 1),
                             null,
                             null,
+                            null,
                         );
                         break;
                     }
@@ -1150,6 +1151,7 @@ pub fn lightingTest(
                             .new(1, 1, 0, 1),
                             null,
                             null,
+                            null,
                         );
                         break;
                     }
@@ -1172,6 +1174,7 @@ pub fn lightingTest(
                     0.01,
                     0.02,
                     color,
+                    null,
                     null,
                     null,
                 );

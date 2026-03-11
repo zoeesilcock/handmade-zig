@@ -330,6 +330,41 @@ const PushBufferResult = extern struct {
     header: ?*RenderEntryHeader = null,
 };
 
+pub const CubeUVLayout = struct {
+    bot_t0: Vector2,
+    bot_t1: Vector2,
+    bot_t2: Vector2,
+    bot_t3: Vector2,
+
+    // Order: +X, +Y, -X, -Y.
+    mid_t0: [4]Vector2,
+    mid_t1: [4]Vector2,
+    mid_t2: [4]Vector2,
+    mid_t3: [4]Vector2,
+
+    top_t0: Vector2,
+    top_t1: Vector2,
+    top_t2: Vector2,
+    top_t3: Vector2,
+
+    pub const default: CubeUVLayout = .{
+        .bot_t0 = .new(0, 0),
+        .bot_t1 = .new(0.25, 0),
+        .bot_t2 = .new(0.25, 0.25),
+        .bot_t3 = .new(0, 0.25),
+
+        .mid_t0 = [1]Vector2{.new(0, 0.25)} ** 4,
+        .mid_t1 = [1]Vector2{.new(0.25, 0.25)} ** 4,
+        .mid_t2 = [1]Vector2{.new(0.25, 0.75)} ** 4,
+        .mid_t3 = [1]Vector2{.new(0, 0.75)} ** 4,
+
+        .top_t0 = .new(0, 0.75),
+        .top_t1 = .new(0.25, 0.75),
+        .top_t2 = .new(0.25, 1),
+        .top_t3 = .new(0, 1),
+    };
+};
+
 const RenderTransform = extern struct {
     position: Vector3 = .zero(),
     x: Vector3 = .zero(),
@@ -365,6 +400,7 @@ pub const RenderGroup = extern struct {
     flags: u32,
     missing_resource_count: u32,
 
+    world_up: Vector3,
     last_setup: RenderSetup = .{},
     game_transform: RenderTransform = .{},
     debug_transform: RenderTransform = .{},
@@ -416,6 +452,7 @@ pub const RenderGroup = extern struct {
             .flags = flags,
             .missing_resource_count = 0,
             .commands = commands,
+            .world_up = .new(0, 0, 1),
             .current_quads = undefined,
             .lighting_enabled = false,
             .light_bounds = .zero(),
@@ -790,6 +827,9 @@ pub const RenderGroup = extern struct {
                     position,
                     radius,
                     color,
+                    null,
+                    null,
+                    null,
                 );
             } else {
                 self.assets.loadBitmap(id, false);
@@ -804,9 +844,11 @@ pub const RenderGroup = extern struct {
         position: Vector3,
         radius: Vector3,
         color: Color,
+        opt_uv_layout: ?*const CubeUVLayout,
         opt_emission: ?f32,
         opt_light_store_in: ?*LightingPointState,
     ) void {
+        const uv_layout: *const CubeUVLayout = opt_uv_layout orelse &.default;
         const emission = opt_emission orelse 0;
         var opt_light_store: ?*LightingPointState = opt_light_store_in;
 
@@ -833,21 +875,6 @@ pub const RenderGroup = extern struct {
             const p5: Vector4 = .new(px, ny, nz, 0);
             const p6: Vector4 = .new(px, py, nz, 0);
             const p7: Vector4 = .new(nx, py, nz, 0);
-
-            const bot_t0: Vector2 = .new(0, 0);
-            const bot_t1: Vector2 = .new(0.25, 0);
-            const bot_t2: Vector2 = .new(0.25, 0.25);
-            const bot_t3: Vector2 = .new(0, 0.25);
-
-            const mid_t0: Vector2 = .new(0, 0.25);
-            const mid_t1: Vector2 = .new(0.25, 0.25);
-            const mid_t2: Vector2 = .new(0.25, 0.75);
-            const mid_t3: Vector2 = .new(0, 0.75);
-
-            const top_t0: Vector2 = .new(0, 0.75);
-            const top_t1: Vector2 = .new(0.25, 0.75);
-            const top_t2: Vector2 = .new(0.25, 1);
-            const top_t3: Vector2 = .new(0, 1);
 
             // const top_color: Color = storeColor(color);
             // const bottom_color: Color = .new(0, 0, 0, top_color.a());
@@ -899,16 +926,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p7,
-                mid_t0,
+                uv_layout.mid_t0[2],
                 cb,
                 p4,
-                mid_t1,
+                uv_layout.mid_t1[2],
                 cb,
                 p0, //
-                mid_t2,
+                uv_layout.mid_t2[2],
                 ct,
                 p3, //
-                mid_t3,
+                uv_layout.mid_t3[2],
                 ct,
                 opt_emission,
                 light_count,
@@ -920,16 +947,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p1, //
-                mid_t3,
+                uv_layout.mid_t3[0],
                 ct,
                 p5,
-                mid_t0,
+                uv_layout.mid_t0[0],
                 cb,
                 p6,
-                mid_t1,
+                uv_layout.mid_t1[0],
                 cb,
                 p2, //
-                mid_t2,
+                uv_layout.mid_t2[0],
                 ct,
                 opt_emission,
                 light_count,
@@ -941,16 +968,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p4,
-                mid_t0,
+                uv_layout.mid_t0[3],
                 cb,
                 p5,
-                mid_t1,
+                uv_layout.mid_t1[3],
                 cb,
                 p1, //
-                mid_t2,
+                uv_layout.mid_t2[3],
                 ct,
                 p0, //
-                mid_t3,
+                uv_layout.mid_t3[3],
                 ct,
                 opt_emission,
                 light_count,
@@ -962,16 +989,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p2, //
-                mid_t3,
+                uv_layout.mid_t3[1],
                 ct,
                 p6,
-                mid_t0,
+                uv_layout.mid_t0[1],
                 cb,
                 p7,
-                mid_t1,
+                uv_layout.mid_t1[1],
                 cb,
                 p3, //
-                mid_t2,
+                uv_layout.mid_t2[1],
                 ct,
                 opt_emission,
                 light_count,
@@ -983,16 +1010,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p7,
-                bot_t0,
+                uv_layout.bot_t0,
                 bottom_color,
                 p6,
-                bot_t1,
+                uv_layout.bot_t1,
                 bottom_color,
                 p5,
-                bot_t2,
+                uv_layout.bot_t2,
                 bottom_color,
                 p4,
-                bot_t3,
+                uv_layout.bot_t3,
                 bottom_color,
                 opt_emission,
                 light_count,
@@ -1004,16 +1031,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p0,
-                top_t0,
+                uv_layout.top_t0,
                 top_color,
                 p1,
-                top_t1,
+                uv_layout.top_t1,
                 top_color,
                 p2,
-                top_t2,
+                uv_layout.top_t2,
                 top_color,
                 p3,
-                top_t3,
+                uv_layout.top_t3,
                 top_color,
                 opt_emission,
                 light_count,
@@ -1179,44 +1206,37 @@ pub const RenderGroup = extern struct {
         }
     }
 
-    pub fn pushSprite(
+    pub fn pushUpright(
         self: *RenderGroup,
         texture: RendererTexture,
-        upright: bool,
         ground_position: Vector3,
         size: Vector2,
-        min_uv: Vector2,
-        max_uv: Vector2,
         opt_color: ?Color,
         opt_x_axis: ?Vector2,
         opt_y_axis: ?Vector2,
+        opt_min_uv: ?Vector2,
+        opt_max_uv: ?Vector2,
+        opt_t_camera_up: ?f32,
     ) void {
         if (self.getCurrentQuads(1)) |_| {
             const color: Color = opt_color orelse .white();
             const x_axis2: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
             const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
+            const min_uv: Vector2 = opt_min_uv orelse .new(0, 0);
+            const max_uv: Vector2 = opt_max_uv orelse .new(1, 1);
+            const t_camera_up: f32 = opt_t_camera_up orelse 0.5;
 
-            var z_bias: f32 = 0;
+            const camera_up: Vector3 = self.game_transform.y;
+            const x_axis_hybrid: Vector3 = self.game_transform.x;
+            const y_axis_hybrid: Vector3 = self.world_up.lerp(camera_up, t_camera_up).normalizeOrZero();
+            const z_bias: f32 = t_camera_up * self.world_up.dotProduct(camera_up) * size.y();
+
+            const x_axis =
+                x_axis_hybrid.scaledTo(x_axis2.x()).plus(y_axis_hybrid.scaledTo(x_axis2.y())).scaledTo(size.x());
+            const y_axis =
+                x_axis_hybrid.scaledTo(y_axis2.x()).plus(y_axis_hybrid.scaledTo(y_axis2.y())).scaledTo(size.y());
+
             const premultiplied_color: Color = storeColor(color);
-            var x_axis: Vector3 = x_axis2.toVector3(0).scaledTo(size.x());
-            var y_axis: Vector3 = y_axis2.toVector3(0).scaledTo(size.y());
-
-            if (upright) {
-                z_bias = size.y();
-                const x_axis0 = Vector3.new(x_axis2.x(), 0, x_axis2.y()).scaledTo(size.x());
-                const y_axis0 = Vector3.new(y_axis2.x(), 0, y_axis2.y()).scaledTo(size.y());
-                const x_axis1 =
-                    self.game_transform.x.scaledTo(x_axis2.x())
-                        .plus(self.game_transform.y.scaledTo(x_axis2.y())).scaledTo(size.x());
-                const y_axis1 =
-                    self.game_transform.x.scaledTo(y_axis2.x())
-                        .plus(self.game_transform.y.scaledTo(y_axis2.y())).scaledTo(size.y());
-
-                x_axis = x_axis0.lerp(x_axis1, 0.25);
-                y_axis = y_axis0.lerp(y_axis1, 0.25);
-                z_bias = 0.25 * size.y();
-            }
-
             const vertex_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
 
             const min_position: Vector3 = ground_position.minus(x_axis.scaledTo(0.5));
@@ -1224,6 +1244,54 @@ pub const RenderGroup = extern struct {
             const min_x_max_y: Vector4 = min_position.plus(y_axis).toVector4(z_bias);
             const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
             const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(z_bias);
+
+            self.pushQuad(
+                texture,
+                min_x_min_y,
+                .new(min_uv.x(), min_uv.y()),
+                vertex_color,
+                max_x_min_y,
+                .new(max_uv.x(), min_uv.y()),
+                vertex_color,
+                max_x_max_y,
+                .new(max_uv.x(), max_uv.y()),
+                vertex_color,
+                min_x_max_y,
+                .new(min_uv.x(), max_uv.y()),
+                vertex_color,
+                null,
+                null,
+                null,
+            );
+        }
+    }
+
+    pub fn pushSprite(
+        self: *RenderGroup,
+        texture: RendererTexture,
+        center_position: Vector3,
+        size: Vector2,
+        opt_color: ?Color,
+        opt_x_axis: ?Vector3,
+        opt_y_axis: ?Vector3,
+        opt_min_uv: ?Vector2,
+        opt_max_uv: ?Vector2,
+    ) void {
+        if (self.getCurrentQuads(1)) |_| {
+            const color: Color = opt_color orelse .white();
+            const x_axis: Vector3 = (opt_x_axis orelse Vector3.new(1, 0, 0)).scaledTo(size.x());
+            const y_axis: Vector3 = (opt_y_axis orelse Vector3.new(0, 1, 0)).scaledTo(size.y());
+            const min_uv: Vector2 = opt_min_uv orelse .new(0, 0);
+            const max_uv: Vector2 = opt_max_uv orelse .new(1, 1);
+
+            const premultiplied_color: Color = storeColor(color);
+            const vertex_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
+
+            const min_position: Vector3 = center_position.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5));
+            const min_x_min_y: Vector4 = min_position.toVector4(0);
+            const min_x_max_y: Vector4 = min_position.plus(y_axis).toVector4(0);
+            const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
+            const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(0);
 
             self.pushQuad(
                 texture,

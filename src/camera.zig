@@ -7,13 +7,16 @@ const Vector3 = math.Vector3;
 const RenderGroup = renderer.RenderGroup;
 
 pub const Camera = struct {
+    offset: Vector3,
+    shift: Vector3,
+
     pitch: f32,
     orbit: f32,
     dolly: f32,
+
     focal_length: f32,
     near_clip_plane: f32,
     far_clip_plane: f32,
-    offset: Vector3,
 
     fog_start: f32,
     fog_end: f32,
@@ -22,13 +25,14 @@ pub const Camera = struct {
     clip_alpha_end: f32,
 
     pub const standard: Camera = .{
+        .offset = .new(0, 0, 0),
+        .shift = .new(0, 0, -1),
         .pitch = 0.3 * math.PI32, // Tilt of the camera.
         .orbit = 0, // Rotation of the camera around the subject.
         .dolly = 20, // Distance away from the subject.
         .focal_length = 3, // Amount of perspective foreshortening.
         .near_clip_plane = 0.2, // Closest you can be to the camera and still be seen.
         .far_clip_plane = 1000, // Furthest you can be from the camera and still be seen.
-        .offset = .new(0, 0, -1),
         .fog_start = 8,
         .fog_end = 20,
         .clip_alpha_start = 2,
@@ -36,7 +40,7 @@ pub const Camera = struct {
     };
 
     pub fn getObjectMatrix(self: *Camera) Matrix4x4 {
-        return buildObjectMatrix(self.offset, self.orbit, self.pitch, self.dolly);
+        return buildObjectMatrix(self.offset.plus(self.shift), self.orbit, self.pitch, self.dolly);
     }
 
     pub fn viewFromCamera(self: *Camera, group: *RenderGroup) void {
