@@ -239,6 +239,10 @@ pub const Assets = struct {
 
     operation_lock: u32,
 
+    white_pixel: u32,
+    // TODO: Replace this with a more robust system.
+    next_free_texture_handle: u32,
+
     pub fn allocate(
         memory_size: MemoryIndex,
         game_state: *shared.State,
@@ -255,8 +259,19 @@ pub const Assets = struct {
         );
         var arena: *MemoryArena = &assets.non_restored_memory;
 
-        assets.texture_queue = texture_queue;
         assets.game_state = game_state;
+        assets.texture_queue = texture_queue;
+
+        assets.white_pixel = 0xffffffff;
+        const op: TextureOp = .{
+            .update = .{
+                .texture = renderer.referToTexture(0, 1, 1),
+                .data = @ptrCast(&assets.white_pixel),
+            },
+        };
+        renderer.addOp(assets.texture_queue, &op);
+
+        assets.next_free_texture_handle = 1;
         assets.memory_sentinel = AssetMemoryBlock{
             .flags = 0,
             .size = 0,
@@ -606,15 +621,16 @@ pub const Assets = struct {
                         self.removeAssetHeaderFromList(header.?);
 
                         if (header.?.asset_type == .Bitmap) {
-                            const op = TextureOp{
-                                .is_allocate = false,
-                                .op = .{
-                                    .deallocate = .{
-                                        .texture = header.?.data.bitmap.texture_handle,
-                                    },
-                                },
-                            };
-                            renderer.addOp(self.texture_queue, &op);
+                            // TODO: Recycle texture handles here instead.
+                            // const op = TextureOp{
+                            //     .is_allocate = false,
+                            //     .op = .{
+                            //         .deallocate = .{
+                            //             .texture = header.?.data.bitmap.texture_handle,
+                            //         },
+                            //     },
+                            // };
+                            // renderer.addOp(self.texture_queue, &op);
                         }
 
                         opt_block = @ptrCast(@as([*]AssetMemoryBlock, @ptrCast(@alignCast(asset.header))) - 1);
@@ -797,6 +813,13 @@ pub const Assets = struct {
                         bitmap.pitch = types.safeTruncateUInt32ToUInt16(size.section);
                         bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
                         bitmap.texture_handle = .empty;
+                        // TODO: Get an available texture handle from a free list here.
+                        bitmap.texture_handle = renderer.referToTexture(
+                            @intCast(self.next_free_texture_handle),
+                            bitmap.width,
+                            bitmap.height,
+                        );
+                        self.next_free_texture_handle += 1;
 
                         var work = LoadAssetWork{
                             .task = undefined,
@@ -1405,17 +1428,11 @@ fn doLoadAssetWorkDirectly(
             .Bitmap => {
                 const bitmap: *LoadedBitmap = &work.asset.header.?.data.bitmap;
                 const op: TextureOp = .{
-                    .is_allocate = true,
-                    .op = .{
-                        .allocate = .{
-                            .width = bitmap.width,
-                            .height = bitmap.height,
-                            .data = @ptrCast(bitmap.memory),
-                            .result_texture = &bitmap.texture_handle,
-                        },
+                    .update = .{
+                        .texture = bitmap.texture_handle,
+                        .data = @ptrCast(bitmap.memory),
                     },
                 };
-
                 renderer.addOp(work.texture_queue.?, &op);
             },
         }

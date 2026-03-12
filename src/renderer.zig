@@ -43,6 +43,7 @@ const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
 const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 
 pub const LIGHT_POINTS_PER_CHUNK = 24;
+pub const TEXTURE_ARRAY_DIM = 512.0;
 
 const processTextureQueueType = fn (
     platform_renderer: *PlatformRenderer,
@@ -71,18 +72,7 @@ pub const TexturedVertex = extern struct {
     // TODO: Doesn't need to be per-vertex - move this into its own per-primitive buffer.
     normal: Vector3,
     light_index: u16 = 0,
-};
-
-const TextureGroup = struct {
-    max_vertex_count: u32,
-    texture_count: u32,
-    dimension: [2]u32,
-};
-
-const MemoryLayout = struct {
-    max_push_buffer_size: u32,
-    texture_group_count: u32,
-    texture_groups: [*]TextureGroup,
+    texture_index: u16 = 0,
 };
 
 pub const RenderSettings = extern struct {
@@ -113,9 +103,15 @@ pub const RenderSettings = extern struct {
 };
 
 pub const RendererTexture = extern struct {
-    handle: u64,
+    index: u32,
+    width: u16,
+    height: u16,
 
-    pub const empty: RendererTexture = .{ .handle = 0 };
+    pub const empty: RendererTexture = .{
+        .index = 0,
+        .width = 0,
+        .height = 0,
+    };
 };
 
 pub const LightingBox = extern struct {
@@ -142,12 +138,7 @@ pub const TextureOpList = extern struct {
 
 pub const TextureOp = struct {
     next: ?*TextureOp = null,
-    is_allocate: bool,
-
-    op: union {
-        allocate: TextureOpAllocate,
-        deallocate: TextureOpDeallocate,
-    },
+    update: TextureOpUpdate,
 };
 
 pub const TextureQueue = extern struct {
@@ -171,8 +162,10 @@ pub const RenderCommands = extern struct {
     max_vertex_count: u32 = 0,
     vertex_count: u32 = 0,
     vertex_array: [*]TexturedVertex = undefined,
-    quad_bitmaps: [*]RendererTexture = undefined,
-    white_bitmap: RendererTexture = undefined,
+
+    max_index_count: u32,
+    index_count: u32,
+    index_array: [*]u16 = undefined,
 
     pub fn reset(self: *RenderCommands) void {
         self.push_buffer_data_at = self.push_buffer_base;
@@ -180,15 +173,9 @@ pub const RenderCommands = extern struct {
     }
 };
 
-const TextureOpAllocate = struct {
-    width: i32,
-    height: i32,
-    data: *anyopaque,
-    result_texture: *RendererTexture,
-};
-
-const TextureOpDeallocate = struct {
+const TextureOpUpdate = struct {
     texture: RendererTexture,
+    data: *anyopaque,
 };
 
 pub const ManualSortKey = extern struct {
@@ -222,6 +209,7 @@ pub const RenderEntryTexturedQuads = extern struct {
     setup: RenderSetup,
     quad_count: u32,
     vertex_array_offset: u32, // Uses 4 vertices per quad.
+    index_array_offset: u32, // Uses 6 indices per quad.
 };
 
 pub const RenderEntryLightingTransfer = extern struct {
@@ -408,6 +396,8 @@ pub const RenderGroup = extern struct {
     commands: *RenderCommands,
 
     current_quads: ?*RenderEntryTexturedQuads,
+
+    white_texture: RendererTexture = .empty,
 
     pub fn beginDepthPeel_(self: *RenderGroup, color: Color) void {
         if (self.pushRenderElement(RenderEntryBeginPeels)) |entry| {
@@ -612,6 +602,14 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn getCurrentQuads(self: *RenderGroup, quad_count: u32) ?*RenderEntryTexturedQuads {
+        const vertex_count: u32 = quad_count * 4;
+        const index_count: u32 = quad_count * 6;
+
+        const max_quads_per_batch: u32 = (std.math.maxInt(u16) - 1) / 4;
+        if (self.current_quads != null and (self.current_quads.?.quad_count + quad_count) > max_quads_per_batch) {
+            self.current_quads = null;
+        }
+
         if (self.current_quads == null) {
             self.current_quads = @ptrCast(@alignCast(
                 self.pushRenderElement_(
@@ -626,7 +624,9 @@ pub const RenderGroup = extern struct {
         }
 
         var result = self.current_quads;
-        if ((self.commands.vertex_count + 4 * quad_count) > self.commands.max_vertex_count) {
+        if ((self.commands.vertex_count + vertex_count) > self.commands.max_vertex_count and
+            (self.commands.index_count + index_count) > self.commands.max_index_count)
+        {
             result = null;
         }
 
@@ -639,16 +639,16 @@ pub const RenderGroup = extern struct {
         self: *RenderGroup,
         texture: RendererTexture,
         p0: Vector4,
-        uv0: Vector2,
+        uv0_in: Vector2,
         c0: u32,
         p1: Vector4,
-        uv1: Vector2,
+        uv1_in: Vector2,
         c1: u32,
         p2: Vector4,
-        uv2: Vector2,
+        uv2_in: Vector2,
         c2: u32,
         p3: Vector4,
-        uv3: Vector2,
+        uv3_in: Vector2,
         c3: u32,
         opt_emission: ?f32,
         opt_light_count: ?u16,
@@ -668,11 +668,26 @@ pub const RenderGroup = extern struct {
         entry.?.quad_count += 1;
 
         const vertex_index: u32 = commands.vertex_count;
+        const index_index: u32 = commands.index_count;
         commands.vertex_count += 4;
+        commands.index_count += 6;
         std.debug.assert(vertex_index <= commands.max_vertex_count);
+        std.debug.assert(index_index <= commands.max_index_count);
 
-        commands.quad_bitmaps[vertex_index >> 2] = texture;
         var vert: [*]TexturedVertex = commands.vertex_array + vertex_index;
+        var index: [*]u16 = commands.index_array + index_index;
+
+        const inverse_uv: Vector2 = .new(
+            @as(f32, @floatFromInt(texture.width)) / TEXTURE_ARRAY_DIM,
+            @as(f32, @floatFromInt(texture.height)) / TEXTURE_ARRAY_DIM,
+        );
+        const uv0: Vector2 = inverse_uv.hadamardProduct(uv0_in);
+        const uv1: Vector2 = inverse_uv.hadamardProduct(uv1_in);
+        const uv2: Vector2 = inverse_uv.hadamardProduct(uv2_in);
+        const uv3: Vector2 = inverse_uv.hadamardProduct(uv3_in);
+
+        const texture_index: u16 = @truncate(texture.index);
+        std.debug.assert(@as(u32, @intCast(texture_index)) == texture.index);
 
         var e10 = p1.minus(p0);
         _ = e10.setZ(e10.z() + e10.w());
@@ -693,24 +708,39 @@ pub const RenderGroup = extern struct {
         vert[0].uv = uv3;
         vert[0].color = c3;
         vert[0].light_index = light_index;
+        vert[0].texture_index = texture_index;
 
         vert[1].position = p0;
         vert[1].normal = n0;
         vert[1].uv = uv0;
         vert[1].color = c0;
         vert[1].light_index = light_index;
+        vert[1].texture_index = texture_index;
 
         vert[2].position = p2;
         vert[2].normal = n2;
         vert[2].uv = uv2;
         vert[2].color = c2;
         vert[2].light_index = light_index;
+        vert[2].texture_index = texture_index;
 
         vert[3].position = p1;
         vert[3].normal = n1;
         vert[3].uv = uv1;
         vert[3].color = c1;
         vert[3].light_index = light_index;
+        vert[3].texture_index = texture_index;
+
+        const base_index: u32 = vertex_index - entry.?.vertex_array_offset;
+        const vi: u16 = @intCast(base_index);
+        std.debug.assert(@as(u32, @intCast(vi)) == base_index);
+
+        index[0] = vi + 0;
+        index[1] = vi + 1;
+        index[2] = vi + 2;
+        index[3] = vi + 1;
+        index[4] = vi + 3;
+        index[5] = vi + 2;
     }
 
     fn pushQuadUnpackedColors(
@@ -1072,7 +1102,7 @@ pub const RenderGroup = extern struct {
             const max_uv: Vector2 = .splat(1);
 
             self.pushQuad(
-                self.commands.white_bitmap,
+                self.white_texture,
                 .new(min_position.x(), min_position.y(), z, 0),
                 .new(min_uv.x(), min_uv.y()),
                 packed_color,
@@ -1167,7 +1197,7 @@ pub const RenderGroup = extern struct {
         thickness: f32,
     ) void {
         if (self.getCurrentQuads(6) != null) {
-            const texture: RendererTexture = self.commands.white_bitmap;
+            const texture: RendererTexture = self.white_texture;
             const offset_position: Vector3 = object_transform.offset_position;
 
             const nx: f32 = offset_position.x() + rectangle.min.x();
@@ -1523,4 +1553,18 @@ pub fn initTextureQueue(queue: *TextureQueue, memory_size: usize, texture_ops_me
         var op: [*]TextureOp = first_free + texture_op_index;
         op[0].next = @ptrCast(first_free + texture_op_index + 1);
     }
+}
+
+pub fn referToTexture(index: u32, width: u32, height: u32) RendererTexture {
+    const result: RendererTexture = .{
+        .index = index,
+        .width = @intCast(width),
+        .height = @intCast(height),
+    };
+
+    std.debug.assert(index == result.index);
+    std.debug.assert(width == result.width);
+    std.debug.assert(height == result.height);
+
+    return result;
 }

@@ -223,7 +223,7 @@ pub fn pushCubeLight(
     opt_light_store: ?*LightingPointState,
 ) void {
     group.pushCube(
-        group.commands.white_bitmap,
+        group.white_texture,
         position,
         radius,
         color.toColor(1),

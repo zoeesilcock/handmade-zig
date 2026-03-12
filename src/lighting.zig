@@ -1055,7 +1055,7 @@ pub fn lightingTest(
     }
 
     _ = group.getCurrentQuads(solution.debug_line_count);
-    const white_texture: RendererTexture = group.commands.white_bitmap;
+    const white_texture: RendererTexture = group.white_texture;
     var debug_line_index: u32 = 0;
     while (debug_line_index < solution.debug_line_count) : (debug_line_index += 1) {
         const line: *DebugLine = &solution.debug_lines[debug_line_index];
@@ -1226,7 +1226,7 @@ fn outputLightingPointsRecurse(
     depth: u32,
 ) void {
     if (depth == 0 or box.child_count == 0) {
-        const white_texture: RendererTexture = group.commands.white_bitmap;
+        const white_texture: RendererTexture = group.white_texture;
 
         var box_surface_index: u32 = 0;
         while (box_surface_index < 6) : (box_surface_index += 1) {

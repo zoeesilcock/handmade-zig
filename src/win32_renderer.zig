@@ -4,8 +4,9 @@ const renderer = @import("renderer.zig");
 pub const LOAD_RENDERER_ENTRY = "win32LoadRenderer";
 
 pub const win32LoadRendererType = ?*const fn (
-    max_quad_count_per_frame: u32,
     opt_window_dc: ?win32.HDC,
+    max_quad_count_per_frame: u32,
+    max_texture_count: u32,
 ) callconv(.c) ?*renderer.PlatformRenderer;
 
 pub fn loadRendererDLL(file_name: [*:0]const u8) win32LoadRendererType {
@@ -18,7 +19,11 @@ pub fn loadRendererDLL(file_name: [*:0]const u8) win32LoadRendererType {
     return win32LoadRenderer;
 }
 
-pub fn initDefaultRenderer(window: win32.HWND, max_quad_count_per_frame: u32) *renderer.PlatformRenderer {
+pub fn initDefaultRenderer(
+    window: win32.HWND,
+    max_quad_count_per_frame: u32,
+    max_texture_count: u32,
+) *renderer.PlatformRenderer {
     // Load the renderer DLL and get the address of the init function.
     const win32LoadRenderer: win32LoadRendererType = loadRendererDLL("win32-handmade-opengl.dll");
 
@@ -36,8 +41,9 @@ pub fn initDefaultRenderer(window: win32.HWND, max_quad_count_per_frame: u32) *r
     // `win32_handmade_opengl.dll`, so we get the DC for our window and pass that to its `win32LoadRenderer`
     // function so it can do all the startup for us.
     const platform_renderer: *renderer.PlatformRenderer = win32LoadRenderer.?(
-        max_quad_count_per_frame,
         win32.GetDC(window),
+        max_quad_count_per_frame,
+        max_texture_count,
     ).?;
 
     return platform_renderer;

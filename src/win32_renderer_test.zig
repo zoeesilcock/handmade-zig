@@ -106,11 +106,11 @@ const TestScene = struct {
 };
 
 fn initTestScene(texture_queue: *TextureQueue, scene: *TestScene, allocator: std.mem.Allocator) void {
-    loadBMP(texture_queue, "test_cube_grass.bmp", allocator, &scene.grass_texture);
-    loadBMP(texture_queue, "test_cube_wall.bmp", allocator, &scene.wall_texture);
-    loadBMP(texture_queue, "test_sprite_tree.bmp", allocator, &scene.tree_texture);
-    loadBMP(texture_queue, "test_sprite_head.bmp", allocator, &scene.head_texture);
-    loadBMP(texture_queue, "test_cover_grass.bmp", allocator, &scene.cover_texture);
+    scene.grass_texture = loadBMP(texture_queue, "test_cube_grass.bmp", allocator, 1);
+    scene.wall_texture = loadBMP(texture_queue, "test_cube_wall.bmp", allocator, 2);
+    scene.tree_texture = loadBMP(texture_queue, "test_sprite_tree.bmp", allocator, 3);
+    scene.head_texture = loadBMP(texture_queue, "test_sprite_head.bmp", allocator, 4);
+    scene.cover_texture = loadBMP(texture_queue, "test_cover_grass.bmp", allocator, 5);
 
     scene.min_position = .new(
         -0.5 * @as(f32, @floatFromInt(TEST_SCENE_DIM_X)),
@@ -333,8 +333,9 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
 
         // Load the renderer DLL and initialize the default renderer.
         const max_quad_count_per_frame: u32 = 1 << 18;
+        const max_texture_count: u32 = 256;
         const platform_renderer: *PlatformRenderer =
-            win32_renderer.initDefaultRenderer(window, max_quad_count_per_frame);
+            win32_renderer.initDefaultRenderer(window, max_quad_count_per_frame, max_texture_count);
 
         // Initialize the test scene. This has nothing to do with the renderer API, it's just a way of making a data
         // structure we can use later to figure out what we want to render ever frame.
@@ -392,6 +393,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             // Ask for no vsync in case we get better timings. We may still get vsync due to either the Windows
             // compositor or the GPU settings.
             frame.settings.request_vsync = false;
+            frame.settings.lighting_disabled = true;
 
             // Draw a single render group, that starts with a clear screen.
             const background_color: Color = .new(0.15, 0.15, 0.15, 0);
@@ -532,8 +534,8 @@ fn loadBMP(
     texture_queue: *TextureQueue,
     file_name: []const u8,
     allocator: std.mem.Allocator,
-    texture_handle: *RendererTexture,
-) void {
+    texture_index: u32,
+) RendererTexture {
     var result: ?LoadedBitmap = null;
     const read_result = readEntireFile(file_name, allocator);
 
@@ -593,18 +595,21 @@ fn loadBMP(
 
     result.?.pitch = result.?.width * 4;
 
+    const texture: RendererTexture = renderer.referToTexture(
+        texture_index,
+        @intCast(result.?.width),
+        @intCast(result.?.height),
+    );
+
     const texture_op: TextureOp = .{
-        .is_allocate = true,
-        .op = .{
-            .allocate = .{
-                .width = result.?.width,
-                .height = result.?.height,
-                .data = result.?.memory.?,
-                .result_texture = texture_handle,
-            },
+        .update = .{
+            .texture = texture,
+            .data = result.?.memory.?,
         },
     };
     renderer.addOp(texture_queue, &texture_op);
+
+    return texture;
 }
 
 fn allocateMemory(size: usize) ?*anyopaque {
@@ -664,7 +669,7 @@ pub export fn WinMain(
     _ = cmd_line;
     _ = cmd_show;
 
-    const window_class: win32.WNDCLASSW = .{
+    const window_class: win32.WNDCLASSA = .{
         .style = .{ .HREDRAW = 1, .VREDRAW = 1, .OWNDC = 1 },
         .lpfnWndProc = windowProcedure,
         .cbClsExtra = 0,
@@ -674,14 +679,14 @@ pub export fn WinMain(
         .hCursor = win32.LoadCursorW(null, win32.IDC_ARROW),
         .hbrBackground = null,
         .lpszMenuName = null,
-        .lpszClassName = win32.L("HandmadeZigRendererTestWindowClass"),
+        .lpszClassName = "HandmadeZigRendererTestWindowClass",
     };
 
-    if (win32.RegisterClassW(&window_class) != 0) {
-        const opt_window_handle: ?win32.HWND = win32.CreateWindowExW(
+    if (win32.RegisterClassA(&window_class) != 0) {
+        const opt_window_handle: ?win32.HWND = win32.CreateWindowExA(
             .{},
             window_class.lpszClassName,
-            win32.L("Handmade Zig Renderer Test"),
+            "Handmade Zig Renderer Test",
             win32.WINDOW_STYLE{
                 .VISIBLE = 1,
                 .TABSTOP = 1,

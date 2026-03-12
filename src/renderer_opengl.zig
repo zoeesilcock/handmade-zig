@@ -57,6 +57,7 @@ pub const GL_DEBUG_TYPE_POP_GROUP = 0x826A;
 pub const GL_DEBUG_SEVERITY_NOTIFICATION = 0x826B;
 
 pub const GL_ARRAY_BUFFER = 0x8892;
+pub const GL_ELEMENT_ARRAY_BUFFER = 0x8893;
 pub const GL_STREAM_DRAW = 0x88E0;
 pub const GL_STREAM_READ = 0x88E1;
 pub const GL_STREAM_COPY = 0x88E2;
@@ -66,6 +67,7 @@ pub const GL_STATIC_COPY = 0x88E6;
 pub const GL_DYNAMIC_DRAW = 0x88E8;
 pub const GL_DYNAMIC_READ = 0x88E9;
 pub const GL_DYNAMIC_COPY = 0x88EA;
+pub const GL_TEXTURE_2D_ARRAY = 0x8C1A;
 
 pub const GL_FRAMEBUFFER_SRGB = 0x8DB9;
 pub const GL_SRGB8_ALPHA8 = 0x8C43;
@@ -276,6 +278,7 @@ const OpenGLProgramCommon = extern struct {
     vert_uv_id: i32 = 0,
     vert_color_id: i32 = 0,
     vert_light_index_id: i32 = 0,
+    vert_texture_index_id: i32 = 0,
 
     sampler_count: u32,
     samplers: [16]i32 = [1]i32{0} ** 16,
@@ -360,11 +363,12 @@ pub const OpenGL = extern struct {
     default_framebuffer_texture_format: i32 = 0,
 
     vertex_buffer: u32 = 0,
+    index_buffer: u32 = 0,
+    screen_fill_vertex_buffer: u32 = 0,
 
     reserved_blit_texture: u32 = 0,
 
-    white: [4][4]u32 = undefined,
-    white_bitmap: RendererTexture = undefined,
+    texture_array: u32 = 0,
 
     multisampling: bool = false,
     depth_peel_count: u32 = 0,
@@ -392,9 +396,11 @@ pub const OpenGL = extern struct {
     push_buffer_memory: [65536]u8 = undefined,
 
     vertex_array: [*]TexturedVertex = undefined,
-    bitmap_array: [*]RendererTexture = undefined,
+    index_array: [*]u16 = undefined,
 
+    max_texture_count: u32,
     max_vertex_count: u32,
+    max_index_count: u32,
     render_commands: RenderCommands,
 };
 
@@ -546,12 +552,59 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     platform.optGLBindVertexArray.?(dummy_vertex_array);
 
     platform.optGLGenBuffers.?(1, &open_gl.vertex_buffer);
-    platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
+    platform.optGLGenBuffers.?(1, &open_gl.index_buffer);
 
-    open_gl.white = [1][4]u32{
-        [1]u32{0xffffffff} ** 4,
-    } ** 4;
-    open_gl.white_bitmap = allocateTexture(open_gl, 1, 1, &open_gl.white);
+    {
+        platform.optGLGenBuffers.?(1, &open_gl.screen_fill_vertex_buffer);
+        platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
+        var vertices: [4]TexturedVertex = [_]TexturedVertex{
+            .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .light_uv = .zero(), .color = 0xffffffff },
+            .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .light_uv = .zero(), .color = 0xffffffff },
+            .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .light_uv = .zero(), .color = 0xffffffff },
+            .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .light_uv = .zero(), .color = 0xffffffff },
+        };
+        platform.optGLBufferData.?(
+            GL_ARRAY_BUFFER,
+            vertices.len * @sizeOf(TexturedVertex),
+            &vertices,
+            GL_STATIC_DRAW,
+        );
+    }
+
+    gl.glGenTextures(1, &open_gl.texture_array);
+    gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
+
+    if (true) {
+        platform.optGLTexStorage3D.?(
+            GL_TEXTURE_2D_ARRAY,
+            1,
+            @intCast(open_gl.default_sprite_texture_format),
+            renderer.TEXTURE_ARRAY_DIM,
+            renderer.TEXTURE_ARRAY_DIM,
+            open_gl.max_texture_count,
+        );
+        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+    } else {
+        platform.optGLTexImage3D.?(
+            GL_TEXTURE_2D_ARRAY,
+            0,
+            open_gl.default_sprite_texture_format,
+            512,
+            512,
+            open_gl.max_texture_count,
+            0,
+            gl.GL_BGRA_EXT,
+            gl.GL_UNSIGNED_BYTE,
+            null,
+        );
+    }
+
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 }
 
 const shader_header_code =
@@ -626,6 +679,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\in vec4 VertColor;
         \\
         \\in int VertLightIndex;
+        \\in int VertTextureIndex;
         \\
         \\smooth out vec2 FragUV;
         \\smooth out vec4 FragColor;
@@ -634,6 +688,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\smooth out vec3 WorldNormal;
         \\
         \\flat out int FragLightIndex;
+        \\flat out int FragTextureIndex;
         \\
         \\void main(void)
         \\{
@@ -658,6 +713,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  WorldNormal = VertN;
         \\
         \\  FragLightIndex = VertLightIndex;
+        \\  FragTextureIndex = VertTextureIndex;
         \\}
     ;
 
@@ -694,7 +750,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
 
     const fragment_code =
         \\// Fragment code
-        \\uniform sampler2D TextureSampler;
+        \\uniform sampler2DArray TextureSampler;
         \\#if DepthPeel
         \\uniform sampler2D DepthSampler;
         \\#endif
@@ -716,6 +772,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\smooth in vec3 WorldNormal;
         \\
         \\flat in int FragLightIndex;
+        \\flat in int FragTextureIndex;
         \\
         \\layout(location = 0) out vec4 BlendUnitColor[3];
         \\
@@ -774,7 +831,8 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  }
         \\#endif
         \\
-        \\  vec4 TexSample = texture(TextureSampler, FragUV);
+        \\  vec3 ArrayUV = vec3(FragUV.x, FragUV.y, float(FragTextureIndex));
+        \\  vec4 TexSample = texture(TextureSampler, ArrayUV);
         \\#if ShaderSimTexReadSRGB
         \\    TexSample.rgb *= TexSample.rgb;
         \\#endif
@@ -1304,6 +1362,7 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
     const uv_array_index: i32 = program.vert_uv_id;
     const color_array_index: i32 = program.vert_color_id;
     const light_index_index: i32 = program.vert_light_index_id;
+    const texture_index_index: i32 = program.vert_texture_index_id;
 
     if (isValidArray(position_array_index)) {
         platform.optGLEnableVertexAttribArray.?(@intCast(position_array_index));
@@ -1360,6 +1419,16 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
             @ptrFromInt(@offsetOf(TexturedVertex, "light_index")),
         );
     }
+    if (isValidArray(texture_index_index)) {
+        platform.optGLEnableVertexAttribArray.?(@intCast(texture_index_index));
+        platform.optGLVertexAttribIPointer.?(
+            @intCast(texture_index_index),
+            1,
+            gl.GL_UNSIGNED_SHORT,
+            @sizeOf(TexturedVertex),
+            @ptrFromInt(@offsetOf(TexturedVertex, "texture_index")),
+        );
+    }
 
     var sampler_index: u32 = 0;
     while (sampler_index < program.sampler_count) : (sampler_index += 1) {
@@ -1375,6 +1444,7 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     const color_array_index: i32 = program.vert_color_id;
     const uv_array_index: i32 = program.vert_uv_id;
     const light_index_index: i32 = program.vert_light_index_id;
+    const texture_index_index: i32 = program.vert_texture_index_id;
 
     if (isValidArray(position_array_index)) {
         platform.optGLDisableVertexAttribArray.?(@intCast(position_array_index));
@@ -1390,6 +1460,9 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     }
     if (isValidArray(light_index_index)) {
         platform.optGLDisableVertexAttribArray.?(@intCast(light_index_index));
+    }
+    if (isValidArray(texture_index_index)) {
+        platform.optGLDisableVertexAttribArray.?(@intCast(texture_index_index));
     }
 }
 
@@ -1746,24 +1819,13 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     wgl.setVSync(open_gl, open_gl.current_settings.request_vsync);
 }
 
-fn beginScreenFill(framebuffer_handle: u32, width: i32, height: i32) void {
+fn beginScreenFill(open_gl: *OpenGL, framebuffer_handle: u32, width: i32, height: i32) void {
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, framebuffer_handle);
     gl.glViewport(0, 0, width, height);
     gl.glScissor(0, 0, width, height);
     gl.glDepthFunc(gl.GL_ALWAYS);
 
-    var vertices: [4]TexturedVertex = [_]TexturedVertex{
-        .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .light_uv = .zero(), .color = 0xffffffff },
-        .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .light_uv = .zero(), .color = 0xffffffff },
-        .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .light_uv = .zero(), .color = 0xffffffff },
-        .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .light_uv = .zero(), .color = 0xffffffff },
-    };
-    platform.optGLBufferData.?(
-        GL_ARRAY_BUFFER,
-        vertices.len * @sizeOf(TexturedVertex),
-        &vertices,
-        GL_STREAM_DRAW,
-    );
+    platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
 }
 
 fn endScreenFill() void {
@@ -1772,7 +1834,7 @@ fn endScreenFill() void {
 }
 
 fn resolveMultisample(open_gl: *OpenGL, from: *Framebuffer, to: *Framebuffer, width: i32, height: i32) void {
-    beginScreenFill(to.framebuffer_handle, width, height);
+    beginScreenFill(open_gl, to.framebuffer_handle, width, height);
 
     useResolveMultisampleProgramBegin(open_gl, &open_gl.resolve_multisample);
 
@@ -1804,17 +1866,11 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
 
     var opt_op: ?*TextureOp = pending.first;
     while (opt_op) |op| : (opt_op = op.next) {
-        if (op.is_allocate) {
-            op.op.allocate.result_texture.* = allocateTexture(
-                open_gl,
-                op.op.allocate.width,
-                op.op.allocate.height,
-                op.op.allocate.data,
-            );
-        } else {
-            var handle: u32 = @intCast(op.op.deallocate.texture.handle);
-            gl.glDeleteTextures(1, &handle);
-        }
+        allocateTexture(
+            open_gl,
+            op.update.texture,
+            op.update.data,
+        );
     }
 
     renderer.enqueueFree(queue, pending);
@@ -1841,9 +1897,10 @@ pub fn beginFrame(
     commands.push_buffer_data_at = &open_gl.push_buffer_memory;
     commands.max_vertex_count = open_gl.max_vertex_count;
     commands.vertex_count = 0;
+    commands.max_index_count = open_gl.max_index_count;
+    commands.index_count = 0;
     commands.vertex_array = open_gl.vertex_array;
-    commands.quad_bitmaps = open_gl.bitmap_array;
-    commands.white_bitmap = open_gl.white_bitmap;
+    commands.index_array = open_gl.index_array;
 
     return commands;
 }
@@ -1867,6 +1924,22 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     gl.glEnable(gl.GL_SCISSOR_TEST);
     gl.glDisable(gl.GL_BLEND);
     gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA);
+
+    platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
+    platform.optGLBufferData.?(
+        GL_ARRAY_BUFFER,
+        commands.vertex_count * @sizeOf(TexturedVertex),
+        commands.vertex_array,
+        GL_STREAM_DRAW,
+    );
+
+    platform.optGLBindBuffer.?(GL_ELEMENT_ARRAY_BUFFER, open_gl.index_buffer);
+    platform.optGLBufferData.?(
+        GL_ELEMENT_ARRAY_BUFFER,
+        commands.index_count * @sizeOf(u16),
+        commands.index_array,
+        GL_STREAM_DRAW,
+    );
 
     const settings: *RenderSettings = &commands.settings;
     if (!settings.equals(&open_gl.current_settings)) {
@@ -1972,6 +2045,9 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 gl.glClear(gl.GL_DEPTH_BUFFER_BIT);
             },
             .RenderEntryTexturedQuads => {
+                platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.vertex_buffer);
+                platform.optGLBindBuffer.?(GL_ELEMENT_ARRAY_BUFFER, open_gl.index_buffer);
+
                 const entry: *RenderEntryTexturedQuads = @ptrCast(@alignCast(data));
                 header_at += @sizeOf(RenderEntryTexturedQuads);
 
@@ -1989,13 +2065,6 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 const clip_max_x: i32 = math.lerpI32Binormal(0, render_width, clip_rect.max.x());
                 const clip_max_y: i32 = math.lerpI32Binormal(0, render_height, clip_rect.max.y());
                 gl.glScissor(clip_min_x, clip_min_y, clip_max_x - clip_min_x, clip_max_y - clip_min_y);
-
-                platform.optGLBufferData.?(
-                    GL_ARRAY_BUFFER,
-                    commands.vertex_count * @sizeOf(TexturedVertex),
-                    commands.vertex_array,
-                    GL_STREAM_DRAW,
-                );
 
                 var program: *ZBiasProgram = &open_gl.z_bias_no_depth_peel;
                 var alpha_threshold: f32 = 0.01;
@@ -2020,21 +2089,29 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
                 useZBiasProgramBegin(program, setup, alpha_threshold);
 
-                var vertex_index: u32 = entry.vertex_array_offset;
-                while (vertex_index < (entry.vertex_array_offset + 4 * entry.quad_count)) : (vertex_index += 4) {
-                    const texture: RendererTexture = commands.quad_bitmaps[vertex_index >> 2];
-                    gl.glBindTexture(gl.GL_TEXTURE_2D, @intCast(texture.handle));
-
-                    if (false) {
-                        platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, @intCast(vertex_index), 4);
-                    } else {
-                        var indices = [_]u32{
-                            vertex_index + 0, vertex_index + 1, vertex_index + 2,
-                            vertex_index + 1, vertex_index + 3, vertex_index + 2,
-                        };
-                        platform.optGLDrawElements.?(gl.GL_TRIANGLES, 6, gl.GL_UNSIGNED_INT, &indices);
+                if (false) {
+                    var index_index: u32 = entry.index_array_offset;
+                    while (index_index < (entry.index_array_offset + 6 * entry.quad_count)) : (index_index += 6) {
+                        const texture: RendererTexture = commands.quad_bitmaps[index_index / 6];
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, @intCast(texture.handle));
+                        platform.optGLDrawElements.?(
+                            gl.GL_TRIANGLES,
+                            6,
+                            gl.GL_UNSIGNED_SHORT,
+                            @ptrFromInt(index_index * @sizeOf(u16)),
+                        );
                     }
                 }
+
+                gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
+                platform.optGLDrawElementsBaseVertex.?(
+                    gl.GL_TRIANGLES,
+                    @intCast(6 * entry.quad_count),
+                    gl.GL_UNSIGNED_SHORT,
+                    @ptrFromInt(entry.index_array_offset * @sizeOf(u16)),
+                    @intCast(entry.vertex_array_offset),
+                );
+
                 gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 
                 useProgramEnd(&program.common);
@@ -2063,19 +2140,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, open_gl.resolve_frame_buffer.framebuffer_handle);
     gl.glViewport(0, 0, render_width, render_height);
     gl.glScissor(0, 0, render_width, render_height);
-
-    var vertices: [4]TexturedVertex = [_]TexturedVertex{
-        .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .light_uv = .zero(), .color = 0xffffffff },
-        .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .light_uv = .zero(), .color = 0xffffffff },
-        .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .light_uv = .zero(), .color = 0xffffffff },
-        .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .light_uv = .zero(), .color = 0xffffffff },
-    };
-    platform.optGLBufferData.?(
-        GL_ARRAY_BUFFER,
-        vertices.len * @sizeOf(TexturedVertex),
-        &vertices,
-        GL_STREAM_DRAW,
-    );
+    platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
 
     useProgramBegin(&open_gl.peel_composite);
     var texture_bind_index: u32 = GL_TEXTURE0;
@@ -2168,30 +2233,23 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     }
 }
 
-fn allocateTexture(open_gl: *OpenGL, width: i32, height: i32, data: ?*anyopaque) callconv(.c) RendererTexture {
-    var handle: u32 = 0;
+fn allocateTexture(open_gl: *OpenGL, texture: RendererTexture, data: *anyopaque) void {
+    std.debug.assert(texture.index < open_gl.max_texture_count);
 
-    gl.glGenTextures(1, &handle);
-    gl.glBindTexture(gl.GL_TEXTURE_2D, handle);
-    gl.glTexImage2D(
-        gl.GL_TEXTURE_2D,
+    gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
+    platform.optGLTexSubImage3D.?(
+        GL_TEXTURE_2D_ARRAY,
         0,
-        open_gl.default_sprite_texture_format,
-        width,
-        height,
         0,
+        0,
+        @intCast(texture.index),
+        texture.width,
+        texture.height,
+        1,
         gl.GL_BGRA_EXT,
         gl.GL_UNSIGNED_BYTE,
         data,
     );
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
-
-    return .{ .handle = handle };
 }
 
 fn drawLineVertices(
@@ -2434,6 +2492,7 @@ fn createProgram(
     program.vert_uv_id = platform.optGLGetAttribLocation.?(program_id, "VertUV");
     program.vert_color_id = platform.optGLGetAttribLocation.?(program_id, "VertColor");
     program.vert_light_index_id = platform.optGLGetAttribLocation.?(program_id, "VertLightIndex");
+    program.vert_texture_index_id = platform.optGLGetAttribLocation.?(program_id, "VertTextureIndex");
     program.sampler_count = 0;
 
     return program_id;

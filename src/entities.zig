@@ -533,7 +533,7 @@ pub fn updateAndRenderEntities(
                         );
                     } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
                         render_group.pushCube(
-                            render_group.commands.white_bitmap,
+                            render_group.white_texture,
                             entity_transform.offset_position.plus(piece.offset),
                             .new(
                                 piece.dimension.x(),
