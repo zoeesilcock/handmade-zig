@@ -1054,7 +1054,7 @@ pub fn lightingTest(
         }
     }
 
-    _ = group.getCurrentQuads(solution.debug_line_count);
+    _ = group.getCurrentQuads(solution.debug_line_count, group.white_texture);
     const white_texture: RendererTexture = group.white_texture;
     var debug_line_index: u32 = 0;
     while (debug_line_index < solution.debug_line_count) : (debug_line_index += 1) {
@@ -1095,7 +1095,7 @@ pub fn lightingTest(
 
     if (false) {
         const draw_point_count: u32 = 2 * 1024;
-        _ = group.getCurrentQuads(draw_point_count * 4 * 6);
+        _ = group.getCurrentQuads(draw_point_count * 4 * 6, group.white_texture);
         var test_series_x: random.SeriesPCG = .seed(23984593284, 3249823984);
         var test_series_y: random.SeriesPCG = .seed(85462378423, 90857892378);
         var test_series_z: random.SeriesPCG = .seed(34205873903, 94569083);
@@ -1199,7 +1199,7 @@ pub fn lightingTest(
     }
 
     if (false) {
-        _ = group.getCurrentQuads(solution.sample_points.len * 6);
+        _ = group.getCurrentQuads(solution.sample_points.len * 6, group.white_texture);
         var point_index: u32 = 0;
         while (point_index < solution.sample_points.len) : (point_index += 1) {
             const position: Vector3 = start_point;
@@ -1328,7 +1328,7 @@ pub fn outputLightingPoints(
     defer TimedBlock.endFunction(@src(), .OutputLightingPoints);
 
     _ = opt_textures;
-    _ = group.getCurrentQuads(solution.point_count);
+    _ = group.getCurrentQuads(solution.point_count, group.white_texture);
 
     outputLightingPointsRecurse(
         group,

@@ -373,6 +373,19 @@ pub const OpenGL = extern struct {
     multisampling: bool = false,
     depth_peel_count: u32 = 0,
 
+    push_buffer_memory: [65536]u8 = undefined,
+    vertex_array: [*]TexturedVertex = undefined,
+    index_array: [*]u16 = undefined,
+    bitmap_array: [*]RendererTexture = undefined,
+
+    max_quad_texture_count: u32,
+    max_texture_count: u32,
+    max_vertex_count: u32,
+    max_index_count: u32,
+
+    max_special_texture_count: u32,
+    special_texture_handles: [*]u32 = undefined,
+
     // Dynamic resources that get recreated when settings change.
     resolve_frame_buffer: Framebuffer = .{},
     depth_peel_buffers: [16]Framebuffer = [1]Framebuffer{.{}} ** 16,
@@ -393,14 +406,6 @@ pub const OpenGL = extern struct {
     debug_light_buffer_index: i32 = 0,
     debug_light_buffer_texture_index: i32 = 0,
 
-    push_buffer_memory: [65536]u8 = undefined,
-
-    vertex_array: [*]TexturedVertex = undefined,
-    index_array: [*]u16 = undefined,
-
-    max_texture_count: u32,
-    max_vertex_count: u32,
-    max_index_count: u32,
     render_commands: RenderCommands,
 };
 
@@ -603,6 +608,19 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    gl.glGenTextures(@intCast(open_gl.max_special_texture_count), @ptrCast(open_gl.special_texture_handles));
+
+    var handle_index: u32 = 0;
+    while (handle_index < open_gl.max_special_texture_count) : (handle_index += 1) {
+        const handle: u32 = open_gl.special_texture_handles[handle_index];
+        gl.glBindTexture(gl.GL_TEXTURE_2D, handle);
+
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 }
@@ -1876,6 +1894,14 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
     renderer.enqueueFree(queue, pending);
 }
 
+fn getSpecialTextureHandleFor(open_gl: *OpenGL, texture: RendererTexture) u32 {
+    const index: u32 = renderer.textureIndexFrom(texture);
+    std.debug.assert(index < open_gl.max_special_texture_count);
+
+    const result: u32 = open_gl.special_texture_handles[index];
+    return result;
+}
+
 pub fn beginFrame(
     open_gl: *OpenGL,
     window_width: i32,
@@ -1901,6 +1927,10 @@ pub fn beginFrame(
     commands.index_count = 0;
     commands.vertex_array = open_gl.vertex_array;
     commands.index_array = open_gl.index_array;
+
+    commands.max_quad_texture_count = open_gl.max_quad_texture_count;
+    commands.quad_texture_count = 0;
+    commands.quad_textures = open_gl.bitmap_array;
 
     return commands;
 }
@@ -2089,11 +2119,14 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
                 useZBiasProgramBegin(program, setup, alpha_threshold);
 
-                if (false) {
-                    var index_index: u32 = entry.index_array_offset;
-                    while (index_index < (entry.index_array_offset + 6 * entry.quad_count)) : (index_index += 6) {
-                        const texture: RendererTexture = commands.quad_bitmaps[index_index / 6];
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, @intCast(texture.handle));
+                if (entry.quad_textures) |quad_textures| {
+                    // Multiple dispatch, slow path, for arbitrary sized textures.
+                    var quad_index: u32 = entry.index_array_offset;
+                    while (quad_index < entry.quad_count) : (quad_index += 1) {
+                        const index_index: u32 = entry.index_array_offset + (6 * quad_index);
+                        const texture: RendererTexture = quad_textures[quad_index];
+                        const texture_handle: u32 = getSpecialTextureHandleFor(open_gl, texture);
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, texture_handle);
                         platform.optGLDrawElements.?(
                             gl.GL_TRIANGLES,
                             6,
@@ -2101,16 +2134,17 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                             @ptrFromInt(index_index * @sizeOf(u16)),
                         );
                     }
+                } else {
+                    // Single dispatch, fast path, for same sized textures.
+                    gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
+                    platform.optGLDrawElementsBaseVertex.?(
+                        gl.GL_TRIANGLES,
+                        @intCast(6 * entry.quad_count),
+                        gl.GL_UNSIGNED_SHORT,
+                        @ptrFromInt(entry.index_array_offset * @sizeOf(u16)),
+                        @intCast(entry.vertex_array_offset),
+                    );
                 }
-
-                gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
-                platform.optGLDrawElementsBaseVertex.?(
-                    gl.GL_TRIANGLES,
-                    @intCast(6 * entry.quad_count),
-                    gl.GL_UNSIGNED_SHORT,
-                    @ptrFromInt(entry.index_array_offset * @sizeOf(u16)),
-                    @intCast(entry.vertex_array_offset),
-                );
 
                 gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 
@@ -2234,22 +2268,41 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 }
 
 fn allocateTexture(open_gl: *OpenGL, texture: RendererTexture, data: *anyopaque) void {
-    std.debug.assert(texture.index < open_gl.max_texture_count);
+    if (renderer.isSpecialTexture(texture)) {
+        const handle: u32 = getSpecialTextureHandleFor(open_gl, texture);
+        gl.glBindTexture(gl.GL_TEXTURE_2D, handle);
+        gl.glTexImage2D(
+            gl.GL_TEXTURE_2D,
+            0,
+            open_gl.default_sprite_texture_format,
+            texture.width,
+            texture.height,
+            0,
+            gl.GL_BGRA_EXT,
+            gl.GL_UNSIGNED_BYTE,
+            data,
+        );
+    } else {
+        const texture_index: u32 = renderer.textureIndexFrom(texture);
+        std.debug.assert(texture_index < open_gl.max_texture_count);
 
-    gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
-    platform.optGLTexSubImage3D.?(
-        GL_TEXTURE_2D_ARRAY,
-        0,
-        0,
-        0,
-        @intCast(texture.index),
-        texture.width,
-        texture.height,
-        1,
-        gl.GL_BGRA_EXT,
-        gl.GL_UNSIGNED_BYTE,
-        data,
-    );
+        gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
+        platform.optGLTexSubImage3D.?(
+            GL_TEXTURE_2D_ARRAY,
+            0,
+            0,
+            0,
+            @intCast(texture_index),
+            texture.width,
+            texture.height,
+            1,
+            gl.GL_BGRA_EXT,
+            gl.GL_UNSIGNED_BYTE,
+            data,
+        );
+    }
+
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 }
 
 fn drawLineVertices(

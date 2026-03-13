@@ -362,7 +362,12 @@ fn loadWglExtensions(open_gl: *OpenGL) void {
     }
 }
 
-pub fn initOpenGL(window_dc: ?win32.HDC, max_quad_count_per_frame: u32, max_texture_count: u32) *OpenGL {
+pub fn initOpenGL(
+    window_dc: ?win32.HDC,
+    max_quad_count_per_frame: u32,
+    max_texture_count: u32,
+    max_special_texture_count: u32,
+) *OpenGL {
     const open_gl: *OpenGL = @ptrCast(@alignCast(rendererAllocate(@sizeOf(OpenGL))));
     open_gl.header.processTextureQueue = &processTextureQueue;
     open_gl.header.beginFrame = &beginFrame;
@@ -372,9 +377,18 @@ pub fn initOpenGL(window_dc: ?win32.HDC, max_quad_count_per_frame: u32, max_text
 
     const max_vertex_count: u32 = max_quad_count_per_frame * 4;
     const max_index_count: u32 = max_quad_count_per_frame * 6;
+    open_gl.max_quad_texture_count = max_quad_count_per_frame;
     open_gl.max_texture_count = max_texture_count;
     open_gl.max_vertex_count = max_vertex_count;
     open_gl.max_index_count = max_index_count;
+    open_gl.max_special_texture_count = max_special_texture_count;
+
+    open_gl.vertex_array = @ptrCast(@alignCast(rendererAllocate(max_vertex_count * @sizeOf(TexturedVertex))));
+    open_gl.index_array = @ptrCast(@alignCast(rendererAllocate(max_index_count * @sizeOf(u16))));
+    open_gl.bitmap_array = @ptrCast(@alignCast(rendererAllocate(open_gl.max_quad_texture_count * @sizeOf(RendererTexture))));
+    if (max_special_texture_count > 0) {
+        open_gl.special_texture_handles = @ptrCast(@alignCast(rendererAllocate(max_special_texture_count * @sizeOf(u32))));
+    }
 
     var opengl_rc: ?win32.HGLRC = null;
     var is_modern_context: bool = true;
@@ -515,9 +529,6 @@ pub fn initOpenGL(window_dc: ?win32.HDC, max_quad_count_per_frame: u32, max_text
         outputLastGLError("Failed to make modern context current");
     }
 
-    open_gl.vertex_array = @ptrCast(@alignCast(rendererAllocate(max_vertex_count * @sizeOf(TexturedVertex))));
-    open_gl.index_array = @ptrCast(@alignCast(rendererAllocate(max_index_count * @sizeOf(u16))));
-
     return open_gl;
 }
 
@@ -525,11 +536,13 @@ pub export fn win32LoadRenderer(
     opt_window_dc: ?win32.HDC,
     max_quad_count_per_frame: u32,
     max_texture_count: u32,
+    max_special_texture_count: u32,
 ) callconv(.c) ?*PlatformRenderer {
     const result: ?*PlatformRenderer = @ptrCast(initOpenGL(
         opt_window_dc,
         max_quad_count_per_frame,
         max_texture_count,
+        max_special_texture_count,
     ));
     return result;
 }

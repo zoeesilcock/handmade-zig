@@ -2065,9 +2065,15 @@ pub export fn wWinMain(
             renderer.initTextureQueue(&texture_queue, @sizeOf(@TypeOf(texture_op_memory)), &texture_op_memory);
 
             const max_quad_count_per_frame: u32 = 1 << 18;
-            const max_texture_count: u32 = 256;
+            const max_texture_count: u32 = shared.NORMAL_TEXTURE_COUNT;
+            const max_special_texture_count: u32 = shared.SPECIAL_TEXTURE_COUNT;
             const platform_renderer: *PlatformRenderer =
-                win32_renderer.initDefaultRenderer(window_handle, max_quad_count_per_frame, max_texture_count);
+                win32_renderer.initDefaultRenderer(
+                    window_handle,
+                    max_quad_count_per_frame,
+                    max_texture_count,
+                    max_special_texture_count,
+                );
 
             var high_priority_startups: [6]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 6;
             var high_priority_queue = shared.PlatformWorkQueue{};

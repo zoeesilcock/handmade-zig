@@ -44,6 +44,7 @@ const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
 
 pub const LIGHT_POINTS_PER_CHUNK = 24;
 pub const TEXTURE_ARRAY_DIM = 512.0;
+pub const SPECIAL_TEXTURE_BIT = 0x8000_0000;
 
 const processTextureQueueType = fn (
     platform_renderer: *PlatformRenderer,
@@ -167,6 +168,10 @@ pub const RenderCommands = extern struct {
     index_count: u32,
     index_array: [*]u16 = undefined,
 
+    max_quad_texture_count: u32,
+    quad_texture_count: u32,
+    quad_textures: [*]RendererTexture,
+
     pub fn reset(self: *RenderCommands) void {
         self.push_buffer_data_at = self.push_buffer_base;
         self.vertex_count = 0;
@@ -210,6 +215,9 @@ pub const RenderEntryTexturedQuads = extern struct {
     quad_count: u32,
     vertex_array_offset: u32, // Uses 4 vertices per quad.
     index_array_offset: u32, // Uses 6 indices per quad.
+
+    // Is null if using the default texture array / single batch render, and an array of one texture per quad if not.
+    quad_textures: ?[*]RendererTexture,
 };
 
 pub const RenderEntryLightingTransfer = extern struct {
@@ -443,7 +451,7 @@ pub const RenderGroup = extern struct {
             .missing_resource_count = 0,
             .commands = commands,
             .world_up = .new(0, 0, 1),
-            .current_quads = undefined,
+            .current_quads = null,
             .lighting_enabled = false,
             .light_bounds = .zero(),
             .light_box_count = 0,
@@ -601,13 +609,21 @@ pub const RenderGroup = extern struct {
         return self.getCameraRectangleAtDistance(z);
     }
 
-    pub fn getCurrentQuads(self: *RenderGroup, quad_count: u32) ?*RenderEntryTexturedQuads {
+    pub fn getCurrentQuads(self: *RenderGroup, quad_count: u32, texture: RendererTexture) ?*RenderEntryTexturedQuads {
         const vertex_count: u32 = quad_count * 4;
         const index_count: u32 = quad_count * 6;
 
         const max_quads_per_batch: u32 = (std.math.maxInt(u16) - 1) / 4;
         if (self.current_quads != null and (self.current_quads.?.quad_count + quad_count) > max_quads_per_batch) {
             self.current_quads = null;
+        }
+
+        const this_textures: bool = isSpecialTexture(texture);
+        if (self.current_quads != null) {
+            const current_textures: bool = self.current_quads.?.quad_textures != null;
+            if (current_textures != this_textures) {
+                self.current_quads = null;
+            }
         }
 
         if (self.current_quads == null) {
@@ -620,12 +636,18 @@ pub const RenderGroup = extern struct {
             ));
             self.current_quads.?.quad_count = 0;
             self.current_quads.?.vertex_array_offset = self.commands.vertex_count;
+            self.current_quads.?.index_array_offset = self.commands.index_count;
             self.current_quads.?.setup = self.last_setup;
+            self.current_quads.?.quad_textures = null;
+            if (this_textures) {
+                self.current_quads.?.quad_textures = self.commands.quad_textures + self.commands.quad_texture_count;
+            }
         }
 
         var result = self.current_quads;
         if ((self.commands.vertex_count + vertex_count) > self.commands.max_vertex_count and
-            (self.commands.index_count + index_count) > self.commands.max_index_count)
+            (self.commands.index_count + index_count) > self.commands.max_index_count and
+            (this_textures and (self.commands.quad_texture_count + quad_count) > self.commands.max_quad_texture_count))
         {
             result = null;
         }
@@ -667,12 +689,21 @@ pub const RenderGroup = extern struct {
 
         entry.?.quad_count += 1;
 
+        const texture_index32: u32 = textureIndexFrom(texture);
+        const texture_index: u16 = @truncate(texture_index32);
+        std.debug.assert(@as(u32, @intCast(texture_index)) == texture_index32);
+        if (isSpecialTexture(texture)) {
+            commands.quad_textures[commands.quad_texture_count] = texture;
+            commands.quad_texture_count += 1;
+        }
+
         const vertex_index: u32 = commands.vertex_count;
         const index_index: u32 = commands.index_count;
         commands.vertex_count += 4;
         commands.index_count += 6;
-        std.debug.assert(vertex_index <= commands.max_vertex_count);
-        std.debug.assert(index_index <= commands.max_index_count);
+        std.debug.assert(commands.vertex_count <= commands.max_vertex_count);
+        std.debug.assert(commands.index_count <= commands.max_index_count);
+        std.debug.assert(commands.quad_texture_count <= commands.max_quad_texture_count);
 
         var vert: [*]TexturedVertex = commands.vertex_array + vertex_index;
         var index: [*]u16 = commands.index_array + index_index;
@@ -685,9 +716,6 @@ pub const RenderGroup = extern struct {
         const uv1: Vector2 = inverse_uv.hadamardProduct(uv1_in);
         const uv2: Vector2 = inverse_uv.hadamardProduct(uv2_in);
         const uv3: Vector2 = inverse_uv.hadamardProduct(uv3_in);
-
-        const texture_index: u16 = @truncate(texture.index);
-        std.debug.assert(@as(u32, @intCast(texture_index)) == texture.index);
 
         var e10 = p1.minus(p0);
         _ = e10.setZ(e10.z() + e10.w());
@@ -885,7 +913,7 @@ pub const RenderGroup = extern struct {
         std.debug.assert(emission >= 0);
         std.debug.assert(emission <= 1);
 
-        if (self.getCurrentQuads(6) != null) {
+        if (self.getCurrentQuads(6, texture) != null) {
             if (!self.lighting_enabled) {
                 opt_light_store = null;
             }
@@ -1090,7 +1118,7 @@ pub const RenderGroup = extern struct {
         const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
         const basis_position = object_transform.getRenderEntityBasisPosition(position);
 
-        if (self.getCurrentQuads(6) != null) {
+        if (self.getCurrentQuads(6, self.white_texture) != null) {
             const premultiplied_color: Color = storeColor(color);
             const packed_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
 
@@ -1196,7 +1224,7 @@ pub const RenderGroup = extern struct {
         color: Color,
         thickness: f32,
     ) void {
-        if (self.getCurrentQuads(6) != null) {
+        if (self.getCurrentQuads(6, self.white_texture) != null) {
             const texture: RendererTexture = self.white_texture;
             const offset_position: Vector3 = object_transform.offset_position;
 
@@ -1248,7 +1276,7 @@ pub const RenderGroup = extern struct {
         opt_max_uv: ?Vector2,
         opt_t_camera_up: ?f32,
     ) void {
-        if (self.getCurrentQuads(1)) |_| {
+        if (self.getCurrentQuads(1, texture)) |_| {
             const color: Color = opt_color orelse .white();
             const x_axis2: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
             const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
@@ -1307,7 +1335,7 @@ pub const RenderGroup = extern struct {
         opt_min_uv: ?Vector2,
         opt_max_uv: ?Vector2,
     ) void {
-        if (self.getCurrentQuads(1)) |_| {
+        if (self.getCurrentQuads(1, texture)) |_| {
             const color: Color = opt_color orelse .white();
             const x_axis: Vector3 = (opt_x_axis orelse Vector3.new(1, 0, 0)).scaledTo(size.x());
             const y_axis: Vector3 = (opt_y_axis orelse Vector3.new(0, 1, 0)).scaledTo(size.y());
@@ -1567,4 +1595,18 @@ pub fn referToTexture(index: u32, width: u32, height: u32) RendererTexture {
     std.debug.assert(height == result.height);
 
     return result;
+}
+
+pub fn isSpecialTexture(texture: RendererTexture) bool {
+    return (texture.index & SPECIAL_TEXTURE_BIT) != 0;
+}
+
+pub fn specialTextureIndexFrom(index: u32) u32 {
+    std.debug.assert((index & SPECIAL_TEXTURE_BIT) == 0);
+
+    return index | SPECIAL_TEXTURE_BIT;
+}
+
+pub fn textureIndexFrom(texture: RendererTexture) u32 {
+    return texture.index & ~@as(u32, @intCast(SPECIAL_TEXTURE_BIT));
 }

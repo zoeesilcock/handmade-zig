@@ -55,6 +55,7 @@ pub const ASSET_TYPE_ID_COUNT = file_formats_v0.ASSET_TYPE_ID_COUNT;
 const ASSET_IMPORT_GRID_MAX = 8;
 const HHA_VERSION = file_formats.HHA_VERSION;
 const HHA_MAGIC_VALUE = file_formats.HHA_MAGIC_VALUE;
+const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
 
 const ImportGridTag = struct {
     type_id: AssetTypeId,
@@ -239,9 +240,13 @@ pub const Assets = struct {
 
     operation_lock: u32,
 
-    white_pixel: u32,
-    // TODO: Replace this with a more robust system.
+    normal_texture_handle_count: u32 = 0,
+    special_texture_handle_count: u32 = 0,
+
+    next_special_texture_handle: u32 = 0,
     next_free_texture_handle: u32,
+
+    white_pixel: u32,
 
     pub fn allocate(
         memory_size: MemoryIndex,
@@ -261,6 +266,8 @@ pub const Assets = struct {
 
         assets.game_state = game_state;
         assets.texture_queue = texture_queue;
+        assets.normal_texture_handle_count = shared.NORMAL_TEXTURE_COUNT;
+        assets.special_texture_handle_count = shared.SPECIAL_TEXTURE_COUNT;
 
         assets.white_pixel = 0xffffffff;
         const op: TextureOp = .{
@@ -272,6 +279,7 @@ pub const Assets = struct {
         renderer.addOp(assets.texture_queue, &op);
 
         assets.next_free_texture_handle = 1;
+
         assets.memory_sentinel = AssetMemoryBlock{
             .flags = 0,
             .size = 0,
@@ -767,6 +775,11 @@ pub const Assets = struct {
         self.loadBitmap(opt_id, false);
     }
 
+    fn dimensionsRequireSpecialTexture(self: *Assets, width: u32, height: u32) bool {
+        _ = self;
+        return width >= TEXTURE_ARRAY_DIM or height >= TEXTURE_ARRAY_DIM;
+    }
+
     pub fn loadBitmap(
         self: *Assets,
         opt_id: ?BitmapId,
@@ -813,13 +826,23 @@ pub const Assets = struct {
                         bitmap.pitch = types.safeTruncateUInt32ToUInt16(size.section);
                         bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
                         bitmap.texture_handle = .empty;
-                        // TODO: Get an available texture handle from a free list here.
-                        bitmap.texture_handle = renderer.referToTexture(
-                            @intCast(self.next_free_texture_handle),
-                            bitmap.width,
-                            bitmap.height,
-                        );
-                        self.next_free_texture_handle += 1;
+
+                        var texture_handle: u32 = 0;
+                        if (self.dimensionsRequireSpecialTexture(@intCast(bitmap.width), @intCast(bitmap.height))) {
+                            texture_handle = renderer.specialTextureIndexFrom(self.next_special_texture_handle);
+                            self.next_special_texture_handle += 1;
+                            if (self.next_special_texture_handle >= self.special_texture_handle_count) {
+                                self.next_special_texture_handle = 0;
+                            }
+                        } else {
+                            std.debug.assert(
+                                self.next_free_texture_handle < self.normal_texture_handle_count,
+                            );
+
+                            texture_handle = self.next_free_texture_handle;
+                            self.next_free_texture_handle += 1;
+                        }
+                        bitmap.texture_handle = renderer.referToTexture(texture_handle, bitmap.width, bitmap.height);
 
                         var work = LoadAssetWork{
                             .task = undefined,

@@ -335,7 +335,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         const max_quad_count_per_frame: u32 = 1 << 18;
         const max_texture_count: u32 = 256;
         const platform_renderer: *PlatformRenderer =
-            win32_renderer.initDefaultRenderer(window, max_quad_count_per_frame, max_texture_count);
+            win32_renderer.initDefaultRenderer(window, max_quad_count_per_frame, max_texture_count, 0);
 
         // Initialize the test scene. This has nothing to do with the renderer API, it's just a way of making a data
         // structure we can use later to figure out what we want to render ever frame.
