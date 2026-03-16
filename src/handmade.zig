@@ -240,10 +240,10 @@ pub export fn updateAndRender(
         cutscene.playIntroCutscene(state);
 
         // This automatically skips the intro cutscene.
-        if (global_config.Game_SkipIntro) {
-            input.controllers[0].start_button.ended_down = true;
-            input.controllers[0].start_button.half_transitions = 1;
-        }
+        // if (global_config.Game_SkipIntro) {
+        //     input.controllers[0].start_button.ended_down = true;
+        //     input.controllers[0].start_button.half_transitions = 1;
+        // }
     }
 
     // if (false) {

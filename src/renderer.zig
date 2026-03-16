@@ -689,12 +689,19 @@ pub const RenderGroup = extern struct {
 
         entry.?.quad_count += 1;
 
+        var inverse_uv: Vector2 = .new(
+            @as(f32, @floatFromInt(texture.width)) / TEXTURE_ARRAY_DIM,
+            @as(f32, @floatFromInt(texture.height)) / TEXTURE_ARRAY_DIM,
+        );
+
         const texture_index32: u32 = textureIndexFrom(texture);
-        const texture_index: u16 = @truncate(texture_index32);
+        var texture_index: u16 = @truncate(texture_index32);
         std.debug.assert(@as(u32, @intCast(texture_index)) == texture_index32);
         if (isSpecialTexture(texture)) {
+            inverse_uv = .one();
             commands.quad_textures[commands.quad_texture_count] = texture;
             commands.quad_texture_count += 1;
+            texture_index = 0;
         }
 
         const vertex_index: u32 = commands.vertex_count;
@@ -708,10 +715,6 @@ pub const RenderGroup = extern struct {
         var vert: [*]TexturedVertex = commands.vertex_array + vertex_index;
         var index: [*]u16 = commands.index_array + index_index;
 
-        const inverse_uv: Vector2 = .new(
-            @as(f32, @floatFromInt(texture.width)) / TEXTURE_ARRAY_DIM,
-            @as(f32, @floatFromInt(texture.height)) / TEXTURE_ARRAY_DIM,
-        );
         const uv0: Vector2 = inverse_uv.hadamardProduct(uv0_in);
         const uv1: Vector2 = inverse_uv.hadamardProduct(uv1_in);
         const uv2: Vector2 = inverse_uv.hadamardProduct(uv2_in);

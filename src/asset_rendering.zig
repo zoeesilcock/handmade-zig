@@ -102,9 +102,7 @@ pub fn pushBitmap(
         );
 
         const size: Vector2 = dim.size;
-        if (group.getCurrentQuads(1, bitmap.texture_handle)) |entry| {
-            entry.quad_count += 1;
-
+        if (group.getCurrentQuads(1, bitmap.texture_handle) != null) {
             const min_position: Vector3 = dim.basis_position;
             var z_bias: f32 = 0;
             const premultiplied_color: Color = renderer.storeColor(color);

@@ -112,7 +112,7 @@ const intro_cutscene: []const LayeredScene = &.{
         .camera_start = Vector3.new(0, 0.5, 0),
         .camera_end = Vector3.new(0, 6.5, -1.5),
         .layers = &.{
-            SceneLayer{ .position = Vector3.new(0, 0, -30), .height = 90, .flags = @intFromEnum(SceneLayerFlags.AtInfinity) }, // Sky.
+            SceneLayer{ .position = Vector3.new(0, 0, -30), .height = 100, .flags = @intFromEnum(SceneLayerFlags.AtInfinity) }, // Sky.
             SceneLayer{ .position = Vector3.new(0, 0, -20), .height = 45, .flags = @intFromEnum(SceneLayerFlags.CounterCameraY) }, // Trees.
             SceneLayer{ .position = Vector3.new(0, -2, -4), .height = 15, .flags = @intFromEnum(SceneLayerFlags.CounterCameraY) }, // Window.
             SceneLayer{ .position = Vector3.new(0, 0.35, -0.5), .height = 1 }, // Hero.
@@ -280,7 +280,14 @@ pub fn updateAndRenderTitleScreen(
             state.assets,
             render_commands,
             RenderGroupFlags.default,
-            // @intFromEnum(RenderGroupFlags.ClearColor) | @intFromEnum(RenderGroupFlags.ClearDepth),
+            background_color,
+        );
+        render_group.end();
+
+        render_group = RenderGroup.begin(
+            state.assets,
+            render_commands,
+            0,
             background_color,
         );
 
@@ -316,13 +323,19 @@ pub fn updateAndRenderCutscene(
     const result = checkForMetaInput(state, input);
 
     if (!result) {
-        const background_color: Color = .new(1, 0.25, 0.25, 0);
         var render_group = RenderGroup.begin(
             state.assets,
             render_commands,
             RenderGroupFlags.default,
-            // @intFromEnum(RenderGroupFlags.ClearDepth),
-            background_color,
+            .zero(),
+        );
+        render_group.end();
+
+        render_group = RenderGroup.begin(
+            state.assets,
+            render_commands,
+            0,
+            .zero(),
         );
 
         // Prefetch assets for the next shot.
@@ -392,7 +405,7 @@ fn renderLayeredScene(
             .new(0, 0, 1),
             .zero(),
             0,
-            -0.1,
+            0.1,
             1000,
             null,
             null,
@@ -442,11 +455,8 @@ fn renderLayeredScene(
                     _ = transform.offset_position.setY(position.y() - camera_offset.y());
                 }
 
-                _ = transform.offset_position.setZ(camera_offset.z());
+                _ = transform.offset_position.setZ(position.z() - camera_offset.z());
 
-                if (INTERNAL) {
-                    render_group.debug_tag = layer_index;
-                }
                 asset_rendering.pushBitmapId(
                     render_group,
                     &transform,
