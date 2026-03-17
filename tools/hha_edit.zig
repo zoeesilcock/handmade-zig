@@ -12,7 +12,7 @@ const String = types.String;
 const HHAHeaderV0 = file_formats_v0.HHAHeaderV0;
 const HHAAssetTypeV0 = file_formats_v0.HHAAssetTypeV0;
 const HHAAssetV0 = file_formats_v0.HHAAssetV0;
-const AssetTypeIdV0 = file_formats_v0.AssetTypeIdV0;
+const AssetBasicCategory = file_formats.AssetBasicCategory;
 
 const HHAHeader = file_formats.HHAHeader;
 const HHAAssetType = file_formats.HHAAssetType;
@@ -90,7 +90,7 @@ fn readEntireFile(file: std.fs.File, allocator: std.mem.Allocator) ![]const u8 {
     return result;
 }
 
-const type_from_id = [_]struct { HHAAssetType, AssetTypeIdV0 }{
+const type_from_id = [_]struct { HHAAssetType, AssetBasicCategory }{
     .{ .None, .None },
 
     .{ .Bitmap, .Shadow },

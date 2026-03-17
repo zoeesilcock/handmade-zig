@@ -34,6 +34,7 @@ const TransientClipRect = renderer.TransientClipRect;
 const ObjectTransform = renderer.ObjectTransform;
 const ClipRectFX = renderer.ClipRectFX;
 const AssetTagId = file_formats.AssetTagId;
+const AssetBasicCategory = file_formats.AssetBasicCategory;
 const BitmapId = file_formats.BitmapId;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
@@ -84,12 +85,16 @@ pub const EntityVisiblePieceFlag = enum(u32) {
 };
 
 pub const EntityVisiblePiece = extern struct {
-    offset: Vector3,
     color: Color,
-    asset_type: AssetTypeId,
-    dimension: Vector2,
+    offset: Vector3,
+    dimension: Vector3,
+
     flags: u32,
-    light_index: u32,
+    category: AssetBasicCategory,
+
+    extra: extern union {
+        cube_uv_layout: renderer.CubeUVLayout,
+    },
 };
 
 pub const CameraBehavior = enum(u32) {
@@ -504,7 +509,7 @@ pub fn updateAndRenderEntities(
                     const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
                     var bitmap_id: ?BitmapId = null;
                     if (opt_assets) |assets| {
-                        bitmap_id = assets.getBestMatchBitmap(piece.asset_type, &match_vector, &weight_vector);
+                        bitmap_id = assets.getBestMatchBitmap(piece.category, &match_vector, &weight_vector);
                     }
 
                     var x_axis: Vector2 = .new(1, 0);
@@ -526,7 +531,7 @@ pub fn updateAndRenderEntities(
                         asset_rendering.pushCubeLight(
                             render_group,
                             entity_transform.offset_position.plus(piece.offset),
-                            Vector3.new(1, 1, 1).scaledTo(piece.dimension.x()),
+                            piece.dimension,
                             piece.color.rgb(),
                             piece.color.a(),
                             @ptrCast(&entity.lighting[piece_index]),
@@ -535,13 +540,9 @@ pub fn updateAndRenderEntities(
                         render_group.pushCube(
                             render_group.white_texture,
                             entity_transform.offset_position.plus(piece.offset),
-                            .new(
-                                piece.dimension.x(),
-                                piece.dimension.x(),
-                                piece.dimension.y(),
-                            ),
+                            piece.dimension,
                             piece.color,
-                            null,
+                            piece.extra.cube_uv_layout,
                             null,
                             @ptrCast(&entity.lighting[piece_index]),
                         );

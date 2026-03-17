@@ -12,7 +12,7 @@ const CUTSCENE_WARMUP_SECONDS: f32 = 2;
 
 const Assets = asset.Assets;
 const AssetTagId = file_formats.AssetTagId;
-const AssetTypeId = asset.AssetTypeId;
+const AssetBasicCategory = file_formats.AssetBasicCategory;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -39,7 +39,7 @@ const SceneLayer = struct {
 };
 
 const LayeredScene = struct {
-    asset_type: AssetTypeId,
+    asset_type: AssetBasicCategory,
     shot_index: u32,
     layers: []const SceneLayer,
     duration: f32,

@@ -42,6 +42,7 @@ const HHAFontGlyph = file_formats.HHAFontGlyph;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
+const AssetBasicCategory = file_formats.AssetBasicCategory;
 const PlatformFileHandle = shared.PlatformFileHandle;
 const PlatformFileInfo = shared.PlatformFileInfo;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
@@ -49,16 +50,15 @@ const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
 const RendererTexture = renderer.RendererTexture;
 
-pub const AssetTypeId = file_formats_v0.AssetTypeIdV0;
 pub const AssetTagId = file_formats.AssetTagId;
-pub const ASSET_TYPE_ID_COUNT = file_formats_v0.ASSET_TYPE_ID_COUNT;
+pub const ASSET_CATEGORY_COUNT = file_formats.ASSET_CATEGORY_COUNT;
 const ASSET_IMPORT_GRID_MAX = 8;
 const HHA_VERSION = file_formats.HHA_VERSION;
 const HHA_MAGIC_VALUE = file_formats.HHA_MAGIC_VALUE;
 const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
 
 const ImportGridTag = struct {
-    type_id: AssetTypeId,
+    type_id: AssetBasicCategory,
     first_tag_index: u32,
     one_past_last_tag_index: u32,
 };
@@ -107,7 +107,7 @@ pub const AssetMemoryHeader = extern struct {
 };
 
 pub const AssetVector = struct {
-    e: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{0} ** ASSET_TYPE_ID_COUNT,
+    e: [ASSET_CATEGORY_COUNT]f32 = [1]f32{0} ** ASSET_CATEGORY_COUNT,
 };
 
 const AssetState = enum(u32) {
@@ -219,7 +219,7 @@ pub const Assets = struct {
 
     loaded_asset_sentinel: AssetMemoryHeader,
 
-    tag_range: [ASSET_TYPE_ID_COUNT]f32 = [1]f32{1000000} ** ASSET_TYPE_ID_COUNT,
+    tag_range: [ASSET_CATEGORY_COUNT]f32 = [1]f32{1000000} ** ASSET_CATEGORY_COUNT,
 
     file_count: u32,
     files: [*]AssetFile,
@@ -233,7 +233,7 @@ pub const Assets = struct {
     asset_count: u32,
     assets: [*]Asset,
 
-    first_asset_of_type: [ASSET_TYPE_ID_COUNT]u32,
+    first_asset_of_type: [ASSET_CATEGORY_COUNT]u32,
 
     source_file_hash: [256]?*SourceFile = [1]?*SourceFile{null} ** 256,
     direction_tag: [4]u32,
@@ -494,7 +494,7 @@ pub const Assets = struct {
                             }
                         }
 
-                        var type_id: AssetTypeId = .None;
+                        var type_id: AssetBasicCategory = .None;
                         var asset_tag_index: u32 = asset.hha.first_tag_index;
                         while (asset_tag_index < asset.hha.one_past_last_tag_index) : (asset_tag_index += 1) {
                             if (assets.tags[asset_tag_index].id == .BasicCategory) {
@@ -519,7 +519,7 @@ pub const Assets = struct {
                 tag[0].value = math.TAU32 / @as(f32, @floatFromInt(assets.direction_tag.len));
                 tag += 1;
                 tag[0].id = AssetTagId.BasicCategory;
-                tag[0].value = @floatFromInt(@as(u32, @intFromEnum(AssetTypeId.Hand)));
+                tag[0].value = @floatFromInt(@as(u32, @intFromEnum(AssetBasicCategory.Hand)));
             }
 
             checkForArtChanges(assets);
@@ -696,7 +696,7 @@ pub const Assets = struct {
         return &self.getFile(file_index).handle;
     }
 
-    pub fn getFirstAsset(self: *Assets, type_id: AssetTypeId) ?u32 {
+    pub fn getFirstAsset(self: *Assets, type_id: AssetBasicCategory) ?u32 {
         TimedBlock.beginFunction(@src(), .GetFirstAsset);
         defer TimedBlock.endFunction(@src(), .GetFirstAsset);
 
@@ -705,7 +705,7 @@ pub const Assets = struct {
         return result;
     }
 
-    // pub fn getRandomAsset(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?u32 {
+    // pub fn getRandomAsset(self: *Assets, type_id: AssetBasicCategory, series: *random.Series) ?u32 {
     //     TimedBlock.beginFunction(@src(), .GetRandomAsset);
     //     defer TimedBlock.endFunction(@src(), .GetRandomAsset);
     //
@@ -723,7 +723,7 @@ pub const Assets = struct {
 
     pub fn getBestMatchAsset(
         self: *Assets,
-        type_id: AssetTypeId,
+        type_id: AssetBasicCategory,
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
     ) ?u32 {
@@ -733,7 +733,7 @@ pub const Assets = struct {
         var result: ?u32 = null;
         var best_diff: f32 = std.math.floatMax(f32);
 
-        var asset_index: u32 = self.first_asset_of_type[type_id.toInt()];
+        var asset_index: u32 = self.first_asset_of_type[@intFromEnum(type_id)];
         while (asset_index != 0) {
             const asset = self.assets[asset_index];
 
@@ -742,7 +742,7 @@ pub const Assets = struct {
             while (tag_index < asset.hha.one_past_last_tag_index) : (tag_index += 1) {
                 const tag: *HHATag = &self.tags[tag_index];
 
-                const a: f32 = match_vector.e[tag.id.toInt()];
+                const a: f32 = match_vector.e[@intFromEnum(tag.id)];
                 const b: f32 = tag.value;
                 const d0 = intrinsics.absoluteValue(a - b);
                 const d1 = intrinsics.absoluteValue((a - (self.tag_range[tag.id.toInt()] * intrinsics.signOfF32(a))) - b);
@@ -919,7 +919,7 @@ pub const Assets = struct {
         return &self.assets[id.value].hha.info.bitmap;
     }
 
-    pub fn getFirstBitmap(self: *Assets, type_id: AssetTypeId) ?BitmapId {
+    pub fn getFirstBitmap(self: *Assets, type_id: AssetBasicCategory) ?BitmapId {
         var result: ?BitmapId = null;
 
         if (self.getFirstAsset(type_id)) |slot_id| {
@@ -929,7 +929,7 @@ pub const Assets = struct {
         return result;
     }
 
-    // pub fn getRandomBitmap(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?BitmapId {
+    // pub fn getRandomBitmap(self: *Assets, type_id: AssetBasicCategory, series: *random.Series) ?BitmapId {
     //     var result: ?BitmapId = null;
     //
     //     if (self.getRandomAsset(type_id, series)) |slot_id| {
@@ -941,7 +941,7 @@ pub const Assets = struct {
 
     pub fn getBestMatchBitmap(
         self: *Assets,
-        type_id: AssetTypeId,
+        type_id: AssetBasicCategory,
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
     ) ?BitmapId {
@@ -1053,7 +1053,7 @@ pub const Assets = struct {
         return result;
     }
 
-    pub fn getFirstSound(self: *Assets, type_id: AssetTypeId) ?SoundId {
+    pub fn getFirstSound(self: *Assets, type_id: AssetBasicCategory) ?SoundId {
         var result: ?SoundId = null;
 
         if (self.getFirstAsset(type_id)) |slot_id| {
@@ -1063,7 +1063,7 @@ pub const Assets = struct {
         return result;
     }
 
-    // pub fn getRandomSound(self: *Assets, type_id: AssetTypeId, series: *random.Series) ?SoundId {
+    // pub fn getRandomSound(self: *Assets, type_id: AssetBasicCategory, series: *random.Series) ?SoundId {
     //     var result: ?SoundId = null;
     //
     //     if (self.getRandomAsset(type_id, series)) |slot_id| {
@@ -1075,7 +1075,7 @@ pub const Assets = struct {
 
     pub fn getBestMatchSound(
         self: *Assets,
-        type_id: AssetTypeId,
+        type_id: AssetBasicCategory,
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
     ) ?SoundId {
@@ -1201,7 +1201,7 @@ pub const Assets = struct {
 
     pub fn getBestMatchFont(
         self: *Assets,
-        type_id: AssetTypeId,
+        type_id: AssetBasicCategory,
         match_vector: *AssetVector,
         weight_vector: *AssetVector,
     ) ?FontId {
@@ -1333,8 +1333,8 @@ pub const Assets = struct {
         shared.platform.writeDataToFile(&file.handle, file.header.annotations, annotation_array_size, annotations);
     }
 
-    pub fn setAssetType(self: *Assets, asset_index: u32, type_id: AssetTypeId) void {
-        if (asset_index != 0 and @intFromEnum(type_id) < @typeInfo(AssetTypeId).@"enum".fields.len) {
+    pub fn setAssetType(self: *Assets, asset_index: u32, type_id: AssetBasicCategory) void {
+        if (asset_index != 0 and @intFromEnum(type_id) < @typeInfo(AssetBasicCategory).@"enum".fields.len) {
             var asset: *Asset = &self.assets[asset_index];
             std.debug.assert(asset.next_of_type == 0);
             asset.next_of_type = self.first_asset_of_type[@intFromEnum(type_id)];

@@ -8,6 +8,7 @@ const asset = @import("asset.zig");
 const brains = @import("brains.zig");
 const world_mod = @import("world.zig");
 const world_mode_mod = @import("world_mode.zig");
+const file_formats = @import("file_formats");
 const std = @import("std");
 
 // Types.
@@ -38,6 +39,7 @@ const BrainHero = brains.BrainHero;
 const BrainSnake = brains.BrainSnake;
 const BrainMonster = brains.BrainMonster;
 const BrainFamiliar = brains.BrainFamiliar;
+const AssetBasicCategory = file_formats.AssetBasicCategory;
 
 pub const shadow_alpha = 0.5;
 const X = 0;
@@ -46,13 +48,13 @@ const Z = 2;
 
 pub fn addPiece(
     entity: *Entity,
-    asset_type: asset.AssetTypeId,
+    category: AssetBasicCategory,
     height: f32,
     offset: Vector3,
     color: Color,
     opt_movement_flags: ?u32,
-) void {
-    addPieceV2(entity, asset_type, .new(0, height), offset, color, opt_movement_flags);
+) *EntityVisiblePiece {
+    return addPieceV3(entity, category, .new(0, height, 0), offset, color, opt_movement_flags);
 }
 
 fn addPieceLight(
@@ -61,35 +63,37 @@ fn addPieceLight(
     offset: Vector3,
     emission: f32,
     color: Color3,
-) void {
-    addPieceV2(
+) *EntityVisiblePiece {
+    return addPieceV3(
         entity,
         .None,
-        .new(radius, radius),
+        .new(radius, radius, radius),
         offset,
         color.toColor(emission),
         @intFromEnum(EntityVisiblePieceFlag.Light),
     );
 }
 
-fn addPieceV2(
+fn addPieceV3(
     entity: *Entity,
-    asset_type: asset.AssetTypeId,
-    dimension: Vector2,
+    category: AssetBasicCategory,
+    dimension: Vector3,
     offset: Vector3,
     color: Color,
     opt_movement_flags: ?u32,
-) void {
+) *EntityVisiblePiece {
     std.debug.assert(entity.piece_count < entity.pieces.len);
 
     var piece: *EntityVisiblePiece = &entity.pieces[entity.piece_count];
     entity.piece_count += 1;
 
-    piece.asset_type = asset_type;
+    piece.category = category;
     piece.dimension = dimension;
     piece.offset = offset;
     piece.color = color;
     piece.flags = opt_movement_flags orelse 0;
+
+    return piece;
 }
 
 fn getCameraOffsetZForDimension(x_count: i32, y_count: i32) f32 {
@@ -232,10 +236,10 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             _ = position.offset.setY(position.offset.y() + 0);
             _ = position.offset.setZ(position.offset.z() + wall_height + 0.5 * series.randomUnilateral());
 
-            addPieceV2(
+            _ = addPieceV3(
                 entity,
                 .Grass,
-                .new(0.7, 0.5 * wall_height),
+                .new(0.7, 0.7, 0.5 * wall_height),
                 .new(0, 0, -0.5 * wall_height),
                 color,
                 @intFromEnum(EntityVisiblePieceFlag.Cube),
@@ -346,7 +350,7 @@ fn addLamp(
 ) void {
     const entity = addEntity(region);
 
-    addPieceLight(entity, 0.5, .new(0, 0, 2.5), 1.0, color);
+    _ = addPieceLight(entity, 0.5, .new(0, 0, 2.5), 1.0, color);
 
     placeEntity(region, entity, world_position);
 }
@@ -360,8 +364,8 @@ fn addFamiliar(region: *SimRegion, world_position: WorldPosition, standing_on: T
     entity.brain_id = sim.addBrain(region);
     entity.occupying = standing_on;
 
-    addPiece(entity, .Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
-    addPiece(entity, .Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
+    _ = addPiece(entity, .Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
+    _ = addPiece(entity, .Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
 
     placeEntity(region, entity, world_position);
 }

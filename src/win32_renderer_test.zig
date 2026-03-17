@@ -29,75 +29,27 @@ const RenderGroupFlags = renderer.RenderGroupFlags;
 const RendererTexture = renderer.RendererTexture;
 const TextureQueue = renderer.TextureQueue;
 const TextureOp = renderer.TextureOp;
+const CubeUVLayout = renderer.CubeUVLayout;
 const Camera = cam.Camera;
 const PlatformRenderer = renderer.PlatformRenderer;
 
 const TEST_SCENE_DIM_X = 40;
 const TEST_SCENE_DIM_Y = 50;
 
-pub const wall_uv: renderer.CubeUVLayout = .{
-    .bot_t0 = .new(0, 0),
-    .bot_t1 = .new(0.25, 0),
-    .bot_t2 = .new(0.25, 0.25),
-    .bot_t3 = .new(0, 0.25),
-
-    .mid_t0 = [1]Vector2{.new(0.5, 0.25)} ** 4,
-    .mid_t1 = [1]Vector2{.new(0.75, 0.25)} ** 4,
-    .mid_t2 = [1]Vector2{.new(0.75, 0.75)} ** 4,
-    .mid_t3 = [1]Vector2{.new(0.5, 0.75)} ** 4,
-
-    .top_t0 = .new(0, 0.75),
-    .top_t1 = .new(0.25, 0.75),
-    .top_t2 = .new(0.25, 1),
-    .top_t3 = .new(0, 1),
-};
-
-pub const wall_start_uv: renderer.CubeUVLayout = .{
-    .bot_t0 = .new(0, 0),
-    .bot_t1 = .new(0.25, 0),
-    .bot_t2 = .new(0.25, 0.25),
-    .bot_t3 = .new(0, 0.25),
-
-    .mid_t0 = [1]Vector2{.new(0.25, 0.25)} ** 4,
-    .mid_t1 = [1]Vector2{.new(0.5, 0.25)} ** 4,
-    .mid_t2 = [1]Vector2{.new(0.5, 0.75)} ** 4,
-    .mid_t3 = [1]Vector2{.new(0.25, 0.75)} ** 4,
-
-    .top_t0 = .new(0, 0.75),
-    .top_t1 = .new(0.25, 0.75),
-    .top_t2 = .new(0.25, 1),
-    .top_t3 = .new(0, 1),
-};
-
-pub const wall_end_uv: renderer.CubeUVLayout = .{
-    .bot_t0 = .new(0, 0),
-    .bot_t1 = .new(0.25, 0),
-    .bot_t2 = .new(0.25, 0.25),
-    .bot_t3 = .new(0, 0.25),
-
-    .mid_t0 = [1]Vector2{.new(0.75, 0.25)} ** 4,
-    .mid_t1 = [1]Vector2{.new(1, 0.25)} ** 4,
-    .mid_t2 = [1]Vector2{.new(1, 0.75)} ** 4,
-    .mid_t3 = [1]Vector2{.new(0.75, 0.75)} ** 4,
-
-    .top_t0 = .new(0, 0.75),
-    .top_t1 = .new(0.25, 0.75),
-    .top_t2 = .new(0.25, 1),
-    .top_t3 = .new(0, 1),
-};
-
-const TestSceneElement = enum(u32) {
+const TestSceneElementType = enum(u32) {
     Grass,
     Tree,
     Wall,
-    WallStart,
-    WallEnd,
+};
+const TestSceneElement = struct {
+    element_type: TestSceneElementType,
+    cube_uv_layout: CubeUVLayout,
 };
 
 const TestScene = struct {
     min_position: Vector3 = .zero(),
     elements: [TEST_SCENE_DIM_Y][TEST_SCENE_DIM_X]TestSceneElement =
-        [1][TEST_SCENE_DIM_X]TestSceneElement{[1]TestSceneElement{.Grass} ** TEST_SCENE_DIM_X} ** TEST_SCENE_DIM_Y,
+        [1][TEST_SCENE_DIM_X]TestSceneElement{[1]TestSceneElement{.{ .element_type = .Grass, .cube_uv_layout = .default }} ** TEST_SCENE_DIM_X} ** TEST_SCENE_DIM_Y,
     grass_texture: RendererTexture = .empty,
     wall_texture: RendererTexture = .empty,
     tree_texture: RendererTexture = .empty,
@@ -151,19 +103,19 @@ fn countOccupantsIn3x3(scene: *TestScene, center_x: u32, center_y: u32) u32 {
 fn isEmpty(scene: *TestScene, x: u32, y: u32) bool {
     var result: bool = false;
     if (y < scene.elements.len and x < scene.elements[0].len) {
-        result = (scene.elements[y][x] == .Grass);
+        result = (scene.elements[y][x].element_type == .Grass);
     }
     return result;
 }
 
-fn placeRandomInUnoccupied(scene: *TestScene, element: TestSceneElement, count: u32) void {
+fn placeRandomInUnoccupied(scene: *TestScene, element_type: TestSceneElementType, count: u32) void {
     var placed: u32 = 0;
     while (placed < count) {
         const x: u32 = 1 + @mod(@as(u32, @intCast(c.rand())), TEST_SCENE_DIM_X - 1);
         const y: u32 = 1 + @mod(@as(u32, @intCast(c.rand())), TEST_SCENE_DIM_Y - 1);
 
         if (countOccupantsIn3x3(scene, x, y) == 0) {
-            scene.elements[y][x] = element;
+            scene.elements[y][x].element_type = element_type;
             placed += 1;
         }
     }
@@ -171,6 +123,8 @@ fn placeRandomInUnoccupied(scene: *TestScene, element: TestSceneElement, count: 
 
 fn placeRectangularWall(scene: *TestScene, min_x: u32, min_y: u32, max_x: u32, max_y: u32) bool {
     var placed: bool = true;
+
+    const wall_uv: CubeUVLayout = renderer.encodeCubeUVLayout(0, 0, 2, 2, 2, 2, 0, 0);
 
     var pass: u32 = 0;
     while (placed and pass <= 1) : (pass += 1) {
@@ -182,15 +136,25 @@ fn placeRectangularWall(scene: *TestScene, min_x: u32, min_y: u32, max_x: u32, m
                     break;
                 }
             } else {
-                var element_type: TestSceneElement = .Wall;
-                if (x == min_x) {
-                    element_type = .WallStart;
-                } else if (x == max_x) {
-                    element_type = .WallEnd;
-                }
+                scene.elements[min_y][x].element_type = .Wall;
+                scene.elements[max_y][x].element_type = .Wall;
 
-                scene.elements[min_y][x] = element_type;
-                scene.elements[max_y][x] = element_type;
+                if (x == min_x) {
+                    scene.elements[min_y][x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 1, 1, 3, 1, 0, 0);
+                    scene.elements[max_y][x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 1, 3, 1, 1, 0, 0);
+                } else if (x == max_x) {
+                    scene.elements[min_y][x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 1, 3, 3, 3, 0, 0);
+                    scene.elements[max_y][x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 3, 1, 3, 3, 0, 0);
+                } else if (x == (min_x + 1)) {
+                    scene.elements[min_y][x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 2, 3, 2, 2, 0, 0);
+                    scene.elements[max_y][x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 2, 2, 2, 1, 0, 0);
+                } else if (x == (max_x - 1)) {
+                    scene.elements[min_y][x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 2, 1, 2, 2, 0, 0);
+                    scene.elements[max_y][x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 2, 2, 2, 3, 0, 0);
+                } else {
+                    scene.elements[min_y][x].cube_uv_layout = wall_uv;
+                    scene.elements[max_y][x].cube_uv_layout = wall_uv;
+                }
             }
         }
 
@@ -202,8 +166,19 @@ fn placeRectangularWall(scene: *TestScene, min_x: u32, min_y: u32, max_x: u32, m
                     break;
                 }
             } else {
-                scene.elements[y][min_x] = .Wall;
-                scene.elements[y][max_x] = .Wall;
+                scene.elements[y][min_x].element_type = .Wall;
+                scene.elements[y][max_x].element_type = .Wall;
+
+                if (y == (min_y + 1)) {
+                    scene.elements[y][min_x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 1, 2, 2, 2, 0, 0);
+                    scene.elements[y][max_x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 2, 2, 3, 2, 0, 0);
+                } else if (y == (max_y - 1)) {
+                    scene.elements[y][min_x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 3, 2, 2, 2, 0, 0);
+                    scene.elements[y][max_x].cube_uv_layout = renderer.encodeCubeUVLayout(0, 0, 2, 2, 1, 2, 0, 0);
+                } else {
+                    scene.elements[y][min_x].cube_uv_layout = wall_uv;
+                    scene.elements[y][max_x].cube_uv_layout = wall_uv;
+                }
             }
         }
     }
@@ -223,7 +198,7 @@ fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
             var z: f32 = 0.4 * @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX));
             var r: f32 = 0.5 + 0.5 * @as(f32, @floatFromInt(c.rand())) / @as(f32, @floatFromInt(c.RAND_MAX));
 
-            if (element == .Wall or element == .WallStart or element == .WallEnd) {
+            if (element.element_type == .Wall) {
                 z = 0.4;
                 r = 1;
             }
@@ -243,7 +218,7 @@ fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
             );
 
             const ground_position: Vector3 = position.plus(.new(0, 0, z_radius));
-            if (element == .Tree) {
+            if (element.element_type == .Tree) {
                 group.pushUpright(
                     scene.tree_texture,
                     ground_position,
@@ -255,33 +230,13 @@ fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
                     null,
                     null,
                 );
-            } else if (element == .Wall) {
+            } else if (element.element_type == .Wall) {
                 group.pushCube(
                     scene.wall_texture,
                     ground_position.plus(.new(0, 0, wall_radius)),
                     .new(0.5, 0.5, wall_radius),
                     color,
-                    &wall_uv,
-                    null,
-                    null,
-                );
-            } else if (element == .WallStart) {
-                group.pushCube(
-                    scene.wall_texture,
-                    ground_position.plus(.new(0, 0, wall_radius)),
-                    .new(0.5, 0.5, wall_radius),
-                    color,
-                    &wall_start_uv,
-                    null,
-                    null,
-                );
-            } else if (element == .WallEnd) {
-                group.pushCube(
-                    scene.wall_texture,
-                    ground_position.plus(.new(0, 0, wall_radius)),
-                    .new(0.5, 0.5, wall_radius),
-                    color,
-                    &wall_end_uv,
+                    element.cube_uv_layout,
                     null,
                     null,
                 );

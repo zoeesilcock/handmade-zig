@@ -253,8 +253,8 @@ fn addPlayer(
     const hero_scale = 3;
     const color: Color = .white();
     if (true) {
-        room_gen.addPiece(body, .Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, room_gen.shadow_alpha), null);
-        room_gen.addPiece(
+        _ = room_gen.addPiece(body, .Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, room_gen.shadow_alpha), null);
+        _ = room_gen.addPiece(
             body,
             .Torso,
             hero_scale * 1.2,
@@ -262,7 +262,7 @@ fn addPlayer(
             color,
             @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
         );
-        room_gen.addPiece(
+        _ = room_gen.addPiece(
             body,
             .Cape,
             hero_scale * 1.2,
@@ -271,9 +271,9 @@ fn addPlayer(
             @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
         );
 
-        room_gen.addPiece(head, .Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
+        _ = room_gen.addPiece(head, .Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
 
-        room_gen.addPiece(glove, .Hand, hero_scale * 0.25, .new(0, 0, 0), color, null);
+        _ = room_gen.addPiece(glove, .Hand, hero_scale * 0.25, .new(0, 0, 0), color, null);
     }
 
     room_gen.placeEntity(sim_region, glove, position);

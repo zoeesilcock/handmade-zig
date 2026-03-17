@@ -326,39 +326,10 @@ const PushBufferResult = extern struct {
     header: ?*RenderEntryHeader = null,
 };
 
-pub const CubeUVLayout = struct {
-    bot_t0: Vector2,
-    bot_t1: Vector2,
-    bot_t2: Vector2,
-    bot_t3: Vector2,
+pub const CubeUVLayout = extern struct {
+    encoding: u16,
 
-    // Order: +X, +Y, -X, -Y.
-    mid_t0: [4]Vector2,
-    mid_t1: [4]Vector2,
-    mid_t2: [4]Vector2,
-    mid_t3: [4]Vector2,
-
-    top_t0: Vector2,
-    top_t1: Vector2,
-    top_t2: Vector2,
-    top_t3: Vector2,
-
-    pub const default: CubeUVLayout = .{
-        .bot_t0 = .new(0, 0),
-        .bot_t1 = .new(0.25, 0),
-        .bot_t2 = .new(0.25, 0.25),
-        .bot_t3 = .new(0, 0.25),
-
-        .mid_t0 = [1]Vector2{.new(0, 0.25)} ** 4,
-        .mid_t1 = [1]Vector2{.new(0.25, 0.25)} ** 4,
-        .mid_t2 = [1]Vector2{.new(0.25, 0.75)} ** 4,
-        .mid_t3 = [1]Vector2{.new(0, 0.75)} ** 4,
-
-        .top_t0 = .new(0, 0.75),
-        .top_t1 = .new(0.25, 0.75),
-        .top_t2 = .new(0.25, 1),
-        .top_t3 = .new(0, 1),
-    };
+    pub const default: CubeUVLayout = .{ .encoding = 0 };
 };
 
 const RenderTransform = extern struct {
@@ -905,11 +876,11 @@ pub const RenderGroup = extern struct {
         position: Vector3,
         radius: Vector3,
         color: Color,
-        opt_uv_layout: ?*const CubeUVLayout,
+        opt_uv_layout: ?CubeUVLayout,
         opt_emission: ?f32,
         opt_light_store_in: ?*LightingPointState,
     ) void {
-        const uv_layout: *const CubeUVLayout = opt_uv_layout orelse &.default;
+        const uv_layout: CubeUVLayout = opt_uv_layout orelse .default;
         const emission = opt_emission orelse 0;
         var opt_light_store: ?*LightingPointState = opt_light_store_in;
 
@@ -983,20 +954,60 @@ pub const RenderGroup = extern struct {
                 }
             }
 
+            const bot_face: u32 = ((uv_layout.encoding >> 2) & 0x3);
+            const top_face: u32 = ((uv_layout.encoding >> 14) & 0x3);
+            const bot_x: f32 = @as(f32, @floatFromInt((uv_layout.encoding >> 0) & 0x3)) * 0.25;
+            const top_x: f32 = @as(f32, @floatFromInt((uv_layout.encoding >> 12) & 0x3)) * 0.25;
+            const mid_x0: f32 = @as(f32, @floatFromInt((uv_layout.encoding >> 4) & 0x3)) * 0.25;
+            const mid_x1: f32 = @as(f32, @floatFromInt((uv_layout.encoding >> 6) & 0x3)) * 0.25;
+            const mid_x2: f32 = @as(f32, @floatFromInt((uv_layout.encoding >> 8) & 0x3)) * 0.25;
+            const mid_x3: f32 = @as(f32, @floatFromInt((uv_layout.encoding >> 10) & 0x3)) * 0.25;
+
+            const bot_t0: Vector2 = Vector2.new(bot_x + cubeDecodeX(bot_face, 0), cubeDecodeY(bot_face, 0));
+            const bot_t1: Vector2 = Vector2.new(bot_x + cubeDecodeX(bot_face, 1), cubeDecodeY(bot_face, 1));
+            const bot_t2: Vector2 = Vector2.new(bot_x + cubeDecodeX(bot_face, 2), cubeDecodeY(bot_face, 2));
+            const bot_t3: Vector2 = Vector2.new(bot_x + cubeDecodeX(bot_face, 3), cubeDecodeY(bot_face, 3));
+
+            const mid_t0_0: Vector2 = .new(mid_x0 + 0, 0.25);
+            const mid_t1_0: Vector2 = .new(mid_x0 + 0.25, 0.25);
+            const mid_t2_0: Vector2 = .new(mid_x0 + 0.25, 0.75);
+            const mid_t3_0: Vector2 = .new(mid_x0 + 0, 0.75);
+
+            const mid_t0_1: Vector2 = .new(mid_x1 + 0, 0.25);
+            const mid_t1_1: Vector2 = .new(mid_x1 + 0.25, 0.25);
+            const mid_t2_1: Vector2 = .new(mid_x1 + 0.25, 0.75);
+            const mid_t3_1: Vector2 = .new(mid_x1 + 0, 0.75);
+
+            const mid_t0_2: Vector2 = .new(mid_x2 + 0, 0.25);
+            const mid_t1_2: Vector2 = .new(mid_x2 + 0.25, 0.25);
+            const mid_t2_2: Vector2 = .new(mid_x2 + 0.25, 0.75);
+            const mid_t3_2: Vector2 = .new(mid_x2 + 0, 0.75);
+
+            const mid_t0_3: Vector2 = .new(mid_x3 + 0, 0.25);
+            const mid_t1_3: Vector2 = .new(mid_x3 + 0.25, 0.25);
+            const mid_t2_3: Vector2 = .new(mid_x3 + 0.25, 0.75);
+            const mid_t3_3: Vector2 = .new(mid_x3 + 0, 0.75);
+
+            // TODO: This isn't right yet.
+            const top_t0: Vector2 = Vector2.new(top_x + cubeDecodeX(top_face, 0), 0.75 + cubeDecodeY(top_face, 0));
+            const top_t1: Vector2 = Vector2.new(top_x + cubeDecodeX(top_face, 1), 0.75 + cubeDecodeY(top_face, 1));
+            const top_t2: Vector2 = Vector2.new(top_x + cubeDecodeX(top_face, 2), 0.75 + cubeDecodeY(top_face, 2));
+            const top_t3: Vector2 = Vector2.new(top_x + cubeDecodeX(top_face, 3), 0.75 + cubeDecodeY(top_face, 3));
+
             // Negative X.
             self.pushQuadUnpackedColors(
                 texture,
                 p7,
-                uv_layout.mid_t0[2],
+                mid_t0_2,
                 cb,
                 p4,
-                uv_layout.mid_t1[2],
+                mid_t1_2,
                 cb,
                 p0, //
-                uv_layout.mid_t2[2],
+                mid_t2_2,
                 ct,
                 p3, //
-                uv_layout.mid_t3[2],
+                mid_t3_2,
                 ct,
                 opt_emission,
                 light_count,
@@ -1008,16 +1019,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p1, //
-                uv_layout.mid_t3[0],
+                mid_t3_0,
                 ct,
                 p5,
-                uv_layout.mid_t0[0],
+                mid_t0_0,
                 cb,
                 p6,
-                uv_layout.mid_t1[0],
+                mid_t1_0,
                 cb,
                 p2, //
-                uv_layout.mid_t2[0],
+                mid_t2_0,
                 ct,
                 opt_emission,
                 light_count,
@@ -1029,16 +1040,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p4,
-                uv_layout.mid_t0[3],
+                mid_t0_3,
                 cb,
                 p5,
-                uv_layout.mid_t1[3],
+                mid_t1_3,
                 cb,
                 p1, //
-                uv_layout.mid_t2[3],
+                mid_t2_3,
                 ct,
                 p0, //
-                uv_layout.mid_t3[3],
+                mid_t3_3,
                 ct,
                 opt_emission,
                 light_count,
@@ -1050,16 +1061,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p2, //
-                uv_layout.mid_t3[1],
+                mid_t3_1,
                 ct,
                 p6,
-                uv_layout.mid_t0[1],
+                mid_t0_1,
                 cb,
                 p7,
-                uv_layout.mid_t1[1],
+                mid_t1_1,
                 cb,
                 p3, //
-                uv_layout.mid_t2[1],
+                mid_t2_1,
                 ct,
                 opt_emission,
                 light_count,
@@ -1071,16 +1082,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p7,
-                uv_layout.bot_t0,
+                bot_t0,
                 bottom_color,
                 p6,
-                uv_layout.bot_t1,
+                bot_t1,
                 bottom_color,
                 p5,
-                uv_layout.bot_t2,
+                bot_t2,
                 bottom_color,
                 p4,
-                uv_layout.bot_t3,
+                bot_t3,
                 bottom_color,
                 opt_emission,
                 light_count,
@@ -1092,16 +1103,16 @@ pub const RenderGroup = extern struct {
             self.pushQuadUnpackedColors(
                 texture,
                 p0,
-                uv_layout.top_t0,
+                top_t0,
                 top_color,
                 p1,
-                uv_layout.top_t1,
+                top_t1,
                 top_color,
                 p2,
-                uv_layout.top_t2,
+                top_t2,
                 top_color,
                 p3,
-                uv_layout.top_t3,
+                top_t3,
                 top_color,
                 opt_emission,
                 light_count,
@@ -1612,4 +1623,43 @@ pub fn specialTextureIndexFrom(index: u32) u32 {
 
 pub fn textureIndexFrom(texture: RendererTexture) u32 {
     return texture.index & ~@as(u32, @intCast(SPECIAL_TEXTURE_BIT));
+}
+
+pub fn encodeCubeUVLayout(
+    bottom_index: u32, // East.
+    bottom_facing_index: u32, // 0: 0 degrees, 1: 90 degrees, 2: 180 degrees, 3: 270 degrees.
+    side_index_0: u32, // North.
+    side_index_1: u32, // West.
+    side_index_2: u32, // South
+    side_index_3: u32,
+    top_index: u32,
+    top_facing_index: u32, // 0: 0 degrees, 1: 90 degrees, 2: 180 degrees, 3: 270 degrees.
+) CubeUVLayout {
+    std.debug.assert(bottom_index <= 3);
+    std.debug.assert(bottom_facing_index <= 3);
+    std.debug.assert(side_index_0 <= 3);
+    std.debug.assert(side_index_1 <= 3);
+    std.debug.assert(side_index_2 <= 3);
+    std.debug.assert(side_index_3 <= 3);
+    std.debug.assert(top_index <= 3);
+    std.debug.assert(top_facing_index <= 3);
+
+    return .{
+        .encoding = @intCast((bottom_index << 0) |
+            (bottom_facing_index << 2) |
+            (side_index_0 << 4) |
+            (side_index_1 << 6) |
+            (side_index_2 << 8) |
+            (side_index_3 << 10) |
+            (top_index << 12) |
+            (top_facing_index << 14)),
+    };
+}
+
+fn cubeDecodeX(face: u32, offset: u32) f32 {
+    return @as(f32, @floatFromInt(((offset - face) ^ ((offset - face) >> 1)) & 0x1)) * 0.25;
+}
+
+fn cubeDecodeY(face: u32, offset: u32) f32 {
+    return @as(f32, @floatFromInt(((offset - face) >> 1) & 0x1)) * 0.25;
 }

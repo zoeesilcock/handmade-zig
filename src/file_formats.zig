@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 1;
+pub const ASSET_CATEGORY_COUNT = @typeInfo(AssetBasicCategory).@"enum".fields.len;
 
 pub const AssetFontType = enum(u32) {
     Default = 0,
@@ -34,6 +35,38 @@ pub const HHAAssetType = enum(u32) {
     Bitmap,
     Sound,
     Font,
+};
+
+pub const AssetBasicCategory = enum(u32) {
+    None,
+
+    // Legacy categories.
+    Shadow,
+    Tree,
+    Sword,
+    Rock,
+    Grass,
+    Tuft,
+    Stone,
+    Head,
+    Cape,
+    Torso,
+    Font,
+    FontGlyph,
+    Bloop,
+    Crack,
+    Drop,
+    Glide,
+    Music,
+    Puhp,
+    OpeningCutscene,
+    Hand,
+
+    // New categories.
+    Wall_WoodAndDrywall,
+    Floor_Hardwood,
+    Floor_Stone,
+    Floor_Field,
 };
 
 pub const HHAHeader = extern struct {
