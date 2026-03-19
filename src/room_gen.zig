@@ -236,9 +236,10 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             _ = position.offset.setY(position.offset.y() + 0);
             _ = position.offset.setZ(position.offset.z() + wall_height + 0.5 * series.randomUnilateral());
 
+            color = .newFromSRGB(1, 1, 1, 1);
             _ = addPieceV3(
                 entity,
-                .Grass,
+                .Block,
                 .new(0.7, 0.7, 0.5 * wall_height),
                 .new(0, 0, -0.5 * wall_height),
                 color,

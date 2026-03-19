@@ -15,6 +15,21 @@ pub const ImageU32 = struct {
     width: u32,
     height: u32,
     pixels: []u32,
+
+    pub fn getTotalImageSize(self: ImageU32) u32 {
+        return self.width * self.height * 4;
+    }
+
+    pub fn pushImage(arena: *MemoryArena, width: u32, height: u32) ImageU32 {
+        var result: ImageU32 = .{
+            .width = width,
+            .height = height,
+            .pixels = undefined,
+        };
+        const size: u32 = result.getTotalImageSize();
+        result.pixels = arena.pushArray(size, u32, null)[0..size];
+        return result;
+    }
 };
 
 const Header = extern struct {

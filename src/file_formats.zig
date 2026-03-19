@@ -2,6 +2,8 @@ const std = @import("std");
 
 pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 1;
+pub const ASSET_MAX_SPRITE_DIM = 512;
+pub const ASSET_MAX_PLATE_DIM = 2048;
 pub const ASSET_CATEGORY_COUNT = @typeInfo(AssetBasicCategory).@"enum".fields.len;
 
 pub const AssetFontType = enum(u32) {
@@ -24,6 +26,13 @@ pub const AssetTagId = enum(u32) {
     Primacy,
 
     BasicCategory,
+
+    Bones,
+    DarkEnergy,
+    Glove,
+    Fingers,
+
+    None, // When we do a full reimport, move this to 0.
 
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
@@ -48,25 +57,26 @@ pub const AssetBasicCategory = enum(u32) {
     Grass,
     Tuft,
     Stone,
-    Head,
+    Head, // Still used.
     Cape,
-    Torso,
-    Font,
-    FontGlyph,
+    Torso, // Still used.
+    Font, // Still used.
+    FontGlyph, // Still used.
     Bloop,
     Crack,
     Drop,
     Glide,
     Music,
     Puhp,
-    OpeningCutscene,
-    Hand,
+    OpeningCutscene, // Still used.
+    Hand, // Still used.
 
     // New categories.
-    Wall_WoodAndDrywall,
-    Floor_Hardwood,
-    Floor_Stone,
-    Floor_Field,
+    Block,
+    Cover,
+    Item,
+    Obstacle,
+    Plate,
 };
 
 pub const HHAHeader = extern struct {

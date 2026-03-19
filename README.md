@@ -19,6 +19,13 @@ zig build -fwine -Dtarget=x86_64-windows && (cd data && ../zig-out/bin/handmade-
 Graphical and audio assets are not included as they are not created by me. The following assets from the pre-order data need to be present to run the game:
 * `handmade_hero_legacy_art.zip/v0_hhas` to be in the `/data` directory.
 * `handmade_hero_legacy_art.zip/png_art_packs` to be in the `/art` directory.
+    * Rename the file called `title_screen.png` to `plate_title_screen.png`.
+    * Rename the file called `hand_fire.png` to `hand_dark_bones.png`.
+    * Rename the file called `hand_glove.png` to `hand_glove_fingers.png`.
+    * Rename the file called `hand_skeleton.png` to `hand_bones.png`.
+    * Rename the file called `.png` to `.png`.
+    * Rename the file called `.png` to `.png`.
+    * Rename the file called `.png` to `.png`.
 
 Until we reach `v2_hhas` the .hha files in `/data` need to be rewritten using `hha-edit -- rewrite`, see below.
 

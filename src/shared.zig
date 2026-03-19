@@ -88,7 +88,7 @@ test "stringsAreEqual" {
     try std.testing.expectEqual(false, stringsAreEqual("abcd", "abc"));
 }
 
-pub fn stringsWithLengthAreEqual(a: [*:0]const u8, a_length: MemoryIndex, b: [*:0]const u8, b_length: MemoryIndex) bool {
+pub fn stringsWithLengthAreEqual(a: [*]const u8, a_length: MemoryIndex, b: [*]const u8, b_length: MemoryIndex) bool {
     var result: bool = a_length == b_length;
 
     if (result) {
@@ -125,11 +125,11 @@ pub fn stringsWithOneLengthAreEqual(a: [*]const u8, a_length: MemoryIndex, opt_b
 }
 
 pub fn stringBufferEquals(a: String, b: [*:0]const u8) bool {
-    return stringsWithOneLengthAreEqual(a.data, a.count, b);
+    return stringsWithOneLengthAreEqual(@ptrCast(a.data), a.count, b);
 }
 
 pub fn stringBuffersEqual(a: String, b: String) bool {
-    return stringsWithOneLengthAreEqual(a.data, a.count, b.data, b.count);
+    return stringsWithLengthAreEqual(a.data, a.count, b.data, b.count);
 }
 
 pub fn toLowercase(character: u8) u8 {

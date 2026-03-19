@@ -49,24 +49,37 @@ const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
 const RendererTexture = renderer.RendererTexture;
+const ImageU32 = png.ImageU32;
 
 pub const AssetTagId = file_formats.AssetTagId;
 pub const ASSET_CATEGORY_COUNT = file_formats.ASSET_CATEGORY_COUNT;
 const ASSET_IMPORT_GRID_MAX = 8;
 const HHA_VERSION = file_formats.HHA_VERSION;
 const HHA_MAGIC_VALUE = file_formats.HHA_MAGIC_VALUE;
+const ASSET_MAX_SPRITE_DIM = file_formats.ASSET_MAX_SPRITE_DIM;
+const ASSET_MAX_PLATE_DIM = file_formats.ASSET_MAX_PLATE_DIM;
 const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
 
-const ImportGridTag = struct {
-    type_id: AssetBasicCategory,
-    first_tag_index: u32,
-    one_past_last_tag_index: u32,
+const ImportType = enum(u32) {
+    None,
+    Plate,
+    SingleTile,
+    MultiTile,
 };
 
-const ImportGridTags = struct {
+const ImportSourceInfo = struct {
     name: String = .empty,
     description: String = .empty,
     author: String = .empty,
+};
+
+const ImportGridTag = struct {
+    type_id: AssetBasicCategory = .None,
+    first_tag_index: u32 = 0,
+    one_past_last_tag_index: u32 = 0,
+};
+
+const ImportGridTags = struct {
     tags: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]ImportGridTag,
 };
 
@@ -236,7 +249,6 @@ pub const Assets = struct {
     first_asset_of_type: [ASSET_CATEGORY_COUNT]u32,
 
     source_file_hash: [256]?*SourceFile = [1]?*SourceFile{null} ** 256,
-    direction_tag: [4]u32,
 
     operation_lock: u32,
 
@@ -511,17 +523,6 @@ pub const Assets = struct {
         std.debug.assert(asset_count == assets.asset_count);
 
         if (INTERNAL) {
-            var direction_tag_index: u32 = 0;
-            while (direction_tag_index < assets.direction_tag.len) : (direction_tag_index += 1) {
-                assets.direction_tag[direction_tag_index] = assets.reserveTag(2);
-                var tag: [*]HHATag = assets.tags + assets.direction_tag[direction_tag_index];
-                tag[0].id = AssetTagId.FacingDirection;
-                tag[0].value = math.TAU32 / @as(f32, @floatFromInt(assets.direction_tag.len));
-                tag += 1;
-                tag[0].id = AssetTagId.BasicCategory;
-                tag[0].value = @floatFromInt(@as(u32, @intFromEnum(AssetBasicCategory.Hand)));
-            }
-
             checkForArtChanges(assets);
         }
 
@@ -1478,17 +1479,197 @@ fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callcon
     handmade.endTaskWithMemory(work.task);
 }
 
-fn processTiledImport(
+fn getDownsampleCountForFit(source: ImageU32, max_width: u32, max_height: u32) u32 {
+    var result: u32 = 0;
+    var width: u32 = source.width;
+    var height: u32 = source.height;
+    while (width > max_width or height > max_height) {
+        width /= 2;
+        height /= 2;
+        result += 1;
+    }
+    return result;
+}
+
+fn downsample(source: ImageU32, downsample_count: u32) ImageU32 {
+    var result: ImageU32 = source;
+    var downsample_index: u32 = 0;
+    while (downsample_index < downsample_count) : (downsample_index += 1) {
+        const width: u32 = result.width / 2;
+        const height: u32 = result.height / 2;
+
+        var dest_pixel: [*]u32 = @ptrCast(result.pixels);
+        var source_pixel0: [*]u32 = @ptrCast(result.pixels);
+        var source_pixel1: [*]u32 = source_pixel0 + result.width;
+
+        var y: u32 = 0;
+        while (y < height) : (y += 1) {
+            var x: u32 = 0;
+            while (x < width) : (x += 1) {
+                var pixel_00: Color = .unpackColorBGRA(source_pixel0[0]);
+                source_pixel0 += 1;
+                var pixel_10: Color = .unpackColorBGRA(source_pixel0[0]);
+                source_pixel0 += 1;
+                var pixel_01: Color = .unpackColorBGRA(source_pixel1[0]);
+                source_pixel1 += 1;
+                var pixel_11: Color = .unpackColorBGRA(source_pixel1[0]);
+                source_pixel1 += 1;
+
+                pixel_00 = math.sRGB255ToLinear1(pixel_00);
+                pixel_10 = math.sRGB255ToLinear1(pixel_10);
+                pixel_01 = math.sRGB255ToLinear1(pixel_01);
+                pixel_11 = math.sRGB255ToLinear1(pixel_11);
+
+                var color: Color = pixel_00.plus(pixel_10).plus(pixel_01).plus(pixel_11).scaledTo(0.25);
+
+                color = math.linear1ToSRGB255(color);
+
+                dest_pixel[0] = Color.packColorBGRA(color);
+                dest_pixel += 1;
+            }
+
+            source_pixel0 += result.width;
+            source_pixel1 += result.width;
+        }
+
+        result.width = width;
+        result.height = height;
+    }
+
+    return result;
+}
+
+fn writeImageToHHA(
     assets: *Assets,
+    info: ImportSourceInfo,
+    tags: ImportGridTag,
+    file: *SourceFile,
+    source_image: ImageU32,
+    temp_arena: *MemoryArena,
+    tile_x_index: u32,
+    tile_y_index: u32,
+) void {
+    _ = temp_arena;
+
+    if (tags.type_id != .None) {
+        var hha_asset: HHAAsset = .{
+            .info = .{
+                .bitmap = .{
+                    .alignment_percentage = .{ 0.5, 0.5 },
+                },
+            },
+        };
+        var asset_index: u32 = file.asset_indices[tile_y_index][tile_x_index];
+        if (asset_index != 0) {
+            const asset: *Asset = &assets.assets[asset_index];
+            hha_asset = asset.hha;
+        } else {
+            asset_index = assets.reserveAsset();
+            assets.setAssetType(asset_index, tags.type_id);
+        }
+
+        if (asset_index != 0) {
+            const asset_data_size: u32 = source_image.getTotalImageSize();
+            var asset: *Asset = &assets.assets[asset_index];
+            if (asset.file_index == 0) {
+                asset.file_index = assets.default_append_hha_index;
+            }
+
+            std.debug.assert(asset.file_index != 0);
+
+            const asset_file: *AssetFile = &assets.files[asset.file_index];
+            if (hha_asset.data_offset == 0 or hha_asset.data_size < asset_data_size) {
+                hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
+            }
+            hha_asset.data_size = asset_data_size;
+
+            hha_asset.info.bitmap.dim[0] = source_image.width;
+            hha_asset.info.bitmap.dim[1] = source_image.height;
+            hha_asset.first_tag_index = tags.first_tag_index;
+            hha_asset.one_past_last_tag_index = tags.one_past_last_tag_index;
+            hha_asset.type = .Bitmap;
+
+            asset.hha = hha_asset;
+            asset.annotation.source_file_date = file.file_date;
+            asset.annotation.source_file_checksum = file.file_checksum;
+            asset.annotation.sprite_sheet_x = tile_x_index;
+            asset.annotation.sprite_sheet_y = tile_y_index;
+
+            assets.writeAssetString(
+                asset_file,
+                info.name,
+                &asset.annotation.asset_name_count,
+                &asset.annotation.asset_name_offset,
+            );
+            assets.writeAssetString(
+                asset_file,
+                info.description,
+                &asset.annotation.asset_description_count,
+                &asset.annotation.asset_description_offset,
+            );
+            assets.writeAssetString(
+                asset_file,
+                info.author,
+                &asset.annotation.author_count,
+                &asset.annotation.author_offset,
+            );
+            assets.writeAssetString(
+                asset_file,
+                file.base_name,
+                &asset.annotation.source_file_base_name_count,
+                &asset.annotation.source_file_base_name_offset,
+            );
+
+            file.asset_indices[tile_y_index][tile_x_index] = asset_index;
+
+            Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, @ptrCast(source_image.pixels));
+        } else {
+            stream.output(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!", .{});
+        }
+    } else {
+        stream.output(&file.errors, @src(), "Sprite found in what is required to be a blank tile.", .{});
+    }
+}
+
+fn processPlateImport(
+    assets: *Assets,
+    info: ImportSourceInfo,
+    tags: ImportGridTag,
+    file: *SourceFile,
+    source_image: ImageU32,
+    temp_arena: *MemoryArena,
+) void {
+    const donwsample_count: u32 = getDownsampleCountForFit(source_image, ASSET_MAX_PLATE_DIM, ASSET_MAX_PLATE_DIM);
+    const dest_image: ImageU32 = downsample(source_image, donwsample_count);
+    writeImageToHHA(assets, info, tags, file, dest_image, temp_arena, 0, 0);
+}
+
+fn processSingleTileImport(
+    assets: *Assets,
+    info: ImportSourceInfo,
+    tags: ImportGridTag,
+    file: *SourceFile,
+    source_image: ImageU32,
+    temp_arena: *MemoryArena,
+) void {
+    const donwsample_count: u32 = getDownsampleCountForFit(source_image, ASSET_MAX_SPRITE_DIM, ASSET_MAX_SPRITE_DIM);
+    const dest_image: ImageU32 = downsample(source_image, donwsample_count);
+    writeImageToHHA(assets, info, tags, file, dest_image, temp_arena, 0, 0);
+}
+
+fn processMultiTileImport(
+    assets: *Assets,
+    info: ImportSourceInfo,
     grid_tag_array: *ImportGridTags,
     file: *SourceFile,
-    image: png.ImageU32,
+    image: ImageU32,
     temp_arena: *MemoryArena,
 ) void {
     const border_dimension: u32 = 8;
     const tile_dimension: u32 = 1024;
 
-    const pixel_buffer: [*]u32 = temp_arena.pushArray(tile_dimension * tile_dimension, u32, null);
+    const size_test: ImageU32 = .{ .width = tile_dimension, .height = tile_dimension, .pixels = undefined };
+    const downsample_count: u32 = getDownsampleCountForFit(size_test, ASSET_MAX_SPRITE_DIM, ASSET_MAX_SPRITE_DIM);
 
     const x_count_max: u32 = file.asset_indices[0].len;
     const y_count_max: u32 = file.asset_indices.len;
@@ -1520,8 +1701,8 @@ fn processTiledImport(
             var min_y: u32 = std.math.maxInt(u32);
             var max_y: u32 = std.math.minInt(u32);
 
+            // Calculate bounds of image contents.
             {
-                var dest_pixel: [*]u32 = pixel_buffer;
                 var source_row: [*]u32 = image.pixels.ptr +
                     (y_index * tile_dimension * image.width + x_index * tile_dimension);
 
@@ -1540,7 +1721,71 @@ fn processTiledImport(
                             min_y = @min(min_y, y);
                             max_y = @max(max_y, y);
                         }
+                    }
 
+                    source_row += image.width;
+                }
+            }
+
+            if (min_x <= max_x) {
+                // There was something in this tile.
+                if (min_x >= border_dimension) {
+                    min_x -= border_dimension;
+                } else {
+                    min_x = 0;
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into left %u-pixel border.", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (max_x < (tile_dimension - border_dimension)) {
+                    max_x += border_dimension;
+                } else {
+                    max_x = tile_dimension - 1;
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into right %u-pixel border.", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (min_y >= border_dimension) {
+                    min_y -= border_dimension;
+                } else {
+                    min_y = 0;
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into top %u-pixel border.", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (max_y < (tile_dimension - border_dimension)) {
+                    max_y += border_dimension;
+                } else {
+                    max_y = tile_dimension - 1;
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into bottom %u-pixel border.", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                const tile_image: ImageU32 = .pushImage(temp_arena, max_x - min_x + 1, max_y - min_y + 1);
+                var dest_pixel: [*]u32 = @ptrCast(tile_image.pixels);
+                var source_row: [*]u32 = image.pixels.ptr +
+                    ((y_index * tile_dimension + min_y) * image.width + (x_index * tile_dimension + min_x));
+
+                var y: u32 = 0;
+                while (y < tile_image.height) : (y += 1) {
+                    var source_pixel: [*]u32 = source_row;
+
+                    var x: u32 = 0;
+                    while (x < tile_image.width) : (x += 1) {
+                        const source_color: u32 = source_pixel[0];
+                        source_pixel += 1;
                         var color: Color = .unpackColorBGRA(math.swapRedAndBlue(source_color));
                         color = math.sRGB255ToLinear1(color);
                         _ = color.setRGB(color.rgb().scaledTo(color.a()));
@@ -1551,190 +1796,179 @@ fn processTiledImport(
 
                     source_row += image.width;
                 }
-            }
 
-            if (min_x <= max_x) {
-                // There was something in this tile.
-
-                if (min_x < border_dimension) {
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into left %u-pixel border.", .{
-                        x_index,
-                        y_index,
-                        border_dimension,
-                    });
-                }
-
-                if (max_x >= (tile_dimension - border_dimension)) {
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into right %u-pixel border.", .{
-                        x_index,
-                        y_index,
-                        border_dimension,
-                    });
-                }
-
-                if (min_y < border_dimension) {
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into top %u-pixel border.", .{
-                        x_index,
-                        y_index,
-                        border_dimension,
-                    });
-                }
-
-                if (max_y >= (tile_dimension - border_dimension)) {
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into bottom %u-pixel border.", .{
-                        x_index,
-                        y_index,
-                        border_dimension,
-                    });
-                }
-
-                var sprite_dimension: u32 = tile_dimension;
-
-                // Downsample by 2x.
-                var downsample: u32 = 0;
-                while (downsample < 1) : (downsample += 1) {
-                    const previous_dimension: u32 = sprite_dimension;
-                    sprite_dimension = sprite_dimension / 2;
-
-                    var dest_pixel: [*]u32 = pixel_buffer;
-                    var source_pixel0: [*]u32 = pixel_buffer;
-                    var source_pixel1: [*]u32 = source_pixel0 + previous_dimension;
-
-                    var y: u32 = 0;
-                    while (y < sprite_dimension) : (y += 1) {
-                        var x: u32 = 0;
-                        while (x < sprite_dimension) : (x += 1) {
-                            var pixel_00: Color = .unpackColorBGRA(source_pixel0[0]);
-                            source_pixel0 += 1;
-                            var pixel_10: Color = .unpackColorBGRA(source_pixel0[0]);
-                            source_pixel0 += 1;
-                            var pixel_01: Color = .unpackColorBGRA(source_pixel1[0]);
-                            source_pixel1 += 1;
-                            var pixel_11: Color = .unpackColorBGRA(source_pixel1[0]);
-                            source_pixel1 += 1;
-
-                            pixel_00 = math.sRGB255ToLinear1(pixel_00);
-                            pixel_10 = math.sRGB255ToLinear1(pixel_10);
-                            pixel_01 = math.sRGB255ToLinear1(pixel_01);
-                            pixel_11 = math.sRGB255ToLinear1(pixel_11);
-
-                            var color: Color = pixel_00.plus(pixel_10).plus(pixel_01).plus(pixel_11).scaledTo(0.25);
-
-                            color = math.linear1ToSRGB255(color);
-
-                            dest_pixel[0] = Color.packColorBGRA(color);
-                            dest_pixel += 1;
-                        }
-
-                        source_pixel0 += previous_dimension;
-                        source_pixel1 += previous_dimension;
-                    }
-                }
-
-                if (grid_tags.type_id != .None) {
-                    var hha_asset: HHAAsset = .{
-                        .info = .{
-                            .bitmap = .{
-                                .alignment_percentage = .{ 0.5, 0.5 },
-                            },
-                        },
-                    };
-                    var asset_index: u32 = file.asset_indices[y_index][x_index];
-                    if (asset_index != 0) {
-                        const asset: *Asset = &assets.assets[asset_index];
-                        hha_asset = asset.hha;
-                    } else {
-                        asset_index = assets.reserveAsset();
-                        assets.setAssetType(asset_index, grid_tags.type_id);
-                    }
-
-                    if (asset_index != 0) {
-                        const asset_data_size: u32 = 4 * sprite_dimension * sprite_dimension;
-                        var asset: *Asset = &assets.assets[asset_index];
-                        if (asset.file_index == 0) {
-                            asset.file_index = assets.default_append_hha_index;
-                        }
-
-                        std.debug.assert(asset.file_index != 0);
-
-                        const asset_file: *AssetFile = &assets.files[asset.file_index];
-                        if (hha_asset.data_offset == 0 or hha_asset.data_size < asset_data_size) {
-                            hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
-                        }
-                        hha_asset.data_size = asset_data_size;
-
-                        // TODO: Translate the tile index into tags based on the name of this file,
-                        // probably using something passed into this routine.
-                        // hha_asset.first_tag_index = 0;
-                        // hha_asset.one_past_last_tag_index = 0;
-                        hha_asset.info.bitmap.dim[0] = sprite_dimension;
-                        hha_asset.info.bitmap.dim[1] = sprite_dimension;
-                        hha_asset.first_tag_index = grid_tags.first_tag_index;
-                        hha_asset.one_past_last_tag_index = grid_tags.one_past_last_tag_index;
-                        hha_asset.type = .Bitmap;
-
-                        asset.hha = hha_asset;
-                        asset.annotation.source_file_date = file.file_date;
-                        asset.annotation.source_file_checksum = file.file_checksum;
-                        asset.annotation.sprite_sheet_x = x_index;
-                        asset.annotation.sprite_sheet_y = y_index;
-
-                        assets.writeAssetString(
-                            asset_file,
-                            grid_tag_array.name,
-                            &asset.annotation.asset_name_count,
-                            &asset.annotation.asset_name_offset,
-                        );
-                        assets.writeAssetString(
-                            asset_file,
-                            grid_tag_array.description,
-                            &asset.annotation.asset_description_count,
-                            &asset.annotation.asset_description_offset,
-                        );
-                        assets.writeAssetString(
-                            asset_file,
-                            grid_tag_array.author,
-                            &asset.annotation.author_count,
-                            &asset.annotation.author_offset,
-                        );
-                        assets.writeAssetString(
-                            asset_file,
-                            file.base_name,
-                            &asset.annotation.source_file_base_name_count,
-                            &asset.annotation.source_file_base_name_offset,
-                        );
-
-                        file.asset_indices[y_index][x_index] = asset_index;
-
-                        Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, pixel_buffer);
-                    } else {
-                        stream.output(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!", .{});
-                    }
-                } else {
-                    stream.output(&file.errors, @src(), "Sprite found in what is required to be a blank tile.", .{});
-                }
+                const dest_image: ImageU32 = downsample(tile_image, downsample_count);
+                writeImageToHHA(assets, info, grid_tags, file, dest_image, temp_arena, x_index, y_index);
             }
         }
     }
 }
 
-fn updateAssetPackageFromPNG(
+const Token = struct {
+    text: String = .empty,
+    value: f32 = 1,
+};
+
+fn popToken(source: *String) Token {
+    var result: Token = .{
+        .text = source.*,
+        .value = 1,
+    };
+
+    var skip: u32 = 0;
+    var index: u32 = 0;
+    while (index < source.count) : (index += 1) {
+        if (source.data[index] == '_') {
+            result.text.count = index;
+            result.text.data = source.data;
+            skip = 1;
+            break;
+        }
+    }
+
+    if (source.count > 0) {
+        source.count -= (result.text.count + skip);
+        source.data += (result.text.count + skip);
+    }
+
+    return result;
+}
+
+const NamedTag = struct {
+    name: String,
+    id: AssetTagId,
+};
+
+const name_tags = [_]NamedTag{
+    .{ .name = .fromSlice("bones"), .id = .Bones },
+    .{ .name = .fromSlice("dark"), .id = .DarkEnergy },
+    .{ .name = .fromSlice("darkenergy"), .id = .DarkEnergy },
+    .{ .name = .fromSlice("glove"), .id = .Glove },
+    .{ .name = .fromSlice("fingers"), .id = .Fingers },
+};
+
+fn tagIdFrom(name: String) AssetTagId {
+    var result: AssetTagId = .None;
+    var name_index: u32 = 0;
+    while (name_index < name_tags.len) : (name_index += 1) {
+        if (shared.stringBuffersEqual(name, name_tags[name_index].name)) {
+            result = name_tags[name_index].id;
+            break;
+        }
+    }
+    return result;
+}
+
+const TagBuilder = struct {
+    assets: *Assets = undefined,
+    first_tag_index: u32 = 0,
+    has_error: bool = false,
+};
+
+fn beginTags(assets: *Assets) TagBuilder {
+    const builder: TagBuilder = .{
+        .assets = assets,
+        .first_tag_index = assets.tag_count,
+    };
+    return builder;
+}
+
+fn addTag(builder: *TagBuilder, tag_id: AssetTagId, value: f32) void {
+    if (builder.assets.tag_count < builder.assets.max_tag_count) {
+        var tag: *HHATag = @ptrCast(builder.assets.tags + builder.assets.tag_count);
+        builder.assets.tag_count += 1;
+
+        tag.id = tag_id;
+        tag.value = value;
+    } else {
+        builder.has_error = true;
+    }
+}
+
+fn endTags(builder: *TagBuilder, cagegory: AssetBasicCategory, tag_string_in: String, errors: *Stream) ImportGridTag {
+    var result: ImportGridTag = .{};
+
+    addTag(builder, .BasicCategory, @floatFromInt(@as(u32, @intFromEnum(cagegory))));
+
+    var tag_string: String = tag_string_in;
+    while (true) {
+        const name_token: Token = popToken(&tag_string);
+        if (name_token.text.count > 0) {
+            const tag_id: AssetTagId = tagIdFrom(name_token.text);
+            if (tag_id != .None) {
+                addTag(builder, tag_id, name_token.value);
+            } else {
+                stream.output(
+                    errors,
+                    @src(),
+                    "Unrecognized tag name: %.*s.\n",
+                    .{ @as(u32, @intCast(name_token.text.count)), name_token.text.data },
+                );
+            }
+        } else {
+            break;
+        }
+    }
+
+    result.type_id = cagegory;
+    result.first_tag_index = builder.first_tag_index;
+    result.one_past_last_tag_index = builder.assets.tag_count;
+
+    if (builder.has_error) {
+        stream.output(errors, @src(), "Out of tag space.\n", .{});
+    }
+
+    return result;
+}
+
+fn parsePieces(
     assets: *Assets,
-    grid_tag_array: *ImportGridTags,
-    file: *SourceFile,
-    contents: Buffer,
-    temp_arena: *MemoryArena,
-) bool {
-    const content_stream: Stream = .makeReadStream(contents, &file.errors);
-    const image = png.parsePNG(temp_arena, content_stream, null);
+    file_name_in: String,
+    info: *ImportSourceInfo,
+    tags: *ImportGridTags,
+    errors: *Stream,
+) ImportType {
+    _ = info;
+    var result: ImportType = .None;
 
-    // if () {
-    processTiledImport(assets, grid_tag_array, file, image, temp_arena);
-    // } else {
-    //     processFlatImport();
-    // }
+    var file_name: String = file_name_in;
+    const name_token: Token = popToken(&file_name);
 
-    return false;
+    if (shared.stringBufferEquals(name_token.text, "block")) {
+        const tag: *ImportGridTag = &tags.tags[0][0];
+        var builder: TagBuilder = beginTags(assets);
+        tag.* = endTags(&builder, .Block, file_name, errors);
+        result = .SingleTile;
+    } else if (shared.stringBufferEquals(name_token.text, "character")) {
+        //
+    } else if (shared.stringBufferEquals(name_token.text, "cover")) {
+        //
+    } else if (shared.stringBufferEquals(name_token.text, "hand")) {
+        var y_index: u32 = 0;
+        while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+            var x_index: u32 = 0;
+            while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+                const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+                if (x_index == 0 and y_index < 4) {
+                    var builder: TagBuilder = beginTags(assets);
+                    addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
+                    tag.* = endTags(&builder, .Hand, file_name, errors);
+                }
+            }
+        }
+
+        result = .MultiTile;
+    } else if (shared.stringBufferEquals(name_token.text, "item")) {
+        //
+    } else if (shared.stringBufferEquals(name_token.text, "obstacles")) {
+        //
+    } else if (shared.stringBufferEquals(name_token.text, "plate")) {
+        //
+    } else {
+        stream.output(errors, @src(), "Unrecognized type of import artwork.\n", .{});
+    }
+
+    return result;
 }
 
 pub fn checkForArtChanges(assets: *Assets) void {
@@ -1747,35 +1981,25 @@ pub fn checkForArtChanges(assets: *Assets) void {
 
         var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
         while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
-            var piece_count: u32 = 0;
-            var pieces: [3]String = [1]String{.empty} ** 3;
-
-            var anchor: [*]u8 = file_info.base_name;
-            var hash_value: u32 = 0;
-            var scan: [*]u8 = file_info.base_name;
-            while (true) : (scan += 1) {
-                if (scan[0] == '_' or scan[0] == 0) {
-                    if (piece_count < pieces.len) {
-                        var string: *Buffer = &pieces[piece_count];
-                        piece_count += 1;
-                        string.count = scan - anchor;
-                        string.data = anchor;
-                    }
-
-                    anchor = scan + 1;
-                }
-
-                if (scan[0] == 0) {
-                    break;
-                }
-
-                shared.updateStringHash(&hash_value, scan[0]);
-            }
+            // var anchor: [*]u8 = file_info.base_name;
+            const hash_value: u32 = 0;
 
             const match: *SourceFile = .getOrCreateFromHashValue(assets, hash_value, file_info.base_name);
 
             if (match.file_date != file_info.file_date) {
-                if (shared.stringBufferEquals(pieces[0], "hand")) {
+                var info: ImportSourceInfo = .{
+                    .author = .fromSlice("Anna Rettberg"),
+                };
+
+                var tags: ImportGridTags = .{ .tags = undefined };
+                const import_type = parsePieces(
+                    assets,
+                    .wrapZ(file_info.base_name),
+                    &info,
+                    &tags,
+                    &match.errors,
+                );
+                if (import_type != .None) {
                     var temp_arena: MemoryArena = .{};
                     defer temp_arena.clear();
 
@@ -1800,22 +2024,15 @@ pub fn checkForArtChanges(assets: *Assets) void {
                     match.file_date = file_info.file_date;
                     match.file_checksum = shared.checksumOf(file_buffer, null);
 
-                    var tags: ImportGridTags = .{ .tags = undefined };
+                    const content_stream: Stream = .makeReadStream(file_buffer, &match.errors);
+                    const image = png.parsePNG(&temp_arena, content_stream, null);
 
-                    var y_index: u32 = 0;
-                    while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
-                        var x_index: u32 = 0;
-                        while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                            var tag: *ImportGridTag = &tags.tags[y_index][x_index];
-                            if (x_index == 0 and y_index < assets.direction_tag.len) {
-                                tag.type_id = .Hand;
-                                tag.first_tag_index = assets.direction_tag[y_index];
-                                tag.one_past_last_tag_index = tag.first_tag_index + 2;
-                            }
-                        }
+                    switch (import_type) {
+                        .Plate => processPlateImport(assets, info, tags.tags[0][0], match, image, &temp_arena),
+                        .SingleTile => processSingleTileImport(assets, info, tags.tags[0][0], match, image, &temp_arena),
+                        .MultiTile => processMultiTileImport(assets, info, &tags, match, image, &temp_arena),
+                        else => unreachable,
                     }
-
-                    _ = updateAssetPackageFromPNG(assets, &tags, match, file_buffer, &temp_arena);
                 }
             }
         }

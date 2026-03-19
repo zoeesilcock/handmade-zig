@@ -537,8 +537,9 @@ pub fn updateAndRenderEntities(
                             @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
-                        render_group.pushCube(
-                            render_group.white_texture,
+                        asset_rendering.pushCubeBitmapId(
+                            render_group,
+                            bitmap_id,
                             entity_transform.offset_position.plus(piece.offset),
                             piece.dimension,
                             piece.color,

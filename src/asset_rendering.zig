@@ -212,6 +212,34 @@ pub fn pushFont(
     return opt_font;
 }
 
+pub fn pushCubeBitmapId(
+    group: *RenderGroup,
+    opt_id: ?file_formats.BitmapId,
+    position: Vector3,
+    radius: Vector3,
+    color: Color,
+    opt_uv_layout: ?renderer.CubeUVLayout,
+    opt_emission: ?f32,
+    opt_light_store_in: ?*LightingPointState,
+) void {
+    if (opt_id) |id| {
+        if (group.assets.getBitmap(id)) |bitmap| {
+            group.pushCube(
+                bitmap.texture_handle,
+                position,
+                radius,
+                color,
+                opt_uv_layout,
+                opt_emission,
+                opt_light_store_in,
+            );
+        } else {
+            group.assets.loadBitmap(id, false);
+            group.missing_resource_count += 1;
+        }
+    }
+}
+
 pub fn pushCubeLight(
     group: *RenderGroup,
     position: Vector3,

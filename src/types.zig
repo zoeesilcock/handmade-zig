@@ -16,6 +16,13 @@ pub const Buffer = struct {
         };
     }
 
+    pub fn wrapZ(ptr: [*:0]u8) Buffer {
+        return .{
+            .count = stringLength(ptr),
+            .data = ptr,
+        };
+    }
+
     pub fn toSlice(self: *Buffer) []const u8 {
         return self.data[0..self.count];
     }
