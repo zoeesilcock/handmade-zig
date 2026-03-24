@@ -1657,9 +1657,9 @@ pub fn encodeCubeUVLayout(
 }
 
 fn cubeDecodeX(face: u32, offset: u32) f32 {
-    return @as(f32, @floatFromInt(((offset - face) ^ ((offset - face) >> 1)) & 0x1)) * 0.25;
+    return @as(f32, @floatFromInt(((offset -% face) ^ ((offset -% face) >> 1)) & 0x1)) * 0.25;
 }
 
 fn cubeDecodeY(face: u32, offset: u32) f32 {
-    return @as(f32, @floatFromInt(((offset - face) >> 1) & 0x1)) * 0.25;
+    return @as(f32, @floatFromInt(((offset -% face) >> 1) & 0x1)) * 0.25;
 }

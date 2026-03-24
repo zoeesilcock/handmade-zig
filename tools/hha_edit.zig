@@ -467,7 +467,7 @@ fn fileExists(file_name: []const u8) bool {
 fn printTag(hha: *LoadedHHA, tag_index: u32) void {
     if (tag_index < hha.tag_count) {
         const tag: *HHATag = &hha.tags[tag_index];
-        std.log.info("                   {s} = {d}", .{ @tagName(tag.id), tag.value });
+        std.log.info("                   {s} = {d}", .{ file_formats.tagNameFromID(tag.id).toSlice(), tag.value });
     } else {
         std.log.err("TAG INDEX OVERFLOW!", .{});
     }

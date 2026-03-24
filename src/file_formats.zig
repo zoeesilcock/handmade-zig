@@ -1,4 +1,6 @@
 const std = @import("std");
+const shared = @import("shared.zig");
+const types = shared.types;
 
 pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 1;
@@ -6,13 +8,16 @@ pub const ASSET_MAX_SPRITE_DIM = 512;
 pub const ASSET_MAX_PLATE_DIM = 2048;
 pub const ASSET_CATEGORY_COUNT = @typeInfo(AssetBasicCategory).@"enum".fields.len;
 
+// Types.
+const String = types.String;
+
 pub const AssetFontType = enum(u32) {
     Default = 0,
     Debug = 10,
 };
 
 pub const AssetTagId = enum(u32) {
-    Smoothness,
+    None,
     Flatness,
     FacingDirection, // Angles in radians off of due right.
     UnicodeCodepoint,
@@ -32,7 +37,13 @@ pub const AssetTagId = enum(u32) {
     Glove,
     Fingers,
 
-    None, // When we do a full reimport, move this to 0.
+    Wood,
+    Stone,
+    Drywall,
+    Manmade,
+    Wall,
+    Floor,
+    Grass,
 
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
@@ -103,7 +114,7 @@ pub fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {
 }
 
 pub const HHATag = extern struct {
-    id: AssetTagId align(1) = .Smoothness,
+    id: AssetTagId align(1) = .None,
     value: f32 align(1) = 0,
 };
 comptime {
@@ -226,3 +237,79 @@ pub const FontId = extern struct {
         return self.value != 0;
     }
 };
+
+const NameTag = struct {
+    name: String,
+    id: AssetTagId,
+};
+
+pub const name_tags = [_]NameTag{
+    .{ .name = .fromSlice("none"), .id = .None },
+    .{ .name = .fromSlice("Flatness"), .id = .Flatness },
+    .{ .name = .fromSlice("FacingDirection"), .id = .FacingDirection },
+    .{ .name = .fromSlice("UnicodeCodepoint"), .id = .UnicodeCodepoint },
+    .{ .name = .fromSlice("FontType"), .id = .FontType },
+    .{ .name = .fromSlice("ShotIndex"), .id = .ShotIndex },
+    .{ .name = .fromSlice("LayerIndex"), .id = .LayerIndex },
+    .{ .name = .fromSlice("Primacy"), .id = .Primacy },
+    .{ .name = .fromSlice("BasicCategory"), .id = .BasicCategory },
+    .{ .name = .fromSlice("bones"), .id = .Bones },
+    .{ .name = .fromSlice("dark"), .id = .DarkEnergy },
+    .{ .name = .fromSlice("darkenergy"), .id = .DarkEnergy },
+    .{ .name = .fromSlice("glove"), .id = .Glove },
+    .{ .name = .fromSlice("fingers"), .id = .Fingers },
+    .{ .name = .fromSlice("wood"), .id = .Wood },
+    .{ .name = .fromSlice("stone"), .id = .Stone },
+    .{ .name = .fromSlice("drywall"), .id = .Drywall },
+    .{ .name = .fromSlice("manmade"), .id = .Manmade },
+    .{ .name = .fromSlice("wall"), .id = .Wall },
+    .{ .name = .fromSlice("floor"), .id = .Floor },
+    .{ .name = .fromSlice("grass"), .id = .Grass },
+};
+
+const type_from_id = [_]struct { HHAAssetType, AssetBasicCategory }{
+    .{ .None, .None },
+
+    .{ .Bitmap, .Shadow },
+    .{ .Bitmap, .Tree },
+    .{ .Bitmap, .Sword },
+    .{ .Bitmap, .Rock },
+
+    .{ .Bitmap, .Grass },
+    .{ .Bitmap, .Tuft },
+    .{ .Bitmap, .Stone },
+
+    .{ .Bitmap, .Head },
+    .{ .Bitmap, .Cape },
+    .{ .Bitmap, .Torso },
+
+    .{ .Font, .Font },
+    .{ .Bitmap, .FontGlyph },
+
+    .{ .Sound, .Bloop },
+    .{ .Sound, .Crack },
+    .{ .Sound, .Drop },
+    .{ .Sound, .Glide },
+    .{ .Sound, .Music },
+    .{ .Sound, .Puhp },
+
+    .{ .Bitmap, .OpeningCutscene },
+
+    .{ .Bitmap, .Hand },
+};
+
+pub fn tagNameFromID(tag_id: AssetTagId) String {
+    return .fromSlice(@tagName(tag_id));
+}
+
+pub fn tagIdFromName(name: String) AssetTagId {
+    var result: AssetTagId = .None;
+    var name_index: u32 = 0;
+    while (name_index < name_tags.len) : (name_index += 1) {
+        if (shared.stringBuffersEqual(name, name_tags[name_index].name)) {
+            result = name_tags[name_index].id;
+            break;
+        }
+    }
+    return result;
+}

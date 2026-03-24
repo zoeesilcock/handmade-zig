@@ -23,9 +23,10 @@ Graphical and audio assets are not included as they are not created by me. The f
     * Rename the file called `hand_fire.png` to `hand_dark_bones.png`.
     * Rename the file called `hand_glove.png` to `hand_glove_fingers.png`.
     * Rename the file called `hand_skeleton.png` to `hand_bones.png`.
-    * Rename the file called `.png` to `.png`.
-    * Rename the file called `.png` to `.png`.
-    * Rename the file called `.png` to `.png`.
+    * Rename the file called `block_forest_01.png` to `block_floor_grass.png`.
+    * Rename the file called `block_orphanage_01.png` to `block_wall_manmade_wood_drywall.png`.
+    * Rename the file called `block_orphanage_02.png` to `block_floor_manmade_wood.png`.
+    * Rename the file called `block_orphanage_03.png` to `block_floor_manmade_stone.png`.
 
 Until we reach `v2_hhas` the .hha files in `/data` need to be rewritten using `hha-edit -- rewrite`, see below.
 

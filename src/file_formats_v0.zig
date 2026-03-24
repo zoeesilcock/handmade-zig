@@ -1,4 +1,4 @@
-const file_formats = @import("file_formats");
+const file_formats = @import("file_formats.zig");
 
 pub const HHA_MAGIC_VALUE = file_formats.hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 0;

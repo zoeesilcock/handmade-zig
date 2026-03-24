@@ -23,7 +23,7 @@ pub const Buffer = struct {
         };
     }
 
-    pub fn toSlice(self: *Buffer) []const u8 {
+    pub fn toSlice(self: *const Buffer) []const u8 {
         return self.data[0..self.count];
     }
 

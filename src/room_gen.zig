@@ -4,11 +4,12 @@ const sim = @import("sim.zig");
 const gen_math = @import("gen_math.zig");
 const world_gen = @import("world_gen.zig");
 const entities = @import("entities.zig");
+const renderer = @import("renderer.zig");
 const asset = @import("asset.zig");
 const brains = @import("brains.zig");
 const world_mod = @import("world.zig");
 const world_mode_mod = @import("world_mode.zig");
-const file_formats = @import("file_formats");
+const file_formats = @import("file_formats.zig");
 const std = @import("std");
 
 // Types.
@@ -28,6 +29,7 @@ const World = world_mod.World;
 const WorldPosition = world_mod.WorldPosition;
 const WorldGenerator = world_gen.WorldGenerator;
 const GenRoom = world_gen.GenRoom;
+const GenRoomSpec = world_gen.GenRoomSpec;
 const GenVolume = gen_math.GenVolume;
 const GenVector3 = gen_math.GenVector3;
 const GenRoomConnection = world_gen.GenRoomConnection;
@@ -125,6 +127,7 @@ fn getCameraOffsetZForDimension(x_count: i32, y_count: i32) f32 {
 }
 
 pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
+    const spec: *GenRoomSpec = room.spec;
     const dimension: GenVector3 = room.volume.getDimension();
     const min_tile_x: i32 = room.volume.min[X];
     const x_count: i32 = dimension[X];
@@ -223,21 +226,33 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 color = .newFromSRGB(0.21, 0.29, 0.42, 1);
             }
 
+            var randomize_top: bool = false;
             if (on_boundary and !on_connection) {
                 wall_height = 2;
                 color = .newFromSRGB(0.5, 0.2, 0.2, 1);
-            } else if (!on_lamp) {
-                entity.traversable_count = 1;
-                entity.traversables[0].position = Vector3.zero();
-                entity.traversables[0].occupier = null;
+
+                entity.addTag(.Wall, 1);
+                entity.addTag(.Wood, 1);
+            } else {
+                entity.addTag(.Floor, 1);
+                entity.addTag(if (spec.stone_floor) .Stone else .Wood, 1);
+                randomize_top = true;
+
+                if (!on_lamp) {
+                    entity.traversable_count = 1;
+                    entity.traversables[0].position = Vector3.zero();
+                    entity.traversables[0].occupier = null;
+                }
             }
+
+            entity.addTag(.Manmade, 1);
 
             _ = position.offset.setX(position.offset.x() + 0);
             _ = position.offset.setY(position.offset.y() + 0);
             _ = position.offset.setZ(position.offset.z() + wall_height + 0.5 * series.randomUnilateral());
 
-            color = .newFromSRGB(1, 1, 1, 1);
-            _ = addPieceV3(
+            color = .newFromSRGB(0.8, 0.8, 0.8, 1);
+            var piece: *EntityVisiblePiece = addPieceV3(
                 entity,
                 .Block,
                 .new(0.7, 0.7, 0.5 * wall_height),
@@ -245,6 +260,19 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 color,
                 @intFromEnum(EntityVisiblePieceFlag.Cube),
             );
+
+            if (randomize_top) {
+                piece.extra.cube_uv_layout = renderer.encodeCubeUVLayout(
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    series.randomChoice(4),
+                    series.randomChoice(4),
+                );
+            }
 
             placeEntity(region, entity, position);
         }

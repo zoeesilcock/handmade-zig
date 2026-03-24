@@ -126,6 +126,9 @@ pub const Entity = extern struct {
     //
     // Everything below here is not worked out yet.
     //
+    tag_count: u32 = 0,
+    tags: [8]AssetTagId = [1]AssetTagId{.None} ** 8,
+    tag_values: [8]f32 = [1]f32{0} ** 8,
     flags: u32 = 0,
 
     position: Vector3 = Vector3.zero(),
@@ -227,6 +230,16 @@ pub const Entity = extern struct {
         }
 
         return result;
+    }
+
+    pub fn addTag(self: *Entity, tag_id: AssetTagId, value: f32) void {
+        std.debug.assert(self.tag_count < self.tags.len);
+
+        const tag_index: u32 = self.tag_count;
+        self.tag_count += 1;
+
+        self.tags[tag_index] = tag_id;
+        self.tag_values[tag_index] = value;
     }
 };
 
@@ -486,6 +499,13 @@ pub fn updateAndRenderEntities(
                 match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
                 var weight_vector = asset.AssetVector{};
                 weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
+
+                var match_index: u32 = 0;
+                while (match_index < entity.tag_count) : (match_index += 1) {
+                    const id: AssetTagId = entity.tags[match_index];
+                    match_vector.e[id.toInt()] = entity.tag_values[match_index];
+                    weight_vector.e[id.toInt()] = 1;
+                }
 
                 // TODO:
                 // * This is where articulated figures will be happening, so we need to have this code look correct in

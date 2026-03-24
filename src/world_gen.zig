@@ -45,8 +45,9 @@ pub const WorldGenerator = struct {
     entropy: *random.Series,
 };
 
-const GenRoomSpec = struct {
+pub const GenRoomSpec = struct {
     required_dimension: GenVector3,
+    stone_floor: bool,
 };
 
 pub const GenRoom = struct {
@@ -691,7 +692,8 @@ fn createForest(gen: *WorldGenerator) GenForest {
 
 fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     var result: GenOrphanage = .{};
-    const bedroom_spec: *GenRoomSpec = genSpec(gen);
+    var bedroom_spec: *GenRoomSpec = genSpec(gen);
+    bedroom_spec.stone_floor = true;
     const save_slot_spec: *GenRoomSpec = genSpec(gen);
     const main_room_spec: *GenRoomSpec = genSpec(gen);
     const tailor_room_spec: *GenRoomSpec = genSpec(gen);

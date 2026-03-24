@@ -54,6 +54,7 @@ const ImageU32 = png.ImageU32;
 pub const AssetTagId = file_formats.AssetTagId;
 pub const ASSET_CATEGORY_COUNT = file_formats.ASSET_CATEGORY_COUNT;
 const ASSET_IMPORT_GRID_MAX = 8;
+const name_tags = file_formats.name_tags;
 const HHA_VERSION = file_formats.HHA_VERSION;
 const HHA_MAGIC_VALUE = file_formats.HHA_MAGIC_VALUE;
 const ASSET_MAX_SPRITE_DIM = file_formats.ASSET_MAX_SPRITE_DIM;
@@ -732,13 +733,13 @@ pub const Assets = struct {
         defer TimedBlock.endFunction(@src(), .GetBestMatchAsset);
 
         var result: ?u32 = null;
-        var best_diff: f32 = std.math.floatMax(f32);
+        var best_match: f32 = 0;
 
         var asset_index: u32 = self.first_asset_of_type[@intFromEnum(type_id)];
         while (asset_index != 0) {
             const asset = self.assets[asset_index];
 
-            var total_weighted_diff: f32 = 0;
+            var total_match: f32 = 0;
             var tag_index: u32 = asset.hha.first_tag_index;
             while (tag_index < asset.hha.one_past_last_tag_index) : (tag_index += 1) {
                 const tag: *HHATag = &self.tags[tag_index];
@@ -747,14 +748,14 @@ pub const Assets = struct {
                 const b: f32 = tag.value;
                 const d0 = intrinsics.absoluteValue(a - b);
                 const d1 = intrinsics.absoluteValue((a - (self.tag_range[tag.id.toInt()] * intrinsics.signOfF32(a))) - b);
-                const difference = @min(d0, d1);
+                const difference = 1.0 - @min(d0, d1);
 
-                const weighted = weight_vector.e[tag.id.toInt()] * intrinsics.absoluteValue(difference);
-                total_weighted_diff += weighted;
+                const weighted = weight_vector.e[tag.id.toInt()] * difference;
+                total_match += weighted;
             }
 
-            if (best_diff > total_weighted_diff) {
-                best_diff = total_weighted_diff;
+            if (best_match < total_match) {
+                best_match = total_match;
                 result = asset_index;
             }
 
@@ -1631,6 +1632,40 @@ fn writeImageToHHA(
     }
 }
 
+fn extractImage(
+    source_image: ImageU32,
+    min_x: u32,
+    min_y: u32,
+    one_past_max_x: u32,
+    one_past_max_y: u32,
+    temp_arena: *MemoryArena,
+) ImageU32 {
+    const result: ImageU32 = .pushImage(temp_arena, one_past_max_x - min_x, one_past_max_y - min_y);
+    var dest_pixel: [*]u32 = @ptrCast(result.pixels);
+    var source_row: [*]u32 = source_image.pixels.ptr + ((one_past_max_y - 1) * source_image.width + min_x);
+
+    var y: u32 = 0;
+    while (y < result.height) : (y += 1) {
+        var source_pixel: [*]u32 = source_row;
+
+        var x: u32 = 0;
+        while (x < result.width) : (x += 1) {
+            const source_color: u32 = source_pixel[0];
+            source_pixel += 1;
+            var color: Color = .unpackColorRGBA(source_color);
+            color = math.sRGB255ToLinear1(color);
+            _ = color.setRGB(color.rgb().scaledTo(color.a()));
+            color = math.linear1ToSRGB255(color);
+            dest_pixel[0] = Color.packColorBGRA(color);
+            dest_pixel += 1;
+        }
+
+        source_row -= source_image.width;
+    }
+
+    return result;
+}
+
 fn processPlateImport(
     assets: *Assets,
     info: ImportSourceInfo,
@@ -1640,7 +1675,15 @@ fn processPlateImport(
     temp_arena: *MemoryArena,
 ) void {
     const donwsample_count: u32 = getDownsampleCountForFit(source_image, ASSET_MAX_PLATE_DIM, ASSET_MAX_PLATE_DIM);
-    const dest_image: ImageU32 = downsample(source_image, donwsample_count);
+    const prepared_image: ImageU32 = extractImage(
+        source_image,
+        0,
+        0,
+        source_image.width,
+        source_image.height,
+        temp_arena,
+    );
+    const dest_image: ImageU32 = downsample(prepared_image, donwsample_count);
     writeImageToHHA(assets, info, tags, file, dest_image, temp_arena, 0, 0);
 }
 
@@ -1653,7 +1696,15 @@ fn processSingleTileImport(
     temp_arena: *MemoryArena,
 ) void {
     const donwsample_count: u32 = getDownsampleCountForFit(source_image, ASSET_MAX_SPRITE_DIM, ASSET_MAX_SPRITE_DIM);
-    const dest_image: ImageU32 = downsample(source_image, donwsample_count);
+    const prepared_image: ImageU32 = extractImage(
+        source_image,
+        0,
+        0,
+        source_image.width,
+        source_image.height,
+        temp_arena,
+    );
+    const dest_image: ImageU32 = downsample(prepared_image, donwsample_count);
     writeImageToHHA(assets, info, tags, file, dest_image, temp_arena, 0, 0);
 }
 
@@ -1773,29 +1824,14 @@ fn processMultiTileImport(
                     });
                 }
 
-                const tile_image: ImageU32 = .pushImage(temp_arena, max_x - min_x + 1, max_y - min_y + 1);
-                var dest_pixel: [*]u32 = @ptrCast(tile_image.pixels);
-                var source_row: [*]u32 = image.pixels.ptr +
-                    ((y_index * tile_dimension + min_y) * image.width + (x_index * tile_dimension + min_x));
-
-                var y: u32 = 0;
-                while (y < tile_image.height) : (y += 1) {
-                    var source_pixel: [*]u32 = source_row;
-
-                    var x: u32 = 0;
-                    while (x < tile_image.width) : (x += 1) {
-                        const source_color: u32 = source_pixel[0];
-                        source_pixel += 1;
-                        var color: Color = .unpackColorBGRA(math.swapRedAndBlue(source_color));
-                        color = math.sRGB255ToLinear1(color);
-                        _ = color.setRGB(color.rgb().scaledTo(color.a()));
-                        color = math.linear1ToSRGB255(color);
-                        dest_pixel[0] = Color.packColorBGRA(color);
-                        dest_pixel += 1;
-                    }
-
-                    source_row += image.width;
-                }
+                const tile_image: ImageU32 = extractImage(
+                    image,
+                    x_index * tile_dimension + min_x,
+                    y_index * tile_dimension + min_y,
+                    x_index * tile_dimension + max_x + 1,
+                    y_index * tile_dimension + max_y + 1,
+                    temp_arena,
+                );
 
                 const dest_image: ImageU32 = downsample(tile_image, downsample_count);
                 writeImageToHHA(assets, info, grid_tags, file, dest_image, temp_arena, x_index, y_index);
@@ -1834,31 +1870,6 @@ fn popToken(source: *String) Token {
     return result;
 }
 
-const NamedTag = struct {
-    name: String,
-    id: AssetTagId,
-};
-
-const name_tags = [_]NamedTag{
-    .{ .name = .fromSlice("bones"), .id = .Bones },
-    .{ .name = .fromSlice("dark"), .id = .DarkEnergy },
-    .{ .name = .fromSlice("darkenergy"), .id = .DarkEnergy },
-    .{ .name = .fromSlice("glove"), .id = .Glove },
-    .{ .name = .fromSlice("fingers"), .id = .Fingers },
-};
-
-fn tagIdFrom(name: String) AssetTagId {
-    var result: AssetTagId = .None;
-    var name_index: u32 = 0;
-    while (name_index < name_tags.len) : (name_index += 1) {
-        if (shared.stringBuffersEqual(name, name_tags[name_index].name)) {
-            result = name_tags[name_index].id;
-            break;
-        }
-    }
-    return result;
-}
-
 const TagBuilder = struct {
     assets: *Assets = undefined,
     first_tag_index: u32 = 0,
@@ -1894,7 +1905,7 @@ fn endTags(builder: *TagBuilder, cagegory: AssetBasicCategory, tag_string_in: St
     while (true) {
         const name_token: Token = popToken(&tag_string);
         if (name_token.text.count > 0) {
-            const tag_id: AssetTagId = tagIdFrom(name_token.text);
+            const tag_id: AssetTagId = file_formats.tagIdFromName(name_token.text);
             if (tag_id != .None) {
                 addTag(builder, tag_id, name_token.value);
             } else {
