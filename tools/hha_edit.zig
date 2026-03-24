@@ -104,7 +104,7 @@ const type_from_id = [_]struct { HHAAssetType, AssetBasicCategory }{
 
     .{ .Bitmap, .Head },
     .{ .Bitmap, .Cape },
-    .{ .Bitmap, .Torso },
+    .{ .Bitmap, .Body },
 
     .{ .Font, .Font },
     .{ .Bitmap, .FontGlyph },

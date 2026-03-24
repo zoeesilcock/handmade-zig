@@ -1500,11 +1500,12 @@ fn downsample(source: ImageU32, downsample_count: u32) ImageU32 {
         const height: u32 = result.height / 2;
 
         var dest_pixel: [*]u32 = @ptrCast(result.pixels);
-        var source_pixel0: [*]u32 = @ptrCast(result.pixels);
-        var source_pixel1: [*]u32 = source_pixel0 + result.width;
+        var source_row: [*]u32 = @ptrCast(result.pixels);
 
         var y: u32 = 0;
         while (y < height) : (y += 1) {
+            var source_pixel0: [*]u32 = source_row;
+            var source_pixel1: [*]u32 = source_row + result.width;
             var x: u32 = 0;
             while (x < width) : (x += 1) {
                 var pixel_00: Color = .unpackColorBGRA(source_pixel0[0]);
@@ -1529,8 +1530,7 @@ fn downsample(source: ImageU32, downsample_count: u32) ImageU32 {
                 dest_pixel += 1;
             }
 
-            source_pixel0 += result.width;
-            source_pixel1 += result.width;
+            source_row += result.width * 2;
         }
 
         result.width = width;
@@ -1951,7 +1951,57 @@ fn parsePieces(
         tag.* = endTags(&builder, .Block, file_name, errors);
         result = .SingleTile;
     } else if (shared.stringBufferEquals(name_token.text, "character")) {
-        //
+        var y_index: u32 = 0;
+        while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+            var x_index: u32 = 0;
+            while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+                const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+
+                if (y_index <= 3) {
+                    if (x_index <= 6) {
+                        var builder: TagBuilder = beginTags(assets);
+                        addTag(
+                            &builder,
+                            .FacingDirection,
+                            @as(f32, @floatFromInt(@mod(y_index, 4))) * math.TAU32 / 4.0,
+                        );
+
+                        switch (x_index) {
+                            0 => addTag(&builder, .Idle, 1),
+                            1 => addTag(&builder, .DodgeLeft, 1),
+                            2 => addTag(&builder, .DodgeRight, 1),
+                            3 => addTag(&builder, .Move, 1),
+                            4 => addTag(&builder, .Hit, 1),
+                            5 => addTag(&builder, .Attack1, 1),
+                            6 => addTag(&builder, .Attack2, 1),
+                            else => unreachable,
+                        }
+
+                        tag.* = endTags(&builder, .Body, file_name, errors);
+                    }
+                } else {
+                    if (x_index <= 2) {
+                        var builder: TagBuilder = beginTags(assets);
+                        addTag(
+                            &builder,
+                            .FacingDirection,
+                            @as(f32, @floatFromInt(@mod(y_index, 4))) * math.TAU32 / 4.0,
+                        );
+
+                        switch (x_index) {
+                            0 => addTag(&builder, .Idle, 1),
+                            1 => addTag(&builder, .Surprise, 1),
+                            2 => addTag(&builder, .Anger, 1),
+                            else => unreachable,
+                        }
+
+                        tag.* = endTags(&builder, .Head, file_name, errors);
+                    }
+                }
+            }
+        }
+
+        result = .MultiTile;
     } else if (shared.stringBufferEquals(name_token.text, "cover")) {
         //
     } else if (shared.stringBufferEquals(name_token.text, "hand")) {

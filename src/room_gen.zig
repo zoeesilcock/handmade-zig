@@ -343,7 +343,7 @@ fn addMonster(region: *SimRegion, world_position: WorldPosition, standing_on: Tr
     initHitPoints(entity, 3);
 
     addPiece(entity, .Shadow, 4.5, .zero(), .new(1, 1, 1, 0.5), null);
-    addPiece(entity, .Torso, 4.5, .zero(), .white(), null);
+    addPiece(entity, .Body, 4.5, .zero(), .white(), null);
 
     placeEntity(region, entity, world_position);
 }
@@ -366,7 +366,7 @@ fn addSnakeSegment(
     initHitPoints(entity, 3);
 
     addPiece(entity, .Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
-    addPiece(entity, if (segment_index != 0) .Torso else .Head, 1.5, .zero(), .white(), null);
+    addPiece(entity, if (segment_index != 0) .Body else .Head, 1.5, .zero(), .white(), null);
     addPieceLight(entity, 0.1, .new(0, 0, 0.5), 1.0, .new(1, 1, 0));
 
     placeEntity(region, entity, world_position);

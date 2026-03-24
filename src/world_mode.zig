@@ -256,7 +256,7 @@ fn addPlayer(
         _ = room_gen.addPiece(body, .Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, room_gen.shadow_alpha), null);
         _ = room_gen.addPiece(
             body,
-            .Torso,
+            .Body,
             hero_scale * 1.2,
             .new(0, 0, 0),
             color,

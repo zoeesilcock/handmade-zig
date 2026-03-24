@@ -45,6 +45,27 @@ pub const AssetTagId = enum(u32) {
     Floor,
     Grass,
 
+    Idle,
+    DodgeLeft,
+    DodgeRight,
+    Move,
+    Hit,
+    Attack1,
+    Attack2,
+    Surprise,
+    Anger,
+
+    Cat,
+    Birman,
+    Ghost,
+    Tabby,
+    Brown,
+    Gray,
+    Krampus,
+    Undead,
+    Broken,
+    Wrapped,
+
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
     }
@@ -70,7 +91,7 @@ pub const AssetBasicCategory = enum(u32) {
     Stone,
     Head, // Still used.
     Cape,
-    Torso, // Still used.
+    Body, // Still used.
     Font, // Still used.
     FontGlyph, // Still used.
     Bloop,
@@ -265,6 +286,25 @@ pub const name_tags = [_]NameTag{
     .{ .name = .fromSlice("wall"), .id = .Wall },
     .{ .name = .fromSlice("floor"), .id = .Floor },
     .{ .name = .fromSlice("grass"), .id = .Grass },
+    .{ .name = .fromSlice("idle"), .id = .Idle },
+    .{ .name = .fromSlice("dodgeleft"), .id = .DodgeLeft },
+    .{ .name = .fromSlice("dodgeright"), .id = .DodgeRight },
+    .{ .name = .fromSlice("move"), .id = .Move },
+    .{ .name = .fromSlice("hit"), .id = .Hit },
+    .{ .name = .fromSlice("attack1"), .id = .Attack1 },
+    .{ .name = .fromSlice("attack2"), .id = .Attack2 },
+    .{ .name = .fromSlice("surprise"), .id = .Surprise },
+    .{ .name = .fromSlice("anger"), .id = .Anger },
+    .{ .name = .fromSlice("cat"), .id = .Cat },
+    .{ .name = .fromSlice("birman"), .id = .Birman },
+    .{ .name = .fromSlice("ghost"), .id = .Ghost },
+    .{ .name = .fromSlice("tabby"), .id = .Tabby },
+    .{ .name = .fromSlice("brown"), .id = .Brown },
+    .{ .name = .fromSlice("gray"), .id = .Gray },
+    .{ .name = .fromSlice("krampus"), .id = .Krampus },
+    .{ .name = .fromSlice("undead"), .id = .Undead },
+    .{ .name = .fromSlice("broken"), .id = .Broken },
+    .{ .name = .fromSlice("wrapped"), .id = .Wrapped },
 };
 
 const type_from_id = [_]struct { HHAAssetType, AssetBasicCategory }{
@@ -281,7 +321,7 @@ const type_from_id = [_]struct { HHAAssetType, AssetBasicCategory }{
 
     .{ .Bitmap, .Head },
     .{ .Bitmap, .Cape },
-    .{ .Bitmap, .Torso },
+    .{ .Bitmap, .Body },
 
     .{ .Font, .Font },
     .{ .Bitmap, .FontGlyph },
