@@ -4,6 +4,7 @@ const math = @import("math.zig");
 const world = @import("world.zig");
 const world_gen = @import("world_gen.zig");
 const room_gen = @import("room_gen.zig");
+const entity_gen = @import("entity_gen.zig");
 const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
@@ -221,12 +222,12 @@ fn addPlayer(
         sim_region.origin,
         standing_on.getSimSpaceTraversable().position,
     );
-    var body = room_gen.addEntity(sim_region);
-    const head = room_gen.addEntity(sim_region);
-    head.collision_volume = room_gen.makeSimpleGroundedCollision(1, 0.5, 0.6, 0.7);
+    var body = entity_gen.addEntity(sim_region);
+    const head = entity_gen.addEntity(sim_region);
+    head.collision_volume = entity_gen.makeSimpleGroundedCollision(1, 0.5, 0.6, 0.7);
     head.addFlags(EntityFlags.Collides.toInt());
 
-    const glove = room_gen.addEntity(sim_region);
+    const glove = entity_gen.addEntity(sim_region);
     glove.addFlags(EntityFlags.Collides.toInt());
     glove.movement_mode = .AngleOffset;
     glove.angle_current = -0.25 * math.TAU32;
@@ -253,8 +254,8 @@ fn addPlayer(
     const hero_scale = 3;
     const color: Color = .white();
     if (true) {
-        _ = room_gen.addPiece(body, .Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, room_gen.shadow_alpha), null);
-        _ = room_gen.addPiece(
+        _ = entity_gen.addPiece(body, .Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, entity_gen.shadow_alpha), null);
+        _ = entity_gen.addPiece(
             body,
             .Body,
             hero_scale * 1.2,
@@ -262,7 +263,7 @@ fn addPlayer(
             color,
             @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
         );
-        _ = room_gen.addPiece(
+        _ = entity_gen.addPiece(
             body,
             .Cape,
             hero_scale * 1.2,
@@ -271,14 +272,14 @@ fn addPlayer(
             @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
         );
 
-        _ = room_gen.addPiece(head, .Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
+        _ = entity_gen.addPiece(head, .Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
 
-        _ = room_gen.addPiece(glove, .Hand, hero_scale * 0.25, .new(0, 0, 0), color, null);
+        _ = entity_gen.addPiece(glove, .Hand, hero_scale * 0.25, .new(0, 0, 0), color, null);
     }
 
-    room_gen.placeEntity(sim_region, glove, position);
-    room_gen.placeEntity(sim_region, head, position);
-    room_gen.placeEntity(sim_region, body, position);
+    entity_gen.placeEntity(sim_region, glove, position);
+    entity_gen.placeEntity(sim_region, head, position);
+    entity_gen.placeEntity(sim_region, body, position);
 }
 
 fn beginSim(

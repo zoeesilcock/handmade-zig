@@ -53,6 +53,7 @@ const ImageU32 = png.ImageU32;
 
 pub const AssetTagId = file_formats.AssetTagId;
 pub const ASSET_CATEGORY_COUNT = file_formats.ASSET_CATEGORY_COUNT;
+pub const ASSET_TAG_COUNT = file_formats.ASSET_TAG_COUNT;
 const ASSET_IMPORT_GRID_MAX = 8;
 const name_tags = file_formats.name_tags;
 const HHA_VERSION = file_formats.HHA_VERSION;
@@ -121,7 +122,7 @@ pub const AssetMemoryHeader = extern struct {
 };
 
 pub const AssetVector = struct {
-    e: [ASSET_CATEGORY_COUNT]f32 = [1]f32{0} ** ASSET_CATEGORY_COUNT,
+    e: [ASSET_TAG_COUNT]f32 = [1]f32{0} ** ASSET_TAG_COUNT,
 };
 
 const AssetState = enum(u32) {
@@ -233,7 +234,7 @@ pub const Assets = struct {
 
     loaded_asset_sentinel: AssetMemoryHeader,
 
-    tag_range: [ASSET_CATEGORY_COUNT]f32 = [1]f32{1000000} ** ASSET_CATEGORY_COUNT,
+    tag_range: [ASSET_TAG_COUNT]f32 = [1]f32{1000000} ** ASSET_TAG_COUNT,
 
     file_count: u32,
     files: [*]AssetFile,

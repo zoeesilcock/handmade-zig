@@ -1,102 +1,38 @@
 const math = @import("math.zig");
-const shared = @import("shared.zig");
 const sim = @import("sim.zig");
 const gen_math = @import("gen_math.zig");
 const world_gen = @import("world_gen.zig");
 const entities = @import("entities.zig");
+const entity_gen = @import("entity_gen.zig");
 const renderer = @import("renderer.zig");
-const asset = @import("asset.zig");
 const brains = @import("brains.zig");
 const world_mod = @import("world.zig");
-const world_mode_mod = @import("world_mode.zig");
-const file_formats = @import("file_formats.zig");
 const std = @import("std");
 
 // Types.
 const Vector3 = math.Vector3;
-const Vector2 = math.Vector2;
 const Color = math.Color;
-const Color3 = math.Color3;
 const Rectangle3 = math.Rectangle3;
 const SimRegion = sim.SimRegion;
 const Entity = entities.Entity;
-const EntityId = entities.EntityId;
 const EntityVisiblePiece = entities.EntityVisiblePiece;
 const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
-const EntityFlags = entities.EntityFlags;
 const TraversableReference = entities.TraversableReference;
 const World = world_mod.World;
 const WorldPosition = world_mod.WorldPosition;
 const WorldGenerator = world_gen.WorldGenerator;
 const GenRoom = world_gen.GenRoom;
 const GenRoomSpec = world_gen.GenRoomSpec;
-const GenVolume = gen_math.GenVolume;
 const GenVector3 = gen_math.GenVector3;
 const GenRoomConnection = world_gen.GenRoomConnection;
 const GenConnection = world_gen.GenConnection;
-const Brain = brains.Brain;
-const BrainId = brains.BrainId;
+const GenEntity = entity_gen.GenEntity;
+const GenEntityTag = entity_gen.GenEntityTag;
 const BrainSlot = brains.BrainSlot;
-const BrainHero = brains.BrainHero;
-const BrainSnake = brains.BrainSnake;
-const BrainMonster = brains.BrainMonster;
-const BrainFamiliar = brains.BrainFamiliar;
-const AssetBasicCategory = file_formats.AssetBasicCategory;
 
-pub const shadow_alpha = 0.5;
 const X = 0;
 const Y = 1;
 const Z = 2;
-
-pub fn addPiece(
-    entity: *Entity,
-    category: AssetBasicCategory,
-    height: f32,
-    offset: Vector3,
-    color: Color,
-    opt_movement_flags: ?u32,
-) *EntityVisiblePiece {
-    return addPieceV3(entity, category, .new(0, height, 0), offset, color, opt_movement_flags);
-}
-
-fn addPieceLight(
-    entity: *Entity,
-    radius: f32,
-    offset: Vector3,
-    emission: f32,
-    color: Color3,
-) *EntityVisiblePiece {
-    return addPieceV3(
-        entity,
-        .None,
-        .new(radius, radius, radius),
-        offset,
-        color.toColor(emission),
-        @intFromEnum(EntityVisiblePieceFlag.Light),
-    );
-}
-
-fn addPieceV3(
-    entity: *Entity,
-    category: AssetBasicCategory,
-    dimension: Vector3,
-    offset: Vector3,
-    color: Color,
-    opt_movement_flags: ?u32,
-) *EntityVisiblePiece {
-    std.debug.assert(entity.piece_count < entity.pieces.len);
-
-    var piece: *EntityVisiblePiece = &entity.pieces[entity.piece_count];
-    entity.piece_count += 1;
-
-    piece.category = category;
-    piece.dimension = dimension;
-    piece.offset = offset;
-    piece.color = color;
-    piece.flags = opt_movement_flags orelse 0;
-
-    return piece;
-}
 
 fn getCameraOffsetZForDimension(x_count: i32, y_count: i32) f32 {
     var x_distance: f32 = 10;
@@ -128,6 +64,7 @@ fn getCameraOffsetZForDimension(x_count: i32, y_count: i32) f32 {
 
 pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
     const spec: *GenRoomSpec = room.spec;
+    var pending_entity: ?*GenEntity = room.first_entity;
     const dimension: GenVector3 = room.volume.getDimension();
     const min_tile_x: i32 = room.volume.min[X];
     const x_count: i32 = dimension[X];
@@ -199,7 +136,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 null,
             );
 
-            const entity: *Entity = addEntity(region);
+            const entity: *Entity = entity_gen.addEntity(region);
 
             var color: Color = .newFromSRGB(0.31, 0.49, 0.32, 1);
             var wall_height: f32 = 0.5;
@@ -211,7 +148,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 (x_index == x_count - 2 and y_index == y_count - 2);
 
             if (on_lamp) {
-                addLamp(
+                entity_gen.addLamp(
                     region,
                     position,
                     .new(
@@ -242,6 +179,21 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                     entity.traversable_count = 1;
                     entity.traversables[0].position = Vector3.zero();
                     entity.traversables[0].occupier = null;
+
+                    if (pending_entity != null) {
+                        var ref: TraversableReference = .init;
+                        ref.entity.ptr = entity;
+                        ref.entity.index = entity.id;
+
+                        const placed_entity: *Entity = pending_entity.?.creator(region, position, ref);
+                        var tag_index: u32 = 0;
+                        while (tag_index < pending_entity.?.tag_count) : (tag_index += 1) {
+                            const tag: *GenEntityTag = &pending_entity.?.tags[tag_index];
+                            placed_entity.addTag(tag.tag_id, tag.value);
+                        }
+
+                        pending_entity = pending_entity.?.next;
+                    }
                 }
             }
 
@@ -252,7 +204,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             _ = position.offset.setZ(position.offset.z() + wall_height + 0.5 * series.randomUnilateral());
 
             color = .newFromSRGB(0.8, 0.8, 0.8, 1);
-            var piece: *EntityVisiblePiece = addPieceV3(
+            var piece: *EntityVisiblePiece = entity_gen.addPieceV3(
                 entity,
                 .Block,
                 .new(0.7, 0.7, 0.5 * wall_height),
@@ -274,7 +226,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 );
             }
 
-            placeEntity(region, entity, position);
+            entity_gen.placeEntity(region, entity, position);
         }
     }
 
@@ -304,128 +256,18 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
         max_room_world_position,
     );
 
-    const camera_room: *Entity = addEntity(region);
+    const camera_room: *Entity = entity_gen.addEntity(region);
     camera_room.collision_volume = .fromMinMax(min_room_position, max_room_position);
 
     camera_room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
     _ = camera_room.camera_offset.setZ(getCameraOffsetZForDimension(x_count, y_count));
-    placeEntity(region, camera_room, change_center);
+    entity_gen.placeEntity(region, camera_room, change_center);
 
     const world_room: *world_mod.WorldRoom =
         world_mod.addWorldRoom(world, min_room_world_position, max_room_world_position);
     _ = world_room;
 
     sim.endWorldChange(region);
-}
-
-pub fn addEntity(region: *SimRegion) *Entity {
-    const entity: *Entity = sim.createEntity(region, sim.allocateEntityId(region));
-
-    entity.x_axis = .new(1, 0);
-    entity.y_axis = .new(0, 1);
-
-    return entity;
-}
-
-pub fn placeEntity(region: *SimRegion, entity: *Entity, chunk_position: WorldPosition) void {
-    entity.position = world_mod.subtractPositions(region.world, &chunk_position, &region.origin);
-}
-
-fn addMonster(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) void {
-    var entity = addEntity(region);
-
-    entity.addFlags(EntityFlags.Collides.toInt());
-
-    entity.brain_slot = BrainSlot.forField(BrainMonster, "body");
-    entity.brain_id = sim.addBrain(region);
-    entity.occupying = standing_on;
-
-    initHitPoints(entity, 3);
-
-    addPiece(entity, .Shadow, 4.5, .zero(), .new(1, 1, 1, 0.5), null);
-    addPiece(entity, .Body, 4.5, .zero(), .white(), null);
-
-    placeEntity(region, entity, world_position);
-}
-
-fn addSnakeSegment(
-    region: *SimRegion,
-    world_position: WorldPosition,
-    standing_on: TraversableReference,
-    brain_id: BrainId,
-    segment_index: u32,
-) void {
-    var entity = addEntity(region);
-
-    entity.addFlags(EntityFlags.Collides.toInt());
-
-    entity.brain_slot = BrainSlot.forIndexedField(BrainSnake, "segments", segment_index);
-    entity.brain_id = brain_id;
-    entity.occupying = standing_on;
-
-    initHitPoints(entity, 3);
-
-    addPiece(entity, .Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
-    addPiece(entity, if (segment_index != 0) .Body else .Head, 1.5, .zero(), .white(), null);
-    addPieceLight(entity, 0.1, .new(0, 0, 0.5), 1.0, .new(1, 1, 0));
-
-    placeEntity(region, entity, world_position);
-}
-
-fn addLamp(
-    region: *SimRegion,
-    world_position: WorldPosition,
-    color: Color3,
-) void {
-    const entity = addEntity(region);
-
-    _ = addPieceLight(entity, 0.5, .new(0, 0, 2.5), 1.0, color);
-
-    placeEntity(region, entity, world_position);
-}
-
-fn addFamiliar(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) void {
-    const entity = addEntity(region);
-
-    entity.addFlags(EntityFlags.Collides.toInt());
-
-    entity.brain_slot = BrainSlot.forField(BrainFamiliar, "head");
-    entity.brain_id = sim.addBrain(region);
-    entity.occupying = standing_on;
-
-    _ = addPiece(entity, .Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
-    _ = addPiece(entity, .Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
-
-    placeEntity(region, entity, world_position);
-}
-
-fn initHitPoints(entity: *Entity, count: u32) void {
-    std.debug.assert(count <= entity.hit_points.len);
-
-    entity.hit_point_max = count;
-
-    var hit_point_index: u32 = 0;
-    while (hit_point_index < entity.hit_point_max) : (hit_point_index += 1) {
-        const hit_point = &entity.hit_points[hit_point_index];
-
-        hit_point.flags = 0;
-        hit_point.filled_amount = shared.HIT_POINT_SUB_COUNT;
-    }
-}
-
-pub fn makeSimpleGroundedCollision(
-    x_dimension: f32,
-    y_dimension: f32,
-    z_dimension: f32,
-    opt_z_offset: ?f32,
-) Rectangle3 {
-    const z_offset: f32 = opt_z_offset orelse 0;
-    const result: Rectangle3 = .fromCenterDimension(
-        Vector3.new(0, 0, 0.5 * z_dimension + z_offset),
-        Vector3.new(x_dimension, y_dimension, z_dimension),
-    );
-
-    return result;
 }
 
 pub fn chunkPositionFromTilePosition(

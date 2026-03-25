@@ -547,13 +547,16 @@ pub fn updateAndRenderEntities(
                         _ = offset.setY(offset.y() + bob_time);
                     }
 
+                    var color: Color = piece.color;
+                    _ = color.setA(color.a() * (1.0 - 0.5 * match_vector.e[@intFromEnum(AssetTagId.Ghost)]));
+
                     if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Light) != 0) {
                         asset_rendering.pushCubeLight(
                             render_group,
                             entity_transform.offset_position.plus(piece.offset),
                             piece.dimension,
-                            piece.color.rgb(),
-                            piece.color.a(),
+                            color.rgb(),
+                            color.a(),
                             @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
@@ -562,7 +565,7 @@ pub fn updateAndRenderEntities(
                             bitmap_id,
                             entity_transform.offset_position.plus(piece.offset),
                             piece.dimension,
-                            piece.color,
+                            color,
                             piece.extra.cube_uv_layout,
                             null,
                             @ptrCast(&entity.lighting[piece_index]),
@@ -574,7 +577,7 @@ pub fn updateAndRenderEntities(
                             bitmap_id,
                             piece.dimension.y(),
                             piece.offset.plus(offset),
-                            piece.color,
+                            color,
                             null,
                             x_axis,
                             y_axis,

@@ -6,6 +6,7 @@ pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
 pub const HHA_VERSION = 1;
 pub const ASSET_MAX_SPRITE_DIM = 512;
 pub const ASSET_MAX_PLATE_DIM = 2048;
+pub const ASSET_TAG_COUNT = @typeInfo(AssetTagId).@"enum".fields.len;
 pub const ASSET_CATEGORY_COUNT = @typeInfo(AssetBasicCategory).@"enum".fields.len;
 
 // Types.

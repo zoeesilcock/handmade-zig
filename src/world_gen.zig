@@ -3,6 +3,7 @@ const shared = @import("shared.zig");
 const random = @import("random.zig");
 const gen_math = @import("gen_math.zig");
 const room_gen = @import("room_gen.zig");
+const entity_gen = @import("entity_gen.zig");
 const box_mod = @import("box.zig");
 const world_mod = @import("world.zig");
 const world_mode_mod = @import("world_mode.zig");
@@ -10,6 +11,7 @@ const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
 const memory = @import("memory.zig");
+const file_formats = @import("file_formats.zig");
 const std = @import("std");
 
 // Types.
@@ -19,6 +21,8 @@ const World = world_mod.World;
 const WorldPosition = world_mod.WorldPosition;
 const GameModeWorld = world_mode_mod.GameModeWorld;
 const Entity = entities.Entity;
+const GenEntity = entity_gen.GenEntity;
+const GenEntityTag = entity_gen.GenEntityTag;
 const TraversableReference = entities.TraversableReference;
 const CameraBehavior = entities.CameraBehavior;
 const SimRegion = sim.SimRegion;
@@ -26,6 +30,7 @@ const BoxSurfaceMask = box_mod.BoxSurfaceMask;
 const BoxSurfaceIndex = box_mod.BoxSurfaceIndex;
 const GenVolume = gen_math.GenVolume;
 const GenVector3 = gen_math.GenVector3;
+const AssetTagId = file_formats.AssetTagId;
 
 const X = 0;
 const Y = 1;
@@ -42,7 +47,53 @@ pub const WorldGenerator = struct {
     first_room: ?*GenRoom,
     first_connection: ?*GenConnection,
 
+    option_arrays: [GEN_OPTION_TYPE_COUNT]GenOptionArray,
+
     entropy: *random.Series,
+};
+
+const GenOption = struct {
+    room: ?*GenRoom,
+};
+
+const GenOptionIterator = struct {
+    room: ?*GenRoom = null,
+
+    pub fn iterateOptions(gen: *WorldGenerator, option_type: GenOptionType) GenOptionIterator {
+        var result: GenOptionIterator = .{};
+        const array: *GenOptionArray = &gen.option_arrays[@intFromEnum(option_type)];
+        if (array.option_count > 0) {
+            array.option_count -= 1;
+            result.room = array.options[array.option_count].room;
+        }
+        return result;
+    }
+
+    pub fn isValid(self: *GenOptionIterator) bool {
+        return self.room != null;
+    }
+
+    pub fn advance(self: *GenOptionIterator) void {
+        self.room = null;
+    }
+
+    pub fn finish(self: *GenOptionIterator) void {
+        self.room = null;
+    }
+};
+
+const GenOptionArray = struct {
+    options: [*]GenOption,
+
+    max_option_count: u32,
+    option_count: u32,
+};
+
+const GEN_OPTION_TYPE_COUNT = @typeInfo(GenOptionType).@"enum".fields.len;
+const GenOptionType = enum(u32) {
+    None,
+    Cat,
+    Orphan,
 };
 
 pub const GenRoomSpec = struct {
@@ -55,8 +106,12 @@ pub const GenRoom = struct {
     global_next: ?*GenRoom,
 
     spec: *GenRoomSpec,
+    options_picked: u64,
+
     volume: GenVolume,
     generation_index: u32,
+
+    first_entity: ?*GenEntity,
 
     debug_label: if (INTERNAL) []const u8 else void,
 };
@@ -251,6 +306,25 @@ fn setSize(gen: *WorldGenerator, spec: *GenRoomSpec, dim_x: i32, dim_y: i32, opt
     const dim_z: i32 = opt_dim_z orelse 1;
 
     spec.required_dimension = .{ dim_x, dim_y, dim_z };
+}
+
+fn addOption(gen: *WorldGenerator, room: *GenRoom, option_type: GenOptionType) *GenOption {
+    const array: *GenOptionArray = &gen.option_arrays[@intFromEnum(option_type)];
+
+    std.debug.assert(array.option_count <= array.max_option_count);
+
+    if (array.option_count == array.max_option_count) {
+        array.max_option_count += 100;
+        const new_options: [*]GenOption = gen.temp_memory.pushArray(array.max_option_count, GenOption, null);
+        _ = shared.copyArray(array.option_count, GenOption, array.options, new_options);
+        array.options = new_options;
+    }
+
+    const result: *GenOption = &array.options[array.option_count];
+    array.option_count += 1;
+    result.room = room;
+
+    return result;
 }
 
 fn beginWorldGen(world: *World) *WorldGenerator {
@@ -692,8 +766,10 @@ fn createForest(gen: *WorldGenerator) GenForest {
 
 fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     var result: GenOrphanage = .{};
+
     var bedroom_spec: *GenRoomSpec = genSpec(gen);
     bedroom_spec.stone_floor = true;
+
     const save_slot_spec: *GenRoomSpec = genSpec(gen);
     const main_room_spec: *GenRoomSpec = genSpec(gen);
     const tailor_room_spec: *GenRoomSpec = genSpec(gen);
@@ -719,6 +795,14 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     const forest_path: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage Forest Path");
     const forest_entrance: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage ForestEntrance");
     // const side_alley: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage Side Alley");
+
+    _ = addOption(gen, main_room, .Cat);
+    _ = addOption(gen, bedroom_a, .Cat);
+    _ = addOption(gen, bedroom_b, .Cat);
+    _ = addOption(gen, bedroom_c, .Cat);
+    _ = addOption(gen, bedroom_d, .Cat);
+    _ = addOption(gen, tailor_room, .Cat);
+    _ = addOption(gen, kitchen, .Cat);
 
     setSize(gen, main_room_spec, 13, 13, null);
     setSize(gen, tailor_room_spec, 8, 6, null);
@@ -757,6 +841,48 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     return result;
 }
 
+fn addEntity(gen: *WorldGenerator, creator: *const entity_gen.createEntityType) *GenEntity {
+    var result: *GenEntity = gen.temp_memory.pushStruct(GenEntity, null);
+    result.creator = creator;
+    return result;
+}
+
+fn placeEntity(gen: *WorldGenerator, entity: *GenEntity, room: *GenRoom) void {
+    _ = gen;
+    entity.next = room.first_entity;
+    room.first_entity = entity;
+}
+
+fn addTag(gen: *WorldGenerator, entity: *GenEntity, tag_id: AssetTagId, value: f32) *GenEntityTag {
+    _ = gen;
+    std.debug.assert(entity.tag_count < entity.tags.len);
+
+    var tag: *GenEntityTag = &entity.tags[entity.tag_count];
+    entity.tag_count += 1;
+
+    tag.tag_id = tag_id;
+    tag.value = value;
+
+    return tag;
+}
+
+fn placeCat(gen: *WorldGenerator) ?*GenEntity {
+    var result: ?*GenEntity = null;
+    var iterator: GenOptionIterator = .iterateOptions(gen, .Cat);
+    while (iterator.isValid()) : (iterator.advance()) {
+        if (iterator.room) |room| {
+            // TODO: Check this room to see if it meets our other criteria.
+            if (true) {
+                result = addEntity(gen, &entity_gen.addCat);
+                _ = addTag(gen, result.?, .Cat, 1);
+                placeEntity(gen, result.?, room);
+                iterator.finish();
+            }
+        }
+    }
+    return result;
+}
+
 pub fn createWorldNew(world: *World) GenResult {
     var result: GenResult = .{ .initial_camera_position = undefined };
 
@@ -768,6 +894,18 @@ pub fn createWorldNew(world: *World) GenResult {
     _ = connect(gen, orphanage.forest_entrance.?, .Down, dungeon.entrance_room.?);
 
     const start_room: *GenRoom = orphanage.hero_bedroom.?;
+
+    const hannah: ?*GenEntity = placeCat(gen);
+    _ = addTag(gen, hannah.?, .Ghost, 1);
+    _ = addTag(gen, hannah.?, .Birman, 1);
+
+    const fred: ?*GenEntity = placeCat(gen);
+    _ = addTag(gen, fred.?, .Brown, 1);
+    _ = addTag(gen, fred.?, .Tabby, 1);
+
+    const molly: ?*GenEntity = placeCat(gen);
+    _ = addTag(gen, molly.?, .Gray, 1);
+    _ = addTag(gen, molly.?, .Tabby, 1);
 
     layout(gen, world, start_room);
     generateWorld(gen, world);
