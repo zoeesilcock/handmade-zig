@@ -822,7 +822,7 @@ pub const Assets = struct {
 
                         var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
 
-                        bitmap.alignment_percentage = Vector2.new(info.alignment_percentage[0], info.alignment_percentage[1]);
+                        bitmap.alignment_percentage = info.align_points[0].getPositionPercent();
                         bitmap.width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1]));
                         bitmap.width = width;
                         bitmap.height = height;
@@ -1556,11 +1556,10 @@ fn writeImageToHHA(
     if (tags.type_id != .None) {
         var hha_asset: HHAAsset = .{
             .info = .{
-                .bitmap = .{
-                    .alignment_percentage = .{ 0.5, 0.5 },
-                },
+                .bitmap = .{},
             },
         };
+        hha_asset.info.bitmap.align_points[0].set(.Default, true, 1.0, .new(0.5, 0.5));
         var asset_index: u32 = file.asset_indices[tile_y_index][tile_x_index];
         if (asset_index != 0) {
             const asset: *Asset = &assets.assets[asset_index];
@@ -1585,8 +1584,8 @@ fn writeImageToHHA(
             }
             hha_asset.data_size = asset_data_size;
 
-            hha_asset.info.bitmap.dim[0] = source_image.width;
-            hha_asset.info.bitmap.dim[1] = source_image.height;
+            hha_asset.info.bitmap.dim[0] = @intCast(source_image.width);
+            hha_asset.info.bitmap.dim[1] = @intCast(source_image.height);
             hha_asset.first_tag_index = tags.first_tag_index;
             hha_asset.one_past_last_tag_index = tags.one_past_last_tag_index;
             hha_asset.type = .Bitmap;

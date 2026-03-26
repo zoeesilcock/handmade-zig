@@ -1,25 +1,28 @@
 const std = @import("std");
 const shared = @import("shared");
+const math = shared.math;
 const asset = shared.asset;
 const types = shared.types;
 const file_formats = shared.file_formats;
 const file_formats_v0 = shared.file_formats_v0;
-const math = shared.math;
 const intrinsics = shared.intrinsics;
 
 // Types.
 const String = types.String;
+const Vector2 = math.Vector2;
 const HHAHeaderV0 = file_formats_v0.HHAHeaderV0;
 const HHAAssetTypeV0 = file_formats_v0.HHAAssetTypeV0;
 const HHAAssetV0 = file_formats_v0.HHAAssetV0;
-const AssetBasicCategory = file_formats.AssetBasicCategory;
+const HHABitmapV0 = file_formats_v0.HHABitmapV0;
 
+const AssetBasicCategory = file_formats.AssetBasicCategory;
 const HHAHeader = file_formats.HHAHeader;
 const HHAAssetType = file_formats.HHAAssetType;
 const HHAAsset = file_formats.HHAAsset;
 const HHATag = file_formats.HHATag;
 const HHAAnnotation = file_formats.HHAAnnotation;
 const HHABitmap = file_formats.HHABitmap;
+const HHAAlignPoint = file_formats.HHAAlignPoint;
 const HHASound = file_formats.HHASound;
 const HHAFont = file_formats.HHAFont;
 const HHAFontGlyph = file_formats.HHAFontGlyph;
@@ -206,8 +209,15 @@ fn readHHAV0(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Alloc
 
                 switch (dest_asset.type) {
                     .Bitmap => {
-                        const bitmap: *HHABitmap = &source_asset.info.bitmap;
-                        dest_asset.info.bitmap = bitmap.*;
+                        const bitmap: *HHABitmapV0 = &source_asset.info.bitmap;
+                        const alignment_percentage: Vector2 = .new(
+                            bitmap.alignment_percentage[0],
+                            bitmap.alignment_percentage[1],
+                        );
+                        dest_asset.info.bitmap.dim[0] = @truncate(bitmap.dim[0]);
+                        dest_asset.info.bitmap.dim[1] = @truncate(bitmap.dim[1]);
+                        dest_asset.info.bitmap.align_points[0].set(.Default, true, 1, alignment_percentage);
+
                         dest_asset.data_size = 4 * bitmap.dim[0] * bitmap.dim[1];
                     },
                     .Sound => {
@@ -245,7 +255,7 @@ fn refString(d: [*]const u8, count: u32, offset: u64) String {
     };
 }
 
-fn readHHAV1(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
+fn readHHAV2(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
     _ = source_file;
 
     const header: *const HHAHeader = @ptrCast(hha.data_store);
@@ -315,8 +325,8 @@ fn readHHA(source_file_name: []const u8, allocator: std.mem.Allocator) ?*LoadedH
             if (result.?.source_version == 0) {
                 readHHAV0(source_file, result.?, allocator);
                 result.?.valid = true;
-            } else if (result.?.source_version == 1) {
-                readHHAV1(source_file, result.?, allocator);
+            } else if (result.?.source_version == 2) {
+                readHHAV2(source_file, result.?, allocator);
                 result.?.valid = true;
             } else {
                 std.log.err("Unrecognized HHA version: {d}", .{result.?.source_version});
@@ -535,10 +545,33 @@ fn printContents(hha: *LoadedHHA) void {
                     bitmap.dim[1],
                     @intFromEnum(hha_asset.type),
                 });
-                std.log.info("                Alignment: {d},{d}", .{
-                    bitmap.alignment_percentage[0],
-                    bitmap.alignment_percentage[1],
-                });
+
+                var first: bool = true;
+                var point_index: u32 = 0;
+                while (point_index < bitmap.align_points.len) : (point_index += 1) {
+                    const point: HHAAlignPoint = bitmap.align_points[point_index];
+                    if (point.align_type != 0) {
+                        if (first) {
+                            std.log.info("                Alignment:", .{});
+                            first = false;
+                        }
+
+                        const position_percent: Vector2 = point.getPositionPercent();
+                        const size: f32 = point.getSize();
+                        const align_type = point.getType();
+                        const is_to_parent = point.isToParent();
+
+                        std.log.info("                    [{d}]: {s}{s}{s} {{{d}.{d}}} {d}", .{
+                            point_index,
+                            if (is_to_parent) "<-" else "",
+                            file_formats.alignPointNameFromType(align_type).toSlice(),
+                            if (is_to_parent) "" else "->",
+                            position_percent.x(),
+                            position_percent.y(),
+                            size,
+                        });
+                    }
+                }
             },
             .Font => {
                 const font: *HHAFont = &hha_asset.info.font;

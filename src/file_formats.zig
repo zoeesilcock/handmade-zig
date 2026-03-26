@@ -1,9 +1,11 @@
 const std = @import("std");
 const shared = @import("shared.zig");
+const math = shared.math;
 const types = shared.types;
+const intrinsics = shared.intrinsics;
 
 pub const HHA_MAGIC_VALUE = hhaCode('h', 'h', 'a', 'f');
-pub const HHA_VERSION = 1;
+pub const HHA_VERSION = 2;
 pub const ASSET_MAX_SPRITE_DIM = 512;
 pub const ASSET_MAX_PLATE_DIM = 2048;
 pub const ASSET_TAG_COUNT = @typeInfo(AssetTagId).@"enum".fields.len;
@@ -11,6 +13,7 @@ pub const ASSET_CATEGORY_COUNT = @typeInfo(AssetBasicCategory).@"enum".fields.le
 
 // Types.
 const String = types.String;
+const Vector2 = math.Vector2;
 
 pub const AssetFontType = enum(u32) {
     Default = 0,
@@ -183,13 +186,72 @@ comptime {
     std.debug.assert(@sizeOf(HHAAsset) == (16 * 8));
 }
 
+const HHAAlignPointType = enum(u16) {
+    None,
+
+    Default,
+
+    TopOfHead,
+    BaseOfNeck,
+
+    ToParent = 0x8000,
+};
+
+pub const HHAAlignPoint = extern struct {
+    position_percent: [2]u16 = [1]u16{0} ** 2,
+    size: u16 = 0,
+    align_type: u16 = 0,
+
+    pub fn set(
+        self: *HHAAlignPoint,
+        align_point_type: HHAAlignPointType,
+        to_parent: bool,
+        size: f32,
+        position_percent: Vector2,
+    ) void {
+        self.position_percent[0] = @intCast(
+            intrinsics.roundReal32ToUInt32(position_percent.x() * @as(f32, @floatFromInt(std.math.maxInt(u16) - 1))),
+        );
+        self.position_percent[1] = @intCast(
+            intrinsics.roundReal32ToUInt32(position_percent.y() * @as(f32, @floatFromInt(std.math.maxInt(u16) - 1))),
+        );
+        self.size = @intCast(
+            intrinsics.roundReal32ToUInt32((size * @as(f32, @floatFromInt(std.math.maxInt(u16)))) / 85.0),
+        );
+        self.align_type =
+            @intFromEnum(align_point_type) | if (to_parent) @intFromEnum(HHAAlignPointType.ToParent) else 0;
+    }
+
+    pub fn isToParent(self: HHAAlignPoint) bool {
+        return (self.align_type & @intFromEnum(HHAAlignPointType.ToParent)) != 0;
+    }
+
+    pub fn getType(self: HHAAlignPoint) HHAAlignPointType {
+        return @enumFromInt(self.align_type & ~@intFromEnum(HHAAlignPointType.ToParent));
+    }
+
+    pub fn getPositionPercent(self: HHAAlignPoint) Vector2 {
+        return .new(
+            @as(f32, @floatFromInt(self.position_percent[0])) / @as(f32, @floatFromInt(std.math.maxInt(u16) - 1)),
+            @as(f32, @floatFromInt(self.position_percent[1])) / @as(f32, @floatFromInt(std.math.maxInt(u16) - 1)),
+        );
+    }
+
+    pub fn getSize(self: HHAAlignPoint) f32 {
+        return (85.0 * @as(f32, @floatFromInt(self.size))) / @as(f32, @floatFromInt(std.math.maxInt(u16)));
+    }
+};
+
 pub const HHABitmap = extern struct {
-    dim: [2]u32 = [1]u32{0} ** 2,
-    alignment_percentage: [2]f32 = [1]f32{0} ** 2,
+    // These are imported from txt file augmentation of the PNG.
+    align_points: [12]HHAAlignPoint = [1]HHAAlignPoint{.{}} ** 12,
+
+    dim: [2]u16 = [1]u16{0} ** 2,
+    reserved: [2]u16 = [1]u16{0} ** 2,
 
     // Data looks like this:
     //
-    // pixels: [dim[1]][dim[0]]u32,
+    // pixels: [dim[1]][dim[0]]u16,
 };
 
 pub const HHASoundChain = enum(u32) {
@@ -308,6 +370,40 @@ pub const name_tags = [_]NameTag{
     .{ .name = .fromSlice("wrapped"), .id = .Wrapped },
 };
 
+pub fn tagNameFromID(tag_id: AssetTagId) String {
+    return .fromSlice(@tagName(tag_id));
+}
+
+pub fn tagIdFromName(name: String) AssetTagId {
+    var result: AssetTagId = .None;
+    var name_index: u32 = 0;
+    while (name_index < name_tags.len) : (name_index += 1) {
+        if (shared.stringBuffersEqual(name, name_tags[name_index].name)) {
+            result = name_tags[name_index].id;
+            break;
+        }
+    }
+    return result;
+}
+
+pub fn alignPointNameFromType(align_type: HHAAlignPointType) String {
+    return .fromSlice(@tagName(align_type));
+}
+
+pub fn alignPointTypeFromName(name: String) HHAAlignPointType {
+    var result: HHAAlignPointType = .None;
+    const type_count: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len;
+    var type_index: u32 = 0;
+    while (type_index < type_count) : (type_index += 1) {
+        const align_type: HHAAlignPointType = @intFromEnum(type_index);
+        if (shared.stringBuffersEqual(name, alignPointTypeFromName(align_type))) {
+            result = align_type;
+            break;
+        }
+    }
+    return result;
+}
+
 const type_from_id = [_]struct { HHAAssetType, AssetBasicCategory }{
     .{ .None, .None },
 
@@ -338,19 +434,3 @@ const type_from_id = [_]struct { HHAAssetType, AssetBasicCategory }{
 
     .{ .Bitmap, .Hand },
 };
-
-pub fn tagNameFromID(tag_id: AssetTagId) String {
-    return .fromSlice(@tagName(tag_id));
-}
-
-pub fn tagIdFromName(name: String) AssetTagId {
-    var result: AssetTagId = .None;
-    var name_index: u32 = 0;
-    while (name_index < name_tags.len) : (name_index += 1) {
-        if (shared.stringBuffersEqual(name, name_tags[name_index].name)) {
-            result = name_tags[name_index].id;
-            break;
-        }
-    }
-    return result;
-}

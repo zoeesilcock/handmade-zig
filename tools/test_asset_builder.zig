@@ -432,10 +432,10 @@ fn loadGlyphBMP(
                     source_row -= MAX_FONT_WIDTH;
                 }
 
-                asset.info.bitmap.alignment_percentage[0] =
-                    (1.0) / @as(f32, @floatFromInt(result.?.width));
-                asset.info.bitmap.alignment_percentage[1] =
-                    (1.0 + @as(f32, @floatFromInt(max_y - (bound_height - font.text_metrics.tmDescent)))) / @as(f32, @floatFromInt(result.?.height));
+                asset.info.bitmap.align_points[0].set(.Default, true, 1.0, .new(
+                    (1.0) / @as(f32, @floatFromInt(result.?.width)),
+                    (1.0 + @as(f32, @floatFromInt(max_y - (bound_height - font.text_metrics.tmDescent)))) / @as(f32, @floatFromInt(result.?.height)),
+                ));
 
                 kerning_change = @as(f32, @floatFromInt(min_x - pre_step_x));
             }
@@ -845,14 +845,12 @@ pub const Assets = struct {
         if (self.addAsset()) |asset| {
             result = BitmapId{ .value = asset.id };
             asset.hha.info = .{
-                .bitmap = HHABitmap{
-                    .dim = .{ 0, 0 },
-                    .alignment_percentage = .{
-                        alignment_percentage_x orelse 0.5,
-                        alignment_percentage_y orelse 0.5,
-                    },
-                },
+                .bitmap = .{},
             };
+            asset.hha.info.bitmap.align_points[0].set(.Default, true, 1, .new(
+                alignment_percentage_x orelse 0.5,
+                alignment_percentage_y orelse 0.5,
+            ));
             asset.source.asset_type = .Bitmap;
             asset.source.data = .{ .bitmap = .{ .file_name = file_name } };
         }
@@ -895,10 +893,7 @@ pub const Assets = struct {
         if (self.addAsset()) |asset| {
             result = BitmapId{ .value = asset.id };
             asset.hha.info = .{
-                .bitmap = HHABitmap{
-                    .dim = .{ 0, 0 },
-                    .alignment_percentage = .{ 0, 0 }, // This is set later by extraction.
-                },
+                .bitmap = .{},
             };
             asset.source.asset_type = .FontGlyph;
             asset.source.data = .{

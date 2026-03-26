@@ -5,7 +5,6 @@ pub const HHA_VERSION = 0;
 pub const ASSET_TYPE_ID_COUNT = @typeInfo(AssetTypeIdV0).@"enum".fields.len;
 
 // Types.
-const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
 const HHAFont = file_formats.HHAFont;
 
@@ -69,12 +68,17 @@ pub const HHAHeaderV0 = extern struct {
     // and cycles to store it in the AssetTypes array.
 };
 
+pub const HHABitmapV0 = extern struct {
+    dim: [2]u32 = [1]u32{0} ** 2,
+    alignment_percentage: [2]f32 = [1]f32{0} ** 2,
+};
+
 pub const HHAAssetV0 = extern struct {
     data_offset: u64 align(1) = 0,
     first_tag_index: u32 align(1) = 0,
     one_past_last_tag_index: u32 align(1) = 0,
     info: extern union {
-        bitmap: HHABitmap,
+        bitmap: HHABitmapV0,
         sound: HHASound,
         font: HHAFont,
     } = undefined,
