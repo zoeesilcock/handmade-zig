@@ -1192,7 +1192,7 @@ fn compileFinalStretchProgram(open_gl: *OpenGL, program: *OpenGLProgramCommon) v
     linkSamplers(program, &.{"ImageSampler"});
 }
 
-fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *RenderSetup, alpha_threshold: f32) void {
+fn useZBiasProgramBegin(program: *ZBiasProgram, setup: *align(1) RenderSetup, alpha_threshold: f32) void {
     useProgramBegin(&program.common);
 
     platform.optGLUniformMatrix4fv.?(program.transform_id, 1, true, setup.projection.toGL());
@@ -1839,29 +1839,37 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     var peel_header_restore: [*]u8 = undefined;
     var header_at: [*]u8 = commands.push_buffer_base;
     while (@intFromPtr(header_at) < @intFromPtr(commands.push_buffer_data_at)) {
-        const header: *RenderEntryHeader = @ptrCast(@alignCast(header_at));
+        const header: *align(1) RenderEntryHeader = @ptrCast(@alignCast(header_at));
         header_at += @sizeOf(RenderEntryHeader);
-        const alignment: usize = switch (header.type) {
-            .RenderEntryFullClear => @alignOf(RenderEntryFullClear),
-            .RenderEntryBeginPeels => @alignOf(RenderEntryBeginPeels),
-            .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
-            .RenderEntryLightingTransfer => @alignOf(RenderEntryLightingTransfer),
-            .RenderEntryDepthClear, .RenderEntryEndPeels => @alignOf(u32),
-        };
+        const data: *anyopaque = @ptrFromInt(@intFromPtr(header) + @sizeOf(RenderEntryHeader));
 
-        const header_address = @intFromPtr(header);
-        const data_address = header_address + @sizeOf(RenderEntryHeader);
-        const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-        const data: *anyopaque = @ptrFromInt(aligned_address);
-
-        header_at += aligned_address - data_address;
+        // const alignment: usize = 1;
+        // //     switch (header.type) {
+        // //     .RenderEntryFullClear => @alignOf(RenderEntryFullClear),
+        // //     .RenderEntryBeginPeels => @alignOf(RenderEntryBeginPeels),
+        // //     .RenderEntryTexturedQuads => @alignOf(RenderEntryTexturedQuads),
+        // //     .RenderEntryLightingTransfer => @alignOf(RenderEntryLightingTransfer),
+        // //     .RenderEntryDepthClear, .RenderEntryEndPeels => @alignOf(u32),
+        // // };
+        //
+        // const header_address = @intFromPtr(header);
+        // const data_address = header_address + @sizeOf(RenderEntryHeader);
+        // const aligned_address = std.mem.alignForward(usize, data_address, alignment);
+        // const data: *anyopaque = @ptrFromInt(data_address);
+        //
+        // header_at += aligned_address - data_address;
 
         switch (header.type) {
             .RenderEntryFullClear => {
                 const entry: *RenderEntryFullClear = @ptrCast(@alignCast(data));
                 header_at += @sizeOf(RenderEntryFullClear);
 
-                gl.glClearColor(entry.clear_color.r(), entry.clear_color.g(), entry.clear_color.b(), 1);
+                gl.glClearColor(
+                    entry.clear_color.values[0],
+                    entry.clear_color.values[1],
+                    entry.clear_color.values[2],
+                    1,
+                );
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT);
             },
             .RenderEntryBeginPeels => {
@@ -1873,7 +1881,12 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
 
                 gl.glScissor(0, 0, render_width, render_height);
                 if (on_peel_index == max_render_target_index) {
-                    gl.glClearColor(entry.clear_color.r(), entry.clear_color.g(), entry.clear_color.b(), 1);
+                    gl.glClearColor(
+                        entry.clear_color.values[0],
+                        entry.clear_color.values[1],
+                        entry.clear_color.values[2],
+                        1,
+                    );
                 } else {
                     gl.glClearColor(0, 0, 0, 0);
                 }
@@ -1930,7 +1943,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 header_at += @sizeOf(RenderEntryTexturedQuads);
 
                 const peeling: bool = on_peel_index > 0;
-                const setup: *RenderSetup = &entry.setup;
+                const setup: *align(1) RenderSetup = &entry.setup;
 
                 var clip_rect: Rectangle2 = setup.clip_rect;
                 const clip_min_x: i32 = math.lerpI32Binormal(0, render_width, clip_rect.min.x());

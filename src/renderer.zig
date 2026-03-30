@@ -198,44 +198,44 @@ pub const RenderEntryType = enum(u16) {
 };
 
 pub const RenderEntryHeader = extern struct {
-    type: RenderEntryType,
-    debug_tag: u32,
+    type: RenderEntryType align(1),
+    debug_tag: u32 align(1),
 };
 
 pub const RenderEntryFullClear = extern struct {
-    clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
+    clear_color: Color align(1), // This color is NOT in linear space, it is in sRGB space directly.
 };
 
 pub const RenderEntryBeginPeels = extern struct {
-    clear_color: Color, // This color is NOT in linear space, it is in sRGB space directly.
+    clear_color: Color align(1), // This color is NOT in linear space, it is in sRGB space directly.
 };
 
 pub const RenderEntryTexturedQuads = extern struct {
-    setup: RenderSetup,
-    quad_count: u32,
-    vertex_array_offset: u32, // Uses 4 vertices per quad.
-    index_array_offset: u32, // Uses 6 indices per quad.
+    setup: RenderSetup align(1),
+    quad_count: u32 align(1),
+    vertex_array_offset: u32 align(1), // Uses 4 vertices per quad.
+    index_array_offset: u32 align(1), // Uses 6 indices per quad.
 
     // Is null if using the default texture array / single batch render, and an array of one texture per quad if not.
-    quad_textures: ?[*]RendererTexture,
+    quad_textures: ?[*]RendererTexture align(1),
 };
 
 pub const RenderEntryLightingTransfer = extern struct {
-    light_data0: [*]Vector4,
-    light_data1: [*]Vector4,
+    light_data0: [*]Vector4 align(1),
+    light_data1: [*]Vector4 align(1),
 };
 
 pub const RenderSetup = extern struct {
-    clip_rect: Rectangle2 = .zero(),
-    render_target_index: u32 = 0,
-    projection: Matrix4x4 = .identity(),
-    camera_position: Vector3 = .zero(),
-    fog_direction: Vector3 = .zero(),
-    fog_color: Color3 = .white(),
-    fog_start_distance: f32 = 0,
-    fog_end_distance: f32 = 0,
-    clip_alpha_start_distance: f32 = 0,
-    clip_alpha_end_distance: f32 = 0,
+    clip_rect: Rectangle2 align(1) = .zero(),
+    render_target_index: u32 align(1) = 0,
+    projection: Matrix4x4 align(1) = .identity(),
+    camera_position: Vector3 align(1) = .zero(),
+    fog_direction: Vector3 align(1) = .zero(),
+    fog_color: Color3 align(1) = .white(),
+    fog_start_distance: f32 align(1) = 0,
+    fog_end_distance: f32 align(1) = 0,
+    clip_alpha_start_distance: f32 align(1) = 0,
+    clip_alpha_end_distance: f32 align(1) = 0,
 };
 
 pub const FogParams = struct {
@@ -387,15 +387,11 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn endDepthPeel_(self: *RenderGroup) void {
-        _ = self.pushRenderElement_(0, .RenderEntryEndPeels, @alignOf(u32));
+        _ = self.pushRenderElement_(0, .RenderEntryEndPeels);
     }
 
     pub fn pushDepthClear_(self: *RenderGroup) void {
-        _ = self.pushRenderElement_(
-            0,
-            .RenderEntryDepthClear,
-            @alignOf(u32),
-        );
+        _ = self.pushRenderElement_(0, .RenderEntryDepthClear);
     }
 
     pub fn pushFullClear_(self: *RenderGroup, color: Color) void {
@@ -498,27 +494,22 @@ pub const RenderGroup = extern struct {
 
         // This depends on the name of this file, if the file name changes the magic number may need to be adjusted.
         const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[9..]);
-        return @ptrCast(@alignCast(self.pushRenderElement_(@sizeOf(T), entry_type, @alignOf(T))));
+        return @ptrCast(self.pushRenderElement_(@sizeOf(T), entry_type));
     }
 
     fn pushRenderElement_(
         self: *RenderGroup,
         in_size: u32,
         entry_type: RenderEntryType,
-        comptime alignment: u32,
     ) ?*anyopaque {
         var result: ?*anyopaque = null;
 
         const size = in_size + @sizeOf(RenderEntryHeader);
-        const data_address = @intFromPtr(self.commands.push_buffer_data_at) + @sizeOf(RenderEntryHeader);
-        const aligned_address = std.mem.alignForward(usize, data_address, alignment);
-        const aligned_offset = aligned_address - data_address;
-        const aligned_size: u32 = @intCast(size + aligned_offset);
-        const push: PushBufferResult = self.pushBuffer(aligned_size);
+        const push: PushBufferResult = self.pushBuffer(size);
 
         if (push.header) |header| {
             header.type = entry_type;
-            result = @ptrFromInt(@intFromPtr(header) + @sizeOf(RenderEntryHeader) + aligned_offset);
+            result = @ptrFromInt(@intFromPtr(header) + @sizeOf(RenderEntryHeader));
 
             if (INTERNAL) {
                 header.debug_tag = self.debug_tag;
@@ -599,11 +590,7 @@ pub const RenderGroup = extern struct {
 
         if (self.current_quads == null) {
             self.current_quads = @ptrCast(@alignCast(
-                self.pushRenderElement_(
-                    @sizeOf(RenderEntryTexturedQuads),
-                    .RenderEntryTexturedQuads,
-                    @alignOf(RenderEntryTexturedQuads),
-                ),
+                self.pushRenderElement_(@sizeOf(RenderEntryTexturedQuads), .RenderEntryTexturedQuads),
             ));
             self.current_quads.?.quad_count = 0;
             self.current_quads.?.vertex_array_offset = self.commands.vertex_count;
@@ -1132,7 +1119,7 @@ pub const RenderGroup = extern struct {
         const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
         const basis_position = object_transform.getRenderEntityBasisPosition(position);
 
-        if (self.getCurrentQuads(6, self.white_texture) != null) {
+        if (self.getCurrentQuads(1, self.white_texture) != null) {
             const premultiplied_color: Color = storeColor(color);
             const packed_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
 
