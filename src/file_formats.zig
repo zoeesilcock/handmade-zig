@@ -153,8 +153,11 @@ pub const HHAAnnotation = extern struct {
     asset_name_offset: u64 align(1) = 0,
     asset_description_offset: u64 align(1) = 0,
     author_offset: u64 align(1) = 0,
-    reserved: [6]u64 align(1) = [1]u64{0} ** 6,
+    error_stream_offset: u64 align(1) = 0,
+    reserved: [4]u64 align(1) = [1]u64{0} ** 4,
 
+    error_stream_count: u32 align(1) = 0,
+    reserved32: u32 align(1) = 0,
     source_file_base_name_count: u32 align(1) = 0,
     asset_name_count: u32 align(1) = 0,
     asset_description_count: u32 align(1) = 0,
@@ -162,7 +165,7 @@ pub const HHAAnnotation = extern struct {
 
     sprite_sheet_x: u32 align(1) = 0,
     sprite_sheet_y: u32 align(1) = 0,
-    reserved32: [2]u32 align(1) = [1]u32{0} ** 2,
+    reserved32_2: [2]u32 align(1) = [1]u32{0} ** 2,
 };
 comptime {
     std.debug.assert(@sizeOf(HHAAnnotation) == (16 * 8));

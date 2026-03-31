@@ -32,7 +32,7 @@ const ParticleCache = particles.ParticleCache;
 const RenderGroup = renderer.RenderGroup;
 const TransientClipRect = renderer.TransientClipRect;
 const ObjectTransform = renderer.ObjectTransform;
-const ClipRectFX = renderer.ClipRectFX;
+const RenderTransform = renderer.RenderTransform;
 const AssetTagId = file_formats.AssetTagId;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const BitmapId = file_formats.BitmapId;
@@ -374,9 +374,31 @@ pub fn updateAndRenderEntities(
     opt_render_group: ?*RenderGroup,
     particle_cache: ?*ParticleCache,
     opt_assets: ?*Assets,
+    opt_input: ?*shared.GameInput,
 ) void {
     TimedBlock.beginFunction(@src(), .UpdateAndRenderEntities);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderEntities);
+
+    var best_hit: f32 = std.math.floatMax(f32);
+    var hit_entity_index: u32 = 0;
+    var hit_entity_piece: u32 = 0;
+    var hit_position: Vector3 = .zero();
+    var hit_radius: Vector3 = .zero();
+
+    var picking_origin: Vector3 = .zero();
+    var picking_ray: Vector3 = .zero();
+    if (opt_render_group) |render_group| {
+        if (opt_input) |input| {
+            const transform: *RenderTransform = &render_group.debug_transform;
+            const cursor_in_world: Vector3 = render_group.unproject(
+                transform,
+                input.clip_space_mouse_position.xy(),
+                1,
+            );
+            picking_origin = transform.position;
+            picking_ray = cursor_in_world.minus(picking_origin).normalizeOrZero();
+        }
+    }
 
     var entity_index: u32 = 0;
     while (entity_index < sim_region.entity_count) : (entity_index += 1) {
@@ -532,6 +554,8 @@ pub fn updateAndRenderEntities(
                         bitmap_id = assets.getBestMatchBitmap(piece.category, &match_vector, &weight_vector);
                     }
 
+                    var world_radius: Vector3 = piece.dimension;
+
                     var x_axis: Vector2 = .new(1, 0);
                     var y_axis: Vector2 = .new(0, 1);
                     if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.AxesDeform) != 0) {
@@ -571,6 +595,8 @@ pub fn updateAndRenderEntities(
                             @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else {
+                        _ = world_radius.setX(world_radius.y());
+                        _ = world_radius.setZ(0.1);
                         asset_rendering.pushBitmapId(
                             render_group,
                             &entity_transform,
@@ -582,6 +608,19 @@ pub fn updateAndRenderEntities(
                             x_axis,
                             y_axis,
                         );
+                    }
+
+                    if (opt_input != null) {
+                        const world_position: Vector3 = entity_transform.offset_position.plus(piece.offset);
+
+                        const hit = picking_origin.rayIntersectsBox(picking_ray, world_position, world_radius);
+                        if (best_hit > hit) {
+                            best_hit = hit;
+                            hit_entity_index = entity_index;
+                            hit_entity_piece = piece_index;
+                            hit_position = world_position;
+                            hit_radius = world_radius;
+                        }
                     }
                 }
                 TimedBlock.endBlock(@src(), .EntityRenderPieces);
@@ -644,6 +683,18 @@ pub fn updateAndRenderEntities(
                 }
                 TimedBlock.endBlock(@src(), .EntityDebug);
             }
+        }
+    }
+
+    if (opt_render_group) |render_group| {
+        if (best_hit != std.math.floatMax(f32)) {
+            var entity_transform = ObjectTransform.defaultUpright();
+            render_group.pushVolumeOutline(
+                &entity_transform,
+                .fromCenterHalfDimension(hit_position, hit_radius),
+                .new(1, 1, 0, 1),
+                0.1,
+            );
         }
     }
 }

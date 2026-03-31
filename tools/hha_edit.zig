@@ -63,6 +63,7 @@ const LoadedHHAAnnotation = struct {
     asset_name: String = .empty,
     asset_description: String = .empty,
     author: String = .empty,
+    error_stream: String = .empty,
 };
 
 const LoadedHHA = struct {
@@ -301,6 +302,11 @@ fn readHHAV2(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Alloc
                 source_annotation[0].author_count,
                 source_annotation[0].author_offset,
             );
+            dest_annotation[0].error_stream = refString(
+                d,
+                source_annotation[0].error_stream_count,
+                source_annotation[0].error_stream_offset,
+            );
         }
 
         hha.had_annotations = true;
@@ -356,7 +362,7 @@ fn writeString(string: String, count: *align(1) u32, dest_file: *const std.fs.Fi
     return result;
 }
 
-fn writeHHAV1(
+fn writeHHAV2(
     source: *LoadedHHA,
     dest_file: *const std.fs.File,
     allocator: std.mem.Allocator,
@@ -430,6 +436,12 @@ fn writeHHAV1(
             &dest_annotation.author_count,
             dest_file,
         );
+
+        dest_annotation.error_stream_offset = writeString(
+            source_annotation.error_stream,
+            &dest_annotation.error_stream_count,
+            dest_file,
+        );
     }
 
     header.tags = writeBlock(dest_tags_size, dest_tags, dest_file);
@@ -448,7 +460,7 @@ fn writeHHA(opt_source: ?*LoadedHHA, dest_file_name: []const u8, allocator: std.
         if (opt_source) |source| {
             if (source.valid) {
                 if (std.fs.cwd().createFile(dest_file_name, .{})) |dest_file| {
-                    writeHHAV1(source, &dest_file, allocator, true);
+                    writeHHAV2(source, &dest_file, allocator, true);
                 } else |err| {
                     std.log.err("Unable to open file {s} for writing. {s}", .{ dest_file_name, @errorName(err) });
                 }
@@ -511,6 +523,26 @@ fn printContents(hha: *LoadedHHA) void {
         }
         if (an.author.count > 0) {
             std.log.info("            Author: {s}", .{an.author.toSlice()});
+        }
+        if (an.error_stream.count > 0) {
+            std.log.info("            Errors:", .{});
+
+            var at: u32 = 0;
+            var base: u32 = 0;
+            while (at <= an.error_stream.count) {
+                if (at == an.error_stream.count or an.error_stream.data[at] == '\n') {
+                    if (base != at) {
+                        std.log.info("                 {s}", .{an.error_stream.toSlice()[base..at]});
+
+                        at += 1;
+                        base = at;
+                    } else {
+                        at += 1;
+                    }
+                } else {
+                    at += 1;
+                }
+            }
         }
 
         std.log.info("            From: {s} {s} {d},{d} (date: {d}, checksum: {d})", .{

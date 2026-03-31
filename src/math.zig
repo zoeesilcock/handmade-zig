@@ -123,6 +123,8 @@ fn Vector2Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeOrZero = Shared.normalizeOrZero;
+        pub const min = Shared.min;
+        pub const max = Shared.max;
         pub const toGL = Shared.toGL;
     };
 }
@@ -227,6 +229,28 @@ fn Vector3Type(comptime ScalarType: type) type {
             );
         }
 
+        pub fn rayIntersectsBox(ray_origin: Self, ray_direction: Self, box_position: Self, box_radius: Self) f32 {
+            const box_min: Vector3 = box_position.minus(box_radius);
+            const box_max: Vector3 = box_position.plus(box_radius);
+
+            const inverse_ray_direction: Vector3 = ray_direction.divideFByMe(1);
+            const t_box_min: Vector3 = box_min.minus(ray_origin).hadamardProduct(inverse_ray_direction);
+            const t_box_max: Vector3 = box_max.minus(ray_origin).hadamardProduct(inverse_ray_direction);
+
+            const t_min3: Vector3 = t_box_min.min(t_box_max);
+            const t_max3: Vector3 = t_box_min.max(t_box_max);
+
+            const t_min: f32 = @max(t_min3.x(), @max(t_min3.y(), t_min3.z()));
+            const t_max: f32 = @min(t_max3.x(), @min(t_max3.y(), t_max3.z()));
+
+            var result: f32 = std.math.floatMax(f32);
+            if ((t_min > 0) and (t_min < t_max)) {
+                result = t_min;
+            }
+
+            return result;
+        }
+
         const Shared = VectorShared(3, ScalarType, Self);
         pub const zero = Shared.zero;
         pub const one = Shared.one;
@@ -236,6 +260,7 @@ fn Vector3Type(comptime ScalarType: type) type {
         pub const times = Shared.times;
         pub const dividedBy = Shared.dividedBy;
         pub const dividedByF = Shared.dividedByF;
+        pub const divideFByMe = Shared.divideFByMe;
         pub const scaledTo = Shared.scaledTo;
         pub const clamp01 = Shared.clamp01;
         pub const negated = Shared.negated;
@@ -247,6 +272,8 @@ fn Vector3Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeOrZero = Shared.normalizeOrZero;
+        pub const min = Shared.min;
+        pub const max = Shared.max;
         pub const toGL = Shared.toGL;
     };
 }
@@ -373,6 +400,8 @@ fn Vector4Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeOrZero = Shared.normalizeOrZero;
+        pub const min = Shared.min;
+        pub const max = Shared.max;
         pub const packColorBGRA255 = Shared.packColorBGRA255;
         pub const packColorBGRA = Shared.packColorBGRA;
         pub const unpackColorBGRA = Shared.unpackColorBGRA;
@@ -465,6 +494,8 @@ fn Color3Type(comptime ScalarType: type) type {
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
         pub const normalizeOrZero = Shared.normalizeOrZero;
+        pub const min = Shared.min;
+        pub const max = Shared.max;
         pub const toGL = Shared.toGL;
     };
 }
@@ -578,6 +609,8 @@ fn Color4Type(comptime ScalarType: type) type {
         pub const invalidPosition = Shared.invalidPosition;
         pub const lerp = Shared.lerp;
         pub const normalized = Shared.normalized;
+        pub const min = Shared.min;
+        pub const max = Shared.max;
         pub const normalizeOrZero = Shared.normalizeOrZero;
         pub const packColorBGRA255 = Shared.packColorBGRA255;
         pub const packColorBGRA = Shared.packColorBGRA;
@@ -634,6 +667,10 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
             return self.scaledTo(1 / scalar);
         }
 
+        pub fn divideFByMe(self: Self, divisor: f32) Self {
+            return Self.splat(divisor).dividedBy(self);
+        }
+
         pub fn scaledTo(self: *const Self, scalar: ScalarType) Self {
             return Self{ .values = self.values * @as(@TypeOf(self.values), @splat(scalar)) };
         }
@@ -672,8 +709,8 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
             return Self{ .values = @splat(100000) };
         }
 
-        pub fn lerp(min: Self, max: Self, time: ScalarType) Self {
-            return Self{ .values = min.values + @as(@TypeOf(min.values), @splat(time)) * (max.values - min.values) };
+        pub fn lerp(from: Self, to: Self, time: ScalarType) Self {
+            return Self{ .values = from.values + @as(@TypeOf(from.values), @splat(time)) * (to.values - from.values) };
         }
 
         pub fn normalized(self: Self) Self {
@@ -686,6 +723,26 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
             if (length_squared > square(0.0001)) {
                 result = self.scaledTo(1 / @sqrt(length_squared));
             }
+            return result;
+        }
+
+        pub fn min(self: Self, b: Self) Self {
+            var result = Self.zero();
+
+            for (0..dimension_count) |axis_index| {
+                result.values[axis_index] = @min(self.values[axis_index], b.values[axis_index]);
+            }
+
+            return result;
+        }
+
+        pub fn max(self: Self, b: Self) Self {
+            var result = Self.zero();
+
+            for (0..dimension_count) |axis_index| {
+                result.values[axis_index] = @max(self.values[axis_index], b.values[axis_index]);
+            }
+
             return result;
         }
 

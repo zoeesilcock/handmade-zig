@@ -332,7 +332,7 @@ pub const CubeUVLayout = extern struct {
     pub const default: CubeUVLayout = .{ .encoding = 0 };
 };
 
-const RenderTransform = extern struct {
+pub const RenderTransform = extern struct {
     position: Vector3 = .zero(),
     x: Vector3 = .zero(),
     y: Vector3 = .zero(),
@@ -768,6 +768,25 @@ pub const RenderGroup = extern struct {
             opt_emission,
             opt_light_count,
             opt_light_index,
+        );
+    }
+
+    pub fn pushDefaultLineSegment(
+        self: *RenderGroup,
+        from_position: Vector3,
+        from_color: Color,
+        to_position: Vector3,
+        to_color: Color,
+        thickness: f32,
+    ) void {
+        _ = self.getCurrentQuads(1, self.white_texture);
+        self.pushLineSegment(
+            self.white_texture,
+            from_position,
+            from_color,
+            to_position,
+            to_color,
+            thickness,
         );
     }
 

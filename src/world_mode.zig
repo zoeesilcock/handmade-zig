@@ -340,6 +340,7 @@ fn simulate(
         opt_render_group,
         particle_cache,
         assets,
+        opt_input,
     );
 }
 

@@ -43,6 +43,15 @@ pub const Stream = struct {
         };
     }
 
+    pub fn getTotalSize(self: *const Stream) usize {
+        var result: usize = 0;
+        var opt_chunk: ?*Chunk = self.first;
+        while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
+            result += chunk.contents.count;
+        }
+        return result;
+    }
+
     pub fn consumeType(self: *Stream, T: type) ?*T {
         return @ptrCast(@alignCast(self.consumeSize(@sizeOf(T))));
     }

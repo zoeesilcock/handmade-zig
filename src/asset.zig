@@ -1249,6 +1249,20 @@ pub const Assets = struct {
         return result;
     }
 
+    fn writeAssetStream(file: *AssetFile, data_offset_in: u64, data: *const Stream) void {
+        var data_offset: u64 = data_offset_in;
+        var opt_chunk: ?*stream.Chunk = data.first;
+        while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
+            writeAssetData(
+                file,
+                data_offset,
+                @intCast(chunk.contents.count),
+                @ptrCast(@alignCast(chunk.contents.data)),
+            );
+            data_offset += chunk.contents.count;
+        }
+    }
+
     fn writeAssetData(file: *AssetFile, data_offset: u64, data_size: u32, data: [*]u32) void {
         file.modified = true;
         shared.platform.writeDataToFile(&file.handle, data_offset, data_size, data);
@@ -1621,14 +1635,26 @@ fn writeImageToHHA(
                 &asset.annotation.source_file_base_name_offset,
             );
 
+            const asset_errors: Stream = .{};
+            const file_error_stream_size: u32 = @intCast(file.errors.getTotalSize());
+            const asset_error_stream_size: u32 = @intCast(asset_errors.getTotalSize());
+            asset.annotation.error_stream_count = file_error_stream_size + asset_error_stream_size;
+            asset.annotation.error_stream_offset = assets.reserveData(asset_file, asset.annotation.error_stream_count);
+            Assets.writeAssetStream(asset_file, asset.annotation.error_stream_offset, &file.errors);
+            Assets.writeAssetStream(
+                asset_file,
+                asset.annotation.error_stream_offset + file_error_stream_size,
+                &asset_errors,
+            );
+
             file.asset_indices[tile_y_index][tile_x_index] = asset_index;
 
             Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, @ptrCast(source_image.pixels));
         } else {
-            stream.output(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!", .{});
+            stream.output(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!\n", .{});
         }
     } else {
-        stream.output(&file.errors, @src(), "Sprite found in what is required to be a blank tile.", .{});
+        stream.output(&file.errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
     }
 }
 
@@ -1727,7 +1753,7 @@ fn processMultiTileImport(
 
     var x_count: u32 = image.width / tile_dimension;
     if (x_count > x_count_max) {
-        stream.output(&file.errors, @src(), "Tile column count of %u exceeds maximum of %u columns.", .{
+        stream.output(&file.errors, @src(), "Tile column count of %u exceeds maximum of %u columns.\n", .{
             x_count,
             x_count_max,
         });
@@ -1735,7 +1761,7 @@ fn processMultiTileImport(
     }
     var y_count: u32 = image.height / tile_dimension;
     if (y_count > y_count_max) {
-        stream.output(&file.errors, @src(), "Tile row count of %u exceeds maximum of %u rows.", .{
+        stream.output(&file.errors, @src(), "Tile row count of %u exceeds maximum of %u rows.\n", .{
             y_count,
             y_count_max,
         });
@@ -1784,7 +1810,7 @@ fn processMultiTileImport(
                     min_x -= border_dimension;
                 } else {
                     min_x = 0;
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into left %u-pixel border.", .{
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into left %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1795,7 +1821,7 @@ fn processMultiTileImport(
                     max_x += border_dimension;
                 } else {
                     max_x = tile_dimension - 1;
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into right %u-pixel border.", .{
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into right %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1806,7 +1832,7 @@ fn processMultiTileImport(
                     min_y -= border_dimension;
                 } else {
                     min_y = 0;
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into top %u-pixel border.", .{
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into top %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1817,7 +1843,7 @@ fn processMultiTileImport(
                     max_y += border_dimension;
                 } else {
                     max_y = tile_dimension - 1;
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into bottom %u-pixel border.", .{
+                    stream.output(&file.errors, @src(), "Tile %u, &u extends into bottom %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -2063,8 +2089,6 @@ pub fn checkForArtChanges(assets: *Assets) void {
                 if (import_type != .None) {
                     var temp_arena: MemoryArena = .{};
                     defer temp_arena.clear();
-
-                    stream.output(&match.errors, @src(), "/**** REIMPORTED ****/\n", .{});
 
                     var handle: PlatformFileHandle = shared.platform.openFile(
                         &file_group,
