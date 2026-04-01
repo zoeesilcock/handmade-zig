@@ -1,3 +1,4 @@
+const shared = @import("shared.zig");
 const asset = @import("asset.zig");
 const asset_rendering = @import("asset_rendering.zig");
 const math = @import("math.zig");
@@ -477,22 +478,6 @@ pub fn drawLineBuffer(debug_state: *DebugState, buffer: *DebugLineBuffer) void {
     }
 }
 
-fn isHex(char: u8) bool {
-    return (char >= '0' and char <= '9') or (char >= 'A' and char <= 'F');
-}
-
-fn getHex(char: u8) u32 {
-    var result: u32 = 0;
-
-    if (char >= '0' and char <= '9') {
-        result = char - '0';
-    } else if (char >= 'A' and char <= 'F') {
-        result = 0xA + (char - 'A');
-    }
-
-    return result;
-}
-
 pub fn textOp(
     debug_state: *DebugState,
     op: DebugTextOp,
@@ -542,15 +527,15 @@ pub fn textOp(
                     var code_point: u32 = at[0];
 
                     if (at[0] == '\\' and
-                        (isHex(at[1])) and
-                        (isHex(at[2])) and
-                        (isHex(at[3])) and
-                        (isHex(at[4])))
+                        (shared.isHex(at[1])) and
+                        (shared.isHex(at[2])) and
+                        (shared.isHex(at[3])) and
+                        (shared.isHex(at[4])))
                     {
-                        code_point = ((getHex(at[1]) << 12) |
-                            (getHex(at[2]) << 8) |
-                            (getHex(at[3]) << 4) |
-                            (getHex(at[4]) << 0));
+                        code_point = ((shared.getHex(at[1]) << 12) |
+                            (shared.getHex(at[2]) << 8) |
+                            (shared.getHex(at[3]) << 4) |
+                            (shared.getHex(at[4]) << 0));
 
                         at += 4;
                     }

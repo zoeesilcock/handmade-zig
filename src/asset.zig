@@ -699,6 +699,12 @@ pub const Assets = struct {
         return &self.getFile(file_index).handle;
     }
 
+    pub fn getAsset(self: *Assets, asset_index: u32) ?Asset {
+        _ = self;
+        _ = asset_index;
+        return null;
+    }
+
     pub fn getFirstAsset(self: *Assets, type_id: AssetBasicCategory) ?u32 {
         TimedBlock.beginFunction(@src(), .GetFirstAsset);
         defer TimedBlock.endFunction(@src(), .GetFirstAsset);
@@ -887,7 +893,7 @@ pub const Assets = struct {
         }
     }
 
-    fn getAsset(self: *Assets, id: u32) ?*AssetMemoryHeader {
+    fn getAssetHeader(self: *Assets, id: u32) ?*AssetMemoryHeader {
         std.debug.assert(id <= self.asset_count);
         const asset = &self.assets[id];
 
@@ -910,7 +916,7 @@ pub const Assets = struct {
     pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
         var result: ?*LoadedBitmap = null;
 
-        if (self.getAsset(id.value)) |header| {
+        if (self.getAssetHeader(id.value)) |header| {
             result = &header.data.bitmap;
         }
 
@@ -1032,7 +1038,7 @@ pub const Assets = struct {
     pub fn getSound(self: *Assets, id: SoundId) ?*LoadedSound {
         var result: ?*LoadedSound = null;
 
-        if (self.getAsset(id.value)) |header| {
+        if (self.getAssetHeader(id.value)) |header| {
             result = &header.data.sound;
         }
 
@@ -1187,7 +1193,7 @@ pub const Assets = struct {
     pub fn getFont(self: *Assets, id: FontId) ?*LoadedFont {
         var result: ?*LoadedFont = null;
 
-        if (self.getAsset(id.value)) |header| {
+        if (self.getAssetHeader(id.value)) |header| {
             result = &header.data.font;
         }
 

@@ -10,6 +10,7 @@ const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
 const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
+const in_game_editor = @import("in_game_editor.zig");
 const std = @import("std");
 
 // Types.
@@ -40,6 +41,7 @@ const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 const LightingPoint = lighting.LightingPoint;
 const LightingPointState = renderer.LightingPointState;
+const EditableHitTest = in_game_editor.EditableHitTest;
 const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 
 const ENTITY_MAX_PIECE_COUNT = 4;
@@ -374,25 +376,19 @@ pub fn updateAndRenderEntities(
     opt_render_group: ?*RenderGroup,
     particle_cache: ?*ParticleCache,
     opt_assets: ?*Assets,
-    opt_input: ?*shared.GameInput,
+    hit_test: *EditableHitTest,
 ) void {
     TimedBlock.beginFunction(@src(), .UpdateAndRenderEntities);
     defer TimedBlock.endFunction(@src(), .UpdateAndRenderEntities);
 
-    var best_hit: f32 = std.math.floatMax(f32);
-    var hit_entity_index: u32 = 0;
-    var hit_entity_piece: u32 = 0;
-    var hit_position: Vector3 = .zero();
-    var hit_radius: Vector3 = .zero();
-
     var picking_origin: Vector3 = .zero();
     var picking_ray: Vector3 = .zero();
-    if (opt_render_group) |render_group| {
-        if (opt_input) |input| {
+    if (hit_test.shouldHitTest()) {
+        if (opt_render_group) |render_group| {
             const transform: *RenderTransform = &render_group.debug_transform;
             const cursor_in_world: Vector3 = render_group.unproject(
                 transform,
-                input.clip_space_mouse_position.xy(),
+                hit_test.clip_space_mouse_position,
                 1,
             );
             picking_origin = transform.position;
@@ -610,16 +606,26 @@ pub fn updateAndRenderEntities(
                         );
                     }
 
-                    if (opt_input != null) {
-                        const world_position: Vector3 = entity_transform.offset_position.plus(piece.offset);
+                    if (bitmap_id != null) {
+                        var highlight_color: Color = hit_test.highlight_color;
+                        if (hit_test.shouldHitTest()) {
+                            const world_position: Vector3 = entity_transform.offset_position.plus(piece.offset);
 
-                        const hit = picking_origin.rayIntersectsBox(picking_ray, world_position, world_radius);
-                        if (best_hit > hit) {
-                            best_hit = hit;
-                            hit_entity_index = entity_index;
-                            hit_entity_piece = piece_index;
-                            hit_position = world_position;
-                            hit_radius = world_radius;
+                            const t_hit = picking_origin.rayIntersectsBox(picking_ray, world_position, world_radius);
+                            if (t_hit < std.math.floatMax(f32)) {
+                                hit_test.addHit(bitmap_id.?.value, t_hit);
+                            } else {
+                                highlight_color = highlight_color.scaledTo(0.1);
+                            }
+                        }
+
+                        if (bitmap_id.?.value != 0 and bitmap_id.?.value == hit_test.highlight_asset_index) {
+                            render_group.pushVolumeOutline(
+                                &entity_transform,
+                                .fromCenterHalfDimension(piece.offset, world_radius),
+                                highlight_color,
+                                0.1,
+                            );
                         }
                     }
                 }
@@ -683,18 +689,6 @@ pub fn updateAndRenderEntities(
                 }
                 TimedBlock.endBlock(@src(), .EntityDebug);
             }
-        }
-    }
-
-    if (opt_render_group) |render_group| {
-        if (best_hit != std.math.floatMax(f32)) {
-            var entity_transform = ObjectTransform.defaultUpright();
-            render_group.pushVolumeOutline(
-                &entity_transform,
-                .fromCenterHalfDimension(hit_position, hit_radius),
-                .new(1, 1, 0, 1),
-                0.1,
-            );
         }
     }
 }

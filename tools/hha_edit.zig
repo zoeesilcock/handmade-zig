@@ -21,6 +21,7 @@ const HHAAssetType = file_formats.HHAAssetType;
 const HHAAsset = file_formats.HHAAsset;
 const HHATag = file_formats.HHATag;
 const HHAAnnotation = file_formats.HHAAnnotation;
+const LoadedHHAAnnotation = file_formats.LoadedHHAAnnotation;
 const HHABitmap = file_formats.HHABitmap;
 const HHAAlignPoint = file_formats.HHAAlignPoint;
 const HHASound = file_formats.HHASound;
@@ -52,19 +53,6 @@ pub fn myLogFn(
         stdout.flush() catch return;
     }
 }
-
-const LoadedHHAAnnotation = struct {
-    source_file_date: u64 align(1) = 0,
-    source_file_checksum: u64 align(1) = 0,
-    sprite_sheet_x: u32 align(1) = 0,
-    sprite_sheet_y: u32 align(1) = 0,
-
-    source_file_base_name: String = .empty,
-    asset_name: String = .empty,
-    asset_description: String = .empty,
-    author: String = .empty,
-    error_stream: String = .empty,
-};
 
 const LoadedHHA = struct {
     valid: bool = false,

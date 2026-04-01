@@ -22,6 +22,7 @@ const audio = @import("audio.zig");
 const cutscene = @import("cutscene.zig");
 const debug = @import("debug.zig");
 const debug_interface = @import("debug_interface.zig");
+const in_game_editor = @import("in_game_editor.zig");
 const std = @import("std");
 
 // Types.
@@ -238,6 +239,22 @@ pub fn isEndOfLine(char: u32) bool {
 
 pub fn isWhitespace(char: u32) bool {
     return char == ' ' or char == '\t' or isEndOfLine(char);
+}
+
+pub fn isHex(char: u8) bool {
+    return (char >= '0' and char <= '9') or (char >= 'A' and char <= 'F');
+}
+
+pub fn getHex(char: u8) u32 {
+    var result: u32 = 0;
+
+    if (char >= '0' and char <= '9') {
+        result = char - '0';
+    } else if (char >= 'A' and char <= 'F') {
+        result = 0xA + (char - 'A');
+    }
+
+    return result;
 }
 
 pub fn i32FromZInternal(at_init: *[*]const u8) i32 {
@@ -1052,6 +1069,8 @@ pub const State = struct {
 
     audio_state: audio.AudioState = undefined,
     music: *PlayingSound = undefined,
+
+    editor: in_game_editor.InGameEditor,
 
     pub fn setGameMode(self: *State, game_mode: GameMode) void {
         var need_to_wait: bool = false;

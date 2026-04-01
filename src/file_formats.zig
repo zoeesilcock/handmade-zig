@@ -171,6 +171,19 @@ comptime {
     std.debug.assert(@sizeOf(HHAAnnotation) == (16 * 8));
 }
 
+pub const LoadedHHAAnnotation = struct {
+    source_file_date: u64 align(1) = 0,
+    source_file_checksum: u64 align(1) = 0,
+    sprite_sheet_x: u32 align(1) = 0,
+    sprite_sheet_y: u32 align(1) = 0,
+
+    source_file_base_name: String = .empty,
+    asset_name: String = .empty,
+    asset_description: String = .empty,
+    author: String = .empty,
+    error_stream: String = .empty,
+};
+
 pub const HHAAsset = extern struct {
     data_offset: u64 align(1) = 0,
     data_size: u32 align(1) = 0,

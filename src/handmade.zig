@@ -15,6 +15,7 @@ const cutscene = @import("cutscene.zig");
 const random = @import("random.zig");
 const config = @import("config.zig");
 const debug_interface = @import("debug_interface.zig");
+const in_game_editor = @import("in_game_editor.zig");
 const std = @import("std");
 
 /// TODO: An overview of upcoming tasks.
@@ -120,6 +121,7 @@ const Particle = shared.Particle;
 const ParticleCel = shared.ParticleCel;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
+const EditableHitTest = in_game_editor.EditableHitTest;
 
 pub export fn updateAndRender(
     platform: shared.Platform,
@@ -253,6 +255,8 @@ pub export fn updateAndRender(
     //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
     // }
 
+    var hit_test: EditableHitTest = state.editor.beginHitTest(input);
+
     var rerun: bool = true;
     while (rerun) {
         switch (state.current_mode) {
@@ -279,10 +283,15 @@ pub export fn updateAndRender(
                     state.mode.world,
                     input,
                     render_commands,
+                    &hit_test,
                 );
             },
         }
     }
+
+    state.editor.endHitTest(input, &hit_test);
+    state.editor.updateAndRender(render_commands, state.assets);
+
     if (state.current_mode == .World) {
         state.mode.world.world.arena.checkArena();
     }

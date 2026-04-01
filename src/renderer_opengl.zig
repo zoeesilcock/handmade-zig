@@ -373,7 +373,8 @@ pub const OpenGL = extern struct {
     multisampling: bool = false,
     depth_peel_count: u32 = 0,
 
-    push_buffer_memory: [65536]u8 = undefined,
+    // TODO: Why do we need so much more memory than Casey does?
+    push_buffer_memory: [8 * 65536]u8 = undefined,
     vertex_array: [*]TexturedVertex = undefined,
     index_array: [*]u16 = undefined,
     bitmap_array: [*]RendererTexture = undefined,

@@ -21,6 +21,7 @@ const file_formats = shared.file_formats;
 const handmade = @import("handmade.zig");
 const cutscene = @import("cutscene.zig");
 const debug_interface = @import("debug_interface.zig");
+const in_game_editor = @import("in_game_editor.zig");
 const std = @import("std");
 
 var global_config = &@import("config.zig").global_config;
@@ -53,6 +54,7 @@ const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const Camera = cam.Camera;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
+const EditableHitTest = in_game_editor.EditableHitTest;
 const AssetTagId = file_formats.AssetTagId;
 const TimedBlock = debug_interface.TimedBlock;
 const MemoryArena = memory.MemoryArena;
@@ -316,6 +318,7 @@ fn simulate(
     opt_input: ?*shared.GameInput,
     opt_render_group: ?*RenderGroup,
     particle_cache: ?*ParticleCache,
+    hit_test: *EditableHitTest,
 ) void {
     const sim_region: *SimRegion = world_sim.sim_region;
 
@@ -340,7 +343,7 @@ fn simulate(
         opt_render_group,
         particle_cache,
         assets,
-        opt_input,
+        hit_test,
     );
 }
 
@@ -371,6 +374,7 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
         work.sim_bounds,
         work.delta_time,
     );
+    var null_hit_test: EditableHitTest = .{};
     simulate(
         &world_sim,
         &work.world_mode.world.game_entropy,
@@ -380,6 +384,7 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
         null,
         null,
         null,
+        &null_hit_test,
     );
     endSim(&arena, &world_sim);
 
@@ -391,6 +396,7 @@ pub fn updateAndRenderWorld(
     world_mode: *GameModeWorld,
     input: *shared.GameInput,
     render_commands: *RenderCommands,
+    hit_test: *EditableHitTest,
 ) bool {
     TimedBlock.beginBlock(@src(), .UpdateAndRenderWorld);
     defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
@@ -594,6 +600,7 @@ pub fn updateAndRenderWorld(
             input,
             &render_group,
             world_mode.particle_cache,
+            hit_test,
         );
 
         // Can we merge the camera update down into the simulation so that we correctly update the camera for the current frame?
@@ -740,16 +747,17 @@ pub fn updateAndRenderWorld(
 
     endSim(&state.frame_arena, &world_sim);
 
-    var heores_exist: bool = false;
+    var heroes_exist: bool = false;
     var controlled_hero_index: u32 = 0;
     while (controlled_hero_index < state.controlled_heroes.len) : (controlled_hero_index += 1) {
         if (state.controlled_heroes[controlled_hero_index].brain_id.value != 0) {
-            heores_exist = true;
+            heroes_exist = true;
             break;
         }
     }
 
-    if (!heores_exist) {
+    if (!heroes_exist) {
+        std.log.info("uuhmkaaaay", .{});
         cutscene.playTitleScreen(state);
     }
 
