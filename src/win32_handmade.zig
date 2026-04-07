@@ -60,7 +60,6 @@ const debug_interface = @import("debug_interface.zig");
 // Types
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
-const DebugId = debug_interface.DebugId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;

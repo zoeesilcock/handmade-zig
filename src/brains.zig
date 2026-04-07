@@ -96,16 +96,7 @@ pub const BrainSlot = extern struct {
     index: u16 = 0,
 
     pub fn forField(comptime slot_type: type, comptime field_name: []const u8) BrainSlot {
-        const full_brain_type_name = @typeName(slot_type);
-
-        comptime var last_dot: usize = 0;
-        comptime for (full_brain_type_name, 0..) |c, i| {
-            if (c == '.') {
-                last_dot = i + 1;
-            }
-        };
-
-        const brain_type_name: []const u8 = full_brain_type_name[last_dot..];
+        const brain_type_name: []const u8 = comptime shared.shortTypeName(slot_type);
         const brain_type: u16 = @intFromEnum(@field(BrainType, brain_type_name));
         const pack_value: u16 = @offsetOf(slot_type, field_name) / @sizeOf(*Entity);
         return BrainSlot{ .type = brain_type, .index = pack_value };

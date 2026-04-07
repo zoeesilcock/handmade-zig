@@ -492,8 +492,7 @@ pub const RenderGroup = extern struct {
         // TimedBlock.beginFunction(@src(), .PushRenderElement);
         // defer TimedBlock.endFunction(@src(), .PushRenderElement);
 
-        // This depends on the name of this file, if the file name changes the magic number may need to be adjusted.
-        const entry_type: RenderEntryType = @field(RenderEntryType, @typeName(T)[9..]);
+        const entry_type: RenderEntryType = @field(RenderEntryType, shared.shortTypeName(T));
         return @ptrCast(self.pushRenderElement_(@sizeOf(T), entry_type));
     }
 

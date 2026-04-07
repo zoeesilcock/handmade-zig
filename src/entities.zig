@@ -1,4 +1,5 @@
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const world = @import("world.zig");
 const brains = @import("brains.zig");
 const asset = @import("asset.zig");
@@ -315,7 +316,7 @@ fn debugPickEntity(
     render_group: *RenderGroup,
     entity_transform: *ObjectTransform,
 ) void {
-    const entity_debug_id = debug_interface.DebugId.fromPointer(&entity.id.value);
+    const entity_debug_id = types.DevId.fromPointer(&entity.id.value);
 
     if (debug_interface.requested(entity_debug_id)) {
         DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");

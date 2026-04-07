@@ -11,14 +11,14 @@ const sort = @import("sort.zig");
 const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
 const debug_ui = @import("debug_ui.zig");
+const dev_ui = @import("dev_ui.zig");
 const std = @import("std");
 
 // Types.
+const DevId = types.DevId;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugType = debug_interface.DebugType;
 const DebugEvent = debug_interface.DebugEvent;
-const DebugId = debug_interface.DebugId;
-const DebugInteraction = debug_ui.DebugInteraction;
 const Layout = debug_ui.Layout;
 const LayoutElement = debug_ui.LayoutElement;
 const TooltipBuffer = debug_ui.TooltipBuffer;
@@ -46,6 +46,14 @@ const debug_color_table = shared.debug_color_table;
 
 const MAX_FRAME_COUNT = 256;
 pub const MAX_VARIABLE_STACK_DEPTH = 64;
+
+fn devIdFromLink(tree: *DebugTree, link: *DebugVariableLink) DevId {
+    return DevId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };
+}
+
+fn devIdFromGuid(tree: *DebugTree, guid: [*:0]const u8) DevId {
+    return DevId{ .value = .{ @ptrCast(tree), @ptrCast(@constCast(guid)) } };
+}
 
 pub const DebugCounterSnapshot = struct {
     hit_count: u32 = 0,
@@ -166,7 +174,7 @@ pub const DebugState = struct {
     menu_active: bool,
 
     selected_id_count: u32,
-    selected_id: [64]DebugId = [1]DebugId{undefined} ** 64,
+    selected_id: [64]DevId = [1]DevId{undefined} ** 64,
 
     element_hash: [1024]?*DebugElement = [1]?*DebugElement{null} ** 1024,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
@@ -177,9 +185,9 @@ pub const DebugState = struct {
 
     last_mouse_position: Vector2,
     alt_ui: bool,
-    interaction: DebugInteraction,
-    hot_interaction: DebugInteraction,
-    next_hot_interaction: DebugInteraction,
+    interaction: dev_ui.Interaction,
+    hot_interaction: dev_ui.Interaction,
+    next_hot_interaction: dev_ui.Interaction,
     paused: bool,
 
     left_edge: f32 = 0,
@@ -217,6 +225,8 @@ pub const DebugState = struct {
     function_info: [*:0]u8,
 
     tooltips: DebugLineBuffer,
+
+    dev_ui_context: dev_ui.Context,
 
     pub fn get() ?*DebugState {
         var result: ?*DebugState = null;
@@ -783,7 +793,7 @@ pub const DebugState = struct {
         return tree;
     }
 
-    pub fn isSelected(self: *DebugState, id: DebugId) bool {
+    pub fn isSelected(self: *DebugState, id: DevId) bool {
         var result = false;
 
         var index: u32 = 0;
@@ -801,14 +811,14 @@ pub const DebugState = struct {
         self.selected_id_count = 0;
     }
 
-    pub fn addToSelection(self: *DebugState, id: DebugId) void {
+    pub fn addToSelection(self: *DebugState, id: DevId) void {
         if (self.selected_id_count < self.selected_id.len and !self.isSelected(id)) {
             self.selected_id[self.selected_id_count] = id;
             self.selected_id_count += 1;
         }
     }
 
-    fn getOrCreateDebugView(self: *DebugState, id: DebugId) *DebugView {
+    fn getOrCreateDebugView(self: *DebugState, id: DevId) *DebugView {
         const hash_index = @mod(((@intFromPtr(id.value[0]) >> 2) + (@intFromPtr(id.value[1]) >> 2)), self.view_hash.len);
         const hash_slot = &self.view_hash[hash_index];
         var result: ?*DebugView = null;
@@ -912,7 +922,7 @@ const DebugViewDataType = enum(u32) {
 };
 
 const DebugView = struct {
-    id: DebugId,
+    id: DevId,
     next_in_hash: *DebugView = undefined,
 
     view_type: DebugViewType,
@@ -1153,7 +1163,7 @@ fn getTotalClocks(frame: *DebugElementFrame) u64 {
 
 fn drawFrameSlider(
     debug_state: *DebugState,
-    slider_id: DebugId,
+    slider_id: DevId,
     total_rect: Rectangle2,
     mouse_position: Vector2,
     root_element: *DebugElement,
@@ -1201,7 +1211,7 @@ fn drawFrameSlider(
                 const text_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
                 _ = shared.formatString(text_buffer.size, text_buffer.data, "%u", .{frame_index});
 
-                debug_state.next_hot_interaction = DebugInteraction.setUInt32(
+                debug_state.next_hot_interaction = dev_ui.Interaction.setUInt32(
                     slider_id,
                     &debug_state.viewing_frame_ordinal,
                     frame_index,
@@ -1215,7 +1225,7 @@ fn drawFrameSlider(
 
 fn drawProfileIn(
     debug_state: *DebugState,
-    graph_id: DebugId,
+    graph_id: DevId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
     root_element: *DebugElement,
@@ -1259,7 +1269,7 @@ fn drawProfileIn(
 
 fn drawProfileBars(
     debug_state: *DebugState,
-    graph_id: DebugId,
+    graph_id: DevId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
     root_node: *DebugProfileNode,
@@ -1303,7 +1313,7 @@ fn drawProfileBars(
             });
 
             const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
-            debug_state.next_hot_interaction = DebugInteraction.setPointer(
+            debug_state.next_hot_interaction = dev_ui.Interaction.setPointer(
                 graph_id,
                 @ptrCast(&view.data.profile_graph.guid),
                 @ptrCast(element.guid),
@@ -1327,7 +1337,7 @@ fn drawProfileBars(
 
 fn drawFrameBars(
     debug_state: *DebugState,
-    graph_id: DebugId,
+    graph_id: DevId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
     root_element: *DebugElement,
@@ -1384,7 +1394,7 @@ fn drawFrameBars(
                     });
 
                     const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
-                    debug_state.next_hot_interaction = DebugInteraction.setPointer(
+                    debug_state.next_hot_interaction = dev_ui.Interaction.setPointer(
                         graph_id,
                         @ptrCast(&view.data.profile_graph.guid),
                         @ptrCast(element.guid),
@@ -1399,7 +1409,7 @@ fn drawFrameBars(
 
 fn drawArenaOccupancy(
     debug_state: *DebugState,
-    graph_id: DebugId,
+    graph_id: DevId,
     frame_rect: Rectangle2,
     mouse_position: Vector2,
     root_element: *DebugElement,
@@ -1445,7 +1455,7 @@ const ClockEntry = struct {
 
 fn drawTopClocksList(
     debug_state: *DebugState,
-    graph_id: DebugId,
+    graph_id: DevId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
     root_element: *DebugElement,
@@ -1551,19 +1561,19 @@ fn drawTopClocksList(
     }
 }
 
-pub fn hit(id: DebugId, z_value: f32) void {
+pub fn hit(id: DevId, z_value: f32) void {
     _ = z_value;
     if (DebugState.get()) |debug_state| {
-        debug_state.next_hot_interaction = DebugInteraction.fromId(id, .Select);
+        debug_state.next_hot_interaction = dev_ui.Interaction.fromId(id, .Select);
     }
 }
 
-pub fn hitStub(id: DebugId, z_value: f32) void {
+pub fn hitStub(id: DevId, z_value: f32) void {
     _ = id;
     _ = z_value;
 }
 
-pub fn highlighted(id: DebugId, outline_color: *Color) bool {
+pub fn highlighted(id: DevId, outline_color: *Color) bool {
     var result = false;
 
     if (DebugState.get()) |debug_state| {
@@ -1581,13 +1591,13 @@ pub fn highlighted(id: DebugId, outline_color: *Color) bool {
     return result;
 }
 
-pub fn highlightedStub(id: DebugId, outline_color: *Color) bool {
+pub fn highlightedStub(id: DevId, outline_color: *Color) bool {
     _ = id;
     _ = outline_color;
     return false;
 }
 
-pub fn requested(id: DebugId) bool {
+pub fn requested(id: DevId) bool {
     var result = false;
 
     if (DebugState.get()) |debug_state| {
@@ -1597,7 +1607,7 @@ pub fn requested(id: DebugId) bool {
     return result;
 }
 
-pub fn requestedStub(id: DebugId) bool {
+pub fn requestedStub(id: DevId) bool {
     _ = id;
     return false;
 }
@@ -1606,7 +1616,7 @@ fn drawDebugElement(
     layout: *Layout,
     tree: *DebugTree,
     element: *DebugElement,
-    debug_id: DebugId,
+    debug_id: DevId,
     frame_ordinal: u32,
 ) void {
     _ = tree;
@@ -1618,8 +1628,8 @@ fn drawDebugElement(
 
     var render_group: *RenderGroup = &debug_state.render_group;
     // const event = &stored_event.data.event;
-    var item_interaction: DebugInteraction =
-        DebugInteraction.elementInteraction(debug_state, debug_id, element, .AutoModifyVariable);
+    var item_interaction: dev_ui.Interaction =
+        dev_ui.Interaction.elementInteraction(debug_state, debug_id, element, .AutoModifyVariable);
     const is_hot: bool = item_interaction.isHot(debug_state);
     const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
     const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
@@ -1686,7 +1696,7 @@ fn drawDebugElement(
             layout.booleanButton(
                 "Occupancy",
                 element.type == .ArenaOccupancy,
-                DebugInteraction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ArenaOccupancy)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ArenaOccupancy)),
             );
             layout.endRow();
 
@@ -1737,21 +1747,21 @@ fn drawDebugElement(
             }
 
             layout.beginRow();
-            layout.actionButton("Root", DebugInteraction.setPointer(debug_id, @ptrCast(&graph.guid), null));
+            layout.actionButton("Root", dev_ui.Interaction.setPointer(debug_id, @ptrCast(&graph.guid), null));
             layout.booleanButton(
                 "Threads",
                 element.type == .ThreadIntervalGraph,
-                DebugInteraction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ThreadIntervalGraph)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ThreadIntervalGraph)),
             );
             layout.booleanButton(
                 "Frames",
                 element.type == .FrameBarGraph,
-                DebugInteraction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.FrameBarGraph)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.FrameBarGraph)),
             );
             layout.booleanButton(
                 "Clocks",
                 element.type == .TopClocksList,
-                DebugInteraction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.TopClocksList)),
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.TopClocksList)),
             );
             layout.endRow();
 
@@ -1831,11 +1841,11 @@ fn drawDebugElement(
             layout.booleanButton(
                 "Pause",
                 debug_state.paused,
-                DebugInteraction.setBool(debug_id, &debug_state.paused, !debug_state.paused),
+                dev_ui.Interaction.setBool(debug_id, &debug_state.paused, !debug_state.paused),
             );
             layout.actionButton(
                 "Oldest",
-                DebugInteraction.setUInt32(
+                dev_ui.Interaction.setUInt32(
                     debug_id,
                     &debug_state.viewing_frame_ordinal,
                     debug_state.oldest_frame_ordinal,
@@ -1843,7 +1853,7 @@ fn drawDebugElement(
             );
             layout.actionButton(
                 "Most Recent",
-                DebugInteraction.setUInt32(
+                dev_ui.Interaction.setUInt32(
                     debug_id,
                     &debug_state.viewing_frame_ordinal,
                     debug_state.most_recent_frame_ordinal,
@@ -1894,13 +1904,13 @@ fn drawTreeLink(debug_state: *DebugState, layout: *Layout, tree: *DebugTree, lin
     const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
 
     if (link.canHaveChildren()) {
-        const id: DebugId = DebugId.fromLink(tree, link);
-        const debug_id: DebugId = DebugId.fromLink(tree, link);
+        const id: DevId = devIdFromLink(tree, link);
+        const debug_id: DevId = devIdFromLink(tree, link);
         const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
-        var item_interaction: DebugInteraction = DebugInteraction.fromId(id, .ToggleExpansion);
+        var item_interaction: dev_ui.Interaction = dev_ui.Interaction.fromId(id, .ToggleExpansion);
 
         if (debug_state.alt_ui) {
-            item_interaction = DebugInteraction.fromLink(link, .TearValue);
+            item_interaction = dev_ui.Interaction.fromLink(link, .TearValue);
         }
 
         const text = std.mem.span(link.name);
@@ -1931,7 +1941,7 @@ fn drawTreeLink(debug_state: *DebugState, layout: *Layout, tree: *DebugTree, lin
             layout.depth -= 1;
         }
     } else {
-        const debug_id = DebugId.fromLink(tree, link);
+        const debug_id = devIdFromLink(tree, link);
         drawDebugElement(layout, tree, link.element.?, debug_id, frame_ordinal);
     }
 }
@@ -1951,7 +1961,7 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
             drawTreeLink(debug_state, &layout, tree, tree_group);
         }
 
-        const move_interaction: DebugInteraction = DebugInteraction{
+        const move_interaction: dev_ui.Interaction = dev_ui.Interaction{
             .interaction_type = .Move,
             .data = .{ .position = &tree.ui_position },
         };
@@ -2176,7 +2186,6 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     }
 
     debug_state.interaction.interaction_type = .None;
-    debug_state.interaction.data = .{ .tree = null };
 }
 
 fn debugInit(
@@ -2288,6 +2297,8 @@ fn debugStart(
     if (!debug_state.paused) {
         debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
     }
+
+    debug_state.dev_ui_context = .fromDebugState(debug_state);
 }
 
 fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
@@ -2365,7 +2376,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     }
 
     const group: *RenderGroup = &debug_state.render_group;
-    debug_state.alt_ui = input.mouse_buttons[shared.GameInputMouseButton.Right.toInt()].ended_down;
+    debug_state.alt_ui = input.alt_down;
 
     const mouse_clip_position: Vector2 = input.clip_space_mouse_position.xy();
     const mouse_position: Vector2 = group.unproject(&group.game_transform, mouse_clip_position, 0).xy();
@@ -2379,7 +2390,7 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     debug_ui.drawLineBuffer(debug_state, &debug_state.tooltips);
     group.end();
 
-    memory.zeroStruct(DebugInteraction, &debug_state.next_hot_interaction);
+    memory.zeroStruct(dev_ui.Interaction, &debug_state.next_hot_interaction);
 }
 
 fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {

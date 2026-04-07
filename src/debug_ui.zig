@@ -5,6 +5,8 @@ const math = @import("math.zig");
 const debug = @import("debug.zig");
 const debug_interface = @import("debug_interface.zig");
 const renderer = @import("renderer.zig");
+const types = @import("types.zig");
+const dev_ui = @import("dev_ui.zig");
 const std = @import("std");
 
 // Types.
@@ -17,142 +19,12 @@ const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const DebugState = debug.DebugState;
 const DebugTree = debug.DebugTree;
-const DebugElement = debug.DebugElement;
 const DebugLineBuffer = debug.DebugLineBuffer;
-const DebugVariableLink = debug.DebugVariableLink;
-const DebugId = debug_interface.DebugId;
+const DevId = types.DevId;
 const DebugType = debug_interface.DebugType;
 const ObjectTransform = renderer.ObjectTransform;
 const RenderGroup = renderer.RenderGroup;
 const TransientClipRect = renderer.TransientClipRect;
-
-const DebugTextOp = enum {
-    DrawText,
-    SizeText,
-};
-
-const DebugInteractionType = enum(u32) {
-    None,
-    NoOp,
-    AutoModifyVariable,
-    ToggleValue,
-    DragValue,
-    TearValue,
-    Resize,
-    Move,
-    Select,
-    ToggleExpansion,
-    SetUInt32,
-    SetBool,
-    SetPointer,
-};
-
-const DebugInteractionTargetType = enum(u32) {
-    uint32,
-    bool,
-    tree,
-    link,
-    position,
-    debug_type,
-    pointer,
-    element,
-};
-
-pub const DebugInteraction = struct {
-    id: DebugId = .empty(),
-    interaction_type: DebugInteractionType = .None,
-
-    target: ?*anyopaque = null,
-    pointer_target: ?*?*const anyopaque = null,
-
-    data: union(DebugInteractionTargetType) {
-        uint32: u32,
-        bool: bool,
-        tree: ?*DebugTree,
-        link: ?*DebugVariableLink,
-        position: *Vector2,
-        debug_type: DebugType,
-        pointer: ?*const anyopaque,
-        element: ?*DebugElement,
-    } = .{ .uint32 = 0 },
-
-    pub fn equals(self: *const DebugInteraction, other: *const DebugInteraction) bool {
-        return self.id.equals(other.id) and
-            self.interaction_type == other.interaction_type and
-            self.target == other.target and
-            std.meta.eql(self.data, other.data);
-    }
-
-    pub fn isHot(self: *const DebugInteraction, debug_state: *const DebugState) bool {
-        var result: bool = self.equals(&debug_state.hot_interaction);
-
-        if (self.interaction_type == .None) {
-            result = false;
-        }
-
-        return result;
-    }
-
-    pub fn elementInteraction(
-        debug_state: *DebugState,
-        debug_id: DebugId,
-        element: *DebugElement,
-        interaction_type: DebugInteractionType,
-    ) DebugInteraction {
-        _ = debug_state;
-        return DebugInteraction{
-            .id = debug_id,
-            .interaction_type = interaction_type,
-            .data = .{ .element = element },
-        };
-    }
-
-    pub fn fromId(id: DebugId, interaction_type: DebugInteractionType) DebugInteraction {
-        return DebugInteraction{
-            .id = id,
-            .interaction_type = interaction_type,
-            .data = .{ .bool = false },
-        };
-    }
-
-    pub fn fromLink(link: *DebugVariableLink, interaction_type: DebugInteractionType) DebugInteraction {
-        return DebugInteraction{
-            .id = .empty(),
-            .interaction_type = interaction_type,
-            .data = .{ .link = link },
-        };
-    }
-
-    pub fn setUInt32(debug_id: DebugId, target: *anyopaque, value: u32) DebugInteraction {
-        const result: DebugInteraction = DebugInteraction{
-            .id = debug_id,
-            .interaction_type = .SetUInt32,
-            .target = target,
-            .data = .{ .uint32 = value },
-        };
-        return result;
-    }
-
-    pub fn setBool(debug_id: DebugId, target: *anyopaque, value: bool) DebugInteraction {
-        const result: DebugInteraction = DebugInteraction{
-            .id = debug_id,
-            .interaction_type = .SetBool,
-            .target = target,
-            .data = .{ .bool = value },
-        };
-        return result;
-    }
-
-    pub fn setPointer(debug_id: DebugId, target: ?*?*const anyopaque, value: ?*const anyopaque) DebugInteraction {
-        const result: DebugInteraction = DebugInteraction{
-            .id = debug_id,
-            .interaction_type = .SetPointer,
-            .pointer_target = target,
-            .data = .{ .pointer = value },
-        };
-        return result;
-    }
-};
 
 pub const Layout = struct {
     debug_state: *DebugState,
@@ -206,11 +78,11 @@ pub const Layout = struct {
     }
 
     pub fn label(self: *Layout, name: [:0]const u8) void {
-        const null_interaction: DebugInteraction = .{};
+        const null_interaction: dev_ui.Interaction = .{};
         _ = basicTextElement(name, self, null_interaction, Color.white(), Color.white(), null, null);
     }
 
-    pub fn actionButton(self: *Layout, name: [:0]const u8, interaction: DebugInteraction) void {
+    pub fn actionButton(self: *Layout, name: [:0]const u8, interaction: dev_ui.Interaction) void {
         _ = basicTextElement(
             name,
             self,
@@ -222,7 +94,7 @@ pub const Layout = struct {
         );
     }
 
-    pub fn booleanButton(self: *Layout, name: [:0]const u8, highlight: bool, interaction: DebugInteraction) void {
+    pub fn booleanButton(self: *Layout, name: [:0]const u8, highlight: bool, interaction: dev_ui.Interaction) void {
         _ = basicTextElement(
             name,
             self,
@@ -257,7 +129,7 @@ pub const LayoutElement = struct {
     layout: *Layout,
     dimension: *Vector2,
     size: ?*Vector2 = null,
-    default_interaction: ?DebugInteraction = null,
+    default_interaction: ?dev_ui.Interaction = null,
 
     bounds: Rectangle2 = undefined,
 
@@ -265,7 +137,7 @@ pub const LayoutElement = struct {
         self.size = self.dimension;
     }
 
-    pub fn defaultInteraction(self: *LayoutElement, interaction: DebugInteraction) void {
+    pub fn defaultInteraction(self: *LayoutElement, interaction: dev_ui.Interaction) void {
         self.default_interaction = interaction;
     }
 
@@ -348,7 +220,7 @@ pub const LayoutElement = struct {
                 Color.black(),
             );
 
-            const size_interaction: DebugInteraction = DebugInteraction{
+            const size_interaction: dev_ui.Interaction = dev_ui.Interaction{
                 .interaction_type = .Resize,
                 .data = .{ .position = size },
             };
@@ -373,7 +245,7 @@ pub const LayoutElement = struct {
 pub fn basicTextElement(
     text: [:0]const u8,
     layout: *Layout,
-    item_interaction: DebugInteraction,
+    item_interaction: dev_ui.Interaction,
     opt_color: ?Color,
     opt_hot_color: ?Color,
     opt_border: ?f32,
@@ -413,15 +285,15 @@ pub fn basicTextElement(
 }
 
 pub fn textOutAt(debug_state: *DebugState, text: [:0]const u8, position: Vector2, color: Color, opt_z: ?f32) void {
-    _ = textOp(debug_state, .DrawText, text, position, color, opt_z);
+    _ = dev_ui.textOp(&debug_state.dev_ui_context, .DrawText, text, position, color, opt_z);
 }
 
 pub fn getTextSize(debug_state: *DebugState, text: [:0]const u8) Rectangle2 {
-    return textOp(debug_state, .SizeText, text, Vector2.zero(), Color.white(), null);
+    return dev_ui.textOp(&debug_state.dev_ui_context, .SizeText, text, Vector2.zero(), Color.white(), null);
 }
 
 pub fn getTextSizeAt(debug_state: *DebugState, text: [:0]const u8, at: Vector2) Rectangle2 {
-    return textOp(debug_state, .SizeText, text, at, Color.white(), null);
+    return dev_ui.textOp(&debug_state.dev_ui_context, .SizeText, text, at, Color.white(), null);
 }
 
 pub const TooltipBuffer = struct {
@@ -476,142 +348,4 @@ pub fn drawLineBuffer(debug_state: *DebugState, buffer: *DebugLineBuffer) void {
             textOutAt(layout.debug_state, @ptrCast(&text), text_position, Color.white(), 4000);
         }
     }
-}
-
-pub fn textOp(
-    debug_state: *DebugState,
-    op: DebugTextOp,
-    text: [:0]const u8,
-    position: Vector2,
-    color_in: Color,
-    opt_z: ?f32,
-) Rectangle2 {
-    var result: Rectangle2 = Rectangle2.invertedInfinity();
-    var rect_found = false;
-    var color = color_in;
-    const z: f32 = opt_z orelse 0;
-
-    var render_group: *RenderGroup = &debug_state.render_group;
-    if (debug_state.debug_font) |font| {
-        if (debug_state.debug_font_info) |font_info| {
-            var match_vector = asset.AssetVector{};
-            var prev_code_point: u32 = 0;
-            var char_scale = debug_state.font_scale;
-            var x: f32 = position.x();
-
-            var at: [*]const u8 = @ptrCast(text);
-            while (at[0] != 0) {
-                if (at[0] == '\\' and
-                    at[1] == '#' and
-                    at[2] != 0 and
-                    at[3] != 0 and
-                    at[4] != 0)
-                {
-                    const c_scale: f32 = 1.0 / 9.0;
-                    color = Color.new(
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
-                        math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
-                        1,
-                    );
-
-                    at += 5;
-                } else if (at[0] == '\\' and
-                    at[1] == '^' and
-                    at[2] != 0)
-                {
-                    const c_scale: f32 = 1.0 / 9.0;
-                    char_scale = debug_state.font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
-                    at += 3;
-                } else {
-                    var code_point: u32 = at[0];
-
-                    if (at[0] == '\\' and
-                        (shared.isHex(at[1])) and
-                        (shared.isHex(at[2])) and
-                        (shared.isHex(at[3])) and
-                        (shared.isHex(at[4])))
-                    {
-                        code_point = ((shared.getHex(at[1]) << 12) |
-                            (shared.getHex(at[2]) << 8) |
-                            (shared.getHex(at[3]) << 4) |
-                            (shared.getHex(at[4]) << 0));
-
-                        at += 4;
-                    }
-
-                    const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(
-                        font_info,
-                        prev_code_point,
-                        code_point,
-                    );
-                    x += advance_x;
-
-                    if (code_point != ' ') {
-                        match_vector.e[@intFromEnum(asset.AssetTagId.UnicodeCodepoint)] = @floatFromInt(code_point);
-                        if (font.getBitmapForGlyph(font_info, render_group.assets, code_point)) |bitmap_id| {
-                            const bitmap_info = render_group.assets.getBitmapInfo(bitmap_id);
-                            const bitmap_scale = char_scale * @as(f32, @floatFromInt(bitmap_info.dim[1]));
-                            const bitamp_offset: Vector3 = Vector3.new(x, position.y(), z);
-
-                            if (op == .DrawText) {
-                                asset_rendering.pushBitmapId(
-                                    render_group,
-                                    &debug_state.shadow_transform,
-                                    bitmap_id,
-                                    bitmap_scale,
-                                    bitamp_offset.plus(Vector3.new(2, -2, 0)),
-                                    Color.black(),
-                                    null,
-                                    null,
-                                    null,
-                                );
-                                asset_rendering.pushBitmapId(
-                                    render_group,
-                                    &debug_state.text_transform,
-                                    bitmap_id,
-                                    bitmap_scale,
-                                    bitamp_offset,
-                                    color,
-                                    null,
-                                    null,
-                                    null,
-                                );
-                            } else {
-                                std.debug.assert(op == .SizeText);
-
-                                if (render_group.assets.getBitmap(bitmap_id)) |bitmap| {
-                                    const dim = asset_rendering.getBitmapDim(
-                                        &ObjectTransform.defaultFlat(),
-                                        bitmap,
-                                        bitmap_scale,
-                                        bitamp_offset,
-                                        1,
-                                        null,
-                                        null,
-                                    );
-                                    var glyph_dim: Rectangle2 = Rectangle2.fromMinDimension(
-                                        dim.position.xy(),
-                                        dim.size,
-                                    );
-                                    result = result.getUnionWith(&glyph_dim);
-                                    rect_found = true;
-                                }
-                            }
-                        }
-                    }
-
-                    prev_code_point = code_point;
-
-                    at += 1;
-                }
-            }
-        }
-    }
-
-    if (!rect_found) {
-        result = Rectangle2.zero();
-    }
-
-    return result;
 }

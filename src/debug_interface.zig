@@ -8,6 +8,7 @@ const file_formats = shared.file_formats;
 const config = @import("config.zig");
 const std = @import("std");
 
+const DevId = types.DevId;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -47,31 +48,6 @@ pub const DebugTable = extern struct {
 
     pub fn setEventRecording(self: *DebugTable, enabled: bool) void {
         self.record_increment = if (enabled) 1 else 0;
-    }
-};
-
-pub const DebugId = extern struct {
-    value: [2]?*anyopaque,
-
-    pub fn empty() DebugId {
-        return .{ .value = .{ null, null } };
-    }
-
-    pub fn fromLink(tree: *debug.DebugTree, link: *debug.DebugVariableLink) DebugId {
-        return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };
-    }
-
-    pub fn fromGuid(tree: *debug.DebugTree, guid: [*:0]const u8) DebugId {
-        return DebugId{ .value = .{ @ptrCast(tree), @ptrCast(@constCast(guid)) } };
-    }
-
-    pub fn fromPointer(pointer: *anyopaque) DebugId {
-        return DebugId{ .value = .{ @ptrCast(pointer), undefined } };
-    }
-
-    pub fn equals(self: DebugId, other: DebugId) bool {
-        return @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]) and
-            @intFromPtr(self.value[1]) == @intFromPtr(other.value[1]);
     }
 };
 
@@ -121,7 +97,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     event_type: DebugType = undefined,
     data: extern union {
         value_debug_event: *DebugEvent,
-        debug_id: DebugId,
+        debug_id: DevId,
         string_pointer: [*]const u8,
         bool: bool,
         u8: u8,
@@ -452,7 +428,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         comptime name: []const u8,
     ) void {
         var event = DebugEvent.record(.OpenDataBlock, DebugEvent.debugName(source, null, name), @ptrCast(name));
-        event.data = .{ .debug_id = DebugId.fromPointer(@ptrCast(@constCast(name))) };
+        event.data = .{ .debug_id = DevId.fromPointer(@ptrCast(@constCast(name))) };
     }
 
     pub fn debugEndDataBlock(comptime source: std.builtin.SourceLocation) void {

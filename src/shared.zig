@@ -46,6 +46,17 @@ pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
 pub const SLOW = @import("build_options").slow;
 
+pub fn shortTypeName(comptime T: type) []const u8 {
+    const full_type_name = @typeName(T);
+    comptime var last_dot: usize = 0;
+    comptime for (full_type_name, 0..) |c, i| {
+        if (c == '.') {
+            last_dot = i + 1;
+        }
+    };
+    return full_type_name[last_dot..];
+}
+
 pub fn copy(size: MemoryIndex, source_init: *anyopaque, dest_init: *anyopaque) *anyopaque {
     var source: [*]u8 = @ptrCast(source_init);
     var dest: [*]u8 = @ptrCast(dest_init);

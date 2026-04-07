@@ -123,6 +123,23 @@ pub fn getThreadId() u32 {
     return thread_id.*;
 }
 
+pub const DevId = extern struct {
+    value: [2]?*anyopaque,
+
+    pub fn empty() DevId {
+        return .{ .value = .{ null, null } };
+    }
+
+    pub fn fromPointer(pointer: *anyopaque) DevId {
+        return DevId{ .value = .{ @ptrCast(pointer), undefined } };
+    }
+
+    pub fn equals(self: DevId, other: DevId) bool {
+        return @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]) and
+            @intFromPtr(self.value[1]) == @intFromPtr(other.value[1]);
+    }
+};
+
 pub const TicketMutex = extern struct {
     ticket: u64,
     serving: u64,

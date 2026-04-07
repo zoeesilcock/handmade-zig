@@ -202,7 +202,7 @@ comptime {
     std.debug.assert(@sizeOf(HHAAsset) == (16 * 8));
 }
 
-const HHAAlignPointType = enum(u16) {
+pub const HHAAlignPointType = enum(u16) {
     None,
 
     Default,
