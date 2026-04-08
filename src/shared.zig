@@ -22,6 +22,7 @@ const audio = @import("audio.zig");
 const cutscene = @import("cutscene.zig");
 const debug = @import("debug.zig");
 const debug_interface = @import("debug_interface.zig");
+const dev_ui = @import("dev_ui.zig");
 const in_game_editor = @import("in_game_editor.zig");
 const std = @import("std");
 
@@ -40,6 +41,7 @@ const BrainId = brains.BrainId;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const TemporaryMemory = memory.TemporaryMemory;
+const DevUI = dev_ui.DevUI;
 
 // Build options.
 pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
@@ -901,7 +903,7 @@ pub fn getSoundSamplesStub(_: *Memory, _: *SoundOutputBuffer) callconv(.c) void 
     return;
 }
 
-pub fn debugFrameEndStub(_: *Memory, _: GameInput, _: *RenderCommands) callconv(.c) void {
+pub fn debugFrameEndStub(_: *Memory, _: *GameInput, _: *RenderCommands) callconv(.c) void {
     return undefined;
 }
 
@@ -1081,6 +1083,7 @@ pub const State = struct {
     audio_state: audio.AudioState = undefined,
     music: *PlayingSound = undefined,
 
+    dev_ui: DevUI,
     editor: in_game_editor.InGameEditor,
 
     pub fn setGameMode(self: *State, game_mode: GameMode) void {

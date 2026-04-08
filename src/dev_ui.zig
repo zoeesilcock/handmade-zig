@@ -1,5 +1,6 @@
 const shared = @import("shared.zig");
 const types = @import("types.zig");
+const memory = @import("memory.zig");
 const debug = @import("debug.zig");
 const math = @import("math.zig");
 const asset = @import("asset.zig");
@@ -9,7 +10,10 @@ const file_formats = @import("file_formats.zig");
 const std = @import("std");
 
 // Types.
-const DebugState = debug.DebugState;
+const Assets = asset.Assets;
+const RenderCommands = renderer.RenderCommands;
+const RenderGroupFlags = renderer.RenderGroupFlags;
+const GameInput = shared.GameInput;
 const DebugElement = debug.DebugElement;
 const DebugVariableLink = debug.DebugVariableLink;
 const Vector2 = math.Vector2;
@@ -20,8 +24,133 @@ const String = types.String;
 const RenderGroup = renderer.RenderGroup;
 const ObjectTransform = renderer.ObjectTransform;
 const LoadedFont = asset.LoadedFont;
+const FontId = file_formats.FontId;
 const HHAFont = file_formats.HHAFont;
 const DevId = types.DevId;
+const TransientClipRect = renderer.TransientClipRect;
+
+pub const DevUI = struct {
+    font_id: FontId,
+    font_info: ?*HHAFont,
+    font_scale: f32,
+    backing_transform: ObjectTransform,
+    shadow_transform: ObjectTransform,
+    ui_transform: ObjectTransform,
+    text_transform: ObjectTransform,
+    tooltip_transform: ObjectTransform,
+
+    mouse_position: Vector2,
+    last_mouse_position: Vector2,
+    delta_mouse_position: Vector2,
+    alt_ui: bool,
+    interaction: Interaction,
+    hot_interaction: Interaction,
+    next_hot_interaction: Interaction,
+
+    //
+    // Per-frame.
+    //
+
+    tooltips: LineBuffer,
+
+    render_group: RenderGroup,
+    font: ?*LoadedFont,
+    default_clip_rect: Rectangle2,
+
+    pub fn init(self: *DevUI, assets: *Assets) void {
+        var match_vector = asset.AssetVector{};
+        var weight_vector = asset.AssetVector{};
+        match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
+        weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
+        self.font_id = assets.getBestMatchFont(.Font, &match_vector, &weight_vector).?;
+
+        self.font_info = assets.getFontInfo(self.font_id);
+        self.font_scale = 1;
+
+        self.backing_transform = ObjectTransform.defaultFlat();
+        self.shadow_transform = ObjectTransform.defaultFlat();
+        self.ui_transform = ObjectTransform.defaultFlat();
+        self.text_transform = ObjectTransform.defaultFlat();
+        self.tooltip_transform = ObjectTransform.defaultFlat();
+
+        _ = self.backing_transform.offset_position.setZ(-5000);
+        _ = self.shadow_transform.offset_position.setZ(-4000);
+        _ = self.ui_transform.offset_position.setZ(-3000);
+        _ = self.text_transform.offset_position.setZ(-2000);
+        _ = self.tooltip_transform.offset_position.setZ(-1000);
+
+        self.last_mouse_position = .zero();
+        self.alt_ui = false;
+        memory.zeroStruct(Interaction, &self.interaction);
+        memory.zeroStruct(Interaction, &self.hot_interaction);
+        memory.zeroStruct(Interaction, &self.next_hot_interaction);
+    }
+
+    pub fn beginFrame(self: *DevUI, assets: *Assets, commands: *RenderCommands, input: *const GameInput) void {
+        const width: f32 = @floatFromInt(commands.window_width);
+        // const height: f32 = @floatFromInt(commands.window_height);
+
+        self.render_group =
+            RenderGroup.begin(assets, commands, @intFromEnum(RenderGroupFlags.ClearDepth), null);
+        self.font = asset_rendering.pushFont(&self.render_group, self.font_id);
+        self.render_group.setCameraTransform(
+            1,
+            .new(2 / width, 0, 0),
+            .new(0, 2 / width, 0),
+            .new(0, 0, 1),
+            .zero(),
+            @intFromEnum(renderer.CameraTransformFlag.IsOrthographic),
+            -10000,
+            10000,
+            null,
+            null,
+        );
+        self.default_clip_rect = self.render_group.last_setup.clip_rect;
+        self.tooltips.line_count = 0;
+
+        const mouse_clip_position: Vector2 = input.clip_space_mouse_position.xy();
+        self.last_mouse_position = self.mouse_position;
+        self.alt_ui = input.alt_down;
+        self.mouse_position =
+            self.render_group.unproject(&self.render_group.game_transform, mouse_clip_position, 0).xy();
+        self.delta_mouse_position = self.mouse_position.minus(self.last_mouse_position);
+    }
+
+    pub fn endFrame(self: *DevUI) void {
+        var mouse_layout: Layout = .begin(self, self.mouse_position);
+        drawLineBuffer(self, &self.tooltips, &mouse_layout);
+        mouse_layout.end();
+
+        self.render_group.end();
+        memory.zeroStruct(Interaction, &self.next_hot_interaction);
+    }
+
+    pub fn interactionIsHot(self: *DevUI, interaction: *const Interaction) bool {
+        var result: bool = interaction.equals(self.hot_interaction);
+
+        if (interaction.interaction_type == .None) {
+            result = false;
+        }
+
+        return result;
+    }
+
+    pub fn getLineAdvance(self: *DevUI) f32 {
+        var result: f32 = 0;
+        if (self.font_info) |font_info| {
+            result = font_info.getLineAdvance() * self.font_scale;
+        }
+        return result;
+    }
+
+    pub fn getBaseline(self: *DevUI) f32 {
+        var result: f32 = 0;
+        if (self.font_info) |font_info| {
+            result = self.font_scale * font_info.getStartingBaselineY();
+        }
+        return result;
+    }
+};
 
 pub const InteractionType = enum(u32) {
     None,
@@ -64,30 +193,20 @@ pub const Interaction = struct {
         element: ?*DebugElement,
     } = .{ .uint32 = 0 },
 
-    pub fn equals(self: *const Interaction, other: *const Interaction) bool {
+    pub fn equals(self: Interaction, other: Interaction) bool {
         return self.id.equals(other.id) and
             self.interaction_type == other.interaction_type and
             self.target == other.target and
             std.meta.eql(self.data, other.data);
     }
 
-    pub fn isHot(self: *const Interaction, debug_state: *const DebugState) bool {
-        var result: bool = self.equals(&debug_state.hot_interaction);
-
-        if (self.interaction_type == .None) {
-            result = false;
-        }
-
-        return result;
-    }
-
     pub fn elementInteraction(
-        debug_state: *DebugState,
+        ui: *DevUI,
         debug_id: DevId,
         element: *DebugElement,
         interaction_type: InteractionType,
     ) Interaction {
-        _ = debug_state;
+        _ = ui;
         return Interaction{
             .id = debug_id,
             .interaction_type = interaction_type,
@@ -147,41 +266,20 @@ const TextOp = enum {
     SizeText,
 };
 
-pub const Context = struct {
-    render_group: *RenderGroup,
-    font: ?*LoadedFont,
-    font_info: ?*HHAFont,
-    font_scale: f32,
-
-    shadow_transform: ObjectTransform,
-    text_transform: ObjectTransform,
-
-    pub fn fromDebugState(debug_state: *DebugState) Context {
-        return .{
-            .render_group = &debug_state.render_group,
-            .font = debug_state.debug_font,
-            .font_info = debug_state.debug_font_info,
-            .font_scale = debug_state.font_scale,
-            .shadow_transform = debug_state.shadow_transform,
-            .text_transform = debug_state.text_transform,
-        };
-    }
-};
-
 pub fn textOp(
-    context: *Context,
+    ui: *DevUI,
     op: TextOp,
     text: [:0]const u8,
     position: Vector2,
     color_in: Color,
     opt_z: ?f32,
 ) Rectangle2 {
-    var render_group: *RenderGroup = context.render_group;
-    const opt_font: ?*asset.LoadedFont = context.font;
-    const font_info: ?*HHAFont = context.font_info;
-    const font_scale: f32 = context.font_scale;
-    const shadow_transform: *ObjectTransform = &context.shadow_transform;
-    const text_transform: *ObjectTransform = &context.text_transform;
+    var render_group: *RenderGroup = &ui.render_group;
+    const opt_font: ?*asset.LoadedFont = ui.font;
+    const font_info: ?*HHAFont = ui.font_info;
+    const font_scale: f32 = ui.font_scale;
+    const shadow_transform: *ObjectTransform = &ui.shadow_transform;
+    const text_transform: *ObjectTransform = &ui.text_transform;
 
     var rect_found = false;
     var color = color_in;
@@ -311,34 +409,126 @@ pub fn textOp(
 }
 
 pub const Layout = struct {
-    pub fn beginSection(self: *Layout, label: []const u8) void {
+    ui: *DevUI = undefined,
+    mouse_position: Vector2 = .zero(),
+    base_corner: Vector2 = .zero(),
+
+    depth: u32 = 0,
+
+    at: Vector2 = .zero(),
+    line_advance: f32 = 0,
+    next_y_delta: f32 = 0,
+    spacing_x: f32 = 0,
+    spacing_y: f32 = 0,
+
+    no_line_feed: u32 = 0,
+    line_initialized: bool = false,
+
+    pub fn begin(ui: *DevUI, upper_corner: Vector2) Layout {
+        var layout: Layout = .{
+            .ui = ui,
+            .mouse_position = ui.mouse_position,
+            .base_corner = upper_corner,
+            .at = upper_corner,
+            .line_advance = 0,
+            .depth = 0,
+            .spacing_x = 4,
+            .spacing_y = 4,
+            .line_initialized = false,
+        };
+
+        if (ui.font_info) |font_info| {
+            layout.line_advance = ui.font_scale * font_info.getLineAdvance();
+        }
+        return layout;
+    }
+
+    pub fn end(self: *Layout) void {
         _ = self;
-        _ = label;
+    }
+
+    pub fn beginElementRectangle(self: *Layout, dimension: *Vector2) LayoutElement {
+        const element: LayoutElement = .{
+            .layout = self,
+            .dimension = dimension,
+        };
+        return element;
+    }
+
+    pub fn beginRow(self: *Layout) void {
+        self.no_line_feed += 1;
+    }
+
+    pub fn label(self: *Layout, name: [:0]const u8) void {
+        const null_interaction: Interaction = .{};
+        _ = basicTextElement(name, self, null_interaction, Color.white(), Color.white(), null, null);
+    }
+
+    pub fn actionButton(self: *Layout, name: [:0]const u8, interaction: Interaction) void {
+        _ = basicTextElement(
+            name,
+            self,
+            interaction,
+            Color.new(0.5, 0.5, 0.5, 1),
+            Color.white(),
+            4,
+            Color.new(0, 0.5, 1, 1),
+        );
+    }
+
+    pub fn booleanButton(self: *Layout, name: [:0]const u8, highlight: bool, interaction: Interaction) void {
+        _ = basicTextElement(
+            name,
+            self,
+            interaction,
+            if (highlight) Color.white() else Color.new(0.5, 0.5, 0.5, 1),
+            Color.white(),
+            4,
+            Color.new(0, 0.5, 1, 1),
+        );
+    }
+
+    pub fn advanceElement(self: *Layout, element_rect: Rectangle2) void {
+        self.next_y_delta = @min(self.next_y_delta, element_rect.min.y() - self.at.y());
+
+        if (self.no_line_feed > 0) {
+            _ = self.at.setX(element_rect.getMaxCorner().x() + self.spacing_x);
+        } else {
+            _ = self.at.setY(self.at.y() + self.next_y_delta - self.spacing_y);
+            self.line_initialized = false;
+        }
+    }
+
+    pub fn endRow(self: *Layout) void {
+        std.debug.assert(self.no_line_feed > 0);
+
+        self.no_line_feed -= 1;
+        self.advanceElement(Rectangle2.fromMinMax(self.at, self.at));
+    }
+
+    pub fn beginSection(self: *Layout, label_text: []const u8) void {
+        _ = self;
+        _ = label_text;
     }
 
     pub fn endSection(self: *Layout) void {
         _ = self;
     }
 
-    pub fn beginLine(self: *Layout) void {
-        _ = self;
+    pub fn labelF(self: *Layout, comptime format: [*]const u8, args: anytype) void {
+        var temp: [64]u8 = undefined;
+        const length: usize = shared.formatString(temp.len, &temp, format, args);
+        self.label(@ptrCast(temp[0..length]));
     }
 
-    pub fn endLine(self: *Layout) void {
-        _ = self;
-    }
-
-    pub fn labelF(self: *Layout, fmt: []const u8, args: anytype) void {
-        _ = self;
-        _ = fmt;
-        _ = args;
-    }
-
-    pub fn button(self: *Layout, label: []const u8, opt_enabled: ?bool) bool {
+    pub fn button(self: *Layout, label_text: [:0]const u8, opt_enabled: ?bool) bool {
         const enabled: bool = opt_enabled orelse true;
-        _ = self;
-        _ = label;
-        _ = enabled;
+        if (enabled) {
+            const null_interaction: Interaction = .{};
+            self.actionButton(label_text, null_interaction);
+        } else {
+            self.label(label_text);
+        }
         return false;
     }
 
@@ -353,25 +543,25 @@ pub const Layout = struct {
         return false;
     }
 
-    pub fn editableBoolean(self: *Layout, label: []const u8, value: *bool) void {
-        _ = self;
-        _ = label;
+    pub fn editableBoolean(self: *Layout, label_text: [:0]const u8, value: *bool) void {
         _ = value;
+        self.label(label_text);
     }
-    pub fn editableType(self: *Layout, label: []const u8, value_name: String, value: *u32) void {
-        _ = self;
-        _ = label;
+
+    pub fn editableType(self: *Layout, label_text: [:0]const u8, value_name: String, value: *u32) void {
         _ = value_name;
         _ = value;
+        self.label(label_text);
     }
-    pub fn editableSize(self: *Layout, label: []const u8, value: *f32) void {
-        _ = self;
-        _ = label;
+
+    pub fn editableSize(self: *Layout, label_text: [:0]const u8, value: *f32) void {
         _ = value;
+        self.label(label_text);
     }
+
     pub fn editablePositionXY(
         self: *Layout,
-        label: []const u8,
+        label_text: []const u8,
         min_x: f32,
         x: *f32,
         max_x: f32,
@@ -380,7 +570,7 @@ pub const Layout = struct {
         max_y: f32,
     ) void {
         _ = self;
-        _ = label;
+        _ = label_text;
         _ = min_x;
         _ = x;
         _ = max_x;
@@ -389,6 +579,232 @@ pub const Layout = struct {
         _ = max_y;
     }
 };
+
+pub const LayoutElement = struct {
+    layout: *Layout,
+    dimension: *Vector2,
+    size: ?*Vector2 = null,
+    default_interaction: ?Interaction = null,
+
+    bounds: Rectangle2 = undefined,
+
+    pub fn makeSizable(self: *LayoutElement) void {
+        self.size = self.dimension;
+    }
+
+    pub fn defaultInteraction(self: *LayoutElement, interaction: Interaction) void {
+        self.default_interaction = interaction;
+    }
+
+    pub fn end(self: *LayoutElement) void {
+        const layout: *Layout = self.layout;
+        const ui: *DevUI = layout.ui;
+        const no_transform = ui.backing_transform;
+
+        if (!layout.line_initialized) {
+            _ = layout.at.setX(
+                layout.base_corner.x() + @as(f32, @floatFromInt(layout.depth)) * 2 * layout.line_advance,
+            );
+            layout.next_y_delta = 0;
+            layout.line_initialized = true;
+        }
+
+        var render_group: *RenderGroup = &ui.render_group;
+        const size_handle_pixels: f32 = 4;
+        var frame: Vector2 = Vector2.new(0, 0);
+
+        if (self.size != null) {
+            frame = Vector2.splat(size_handle_pixels);
+        }
+
+        const total_dimension: Vector2 = self.dimension.plus(frame.scaledTo(2));
+
+        const total_min_corner: Vector2 = Vector2.new(
+            layout.at.x(),
+            layout.at.y() - total_dimension.y(),
+        );
+        const total_max_corner: Vector2 = total_min_corner.plus(total_dimension);
+
+        const interior_min_corner: Vector2 = total_min_corner.plus(frame);
+        const interior_max_corner: Vector2 = interior_min_corner.plus(self.dimension.*);
+
+        const total_bounds: Rectangle2 = Rectangle2.fromMinMax(total_min_corner, total_max_corner);
+        self.bounds = Rectangle2.fromMinMax(interior_min_corner, interior_max_corner);
+
+        if (self.default_interaction) |interaction| {
+            if (interaction.interaction_type != .None and layout.mouse_position.isInRectangle(self.bounds)) {
+                ui.next_hot_interaction = interaction;
+            }
+        }
+
+        if (self.size) |size| {
+            render_group.pushRectangle2(
+                &no_transform,
+                Rectangle2.fromMinMax(
+                    Vector2.new(total_min_corner.x(), interior_min_corner.y()),
+                    Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
+                ),
+                0,
+                Color.black(),
+            );
+            render_group.pushRectangle2(
+                &no_transform,
+                Rectangle2.fromMinMax(
+                    Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
+                    Vector2.new(total_max_corner.x(), total_max_corner.y()),
+                ),
+                0,
+                Color.black(),
+            );
+            render_group.pushRectangle2(
+                &no_transform,
+                Rectangle2.fromMinMax(
+                    Vector2.new(interior_min_corner.x(), total_min_corner.y()),
+                    Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
+                ),
+                0,
+                Color.black(),
+            );
+            render_group.pushRectangle2(
+                &no_transform,
+                Rectangle2.fromMinMax(
+                    Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
+                    Vector2.new(interior_max_corner.x(), total_max_corner.y()),
+                ),
+                0,
+                Color.black(),
+            );
+
+            const size_interaction: Interaction = Interaction{
+                .interaction_type = .Resize,
+                .data = .{ .position = size },
+            };
+
+            const size_box: Rectangle2 = Rectangle2.fromMinMax(
+                Vector2.new(interior_max_corner.x(), total_min_corner.y()),
+                Vector2.new(total_max_corner.x(), interior_min_corner.y()),
+            ).addRadius(Vector2.splat(4));
+            const size_box_color: Color =
+                if (layout.ui.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
+            render_group.pushRectangle2(&no_transform, size_box, 0, size_box_color);
+
+            if (layout.mouse_position.isInRectangle(size_box)) {
+                ui.next_hot_interaction = size_interaction;
+            }
+        }
+
+        layout.advanceElement(total_bounds);
+    }
+};
+
+pub fn basicTextElement(
+    text: [:0]const u8,
+    layout: *Layout,
+    item_interaction: Interaction,
+    opt_color: ?Color,
+    opt_hot_color: ?Color,
+    opt_border: ?f32,
+    opt_backdrop_color: ?Color,
+) Vector2 {
+    const ui: *DevUI = layout.ui;
+    var dim: Vector2 = Vector2.zero();
+    const border: f32 = opt_border orelse 0;
+
+    const item_color = opt_color orelse Color.new(0.8, 0.8, 0.8, 1);
+    const hot_color = opt_hot_color orelse Color.white();
+    const text_bounds = getTextSize(ui, text);
+    dim = Vector2.new(text_bounds.getDimension().x() + 2 * border, layout.line_advance + 2 * border);
+
+    var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
+    layout_element.defaultInteraction(item_interaction);
+    layout_element.end();
+
+    const is_hot: bool = ui.interactionIsHot(&item_interaction);
+
+    const text_position: Vector2 = Vector2.new(
+        layout_element.bounds.min.x() + border,
+        layout_element.bounds.max.y() - border - ui.getBaseline(),
+    );
+
+    if (opt_backdrop_color) |backdrop_color| {
+        ui.render_group.pushRectangle2(
+            &ui.backing_transform,
+            layout_element.bounds,
+            0,
+            backdrop_color,
+        );
+    }
+    textOutAt(ui, text, text_position, if (is_hot) hot_color else item_color, null);
+
+    return dim;
+}
+
+pub fn textOutAt(ui: *DevUI, text: [:0]const u8, position: Vector2, color: Color, opt_z: ?f32) void {
+    _ = textOp(ui, .DrawText, text, position, color, opt_z);
+}
+
+pub fn getTextSize(ui: *DevUI, text: [:0]const u8) Rectangle2 {
+    return textOp(ui, .SizeText, text, Vector2.zero(), Color.white(), null);
+}
+
+pub fn getTextSizeAt(ui: *DevUI, text: [:0]const u8, at: Vector2) Rectangle2 {
+    return textOp(ui, .SizeText, text, at, Color.white(), null);
+}
+
+pub const TooltipBuffer = struct {
+    size: usize = 0,
+    data: [*]u8 = undefined,
+};
+
+pub const LineBuffer = struct {
+    line_count: u32,
+    line_text: [16][256]u8,
+};
+
+pub fn addLine(buffer: *LineBuffer) TooltipBuffer {
+    var result: TooltipBuffer = .{
+        .size = buffer.line_text[0].len,
+    };
+
+    if (buffer.line_count < buffer.line_text.len) {
+        result.data = &buffer.line_text[buffer.line_count];
+        buffer.line_count += 1;
+    } else {
+        result.data = &buffer.line_text[buffer.line_count - 1];
+    }
+
+    return result;
+}
+
+pub fn drawLineBuffer(ui: *DevUI, buffer: *LineBuffer, layout: *Layout) void {
+    const render_group: *RenderGroup = &ui.render_group;
+    const transient_clip_rect: TransientClipRect = .initWith(render_group, ui.default_clip_rect);
+    defer transient_clip_rect.restore();
+
+    var tooltip_index: u32 = 0;
+    while (tooltip_index < buffer.line_count) : (tooltip_index += 1) {
+        const text = buffer.line_text[tooltip_index];
+        const text_bounds = getTextSize(layout.ui, @ptrCast(&text));
+        var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
+
+        var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
+        layout_element.end();
+
+        layout.ui.render_group.pushRectangle2(
+            &layout.ui.tooltip_transform,
+            layout_element.bounds.addRadius(.new(4, 4)),
+            0,
+            .new(0, 0, 0, 0.75),
+        );
+
+        const text_position: Vector2 = Vector2.new(
+            layout_element.bounds.min.x(),
+            layout_element.bounds.max.y() - ui.getBaseline(),
+        );
+        // TODO: It's probably the right thing to do to make z flow through the debug system sensibly.
+        textOutAt(layout.ui, @ptrCast(&text), text_position, Color.white(), 4000);
+    }
+}
 
 pub const EditBlock = struct {
     //

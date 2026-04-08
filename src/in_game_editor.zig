@@ -9,6 +9,7 @@ const memory = @import("memory.zig");
 const dev_ui = @import("dev_ui.zig");
 
 // Types.
+const DevUI = dev_ui.DevUI;
 const Vector2 = math.Vector2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
@@ -29,6 +30,7 @@ const HHAFont = file_formats.HHAFont;
 const FontId = file_formats.FontId;
 const MemoryArena = memory.MemoryArena;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
+const ObjectTransform = renderer.ObjectTransform;
 
 const EditableAsset = struct {
     asset_index: u32,
@@ -163,6 +165,7 @@ const InGameEditorMode = enum(u32) {
 
 pub const InGameEditor = struct {
     undo_memory: MemoryArena = .{},
+    assets: *Assets,
 
     active_group: EditableAssetGroup = .empty,
     hot_group: EditableAssetGroup = .empty,
@@ -173,6 +176,11 @@ pub const InGameEditor = struct {
     clean_undo_sentinel_next: ?*InGameEdit, // Tells us whether we are "dirty" or not.
     undo_sentinel: InGameEdit,
     redo_sentinel: InGameEdit,
+
+    pub fn init(self: *InGameEditor, assets: *Assets) void {
+        self.undo_memory.allocation_flags |= @intFromEnum(PlatformMemoryBlockFlags.NotRestored);
+        self.assets = assets;
+    }
 
     fn isDirty(self: *InGameEditor) bool {
         return self.undo_sentinel.next != self.clean_undo_sentinel_next;
@@ -206,7 +214,6 @@ pub const InGameEditor = struct {
 
     fn editAlignPoint(
         self: *InGameEditor,
-        assets: *Assets,
         asset_index: u32,
         point_index: u32,
         align_point_type: HHAAlignPointType,
@@ -218,7 +225,7 @@ pub const InGameEditor = struct {
         edit.asset_index = asset_index;
         edit.align_point_index = point_index;
 
-        if (alignPointFromAssetAndIndex(assets, asset_index, point_index)) |point| {
+        if (alignPointFromAssetAndIndex(self.assets, asset_index, point_index)) |point| {
             edit.change[@intFromEnum(InGameEditChangeType.ChangeFrom)] = point.*;
             point.set(align_point_type, to_parent, size, position_percent);
             edit.change[@intFromEnum(InGameEditChangeType.ChangeTo)] = point.*;
@@ -226,7 +233,7 @@ pub const InGameEditor = struct {
     }
 
     fn applyEditChange(
-        assets: *Assets,
+        self: *InGameEditor,
         edit: *InGameEdit,
         change_type: InGameEditChangeType,
     ) void {
@@ -234,7 +241,7 @@ pub const InGameEditor = struct {
             .AlignPointEdit => {
                 const align_edit: *AlignPointEdit = &edit.operation.align_point_edit;
                 const point: ?*HHAAlignPoint = alignPointFromAssetAndIndex(
-                    assets,
+                    self.assets,
                     align_edit.asset_index,
                     align_edit.align_point_index,
                 );
@@ -244,15 +251,15 @@ pub const InGameEditor = struct {
         }
     }
 
-    fn undo(self: *InGameEditor, assets: *Assets) void {
+    fn undo(self: *InGameEditor) void {
         const edit: ?*InGameEdit = self.undo_sentinel.popFirst();
-        applyEditChange(assets, edit.?, .ChangeFrom);
+        self.applyEditChange(edit.?, .ChangeFrom);
         self.redo_sentinel.pushFirst(edit.?);
     }
 
-    fn redo(self: *InGameEditor, assets: *Assets) void {
+    fn redo(self: *InGameEditor) void {
         const edit: ?*InGameEdit = self.redo_sentinel.popFirst();
-        applyEditChange(assets, edit.?, .ChangeTo);
+        self.applyEditChange(edit.?, .ChangeTo);
         self.undo_sentinel.pushFirst(edit.?);
     }
 
@@ -276,74 +283,42 @@ pub const InGameEditor = struct {
         return result;
     }
 
-    pub fn updateAndRender(self: *InGameEditor, commands: *RenderCommands, assets: *Assets) void {
-        self.undo_memory.allocation_flags |= @intFromEnum(PlatformMemoryBlockFlags.NotRestored);
-
+    pub fn updateAndRender(self: *InGameEditor, ui: *DevUI) void {
         if (self.mode != .None) {
-            const width: f32 = @floatFromInt(commands.window_width);
-            const height: f32 = @floatFromInt(commands.window_height);
+            var layout: dev_ui.Layout = .begin(ui, .new(0, 0));
 
-            var render_group: RenderGroup =
-                RenderGroup.begin(assets, commands, @intFromEnum(RenderGroupFlags.ClearDepth), null);
-            render_group.setCameraTransform(
-                1,
-                .new(2 / width, 0, 0),
-                .new(0, 2 / width, 0),
-                .new(0, 0, 1),
-                .zero(),
-                @intFromEnum(renderer.CameraTransformFlag.IsOrthographic),
-                -10000,
-                10000,
-                null,
-                null,
-            );
-
-            var match_vector = asset_mod.AssetVector{};
-            var weight_vector = asset_mod.AssetVector{};
-            match_vector.e[asset_mod.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
-            weight_vector.e[asset_mod.AssetTagId.FontType.toInt()] = 1;
-            const font_id: ?FontId = assets.getBestMatchFont(.Font, &match_vector, &weight_vector);
-            const font: ?*LoadedFont = asset_rendering.pushFont(&render_group, font_id);
-            const font_info: *HHAFont = assets.getFontInfo(font_id.?);
-            var layout: dev_ui.Layout = .{};
-
-            layout.beginLine();
+            layout.beginRow();
             if (layout.button("SAVE", self.isDirty())) {
                 self.clean_undo_sentinel_next = self.undo_sentinel.next;
             }
 
             if (layout.button("REVERT", self.isDirty())) {
                 while (self.clean_undo_sentinel_next != self.undo_sentinel.next) {
-                    self.undo(assets);
+                    self.undo();
                 }
             }
-            layout.endLine();
+            layout.endRow();
 
-            layout.beginLine();
+            layout.beginRow();
             if (layout.button("UNDO", self.undoAvailable())) {
-                self.undo(assets);
+                self.undo();
             }
             if (layout.button("REDO", self.redoAvailable())) {
-                self.redo(assets);
+                self.redo();
             }
-            layout.endLine();
+            layout.endRow();
 
-            _ = font;
-            _ = font_info;
-            _ = height;
             switch (self.mode) {
-                .EditingAssets => self.assetEditor(assets, &layout),
+                .EditingAssets => self.assetEditor(&layout),
                 else => {},
             }
-
-            render_group.end();
         }
     }
 
-    pub fn assetEditor(self: *InGameEditor, assets: *Assets, layout: *dev_ui.Layout) void {
+    pub fn assetEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
         const asset_index: u32 = self.active_asset_index;
 
-        if (assets.getAsset(self.active_asset_index)) |asset| {
+        if (self.assets.getAsset(self.active_asset_index)) |asset| {
             const hha: *const HHAAsset = &asset.hha;
 
             switch (hha.type) {
@@ -360,13 +335,12 @@ pub const InGameEditor = struct {
                         var position_percent: Vector2 = point.getPositionPercent();
                         var size: f32 = point.getSize();
 
-                        layout.beginLine();
+                        layout.beginRow();
                         layout.labelF("[%d]", .{point_index});
 
                         if (point.align_type == @intFromEnum(HHAAlignPointType.None)) {
                             if (layout.button("[Unused]", null)) {
                                 self.editAlignPoint(
-                                    assets,
                                     asset_index,
                                     point_index,
                                     .Default,
@@ -396,7 +370,6 @@ pub const InGameEditor = struct {
 
                             if (layout.endEditBlock(change_block)) {
                                 self.editAlignPoint(
-                                    assets,
                                     asset_index,
                                     point_index,
                                     @enumFromInt(align_point_type_int),
@@ -407,7 +380,6 @@ pub const InGameEditor = struct {
                             }
                             if (layout.button("[DELETE]", null)) {
                                 self.editAlignPoint(
-                                    assets,
                                     asset_index,
                                     point_index,
                                     .None,
@@ -417,7 +389,7 @@ pub const InGameEditor = struct {
                                 );
                             }
                         }
-                        layout.endLine();
+                        layout.endRow();
                     }
                     layout.endSection();
                 },

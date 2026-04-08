@@ -2388,7 +2388,7 @@ pub export fn wWinMain(
                         }
 
                         if (game.debugFrameEnd) |frameEndFn| {
-                            frameEndFn(&game_memory, new_input.*, frame);
+                            frameEndFn(&game_memory, new_input, frame);
                         }
 
                         if (executable_needs_reloading) {

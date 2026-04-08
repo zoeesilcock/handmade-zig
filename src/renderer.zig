@@ -481,13 +481,6 @@ pub const RenderGroup = extern struct {
         return result;
     }
 
-    pub fn pushSortBarrier(self: *RenderGroup, turn_off_sorting: bool) void {
-        _ = self;
-        _ = turn_off_sorting;
-
-        // TODO: Do we want the sort barrier again?
-    }
-
     pub fn pushRenderElement(self: *RenderGroup, comptime T: type) ?*T {
         // TimedBlock.beginFunction(@src(), .PushRenderElement);
         // defer TimedBlock.endFunction(@src(), .PushRenderElement);

@@ -222,6 +222,9 @@ pub export fn updateAndRender(
         state.assets = Assets.allocate(types.megabytes(256), state, game_memory.texture_queue);
 
         state.frame_arena_temp = state.frame_arena.beginTemporaryMemory();
+
+        state.dev_ui.init(state.assets);
+        state.editor.init(state.assets);
     }
 
     state.frame_arena.endTemporaryMemory(state.frame_arena_temp);
@@ -290,7 +293,10 @@ pub export fn updateAndRender(
     }
 
     state.editor.endHitTest(input, &hit_test);
-    state.editor.updateAndRender(render_commands, state.assets);
+
+    state.dev_ui.beginFrame(state.assets, render_commands, input);
+    state.editor.updateAndRender(&state.dev_ui);
+    state.dev_ui.endFrame();
 
     if (state.current_mode == .World) {
         state.mode.world.world.arena.checkArena();
@@ -299,7 +305,11 @@ pub export fn updateAndRender(
     state.mode_arena.checkArena();
 }
 
-pub export fn debugFrameEnd(game_memory: *shared.Memory, input: shared.GameInput, commands: *renderer.RenderCommands) void {
+pub export fn debugFrameEnd(
+    game_memory: *shared.Memory,
+    input: *shared.GameInput,
+    commands: *renderer.RenderCommands,
+) void {
     shared.debugFrameEnd(game_memory, input, commands);
 }
 

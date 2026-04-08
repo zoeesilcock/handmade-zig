@@ -10,18 +10,17 @@ const sim = @import("sim.zig");
 const sort = @import("sort.zig");
 const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
-const debug_ui = @import("debug_ui.zig");
 const dev_ui = @import("dev_ui.zig");
 const std = @import("std");
 
 // Types.
 const DevId = types.DevId;
+const Assets = asset.Assets;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugType = debug_interface.DebugType;
 const DebugEvent = debug_interface.DebugEvent;
-const Layout = debug_ui.Layout;
-const LayoutElement = debug_ui.LayoutElement;
-const TooltipBuffer = debug_ui.TooltipBuffer;
+const DevUI = dev_ui.DevUI;
+const TooltipBuffer = dev_ui.TooltipBuffer;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
@@ -40,8 +39,6 @@ const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const TransientClipRect = renderer.TransientClipRect;
 
-const textOutAt = debug_ui.textOutAt;
-const basicTextElement = debug_ui.basicTextElement;
 const debug_color_table = shared.debug_color_table;
 
 const MAX_FRAME_COUNT = 256;
@@ -150,31 +147,9 @@ const ElementAddOp = enum(u32) {
     CreateHierarchy = 0x2,
 };
 
-pub const DebugLineBuffer = struct {
-    line_count: u32,
-    line_text: [16][256]u8,
-};
-
 pub const DebugState = struct {
     debug_arena: MemoryArena,
     per_frame_arena: MemoryArena,
-
-    default_clip_rect: Rectangle2,
-    render_group: RenderGroup,
-    debug_font: ?*asset.LoadedFont,
-    debug_font_info: ?*file_formats.HHAFont,
-
-    backing_transform: ObjectTransform,
-    shadow_transform: ObjectTransform,
-    ui_transform: ObjectTransform,
-    text_transform: ObjectTransform,
-    tooltip_transform: ObjectTransform,
-
-    menu_position: Vector2,
-    menu_active: bool,
-
-    selected_id_count: u32,
-    selected_id: [64]DevId = [1]DevId{undefined} ** 64,
 
     element_hash: [1024]?*DebugElement = [1]?*DebugElement{null} ** 1024,
     view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
@@ -183,24 +158,9 @@ pub const DebugState = struct {
     profile_group: *DebugVariableLink,
     tree_sentinel: DebugTree,
 
-    last_mouse_position: Vector2,
-    alt_ui: bool,
-    interaction: dev_ui.Interaction,
-    hot_interaction: dev_ui.Interaction,
-    next_hot_interaction: dev_ui.Interaction,
     paused: bool,
 
-    left_edge: f32 = 0,
-    right_edge: f32 = 0,
-    font_scale: f32 = 0,
-    font_id: file_formats.FontId = undefined,
-    global_width: f32 = 0,
-    global_height: f32 = 0,
-
-    mouse_text_layout: Layout,
-
     total_frame_count: u32,
-
     viewing_frame_ordinal: u32,
     most_recent_frame_ordinal: u32,
     collation_frame_ordinal: u32,
@@ -224,9 +184,22 @@ pub const DebugState = struct {
     function_info_size: u32,
     function_info: [*:0]u8,
 
-    tooltips: DebugLineBuffer,
+    //
+    //
+    //
 
-    dev_ui_context: dev_ui.Context,
+    dev_ui: DevUI,
+
+    menu_position: Vector2,
+    menu_active: bool,
+
+    selected_id_count: u32,
+    selected_id: [64]DevId = [1]DevId{undefined} ** 64,
+
+    left_edge: f32 = 0,
+    right_edge: f32 = 0,
+    font_scale: f32 = 0,
+    font_id: file_formats.FontId = undefined,
 
     pub fn get() ?*DebugState {
         var result: ?*DebugState = null;
@@ -841,22 +814,6 @@ pub const DebugState = struct {
 
         return result.?;
     }
-
-    fn getLineAdvance(self: *DebugState) f32 {
-        var result: f32 = 0;
-        if (self.debug_font_info) |font_info| {
-            result = font_info.getLineAdvance() * self.font_scale;
-        }
-        return result;
-    }
-
-    fn getBaseline(self: *DebugState) f32 {
-        var result: f32 = 0;
-        if (self.debug_font_info) |font_info| {
-            result = self.font_scale * font_info.getStartingBaselineY();
-        }
-        return result;
-    }
 };
 
 const DebugVariableToTextFlag = enum(u32) {
@@ -1168,9 +1125,16 @@ fn drawFrameSlider(
     mouse_position: Vector2,
     root_element: *DebugElement,
 ) void {
+    const ui: *DevUI = &debug_state.dev_ui;
+    const render_group: *RenderGroup = &ui.render_group;
     const frame_count: u32 = root_element.frames.len;
     if (frame_count > 0) {
-        debug_state.render_group.pushRectangle2(&debug_state.backing_transform, total_rect, 0, Color.new(0, 0, 0, 0.25));
+        render_group.pushRectangle2(
+            &ui.backing_transform,
+            total_rect,
+            0,
+            Color.new(0, 0, 0, 0.25),
+        );
 
         const bar_width: f32 = total_rect.getDimension().x() / @as(f32, @floatFromInt(frame_count));
         var at_x: f32 = total_rect.min.x();
@@ -1202,16 +1166,16 @@ fn drawFrameSlider(
             }
 
             if (highlight) {
-                debug_state.render_group.pushRectangle2(&debug_state.ui_transform, region_rect, 0, highlight_color);
+                render_group.pushRectangle2(&ui.ui_transform, region_rect, 0, highlight_color);
             }
 
-            debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, region_rect, 1, color, 2);
+            render_group.pushRectangle2Outline(&ui.ui_transform, region_rect, 1, color, 2);
 
             if (mouse_position.isInRectangle(region_rect)) {
-                const text_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
+                const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
                 _ = shared.formatString(text_buffer.size, text_buffer.data, "%u", .{frame_index});
 
-                debug_state.next_hot_interaction = dev_ui.Interaction.setUInt32(
+                ui.next_hot_interaction = dev_ui.Interaction.setUInt32(
                     slider_id,
                     &debug_state.viewing_frame_ordinal,
                     frame_index,
@@ -1277,6 +1241,8 @@ fn drawProfileBars(
     lane_height: f32,
     depth_remaining: u32,
 ) void {
+    const ui: *DevUI = &debug_state.dev_ui;
+    const render_group: *RenderGroup = &ui.render_group;
     const frame_span: f32 = @floatFromInt(root_node.duration);
     const pixel_span: f32 = profile_rect.getDimension().x();
     const base_z: f32 = 100 - 10 * @as(f32, @floatFromInt(depth_remaining));
@@ -1302,18 +1268,18 @@ fn drawProfileBars(
         const lane_y: f32 = profile_rect.max.y() - lane_stride * lane;
 
         const region_rect = math.Rectangle2.new(this_min_x, lane_y - lane_height, this_max_x, lane_y);
-        debug_state.render_group.pushRectangle2(&debug_state.ui_transform, region_rect, base_z, color.toColor(1));
-        debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, region_rect, base_z + 1, Color.black(), 2);
+        render_group.pushRectangle2(&ui.ui_transform, region_rect, base_z, color.toColor(1));
+        render_group.pushRectangle2Outline(&ui.ui_transform, region_rect, base_z + 1, Color.black(), 2);
 
         if (mouse_position.isInRectangle(region_rect)) {
-            const text_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
+            const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
             _ = shared.formatString(text_buffer.size, text_buffer.data, "%s: %10ucy", .{
                 element.guid,
                 node.duration,
             });
 
             const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
-            debug_state.next_hot_interaction = dev_ui.Interaction.setPointer(
+            ui.next_hot_interaction = dev_ui.Interaction.setPointer(
                 graph_id,
                 @ptrCast(&view.data.profile_graph.guid),
                 @ptrCast(element.guid),
@@ -1342,6 +1308,8 @@ fn drawFrameBars(
     mouse_position: Vector2,
     root_element: *DebugElement,
 ) void {
+    const ui: *DevUI = &debug_state.dev_ui;
+    const render_group: *RenderGroup = &ui.render_group;
     const frame_count: u32 = root_element.frames.len;
     const bar_width: f32 = profile_rect.getDimension().x() / @as(f32, @floatFromInt(frame_count));
     var at_x: f32 = profile_rect.min.x();
@@ -1372,14 +1340,14 @@ fn drawFrameBars(
                     this_min_y + scale * @as(f32, @floatFromInt(node.duration));
 
                 const region_rect = math.Rectangle2.new(at_x, this_min_y, at_x + bar_width, this_max_y);
-                debug_state.render_group.pushRectangle2(
-                    &debug_state.ui_transform,
+                render_group.pushRectangle2(
+                    &ui.ui_transform,
                     region_rect,
                     0,
                     color.toColor(1).scaledTo(highlight_dim),
                 );
-                debug_state.render_group.pushRectangle2Outline(
-                    &debug_state.ui_transform,
+                render_group.pushRectangle2Outline(
+                    &ui.ui_transform,
                     region_rect,
                     0,
                     Color.black(),
@@ -1387,14 +1355,14 @@ fn drawFrameBars(
                 );
 
                 if (mouse_position.isInRectangle(region_rect)) {
-                    const text_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
+                    const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
                     _ = shared.formatString(text_buffer.size, text_buffer.data, "%s: %10ucy", .{
                         element.guid,
                         node.duration,
                     });
 
                     const view: *DebugView = debug_state.getOrCreateDebugView(graph_id);
-                    debug_state.next_hot_interaction = dev_ui.Interaction.setPointer(
+                    ui.next_hot_interaction = dev_ui.Interaction.setPointer(
                         graph_id,
                         @ptrCast(&view.data.profile_graph.guid),
                         @ptrCast(element.guid),
@@ -1420,6 +1388,8 @@ fn drawArenaOccupancy(
     _ = mouse_position;
     _ = root_element;
 
+    // const ui: *DevUI = &debug_state.dev_ui;
+    // const render_group: *RenderGroup = &debug_state.dev_ui.render_group;
     // const root_frame: *DebugElementFrame = &root_element.frames[debug_state.viewing_frame_ordinal];
     // if (root_frame.oldest_event) |event| {
     //     const arena: *MemoryArena = event.data.event.data.MemoryArena;
@@ -1440,11 +1410,11 @@ fn drawArenaOccupancy(
     //         frame_rect.max.x(),
     //         frame_rect.max.y(),
     //     );
-    //     debug_state.render_group.pushRectangle2(&debug_state.ui_transform, used_rect, 0, Color.new(1, 0.5, 0, 1));
-    //     debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, used_rect, 0, Color.black(), 2);
+    //     render_group.pushRectangle2(&ui.ui_transform, used_rect, 0, Color.new(1, 0.5, 0, 1));
+    //     render_group.pushRectangle2Outline(&ui.ui_transform, used_rect, 0, Color.black(), 2);
     //
-    //     debug_state.render_group.pushRectangle2(&debug_state.ui_transform, unused_rect, 0, Color.new(0, 1, 0, 1));
-    //     debug_state.render_group.pushRectangle2Outline(&debug_state.ui_transform, unused_rect, 0, Color.black(), 2);
+    //     render_group.pushRectangle2(&ui.ui_transform, unused_rect, 0, Color.new(0, 1, 0, 1));
+    //     render_group.pushRectangle2Outline(&ui.ui_transform, unused_rect, 0, Color.black(), 2);
     // }
 }
 
@@ -1463,6 +1433,7 @@ fn drawTopClocksList(
     _ = graph_id;
     _ = root_element;
 
+    const ui: *DevUI = &debug_state.dev_ui;
     const temp = debug_state.debug_arena.beginTemporaryMemory();
     defer debug_state.debug_arena.endTemporaryMemory(temp);
 
@@ -1515,7 +1486,7 @@ fn drawTopClocksList(
 
     var running_sum: f64 = 0;
 
-    var at: Vector2 = Vector2.new(profile_rect.min.x(), profile_rect.max.y() - debug_state.getBaseline());
+    var at: Vector2 = Vector2.new(profile_rect.min.x(), profile_rect.max.y() - ui.getBaseline());
     index = 0;
     while (index < link_count) : (index += 1) {
         const entry: *ClockEntry = &entries[sort_a[index].index];
@@ -1531,17 +1502,17 @@ fn drawTopClocksList(
             stats.count,
             element.getName(),
         });
-        textOutAt(
-            debug_state,
+        dev_ui.textOutAt(
+            ui,
             @ptrCast(&buffer),
             at,
             Color.white(),
             null,
         );
 
-        const text_rect: Rectangle2 = debug_ui.getTextSizeAt(debug_state, @ptrCast(&buffer), at);
+        const text_rect: Rectangle2 = dev_ui.getTextSizeAt(ui, @ptrCast(&buffer), at);
         if (mouse_position.isInRectangle(text_rect)) {
-            const tooltip_buffer: TooltipBuffer = debug_ui.addLine(&debug_state.tooltips);
+            const tooltip_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
             _ = shared.formatString(
                 tooltip_buffer.size,
                 tooltip_buffer.data,
@@ -1556,7 +1527,7 @@ fn drawTopClocksList(
         if (at.y() < profile_rect.min.y()) {
             break;
         } else {
-            _ = at.setY(at.y() - debug_state.getLineAdvance());
+            _ = at.setY(at.y() - ui.getLineAdvance());
         }
     }
 }
@@ -1564,7 +1535,7 @@ fn drawTopClocksList(
 pub fn hit(id: DevId, z_value: f32) void {
     _ = z_value;
     if (DebugState.get()) |debug_state| {
-        debug_state.next_hot_interaction = dev_ui.Interaction.fromId(id, .Select);
+        debug_state.dev_ui.next_hot_interaction = dev_ui.Interaction.fromId(id, .Select);
     }
 }
 
@@ -1601,7 +1572,7 @@ pub fn requested(id: DevId) bool {
     var result = false;
 
     if (DebugState.get()) |debug_state| {
-        result = debug_state.isSelected(id) or id.equals(debug_state.hot_interaction.id);
+        result = debug_state.isSelected(id) or id.equals(debug_state.dev_ui.hot_interaction.id);
     }
 
     return result;
@@ -1613,7 +1584,8 @@ pub fn requestedStub(id: DevId) bool {
 }
 
 fn drawDebugElement(
-    layout: *Layout,
+    debug_state: *DebugState,
+    layout: *dev_ui.Layout,
     tree: *DebugTree,
     element: *DebugElement,
     debug_id: DevId,
@@ -1621,16 +1593,16 @@ fn drawDebugElement(
 ) void {
     _ = tree;
 
-    const debug_state: *DebugState = layout.debug_state;
-    const no_transform = debug_state.backing_transform;
+    const ui: *DevUI = &debug_state.dev_ui;
+    var render_group: *RenderGroup = &ui.render_group;
+    const no_transform = ui.backing_transform;
     _ = frame_ordinal;
     // const opt_stored_event: ?*DebugStoredEvent = element.frames[frame_ordinal].most_recent_event;
 
-    var render_group: *RenderGroup = &debug_state.render_group;
     // const event = &stored_event.data.event;
     var item_interaction: dev_ui.Interaction =
-        dev_ui.Interaction.elementInteraction(debug_state, debug_id, element, .AutoModifyVariable);
-    const is_hot: bool = item_interaction.isHot(debug_state);
+        dev_ui.Interaction.elementInteraction(ui, debug_id, element, .AutoModifyVariable);
+    const is_hot: bool = ui.interactionIsHot(&item_interaction);
     const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
     const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
 
@@ -1658,17 +1630,22 @@ fn drawDebugElement(
                 }
             }
 
-            var layout_element: LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
+            var layout_element: dev_ui.LayoutElement = layout.beginElementRectangle(&view.data.inline_block.dimension);
             layout_element.makeSizable();
             layout_element.defaultInteraction(item_interaction);
             layout_element.end();
 
-            render_group.pushRectangle2(&debug_state.backing_transform, layout_element.bounds, 0, Color.black());
+            render_group.pushRectangle2(
+                &ui.backing_transform,
+                layout_element.bounds,
+                0,
+                Color.black(),
+            );
 
             if (opt_bitmap) |bitmap| {
                 asset_rendering.pushBitmap(
                     render_group,
-                    &debug_state.backing_transform,
+                    &ui.backing_transform,
                     bitmap,
                     bitmap_scale,
                     layout_element.bounds.min.toVector3(1),
@@ -1700,12 +1677,12 @@ fn drawDebugElement(
             );
             layout.endRow();
 
-            var layout_element: LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
+            var layout_element: dev_ui.LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
             layout_element.makeSizable();
             layout_element.end();
 
             render_group.pushRectangle2(
-                &debug_state.backing_transform,
+                &ui.backing_transform,
                 layout_element.bounds,
                 0,
                 Color.new(0, 0, 0, 0.75),
@@ -1714,7 +1691,7 @@ fn drawDebugElement(
             const transient_clip_rect: TransientClipRect = .initWith(
                 render_group,
                 render_group.getClipRectByRectangle(
-                    &debug_state.backing_transform,
+                    &ui.backing_transform,
                     layout_element.bounds,
                     0,
                 ),
@@ -1765,12 +1742,12 @@ fn drawDebugElement(
             );
             layout.endRow();
 
-            var layout_element: LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
+            var layout_element: dev_ui.LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
             layout_element.makeSizable();
             layout_element.end();
 
             render_group.pushRectangle2(
-                &debug_state.backing_transform,
+                &ui.backing_transform,
                 layout_element.bounds,
                 0,
                 Color.new(0, 0, 0, 0.75),
@@ -1779,7 +1756,7 @@ fn drawDebugElement(
             const transient_clip_rect: TransientClipRect = .initWith(
                 render_group,
                 render_group.getClipRectByRectangle(
-                    &debug_state.backing_transform,
+                    &ui.backing_transform,
                     layout_element.bounds,
                     0,
                 ),
@@ -1833,7 +1810,7 @@ fn drawDebugElement(
                 _ = dimension.setY(32);
             }
 
-            var layout_element: LayoutElement = layout.beginElementRectangle(dimension);
+            var layout_element: dev_ui.LayoutElement = layout.beginElementRectangle(dimension);
             layout_element.makeSizable();
             layout_element.end();
 
@@ -1878,14 +1855,14 @@ fn drawDebugElement(
                 most_recent_frame.profile_block_count,
                 most_recent_frame.data_block_count,
             });
-            _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
+            _ = dev_ui.basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         .DebugMemoryInfo => {
             // var text: [128:0]u8 = undefined;
             // _ = shared.formatString(text.len, &text, "Per-frame arena space remaining: %ukb", .{
             //     debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
             // });
-            // _ = basicTextElement(&text, layout, item_interaction, null, null, null, null);
+            // _ = dev_ui.basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         else => {
             var null_event: DebugEvent = .{
@@ -1895,12 +1872,13 @@ fn drawDebugElement(
             const event: *DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else &null_event;
             var text: [256:0]u8 = undefined;
             _ = debugEventToText(&text, @ptrFromInt(@intFromPtr(&text) + text.len), element, event, DebugVariableToTextFlag.displayFlags());
-            _ = basicTextElement(&text, layout, item_interaction, item_color, null, null, null);
+            _ = dev_ui.basicTextElement(&text, layout, item_interaction, item_color, null, null, null);
         },
     }
 }
 
-fn drawTreeLink(debug_state: *DebugState, layout: *Layout, tree: *DebugTree, link: *DebugVariableLink) void {
+fn drawTreeLink(debug_state: *DebugState, layout: *dev_ui.Layout, tree: *DebugTree, link: *DebugVariableLink) void {
+    const ui: *DevUI = &debug_state.dev_ui;
     const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
 
     if (link.canHaveChildren()) {
@@ -1909,26 +1887,26 @@ fn drawTreeLink(debug_state: *DebugState, layout: *Layout, tree: *DebugTree, lin
         const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
         var item_interaction: dev_ui.Interaction = dev_ui.Interaction.fromId(id, .ToggleExpansion);
 
-        if (debug_state.alt_ui) {
+        if (ui.alt_ui) {
             item_interaction = dev_ui.Interaction.fromLink(link, .TearValue);
         }
 
         const text = std.mem.span(link.name);
-        const text_bounds = debug_ui.getTextSize(debug_state, text);
+        const text_bounds = dev_ui.getTextSize(ui, text);
         var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
 
-        var element: LayoutElement = layout.beginElementRectangle(&dim);
+        var element: dev_ui.LayoutElement = layout.beginElementRectangle(&dim);
         element.defaultInteraction(item_interaction);
         element.end();
 
-        const is_hot: bool = item_interaction.isHot(debug_state);
+        const is_hot: bool = ui.interactionIsHot(&item_interaction);
         const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
 
         const text_position: Vector2 = Vector2.new(
             element.bounds.min.x(),
-            element.bounds.max.y() - debug_state.getBaseline(),
+            element.bounds.max.y() - ui.getBaseline(),
         );
-        textOutAt(debug_state, text, text_position, item_color, null);
+        dev_ui.textOutAt(ui, text, text_position, item_color, null);
 
         if (view.data == .collapsible and view.data.collapsible.expanded_always) {
             layout.depth += 1;
@@ -1942,20 +1920,21 @@ fn drawTreeLink(debug_state: *DebugState, layout: *Layout, tree: *DebugTree, lin
         }
     } else {
         const debug_id = devIdFromLink(tree, link);
-        drawDebugElement(layout, tree, link.element.?, debug_id, frame_ordinal);
+        drawDebugElement(debug_state, layout, tree, link.element.?, debug_id, frame_ordinal);
     }
 }
 
 fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
+    const ui: *DevUI = &debug_state.dev_ui;
+    const render_group: *RenderGroup = &ui.render_group;
     var opt_tree: ?*DebugTree = debug_state.tree_sentinel.next;
-    const render_group: *RenderGroup = &debug_state.render_group;
 
     while (opt_tree) |tree| : (opt_tree = tree.next) {
         if (tree == &debug_state.tree_sentinel) {
             break;
         }
 
-        var layout: Layout = Layout.begin(debug_state, mouse_position, tree.ui_position);
+        var layout: dev_ui.Layout = dev_ui.Layout.begin(ui, tree.ui_position);
 
         if (tree.group) |tree_group| {
             drawTreeLink(debug_state, &layout, tree, tree_group);
@@ -1966,7 +1945,7 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
             .data = .{ .position = &tree.ui_position },
         };
         const move_box_color: Color =
-            if (move_interaction.isHot(debug_state)) Color.new(1, 1, 0, 1) else Color.white();
+            if (ui.interactionIsHot(&move_interaction)) Color.new(1, 1, 0, 1) else Color.white();
         const move_box: Rectangle2 = Rectangle2.fromCenterHalfDimension(
             tree.ui_position.minus(Vector2.new(4, 4)),
             Vector2.new(4, 4),
@@ -1974,7 +1953,7 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
         render_group.pushRectangle2(&ObjectTransform.defaultFlat(), move_box, 0, move_box_color);
 
         if (mouse_position.isInRectangle(move_box)) {
-            debug_state.next_hot_interaction = move_interaction;
+            ui.next_hot_interaction = move_interaction;
         }
 
         layout.end();
@@ -2002,8 +1981,8 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
     //         best_distance_sq = this_distance_sq;
     //     }
     //
-    //     const text_bounds: Rectangle2 = debug_ui.getTextSize(debug_state, text);
-    //     textOutAt(text, text_position.minus(text_bounds.getDimension().scaledTo(0.5)), item_color);
+    //     const text_bounds: Rectangle2 = dev_ui.getTextSize(debug_state, text);
+    //     dev_ui.textOutAt(text, text_position.minus(text_bounds.getDimension().scaledTo(0.5)), item_color);
     // }
     //
     // if (mouse_position.minus(debug_state.menu_position).lengthSquared() > math.square(menu_radius)) {
@@ -2014,61 +1993,68 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
 }
 
 fn beginInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
+    const ui: *DevUI = &debug_state.dev_ui;
     const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
-    if (debug_state.hot_interaction.interaction_type != .None) {
-        if (debug_state.hot_interaction.interaction_type == .AutoModifyVariable) {
-            switch (debug_state.hot_interaction.data.element.?.frames[frame_ordinal].most_recent_event.?.data.event.event_type) {
+    if (ui.hot_interaction.interaction_type != .None) {
+        if (ui.hot_interaction.interaction_type == .AutoModifyVariable) {
+            switch (ui.hot_interaction.data.element.?.frames[frame_ordinal]
+                .most_recent_event.?.data.event.event_type) {
                 .bool, .Enum => {
-                    debug_state.hot_interaction.interaction_type = .ToggleValue;
+                    ui.hot_interaction.interaction_type = .ToggleValue;
                 },
                 .f32 => {
-                    debug_state.hot_interaction.interaction_type = .DragValue;
+                    ui.hot_interaction.interaction_type = .DragValue;
                 },
                 .OpenDataBlock => {
-                    debug_state.hot_interaction.interaction_type = .ToggleValue;
+                    ui.hot_interaction.interaction_type = .ToggleValue;
                 },
                 else => {},
             }
         }
 
-        switch (debug_state.hot_interaction.interaction_type) {
+        switch (ui.hot_interaction.interaction_type) {
             .TearValue => {
                 const root_group: *DebugVariableLink =
-                    debug_state.cloneVariableLink(debug_state.hot_interaction.data.link.?);
+                    debug_state.cloneVariableLink(ui.hot_interaction.data.link.?);
                 const tree: *DebugTree = debug_state.addTree(root_group, mouse_position);
-                debug_state.hot_interaction.interaction_type = .Move;
-                debug_state.hot_interaction.data = .{ .position = &tree.ui_position };
+                ui.hot_interaction.interaction_type = .Move;
+                ui.hot_interaction.data = .{ .position = &tree.ui_position };
             },
             .Select => {
                 if (!input.shift_down) {
                     debug_state.clearSelection();
                 }
 
-                debug_state.addToSelection(debug_state.hot_interaction.id);
+                debug_state.addToSelection(ui.hot_interaction.id);
             },
             else => {},
         }
 
-        debug_state.interaction = debug_state.hot_interaction;
+        ui.interaction = ui.hot_interaction;
     } else {
-        debug_state.interaction.interaction_type = .NoOp;
+        ui.interaction.interaction_type = .NoOp;
     }
 }
 
-fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_position: Vector2) void {
-    const mouse_delta = mouse_position.minus(debug_state.last_mouse_position);
+fn interact(
+    debug_state: *DebugState,
+    input: *const shared.GameInput,
+    mouse_position: Vector2,
+    delta_mouse_position: Vector2,
+) void {
+    const ui: *DevUI = &debug_state.dev_ui;
 
-    if (debug_state.interaction.interaction_type != .None) {
+    if (ui.interaction.interaction_type != .None) {
         // Mouse move interaction.
         const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
-        switch (debug_state.interaction.interaction_type) {
+        switch (ui.interaction.interaction_type) {
             .DragValue => {
-                if (debug_state.interaction.data.element) |element| {
+                if (ui.interaction.data.element) |element| {
                     if (element.frames[frame_ordinal].most_recent_event) |stored_event| {
                         const event = &stored_event.data.event;
                         switch (event.event_type) {
                             .f32 => {
-                                event.data.f32 += 0.1 * mouse_delta.y();
+                                event.data.f32 += 0.1 * delta_mouse_position.y();
                             },
                             else => {},
                         }
@@ -2077,15 +2063,15 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
                 }
             },
             .Resize => {
-                var position = debug_state.interaction.data.position;
-                const flipped_delta: Vector2 = Vector2.new(mouse_delta.x(), -mouse_delta.y());
+                var position = ui.interaction.data.position;
+                const flipped_delta: Vector2 = Vector2.new(delta_mouse_position.x(), -delta_mouse_position.y());
                 position.* = position.plus(flipped_delta);
                 _ = position.setX(@max(position.x(), 10));
                 _ = position.setY(@max(position.y(), 10));
             },
             .Move => {
-                var position = debug_state.interaction.data.position;
-                position.* = position.plus(mouse_delta);
+                var position = ui.interaction.data.position;
+                position.* = position.plus(delta_mouse_position);
             },
             else => {},
         }
@@ -2101,7 +2087,7 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
             endInteract(debug_state, input, mouse_position);
         }
     } else {
-        debug_state.hot_interaction = debug_state.next_hot_interaction;
+        ui.hot_interaction = ui.next_hot_interaction;
 
         var transition_index: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
         while (transition_index > 1) : (transition_index -= 1) {
@@ -2113,8 +2099,6 @@ fn interact(debug_state: *DebugState, input: *const shared.GameInput, mouse_posi
             beginInteract(debug_state, input, mouse_position);
         }
     }
-
-    debug_state.last_mouse_position = mouse_position;
 }
 
 fn markEditedEvent(debug_state: *DebugState, opt_event: ?*DebugEvent) void {
@@ -2134,10 +2118,11 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     _ = input;
     _ = mouse_position;
 
+    const ui: *DevUI = &debug_state.dev_ui;
     const frame_ordinal: u32 = debug_state.most_recent_frame_ordinal;
-    switch (debug_state.interaction.interaction_type) {
+    switch (ui.interaction.interaction_type) {
         .ToggleExpansion => {
-            const view: *DebugView = debug_state.getOrCreateDebugView(debug_state.interaction.id);
+            const view: *DebugView = debug_state.getOrCreateDebugView(ui.interaction.id);
 
             view.view_type = .Collapsible;
             if (view.data != .collapsible) {
@@ -2149,24 +2134,24 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
             view.data.collapsible.expanded_always = !view.data.collapsible.expanded_always;
         },
         .SetUInt32 => {
-            if (debug_state.interaction.target) |target| {
+            if (ui.interaction.target) |target| {
                 const u32_target = @as(*u32, @ptrCast(@alignCast(target)));
-                u32_target.* = debug_state.interaction.data.uint32;
+                u32_target.* = ui.interaction.data.uint32;
             }
         },
         .SetBool => {
-            if (debug_state.interaction.target) |target| {
+            if (ui.interaction.target) |target| {
                 const bool_target = @as(*bool, @ptrCast(@alignCast(target)));
-                bool_target.* = debug_state.interaction.data.bool;
+                bool_target.* = ui.interaction.data.bool;
             }
         },
         .SetPointer => {
-            if (debug_state.interaction.pointer_target) |target| {
-                target.* = debug_state.interaction.data.pointer;
+            if (ui.interaction.pointer_target) |target| {
+                target.* = ui.interaction.data.pointer;
             }
         },
         .ToggleValue => {
-            if (debug_state.interaction.data.element) |interaction_element| {
+            if (ui.interaction.data.element) |interaction_element| {
                 if (interaction_element.frames[frame_ordinal].most_recent_event) |stored_event| {
                     const event = &stored_event.data.event;
                     switch (event.event_type) {
@@ -2185,10 +2170,11 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
         else => {},
     }
 
-    debug_state.interaction.interaction_type = .None;
+    ui.interaction.interaction_type = .None;
 }
 
 fn debugInit(
+    assets: *Assets,
     width: i32,
     height: i32,
 ) *DebugState {
@@ -2233,6 +2219,8 @@ fn debugInit(
         Vector2.new(0.0 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
     );
 
+    debug_state.dev_ui.init(assets);
+
     return debug_state;
 }
 
@@ -2240,73 +2228,23 @@ fn debugStart(
     debug_state: *DebugState,
     commands: *renderer.RenderCommands,
     assets: *asset.Assets,
-    width: i32,
-    height: i32,
+    input: *const shared.GameInput,
 ) void {
     TimedBlock.beginFunction(@src(), .DebugStart);
     defer TimedBlock.endFunction(@src(), .DebugStart);
-
-    debug_state.render_group = RenderGroup.begin(assets, commands, @intFromEnum(RenderGroupFlags.ClearDepth), null);
-
-    if (asset_rendering.pushFont(&debug_state.render_group, debug_state.font_id)) |font| {
-        debug_state.debug_font = font;
-        debug_state.debug_font_info = debug_state.render_group.assets.getFontInfo(debug_state.font_id);
-    }
-
-    debug_state.global_width = @floatFromInt(width);
-    debug_state.global_height = @floatFromInt(height);
-
-    var match_vector = asset.AssetVector{};
-    var weight_vector = asset.AssetVector{};
-    match_vector.e[asset.AssetTagId.FontType.toInt()] = @intFromEnum(file_formats.AssetFontType.Debug);
-    weight_vector.e[asset.AssetTagId.FontType.toInt()] = 1;
-    if (assets.getBestMatchFont(.Font, &match_vector, &weight_vector)) |id| {
-        debug_state.font_id = id;
-    }
-
-    debug_state.font_scale = 1;
-    debug_state.left_edge = -0.5 * @as(f32, @floatFromInt(width));
-    debug_state.right_edge = 0.5 * @as(f32, @floatFromInt(width));
-    debug_state.render_group.setCameraTransform(
-        1,
-        .new(2 / @as(f32, @floatFromInt(width)), 0, 0),
-        .new(0, 2 / @as(f32, @floatFromInt(width)), 0),
-        .new(0, 0, 1),
-        .zero(),
-        @intFromEnum(renderer.CameraTransformFlag.IsOrthographic),
-        -10000,
-        10000,
-        null,
-        null,
-    );
-
-    debug_state.backing_transform = ObjectTransform.defaultFlat();
-    debug_state.shadow_transform = ObjectTransform.defaultFlat();
-    debug_state.ui_transform = ObjectTransform.defaultFlat();
-    debug_state.text_transform = ObjectTransform.defaultFlat();
-    debug_state.tooltip_transform = ObjectTransform.defaultFlat();
-    _ = debug_state.backing_transform.offset_position.setZ(-5000);
-    _ = debug_state.shadow_transform.offset_position.setZ(-4000);
-    _ = debug_state.ui_transform.offset_position.setZ(-3000);
-    _ = debug_state.text_transform.offset_position.setZ(-2000);
-    _ = debug_state.tooltip_transform.offset_position.setZ(-1000);
-
-    debug_state.default_clip_rect = debug_state.render_group.last_setup.clip_rect;
-    debug_state.tooltips.line_count = 0;
 
     if (!debug_state.paused) {
         debug_state.viewing_frame_ordinal = debug_state.most_recent_frame_ordinal;
     }
 
-    debug_state.dev_ui_context = .fromDebugState(debug_state);
+    debug_state.dev_ui.beginFrame(assets, commands, input);
 }
 
 fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
     TimedBlock.beginFunction(@src(), .DebugEnd);
     defer TimedBlock.endFunction(@src(), .DebugEnd);
 
-    debug_state.render_group.pushSortBarrier(true);
-
+    const ui: *DevUI = &debug_state.dev_ui;
     const mem_stats: DebugPlatformMemoryStats = shared.platform.debugGetMemoryStats();
 
     // Set the text shown in the root node of the debug menu.
@@ -2375,22 +2313,9 @@ fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
         }
     }
 
-    const group: *RenderGroup = &debug_state.render_group;
-    debug_state.alt_ui = input.alt_down;
-
-    const mouse_clip_position: Vector2 = input.clip_space_mouse_position.xy();
-    const mouse_position: Vector2 = group.unproject(&group.game_transform, mouse_clip_position, 0).xy();
-
-    debug_state.mouse_text_layout = Layout.begin(debug_state, mouse_position, mouse_position);
-    drawTrees(debug_state, mouse_position);
-    debug_state.mouse_text_layout.end();
-
-    interact(debug_state, input, mouse_position);
-
-    debug_ui.drawLineBuffer(debug_state, &debug_state.tooltips);
-    group.end();
-
-    memory.zeroStruct(dev_ui.Interaction, &debug_state.next_hot_interaction);
+    drawTrees(debug_state, ui.mouse_position);
+    interact(debug_state, input, ui.mouse_position, ui.delta_mouse_position);
+    debug_state.dev_ui.endFrame();
 }
 
 fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {
@@ -2405,7 +2330,7 @@ fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {
 
 pub fn frameEnd(
     game_memory: *shared.Memory,
-    input: shared.GameInput,
+    input: *shared.GameInput,
     commands: *renderer.RenderCommands,
 ) callconv(.c) void {
     memory.zeroStruct(DebugEvent, &shared.global_debug_table.edit_event);
@@ -2422,7 +2347,13 @@ pub fn frameEnd(
     const event_count: u32 = @intCast(event_array_index_event_index & 0xffffffff);
 
     if (game_memory.debug_state == null) {
-        game_memory.debug_state = debugInit(@intCast(commands.settings.width), @intCast(commands.settings.height));
+        if (getGameAssets(game_memory)) |assets| {
+            game_memory.debug_state = debugInit(
+                assets,
+                @intCast(commands.settings.width),
+                @intCast(commands.settings.height),
+            );
+        }
     }
 
     if (game_memory.debug_state) |debug_state| {
@@ -2431,11 +2362,10 @@ pub fn frameEnd(
                 debug_state,
                 commands,
                 assets,
-                @intCast(commands.settings.width),
-                @intCast(commands.settings.height),
+                input,
             );
             debug_state.collateDebugRecords(event_count, &shared.global_debug_table.events[event_array_index]);
-            debugEnd(debug_state, &input);
+            debugEnd(debug_state, input);
         }
     }
 }
