@@ -43,9 +43,14 @@ pub const DevUI = struct {
     last_mouse_position: Vector2,
     delta_mouse_position: Vector2,
     alt_ui: bool,
+
     interaction: Interaction,
+
     hot_interaction: Interaction,
     next_hot_interaction: Interaction,
+
+    id_to_execute: DevId,
+    next_id_to_execute: DevId,
 
     //
     // Per-frame.
@@ -123,6 +128,9 @@ pub const DevUI = struct {
 
         self.render_group.end();
         memory.zeroStruct(Interaction, &self.next_hot_interaction);
+
+        self.id_to_execute = self.next_id_to_execute;
+        memory.zeroStruct(DevId, &self.next_id_to_execute);
     }
 
     pub fn interactionIsHot(self: *DevUI, interaction: *const Interaction) bool {
@@ -166,6 +174,8 @@ pub const InteractionType = enum(u32) {
     SetUInt32,
     SetBool,
     SetPointer,
+    ImmediateButton,
+    PickAsset,
 };
 
 const InteractionTargetType = enum(u32) {
@@ -178,7 +188,7 @@ const InteractionTargetType = enum(u32) {
 };
 
 pub const Interaction = struct {
-    id: DevId = .empty(),
+    id: DevId = .empty,
     interaction_type: InteractionType = .None,
 
     target: ?*anyopaque = null,
@@ -193,11 +203,24 @@ pub const Interaction = struct {
         element: ?*DebugElement,
     } = .{ .uint32 = 0 },
 
+    pub const none: Interaction = .{
+        .interaction_type = .None,
+    };
+
+    pub fn isValid(self: *Interaction) bool {
+        return self.interaction_type != .None;
+    }
+
     pub fn equals(self: Interaction, other: Interaction) bool {
         return self.id.equals(other.id) and
             self.interaction_type == other.interaction_type and
             self.target == other.target and
             std.meta.eql(self.data, other.data);
+    }
+
+    pub fn clear(self: *Interaction) void {
+        self.interaction_type = .None;
+        self.data = .{ .pointer = null };
     }
 
     pub fn elementInteraction(
@@ -224,7 +247,7 @@ pub const Interaction = struct {
 
     pub fn fromLink(link: *DebugVariableLink, interaction_type: InteractionType) Interaction {
         return Interaction{
-            .id = .empty(),
+            .id = .empty,
             .interaction_type = interaction_type,
             .data = .{ .link = link },
         };
@@ -521,15 +544,25 @@ pub const Layout = struct {
         self.label(@ptrCast(temp[0..length]));
     }
 
-    pub fn button(self: *Layout, label_text: [:0]const u8, opt_enabled: ?bool) bool {
+    pub fn button(self: *Layout, id: DevId, label_text: [:0]const u8, opt_enabled: ?bool) bool {
         const enabled: bool = opt_enabled orelse true;
+
         if (enabled) {
-            const null_interaction: Interaction = .{};
-            self.actionButton(label_text, null_interaction);
+            const interaction: Interaction = .{
+                .id = id,
+                .interaction_type = .ImmediateButton,
+            };
+            self.actionButton(label_text, interaction);
         } else {
             self.label(label_text);
         }
-        return false;
+
+        var result: bool = false;
+        if (id.isValid()) {
+            result = id.equals(self.ui.id_to_execute);
+        }
+
+        return result;
     }
 
     pub fn beginEditBlock(self: *Layout) EditBlock {

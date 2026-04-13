@@ -1,6 +1,11 @@
 const std = @import("std");
+const types = @import("types.zig");
 
 pub const INTERNAL = @import("build_options").internal;
+
+pub fn fileAndLine(comptime source: std.builtin.SourceLocation) []const u8 {
+    return source.file ++ "|#" ++ std.fmt.comptimePrint("{d}", .{source.line});
+}
 
 pub const String = Buffer;
 pub const Buffer = struct {
@@ -123,20 +128,55 @@ pub fn getThreadId() u32 {
     return thread_id.*;
 }
 
-pub const DevId = extern struct {
-    value: [2]?*anyopaque,
+const DevIdValue = extern union {
+    ptr: ?*const anyopaque,
+    u64: u64,
+    u32: [2]u32,
+};
 
-    pub fn empty() DevId {
-        return .{ .value = .{ null, null } };
+pub const DevId = extern struct {
+    value: [2]DevIdValue,
+
+    pub const empty: DevId = .{ .value = .{ .{ .u64 = 0 }, .{ .u64 = 0 } } };
+
+    pub fn isValid(self: *const DevId) bool {
+        return self.value[0].u64 != 0 or self.value[1].u64 != 0;
     }
 
-    pub fn fromPointer(pointer: *anyopaque) DevId {
-        return DevId{ .value = .{ @ptrCast(pointer), undefined } };
+    pub fn fromPointer(pointer: *const anyopaque) DevId {
+        return DevId{
+            .value = .{
+                .{ .ptr = @ptrCast(pointer) },
+                .{ .ptr = undefined },
+            },
+        };
+    }
+
+    pub fn fromPointerAndLine(pointer: *const anyopaque, comptime source: std.builtin.SourceLocation) DevId {
+        return .{
+            .value = .{
+                .{ .ptr = @ptrCast(pointer) },
+                .{ .ptr = @ptrCast(types.fileAndLine(source)) },
+            },
+        };
+    }
+
+    pub fn fromU32s(a: u32, b: u32, comptime source: std.builtin.SourceLocation) DevId {
+        return .{
+            .value = .{
+                .{
+                    .u32 = .{ a, b },
+                },
+                .{
+                    .ptr = @ptrCast(types.fileAndLine(source)),
+                },
+            },
+        };
     }
 
     pub fn equals(self: DevId, other: DevId) bool {
-        return @intFromPtr(self.value[0]) == @intFromPtr(other.value[0]) and
-            @intFromPtr(self.value[1]) == @intFromPtr(other.value[1]);
+        return self.value[0].u64 == other.value[0].u64 and
+            self.value[1].u64 == other.value[1].u64;
     }
 };
 

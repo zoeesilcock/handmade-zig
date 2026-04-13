@@ -296,6 +296,7 @@ pub export fn updateAndRender(
 
     state.dev_ui.beginFrame(state.assets, render_commands, input);
     state.editor.updateAndRender(&state.dev_ui);
+    state.editor.interact(&state.dev_ui, input);
     state.dev_ui.endFrame();
 
     if (state.current_mode == .World) {

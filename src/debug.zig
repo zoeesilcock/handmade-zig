@@ -45,11 +45,21 @@ const MAX_FRAME_COUNT = 256;
 pub const MAX_VARIABLE_STACK_DEPTH = 64;
 
 fn devIdFromLink(tree: *DebugTree, link: *DebugVariableLink) DevId {
-    return DevId{ .value = .{ @ptrCast(tree), @ptrCast(link) } };
+    return DevId{
+        .value = .{
+            .{ .ptr = @ptrCast(tree) },
+            .{ .ptr = @ptrCast(link) },
+        },
+    };
 }
 
 fn devIdFromGuid(tree: *DebugTree, guid: [*:0]const u8) DevId {
-    return DevId{ .value = .{ @ptrCast(tree), @ptrCast(@constCast(guid)) } };
+    return DevId{
+        .value = .{
+            .{ .ptr = @ptrCast(tree) },
+            .{ .ptr = @ptrCast(@constCast(guid)) },
+        },
+    };
 }
 
 pub const DebugCounterSnapshot = struct {
@@ -792,7 +802,7 @@ pub const DebugState = struct {
     }
 
     fn getOrCreateDebugView(self: *DebugState, id: DevId) *DebugView {
-        const hash_index = @mod(((@intFromPtr(id.value[0]) >> 2) + (@intFromPtr(id.value[1]) >> 2)), self.view_hash.len);
+        const hash_index = @mod(((id.value[0].u32[0]) >> 2) + ((id.value[1].u32[0] >> 2)), self.view_hash.len);
         const hash_slot = &self.view_hash[hash_index];
         var result: ?*DebugView = null;
 
@@ -2170,7 +2180,7 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
         else => {},
     }
 
-    ui.interaction.interaction_type = .None;
+    ui.interaction.clear();
 }
 
 fn debugInit(

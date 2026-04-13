@@ -1,5 +1,6 @@
 const std = @import("std");
 const shared = @import("shared.zig");
+const types = @import("types.zig");
 const math = @import("math.zig");
 const renderer = @import("renderer.zig");
 const asset_mod = @import("asset.zig");
@@ -10,6 +11,7 @@ const dev_ui = @import("dev_ui.zig");
 
 // Types.
 const DevUI = dev_ui.DevUI;
+const DevId = types.DevId;
 const Vector2 = math.Vector2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
@@ -33,6 +35,7 @@ const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const ObjectTransform = renderer.ObjectTransform;
 
 const EditableAsset = struct {
+    id: DevId,
     asset_index: u32,
     sort_key: f32, // Less is better.
 };
@@ -48,10 +51,10 @@ pub const EditableHitTest = struct {
     dest_group: ?*EditableAssetGroup = null,
     clip_space_mouse_position: Vector2 = .zero(),
 
-    highlight_asset_index: u32 = 0,
     highlight_color: Color = .zero(),
+    highlight_id: DevId = .empty,
 
-    pub fn addHit(self: *EditableHitTest, asset_index: u32, sort_key: f32) void {
+    pub fn addHit(self: *EditableHitTest, id: DevId, asset_index: u32, sort_key: f32) void {
         const dest_group: *EditableAssetGroup = self.dest_group.?;
         var test_index: u32 = 0;
 
@@ -68,6 +71,7 @@ pub const EditableHitTest = struct {
                     dest_group.assets[copy_index] = dest_group.assets[copy_index - 1];
                 }
 
+                dest.id = id;
                 dest.asset_index = asset_index;
                 dest.sort_key = sort_key;
 
@@ -80,6 +84,7 @@ pub const EditableHitTest = struct {
             const dest: *EditableAsset = &dest_group.assets[dest_group.asset_count];
             dest_group.asset_count += 1;
 
+            dest.id = id;
             dest.asset_index = asset_index;
             dest.sort_key = sort_key;
         }
@@ -126,6 +131,11 @@ const InGameEdit = struct {
         return result;
     }
 
+    pub fn sentinelize(self: *InGameEdit) void {
+        self.prev = self;
+        self.next = self;
+    }
+
     pub fn link(self: *InGameEdit, edit: *InGameEdit) void {
         edit.prev = self;
         edit.next = self.next;
@@ -138,14 +148,13 @@ const InGameEdit = struct {
         self.prev.?.next = self.next;
         self.next.?.prev = self.prev;
 
-        self.prev = self;
-        self.next = self;
+        self.sentinelize();
     }
 
     pub fn popFirst(self: *InGameEdit) ?*InGameEdit {
         var result: ?*InGameEdit = null;
 
-        if (self.prev != self) {
+        if (self.next != self) {
             result = self.next;
             self.next.?.unlink();
         }
@@ -172,6 +181,7 @@ pub const InGameEditor = struct {
 
     mode: InGameEditorMode = .None,
     active_asset_index: u32 = 0,
+    highlight_id: DevId,
 
     clean_undo_sentinel_next: ?*InGameEdit, // Tells us whether we are "dirty" or not.
     undo_sentinel: InGameEdit,
@@ -180,6 +190,10 @@ pub const InGameEditor = struct {
     pub fn init(self: *InGameEditor, assets: *Assets) void {
         self.undo_memory.allocation_flags |= @intFromEnum(PlatformMemoryBlockFlags.NotRestored);
         self.assets = assets;
+
+        self.undo_sentinel.sentinelize();
+        self.redo_sentinel.sentinelize();
+        self.clean_undo_sentinel_next = self.undo_sentinel.next;
     }
 
     fn isDirty(self: *InGameEditor) bool {
@@ -207,9 +221,10 @@ pub const InGameEditor = struct {
     fn allocateEdit(self: *InGameEditor, T: type) *T {
         var result: *InGameEdit = self.undo_memory.pushStruct(InGameEdit, null);
         result.edit_type = @field(InGameEditType, shared.shortTypeName(T));
-        result.next = result;
-        result.prev = result;
-        return @ptrCast(result);
+        result.sentinelize();
+        self.undo_sentinel.pushFirst(result);
+
+        return @ptrCast(&result.operation);
     }
 
     fn editAlignPoint(
@@ -230,6 +245,9 @@ pub const InGameEditor = struct {
             point.set(align_point_type, to_parent, size, position_percent);
             edit.change[@intFromEnum(InGameEditChangeType.ChangeTo)] = point.*;
         }
+
+        std.debug.assert(self.undo_sentinel.prev.?.next != null);
+        std.debug.assert(self.undo_sentinel.next.?.prev != null);
     }
 
     fn applyEditChange(
@@ -275,7 +293,7 @@ pub const InGameEditor = struct {
         if (self.mode == .EditingAssets) {
             result.dest_group = &self.hot_group;
             result.clip_space_mouse_position = input.clip_space_mouse_position.xy();
-            result.highlight_asset_index = self.active_asset_index;
+            result.highlight_id = self.highlight_id;
             result.highlight_color = .new(1, 1, 0, 1);
             result.dest_group.?.asset_count = 0;
         }
@@ -288,11 +306,11 @@ pub const InGameEditor = struct {
             var layout: dev_ui.Layout = .begin(ui, .new(0, 0));
 
             layout.beginRow();
-            if (layout.button("SAVE", self.isDirty())) {
+            if (layout.button(.fromPointerAndLine(self, @src()), "SAVE", self.isDirty())) {
                 self.clean_undo_sentinel_next = self.undo_sentinel.next;
             }
 
-            if (layout.button("REVERT", self.isDirty())) {
+            if (layout.button(.fromPointerAndLine(self, @src()), "REVERT", self.isDirty())) {
                 while (self.clean_undo_sentinel_next != self.undo_sentinel.next) {
                     self.undo();
                 }
@@ -300,10 +318,10 @@ pub const InGameEditor = struct {
             layout.endRow();
 
             layout.beginRow();
-            if (layout.button("UNDO", self.undoAvailable())) {
+            if (layout.button(.fromPointerAndLine(self, @src()), "UNDO", self.undoAvailable())) {
                 self.undo();
             }
-            if (layout.button("REDO", self.redoAvailable())) {
+            if (layout.button(.fromPointerAndLine(self, @src()), "REDO", self.redoAvailable())) {
                 self.redo();
             }
             layout.endRow();
@@ -315,7 +333,70 @@ pub const InGameEditor = struct {
         }
     }
 
-    pub fn assetEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
+    pub fn interact(self: *InGameEditor, ui: *DevUI, input: *GameInput) void {
+        if (!ui.next_hot_interaction.isValid()) {
+            ui.next_hot_interaction.interaction_type = .PickAsset;
+        }
+
+        std.debug.assert(self.undo_sentinel.prev.?.next != null);
+        std.debug.assert(self.undo_sentinel.next.?.prev != null);
+
+        const transition_count: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
+        var mouse_button: bool = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down;
+        if (@mod(transition_count, 2) != 0) {
+            mouse_button = !mouse_button;
+        }
+
+        var transition_index: u32 = 0;
+        while (transition_index <= transition_count) : (transition_index += 1) {
+            var mouse_move: bool = false;
+            var mouse_down: bool = false;
+            var mouse_up: bool = false;
+            if (transition_index == 0) {
+                mouse_move = true;
+            } else {
+                mouse_down = mouse_button;
+                mouse_up = !mouse_button;
+            }
+
+            switch (ui.interaction.interaction_type) {
+                .ImmediateButton => {
+                    if (mouse_up) {
+                        ui.next_id_to_execute = ui.interaction.id;
+                        ui.interaction.clear();
+                    }
+                },
+                .PickAsset => {
+                    if (mouse_up) {
+                        if (self.hot_group.asset_count > 0) {
+                            self.highlight_id = self.hot_group.assets[0].id;
+                            self.active_asset_index = self.hot_group.assets[0].asset_index;
+                        } else {
+                            self.highlight_id = .empty;
+                            self.active_asset_index = 0;
+                        }
+                        ui.interaction.clear();
+                    }
+                },
+                .None => {
+                    ui.hot_interaction = ui.next_hot_interaction;
+
+                    if (mouse_down) {
+                        ui.interaction = ui.hot_interaction;
+                    }
+                },
+                else => {
+                    if (mouse_up) {
+                        ui.interaction.clear();
+                    }
+                },
+            }
+
+            mouse_button = !mouse_button;
+        }
+    }
+
+    fn assetEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
         const asset_index: u32 = self.active_asset_index;
 
         if (self.assets.getAsset(self.active_asset_index)) |asset| {
@@ -338,8 +419,8 @@ pub const InGameEditor = struct {
                         layout.beginRow();
                         layout.labelF("[%d]", .{point_index});
 
-                        if (point.align_type == @intFromEnum(HHAAlignPointType.None)) {
-                            if (layout.button("[Unused]", null)) {
+                        if (align_point_type_int == @intFromEnum(HHAAlignPointType.None)) {
+                            if (layout.button(.fromPointerAndLine(point, @src()), "[unused]", null)) {
                                 self.editAlignPoint(
                                     asset_index,
                                     point_index,
@@ -378,14 +459,14 @@ pub const InGameEditor = struct {
                                     position_percent,
                                 );
                             }
-                            if (layout.button("[DELETE]", null)) {
+                            if (layout.button(.fromPointerAndLine(point, @src()), "[DELETE]", null)) {
                                 self.editAlignPoint(
                                     asset_index,
                                     point_index,
                                     .None,
-                                    to_parent,
-                                    size,
-                                    position_percent,
+                                    false,
+                                    1,
+                                    .new(0.5, 0.5),
                                 );
                             }
                         }
@@ -399,13 +480,8 @@ pub const InGameEditor = struct {
     }
 
     pub fn endHitTest(self: *InGameEditor, input: *GameInput, hit_test: *EditableHitTest) void {
+        _ = self;
         _ = input;
-
-        if (hit_test.shouldHitTest()) {
-            self.active_asset_index = 0;
-            if (hit_test.dest_group.?.asset_count > 0) {
-                self.active_asset_index = hit_test.dest_group.?.assets[0].asset_index;
-            }
-        }
+        _ = hit_test;
     }
 };

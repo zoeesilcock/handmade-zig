@@ -607,24 +607,23 @@ pub fn updateAndRenderEntities(
                         );
                     }
 
+                    const dev_id: types.DevId = .fromU32s(entity.id.value, piece_index, @src());
+
                     if (bitmap_id != null) {
-                        var highlight_color: Color = hit_test.highlight_color;
                         if (hit_test.shouldHitTest()) {
                             const world_position: Vector3 = entity_transform.offset_position.plus(piece.offset);
 
                             const t_hit = picking_origin.rayIntersectsBox(picking_ray, world_position, world_radius);
                             if (t_hit < std.math.floatMax(f32)) {
-                                hit_test.addHit(bitmap_id.?.value, t_hit);
-                            } else {
-                                highlight_color = highlight_color.scaledTo(0.1);
+                                hit_test.addHit(dev_id, bitmap_id.?.value, t_hit);
                             }
                         }
 
-                        if (bitmap_id.?.value != 0 and bitmap_id.?.value == hit_test.highlight_asset_index) {
+                        if (dev_id.equals(hit_test.highlight_id)) {
                             render_group.pushVolumeOutline(
                                 &entity_transform,
                                 .fromCenterHalfDimension(piece.offset, world_radius),
-                                highlight_color,
+                                hit_test.highlight_color,
                                 0.1,
                             );
                         }
