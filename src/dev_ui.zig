@@ -49,8 +49,8 @@ pub const DevUI = struct {
     hot_interaction: Interaction,
     next_hot_interaction: Interaction,
 
-    id_to_execute: DevId,
-    next_id_to_execute: DevId,
+    to_execute: Interaction,
+    next_to_execute: Interaction,
 
     //
     // Per-frame.
@@ -129,8 +129,8 @@ pub const DevUI = struct {
         self.render_group.end();
         memory.zeroStruct(Interaction, &self.next_hot_interaction);
 
-        self.id_to_execute = self.next_id_to_execute;
-        memory.zeroStruct(DevId, &self.next_id_to_execute);
+        self.to_execute = self.next_to_execute;
+        memory.zeroStruct(Interaction, &self.next_to_execute);
     }
 
     pub fn interactionIsHot(self: *DevUI, interaction: *const Interaction) bool {
@@ -175,6 +175,7 @@ pub const InteractionType = enum(u32) {
     SetBool,
     SetPointer,
     ImmediateButton,
+    Draggable,
     PickAsset,
 };
 
@@ -447,6 +448,8 @@ pub const Layout = struct {
     no_line_feed: u32 = 0,
     line_initialized: bool = false,
 
+    edit_occurred: bool = false,
+
     pub fn begin(ui: *DevUI, upper_corner: Vector2) Layout {
         var layout: Layout = .{
             .ui = ui,
@@ -544,14 +547,21 @@ pub const Layout = struct {
         self.label(@ptrCast(temp[0..length]));
     }
 
-    pub fn button(self: *Layout, id: DevId, label_text: [:0]const u8, opt_enabled: ?bool) bool {
+    pub fn buttonWithClassifier(
+        self: *Layout,
+        id: DevId,
+        classifier: ?*anyopaque,
+        label_text: [:0]const u8,
+        opt_enabled: ?bool,
+    ) bool {
         const enabled: bool = opt_enabled orelse true;
+        const interaction: Interaction = .{
+            .id = id,
+            .interaction_type = .ImmediateButton,
+            .target = classifier,
+        };
 
         if (enabled) {
-            const interaction: Interaction = .{
-                .id = id,
-                .interaction_type = .ImmediateButton,
-            };
             self.actionButton(label_text, interaction);
         } else {
             self.label(label_text);
@@ -559,42 +569,85 @@ pub const Layout = struct {
 
         var result: bool = false;
         if (id.isValid()) {
-            result = id.equals(self.ui.id_to_execute);
+            result = interaction.equals(self.ui.to_execute);
         }
 
         return result;
     }
 
+    pub fn button(self: *Layout, id: DevId, label_text: [:0]const u8, opt_enabled: ?bool) bool {
+        const result = self.buttonWithClassifier(id, null, label_text, opt_enabled);
+        return result;
+    }
+
     pub fn beginEditBlock(self: *Layout) EditBlock {
-        _ = self;
-        return .{};
+        return .{
+            .previous_edit_occurred = self.edit_occurred,
+        };
     }
 
     pub fn endEditBlock(self: *Layout, block: EditBlock) bool {
-        _ = self;
-        _ = block;
-        return false;
+        const result: bool = self.edit_occurred;
+        self.edit_occurred = block.previous_edit_occurred;
+        return result;
     }
 
-    pub fn editableBoolean(self: *Layout, label_text: [:0]const u8, value: *bool) void {
-        _ = value;
+    pub fn editableBoolean(self: *Layout, id: DevId, label_text: [:0]const u8, value: *bool) void {
+        if (self.button(id, if (value.*) "*" else "-", null)) {
+            self.edit_occurred = true;
+            value.* = !value.*;
+        }
         self.label(label_text);
     }
 
-    pub fn editableType(self: *Layout, label_text: [:0]const u8, value_name: String, value: *u32) void {
-        _ = value_name;
-        _ = value;
+    pub fn editableType(self: *Layout, id: DevId, label_text: [:0]const u8, value_name: String, value: *u32) void {
+        var left_label: [:0]const u8 = "<";
+        var right_label: [:0]const u8 = ">";
+
         self.label(label_text);
+
+        if (self.buttonWithClassifier(id, @ptrCast(&left_label), left_label, null)) {
+            value.* -= 1;
+            self.edit_occurred = true;
+        }
+
+        self.labelF("%s", .{value_name.data});
+
+        if (self.buttonWithClassifier(id, @ptrCast(&right_label), right_label, null)) {
+            value.* += 1;
+            self.edit_occurred = true;
+        }
     }
 
-    pub fn editableSize(self: *Layout, label_text: [:0]const u8, value: *f32) void {
-        _ = value;
-        self.label(label_text);
+    pub fn editableSize(self: *Layout, id: DevId, label_text: [:0]const u8, value: *f32) void {
+        var temp: [64]u8 = undefined;
+        const length: usize = shared.formatString(temp.len, &temp, "%s(%.02f)", .{ label_text, value.* });
+
+        const interaction: Interaction = .{
+            .id = id,
+            .interaction_type = .Draggable,
+        };
+
+        _ = basicTextElement(
+            @ptrCast(temp[0..length]),
+            self,
+            interaction,
+            .new(0.8, 0.8, 0.8, 1),
+            .white(),
+            6,
+            .new(0.7, 0.5, 0.3, 0.5),
+        );
+
+        if (interaction.equals(self.ui.interaction)) {
+            value.* += 0.001 * value.* * self.ui.delta_mouse_position.y();
+            self.edit_occurred = true;
+        }
     }
 
     pub fn editablePositionXY(
         self: *Layout,
-        label_text: []const u8,
+        id: DevId,
+        label_text: [:0]const u8,
         min_x: f32,
         x: *f32,
         max_x: f32,
@@ -602,14 +655,32 @@ pub const Layout = struct {
         y: *f32,
         max_y: f32,
     ) void {
-        _ = self;
-        _ = label_text;
-        _ = min_x;
-        _ = x;
-        _ = max_x;
-        _ = min_y;
-        _ = y;
-        _ = max_y;
+        var temp: [64]u8 = undefined;
+        const length: usize = shared.formatString(temp.len, &temp, "%s(%.02f,%.02f)", .{ label_text, x.*, y.* });
+
+        const interaction: Interaction = .{
+            .id = id,
+            .interaction_type = .Draggable,
+        };
+
+        _ = basicTextElement(
+            @ptrCast(temp[0..length]),
+            self,
+            interaction,
+            .new(0.8, 0.8, 0.8, 1),
+            .white(),
+            6,
+            .new(0.7, 0.5, 0.3, 0.5),
+        );
+
+        if (interaction.equals(self.ui.interaction)) {
+            const delta_x: f32 = 0.001 * (max_x - min_x);
+            const delta_y: f32 = 0.001 * (max_y - min_y);
+
+            x.* = math.clampf(min_x, x.* + delta_x * self.ui.delta_mouse_position.x(), max_x);
+            y.* = math.clampf(min_y, y.* + delta_y * self.ui.delta_mouse_position.y(), max_y);
+            self.edit_occurred = true;
+        }
     }
 };
 
@@ -840,5 +911,5 @@ pub fn drawLineBuffer(ui: *DevUI, buffer: *LineBuffer, layout: *Layout) void {
 }
 
 pub const EditBlock = struct {
-    //
+    previous_edit_occurred: bool,
 };

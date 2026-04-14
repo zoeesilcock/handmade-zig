@@ -34,6 +34,8 @@ const MemoryArena = memory.MemoryArena;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const ObjectTransform = renderer.ObjectTransform;
 
+const HHA_ALIGN_POINT_TYPE_COUNT = file_formats.HHA_ALIGN_POINT_TYPE_COUNT;
+
 const EditableAsset = struct {
     id: DevId,
     asset_index: u32,
@@ -186,6 +188,7 @@ pub const InGameEditor = struct {
     clean_undo_sentinel_next: ?*InGameEdit, // Tells us whether we are "dirty" or not.
     undo_sentinel: InGameEdit,
     redo_sentinel: InGameEdit,
+    in_progress_sentinel: InGameEdit,
 
     pub fn init(self: *InGameEditor, assets: *Assets) void {
         self.undo_memory.allocation_flags |= @intFromEnum(PlatformMemoryBlockFlags.NotRestored);
@@ -193,6 +196,7 @@ pub const InGameEditor = struct {
 
         self.undo_sentinel.sentinelize();
         self.redo_sentinel.sentinelize();
+        self.in_progress_sentinel.sentinelize();
         self.clean_undo_sentinel_next = self.undo_sentinel.next;
     }
 
@@ -218,13 +222,34 @@ pub const InGameEditor = struct {
         return result;
     }
 
-    fn allocateEdit(self: *InGameEditor, T: type) *T {
-        var result: *InGameEdit = self.undo_memory.pushStruct(InGameEdit, null);
-        result.edit_type = @field(InGameEditType, shared.shortTypeName(T));
-        result.sentinelize();
-        self.undo_sentinel.pushFirst(result);
+    fn getOrCreatedEditInProgress(self: *InGameEditor, match: *InGameEdit) *InGameEdit {
+        var result: ?*InGameEdit = null;
+        var test_edit: *InGameEdit = self.in_progress_sentinel.next.?;
+        while (result == null and test_edit != &self.in_progress_sentinel) : (test_edit = test_edit.next.?) {
+            if (test_edit.edit_type == match.edit_type) {
+                switch (test_edit.edit_type) {
+                    .AlignPointEdit => {
+                        if (match.operation.align_point_edit.asset_index ==
+                            test_edit.operation.align_point_edit.asset_index and
+                            match.operation.align_point_edit.align_point_index ==
+                                test_edit.operation.align_point_edit.align_point_index)
+                        {
+                            result = test_edit;
+                        }
+                        break;
+                    },
+                    else => {},
+                }
+            }
+        }
 
-        return @ptrCast(&result.operation);
+        if (result == null) {
+            result = self.undo_memory.pushStruct(InGameEdit, null);
+            result.?.* = match.*;
+            self.in_progress_sentinel.pushFirst(result.?);
+        }
+
+        return result.?;
     }
 
     fn editAlignPoint(
@@ -236,18 +261,26 @@ pub const InGameEditor = struct {
         size: f32,
         position_percent: Vector2,
     ) void {
-        var edit: *AlignPointEdit = self.allocateEdit(AlignPointEdit);
-        edit.asset_index = asset_index;
-        edit.align_point_index = point_index;
-
         if (alignPointFromAssetAndIndex(self.assets, asset_index, point_index)) |point| {
-            edit.change[@intFromEnum(InGameEditChangeType.ChangeFrom)] = point.*;
-            point.set(align_point_type, to_parent, size, position_percent);
-            edit.change[@intFromEnum(InGameEditChangeType.ChangeTo)] = point.*;
-        }
+            var match: InGameEdit = .{
+                .next = null,
+                .prev = null,
+                .edit_type = .AlignPointEdit,
+                .operation = .{
+                    .align_point_edit = .{
+                        .asset_index = asset_index,
+                        .align_point_index = point_index,
+                        .change = undefined,
+                    },
+                },
+            };
+            match.operation.align_point_edit.change[@intFromEnum(InGameEditChangeType.ChangeFrom)] = point.*;
 
-        std.debug.assert(self.undo_sentinel.prev.?.next != null);
-        std.debug.assert(self.undo_sentinel.next.?.prev != null);
+            var edit: *InGameEdit = self.getOrCreatedEditInProgress(&match);
+
+            point.set(align_point_type, to_parent, size, position_percent);
+            edit.operation.align_point_edit.change[@intFromEnum(InGameEditChangeType.ChangeTo)] = point.*;
+        }
     }
 
     fn applyEditChange(
@@ -338,9 +371,6 @@ pub const InGameEditor = struct {
             ui.next_hot_interaction.interaction_type = .PickAsset;
         }
 
-        std.debug.assert(self.undo_sentinel.prev.?.next != null);
-        std.debug.assert(self.undo_sentinel.next.?.prev != null);
-
         const transition_count: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
         var mouse_button: bool = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down;
         if (@mod(transition_count, 2) != 0) {
@@ -359,11 +389,13 @@ pub const InGameEditor = struct {
                 mouse_up = !mouse_button;
             }
 
+            var end_interaction: bool = false;
+
             switch (ui.interaction.interaction_type) {
-                .ImmediateButton => {
+                .ImmediateButton, .Draggable => {
                     if (mouse_up) {
-                        ui.next_id_to_execute = ui.interaction.id;
-                        ui.interaction.clear();
+                        ui.next_to_execute = ui.interaction;
+                        end_interaction = true;
                     }
                 },
                 .PickAsset => {
@@ -375,7 +407,7 @@ pub const InGameEditor = struct {
                             self.highlight_id = .empty;
                             self.active_asset_index = 0;
                         }
-                        ui.interaction.clear();
+                        end_interaction = true;
                     }
                 },
                 .None => {
@@ -387,9 +419,19 @@ pub const InGameEditor = struct {
                 },
                 else => {
                     if (mouse_up) {
-                        ui.interaction.clear();
+                        end_interaction = true;
                     }
                 },
+            }
+
+            if (end_interaction) {
+                ui.interaction.clear();
+
+                while (!self.in_progress_sentinel.isEmpty()) {
+                    self.undo_sentinel.pushFirst(
+                        self.in_progress_sentinel.popFirst().?,
+                    );
+                }
             }
 
             mouse_button = !mouse_button;
@@ -432,14 +474,16 @@ pub const InGameEditor = struct {
                             }
                         } else {
                             const change_block: dev_ui.EditBlock = layout.beginEditBlock();
-                            layout.editableBoolean("ToParent", &to_parent);
+                            layout.editableBoolean(.fromPointerAndLine(point, @src()), "ToParent", &to_parent);
                             layout.editableType(
+                                .fromPointerAndLine(point, @src()),
                                 "Type",
                                 file_formats.alignPointNameFromType(align_point_type),
                                 &align_point_type_int,
                             );
-                            layout.editableSize("Size", &size);
+                            layout.editableSize(.fromPointerAndLine(point, @src()), "Size", &size);
                             layout.editablePositionXY(
+                                .fromPointerAndLine(point, @src()),
                                 "PercentP",
                                 0,
                                 &position_percent.values[0],
@@ -450,6 +494,12 @@ pub const InGameEditor = struct {
                             );
 
                             if (layout.endEditBlock(change_block)) {
+                                if (align_point_type_int == 0) {
+                                    align_point_type_int = HHA_ALIGN_POINT_TYPE_COUNT - 1;
+                                } else if (align_point_type_int >= HHA_ALIGN_POINT_TYPE_COUNT) {
+                                    align_point_type_int = 1;
+                                }
+
                                 self.editAlignPoint(
                                     asset_index,
                                     point_index,

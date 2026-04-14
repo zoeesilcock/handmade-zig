@@ -202,6 +202,8 @@ comptime {
     std.debug.assert(@sizeOf(HHAAsset) == (16 * 8));
 }
 
+// Note: The decrement by 1 here is to avoid ToParent being counted. Adjust this if you add more non-sequential entries.
+pub const HHA_ALIGN_POINT_TYPE_COUNT: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len - 1;
 pub const HHAAlignPointType = enum(u16) {
     None,
 
@@ -226,10 +228,22 @@ pub const HHAAlignPoint = extern struct {
         position_percent: Vector2,
     ) void {
         self.position_percent[0] = @intCast(
-            intrinsics.roundReal32ToUInt32(position_percent.x() * @as(f32, @floatFromInt(std.math.maxInt(u16) - 1))),
+            intrinsics.roundReal32ToUInt32(
+                math.clamp01MapToRange(
+                    -2,
+                    2,
+                    position_percent.x(),
+                ) * @as(f32, @floatFromInt(std.math.maxInt(u16) - 1)),
+            ),
         );
         self.position_percent[1] = @intCast(
-            intrinsics.roundReal32ToUInt32(position_percent.y() * @as(f32, @floatFromInt(std.math.maxInt(u16) - 1))),
+            intrinsics.roundReal32ToUInt32(
+                math.clamp01MapToRange(
+                    -2,
+                    2,
+                    position_percent.y(),
+                ) * @as(f32, @floatFromInt(std.math.maxInt(u16) - 1)),
+            ),
         );
         self.size = @intCast(
             intrinsics.roundReal32ToUInt32((size * @as(f32, @floatFromInt(std.math.maxInt(u16)))) / 85.0),
@@ -248,8 +262,10 @@ pub const HHAAlignPoint = extern struct {
 
     pub fn getPositionPercent(self: HHAAlignPoint) Vector2 {
         return .new(
-            @as(f32, @floatFromInt(self.position_percent[0])) / @as(f32, @floatFromInt(std.math.maxInt(u16) - 1)),
-            @as(f32, @floatFromInt(self.position_percent[1])) / @as(f32, @floatFromInt(std.math.maxInt(u16) - 1)),
+            -2 + 4 * (@as(f32, @floatFromInt(self.position_percent[0])) /
+                @as(f32, @floatFromInt(std.math.maxInt(u16) - 1))),
+            -2 + 4 * (@as(f32, @floatFromInt(self.position_percent[1])) /
+                @as(f32, @floatFromInt(std.math.maxInt(u16) - 1))),
         );
     }
 
@@ -408,8 +424,8 @@ pub fn alignPointNameFromType(align_type: HHAAlignPointType) String {
 
 pub fn alignPointTypeFromName(name: String) HHAAlignPointType {
     var result: HHAAlignPointType = .None;
-    const type_count: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len;
     var type_index: u32 = 0;
+    const type_count: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len;
     while (type_index < type_count) : (type_index += 1) {
         const align_type: HHAAlignPointType = @intFromEnum(type_index);
         if (shared.stringBuffersEqual(name, alignPointTypeFromName(align_type))) {

@@ -593,9 +593,9 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                                 if (i == arg_index and field.type == u8) {
                                     value = @field(args, field.name);
                                     outChar(&temp_dest, value);
-                                    arg_index += 1;
                                 }
                             }
+                            arg_index += 1;
                         }
                     },
                     's' => {
@@ -603,9 +603,15 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                             var value: [*]const u8 = "";
                             inline for (fields_info, 0..) |field, i| {
                                 if (i == arg_index) {
-                                    if (field.type == [*:0]const u8) {
+                                    if (field.type == [*:0]const u8 or
+                                        field.type == [*]const u8 or
+                                        field.type == [*]u8)
+                                    {
                                         value = @field(args, field.name);
-                                    } else if (field.type == [:0]const u8) {
+                                    } else if (field.type == [:0]const u8 or
+                                        field.type == []const u8 or
+                                        field.type == []u8)
+                                    {
                                         value = @field(args, field.name).ptr;
                                     }
 
@@ -622,9 +628,9 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                                     }
 
                                     temp_dest.at = @constCast(value + temp_dest.size);
-                                    arg_index += 1;
                                 }
                             }
+                            arg_index += 1;
                         }
                     },
                     'p' => {
@@ -634,9 +640,9 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                                 if (i == arg_index and field.type == @TypeOf(value)) {
                                     value = @field(args, field.name);
                                     u64ToASCII(&temp_dest, @intCast(value), 16, lower_hex_chars);
-                                    arg_index += 1;
                                 }
                             }
+                            arg_index += 1;
                         }
                     },
                     'n' => {
@@ -646,9 +652,9 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                                 if (i == arg_index and field.type == @TypeOf(value)) {
                                     value = @field(args, field.name);
                                     value.* = dest.at - &dest_init;
-                                    arg_index += 1;
                                 }
                             }
+                            arg_index += 1;
                         }
                     },
                     '%' => {
