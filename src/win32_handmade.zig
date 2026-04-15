@@ -68,6 +68,7 @@ const TextureQueue = renderer.TextureQueue;
 const TextureOp = renderer.TextureOp;
 const RenderCommands = renderer.RenderCommands;
 const Rectangle2i = math.Rectangle2i;
+const String = types.String;
 const TicketMutex = types.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
@@ -144,6 +145,8 @@ const Win32State = extern struct {
 
     exe_file_name: [STATE_FILE_NAME_COUNT:0]u8 = undefined,
     one_past_last_exe_file_name_slash: usize = 0,
+
+    temp_dll_number: u32 = 0,
 };
 
 const MemoryBlockLoopingFlag = enum(u64) {
@@ -734,13 +737,21 @@ fn timeIsValid(time: win32.FILETIME) bool {
     return time.dwLowDateTime != 0 or time.dwHighDateTime != 0;
 }
 
-fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Game {
+fn loadGameCode(state: *Win32State, source_dll_name: [*:0]const u8) Game {
     var result = Game{};
+    var temp_dll_name = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
 
-    _ = win32.CopyFileA(source_dll_name, temp_dll_name, win32.FALSE);
+    while (state.temp_dll_number < 1024) {
+        buildExePathFileNameWithNumber(state, state.temp_dll_number, "handmade_temp.dll", &temp_dll_name);
+        if (win32.CopyFileA(source_dll_name, @ptrCast(&temp_dll_name), win32.FALSE) != 0) {
+            break;
+        } else {
+            state.temp_dll_number += 1;
+        }
+    }
 
     result.last_write_time = getLastWriteTime(source_dll_name);
-    result.dll = win32.LoadLibraryA(temp_dll_name);
+    result.dll = win32.LoadLibraryA(@ptrCast(&temp_dll_name));
     result.debugFrameEnd = null;
 
     if (result.dll) |library| {
@@ -774,7 +785,10 @@ fn loadGameCode(source_dll_name: [*:0]const u8, temp_dll_name: [*:0]const u8) Ga
 
 fn unloadGameCode(game: *Game) void {
     if (game.dll) |dll| {
-        _ = win32.FreeLibrary(dll);
+        _ = dll;
+        // TODO: Currently, we never unload libraries, because we may still be pointing to strings that are inside
+        // them (despite our best efforts). Should we just make "never unload" be the policy?
+        // _ = win32.FreeLibrary(dll);
         game.dll = undefined;
     }
 
@@ -1558,42 +1572,36 @@ fn getSecondsElapsed(start: win32.LARGE_INTEGER, end: win32.LARGE_INTEGER) f32 {
     return @as(f32, @floatFromInt(end.QuadPart - start.QuadPart)) / @as(f32, @floatFromInt(perf_count_frequency));
 }
 
-fn catStrings(
-    source_a: []const u8,
-    source_b: []const u8,
-    dest: [:0]u8,
-) void {
-    var index: usize = 0;
-    for (source_a) |a| {
-        dest[index] = a;
-        index += 1;
-    }
-
-    for (source_b) |b| {
-        dest[index] = b;
-        index += 1;
-    }
-}
-
 fn getExeFileName(state: *Win32State) void {
     state.exe_file_name = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
 
     _ = win32.GetModuleFileNameA(null, &state.exe_file_name, @sizeOf(u8) * STATE_FILE_NAME_COUNT);
 
-    state.one_past_last_exe_file_name_slash = 0;
-    for (state.exe_file_name, 0..) |char, index| {
-        if (char == '\\') {
-            state.one_past_last_exe_file_name_slash = index + 1;
+    state.one_past_last_exe_file_name_slash = @intFromPtr(&state.exe_file_name);
+    var scan: [*]const u8 = @ptrCast(&state.exe_file_name);
+    while (scan[0] != 0) : (scan += 1) {
+        if (scan[0] == '\\') {
+            state.one_past_last_exe_file_name_slash = @intFromPtr(scan) + 1;
         }
     }
 }
 
+fn buildExePathFileNameWithNumber(state: *Win32State, unique: u32, file_name: []const u8, dest: [:0]u8) void {
+    const a: String = .{
+        .data = @ptrCast(&state.exe_file_name),
+        .count = state.one_past_last_exe_file_name_slash - @intFromPtr(&state.exe_file_name),
+    };
+    const b: String = .fromSlice(file_name);
+
+    if (unique == 0) {
+        _ = shared.formatString(dest.len, @ptrCast(dest.ptr), "%S%S", .{ a, b });
+    } else {
+        _ = shared.formatString(dest.len, @ptrCast(dest.ptr), "%S%d_%S", .{ a, unique, b });
+    }
+}
+
 fn buildExePathFileName(state: *Win32State, file_name: []const u8, dest: [:0]u8) void {
-    catStrings(
-        state.exe_file_name[0..state.one_past_last_exe_file_name_slash],
-        file_name,
-        dest,
-    );
+    buildExePathFileNameWithNumber(state, 0, file_name, dest);
 }
 
 fn getInputFileLocation(state: *Win32State, is_input: bool, slot_index: u32, dest: [:0]u8) void {
@@ -1973,8 +1981,6 @@ pub export fn wWinMain(
 
     var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
     buildExePathFileName(state, "handmade.dll", &source_dll_path);
-    var temp_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
-    buildExePathFileName(state, "handmade_temp.dll", &temp_dll_path);
 
     var performance_frequency: win32.LARGE_INTEGER = undefined;
     _ = win32.QueryPerformanceFrequency(&performance_frequency);
@@ -2143,7 +2149,7 @@ pub export fn wWinMain(
                 var flip_wall_clock: win32.LARGE_INTEGER = getWallClock();
 
                 // Load the game code.
-                var game = loadGameCode(&source_dll_path, &temp_dll_path);
+                var game = loadGameCode(state, &source_dll_path);
                 global_debug_table.setEventRecording(game.is_valid);
 
                 running = true;
@@ -2393,7 +2399,7 @@ pub export fn wWinMain(
 
                         if (executable_needs_reloading) {
                             unloadGameCode(&game);
-                            game = loadGameCode(&source_dll_path, &temp_dll_path);
+                            game = loadGameCode(state, &source_dll_path);
                             game_memory.executable_reloaded = true;
                             global_debug_table.setEventRecording(game.is_valid);
                         }

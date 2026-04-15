@@ -633,6 +633,28 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                             arg_index += 1;
                         }
                     },
+                    'S' => {
+                        if (fields_info.len > arg_index) {
+                            var value: String = .empty;
+                            inline for (fields_info, 0..) |field, i| {
+                                if (i == arg_index) {
+                                    if (field.type == String) {
+                                        value = @field(args, field.name);
+                                    }
+
+                                    temp = @constCast(value.data);
+                                    temp_dest.size = value.count;
+
+                                    if (precision_specified) {
+                                        temp_dest.size = @intCast(precision);
+                                    }
+
+                                    temp_dest.at = @constCast(temp + temp_dest.size);
+                                }
+                            }
+                            arg_index += 1;
+                        }
+                    },
                     'p' => {
                         if (fields_info.len > arg_index) {
                             var value: usize = 0;

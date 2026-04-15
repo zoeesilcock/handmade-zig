@@ -39,6 +39,8 @@ pub const DevUI = struct {
     text_transform: ObjectTransform,
     tooltip_transform: ObjectTransform,
 
+    ui_space: Rectangle2,
+
     mouse_position: Vector2,
     last_mouse_position: Vector2,
     delta_mouse_position: Vector2,
@@ -48,9 +50,6 @@ pub const DevUI = struct {
 
     hot_interaction: Interaction,
     next_hot_interaction: Interaction,
-
-    to_execute: Interaction,
-    next_to_execute: Interaction,
 
     //
     // Per-frame.
@@ -93,7 +92,7 @@ pub const DevUI = struct {
 
     pub fn beginFrame(self: *DevUI, assets: *Assets, commands: *RenderCommands, input: *const GameInput) void {
         const width: f32 = @floatFromInt(commands.window_width);
-        // const height: f32 = @floatFromInt(commands.window_height);
+        const height: f32 = @floatFromInt(commands.window_height);
 
         self.render_group =
             RenderGroup.begin(assets, commands, @intFromEnum(RenderGroupFlags.ClearDepth), null);
@@ -110,6 +109,12 @@ pub const DevUI = struct {
             null,
             null,
         );
+
+        self.ui_space = .fromCenterDimension(
+            .new(0, 0),
+            .new(width, height),
+        );
+
         self.default_clip_rect = self.render_group.last_setup.clip_rect;
         self.tooltips.line_count = 0;
 
@@ -128,9 +133,6 @@ pub const DevUI = struct {
 
         self.render_group.end();
         memory.zeroStruct(Interaction, &self.next_hot_interaction);
-
-        self.to_execute = self.next_to_execute;
-        memory.zeroStruct(Interaction, &self.next_to_execute);
     }
 
     pub fn interactionIsHot(self: *DevUI, interaction: *const Interaction) bool {
@@ -432,6 +434,21 @@ pub fn textOp(
     return result;
 }
 
+const SectionPickerMove = enum(u32) {
+    Init,
+    Keep,
+    Previous,
+    Next,
+};
+
+pub const SectionPicker = struct {
+    move: SectionPickerMove,
+    previous_section_id: DevId,
+    current_section_id: DevId,
+    current_name: String,
+    current_section_exists: bool,
+};
+
 pub const Layout = struct {
     ui: *DevUI = undefined,
     mouse_position: Vector2 = .zero(),
@@ -444,11 +461,14 @@ pub const Layout = struct {
     next_y_delta: f32 = 0,
     spacing_x: f32 = 0,
     spacing_y: f32 = 0,
+    thickness: f32 = 0,
 
     no_line_feed: u32 = 0,
     line_initialized: bool = false,
 
     edit_occurred: bool = false,
+
+    to_execute: Interaction = .none,
 
     pub fn begin(ui: *DevUI, upper_corner: Vector2) Layout {
         var layout: Layout = .{
@@ -460,12 +480,32 @@ pub const Layout = struct {
             .depth = 0,
             .spacing_x = 4,
             .spacing_y = 4,
+            .thickness = 6,
             .line_initialized = false,
         };
 
         if (ui.font_info) |font_info| {
             layout.line_advance = ui.font_scale * font_info.getLineAdvance();
         }
+        return layout;
+    }
+
+    pub fn beginBox(ui: *DevUI, box: Rectangle2, opt_backdrop_color: ?Color) Layout {
+        const backdrop_color: Color = opt_backdrop_color orelse .new(0, 0, 0, 0.75);
+        const upper_corner: Vector2 = .new(box.min.x() + 6, box.max.y() - 6);
+        const layout: Layout = begin(ui, upper_corner);
+
+        if (layout.mouse_position.isInRectangle(box)) {
+            ui.next_hot_interaction.interaction_type = .NoOp;
+        }
+
+        ui.render_group.pushRectangle2(
+            &ui.backing_transform,
+            box,
+            0,
+            backdrop_color,
+        );
+
         return layout;
     }
 
@@ -487,7 +527,7 @@ pub const Layout = struct {
 
     pub fn label(self: *Layout, name: [:0]const u8) void {
         const null_interaction: Interaction = .{};
-        _ = basicTextElement(name, self, null_interaction, Color.white(), Color.white(), null, null);
+        _ = basicTextElement(name, self, null_interaction, Color.white(), Color.white(), self.thickness, null);
     }
 
     pub fn actionButton(self: *Layout, name: [:0]const u8, interaction: Interaction) void {
@@ -497,7 +537,7 @@ pub const Layout = struct {
             interaction,
             Color.new(0.5, 0.5, 0.5, 1),
             Color.white(),
-            4,
+            self.thickness,
             Color.new(0, 0.5, 1, 1),
         );
     }
@@ -509,7 +549,7 @@ pub const Layout = struct {
             interaction,
             if (highlight) Color.white() else Color.new(0.5, 0.5, 0.5, 1),
             Color.white(),
-            4,
+            self.thickness,
             Color.new(0, 0.5, 1, 1),
         );
     }
@@ -532,13 +572,67 @@ pub const Layout = struct {
         self.advanceElement(Rectangle2.fromMinMax(self.at, self.at));
     }
 
-    pub fn beginSection(self: *Layout, label_text: []const u8) void {
+    pub fn beginSection(self: *Layout, picker: *SectionPicker, section_id: DevId, name: String) bool {
+        switch (picker.move) {
+            .Init => {
+                picker.current_section_id = section_id;
+                picker.move = .Keep;
+            },
+            .Previous => {
+                if (picker.current_section_id.equals(section_id)) {
+                    picker.current_section_id = picker.previous_section_id;
+                    picker.move = .Keep;
+                    picker.current_section_exists = true;
+                }
+            },
+            .Next => {
+                if (picker.current_section_id.equals(picker.previous_section_id)) {
+                    picker.current_section_id = section_id;
+                    picker.move = .Keep;
+                }
+            },
+            else => {},
+        }
+
+        if (picker.current_section_id.equals(picker.previous_section_id)) {}
+
+        const result: bool = picker.current_section_id.equals(section_id);
+        picker.previous_section_id = section_id;
+
+        if (result) {
+            picker.current_name = name;
+            picker.current_section_exists = true;
+        }
+
         _ = self;
-        _ = label_text;
+        return result;
     }
 
     pub fn endSection(self: *Layout) void {
         _ = self;
+    }
+
+    pub fn sectionPicker(self: *Layout, picker: *SectionPicker) void {
+        const id: DevId = .fromPointer(@ptrCast(picker));
+
+        var left_label: [:0]const u8 = "<";
+        var right_label: [:0]const u8 = ">";
+
+        if (self.buttonWithClassifier(id, @ptrCast(&left_label), left_label, null, null)) {
+            picker.move = .Previous;
+        }
+
+        if (self.buttonWithClassifier(id, @ptrCast(&right_label), right_label, null, null)) {
+            picker.move = .Next;
+        }
+
+        self.labelF("%s", .{picker.current_name.data});
+
+        if (!picker.current_section_exists) {
+            picker.move = .Init;
+        }
+
+        picker.current_section_exists = false;
     }
 
     pub fn labelF(self: *Layout, comptime format: [*]const u8, args: anytype) void {
@@ -553,30 +647,55 @@ pub const Layout = struct {
         classifier: ?*anyopaque,
         label_text: [:0]const u8,
         opt_enabled: ?bool,
+        opt_backdrop_color: ?Color,
     ) bool {
+        const backdrop_color: Color = opt_backdrop_color orelse .new(0, 0.35, 0.7, 1);
         const enabled: bool = opt_enabled orelse true;
-        const interaction: Interaction = .{
+        var interaction: Interaction = .{
             .id = id,
             .interaction_type = .ImmediateButton,
             .target = classifier,
         };
 
-        if (enabled) {
-            self.actionButton(label_text, interaction);
-        } else {
-            self.label(label_text);
-        }
-
         var result: bool = false;
         if (id.isValid()) {
-            result = interaction.equals(self.ui.to_execute);
+            result = interaction.equals(self.to_execute);
+        }
+
+        if (enabled) {
+            _ = basicTextElement(
+                label_text,
+                self,
+                interaction,
+                Color.new(0.75, 0.75, 0.75, 1),
+                Color.white(),
+                self.thickness,
+                backdrop_color,
+            );
+        } else {
+            interaction.interaction_type = .NoOp;
+            _ = basicTextElement(
+                label_text,
+                self,
+                interaction,
+                Color.new(0.5, 0.5, 0.5, 1),
+                Color.new(0.5, 0.5, 0.5, 1),
+                self.thickness,
+                Color.new(0.25, 0.25, 0.25, 1),
+            );
         }
 
         return result;
     }
 
-    pub fn button(self: *Layout, id: DevId, label_text: [:0]const u8, opt_enabled: ?bool) bool {
-        const result = self.buttonWithClassifier(id, null, label_text, opt_enabled);
+    pub fn button(
+        self: *Layout,
+        id: DevId,
+        label_text: [:0]const u8,
+        opt_enabled: ?bool,
+        opt_backdrop_color: ?Color,
+    ) bool {
+        const result = self.buttonWithClassifier(id, null, label_text, opt_enabled, opt_backdrop_color);
         return result;
     }
 
@@ -593,30 +712,36 @@ pub const Layout = struct {
     }
 
     pub fn editableBoolean(self: *Layout, id: DevId, label_text: [:0]const u8, value: *bool) void {
-        if (self.button(id, if (value.*) "*" else "-", null)) {
+        var temp: [64]u8 = undefined;
+        const check_mark: [:0]const u8 = if (value.*) "+" else "-";
+        const length: usize = shared.formatString(temp.len, &temp, "%s%s", .{ check_mark, label_text });
+        const backdrop_color: Color = if (value.*) .new(0.1, 0.5, 0.1, 1) else .new(0.5, 0.1, 0.1, 1);
+
+        if (self.button(id, @ptrCast(temp[0..length]), true, backdrop_color)) {
             self.edit_occurred = true;
             value.* = !value.*;
         }
-        self.label(label_text);
     }
 
     pub fn editableType(self: *Layout, id: DevId, label_text: [:0]const u8, value_name: String, value: *u32) void {
         var left_label: [:0]const u8 = "<";
         var right_label: [:0]const u8 = ">";
 
-        self.label(label_text);
+        if (label_text.len > 0) {
+            self.label(label_text);
+        }
 
-        if (self.buttonWithClassifier(id, @ptrCast(&left_label), left_label, null)) {
+        if (self.buttonWithClassifier(id, @ptrCast(&left_label), left_label, null, null)) {
             value.* -= 1;
             self.edit_occurred = true;
         }
 
-        self.labelF("%s", .{value_name.data});
-
-        if (self.buttonWithClassifier(id, @ptrCast(&right_label), right_label, null)) {
+        if (self.buttonWithClassifier(id, @ptrCast(&right_label), right_label, null, null)) {
             value.* += 1;
             self.edit_occurred = true;
         }
+
+        self.labelF("%s", .{value_name.data});
     }
 
     pub fn editableSize(self: *Layout, id: DevId, label_text: [:0]const u8, value: *f32) void {
@@ -634,7 +759,7 @@ pub const Layout = struct {
             interaction,
             .new(0.8, 0.8, 0.8, 1),
             .white(),
-            6,
+            self.thickness,
             .new(0.7, 0.5, 0.3, 0.5),
         );
 
@@ -669,7 +794,7 @@ pub const Layout = struct {
             interaction,
             .new(0.8, 0.8, 0.8, 1),
             .white(),
-            6,
+            self.thickness,
             .new(0.7, 0.5, 0.3, 0.5),
         );
 

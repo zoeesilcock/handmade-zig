@@ -12,6 +12,7 @@ const dev_ui = @import("dev_ui.zig");
 // Types.
 const DevUI = dev_ui.DevUI;
 const DevId = types.DevId;
+const String = types.String;
 const Vector2 = math.Vector2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
@@ -185,10 +186,15 @@ pub const InGameEditor = struct {
     active_asset_index: u32 = 0,
     highlight_id: DevId,
 
+    main_section: dev_ui.SectionPicker,
+
     clean_undo_sentinel_next: ?*InGameEdit, // Tells us whether we are "dirty" or not.
     undo_sentinel: InGameEdit,
     redo_sentinel: InGameEdit,
     in_progress_sentinel: InGameEdit,
+
+    to_execute: dev_ui.Interaction,
+    next_to_execute: dev_ui.Interaction,
 
     pub fn init(self: *InGameEditor, assets: *Assets) void {
         self.undo_memory.allocation_flags |= @intFromEnum(PlatformMemoryBlockFlags.NotRestored);
@@ -336,33 +342,66 @@ pub const InGameEditor = struct {
 
     pub fn updateAndRender(self: *InGameEditor, ui: *DevUI) void {
         if (self.mode != .None) {
-            var layout: dev_ui.Layout = .begin(ui, .new(0, 0));
+            var layout: dev_ui.Layout = .beginBox(
+                ui,
+                .fromMinMax(
+                    ui.ui_space.min,
+                    .new(ui.ui_space.min.x() + 700, 0),
+                ),
+                null,
+            );
+            layout.to_execute = self.to_execute;
 
             layout.beginRow();
-            if (layout.button(.fromPointerAndLine(self, @src()), "SAVE", self.isDirty())) {
-                self.clean_undo_sentinel_next = self.undo_sentinel.next;
-            }
-
-            if (layout.button(.fromPointerAndLine(self, @src()), "REVERT", self.isDirty())) {
-                while (self.clean_undo_sentinel_next != self.undo_sentinel.next) {
-                    self.undo();
-                }
-            }
-            layout.endRow();
-
-            layout.beginRow();
-            if (layout.button(.fromPointerAndLine(self, @src()), "UNDO", self.undoAvailable())) {
+            if (layout.button(.fromPointerAndLine(self, @src()), "UNDO", self.undoAvailable(), null)) {
                 self.undo();
             }
-            if (layout.button(.fromPointerAndLine(self, @src()), "REDO", self.redoAvailable())) {
+            if (layout.button(.fromPointerAndLine(self, @src()), "REDO", self.redoAvailable(), null)) {
                 self.redo();
             }
+
+            layout.sectionPicker(&self.main_section);
             layout.endRow();
+
+            var hha_section_name: []const u8 = "HHA";
+            if (layout.beginSection(
+                &self.main_section,
+                .fromPointerAndLine(@ptrCast(&hha_section_name), @src()),
+                .fromSlice(hha_section_name),
+            )) {
+                layout.beginRow();
+                if (layout.button(.fromPointerAndLine(self, @src()), "SAVE", self.isDirty(), null)) {
+                    self.clean_undo_sentinel_next = self.undo_sentinel.next;
+                }
+                layout.endRow();
+
+                layout.beginRow();
+                layout.endRow();
+
+                layout.beginRow();
+                if (layout.button(.fromPointerAndLine(self, @src()), "REVERT", self.isDirty(), null)) {
+                    while (self.clean_undo_sentinel_next != self.undo_sentinel.next) {
+                        self.undo();
+                    }
+                }
+                layout.endRow();
+                layout.endSection();
+            }
 
             switch (self.mode) {
                 .EditingAssets => self.assetEditor(&layout),
                 else => {},
             }
+
+            if (self.to_execute.isValid() and !self.next_to_execute.isValid()) {
+                while (!self.in_progress_sentinel.isEmpty()) {
+                    self.undo_sentinel.pushFirst(
+                        self.in_progress_sentinel.popFirst().?,
+                    );
+                }
+            }
+            self.to_execute = self.next_to_execute;
+            memory.zeroStruct(dev_ui.Interaction, &self.next_to_execute);
         }
     }
 
@@ -394,7 +433,7 @@ pub const InGameEditor = struct {
             switch (ui.interaction.interaction_type) {
                 .ImmediateButton, .Draggable => {
                     if (mouse_up) {
-                        ui.next_to_execute = ui.interaction;
+                        self.next_to_execute = ui.interaction;
                         end_interaction = true;
                     }
                 },
@@ -426,12 +465,6 @@ pub const InGameEditor = struct {
 
             if (end_interaction) {
                 ui.interaction.clear();
-
-                while (!self.in_progress_sentinel.isEmpty()) {
-                    self.undo_sentinel.pushFirst(
-                        self.in_progress_sentinel.popFirst().?,
-                    );
-                }
             }
 
             mouse_button = !mouse_button;
@@ -447,82 +480,88 @@ pub const InGameEditor = struct {
             switch (hha.type) {
                 .Bitmap => {
                     const bitmap: *HHABitmap = &asset.hha.info.bitmap;
-                    layout.beginSection("Alignment Points");
-                    var point_index: u32 = 0;
-                    while (point_index < bitmap.align_points.len) : (point_index += 1) {
-                        const point: *HHAAlignPoint = &bitmap.align_points[point_index];
+                    var section_name: []const u8 = "Alignment Points";
+                    if (layout.beginSection(
+                        &self.main_section,
+                        .fromPointerAndLine(@ptrCast(&section_name), @src()),
+                        .fromSlice(section_name),
+                    )) {
+                        var point_index: u32 = 0;
+                        while (point_index < bitmap.align_points.len) : (point_index += 1) {
+                            const point: *HHAAlignPoint = &bitmap.align_points[point_index];
 
-                        var to_parent: bool = point.isToParent();
-                        const align_point_type: HHAAlignPointType = point.getType();
-                        var align_point_type_int: u32 = @intFromEnum(align_point_type);
-                        var position_percent: Vector2 = point.getPositionPercent();
-                        var size: f32 = point.getSize();
+                            var to_parent: bool = point.isToParent();
+                            const align_point_type: HHAAlignPointType = point.getType();
+                            var align_point_type_int: u32 = @intFromEnum(align_point_type);
+                            var position_percent: Vector2 = point.getPositionPercent();
+                            var size: f32 = point.getSize();
 
-                        layout.beginRow();
-                        layout.labelF("[%d]", .{point_index});
+                            layout.beginRow();
+                            layout.labelF("[%d]", .{point_index});
 
-                        if (align_point_type_int == @intFromEnum(HHAAlignPointType.None)) {
-                            if (layout.button(.fromPointerAndLine(point, @src()), "[unused]", null)) {
-                                self.editAlignPoint(
-                                    asset_index,
-                                    point_index,
-                                    .Default,
-                                    false,
-                                    1,
-                                    .new(0.5, 0.5),
-                                );
-                            }
-                        } else {
-                            const change_block: dev_ui.EditBlock = layout.beginEditBlock();
-                            layout.editableBoolean(.fromPointerAndLine(point, @src()), "ToParent", &to_parent);
-                            layout.editableType(
-                                .fromPointerAndLine(point, @src()),
-                                "Type",
-                                file_formats.alignPointNameFromType(align_point_type),
-                                &align_point_type_int,
-                            );
-                            layout.editableSize(.fromPointerAndLine(point, @src()), "Size", &size);
-                            layout.editablePositionXY(
-                                .fromPointerAndLine(point, @src()),
-                                "PercentP",
-                                0,
-                                &position_percent.values[0],
-                                1,
-                                0,
-                                &position_percent.values[1],
-                                1,
-                            );
-
-                            if (layout.endEditBlock(change_block)) {
-                                if (align_point_type_int == 0) {
-                                    align_point_type_int = HHA_ALIGN_POINT_TYPE_COUNT - 1;
-                                } else if (align_point_type_int >= HHA_ALIGN_POINT_TYPE_COUNT) {
-                                    align_point_type_int = 1;
+                            if (align_point_type_int == @intFromEnum(HHAAlignPointType.None)) {
+                                if (layout.button(.fromPointerAndLine(point, @src()), "[ADD]", null, null)) {
+                                    self.editAlignPoint(
+                                        asset_index,
+                                        point_index,
+                                        .Default,
+                                        false,
+                                        1,
+                                        .new(0.5, 0.5),
+                                    );
                                 }
-
-                                self.editAlignPoint(
-                                    asset_index,
-                                    point_index,
-                                    @enumFromInt(align_point_type_int),
-                                    to_parent,
-                                    size,
-                                    position_percent,
-                                );
-                            }
-                            if (layout.button(.fromPointerAndLine(point, @src()), "[DELETE]", null)) {
-                                self.editAlignPoint(
-                                    asset_index,
-                                    point_index,
-                                    .None,
-                                    false,
+                            } else {
+                                const change_block: dev_ui.EditBlock = layout.beginEditBlock();
+                                if (layout.button(.fromPointerAndLine(point, @src()), "[DEL]", null, null)) {
+                                    self.editAlignPoint(
+                                        asset_index,
+                                        point_index,
+                                        .None,
+                                        false,
+                                        1,
+                                        .new(0.5, 0.5),
+                                    );
+                                }
+                                layout.editableBoolean(.fromPointerAndLine(point, @src()), "ToPar", &to_parent);
+                                layout.editableSize(.fromPointerAndLine(point, @src()), "S", &size);
+                                layout.editablePositionXY(
+                                    .fromPointerAndLine(point, @src()),
+                                    "P",
+                                    0,
+                                    &position_percent.values[0],
                                     1,
-                                    .new(0.5, 0.5),
+                                    0,
+                                    &position_percent.values[1],
+                                    1,
                                 );
+                                layout.editableType(
+                                    .fromPointerAndLine(point, @src()),
+                                    "",
+                                    file_formats.alignPointNameFromType(align_point_type),
+                                    &align_point_type_int,
+                                );
+
+                                if (layout.endEditBlock(change_block)) {
+                                    if (align_point_type_int == 0) {
+                                        align_point_type_int = HHA_ALIGN_POINT_TYPE_COUNT - 1;
+                                    } else if (align_point_type_int >= HHA_ALIGN_POINT_TYPE_COUNT) {
+                                        align_point_type_int = 1;
+                                    }
+
+                                    self.editAlignPoint(
+                                        asset_index,
+                                        point_index,
+                                        @enumFromInt(align_point_type_int),
+                                        to_parent,
+                                        size,
+                                        position_percent,
+                                    );
+                                }
                             }
+                            layout.endRow();
                         }
-                        layout.endRow();
+                        layout.endSection();
                     }
-                    layout.endSection();
                 },
                 else => {},
             }
