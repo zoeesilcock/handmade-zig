@@ -293,35 +293,6 @@ pub const CameraTransformFlag = enum(u32) {
     UsesFog = 0x8,
 };
 
-pub const ObjectTransform = extern struct {
-    upright: bool,
-    offset_position: Vector3,
-    scale: f32,
-
-    pub fn defaultUpright() ObjectTransform {
-        return ObjectTransform{
-            .upright = true,
-            .offset_position = Vector3.zero(),
-            .scale = 1,
-        };
-    }
-
-    pub fn defaultFlat() ObjectTransform {
-        return ObjectTransform{
-            .upright = false,
-            .offset_position = Vector3.zero(),
-            .scale = 1,
-        };
-    }
-    pub fn getRenderEntityBasisPosition(
-        object_transform: *const ObjectTransform,
-        original_position: Vector3,
-    ) Vector3 {
-        const position: Vector3 = original_position.xy().toVector3(0).plus(object_transform.offset_position);
-        return position;
-    }
-};
-
 const PushBufferResult = extern struct {
     header: ?*RenderEntryHeader = null,
 };
@@ -550,9 +521,6 @@ pub const RenderGroup = extern struct {
     }
 
     pub fn getCameraRectangleAtDistance(self: *RenderGroup, distance_from_camera: f32) Rectangle3 {
-        var transform: ObjectTransform = .defaultFlat();
-        _ = transform.offset_position.setZ(-distance_from_camera);
-
         const min_corner = self.unproject(&self.game_transform, .new(-1, -1), distance_from_camera);
         const max_corner = self.unproject(&self.game_transform, .new(1, 1), distance_from_camera);
 
@@ -1122,13 +1090,11 @@ pub const RenderGroup = extern struct {
 
     pub fn pushRectangle(
         self: *RenderGroup,
-        object_transform: *const ObjectTransform,
+        position: Vector3,
         dimension: Vector2,
-        offset: Vector3,
         color: Color,
     ) void {
-        const position = offset.minus(dimension.scaledTo(0.5).toVector3(0));
-        const basis_position = object_transform.getRenderEntityBasisPosition(position);
+        const basis_position = position.minus(dimension.scaledTo(0.5).toVector3(0));
 
         if (self.getCurrentQuads(1, self.white_texture) != null) {
             const premultiplied_color: Color = storeColor(color);
@@ -1164,31 +1130,27 @@ pub const RenderGroup = extern struct {
 
     pub fn pushRectangle2(
         self: *RenderGroup,
-        object_transform: *const ObjectTransform,
         rectangle: Rectangle2,
-        z: f32,
+        offset: Vector3,
         color: Color,
     ) void {
         self.pushRectangle(
-            object_transform,
+            rectangle.getCenter().toVector3(0).plus(offset),
             rectangle.getDimension(),
-            rectangle.toRectangle3(z, z).getCenter(),
             color,
         );
     }
 
     pub fn pushRectangle2Outline(
         self: *RenderGroup,
-        object_transform: *const ObjectTransform,
         rectangle: Rectangle2,
-        z: f32,
+        offset: Vector3,
         color: Color,
         thickness: f32,
     ) void {
         self.pushRectangleOutline(
-            object_transform,
             rectangle.getDimension(),
-            rectangle.toRectangle3(z, z).getCenter(),
+            rectangle.getCenter().toVector3(0).plus(offset),
             color,
             thickness,
         );
@@ -1196,56 +1158,49 @@ pub const RenderGroup = extern struct {
 
     pub fn pushRectangleOutline(
         self: *RenderGroup,
-        object_transform: *const ObjectTransform,
         dimension: Vector2,
         offset: Vector3,
         color: Color,
         thickness: f32,
     ) void {
         self.pushRectangle(
-            object_transform,
-            Vector2.new(dimension.x() - thickness - 0.01, thickness),
             offset.minus(Vector3.new(0, 0.5 * dimension.y(), 0)),
+            Vector2.new(dimension.x() - thickness - 0.01, thickness),
             color,
         );
         self.pushRectangle(
-            object_transform,
-            Vector2.new(dimension.x() - thickness - 0.01, thickness),
             offset.plus(Vector3.new(0, 0.5 * dimension.y(), 0)),
+            Vector2.new(dimension.x() - thickness - 0.01, thickness),
             color,
         );
 
         self.pushRectangle(
-            object_transform,
-            Vector2.new(thickness, dimension.y() + thickness),
             offset.minus(Vector3.new(0.5 * dimension.x(), 0, 0)),
+            Vector2.new(thickness, dimension.y() + thickness),
             color,
         );
         self.pushRectangle(
-            object_transform,
-            Vector2.new(thickness, dimension.y() + thickness),
             offset.plus(Vector3.new(0.5 * dimension.x(), 0, 0)),
+            Vector2.new(thickness, dimension.y() + thickness),
             color,
         );
     }
 
     pub fn pushVolumeOutline(
         self: *RenderGroup,
-        object_transform: *const ObjectTransform,
         rectangle: Rectangle3,
         color: Color,
         thickness: f32,
     ) void {
         if (self.getCurrentQuads(6, self.white_texture) != null) {
             const texture: RendererTexture = self.white_texture;
-            const offset_position: Vector3 = object_transform.offset_position;
 
-            const nx: f32 = offset_position.x() + rectangle.min.x();
-            const px: f32 = offset_position.x() + rectangle.max.x();
-            const ny: f32 = offset_position.y() + rectangle.min.y();
-            const py: f32 = offset_position.y() + rectangle.max.y();
-            const nz: f32 = offset_position.z() + rectangle.min.z();
-            const pz: f32 = offset_position.z() + rectangle.max.z();
+            const nx: f32 = rectangle.min.x();
+            const px: f32 = rectangle.max.x();
+            const ny: f32 = rectangle.min.y();
+            const py: f32 = rectangle.max.y();
+            const nz: f32 = rectangle.min.z();
+            const pz: f32 = rectangle.max.z();
 
             const p0: Vector3 = .new(nx, ny, pz);
             const p1: Vector3 = .new(px, ny, pz);
@@ -1394,11 +1349,10 @@ pub const RenderGroup = extern struct {
 
     fn getClipSpacePoint(
         self: *RenderGroup,
-        object_transform: *ObjectTransform,
         world_position: Vector3,
     ) Vector2 {
         var position: Vector4 =
-            self.last_setup.projection.timesV(world_position.plus(object_transform.offset_position)).toVector4(1);
+            self.last_setup.projection.timesV(world_position).toVector4(1);
         _ = position.setXYZ(position.xyz().dividedByF(position.w()));
 
         return position.xy();
@@ -1406,27 +1360,21 @@ pub const RenderGroup = extern struct {
 
     pub fn getClipRectByTransform(
         self: *RenderGroup,
-        object_transform: *ObjectTransform,
         offset: Vector3,
         dimension: Vector2,
     ) Rectangle2 {
-        const min_corner: Vector2 = self.getClipSpacePoint(object_transform, offset);
-        const max_corner: Vector2 = self.getClipSpacePoint(object_transform, offset.plus(dimension.toVector3(0)));
+        const min_corner: Vector2 = self.getClipSpacePoint(offset);
+        const max_corner: Vector2 = self.getClipSpacePoint(offset.plus(dimension.toVector3(0)));
 
         return .fromMinMax(min_corner, max_corner);
     }
 
     pub fn getClipRectByRectangle(
         self: *RenderGroup,
-        object_transform: *ObjectTransform,
         rectangle: Rectangle2,
         z: f32,
     ) Rectangle2 {
-        return self.getClipRectByTransform(
-            object_transform,
-            rectangle.min.toVector3(z),
-            rectangle.getDimension(),
-        );
+        return self.getClipRectByTransform(rectangle.min.toVector3(z), rectangle.getDimension());
     }
 
     pub fn pushRenderTarget(self: *RenderGroup, render_target_index: u32) u32 {

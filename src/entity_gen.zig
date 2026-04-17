@@ -19,12 +19,14 @@ const EntityFlags = entities.EntityFlags;
 const EntityVisiblePiece = entities.EntityVisiblePiece;
 const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
 const TraversableReference = entities.TraversableReference;
+const BitmapPiece = entities.BitmapPiece;
 const Rectangle3 = math.Rectangle3;
 const SimRegion = sim.SimRegion;
 const WorldGenerator = world_gen.WorldGenerator;
 const WorldPosition = world_mod.WorldPosition;
 const AssetTagId = file_formats.AssetTagId;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
+const HHAAlignPointType = file_formats.HHAAlignPointType;
 const BrainId = brains.BrainId;
 const BrainSlot = brains.BrainSlot;
 const BrainHero = brains.BrainHero;
@@ -73,6 +75,25 @@ pub fn addPiece(
     opt_movement_flags: ?u32,
 ) *EntityVisiblePiece {
     return addPieceV3(entity, category, .new(0, height, 0), offset, color, opt_movement_flags);
+}
+
+fn connectPiece(
+    entity: *Entity,
+    parent: *EntityVisiblePiece,
+    parent_type: HHAAlignPointType,
+    child: *EntityVisiblePiece,
+    child_type: HHAAlignPointType,
+) void {
+    std.debug.assert(child.isBitmap());
+
+    const bitmap: *BitmapPiece = &child.extra.bitmap;
+    bitmap.parent_piece = @intCast(
+        @as([*]EntityVisiblePiece, @ptrCast(parent)) - @as([*]EntityVisiblePiece, @ptrCast(&entity.pieces)),
+    );
+    bitmap.parent_align_type = @intCast(@intFromEnum(parent_type));
+    bitmap.child_align_type = @intCast(@intFromEnum(child_type));
+
+    std.debug.assert(@intFromPtr(parent) < @intFromPtr(child));
 }
 
 fn addPieceLight(
@@ -150,8 +171,10 @@ pub fn addCat(region: *SimRegion, world_position: WorldPosition, standing_on: Tr
     // entity.brain_id = sim.addBrain(region);
     entity.occupying = standing_on;
 
-    _ = addPiece(entity, .Body, 1.5, .new(0, 0, 1), .white(), null);
-    _ = addPiece(entity, .Head, 1, .new(0, 0, 1.2), .white(), null);
+    const body: *EntityVisiblePiece = addPiece(entity, .Body, 1.5, .new(0, 0, 1), .white(), null);
+    const head: *EntityVisiblePiece = addPiece(entity, .Head, 1, .new(0, 0, 1.2), .white(), null);
+
+    connectPiece(entity, body, .Default, head, .BaseOfNeck);
 
     placeEntity(region, entity, world_position);
 

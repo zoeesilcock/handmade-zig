@@ -21,6 +21,7 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
+const Matrix4x4 = math.Matrix4x4;
 const BrainId = brains.BrainId;
 const BrainType = brains.BrainType;
 const BrainSlot = brains.BrainSlot;
@@ -33,7 +34,6 @@ const ManualSortKey = renderer.ManualSortKey;
 const ParticleCache = particles.ParticleCache;
 const RenderGroup = renderer.RenderGroup;
 const TransientClipRect = renderer.TransientClipRect;
-const ObjectTransform = renderer.ObjectTransform;
 const RenderTransform = renderer.RenderTransform;
 const AssetTagId = file_formats.AssetTagId;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
@@ -80,6 +80,14 @@ pub const EntityMovementMode = enum(u32) {
     AngleAttackSwipe,
 };
 
+pub const BitmapPiece = extern struct {
+    // Parents must ALWAYS come before children.
+    parent_piece: u8,
+    parent_align_type: u8, // file_formats.HHAAlignPointType,
+    child_align_type: u8, // file_formats.HHAAlignPointType,
+    reserved: u8,
+};
+
 pub const EntityVisiblePieceFlag = enum(u32) {
     AxesDeform = 0x1,
     BobOffset = 0x2,
@@ -96,8 +104,14 @@ pub const EntityVisiblePiece = extern struct {
     category: AssetBasicCategory,
 
     extra: extern union {
+        bitmap: BitmapPiece,
         cube_uv_layout: renderer.CubeUVLayout,
     },
+
+    pub fn isBitmap(self: *EntityVisiblePiece) bool {
+        return (self.flags &
+            (@intFromEnum(EntityVisiblePieceFlag.Cube) | @intFromEnum(EntityVisiblePieceFlag.Light))) == 0;
+    }
 };
 
 pub const CameraBehavior = enum(u32) {
@@ -177,7 +191,7 @@ pub const Entity = extern struct {
     traversables: [16]EntityTraversablePoint,
 
     piece_count: u32,
-    pieces: [ENTITY_MAX_PIECE_COUNT]EntityVisiblePiece, // 0 is the "on top" piece.
+    pieces: [ENTITY_MAX_PIECE_COUNT]EntityVisiblePiece,
 
     auto_boost_to: TraversableReference,
 
@@ -310,65 +324,6 @@ pub const EntityTraversablePoint = extern struct {
     position: Vector3,
     occupier: ?*Entity,
 };
-
-fn debugPickEntity(
-    entity: *Entity,
-    render_group: *RenderGroup,
-    entity_transform: *ObjectTransform,
-) void {
-    const entity_debug_id = types.DevId.fromPointer(&entity.id.value);
-
-    if (debug_interface.requested(entity_debug_id)) {
-        DebugInterface.debugBeginDataBlock(@src(), "Simulation/Entity");
-    }
-
-    // TODO: This needs to do raycasting now, if we want to reenable it.
-    _ = render_group;
-    _ = entity_transform;
-    // if (shared.DEBUG) {
-    //     var volume_index: u32 = 0;
-    //     while (volume_index < entity.collision.volume_count) : (volume_index += 1) {
-    //         const volume = entity.collision.volumes[volume_index];
-    //         const local_mouse_position = render_group.unproject(
-    //             entity_transform,
-    //             DebugInterface.debugGetMousePosition(),
-    //             1,
-    //         );
-    //
-    //         if (local_mouse_position.x() > -0.5 * volume.dimension.x() and
-    //             local_mouse_position.x() < 0.5 * volume.dimension.x() and
-    //             local_mouse_position.y() > -0.5 * volume.dimension.y() and
-    //             local_mouse_position.y() < 0.5 * volume.dimension.y())
-    //         {
-    //             debug_interface.hit(entity_debug_id, local_mouse_position.z());
-    //         }
-    //
-    //         var outline_color: Color = undefined;
-    //         if (debug_interface.highlighted(entity_debug_id, &outline_color)) {
-    //             render_group.pushRectangleOutline(
-    //                 entity_transform,
-    //                 volume.dimension.xy(),
-    //                 volume.offset_position.minus(Vector3.new(0, 0, 0.5 * volume.dimension.z())),
-    //                 outline_color,
-    //                 0.05,
-    //             );
-    //         }
-    //     }
-    // }
-
-    if (global_config.Simulation_InspectSelectedEntity) {
-        if (debug_interface.requested(entity_debug_id)) {
-            DebugInterface.debugStruct(@src(), entity);
-            // DebugInterface.debugBeginArray(entity.hit_points);
-            // var hit_point_index: u32 = 0;
-            // while (hit_point_index < entity.hit_points.len) : (hit_point_index += 1) {
-            //     DebugInterface.debugValue(@src(), entity.hit_points[hit_point_index]);
-            // }
-            // DebugInterface.debugEndArray();
-            DebugInterface.debugEndDataBlock(@src());
-        }
-    }
-}
 
 pub fn updateAndRenderEntities(
     sim_region: *SimRegion,
@@ -511,8 +466,7 @@ pub fn updateAndRenderEntities(
 
             TimedBlock.beginBlock(@src(), .EntityRender);
             if (opt_render_group) |render_group| {
-                var entity_transform = ObjectTransform.defaultUpright();
-                entity_transform.offset_position = entity.getGroundPoint();
+                const entity_ground_point: Vector3 = entity.getGroundPoint();
 
                 var match_vector = asset.AssetVector{};
                 match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
@@ -543,6 +497,9 @@ pub fn updateAndRenderEntities(
                 // time and that way we can use the low bits for maintaining order? Or maybe we just use a stable sort?
 
                 TimedBlock.beginBlock(@src(), .EntityRenderPieces);
+
+                // var piece_transforms: [ENTITY_MAX_PIECE_COUNT]Matrix4x4 = undefined;
+
                 var piece_index: u32 = 0;
                 while (piece_index < entity.piece_count) : (piece_index += 1) {
                     const piece: *EntityVisiblePiece = &entity.pieces[piece_index];
@@ -574,7 +531,7 @@ pub fn updateAndRenderEntities(
                     if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Light) != 0) {
                         asset_rendering.pushCubeLight(
                             render_group,
-                            entity_transform.offset_position.plus(piece.offset),
+                            entity_ground_point.plus(piece.offset),
                             piece.dimension,
                             color.rgb(),
                             color.a(),
@@ -584,7 +541,7 @@ pub fn updateAndRenderEntities(
                         asset_rendering.pushCubeBitmapId(
                             render_group,
                             bitmap_id,
-                            entity_transform.offset_position.plus(piece.offset),
+                            entity_ground_point.plus(piece.offset),
                             piece.dimension,
                             color,
                             piece.extra.cube_uv_layout,
@@ -594,24 +551,47 @@ pub fn updateAndRenderEntities(
                     } else {
                         _ = world_radius.setX(world_radius.y());
                         _ = world_radius.setZ(0.1);
-                        asset_rendering.pushBitmapId(
-                            render_group,
-                            &entity_transform,
-                            bitmap_id,
-                            piece.dimension.y(),
-                            piece.offset.plus(offset),
-                            color,
-                            null,
-                            x_axis,
-                            y_axis,
-                        );
+
+                        if (opt_assets) |assets| {
+                            if (bitmap_id) |id| {
+                                const bitmap_info: *file_formats.HHABitmap = assets.getBitmapInfo(id);
+                                if (assets.getBitmap(id)) |bitmap| {
+                                    const align_percentage: Vector2 = bitmap_info.getFirstAlign();
+
+                                    var bitmap_dim = asset_rendering.getBitmapDim(
+                                        bitmap,
+                                        piece.dimension.y(),
+                                        entity_ground_point.plus(piece.offset.plus(offset)),
+                                        align_percentage,
+                                        x_axis,
+                                        y_axis,
+                                    );
+
+                                    asset_rendering.pushBitmapWithDim(
+                                        render_group,
+                                        true,
+                                        &bitmap_dim,
+                                        bitmap,
+                                        piece.dimension.y(),
+                                        entity_ground_point.plus(piece.offset.plus(offset)),
+                                        color,
+                                        align_percentage,
+                                        x_axis,
+                                        y_axis,
+                                    );
+                                } else {
+                                    assets.loadBitmap(id, false);
+                                    render_group.missing_resource_count += 1;
+                                }
+                            }
+                        }
                     }
 
                     const dev_id: types.DevId = .fromU32s(entity.id.value, piece_index, @src());
 
                     if (bitmap_id != null) {
                         if (hit_test.shouldHitTest()) {
-                            const world_position: Vector3 = entity_transform.offset_position.plus(piece.offset);
+                            const world_position: Vector3 = entity_ground_point.plus(piece.offset);
 
                             const t_hit = picking_origin.rayIntersectsBox(picking_ray, world_position, world_radius);
                             if (t_hit < std.math.floatMax(f32)) {
@@ -621,8 +601,7 @@ pub fn updateAndRenderEntities(
 
                         if (dev_id.equals(hit_test.highlight_id)) {
                             render_group.pushVolumeOutline(
-                                &entity_transform,
-                                .fromCenterHalfDimension(piece.offset, world_radius),
+                                .fromCenterHalfDimension(entity_ground_point.plus(piece.offset), world_radius),
                                 hit_test.highlight_color,
                                 0.1,
                             );
@@ -632,11 +611,10 @@ pub fn updateAndRenderEntities(
                 TimedBlock.endBlock(@src(), .EntityRenderPieces);
 
                 TimedBlock.beginBlock(@src(), .EntityRenderHitpoints);
-                drawHitPoints(entity, render_group, &entity_transform);
+                drawHitPoints(entity, render_group, entity_ground_point);
                 TimedBlock.endBlock(@src(), .EntityRenderHitpoints);
 
                 TimedBlock.beginBlock(@src(), .EntityRenderVolume);
-                entity_transform.upright = false;
                 {
                     if (global_config.Simulation_VisualizeCollisionVolumes) {
                         if (entity.collision_volume.hasArea()) {
@@ -646,7 +624,7 @@ pub fn updateAndRenderEntities(
                                 color = .new(1, 0, 1, 1);
                             }
 
-                            render_group.pushVolumeOutline(&entity_transform, entity.collision_volume, color, 0.01);
+                            render_group.pushVolumeOutline(entity.collision_volume, color, 0.01);
                         }
                     }
 
@@ -663,14 +641,12 @@ pub fn updateAndRenderEntities(
                             }
 
                             render_group.pushRectangle(
-                                &entity_transform,
-                                Vector2.new(1.4, 1.4),
                                 traversable.position,
+                                Vector2.new(1.4, 1.4),
                                 color,
                             );
 
                             // render_group.pushRectangleOutline(
-                            //     entity_transform,
                             //     Vector2.new(1.2, 1.2),
                             //     traversable.position,
                             //     Color.new(0, 0, 0, 1),
@@ -680,20 +656,13 @@ pub fn updateAndRenderEntities(
                     }
                 }
                 TimedBlock.endBlock(@src(), .EntityRenderVolume);
-
                 TimedBlock.endBlock(@src(), .EntityRender);
-
-                TimedBlock.beginBlock(@src(), .EntityDebug);
-                if (INTERNAL) {
-                    debugPickEntity(entity, render_group, &entity_transform);
-                }
-                TimedBlock.endBlock(@src(), .EntityDebug);
             }
         }
     }
 }
 
-fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, object_transform: *ObjectTransform) void {
+fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, ground_point: Vector3) void {
     if (entity.hit_point_max >= 1) {
         const hit_point_dimension = Vector2.new(0.2, 0.2);
         const hit_point_spacing_x = hit_point_dimension.x() * 2;
@@ -710,9 +679,8 @@ fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, object_transform: 
             }
 
             render_group.pushRectangle(
-                object_transform,
+                ground_point.plus(hit_position.toVector3(0.1)),
                 hit_point_dimension,
-                hit_position.toVector3(0.1),
                 hit_point_color,
             );
             hit_position = hit_position.plus(hit_position_delta);

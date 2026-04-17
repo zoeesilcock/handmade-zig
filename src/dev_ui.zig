@@ -22,7 +22,6 @@ const Rectangle2 = math.Rectangle2;
 const Color = math.Color;
 const String = types.String;
 const RenderGroup = renderer.RenderGroup;
-const ObjectTransform = renderer.ObjectTransform;
 const LoadedFont = asset.LoadedFont;
 const FontId = file_formats.FontId;
 const HHAFont = file_formats.HHAFont;
@@ -33,11 +32,11 @@ pub const DevUI = struct {
     font_id: FontId,
     font_info: ?*HHAFont,
     font_scale: f32,
-    backing_transform: ObjectTransform,
-    shadow_transform: ObjectTransform,
-    ui_transform: ObjectTransform,
-    text_transform: ObjectTransform,
-    tooltip_transform: ObjectTransform,
+    backing_transform: Vector3,
+    shadow_transform: Vector3,
+    ui_transform: Vector3,
+    text_transform: Vector3,
+    tooltip_transform: Vector3,
 
     ui_space: Rectangle2,
 
@@ -71,17 +70,11 @@ pub const DevUI = struct {
         self.font_info = assets.getFontInfo(self.font_id);
         self.font_scale = 1;
 
-        self.backing_transform = ObjectTransform.defaultFlat();
-        self.shadow_transform = ObjectTransform.defaultFlat();
-        self.ui_transform = ObjectTransform.defaultFlat();
-        self.text_transform = ObjectTransform.defaultFlat();
-        self.tooltip_transform = ObjectTransform.defaultFlat();
-
-        _ = self.backing_transform.offset_position.setZ(-5000);
-        _ = self.shadow_transform.offset_position.setZ(-4000);
-        _ = self.ui_transform.offset_position.setZ(-3000);
-        _ = self.text_transform.offset_position.setZ(-2000);
-        _ = self.tooltip_transform.offset_position.setZ(-1000);
+        self.backing_transform = .new(0, 0, -5000);
+        self.shadow_transform = .new(0, 0, -4000);
+        self.ui_transform = .new(0, 0, -3000);
+        self.text_transform = .new(0, 0, -2000);
+        self.tooltip_transform = .new(0, 0, -1000);
 
         self.last_mouse_position = .zero();
         self.alt_ui = false;
@@ -304,8 +297,8 @@ pub fn textOp(
     const opt_font: ?*asset.LoadedFont = ui.font;
     const font_info: ?*HHAFont = ui.font_info;
     const font_scale: f32 = ui.font_scale;
-    const shadow_transform: *ObjectTransform = &ui.shadow_transform;
-    const text_transform: *ObjectTransform = &ui.text_transform;
+    const shadow_transform: *Vector3 = &ui.shadow_transform;
+    const text_transform: *Vector3 = &ui.text_transform;
 
     var rect_found = false;
     var color = color_in;
@@ -373,26 +366,26 @@ pub fn textOp(
                         const bitmap_scale = char_scale * @as(f32, @floatFromInt(bitmap_info.dim[1]));
                         const bitamp_offset: Vector3 = Vector3.new(x, position.y(), z);
 
+                        const align_percentage: Vector2 = bitmap_info.getFirstAlign();
+
                         if (op == .DrawText) {
                             asset_rendering.pushBitmapId(
                                 render_group,
-                                shadow_transform,
                                 bitmap_id,
                                 bitmap_scale,
-                                bitamp_offset.plus(Vector3.new(2, -2, 0)),
+                                shadow_transform.plus(bitamp_offset).plus(Vector3.new(2, -2, 0)),
                                 Color.black(),
-                                null,
+                                align_percentage,
                                 null,
                                 null,
                             );
                             asset_rendering.pushBitmapId(
                                 render_group,
-                                text_transform,
                                 bitmap_id,
                                 bitmap_scale,
-                                bitamp_offset,
+                                text_transform.plus(bitamp_offset),
                                 color,
-                                null,
+                                align_percentage,
                                 null,
                                 null,
                             );
@@ -401,11 +394,10 @@ pub fn textOp(
 
                             if (render_group.assets.getBitmap(bitmap_id)) |bitmap| {
                                 const dim = asset_rendering.getBitmapDim(
-                                    &ObjectTransform.defaultFlat(),
                                     bitmap,
                                     bitmap_scale,
                                     bitamp_offset,
-                                    1,
+                                    align_percentage,
                                     null,
                                     null,
                                 );
@@ -500,9 +492,8 @@ pub const Layout = struct {
         }
 
         ui.render_group.pushRectangle2(
-            &ui.backing_transform,
             box,
-            0,
+            ui.backing_transform,
             backdrop_color,
         );
 
@@ -828,7 +819,6 @@ pub const LayoutElement = struct {
     pub fn end(self: *LayoutElement) void {
         const layout: *Layout = self.layout;
         const ui: *DevUI = layout.ui;
-        const no_transform = ui.backing_transform;
 
         if (!layout.line_initialized) {
             _ = layout.at.setX(
@@ -868,39 +858,35 @@ pub const LayoutElement = struct {
 
         if (self.size) |size| {
             render_group.pushRectangle2(
-                &no_transform,
                 Rectangle2.fromMinMax(
                     Vector2.new(total_min_corner.x(), interior_min_corner.y()),
                     Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
                 ),
-                0,
+                .zero(),
                 Color.black(),
             );
             render_group.pushRectangle2(
-                &no_transform,
                 Rectangle2.fromMinMax(
                     Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
                     Vector2.new(total_max_corner.x(), total_max_corner.y()),
                 ),
-                0,
+                .zero(),
                 Color.black(),
             );
             render_group.pushRectangle2(
-                &no_transform,
                 Rectangle2.fromMinMax(
                     Vector2.new(interior_min_corner.x(), total_min_corner.y()),
                     Vector2.new(interior_max_corner.x(), interior_min_corner.y()),
                 ),
-                0,
+                .zero(),
                 Color.black(),
             );
             render_group.pushRectangle2(
-                &no_transform,
                 Rectangle2.fromMinMax(
                     Vector2.new(interior_min_corner.x(), interior_max_corner.y()),
                     Vector2.new(interior_max_corner.x(), total_max_corner.y()),
                 ),
-                0,
+                .zero(),
                 Color.black(),
             );
 
@@ -915,7 +901,7 @@ pub const LayoutElement = struct {
             ).addRadius(Vector2.splat(4));
             const size_box_color: Color =
                 if (layout.ui.interactionIsHot(&size_interaction)) Color.new(1, 1, 0, 1) else Color.white();
-            render_group.pushRectangle2(&no_transform, size_box, 0, size_box_color);
+            render_group.pushRectangle2(size_box, .zero(), size_box_color);
 
             if (layout.mouse_position.isInRectangle(size_box)) {
                 ui.next_hot_interaction = size_interaction;
@@ -957,9 +943,8 @@ pub fn basicTextElement(
 
     if (opt_backdrop_color) |backdrop_color| {
         ui.render_group.pushRectangle2(
-            &ui.backing_transform,
             layout_element.bounds,
-            0,
+            ui.backing_transform,
             backdrop_color,
         );
     }
@@ -1020,9 +1005,8 @@ pub fn drawLineBuffer(ui: *DevUI, buffer: *LineBuffer, layout: *Layout) void {
         layout_element.end();
 
         layout.ui.render_group.pushRectangle2(
-            &layout.ui.tooltip_transform,
             layout_element.bounds.addRadius(.new(4, 4)),
-            0,
+            layout.ui.tooltip_transform,
             .new(0, 0, 0, 0.75),
         );
 

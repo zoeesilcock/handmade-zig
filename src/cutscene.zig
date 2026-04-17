@@ -18,7 +18,6 @@ const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Matrix4x4 = math.Matrix4x4;
 const Color = math.Color;
-const ObjectTransform = renderer.ObjectTransform;
 const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const RenderCommands = renderer.RenderCommands;
@@ -432,7 +431,7 @@ fn renderLayeredScene(
             const layer_image = assets.getBestMatchBitmap(scene.asset_type, &match_vector, &weight_vector);
 
             if (opt_render_group) |render_group| {
-                var transform = ObjectTransform.defaultFlat();
+                var offset_position: Vector3 = .zero();
                 var position: Vector3 = layer.position;
 
                 if (layer.flags & @intFromEnum(SceneLayerFlags.AtInfinity) != 0) {
@@ -444,27 +443,28 @@ fn renderLayeredScene(
                 }
 
                 if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraX) != 0) {
-                    _ = transform.offset_position.setX(position.x() + camera_offset.x());
+                    _ = offset_position.setX(position.x() + camera_offset.x());
                 } else {
-                    _ = transform.offset_position.setX(position.x() - camera_offset.x());
+                    _ = offset_position.setX(position.x() - camera_offset.x());
                 }
 
                 if (layer.flags & @intFromEnum(SceneLayerFlags.CounterCameraY) != 0) {
-                    _ = transform.offset_position.setY(position.y() + camera_offset.y());
+                    _ = offset_position.setY(position.y() + camera_offset.y());
                 } else {
-                    _ = transform.offset_position.setY(position.y() - camera_offset.y());
+                    _ = offset_position.setY(position.y() - camera_offset.y());
                 }
 
-                _ = transform.offset_position.setZ(position.z() - camera_offset.z());
+                _ = offset_position.setZ(position.z() - camera_offset.z());
 
+                const bitmap_info = render_group.assets.getBitmapInfo(layer_image.?);
+                const align_percentage: Vector2 = bitmap_info.getFirstAlign();
                 asset_rendering.pushBitmapId(
                     render_group,
-                    &transform,
                     layer_image,
                     layer.height,
-                    Vector3.zero(),
+                    offset_position,
                     color,
-                    null,
+                    align_percentage,
                     null,
                     null,
                 );

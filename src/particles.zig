@@ -18,7 +18,6 @@ const Color = math.Color;
 const V3_4x = simd.V3_4x;
 const V4_4x = simd.V4_4x;
 const RenderGroup = renderer.RenderGroup;
-const ObjectTransform = renderer.ObjectTransform;
 const EntityId = entities.EntityId;
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
 const Assets = asset.Assets;
@@ -129,7 +128,6 @@ fn updateAndRenderFire(
     render_group: *RenderGroup,
 ) void {
     const frame_displacement: V3_4x = .fromVector3(frame_displacement_in);
-    var transform: ObjectTransform = .defaultUpright();
 
     // const grid_scale: f32 = 0.25;
     // const inv_grid_scale: f32 = 1 / grid_scale;
@@ -264,7 +262,16 @@ fn updateAndRenderFire(
             const p: Vector3 = .new(a.p.x[sub_index], a.p.y[sub_index], a.p.z[sub_index]);
             const c: Color = .new(a.c.r[sub_index], a.c.g[sub_index], a.c.b[sub_index], a.c.a[sub_index]);
             if (c.a() > 0) {
-                asset_rendering.pushBitmapId(render_group, &transform, system.bitmap_id, 1, p, c, null, null, null);
+                asset_rendering.pushBitmapId(
+                    render_group,
+                    system.bitmap_id,
+                    1,
+                    p,
+                    c,
+                    .new(0.5, 0.5),
+                    null,
+                    null,
+                );
             }
         }
     }

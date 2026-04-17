@@ -45,7 +45,6 @@ const BitmapId = file_formats.BitmapId;
 const RenderGroup = renderer.RenderGroup;
 const RenderCommands = renderer.RenderCommands;
 const RenderGroupFlags = renderer.RenderGroupFlags;
-const ObjectTransform = renderer.ObjectTransform;
 const TransientClipRect = renderer.TransientClipRect;
 const LightingSolution = lighting.LightingSolution;
 const LightingTextures = lighting.LightingTextures;
@@ -637,8 +636,6 @@ pub fn updateAndRenderWorld(
             frame_to_frame_camera_delta_position.negated(),
         );
 
-        var world_transform = ObjectTransform.defaultUpright();
-
         var min_chunk_position: WorldPosition = world_mode.camera.position;
         min_chunk_position.offset = .zero();
         var max_chunk_position: WorldPosition = min_chunk_position;
@@ -653,53 +650,45 @@ pub fn updateAndRenderWorld(
 
         if (false) {
             // render_group.pushVolumeOutline(
-            //     &world_transform,
             //     .fromMinMax(.new(-1, -1, -1), .new(1, 1, 1)),
             //     .new(1, 1, 0, 1),
             //     0.01,
             // );
             render_group.pushVolumeOutline(
-                &world_transform,
                 world_camera_rect,
                 .new(1, 1, 1, 1),
                 0.1,
             );
             render_group.pushVolumeOutline(
-                &world_transform,
                 chunk_boundary,
                 .new(1, 0.5, 0, 1),
                 0.1,
             );
             render_group.pushRectangleOutline(
-                &world_transform,
                 screen_bounds.getDimension(),
                 Vector3.new(0, 0, 0.005),
                 Color.new(1, 1, 0, 1),
                 0.1,
             );
             render_group.pushRectangleOutline(
-                &world_transform,
                 screen_bounds.getDimension(),
                 Vector3.new(0, 0, 0.005),
                 Color.new(1, 1, 0, 1),
                 0.1,
             );
             // render_group.pushRectangleOutline(
-            //     &world_transform,
             //     camera_bounds_in_meters.getDimension().xy(),
             //     Vector3.zero(),
             //     Color.new(1, 1, 1, 1),
             //     0.1,
             // );
             render_group.pushRectangleOutline(
-                &world_transform,
                 light_bounds.getDimension().xy(),
                 Vector3.new(0, 0, 0.005),
                 Color.new(0, 1, 1, 1),
                 0.1,
             );
             render_group.pushRectangleOutline(
-                &world_transform,
                 world_sim.sim_region.bounds.getDimension().xy(),
                 Vector3.new(0, 0, 0.005),
                 Color.new(1, 0, 1, 1),
@@ -712,7 +701,6 @@ pub fn updateAndRenderWorld(
             while (room_index < world_mode.world.room_count) : (room_index += 1) {
                 const room: *WorldRoom = &world_mode.world.rooms[room_index];
                 render_group.pushVolumeOutline(
-                    &world_transform,
                     .fromMinMax(
                         sim.mapIntoSimSpace(world_sim.sim_region, room.min_pos),
                         sim.mapIntoSimSpace(world_sim.sim_region, room.max_pos),

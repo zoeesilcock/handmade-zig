@@ -284,6 +284,10 @@ pub const HHABitmap = extern struct {
     // Data looks like this:
     //
     // pixels: [dim[1]][dim[0]]u16,
+
+    pub fn getFirstAlign(self: *HHABitmap) Vector2 {
+        return self.align_points[0].getPositionPercent();
+    }
 };
 
 pub const HHASoundChain = enum(u32) {

@@ -1140,9 +1140,8 @@ fn drawFrameSlider(
     const frame_count: u32 = root_element.frames.len;
     if (frame_count > 0) {
         render_group.pushRectangle2(
-            &ui.backing_transform,
             total_rect,
-            0,
+            ui.backing_transform,
             Color.new(0, 0, 0, 0.25),
         );
 
@@ -1176,10 +1175,10 @@ fn drawFrameSlider(
             }
 
             if (highlight) {
-                render_group.pushRectangle2(&ui.ui_transform, region_rect, 0, highlight_color);
+                render_group.pushRectangle2(region_rect, ui.ui_transform, highlight_color);
             }
 
-            render_group.pushRectangle2Outline(&ui.ui_transform, region_rect, 1, color, 2);
+            render_group.pushRectangle2Outline(region_rect, ui.ui_transform.plus(.new(0, 0, 1)), color, 2);
 
             if (mouse_position.isInRectangle(region_rect)) {
                 const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
@@ -1278,8 +1277,8 @@ fn drawProfileBars(
         const lane_y: f32 = profile_rect.max.y() - lane_stride * lane;
 
         const region_rect = math.Rectangle2.new(this_min_x, lane_y - lane_height, this_max_x, lane_y);
-        render_group.pushRectangle2(&ui.ui_transform, region_rect, base_z, color.toColor(1));
-        render_group.pushRectangle2Outline(&ui.ui_transform, region_rect, base_z + 1, Color.black(), 2);
+        render_group.pushRectangle2(region_rect, ui.ui_transform.plus(.new(0, 0, base_z)), color.toColor(1));
+        render_group.pushRectangle2Outline(region_rect, ui.ui_transform.plus(.new(0, 0, base_z + 1)), Color.black(), 2);
 
         if (mouse_position.isInRectangle(region_rect)) {
             const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
@@ -1351,15 +1350,13 @@ fn drawFrameBars(
 
                 const region_rect = math.Rectangle2.new(at_x, this_min_y, at_x + bar_width, this_max_y);
                 render_group.pushRectangle2(
-                    &ui.ui_transform,
                     region_rect,
-                    0,
+                    ui.ui_transform,
                     color.toColor(1).scaledTo(highlight_dim),
                 );
                 render_group.pushRectangle2Outline(
-                    &ui.ui_transform,
                     region_rect,
-                    0,
+                    ui.ui_transform,
                     Color.black(),
                     2,
                 );
@@ -1605,7 +1602,6 @@ fn drawDebugElement(
 
     const ui: *DevUI = &debug_state.dev_ui;
     var render_group: *RenderGroup = &ui.render_group;
-    const no_transform = ui.backing_transform;
     _ = frame_ordinal;
     // const opt_stored_event: ?*DebugStoredEvent = element.frames[frame_ordinal].most_recent_event;
 
@@ -1627,11 +1623,10 @@ fn drawDebugElement(
             if (opt_event) |event| {
                 if (render_group.assets.getBitmap(event.data.BitmapId)) |bitmap| {
                     var dim = asset_rendering.getBitmapDim(
-                        &no_transform,
                         bitmap,
                         bitmap_scale,
                         Vector3.zero(),
-                        0,
+                        .zero(),
                         null,
                         null,
                     );
@@ -1646,21 +1641,19 @@ fn drawDebugElement(
             layout_element.end();
 
             render_group.pushRectangle2(
-                &ui.backing_transform,
                 layout_element.bounds,
-                0,
+                ui.backing_transform,
                 Color.black(),
             );
 
             if (opt_bitmap) |bitmap| {
                 asset_rendering.pushBitmap(
                     render_group,
-                    &ui.backing_transform,
                     bitmap,
                     bitmap_scale,
-                    layout_element.bounds.min.toVector3(1),
+                    layout_element.bounds.min.toVector3(1).plus(ui.backing_transform),
                     Color.white(),
-                    0,
+                    .zero(),
                     null,
                     null,
                 );
@@ -1692,18 +1685,16 @@ fn drawDebugElement(
             layout_element.end();
 
             render_group.pushRectangle2(
-                &ui.backing_transform,
                 layout_element.bounds,
-                0,
+                ui.backing_transform,
                 Color.new(0, 0, 0, 0.75),
             );
 
             const transient_clip_rect: TransientClipRect = .initWith(
                 render_group,
                 render_group.getClipRectByRectangle(
-                    &ui.backing_transform,
                     layout_element.bounds,
-                    0,
+                    ui.backing_transform.z(),
                 ),
             );
             defer transient_clip_rect.restore();
@@ -1757,18 +1748,16 @@ fn drawDebugElement(
             layout_element.end();
 
             render_group.pushRectangle2(
-                &ui.backing_transform,
                 layout_element.bounds,
-                0,
+                ui.backing_transform,
                 Color.new(0, 0, 0, 0.75),
             );
 
             const transient_clip_rect: TransientClipRect = .initWith(
                 render_group,
                 render_group.getClipRectByRectangle(
-                    &ui.backing_transform,
                     layout_element.bounds,
-                    0,
+                    ui.backing_transform.z(),
                 ),
             );
             defer transient_clip_rect.restore();
@@ -1960,7 +1949,7 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
             tree.ui_position.minus(Vector2.new(4, 4)),
             Vector2.new(4, 4),
         );
-        render_group.pushRectangle2(&ObjectTransform.defaultFlat(), move_box, 0, move_box_color);
+        render_group.pushRectangle2(move_box, .zero(), move_box_color);
 
         if (mouse_position.isInRectangle(move_box)) {
             ui.next_hot_interaction = move_interaction;

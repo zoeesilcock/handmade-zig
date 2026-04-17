@@ -827,17 +827,13 @@ pub const Assets = struct {
                         asset.header = self.acquireAssetMemory(types.align16(size.total), id.value, .Bitmap);
 
                         var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
-
-                        bitmap.alignment_percentage = info.align_points[0].getPositionPercent();
-                        bitmap.width_over_height = @as(f32, @floatFromInt(info.dim[0])) / @as(f32, @floatFromInt(info.dim[1]));
-                        bitmap.width = width;
-                        bitmap.height = height;
-                        bitmap.pitch = types.safeTruncateUInt32ToUInt16(size.section);
+                        const bitmap_width: u32 = width;
+                        const bitmap_height: u32 = height;
                         bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
                         bitmap.texture_handle = .empty;
 
                         var texture_handle: u32 = 0;
-                        if (self.dimensionsRequireSpecialTexture(@intCast(bitmap.width), @intCast(bitmap.height))) {
+                        if (self.dimensionsRequireSpecialTexture(@intCast(bitmap_width), @intCast(bitmap_height))) {
                             texture_handle = renderer.specialTextureIndexFrom(self.next_special_texture_handle);
                             self.next_special_texture_handle += 1;
                             if (self.next_special_texture_handle >= self.special_texture_handle_count) {
@@ -851,7 +847,7 @@ pub const Assets = struct {
                             texture_handle = self.next_free_texture_handle;
                             self.next_free_texture_handle += 1;
                         }
-                        bitmap.texture_handle = renderer.referToTexture(texture_handle, bitmap.width, bitmap.height);
+                        bitmap.texture_handle = renderer.referToTexture(texture_handle, bitmap_width, bitmap_height);
 
                         var work = LoadAssetWork{
                             .task = undefined,
@@ -1371,13 +1367,7 @@ pub const WritableBitmap = struct {
 };
 
 pub const LoadedBitmap = extern struct {
-    memory: ?[*]u8,
-
-    alignment_percentage: Vector2 = Vector2.zero(),
-    width_over_height: f32 = 0,
-    width: u16 = 0,
-    height: u16 = 0,
-    pitch: u16 = 0,
+    memory: ?[*]u8, // TODO: Really, we only need texture transfer buffers now.
     texture_handle: RendererTexture,
 };
 
