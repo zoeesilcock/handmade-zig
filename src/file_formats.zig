@@ -274,9 +274,10 @@ pub const HHAAlignPoint = extern struct {
     }
 };
 
+pub const HHA_BITMAP_ALIGN_POINT_COUNT = 12;
 pub const HHABitmap = extern struct {
     // These are imported from txt file augmentation of the PNG.
-    align_points: [12]HHAAlignPoint = [1]HHAAlignPoint{.{}} ** 12,
+    align_points: [HHA_BITMAP_ALIGN_POINT_COUNT]HHAAlignPoint = [1]HHAAlignPoint{.{}} ** HHA_BITMAP_ALIGN_POINT_COUNT,
 
     dim: [2]u16 = [1]u16{0} ** 2,
     reserved: [2]u16 = [1]u16{0} ** 2,

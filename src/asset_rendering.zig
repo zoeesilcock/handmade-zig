@@ -254,6 +254,7 @@ pub fn pushCubeBitmapId(
                 opt_uv_layout,
                 opt_emission,
                 opt_light_store_in,
+                null,
             );
         } else {
             group.assets.loadBitmap(id, false);
@@ -278,6 +279,7 @@ pub fn pushCubeLight(
         null,
         emission,
         opt_light_store,
+        null,
     );
 }
 

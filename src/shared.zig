@@ -29,6 +29,7 @@ const std = @import("std");
 // Types.
 const Vector2 = math.Vector2;
 const Color3 = math.Color3;
+const Color = math.Color;
 const Buffer = types.Buffer;
 const String = types.String;
 const LoadedBitmap = asset.LoadedBitmap;
@@ -938,7 +939,7 @@ pub fn debugFrameEndStub(_: *Memory, _: *GameInput, _: *RenderCommands) callconv
 pub var global_debug_table: *DebugTable = undefined;
 pub var debug_global_memory: ?*Memory = null;
 pub var debugFrameEnd: *const @TypeOf(debugFrameEndStub) = if (INTERNAL) @import("debug.zig").frameEnd else debugFrameEndStub;
-pub const debug_color_table: [11]Color3 = .{
+pub const debug_color_table = [_]Color3{
     Color3.new(1, 0, 0),
     Color3.new(0, 1, 0),
     Color3.new(0, 0, 1),
@@ -950,7 +951,22 @@ pub const debug_color_table: [11]Color3 = .{
     Color3.new(0.5, 1, 0),
     Color3.new(0, 1, 0.5),
     Color3.new(0.5, 0, 1),
+    Color3.new(1, 0.75, 0.5),
+    Color3.new(1, 0.5, 0.75),
+    Color3.new(0.75, 1, 0.5),
+    Color3.new(0.5, 1, 0.75),
+    Color3.new(0.5, 0.75, 1),
 };
+
+pub fn getDebugColor3(value: u32) Color3 {
+    const result = debug_color_table[@mod(value, debug_color_table.len)];
+    return result;
+}
+pub fn getDebugColor4(value: u32, opt_alpha: ?f32) Color {
+    const alpha: f32 = opt_alpha orelse 1;
+    const result: Color = getDebugColor3(value).toColor(alpha);
+    return result;
+}
 
 pub const SoundOutputBuffer = extern struct {
     // IMPORTANT: Samples must be padded to a multiple of 4 samples.

@@ -828,6 +828,7 @@ pub const RenderGroup = extern struct {
                     null,
                     null,
                     null,
+                    null,
                 );
             } else {
                 self.assets.loadBitmap(id, false);
@@ -845,10 +846,12 @@ pub const RenderGroup = extern struct {
         opt_uv_layout: ?CubeUVLayout,
         opt_emission: ?f32,
         opt_light_store_in: ?*LightingPointState,
+        opt_z_bias: ?f32,
     ) void {
         const uv_layout: CubeUVLayout = opt_uv_layout orelse .default;
         const emission = opt_emission orelse 0;
         var opt_light_store: ?*LightingPointState = opt_light_store_in;
+        const z_bias: f32 = opt_z_bias orelse 0;
 
         std.debug.assert(emission >= 0);
         std.debug.assert(emission <= 1);
@@ -865,14 +868,14 @@ pub const RenderGroup = extern struct {
             const nz: f32 = position.z() - radius.z();
             const pz: f32 = position.z() + radius.z();
 
-            const p0: Vector4 = .new(nx, ny, pz, 0);
-            const p1: Vector4 = .new(px, ny, pz, 0);
-            const p2: Vector4 = .new(px, py, pz, 0);
-            const p3: Vector4 = .new(nx, py, pz, 0);
-            const p4: Vector4 = .new(nx, ny, nz, 0);
-            const p5: Vector4 = .new(px, ny, nz, 0);
-            const p6: Vector4 = .new(px, py, nz, 0);
-            const p7: Vector4 = .new(nx, py, nz, 0);
+            const p0: Vector4 = .new(nx, ny, pz, z_bias);
+            const p1: Vector4 = .new(px, ny, pz, z_bias);
+            const p2: Vector4 = .new(px, py, pz, z_bias);
+            const p3: Vector4 = .new(nx, py, pz, z_bias);
+            const p4: Vector4 = .new(nx, ny, nz, z_bias);
+            const p5: Vector4 = .new(px, ny, nz, z_bias);
+            const p6: Vector4 = .new(px, py, nz, z_bias);
+            const p7: Vector4 = .new(nx, py, nz, z_bias);
 
             // const top_color: Color = storeColor(color);
             // const bottom_color: Color = .new(0, 0, 0, top_color.a());

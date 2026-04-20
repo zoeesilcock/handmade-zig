@@ -38,6 +38,7 @@ const RenderTransform = renderer.RenderTransform;
 const AssetTagId = file_formats.AssetTagId;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const BitmapId = file_formats.BitmapId;
+const HHAAlignPoint = file_formats.HHAAlignPoint;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 const LightingPoint = lighting.LightingPoint;
@@ -528,6 +529,9 @@ pub fn updateAndRenderEntities(
                     var color: Color = piece.color;
                     _ = color.setA(color.a() * (1.0 - 0.5 * match_vector.e[@intFromEnum(AssetTagId.Ghost)]));
 
+                    const dev_id: types.DevId = .fromU32s(entity.id.value, piece_index, @src());
+                    const highlighted: bool = dev_id.equals(hit_test.highlight_id);
+
                     if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Light) != 0) {
                         asset_rendering.pushCubeLight(
                             render_group,
@@ -579,6 +583,35 @@ pub fn updateAndRenderEntities(
                                         x_axis,
                                         y_axis,
                                     );
+
+                                    if (highlighted) {
+                                        var ap_index: u32 = 0;
+                                        while (ap_index < bitmap_info.align_points.len) : (ap_index += 1) {
+                                            const ap: HHAAlignPoint = bitmap_info.align_points[ap_index];
+
+                                            if (hit_test.shouldDrawAlignPoint(ap_index) and ap.getType() != .None) {
+                                                const temp_dim = asset_rendering.getBitmapDim(
+                                                    bitmap,
+                                                    piece.dimension.y(),
+                                                    bitmap_dim.position,
+                                                    ap.getPositionPercent().negated(),
+                                                    x_axis,
+                                                    y_axis,
+                                                );
+
+                                                render_group.pushCube(
+                                                    render_group.white_texture,
+                                                    temp_dim.position,
+                                                    .splat(0.04),
+                                                    shared.getDebugColor4(ap_index, null),
+                                                    null,
+                                                    null,
+                                                    null,
+                                                    3,
+                                                );
+                                            }
+                                        }
+                                    }
                                 } else {
                                     assets.loadBitmap(id, false);
                                     render_group.missing_resource_count += 1;
@@ -586,8 +619,6 @@ pub fn updateAndRenderEntities(
                             }
                         }
                     }
-
-                    const dev_id: types.DevId = .fromU32s(entity.id.value, piece_index, @src());
 
                     if (bitmap_id != null) {
                         if (hit_test.shouldHitTest()) {
@@ -599,7 +630,7 @@ pub fn updateAndRenderEntities(
                             }
                         }
 
-                        if (dev_id.equals(hit_test.highlight_id)) {
+                        if (highlighted) {
                             render_group.pushVolumeOutline(
                                 .fromCenterHalfDimension(entity_ground_point.plus(piece.offset), world_radius),
                                 hit_test.highlight_color,

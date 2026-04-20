@@ -13,6 +13,9 @@ const std = @import("std");
 const Assets = asset.Assets;
 const RenderCommands = renderer.RenderCommands;
 const RenderGroupFlags = renderer.RenderGroupFlags;
+const RenderGroup = renderer.RenderGroup;
+const RendererTexture = renderer.RendererTexture;
+const TransientClipRect = renderer.TransientClipRect;
 const GameInput = shared.GameInput;
 const DebugElement = debug.DebugElement;
 const DebugVariableLink = debug.DebugVariableLink;
@@ -21,12 +24,11 @@ const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const Color = math.Color;
 const String = types.String;
-const RenderGroup = renderer.RenderGroup;
 const LoadedFont = asset.LoadedFont;
+const BitmapId = file_formats.BitmapId;
 const FontId = file_formats.FontId;
 const HHAFont = file_formats.HHAFont;
 const DevId = types.DevId;
-const TransientClipRect = renderer.TransientClipRect;
 
 pub const DevUI = struct {
     font_id: FontId,
@@ -687,6 +689,73 @@ pub const Layout = struct {
         opt_backdrop_color: ?Color,
     ) bool {
         const result = self.buttonWithClassifier(id, null, label_text, opt_enabled, opt_backdrop_color);
+        return result;
+    }
+
+    pub fn buttonF(self: *Layout, id: DevId, enabled: bool, comptime format: [*]const u8, args: anytype) bool {
+        var temp: [64]u8 = undefined;
+        const length: usize = shared.formatString(temp.len, &temp, format, args);
+        return self.button(id, enabled, @ptrCast(temp[0..length]));
+    }
+
+    pub fn bitmapButton(
+        self: *Layout,
+        id: DevId,
+        classifier: ?*anyopaque,
+        width: f32,
+        height: f32,
+        bitmap_id: BitmapId,
+        enabled: bool,
+        highlighted: bool,
+    ) bool {
+        var interaction: Interaction = .{
+            .id = id,
+            .interaction_type = .ImmediateButton,
+            .target = classifier,
+        };
+
+        var result: bool = false;
+        if (id.isValid()) {
+            result = interaction.equals(self.to_execute);
+        }
+
+        const ui: *DevUI = self.ui;
+        const render_group: *RenderGroup = &ui.render_group;
+
+        const border: f32 = self.thickness;
+        var dim: Vector2 = Vector2.new(width + 2 * border, height + 2 * border);
+
+        var element: LayoutElement = self.beginElementRectangle(&dim);
+        element.defaultInteraction(interaction);
+        element.end();
+
+        _ = enabled;
+        // const is_hot: bool = ui.interactionIsHot(&interaction);
+
+        if (render_group.assets.getBitmap(bitmap_id)) |bitmap| {
+            render_group.pushSprite(
+                bitmap.texture_handle,
+                element.bounds.getCenter().toVector3(ui.ui_transform.z()),
+                element.bounds.getDimension(),
+                null,
+                null,
+                null,
+                null,
+                null,
+            );
+        } else {
+            render_group.assets.loadBitmap(bitmap_id, false);
+        }
+
+        if (highlighted) {
+            ui.render_group.pushRectangle2Outline(
+                element.bounds,
+                ui.text_transform,
+                .new(1, 1, 1, 1),
+                3,
+            );
+        }
+
         return result;
     }
 
