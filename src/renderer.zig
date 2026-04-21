@@ -19,6 +19,13 @@ const SLOW = shared.SLOW;
 pub const ENTITY_VISIBLE_PIECE_COUNT = 4096;
 var global_config = &@import("config.zig").global_config;
 
+// TODO:
+// We can now se where the renderer is heading and we should take a moment to clean things up to the point where
+// it actually happens:
+//
+// We should just have the opening of a quad set happen inside the entity renderer, and it should stream out
+// quads directly, using utility functions wo write them directly into the quad stream.
+
 // Types.
 const MemoryArena = memory.MemoryArena;
 const Vector2 = math.Vector2;
@@ -1297,29 +1304,27 @@ pub const RenderGroup = extern struct {
     pub fn pushSprite(
         self: *RenderGroup,
         texture: RendererTexture,
-        center_position: Vector3,
-        size: Vector2,
+        min_position: Vector3,
+        opt_scaled_x_axis: ?Vector3,
+        opt_scaled_y_axis: ?Vector3,
         opt_color: ?Color,
-        opt_x_axis: ?Vector3,
-        opt_y_axis: ?Vector3,
         opt_min_uv: ?Vector2,
         opt_max_uv: ?Vector2,
     ) void {
         if (self.getCurrentQuads(1, texture)) |_| {
             const color: Color = opt_color orelse .white();
-            const x_axis: Vector3 = (opt_x_axis orelse Vector3.new(1, 0, 0)).scaledTo(size.x());
-            const y_axis: Vector3 = (opt_y_axis orelse Vector3.new(0, 1, 0)).scaledTo(size.y());
+            const scaled_x_axis: Vector3 = (opt_scaled_x_axis orelse Vector3.new(1, 0, 0));
+            const scaled_y_axis: Vector3 = (opt_scaled_y_axis orelse Vector3.new(0, 1, 0));
             const min_uv: Vector2 = opt_min_uv orelse .new(0, 0);
             const max_uv: Vector2 = opt_max_uv orelse .new(1, 1);
 
             const premultiplied_color: Color = storeColor(color);
             const vertex_color: u32 = premultiplied_color.scaledTo(255).packColorRGBA();
 
-            const min_position: Vector3 = center_position.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5));
             const min_x_min_y: Vector4 = min_position.toVector4(0);
-            const min_x_max_y: Vector4 = min_position.plus(y_axis).toVector4(0);
-            const max_x_min_y: Vector4 = min_position.plus(x_axis).toVector4(0);
-            const max_x_max_y: Vector4 = min_position.plus(x_axis).plus(y_axis).toVector4(0);
+            const min_x_max_y: Vector4 = min_position.plus(scaled_y_axis).toVector4(0);
+            const max_x_min_y: Vector4 = min_position.plus(scaled_x_axis).toVector4(0);
+            const max_x_max_y: Vector4 = min_position.plus(scaled_x_axis).plus(scaled_y_axis).toVector4(0);
 
             self.pushQuad(
                 texture,

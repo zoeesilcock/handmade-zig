@@ -96,6 +96,21 @@ fn connectPiece(
     std.debug.assert(@intFromPtr(parent) < @intFromPtr(child));
 }
 
+fn connectPieceToWorld(
+    entity: *Entity,
+    child: *EntityVisiblePiece,
+    child_type: HHAAlignPointType,
+) void {
+    _ = entity;
+
+    std.debug.assert(child.isBitmap());
+
+    const bitmap: *BitmapPiece = &child.extra.bitmap;
+    bitmap.parent_piece = 0;
+    bitmap.parent_align_type = @intCast(@intFromEnum(HHAAlignPointType.None));
+    bitmap.child_align_type = @intCast(@intFromEnum(child_type));
+}
+
 fn addPieceLight(
     entity: *Entity,
     radius: f32,
@@ -174,7 +189,8 @@ pub fn addCat(region: *SimRegion, world_position: WorldPosition, standing_on: Tr
     const body: *EntityVisiblePiece = addPiece(entity, .Body, 1.5, .new(0, 0, 1), .white(), null);
     const head: *EntityVisiblePiece = addPiece(entity, .Head, 1, .new(0, 0, 1.2), .white(), null);
 
-    connectPiece(entity, body, .Default, head, .BaseOfNeck);
+    connectPieceToWorld(entity, body, .Default);
+    connectPiece(entity, body, .BaseOfNeck, head, .Default);
 
     placeEntity(region, entity, world_position);
 

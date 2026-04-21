@@ -733,12 +733,17 @@ pub const Layout = struct {
         // const is_hot: bool = ui.interactionIsHot(&interaction);
 
         if (render_group.assets.getBitmap(bitmap_id)) |bitmap| {
+            const dim_xy: Vector2 = element.bounds.getDimension();
+            const x_axis: Vector3 = .new(dim_xy.x(), 0, 0);
+            const y_axis: Vector3 = .new(0, dim_xy.y(), 0);
+            const min_position: Vector3 = element.bounds.getCenter().toVector3(ui.ui_transform.z())
+                .minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5));
+
             render_group.pushSprite(
                 bitmap.texture_handle,
-                element.bounds.getCenter().toVector3(ui.ui_transform.z()),
-                element.bounds.getDimension(),
-                null,
-                null,
+                min_position,
+                x_axis,
+                y_axis,
                 null,
                 null,
                 null,

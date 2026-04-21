@@ -4,6 +4,7 @@ const world = @import("world.zig");
 const brains = @import("brains.zig");
 const asset = @import("asset.zig");
 const asset_rendering = @import("asset_rendering.zig");
+const renderer_geometry = @import("renderer_geometry.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
 const particles = @import("particles.zig");
@@ -21,12 +22,12 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
-const Matrix4x4 = math.Matrix4x4;
 const BrainId = brains.BrainId;
 const BrainType = brains.BrainType;
 const BrainSlot = brains.BrainSlot;
 const Assets = asset.Assets;
 const AssetTypeId = asset.AssetTypeId;
+const SpriteValues = renderer_geometry.SpriteValues;
 const TransientState = shared.TransientState;
 const SimRegion = sim.SimRegion;
 const WorldPosition = world.WorldPosition;
@@ -38,7 +39,9 @@ const RenderTransform = renderer.RenderTransform;
 const AssetTagId = file_formats.AssetTagId;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const BitmapId = file_formats.BitmapId;
+const HHABitmap = file_formats.HHABitmap;
 const HHAAlignPoint = file_formats.HHAAlignPoint;
+const HHAAlignPointType = file_formats.HHAAlignPointType;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 const LightingPoint = lighting.LightingPoint;
@@ -499,7 +502,8 @@ pub fn updateAndRenderEntities(
 
                 TimedBlock.beginBlock(@src(), .EntityRenderPieces);
 
-                // var piece_transforms: [ENTITY_MAX_PIECE_COUNT]Matrix4x4 = undefined;
+                var bitmap_infos: [ENTITY_MAX_PIECE_COUNT]?*HHABitmap = [1]?*HHABitmap{null} ** ENTITY_MAX_PIECE_COUNT;
+                var piece_sprites: [ENTITY_MAX_PIECE_COUNT]SpriteValues = undefined;
 
                 var piece_index: u32 = 0;
                 while (piece_index < entity.piece_count) : (piece_index += 1) {
@@ -553,35 +557,59 @@ pub fn updateAndRenderEntities(
                             @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else {
+                        const bitmap_piece: BitmapPiece = piece.extra.bitmap;
                         _ = world_radius.setX(world_radius.y());
                         _ = world_radius.setZ(0.1);
 
                         if (opt_assets) |assets| {
                             if (bitmap_id) |id| {
-                                const bitmap_info: *file_formats.HHABitmap = assets.getBitmapInfo(id);
                                 if (assets.getBitmap(id)) |bitmap| {
-                                    const align_percentage: Vector2 = bitmap_info.getFirstAlign();
+                                    const bitmap_info: *HHABitmap = assets.getBitmapInfo(id);
+                                    const parent_bitmap_info: ?*HHABitmap = bitmap_infos[bitmap_piece.parent_piece];
 
-                                    var bitmap_dim = asset_rendering.getBitmapDim(
-                                        bitmap,
-                                        piece.dimension.y(),
-                                        entity_ground_point.plus(piece.offset.plus(offset)),
-                                        align_percentage,
-                                        x_axis,
-                                        y_axis,
+                                    const child_align: HHAAlignPoint = bitmap_info.findAlign(
+                                        bitmap_piece.child_align_type | @intFromEnum(HHAAlignPointType.ToParent),
                                     );
 
-                                    asset_rendering.pushBitmapWithDim(
-                                        render_group,
-                                        true,
-                                        &bitmap_dim,
-                                        bitmap,
+                                    var initial_position: Vector3 =
+                                        entity_ground_point.plus(piece.offset.plus(offset));
+                                    if (bitmap_piece.parent_align_type != 0) {
+                                        if (parent_bitmap_info) |parent_info| {
+                                            const parent_align: HHAAlignPoint = parent_info.findAlign(
+                                                bitmap_piece.parent_align_type,
+                                            );
+                                            initial_position =
+                                                piece_sprites[bitmap_piece.parent_piece].worldPositionFromAlignPosition(
+                                                    parent_align.getPositionPercent(),
+                                                );
+                                        }
+                                    }
+
+                                    bitmap_infos[piece_index] = bitmap_info;
+                                    const align_percentage: Vector2 = child_align.getPositionPercent();
+
+                                    const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(
+                                        bitmap.texture_handle,
                                         piece.dimension.y(),
-                                        entity_ground_point.plus(piece.offset.plus(offset)),
-                                        color,
+                                    );
+                                    const sprite: SpriteValues = .forUpright(
+                                        render_group,
+                                        initial_position,
+                                        world_dim,
                                         align_percentage,
                                         x_axis,
                                         y_axis,
+                                        null,
+                                    );
+                                    piece_sprites[piece_index] = sprite;
+                                    render_group.pushSprite(
+                                        bitmap.texture_handle,
+                                        sprite.min_position,
+                                        sprite.scaled_x_axis,
+                                        sprite.scaled_y_axis,
+                                        color,
+                                        null,
+                                        null,
                                     );
 
                                     if (highlighted) {
@@ -590,18 +618,11 @@ pub fn updateAndRenderEntities(
                                             const ap: HHAAlignPoint = bitmap_info.align_points[ap_index];
 
                                             if (hit_test.shouldDrawAlignPoint(ap_index) and ap.getType() != .None) {
-                                                const temp_dim = asset_rendering.getBitmapDim(
-                                                    bitmap,
-                                                    piece.dimension.y(),
-                                                    bitmap_dim.position,
-                                                    ap.getPositionPercent().negated(),
-                                                    x_axis,
-                                                    y_axis,
-                                                );
-
                                                 render_group.pushCube(
                                                     render_group.white_texture,
-                                                    temp_dim.position,
+                                                    sprite.worldPositionFromAlignPosition(
+                                                        ap.getPositionPercent(),
+                                                    ),
                                                     .splat(0.04),
                                                     shared.getDebugColor4(ap_index, null),
                                                     null,

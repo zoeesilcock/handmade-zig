@@ -403,7 +403,6 @@ pub fn updateAndRenderWorld(
     const result = false;
 
     var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
-    const focal_length: f32 = 1;
 
     const mouse_position: Vector2 = input.clip_space_mouse_position.xy();
     const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
@@ -423,7 +422,8 @@ pub fn updateAndRenderWorld(
     world_mode.last_mouse_position = mouse_position;
     DebugInterface.debugSetMousePosition(mouse_position);
 
-    world_mode.camera_pitch = 0.05 * math.PI32;
+    const focal_length: f32 = 1.5;
+    world_mode.camera_pitch = 0.125 * math.PI32;
     world_mode.camera_orbit = 0;
     world_mode.camera_dolly = 0;
 
@@ -450,8 +450,8 @@ pub fn updateAndRenderWorld(
     const camera_z: Vector3 = camera_o.getColumn(2);
     var fog: renderer.FogParams = .{
         .direction = camera_z.negated(),
-        .start_distance = 8,
-        .end_distance = 20,
+        .start_distance = 15,
+        .end_distance = 30,
     };
     var alpha_clip: renderer.AlphaClipParams = .{
         .delta_start_distance = 2,

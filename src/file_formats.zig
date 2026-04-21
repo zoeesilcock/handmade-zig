@@ -289,6 +289,20 @@ pub const HHABitmap = extern struct {
     pub fn getFirstAlign(self: *HHABitmap) Vector2 {
         return self.align_points[0].getPositionPercent();
     }
+
+    pub fn findAlign(self: *HHABitmap, complete_type: u32) HHAAlignPoint {
+        var result: HHAAlignPoint = .{};
+
+        var point_index: u32 = 0;
+        while (point_index < self.align_points.len) : (point_index += 1) {
+            if (self.align_points[point_index].align_type == complete_type) {
+                result = self.align_points[point_index];
+                break;
+            }
+        }
+
+        return result;
+    }
 };
 
 pub const HHASoundChain = enum(u32) {

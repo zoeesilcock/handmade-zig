@@ -57,7 +57,7 @@ fn getCameraOffsetZForDimension(x_count: i32, y_count: i32) f32 {
         y_distance = 14;
     }
 
-    const result: f32 = @max(x_distance, y_distance);
+    const result: f32 = 1.2 * @max(x_distance, y_distance);
 
     return result;
 }
