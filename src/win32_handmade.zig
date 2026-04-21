@@ -667,7 +667,7 @@ const DebugFunctions = if (INTERNAL) struct {
         if (h_process.* != win32.INVALID_HANDLE_VALUE) {
             result.started_successfully = true;
 
-            if (win32.WaitForSingleObject(h_process.*, 0) == @intFromEnum(win32.WAIT_OBJECT_0)) {
+            if (win32.WaitForSingleObject(h_process.*, 0) == win32.WAIT_OBJECT_0) {
                 var exit_code: u32 = undefined;
                 _ = win32.GetExitCodeProcess(h_process.*, &exit_code);
                 _ = win32.CloseHandle(h_process.*);
@@ -913,27 +913,33 @@ fn processXInput(
                 new_controller.clutch_max = @as(f32, @floatFromInt(trigger_max)) / 255;
 
                 // Left stick X.
-                new_controller.stick_average_x = processXInputStick(pad.sThumbLX, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+                new_controller.stick_average_x = processXInputStick(
+                    pad.sThumbLX,
+                    @bitCast(win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
+                );
 
                 // Left stick Y.
-                new_controller.stick_average_y = processXInputStick(pad.sThumbLY, win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+                new_controller.stick_average_y = processXInputStick(
+                    pad.sThumbLY,
+                    @bitCast(win32.XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
+                );
 
                 if (new_controller.stick_average_x != 0.0 or new_controller.stick_average_y != 0.0) {
                     new_controller.is_analog = true;
                 }
 
                 // D-pad overrides the stick value.
-                if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_UP) > 0) {
+                if (pad.wButtons.DPAD_UP > 0) {
                     new_controller.stick_average_y = 1.0;
                     new_controller.is_analog = false;
-                } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_DOWN) > 0) {
+                } else if (pad.wButtons.DPAD_DOWN > 0) {
                     new_controller.stick_average_y = -1.0;
                     new_controller.is_analog = false;
                 }
-                if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_LEFT) > 0) {
+                if ((pad.wButtons.DPAD_LEFT) > 0) {
                     new_controller.stick_average_x = -1.0;
                     new_controller.is_analog = false;
-                } else if ((pad.wButtons & win32.XINPUT_GAMEPAD_DPAD_RIGHT) > 0) {
+                } else if (pad.wButtons.DPAD_RIGHT > 0) {
                     new_controller.stick_average_x = 1.0;
                     new_controller.is_analog = false;
                 }
@@ -967,54 +973,54 @@ fn processXInput(
 
                 // Main buttons.
                 processXInputDigitalButton(
-                    pad.wButtons,
-                    win32.XINPUT_GAMEPAD_A,
+                    @bitCast(pad.wButtons),
+                    @bitCast(win32.XINPUT_GAMEPAD_A),
                     &old_controller.action_down,
                     &new_controller.action_down,
                 );
                 processXInputDigitalButton(
-                    pad.wButtons,
-                    win32.XINPUT_GAMEPAD_B,
+                    @bitCast(pad.wButtons),
+                    @bitCast(win32.XINPUT_GAMEPAD_B),
                     &old_controller.action_right,
                     &new_controller.action_right,
                 );
                 processXInputDigitalButton(
-                    pad.wButtons,
-                    win32.XINPUT_GAMEPAD_X,
+                    @bitCast(pad.wButtons),
+                    @bitCast(win32.XINPUT_GAMEPAD_X),
                     &old_controller.action_left,
                     &new_controller.action_left,
                 );
                 processXInputDigitalButton(
-                    pad.wButtons,
-                    win32.XINPUT_GAMEPAD_Y,
+                    @bitCast(pad.wButtons),
+                    @bitCast(win32.XINPUT_GAMEPAD_Y),
                     &old_controller.action_up,
                     &new_controller.action_up,
                 );
 
                 // Shoulder buttons.
                 processXInputDigitalButton(
-                    pad.wButtons,
-                    win32.XINPUT_GAMEPAD_LEFT_SHOULDER,
+                    @bitCast(pad.wButtons),
+                    @bitCast(win32.XINPUT_GAMEPAD_LEFT_SHOULDER),
                     &old_controller.left_shoulder,
                     &new_controller.left_shoulder,
                 );
                 processXInputDigitalButton(
-                    pad.wButtons,
-                    win32.XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                    @bitCast(pad.wButtons),
+                    @bitCast(win32.XINPUT_GAMEPAD_RIGHT_SHOULDER),
                     &old_controller.right_shoulder,
                     &new_controller.right_shoulder,
                 );
 
                 // Special buttons.
                 processXInputDigitalButton(
-                    pad.wButtons,
-                    win32.XINPUT_GAMEPAD_START,
+                    @bitCast(pad.wButtons),
+                    @bitCast(win32.XINPUT_GAMEPAD_START),
                     &old_controller.start_button,
                     &new_controller.start_button,
                 );
                 processXInputDigitalButton(
-                    pad.wButtons,
-                    win32.XINPUT_GAMEPAD_BACK,
+                    @bitCast(pad.wButtons),
+                    @bitCast(win32.XINPUT_GAMEPAD_BACK),
                     &old_controller.back_button,
                     &new_controller.back_button,
                 );
@@ -1028,8 +1034,8 @@ fn processXInput(
 }
 
 fn processXInputDigitalButton(
-    x_input_button_state: u32,
-    button_bit: u32,
+    x_input_button_state: u16,
+    button_bit: u16,
     old_state: *shared.ControllerButtonState,
     new_state: *shared.ControllerButtonState,
 ) void {
