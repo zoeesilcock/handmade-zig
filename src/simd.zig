@@ -85,7 +85,10 @@ pub const V3_4x = extern struct {
     }
 
     pub fn getComponent(self: V3_4x, c_index: u32) Vector3 {
-        return .new(self.x[c_index], self.y[c_index], self.z[c_index]);
+        const x: [4]f32 = self.x;
+        const y: [4]f32 = self.y;
+        const z: [4]f32 = self.z;
+        return .new(x[c_index], y[c_index], z[c_index]);
     }
 
     pub fn min(self: V3_4x, b: V3_4x) V3_4x {

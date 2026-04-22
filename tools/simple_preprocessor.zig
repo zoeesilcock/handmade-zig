@@ -298,9 +298,8 @@ const Tokenizer = struct {
     }
 };
 
-pub fn main() anyerror!void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) anyerror!void {
+    const allocator = init.gpa;
 
     const file_names = [_][]const u8{
         "src/sim.zig",
@@ -309,7 +308,7 @@ pub fn main() anyerror!void {
     };
 
     for (file_names) |file_name| {
-        const file = readEntireFile(file_name, allocator);
+        const file = readEntireFile(file_name, allocator, init.io);
         var tokenizer: Tokenizer = .{ .at = @ptrCast(file.contents), .allocator = allocator };
         var parsing: bool = true;
         while (parsing) {
@@ -351,26 +350,18 @@ const EntireFile = struct {
     contents: []const u8 = undefined,
 };
 
-fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFile {
+fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator, io: std.Io) EntireFile {
     var result = EntireFile{};
 
-    if (std.fs.cwd().openFile(file_name, .{ .mode = .read_only })) |file| {
-        defer file.close();
+    if (std.Io.Dir.cwd().openFile(io, file_name, .{ .mode = .read_only })) |file| {
+        defer file.close(io);
 
-        _ = file.seekFromEnd(0) catch undefined;
-        result.content_size = @as(u32, @intCast(file.getPos() catch 0));
-        _ = file.seekTo(0) catch undefined;
-
-        const buffer = file.readToEndAllocOptions(
-            allocator,
-            std.math.maxInt(u32),
-            null,
-            .fromByteUnits(@alignOf(u32)),
-            0,
-        ) catch "";
-        result.contents = buffer;
+        var file_reader = file.reader(io, &.{});
+        const contents = file_reader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32))) catch "";
+        result.contents = contents;
+        result.content_size = @intCast(contents.len);
     } else |err| {
-        std.debug.print("Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
+        std.log.err("Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
     }
 
     return result;

@@ -57,12 +57,17 @@ const TestScene = struct {
     cover_texture: RendererTexture = .empty,
 };
 
-fn initTestScene(texture_queue: *TextureQueue, scene: *TestScene, allocator: std.mem.Allocator) void {
-    scene.grass_texture = loadBMP(texture_queue, "test_cube_grass.bmp", allocator, 1);
-    scene.wall_texture = loadBMP(texture_queue, "test_cube_wall.bmp", allocator, 2);
-    scene.tree_texture = loadBMP(texture_queue, "test_sprite_tree.bmp", allocator, 3);
-    scene.head_texture = loadBMP(texture_queue, "test_sprite_head.bmp", allocator, 4);
-    scene.cover_texture = loadBMP(texture_queue, "test_cover_grass.bmp", allocator, 5);
+fn initTestScene(
+    texture_queue: *TextureQueue,
+    scene: *TestScene,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+) void {
+    scene.grass_texture = loadBMP(texture_queue, "test_cube_grass.bmp", 1, allocator, io);
+    scene.wall_texture = loadBMP(texture_queue, "test_cube_wall.bmp", 2, allocator, io);
+    scene.tree_texture = loadBMP(texture_queue, "test_sprite_tree.bmp", 2, allocator, io);
+    scene.head_texture = loadBMP(texture_queue, "test_sprite_head.bmp", 4, allocator, io);
+    scene.cover_texture = loadBMP(texture_queue, "test_cover_grass.bmp", 5, allocator, io);
 
     scene.min_position = .new(
         -0.5 * @as(f32, @floatFromInt(TEST_SCENE_DIM_X)),
@@ -277,7 +282,10 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         // This times our rendering, it has nothing to do with the renderer API.
         var frame_stats: FrameStats = .init();
 
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        const io = threaded.io();
+
+        var gpa: std.heap.DebugAllocator(.{}) = .init;
         const allocator = gpa.allocator();
 
         // Allocate a set of operations for submitting textures. We allocate as many as we think we will want
@@ -297,7 +305,7 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         // Initialize the test scene. This has nothing to do with the renderer API, it's just a way of making a data
         // structure we can use later to figure out what we want to render ever frame.
         var scene: TestScene = .{};
-        initTestScene(&texture_queue, &scene, allocator);
+        initTestScene(&texture_queue, &scene, allocator, io);
 
         // Get camera parameters for viewing a scene (at meter scale) from a reasonable 3rd-person perspective.
         var camera: Camera = .standard;
@@ -468,18 +476,16 @@ const EntireFile = struct {
     contents: []const u8 = undefined,
 };
 
-fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFile {
+fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator, io: std.Io) EntireFile {
     var result = EntireFile{};
 
-    if (std.fs.cwd().openFile(file_name, .{ .mode = .read_only })) |file| {
-        defer file.close();
+    if (std.Io.Dir.cwd().openFile(io, file_name, .{ .mode = .read_only })) |file| {
+        defer file.close(io);
 
-        _ = file.seekFromEnd(0) catch undefined;
-        result.content_size = @as(u32, @intCast(file.getPos() catch 0));
-        _ = file.seekTo(0) catch undefined;
-
-        const buffer = file.readToEndAlloc(allocator, std.math.maxInt(u32)) catch "";
-        result.contents = buffer;
+        var file_reader = file.reader(io, &.{});
+        const contents = file_reader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32))) catch "";
+        result.contents = contents;
+        result.content_size = @intCast(contents.len);
     } else |err| {
         std.log.err("Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
     }
@@ -490,11 +496,12 @@ fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFil
 fn loadBMP(
     texture_queue: *TextureQueue,
     file_name: []const u8,
-    allocator: std.mem.Allocator,
     texture_index: u32,
+    allocator: std.mem.Allocator,
+    io: std.Io,
 ) RendererTexture {
     var result: ?LoadedBitmap = null;
-    const read_result = readEntireFile(file_name, allocator);
+    const read_result = readEntireFile(file_name, allocator, io);
 
     if (read_result.content_size > 0) {
         const header = @as(*BitmapHeader, @ptrCast(@alignCast(@constCast(read_result.contents))));

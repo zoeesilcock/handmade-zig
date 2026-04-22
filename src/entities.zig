@@ -54,7 +54,7 @@ const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
 pub const INTERNAL = @import("build_options").internal;
 var global_config = &@import("config.zig").global_config;
 
-pub const EntityId = packed struct {
+pub const EntityId = extern struct {
     value: u32 = 0,
 
     pub fn equals(self: EntityId, other: EntityId) bool {

@@ -2,6 +2,7 @@
 
 Learning Zig by following along with the [Handmade Hero](https://handmadehero.org/) series of videos by Casey Muratori. This implementation follows Casey's approach as closely as Zig allows with some minor departures when I want to explore some specific Zig feature (like using `@Vector` to get SIMD vector math for example).
 
+
 ## Running
 Since the executable looks for the library in the same directory as the executable the regular `zig build run` approach doesn't work. The easiest solution is to build it first and then launch the built executable (so that it can find the library) with the correct working directory (so that it can find the assets).
 
@@ -14,6 +15,7 @@ ZSH + Wine on Linux:
 ```
 zig build -fwine -Dtarget=x86_64-windows && (cd data && ../zig-out/bin/handmade-zig.exe)
 ```
+
 
 ## Assets
 Graphical and audio assets are not included as they are not created by me. The following assets from the pre-order data need to be present to run the game:
@@ -47,9 +49,9 @@ The asset builder can be used to generate HHA files based on the early data loca
 zig build build-assets -Dpackage=AssetBuilder
 ```
 
-### PNG reader
+### PNG test
 ```
-zig build run-png-reader -Dpackage=PNGReader -- test/gimp_test.png
+zig build run-test-png -Dpackage=TestPNG -- test/gimp_test.png C:/tmp/gimp_test_rgb.bmp C:/tmp/gimp_test_alpha.bmp
 ```
 
 ### HHA edit
@@ -63,16 +65,23 @@ zig build hha-edit -Dpackage=HHAEdit -- -dump source.hha dest.hha
 
 ### Renderer test
 This is a way to test the renderer standalone from the rest of the project.
-It expects some .bmp images in the `data/renderer_test` directory:
-* `test_cube_wall.bmp` (`block_orphanage_01.png` scaled down to 512x512px)
-* `test_cube_grass.bmp` (`block_forest_01.png` scaled down to 512x512px)
+It expects some .bmp images and the renderer .dll file in the `data/renderer_test` directory:
+* `test_cube_wall.bmp` (`block_orphanage_01.png` scaled down to 512x512px).
+* `test_cube_grass.bmp` (`block_forest_01.png` scaled down to 512x512px).
 * `test_sprite_head.bmp` (the last srpite in `character_krampus.png`, cropped and scaled down to 512x512px).
 * `test_sprite_tree.bmp` (the bottom left sprite in `obstacles_forest.png`, cropped and scaled down to 512px height).
 * `test_cover_grass.bmp` (the top left sprite in `cover_forest.png`, cropped to 512x512px).
+* `win32-handmade-opengl.dll` (copy from `zig-out/bin` after running `zig build -Dpackage=RendererLibrary`).
 
 ```
 zig build hha-edit -Dpackage=RendererTest run-renderer-test
 ```
+
+### Handmade ray
+```
+zig build run-raytracer -Dpackage=Raytracer
+```
+
 
 ## Hot reloading
 The game is split up into an executable for the runtime and a DLL that contains the actual game. This allows hot reloading for most of the game code. When the DLL is rebuilt, the game will automatically reload it.
@@ -81,6 +90,7 @@ To make this even more automatic you can run a separate terminal which automatic
 ```
 zig build --watch -Dpackage=Library
 ```
+
 
 ## Debugging
 The included debugger config under `.vscode/launch.json` is compatible with the [nvim-dap plugin](https://github.com/mfussenegger/nvim-dap) in Neovim and the [C/C++ extension](https://github.com/Microsoft/vscode-cpptools) in VS Code. Using regular Visual Studio with C/C++ tooling appears to give the most reliable results. Another alternative that works almost as well as Visual Studio is [RAD Debugger](https://github.com/EpicGamesExt/raddebugger).

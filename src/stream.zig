@@ -111,7 +111,7 @@ pub const Stream = struct {
         return result;
     }
 
-    pub fn appendChunk(self: *Stream, size: usize, contents: [:0]align(1) u8) *Chunk {
+    pub fn appendChunk(self: *Stream, size: usize, contents: [*]align(1) u8) *Chunk {
         const chunk: *Chunk = self.arena.?.pushStruct(Chunk, .aligned(@alignOf(Chunk), false));
         chunk.contents.count = size;
         chunk.contents.data = @ptrCast(contents);

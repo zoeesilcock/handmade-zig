@@ -35,19 +35,22 @@ pub const std_options: std.Options = .{
 
 pub fn myLogFn(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
-    _ = scope;
+    const io = std.Options.debug_io;
+
     if (level == .err) {
-        std.debug.lockStdErr();
-        defer std.debug.unlockStdErr();
-        const stderr = std.fs.File.stderr().deprecatedWriter();
-        nosuspend stderr.print(format ++ "\n", args) catch return;
+        const prev = io.swapCancelProtection(.blocked);
+        defer _ = io.swapCancelProtection(prev);
+        var buffer: [64]u8 = undefined;
+        const stderr = std.debug.lockStderr(&buffer).terminal();
+        defer std.debug.unlockStderr();
+        return std.log.defaultLogFileTerminal(level, scope, format, args, stderr) catch {};
     } else {
         var stdout_buf: [1024]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_writer = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         var stdout = &stdout_writer.interface;
         stdout.print(format ++ "\n", args) catch return;
         stdout.flush() catch return;
@@ -72,12 +75,11 @@ const LoadedHHA = struct {
     data_store: []const u8 = undefined,
 };
 
-fn readEntireFile(file: std.fs.File, allocator: std.mem.Allocator) ![]const u8 {
+fn readEntireFile(file: std.Io.File, allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
     var result: []const u8 = undefined;
 
-    _ = try file.seekTo(0);
-
-    result = try file.readToEndAllocOptions(allocator, std.math.maxInt(u32), null, .@"32", 0);
+    var file_reader = file.reader(io, &.{});
+    result = try file_reader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32)));
 
     return result;
 }
@@ -138,7 +140,7 @@ fn removePath(file_name: *String) void {
     file_name.count -= new_start;
 }
 
-fn readHHAV0(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
+fn readHHAV0(source_file: std.Io.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
     _ = source_file;
 
     const header: *const HHAHeaderV0 = @ptrCast(hha.data_store);
@@ -244,7 +246,7 @@ fn refString(d: [*]const u8, count: u32, offset: u64) String {
     };
 }
 
-fn readHHAV2(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
+fn readHHAV2(source_file: std.Io.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
     _ = source_file;
 
     const header: *const HHAHeader = @ptrCast(hha.data_store);
@@ -301,16 +303,16 @@ fn readHHAV2(source_file: std.fs.File, hha: *LoadedHHA, allocator: std.mem.Alloc
     }
 }
 
-fn readHHA(source_file_name: []const u8, allocator: std.mem.Allocator) ?*LoadedHHA {
+fn readHHA(source_file_name: []const u8, allocator: std.mem.Allocator, io: std.Io) ?*LoadedHHA {
     const result: ?*LoadedHHA = allocator.create(LoadedHHA) catch null;
     const null_hha: LoadedHHA = .{};
     result.?.* = null_hha;
     result.?.source_file_name = source_file_name;
 
-    if (std.fs.cwd().openFile(source_file_name, .{ .mode = .read_only })) |source_file| {
-        defer source_file.close();
+    if (std.Io.Dir.cwd().openFile(io, source_file_name, .{ .mode = .read_only })) |source_file| {
+        defer source_file.close(io);
 
-        result.?.data_store = readEntireFile(source_file, allocator) catch undefined;
+        result.?.data_store = readEntireFile(source_file, allocator, io) catch undefined;
 
         result.?.magic_value = @as([*]const u32, @ptrCast(@alignCast(result.?.data_store)))[0];
         result.?.source_version = @as([*]const u32, @ptrCast(@alignCast(result.?.data_store)))[1];
@@ -335,26 +337,39 @@ fn readHHA(source_file_name: []const u8, allocator: std.mem.Allocator) ?*LoadedH
     return result;
 }
 
-fn writeBlock(size: u32, source: *anyopaque, dest_file: *const std.fs.File) u64 {
-    const result: u64 = dest_file.getPos() catch unreachable;
+fn writeBlock(
+    size: u32,
+    source: *anyopaque,
+    dest_file: *const std.Io.File,
+    file_writer: *std.Io.File.Writer,
+    io: std.Io,
+) u64 {
+    const result: u64 = file_writer.logicalPos();
 
     const bytes: [*]const u8 = @ptrCast(source);
-    dest_file.writeAll(bytes[0..size]) catch unreachable;
+    dest_file.writeStreamingAll(io, bytes[0..size]) catch unreachable;
 
     return result;
 }
 
-fn writeString(string: String, count: *align(1) u32, dest_file: *const std.fs.File) u64 {
+fn writeString(
+    string: String,
+    count: *align(1) u32,
+    dest_file: *const std.Io.File,
+    file_writer: *std.Io.File.Writer,
+    io: std.Io,
+) u64 {
     count.* = @intCast(string.count);
-    const result: u64 = writeBlock(@intCast(string.count), string.data, dest_file);
+    const result: u64 = writeBlock(@intCast(string.count), string.data, dest_file, file_writer, io);
     return result;
 }
 
 fn writeHHAV2(
     source: *LoadedHHA,
-    dest_file: *const std.fs.File,
-    allocator: std.mem.Allocator,
+    dest_file: *const std.Io.File,
     include_annotations: bool,
+    allocator: std.mem.Allocator,
+    io: std.Io,
 ) void {
     var header: HHAHeader = .{};
 
@@ -370,7 +385,9 @@ fn writeHHAV2(
     const dest_annotations: [*]HHAAnnotation = @ptrCast(allocator.alloc(HHAAnnotation, header.asset_count) catch undefined);
 
     const header_size: u32 = @sizeOf(HHAHeader);
-    dest_file.seekTo(header_size) catch unreachable;
+    var buffer: [1024]u8 = undefined;
+    var file_writer = dest_file.writer(io, &buffer);
+    file_writer.seekTo(header_size) catch unreachable;
 
     var tag_index: u32 = 0;
     while (tag_index < source.tag_count) : (tag_index += 1) {
@@ -392,6 +409,8 @@ fn writeHHAV2(
             dest_asset.data_size,
             @ptrFromInt(@intFromPtr(source.data_store.ptr) + source_asset.data_offset),
             dest_file,
+            &file_writer,
+            io,
         );
 
         dest_annotation.* = .{
@@ -405,50 +424,60 @@ fn writeHHAV2(
             source_annotation.source_file_base_name,
             &dest_annotation.source_file_base_name_count,
             dest_file,
+            &file_writer,
+            io,
         );
 
         dest_annotation.asset_name_offset = writeString(
             source_annotation.asset_name,
             &dest_annotation.asset_name_count,
             dest_file,
+            &file_writer,
+            io,
         );
 
         dest_annotation.asset_description_offset = writeString(
             source_annotation.asset_description,
             &dest_annotation.asset_description_count,
             dest_file,
+            &file_writer,
+            io,
         );
 
         dest_annotation.author_offset = writeString(
             source_annotation.author,
             &dest_annotation.author_count,
             dest_file,
+            &file_writer,
+            io,
         );
 
         dest_annotation.error_stream_offset = writeString(
             source_annotation.error_stream,
             &dest_annotation.error_stream_count,
             dest_file,
+            &file_writer,
+            io,
         );
     }
 
-    header.tags = writeBlock(dest_tags_size, dest_tags, dest_file);
-    header.assets = writeBlock(dest_assets_size, dest_assets, dest_file);
+    header.tags = writeBlock(dest_tags_size, dest_tags, dest_file, &file_writer, io);
+    header.assets = writeBlock(dest_assets_size, dest_assets, dest_file, &file_writer, io);
     if (include_annotations) {
-        header.annotations = writeBlock(dest_annotations_size, dest_annotations, dest_file);
+        header.annotations = writeBlock(dest_annotations_size, dest_annotations, dest_file, &file_writer, io);
     }
 
-    dest_file.seekTo(0) catch unreachable;
-    const check_header_location: u64 = writeBlock(header_size, &header, dest_file);
+    file_writer.seekTo(0) catch unreachable;
+    const check_header_location: u64 = writeBlock(header_size, &header, dest_file, &file_writer, io);
     std.debug.assert(check_header_location == 0);
 }
 
-fn writeHHA(opt_source: ?*LoadedHHA, dest_file_name: []const u8, allocator: std.mem.Allocator) void {
-    if (!fileExists(dest_file_name)) {
+fn writeHHA(opt_source: ?*LoadedHHA, dest_file_name: []const u8, allocator: std.mem.Allocator, io: std.Io) void {
+    if (!fileExists(dest_file_name, io)) {
         if (opt_source) |source| {
             if (source.valid) {
-                if (std.fs.cwd().createFile(dest_file_name, .{})) |dest_file| {
-                    writeHHAV2(source, &dest_file, allocator, true);
+                if (std.Io.Dir.cwd().createFile(io, dest_file_name, .{})) |dest_file| {
+                    writeHHAV2(source, &dest_file, true, allocator, io);
                 } else |err| {
                     std.log.err("Unable to open file {s} for writing. {s}", .{ dest_file_name, @errorName(err) });
                 }
@@ -461,11 +490,11 @@ fn writeHHA(opt_source: ?*LoadedHHA, dest_file_name: []const u8, allocator: std.
     }
 }
 
-fn fileExists(file_name: []const u8) bool {
+fn fileExists(file_name: []const u8, io: std.Io) bool {
     var result: bool = false;
 
-    const opt_file: ?std.fs.File = std.fs.cwd().openFile(file_name, .{ .mode = .read_only }) catch null;
-    defer if (opt_file) |file| file.close();
+    const opt_file: ?std.Io.File = std.Io.Dir.cwd().openFile(io, file_name, .{ .mode = .read_only }) catch null;
+    defer if (opt_file) |file| file.close(io);
 
     if (opt_file != null) {
         result = true;
@@ -627,13 +656,9 @@ fn printContents(hha: *LoadedHHA) void {
     }
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena.allocator();
-    defer arena.deinit();
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(allocator);
 
     var print_usage: bool = false;
 
@@ -642,8 +667,8 @@ pub fn main() !void {
             const source_file_name: []const u8 = args[2];
             const dest_file_name: []const u8 = args[3];
 
-            const hha: ?*LoadedHHA = readHHA(source_file_name, allocator);
-            writeHHA(hha, dest_file_name, allocator);
+            const hha: ?*LoadedHHA = readHHA(source_file_name, allocator, init.io);
+            writeHHA(hha, dest_file_name, allocator, init.io);
         } else {
             print_usage = true;
         }
@@ -651,14 +676,14 @@ pub fn main() !void {
         if (std.mem.eql(u8, args[1], "-info")) {
             const file_name: []const u8 = args[2];
 
-            if (readHHA(file_name, allocator)) |hha| {
+            if (readHHA(file_name, allocator, init.io)) |hha| {
                 std.log.info("{s}", .{hha.source_file_name});
                 printHeaderInfo(hha);
             }
         } else if (std.mem.eql(u8, args[1], "-dump")) {
             const file_name: []const u8 = args[2];
 
-            if (readHHA(file_name, allocator)) |hha| {
+            if (readHHA(file_name, allocator, init.io)) |hha| {
                 std.log.info("{s}", .{hha.source_file_name});
                 printHeaderInfo(hha);
                 printContents(hha);
@@ -666,18 +691,22 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, args[1], "-create")) {
             const file_name: []const u8 = args[2];
 
-            if (!fileExists(file_name)) {
-                const opt_dest: ?std.fs.File = std.fs.cwd().openFile(file_name, .{ .mode = .write_only }) catch null;
-                defer if (opt_dest) |dest| dest.close();
+            if (!fileExists(file_name, init.io)) {
+                const opt_dest: ?std.Io.File = std.Io.Dir.cwd().openFile(
+                    init.io,
+                    file_name,
+                    .{ .mode = .write_only },
+                ) catch null;
+                defer if (opt_dest) |dest| dest.close(init.io);
 
-                if (std.fs.cwd().createFile(file_name, .{})) |dest| {
+                if (std.Io.Dir.cwd().createFile(init.io, file_name, .{})) |dest| {
                     const header: HHAHeader = .{
                         .tag_count = 0,
                         .asset_count = 0,
                     };
 
                     var buf: [1024]u8 = undefined;
-                    var file_writer = dest.writer(&buf);
+                    var file_writer = dest.writer(init.io, &buf);
                     const writer = &file_writer.interface;
 
                     try writer.writeAll(std.mem.asBytes(&header)[0..@sizeOf(HHAHeader)]);

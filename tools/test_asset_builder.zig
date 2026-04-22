@@ -45,18 +45,16 @@ const EntireFile = struct {
     contents: []const u8 = undefined,
 };
 
-fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator) EntireFile {
+fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator, io: std.Io) EntireFile {
     var result = EntireFile{};
 
-    if (std.fs.cwd().openFile(file_name, .{ .mode = .read_only })) |file| {
-        defer file.close();
+    if (std.Io.Dir.cwd().openFile(io, file_name, .{ .mode = .read_only })) |file| {
+        defer file.close(io);
 
-        _ = file.seekFromEnd(0) catch undefined;
-        result.content_size = @as(u32, @intCast(file.getPos() catch 0));
-        _ = file.seekTo(0) catch undefined;
-
-        const buffer = file.readToEndAlloc(allocator, std.math.maxInt(u32)) catch "";
-        result.contents = buffer;
+        var file_reader = file.reader(io, &.{});
+        const contents = file_reader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32))) catch "";
+        result.contents = contents;
+        result.content_size = @intCast(contents.len);
     } else |err| {
         std.log.err("Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
     }
@@ -97,9 +95,10 @@ const LoadedBitmap = struct {
 fn loadBMP(
     file_name: []const u8,
     allocator: std.mem.Allocator,
+    io: std.Io,
 ) ?LoadedBitmap {
     var result: ?LoadedBitmap = null;
-    const read_result = readEntireFile(file_name, allocator);
+    const read_result = readEntireFile(file_name, allocator, io);
 
     if (read_result.content_size > 0) {
         const header = @as(*BitmapHeader, @ptrCast(@alignCast(@constCast(read_result.contents))));
@@ -464,7 +463,7 @@ fn loadGlyphBMP(
             return null;
         }
     } else {
-        // const ttf_file = readEntireFile(file_name, allocator);
+        // const ttf_file = readEntireFile(file_name, allocator, io);
         // defer allocator.free(ttf_file.contents);
         //
         // if (ttf_file.content_size != 0) {
@@ -588,7 +587,7 @@ const RiffIterator = struct {
 
     fn getType(self: RiffIterator) ?WaveChunkId {
         const chunk: *WaveChunk = @ptrCast(@alignCast(self.at));
-        return std.meta.intToEnum(WaveChunkId, chunk.id) catch null;
+        return std.enums.fromInt(WaveChunkId, chunk.id);
     }
 
     fn getChunkData(self: RiffIterator) *anyopaque {
@@ -610,9 +609,10 @@ pub fn loadWAV(
     section_first_sample_index: u32,
     section_sample_count: u32,
     allocator: std.mem.Allocator,
+    io: std.Io,
 ) LoadedSound {
     var result: LoadedSound = undefined;
-    const read_result = readEntireFile(file_name, allocator);
+    const read_result = readEntireFile(file_name, allocator, io);
 
     if (read_result.content_size > 0) {
         result.free = read_result.contents;
@@ -970,20 +970,13 @@ pub const Assets = struct {
     }
 };
 
-pub fn main() anyerror!void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
+pub fn main(init: std.process.Init) anyerror!void {
     initializeFontDC();
 
-    writeFonts(allocator);
-    writeHero(allocator);
-    writeNonHero(allocator);
-    writeSounds(allocator);
-
-    if (gpa.detectLeaks()) {
-        std.log.debug("Memory leaks detected.\n", .{});
-    }
+    writeFonts(init.gpa, init.io);
+    writeHero(init.gpa, init.io);
+    writeNonHero(init.gpa, init.io);
+    writeSounds(init.gpa, init.io);
 }
 
 fn addFont(
@@ -1018,7 +1011,7 @@ fn addFont(
     return font;
 }
 
-fn writeFonts(allocator: std.mem.Allocator) void {
+fn writeFonts(allocator: std.mem.Allocator, io: std.Io) void {
     var assets = Assets.init();
 
     const fonts: [2]*LoadedFont = .{
@@ -1055,10 +1048,10 @@ fn writeFonts(allocator: std.mem.Allocator) void {
     }
     assets.endAssetType();
 
-    writeHHA("testfonts.hha", &assets, allocator) catch unreachable;
+    writeHHA(io, "testfonts.hha", &assets, allocator) catch unreachable;
 }
 
-fn writeHero(allocator: std.mem.Allocator) void {
+fn writeHero(allocator: std.mem.Allocator, io: std.Io) void {
     var result = Assets.init();
 
     const angle_right: f32 = 0;
@@ -1101,10 +1094,10 @@ fn writeHero(allocator: std.mem.Allocator) void {
     result.addTag(.FacingDirection, angle_front);
     result.endAssetType();
 
-    writeHHA("test1.hha", &result, allocator) catch unreachable;
+    writeHHA(io, "test1.hha", &result, allocator) catch unreachable;
 }
 
-fn writeNonHero(allocator: std.mem.Allocator) void {
+fn writeNonHero(allocator: std.mem.Allocator, io: std.Io) void {
     var result = Assets.init();
 
     result.beginAssetType(.Shadow);
@@ -1137,10 +1130,10 @@ fn writeNonHero(allocator: std.mem.Allocator) void {
     _ = result.addBitmapAsset("test2/tuft02.bmp", null, null);
     result.endAssetType();
 
-    writeHHA("test2.hha", &result, allocator) catch unreachable;
+    writeHHA(io, "test2.hha", &result, allocator) catch unreachable;
 }
 
-fn writeSounds(allocator: std.mem.Allocator) void {
+fn writeSounds(allocator: std.mem.Allocator, io: std.Io) void {
     var result = Assets.init();
 
     result.beginAssetType(.Bloop);
@@ -1184,18 +1177,18 @@ fn writeSounds(allocator: std.mem.Allocator) void {
     _ = result.addSoundAsset("test3/puhp_01.wav");
     result.endAssetType();
 
-    writeHHA("test3.hha", &result, allocator) catch unreachable;
+    writeHHA(io, "test3.hha", &result, allocator) catch unreachable;
 }
 
-fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator) !void {
+fn writeHHA(io: std.Io, file_name: []const u8, result: *Assets, allocator: std.mem.Allocator) !void {
     // Open or create a file.
-    var opt_out: ?std.fs.File = null;
-    if (std.fs.cwd().openFile(file_name, .{ .mode = .write_only })) |file| {
+    var opt_out: ?std.Io.File = null;
+    if (std.Io.Dir.cwd().openFile(io, file_name, .{ .mode = .write_only })) |file| {
         opt_out = file;
     } else |err| {
         std.log.err("Unable to open '{s}': {s}", .{ file_name, @errorName(err) });
 
-        opt_out = std.fs.cwd().createFile(file_name, .{}) catch |create_err| {
+        opt_out = std.Io.Dir.cwd().createFile(io, file_name, .{}) catch |create_err| {
             std.log.err("Unable to create '{s}': {s}", .{ file_name, @errorName(create_err) });
             std.process.exit(1);
         };
@@ -1203,7 +1196,11 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
 
     // Write the results out to the file.
     if (opt_out) |out| {
-        defer out.close();
+        defer out.close(io);
+
+        var buffer: [1024]u8 = undefined;
+        var file_writer = out.writerStreaming(io, &buffer);
+        var writer = file_writer.interface;
 
         var header = HHAHeader{
             .tag_count = result.tag_count,
@@ -1220,24 +1217,28 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
         header.assets = header.asset_types + asset_type_array_size;
         header.assets = (header.assets + @alignOf(HHAAsset) - 1) & ~@as(u32, @alignOf(HHAAsset) - 1);
 
-        var bytes_written: usize = 0;
-        bytes_written += try out.write(std.mem.asBytes(&header));
+        // var bytes_written: usize = 0;
+        try writer.writeAll(std.mem.asBytes(&header));
+        // bytes_written += try out.writeStreamingAll(io, std.mem.asBytes(&header));
         // std.log.info("Bytes written after header: {d}\n", .{ bytes_written });
         // std.log.info("Tags: Expected: {d}, actual: {d}\n", .{header.tags, bytes_written});
-        bytes_written += try out.write(std.mem.asBytes(&result.tags)[0..tag_array_size]);
+        try writer.writeAll(std.mem.asBytes(&result.tags)[0..tag_array_size]);
+        // bytes_written += try out.writeStreamingAll(io, std.mem.asBytes(&result.tags)[0..tag_array_size]);
         // std.log.info("Bytes written after tags: {d}\n", .{ bytes_written });
         // std.log.info("Asset types: Expected: {d}, actual: {d}\n", .{header.asset_types, bytes_written});
-        bytes_written += try out.write(std.mem.asBytes(&result.asset_types));
+        try writer.writeAll(std.mem.asBytes(&result.asset_types));
+        // bytes_written += try out.writeStreamingAll(io, std.mem.asBytes(&result.asset_types));
         // std.log.info("Bytes written after asset types: {d}\n", .{ bytes_written });
         // std.log.info("Assets: Expected: {d}, actual: {d}\n", .{header.assets, bytes_written});
 
-        try out.seekBy(asset_array_size);
+        // try out.seekBy(asset_array_size);
+        try file_writer.seekTo(file_writer.logicalPos() + asset_array_size);
         var asset_index: u32 = 1;
         while (asset_index < header.asset_count) : (asset_index += 1) {
             const source: *AssetSource = &result.asset_sources[asset_index];
             var dest: *HHAAsset = &result.assets[asset_index];
 
-            dest.data_offset = try out.getPos();
+            dest.data_offset = file_writer.logicalPos();
 
             switch (source.asset_type) {
                 .Font => {
@@ -1247,14 +1248,16 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
 
                     const glyphs_size: u32 = font.glyph_count * @sizeOf(HHAFontGlyph);
                     var bytes: []const u8 = @as([*]const u8, @ptrCast(font.glyphs))[0..glyphs_size];
-                    bytes_written += try out.write(bytes);
+                    // bytes_written += try out.writeStreamingAll(io, bytes);
+                    try writer.writeAll(bytes);
 
                     var horizontal_advance: [*]u8 = @ptrCast(@alignCast(font.horizontal_advance));
                     var glyph_index: u32 = 0;
                     while (glyph_index < font.glyph_count) : (glyph_index += 1) {
                         const horizontal_advance_slice_size: u32 = @sizeOf(f32) * font.glyph_count;
                         bytes = @as([*]const u8, @ptrCast(horizontal_advance))[0..horizontal_advance_slice_size];
-                        bytes_written += try out.write(bytes);
+                        // bytes_written += try out.writeStreamingAll(io, bytes);
+                        try writer.writeAll(bytes);
                         horizontal_advance += @sizeOf(f32) * font.max_glyph_count;
                     }
                 },
@@ -1262,7 +1265,7 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
                     const opt_bmp = if (source.asset_type == .FontGlyph)
                         loadGlyphBMP(source.data.glyph.font, source.data.glyph.code_point, allocator, dest)
                     else
-                        loadBMP(source.data.bitmap.file_name, allocator);
+                        loadBMP(source.data.bitmap.file_name, allocator, io);
 
                     if (opt_bmp) |bmp| {
                         defer allocator.free(bmp.free);
@@ -1273,13 +1276,20 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
                         std.debug.assert((bmp.width * 4) == bmp.pitch);
                         const size: usize = @as(usize, @intCast(bmp.width)) * @as(usize, @intCast(bmp.height * 4));
                         const bytes: []const u8 = @as([*]const u8, @ptrCast(bmp.memory.?))[0..size];
-                        bytes_written += try out.write(bytes);
+                        // bytes_written += try out.writeStreamingAll(io, bytes);
+                        try writer.writeAll(bytes);
                         // std.log.info("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
                         // std.log.info("Bytes written after bmp: {d}\n", .{bytes_written});
                     }
                 },
                 .Sound => {
-                    const wav = loadWAV(source.data.sound.file_name, source.data.sound.first_sample_index, dest.info.sound.sample_count, allocator);
+                    const wav = loadWAV(
+                        source.data.sound.file_name,
+                        source.data.sound.first_sample_index,
+                        dest.info.sound.sample_count,
+                        allocator,
+                        io,
+                    );
                     defer allocator.free(wav.free);
 
                     dest.info.sound.sample_count = wav.sample_count;
@@ -1289,16 +1299,18 @@ fn writeHHA(file_name: []const u8, result: *Assets, allocator: std.mem.Allocator
                     while (channel_index < wav.channel_count) : (channel_index += 1) {
                         const size: usize = dest.info.sound.sample_count * @sizeOf(i16);
                         const bytes: []const u8 = @as([*]const u8, @ptrCast(wav.samples[channel_index].?))[0..size];
-                        bytes_written += try out.write(bytes);
+                        // bytes_written += try out.writeStreamingAll(io, bytes);
+                        try writer.writeAll(bytes);
                         // std.log.info("Expected size: {d}, size: {d}\n", .{ size, bytes.len });
                         // std.log.info("Bytes written after wav: {d}\n", .{ bytes_written });
                     }
                 },
             }
         }
-        try out.seekTo(header.assets);
-        bytes_written += try out.write(std.mem.asBytes(&result.assets)[0..asset_array_size]);
+        try file_writer.seekTo(header.assets);
+        // bytes_written += try out.writeStreamingAll(io, std.mem.asBytes(&result.assets)[0..asset_array_size]);
+        try writer.writeAll(std.mem.asBytes(&result.assets)[0..asset_array_size]);
 
-        std.log.info("Bytes written: {s} {d}\n", .{ file_name, bytes_written });
+        std.log.info("Bytes written: {s} {d}\n", .{ file_name, 0 });
     }
 }

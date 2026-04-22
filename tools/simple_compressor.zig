@@ -12,13 +12,10 @@ const std = @import("std");
 ///   deinterleaving by 4, etc.)
 /// * Add the concept of switchable compression mid-stream to allow different blocks to be encoded with different
 ///   methods.
-pub fn main() anyerror!void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
+pub fn main(init: std.process.Init) anyerror!void {
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     if (args.len == 5) {
         var final_output_size: usize = 0;
@@ -44,7 +41,7 @@ pub fn main() anyerror!void {
         }
 
         if (opt_compressor) |compressor| {
-            const in_file = try readEntireFileIntoMemory(in_filename, allocator);
+            const in_file = readEntireFileIntoMemory(in_filename, allocator, init.io);
             defer allocator.free(in_file.contents);
 
             if (std.mem.eql(u8, command, "compress")) {
@@ -121,10 +118,10 @@ pub fn main() anyerror!void {
         }
 
         if (final_output_size > 0) {
-            if (std.fs.cwd().createFile(out_filename, .{})) |file| {
-                defer file.close();
+            if (std.Io.Dir.cwd().createFile(init.io, out_filename, .{})) |file| {
+                defer file.close(init.io);
 
-                try file.writeAll(final_output_buffer[0..final_output_size]);
+                try file.writeStreamingAll(init.io, final_output_buffer[0..final_output_size]);
             } else |err| {
                 std.log.err("Cannot open output file '{s}': {s}", .{ out_filename, @errorName(err) });
             }
@@ -402,24 +399,16 @@ const FileContents = struct {
     contents: [:0]const u8 = undefined,
 };
 
-fn readEntireFileIntoMemory(file_name: []const u8, allocator: std.mem.Allocator) !FileContents {
+fn readEntireFileIntoMemory(file_name: []const u8, allocator: std.mem.Allocator, io: std.Io) FileContents {
     var result = FileContents{};
 
-    if (std.fs.cwd().openFile(file_name, .{ .mode = .read_only })) |file| {
-        defer file.close();
+    if (std.Io.Dir.cwd().openFile(io, file_name, .{ .mode = .read_only })) |file| {
+        defer file.close(io);
 
-        _ = try file.seekFromEnd(0);
-        result.file_size = try file.getPos();
-        _ = try file.seekTo(0);
-
-        const buffer = try file.readToEndAllocOptions(
-            allocator,
-            std.math.maxInt(u32),
-            null,
-            .fromByteUnits(@alignOf(u32)),
-            0,
-        );
-        result.contents = buffer;
+        var file_reader = file.reader(io, &.{});
+        const contents = file_reader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32))) catch "";
+        result.contents = @ptrCast(contents);
+        result.file_size = @intCast(contents.len);
     } else |err| {
         std.log.err("Cannot open input file '{s}': {s}", .{ file_name, @errorName(err) });
     }

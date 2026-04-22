@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 // Defaults.
-const FORCE_RELEASE_MODE = true;
+const FORCE_RELEASE_MODE = false;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
 const SLOW_DEFAULT = true;
@@ -231,8 +231,8 @@ fn addAssetBuilder(
     asset_builder_exe.root_module.addImport("shared", shared_module);
 
     const stb_dep = b.dependency("stb", .{});
-    asset_builder_exe.addIncludePath(stb_dep.path(""));
-    asset_builder_exe.addCSourceFiles(.{ .files = &[_][]const u8{"tools/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
+    asset_builder_exe.root_module.addIncludePath(stb_dep.path(""));
+    asset_builder_exe.root_module.addCSourceFiles(.{ .files = &[_][]const u8{"tools/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
 
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     asset_builder_exe.root_module.addImport("win32", zigwin32);
@@ -460,6 +460,6 @@ fn addRendererTest(
     // Allow running main executable from build command.
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run-renderer-test", "Run the renderer test");
-    run_exe.setCwd(b.path("."));
+    run_exe.setCwd(b.path("./data/renderer_test"));
     run_step.dependOn(&run_exe.step);
 }

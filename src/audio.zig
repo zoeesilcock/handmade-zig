@@ -216,13 +216,13 @@ pub const AudioState = struct {
                         {
                             var channel_index: u32 = 0;
                             while (channel_index < output_channel_count) : (channel_index += 1) {
-                                if (volume_velocity_chunk.values[channel_index] != 0) {
-                                    const delta_volume: f32 = playing_sound.target_volume.values[channel_index] -
-                                        volume.values[channel_index];
+                                if (volume_velocity_chunk.valueAt(channel_index) != 0) {
+                                    const delta_volume: f32 = playing_sound.target_volume.valueAt(channel_index) -
+                                        volume.valueAt(channel_index);
 
                                     if (delta_volume != 0) {
                                         const volume_chunk_count: u32 =
-                                            @intFromFloat((delta_volume / volume_velocity_chunk.values[channel_index]) + 0.5);
+                                            @intFromFloat((delta_volume / volume_velocity_chunk.valueAt(channel_index)) + 0.5);
                                         if (chunks_to_mix > volume_chunk_count) {
                                             chunks_to_mix = @intCast(volume_chunk_count);
                                             volume_ends_at[channel_index] = volume_chunk_count;
@@ -299,9 +299,11 @@ pub const AudioState = struct {
                             var channel_index: u32 = 0;
                             while (channel_index < output_channel_count) : (channel_index += 1) {
                                 if (chunks_to_mix == volume_ends_at[channel_index]) {
-                                    playing_sound.current_volume.values[channel_index] =
-                                        playing_sound.target_volume.values[channel_index];
-                                    playing_sound.current_volume_velocity.values[channel_index] = 0;
+                                    playing_sound.current_volume.setValueAt(
+                                        channel_index,
+                                        playing_sound.target_volume.valueAt(channel_index),
+                                    );
+                                    playing_sound.current_volume_velocity.setValueAt(channel_index, 0);
                                 }
                             }
                         }

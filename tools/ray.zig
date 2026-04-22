@@ -30,19 +30,22 @@ pub const std_options: std.Options = .{
 
 pub fn myLogFn(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
-    _ = scope;
+    const io = std.Options.debug_io;
+
     if (level == .err) {
-        std.debug.lockStdErr();
-        defer std.debug.unlockStdErr();
-        const stderr = std.fs.File.stderr().deprecatedWriter();
-        nosuspend stderr.print(format ++ "\n", args) catch return;
+        const prev = io.swapCancelProtection(.blocked);
+        defer _ = io.swapCancelProtection(prev);
+        var buffer: [64]u8 = undefined;
+        const stderr = std.debug.lockStderr(&buffer).terminal();
+        defer std.debug.unlockStderr();
+        return std.log.defaultLogFileTerminal(level, scope, format, args, stderr) catch {};
     } else {
         var stdout_buf: [1024]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_writer = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         var stdout = &stdout_writer.interface;
         stdout.print(format ++ "\n", args) catch return;
         stdout.flush() catch return;
@@ -143,7 +146,7 @@ fn allocateImage(width: u32, height: u32, allocator: std.mem.Allocator) !ImageU3
     };
 }
 
-fn writeImage(image: ImageU32, output_file_name: []const u8) !void {
+fn writeImage(image: ImageU32, output_file_name: []const u8, io: std.Io) !void {
     const output_pixel_size: u32 = getTotalPixelSize(image);
     const header_size: u32 = @sizeOf(BitmapHeader) - 10;
     const header: BitmapHeader = .{
@@ -167,11 +170,11 @@ fn writeImage(image: ImageU32, output_file_name: []const u8) !void {
 
     if (false) {
         const in_file_name: []const u8 = "reference.bmp";
-        if (std.fs.cwd().openFile(in_file_name, .{})) |file| {
-            defer file.close();
+        if (std.Io.Dir.cwd().openFile(io, in_file_name, .{})) |file| {
+            defer file.close(io);
 
             var buf: [1024]u8 = undefined;
-            var file_reader = file.reader(&buf);
+            var file_reader = file.reader(io, &buf);
             const reader = &file_reader.interface;
 
             const in_header: BitmapHeader = try reader.takeStruct(BitmapHeader, .little);
@@ -181,11 +184,11 @@ fn writeImage(image: ImageU32, output_file_name: []const u8) !void {
         }
     }
 
-    if (std.fs.cwd().createFile(output_file_name, .{})) |file| {
-        defer file.close();
+    if (std.Io.Dir.cwd().createFile(io, output_file_name, .{})) |file| {
+        defer file.close(io);
 
         var buf: [1024]u8 = undefined;
-        var file_writer = file.writer(&buf);
+        var file_writer = file.writer(io, &buf);
         const writer = &file_writer.interface;
 
         try writer.writeAll(std.mem.asBytes(&header)[0..header_size]);
@@ -530,10 +533,9 @@ pub fn renderTile(queue: *WorkQueue) bool {
     return true;
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena.allocator();
-    defer arena.deinit();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.arena.allocator();
 
     var materials = [_]Material{
         .{ .emit_color = .new(0.3, 0.4, 0.5) },
@@ -681,7 +683,7 @@ pub fn main() !void {
         .{@as(f64, @floatFromInt(time_elapsed)) / @as(f64, @floatFromInt(queue.bounces_computed))},
     );
 
-    try writeImage(image, "test.bmp");
+    try writeImage(image, "test.bmp", io);
 
     std.log.err("Done.", .{});
 }

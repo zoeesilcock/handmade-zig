@@ -115,11 +115,11 @@ pub fn getBoxSurface(position_in: Vector3, radius: Vector3, surface_index: u32) 
 
     var position: Vector3 = position_in;
     if (positive == 1) {
-        normal.values[axis_index] = 1;
-        position.values[axis_index] += radius.values[axis_index];
+        normal.setValueAt(axis_index, 1);
+        position.setValueAt(axis_index, position.valueAt(axis_index) + radius.valueAt(axis_index));
     } else {
-        normal.values[axis_index] = -1;
-        position.values[axis_index] -= radius.values[axis_index];
+        normal.setValueAt(axis_index, -1);
+        position.setValueAt(axis_index, position.valueAt(axis_index) - radius.valueAt(axis_index));
     }
 
     var sign_x: f32 = if (positive == 1) 1 else -1;

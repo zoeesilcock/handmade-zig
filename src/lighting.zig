@@ -537,6 +537,10 @@ fn computeLightPropagation(
                     .plus(sample_point_normal.scaledToV(sample_direction_4x.z)));
 
             const ray: RaycastResult = raycast(work, ray_origin, sample_direction_4x);
+            const ray_hit: [4]bool = ray.hit;
+            const ray_t_ray: [4]f32 = ray.t_ray;
+            const ray_box_index: [4]u32 = ray.box_index;
+            const ray_box_surface_index: [4]u32 = ray.box_surface_index;
 
             const ray_position_4x: V3_4x = ray_origin.plus(sample_direction_4x.scaledToV(ray.t_ray));
 
@@ -545,8 +549,8 @@ fn computeLightPropagation(
                 if (true) {
                     if (sample_point_index == solution.debug_point_index) {
                         const sample_direction: Vector3 = sample_direction_4x.getComponent(sub_ray);
-                        const hit: bool = ray.hit[sub_ray];
-                        const t_ray: f32 = ray.t_ray[sub_ray];
+                        const hit: bool = ray_hit[sub_ray];
+                        const t_ray: f32 = ray_t_ray[sub_ray];
                         const draw_length: f32 = 0.25;
                         const end_point: Vector3 = sample_point.position.plus(sample_direction.scaledTo(
                             if (hit) t_ray else draw_length,
@@ -562,9 +566,9 @@ fn computeLightPropagation(
                 }
 
                 var transfer_pps: Color3 = .zero();
-                if (ray.hit[sub_ray]) {
-                    const hit_box: *LightingBox = getBox(solution, ray.box_index[sub_ray]);
-                    const box_surface_index: u32 = ray.box_surface_index[sub_ray];
+                if (ray_hit[sub_ray]) {
+                    const hit_box: *LightingBox = getBox(solution, ray_box_index[sub_ray]);
+                    const box_surface_index: u32 = ray_box_surface_index[sub_ray];
                     const ray_position: Vector3 = ray_position_4x.getComponent(sub_ray);
 
                     // TODO: Update this transfer to be bidirectional.
@@ -736,7 +740,7 @@ fn splitBox(
             if (true) {
                 // One-plane case (k-d-tree-like).
                 var class_direction: Vector3 = .zero();
-                class_direction.values[dimension_index] = 1.0;
+                class_direction.setValueAt(dimension_index, 1.0);
                 const class_distance: f32 = class_direction.dotProduct(parent_box.position);
 
                 var count_a: u16 = 0;

@@ -37,19 +37,17 @@ const BitmapHeader = packed struct {
     colors_important: u32,
 };
 
-fn readEntireFile(file_name: [:0]const u8, allocator: std.mem.Allocator, errors: *Stream) !Stream {
+fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator, errors: *Stream, io: std.Io) !Stream {
     var buffer: Buffer = .{};
 
-    var open_error: ?std.fs.File.OpenError = null;
-    if (std.fs.cwd().openFile(file_name, .{})) |file| {
-        defer file.close();
+    var open_error: ?std.Io.File.OpenError = null;
+    if (std.Io.Dir.cwd().openFile(io, file_name, .{ .mode = .read_only })) |file| {
+        defer file.close(io);
 
-        _ = try file.seekFromEnd(0);
-        buffer.count = @as(u32, @intCast(file.getPos() catch 0));
-        _ = try file.seekTo(0);
-
-        const file_contents = try file.readToEndAllocOptions(allocator, std.math.maxInt(u32), null, .@"32", 0);
-        buffer.data = @ptrCast(file_contents);
+        var file_reader = file.reader(io, &.{});
+        const file_contents = try file_reader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32)));
+        buffer.data = file_contents.ptr;
+        buffer.count = file_contents.len;
     } else |err| {
         open_error = err;
     }
@@ -107,6 +105,7 @@ fn writeBMPImageTopDownRGBA(
     output_file_name: []const u8,
     pixel_ops: u32,
     errors: *Stream,
+    io: std.Io,
 ) !void {
     const output_pixel_size: u32 = 4 * width * height;
 
@@ -177,11 +176,11 @@ fn writeBMPImageTopDownRGBA(
         row1 -= width;
     }
 
-    if (std.fs.cwd().createFile(output_file_name, .{})) |file| {
-        defer file.close();
+    if (std.Io.Dir.cwd().createFile(io, output_file_name, .{})) |file| {
+        defer file.close(io);
 
         var buf: [1024]u8 = undefined;
-        var file_writer = file.writer(&buf);
+        var file_writer = file.writer(io, &buf);
         const writer = &file_writer.interface;
 
         try writer.writeAll(std.mem.asBytes(&header)[0..header_size]);
@@ -221,10 +220,8 @@ fn crtDeallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.c) v
     }
 }
 
-pub fn main() !void {
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena_allocator.allocator();
-    defer arena_allocator.deinit();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.arena.allocator();
 
     shared.platform = shared.Platform{
         .allocateMemory = crtAllocateMemory,
@@ -236,8 +233,7 @@ pub fn main() !void {
     var error_stream: Stream = .onDemandMemoryStream(&arena, null);
     var info_stream: Stream = .onDemandMemoryStream(&arena, &error_stream);
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(allocator);
 
     if (args.len == 4) {
         const in_file_name: [:0]const u8 = args[1];
@@ -245,7 +241,7 @@ pub fn main() !void {
         const out_file_name_alpha: [:0]const u8 = args[3];
 
         stream.output(&info_stream, @src(), "Loading PNG %s...\n", .{in_file_name});
-        const file: Stream = try readEntireFile(in_file_name, allocator, &error_stream);
+        const file: Stream = try readEntireFile(in_file_name, allocator, &error_stream, init.io);
         const image: ImageU32 = png.parsePNG(&arena, file, &info_stream);
 
         stream.output(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_rgb});
@@ -256,6 +252,7 @@ pub fn main() !void {
             out_file_name_rgb,
             @intFromEnum(PixelOp.SwapRedAndBlue) | @intFromEnum(PixelOp.Invert), // | @intFromEnum(PixelOp.MultiplyAlpha),
             &error_stream,
+            init.io,
         );
         stream.output(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_alpha});
         try writeBMPImageTopDownRGBA(
@@ -265,6 +262,7 @@ pub fn main() !void {
             out_file_name_alpha,
             @intFromEnum(PixelOp.ReplaceAlpha),
             &error_stream,
+            init.io,
         );
     } else {
         stream.output(
@@ -275,17 +273,17 @@ pub fn main() !void {
         );
     }
 
-    var buf: [128]u8 = undefined;
+    var buf: [1024]u8 = undefined;
 
-    const stdout = std.fs.File.stdout().writer(&buf);
-    var stdout_writer = stdout.interface;
-    try stdout_writer.writeAll("Info:\n");
-    try dumpStreamToWriter(&info_stream, &stdout_writer);
-    try stdout_writer.flush();
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &buf);
+    const stdout = &stdout_writer.interface;
+    try stdout.writeAll("Info:\n");
+    try dumpStreamToWriter(&info_stream, stdout);
+    try stdout.flush();
 
-    try stdout_writer.writeAll("Errors:\n");
-    const stderr = std.fs.File.stderr().writer(&buf);
-    var stderr_writer = stderr.interface;
-    try dumpStreamToWriter(&error_stream, &stderr_writer);
-    try stderr_writer.flush();
+    try stdout.writeAll("Errors:\n");
+    var stderr_writer = std.Io.File.stderr().writer(init.io, &buf);
+    const stderr = &stderr_writer.interface;
+    try dumpStreamToWriter(&error_stream, stderr);
+    try stderr.flush();
 }

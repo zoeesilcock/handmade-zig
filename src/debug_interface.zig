@@ -473,31 +473,6 @@ pub const DebugInterface = if (INTERNAL) struct {
     }
 
     pub fn debugEndArray() void {}
-
-    fn LocalStorageType() type {
-        const storage_fields = comptime blk: {
-            var fields: []const std.builtin.Type.StructField = &[_]std.builtin.Type.StructField{};
-            for (std.meta.fields(config.GlobalConstants)) |field| {
-                fields = fields ++ &[1]std.builtin.Type.StructField{std.builtin.Type.StructField{
-                    .name = field.name,
-                    .type = ?DebugEvent,
-                    .default_value = @ptrCast(&@as(?DebugEvent, null)),
-                    .is_comptime = false,
-                    .alignment = 0,
-                }};
-            }
-            break :blk fields;
-        };
-
-        return @Type(.{
-            .Struct = .{
-                .layout = std.builtin.Type.ContainerLayout.auto,
-                .fields = storage_fields,
-                .decls = &[_]std.builtin.Type.Declaration{},
-                .is_tuple = false,
-            },
-        });
-    }
 } else struct {
     pub fn debugBeginDataBlock(
         source: std.builtin.SourceLocation,

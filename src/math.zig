@@ -104,6 +104,8 @@ fn Vector2Type(comptime ScalarType: type) type {
         }
 
         const Shared = VectorShared(2, ScalarType, Self);
+        pub const valueAt = Shared.valueAt;
+        pub const setValueAt = Shared.setValueAt;
         pub const zero = Shared.zero;
         pub const one = Shared.one;
         pub const splat = Shared.splat;
@@ -252,6 +254,8 @@ fn Vector3Type(comptime ScalarType: type) type {
         }
 
         const Shared = VectorShared(3, ScalarType, Self);
+        pub const valueAt = Shared.valueAt;
+        pub const setValueAt = Shared.setValueAt;
         pub const zero = Shared.zero;
         pub const one = Shared.one;
         pub const splat = Shared.splat;
@@ -381,6 +385,8 @@ fn Vector4Type(comptime ScalarType: type) type {
         }
 
         const Shared = VectorShared(4, ScalarType, Self);
+        pub const valueAt = Shared.valueAt;
+        pub const setValueAt = Shared.setValueAt;
         pub const zero = Shared.zero;
         pub const one = Shared.one;
         pub const splat = Shared.splat;
@@ -473,6 +479,8 @@ fn Color3Type(comptime ScalarType: type) type {
         }
 
         const Shared = VectorShared(3, ScalarType, Self);
+        pub const valueAt = Shared.valueAt;
+        pub const setValueAt = Shared.setValueAt;
         pub const zero = Shared.zero;
         pub const one = Shared.one;
         pub const white = Shared.white;
@@ -589,6 +597,8 @@ fn Color4Type(comptime ScalarType: type) type {
         }
 
         const Shared = VectorShared(4, ScalarType, Self);
+        pub const valueAt = Shared.valueAt;
+        pub const setValueAt = Shared.setValueAt;
         pub const zero = Shared.zero;
         pub const one = Shared.one;
         pub const white = Shared.white;
@@ -623,6 +633,17 @@ fn Color4Type(comptime ScalarType: type) type {
 
 fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: type, comptime Self: type) type {
     return struct {
+        pub fn valueAt(self: Self, index: usize) ScalarType {
+            const array: [dimension_count]ScalarType = self.values;
+            return array[index];
+        }
+
+        pub fn setValueAt(self: *Self, index: usize, value: ScalarType) void {
+            var array: [dimension_count]ScalarType = self.values;
+            array[index] = value;
+            self.values = array;
+        }
+
         pub fn zero() Self {
             return Self{ .values = @splat(0) };
         }
@@ -678,8 +699,9 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         pub fn clamp01(self: *const Self) Self {
             var result = Self.zero();
 
-            for (0..dimension_count) |axis_index| {
-                result.values[axis_index] = clampf01(self.values[axis_index]);
+            var array: [dimension_count]ScalarType = self.values;
+            for (&array, 0..) |elem, axis_index| {
+                result.setValueAt(axis_index, clampf01(elem));
             }
 
             return result;
@@ -729,8 +751,9 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         pub fn min(self: Self, b: Self) Self {
             var result = Self.zero();
 
-            for (0..dimension_count) |axis_index| {
-                result.values[axis_index] = @min(self.values[axis_index], b.values[axis_index]);
+            var array: [dimension_count]ScalarType = self.values;
+            for (&array, 0..) |elem, axis_index| {
+                result.setValueAt(axis_index, @min(elem, b.valueAt(axis_index)));
             }
 
             return result;
@@ -739,8 +762,9 @@ fn VectorShared(comptime dimension_count: comptime_int, comptime ScalarType: typ
         pub fn max(self: Self, b: Self) Self {
             var result = Self.zero();
 
-            for (0..dimension_count) |axis_index| {
-                result.values[axis_index] = @max(self.values[axis_index], b.values[axis_index]);
+            var array: [dimension_count]ScalarType = self.values;
+            for (&array, 0..) |elem, axis_index| {
+                result.setValueAt(axis_index, @max(elem, b.valueAt(axis_index)));
             }
 
             return result;
@@ -1048,8 +1072,8 @@ fn RectangleShared(
             var result = true;
 
             for (0..dimension_count) |axis_index| {
-                if ((b.max.values[axis_index] <= self.min.values[axis_index]) or
-                    (b.min.values[axis_index] >= self.max.values[axis_index]))
+                if ((b.max.valueAt(axis_index) <= self.min.valueAt(axis_index)) or
+                    (b.min.valueAt(axis_index) >= self.max.valueAt(axis_index)))
                 {
                     result = false;
                     break;
@@ -1259,7 +1283,10 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             for (0..row_count) |r| { // Rows of self.
                 for (0..col_count) |c| { // Columns of b.
                     for (0..col_count) |i| { // Columns of self, and rows of b.
-                        result.values[r].values[c] += self.values[r].values[i] * b.values[i].values[c];
+                        result.values[r].setValueAt(
+                            c,
+                            result.values[r].valueAt(c) + self.values[r].valueAt(i) * b.values[i].valueAt(c),
+                        );
                     }
                 }
             }
@@ -1380,7 +1407,7 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             var result: Vector3 = .zero();
 
             for (0..row_count - 1) |r| {
-                result.values[r] = self.values[r].values[column];
+                result.setValueAt(r, self.values[r].valueAt(column));
             }
 
             return result;

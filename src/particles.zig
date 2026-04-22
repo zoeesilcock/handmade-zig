@@ -257,10 +257,20 @@ fn updateAndRenderFire(
         // }
 
         // Render particle.
+
+        const x_array: [4]f32 = a.p.x;
+        const y_array: [4]f32 = a.p.y;
+        const z_array: [4]f32 = a.p.z;
+
+        const r_array: [4]f32 = a.c.r;
+        const g_array: [4]f32 = a.c.g;
+        const b_array: [4]f32 = a.c.b;
+        const a_array: [4]f32 = a.c.a;
+
         var sub_index: u32 = 0;
         while (sub_index < 4) : (sub_index += 1) {
-            const p: Vector3 = .new(a.p.x[sub_index], a.p.y[sub_index], a.p.z[sub_index]);
-            const c: Color = .new(a.c.r[sub_index], a.c.g[sub_index], a.c.b[sub_index], a.c.a[sub_index]);
+            const p: Vector3 = .new(x_array[sub_index], y_array[sub_index], z_array[sub_index]);
+            const c: Color = .new(r_array[sub_index], g_array[sub_index], b_array[sub_index], a_array[sub_index]);
             if (c.a() > 0) {
                 asset_rendering.pushBitmapId(
                     render_group,
