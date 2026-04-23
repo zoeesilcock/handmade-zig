@@ -110,16 +110,26 @@ pub const RenderSettings = extern struct {
     }
 };
 
-pub const RendererTexture = extern struct {
-    index: u32,
-    width: u16,
-    height: u16,
+pub const RendererTexture = extern union {
+    pack: u64,
+    // TODO: Confirm that this is same size as u64. Add align(1) otherwise.
+    values: extern struct {
+        index: u32,
+        width: u16,
+        height: u16,
+    },
 
     pub const empty: RendererTexture = .{
-        .index = 0,
-        .width = 0,
-        .height = 0,
+        .values = .{
+            .index = 0,
+            .width = 0,
+            .height = 0,
+        },
     };
+
+    pub fn isValid(self: RendererTexture) bool {
+        return self.pack != 0;
+    }
 };
 
 pub const LightingBox = extern struct {
@@ -146,7 +156,9 @@ pub const TextureOpList = extern struct {
 
 pub const TextureOp = struct {
     next: ?*TextureOp = null,
-    update: TextureOpUpdate,
+
+    texture: RendererTexture,
+    data: *anyopaque,
 };
 
 pub const TextureQueue = extern struct {
@@ -183,11 +195,6 @@ pub const RenderCommands = extern struct {
         self.push_buffer_data_at = self.push_buffer_base;
         self.vertex_count = 0;
     }
-};
-
-const TextureOpUpdate = struct {
-    texture: RendererTexture,
-    data: *anyopaque,
 };
 
 pub const ManualSortKey = extern struct {
@@ -615,8 +622,8 @@ pub const RenderGroup = extern struct {
         entry.?.quad_count += 1;
 
         var inverse_uv: Vector2 = .new(
-            @as(f32, @floatFromInt(texture.width)) / TEXTURE_ARRAY_DIM,
-            @as(f32, @floatFromInt(texture.height)) / TEXTURE_ARRAY_DIM,
+            @as(f32, @floatFromInt(texture.values.width)) / TEXTURE_ARRAY_DIM,
+            @as(f32, @floatFromInt(texture.values.height)) / TEXTURE_ARRAY_DIM,
         );
 
         const texture_index32: u32 = textureIndexFrom(texture);
@@ -838,7 +845,7 @@ pub const RenderGroup = extern struct {
                     null,
                 );
             } else {
-                self.assets.loadBitmap(id, false);
+                self.assets.loadBitmap(id);
                 self.missing_resource_count += 1;
             }
         }
@@ -1516,6 +1523,18 @@ pub fn enqueueFree(queue: *TextureQueue, list: TextureOpList) void {
     }
 }
 
+pub fn beginTextureOp(queue: *TextureQueue, width: f32, height: f32) ?*TextureOp {
+    _ = queue;
+    _ = width;
+    _ = height;
+    return null;
+}
+
+pub fn completeTextureOp(queue: *TextureQueue, texture_op: *TextureOp) void {
+    _ = queue;
+    _ = texture_op;
+}
+
 pub fn addOp(queue: *TextureQueue, source: *const TextureOp) void {
     queue.mutex.begin();
 
@@ -1553,20 +1572,22 @@ pub fn initTextureQueue(queue: *TextureQueue, memory_size: usize, texture_ops_me
 
 pub fn referToTexture(index: u32, width: u32, height: u32) RendererTexture {
     const result: RendererTexture = .{
-        .index = index,
-        .width = @intCast(width),
-        .height = @intCast(height),
+        .values = .{
+            .index = index,
+            .width = @intCast(width),
+            .height = @intCast(height),
+        },
     };
 
-    std.debug.assert(index == result.index);
-    std.debug.assert(width == result.width);
-    std.debug.assert(height == result.height);
+    std.debug.assert(index == result.values.index);
+    std.debug.assert(width == result.values.width);
+    std.debug.assert(height == result.values.height);
 
     return result;
 }
 
 pub fn isSpecialTexture(texture: RendererTexture) bool {
-    return (texture.index & SPECIAL_TEXTURE_BIT) != 0;
+    return (texture.values.index & SPECIAL_TEXTURE_BIT) != 0;
 }
 
 pub fn specialTextureIndexFrom(index: u32) u32 {
@@ -1576,7 +1597,7 @@ pub fn specialTextureIndexFrom(index: u32) u32 {
 }
 
 pub fn textureIndexFrom(texture: RendererTexture) u32 {
-    return texture.index & ~@as(u32, @intCast(SPECIAL_TEXTURE_BIT));
+    return texture.values.index & ~@as(u32, @intCast(SPECIAL_TEXTURE_BIT));
 }
 
 pub fn encodeCubeUVLayout(

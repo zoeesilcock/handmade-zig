@@ -31,6 +31,7 @@ const SpriteValues = renderer_geometry.SpriteValues;
 const TransientState = shared.TransientState;
 const SimRegion = sim.SimRegion;
 const WorldPosition = world.WorldPosition;
+const RendererTexture = renderer.RendererTexture;
 const ManualSortKey = renderer.ManualSortKey;
 const ParticleCache = particles.ParticleCache;
 const RenderGroup = renderer.RenderGroup;
@@ -47,8 +48,8 @@ const TimedBlock = debug_interface.TimedBlock;
 const LightingPoint = lighting.LightingPoint;
 const LightingPointState = renderer.LightingPointState;
 const EditableHitTest = in_game_editor.EditableHitTest;
-const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 
+const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const ENTITY_MAX_PIECE_COUNT = 4;
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
 pub const INTERNAL = @import("build_options").internal;
@@ -557,19 +558,20 @@ pub fn updateAndRenderEntities(
                             @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else {
-                        const bitmap_piece: BitmapPiece = piece.extra.bitmap;
-                        _ = world_radius.setX(world_radius.y());
-                        _ = world_radius.setZ(0.1);
-
                         if (opt_assets) |assets| {
                             if (bitmap_id) |id| {
-                                if (assets.getBitmap(id)) |bitmap| {
+                                const texture_handle: RendererTexture = assets.getBitmap(id);
+                                if (texture_handle.isValid()) {
+                                    const bitmap_piece: BitmapPiece = piece.extra.bitmap;
                                     const bitmap_info: *HHABitmap = assets.getBitmapInfo(id);
                                     const parent_bitmap_info: ?*HHABitmap = bitmap_infos[bitmap_piece.parent_piece];
+                                    var height_ratio: f32 =
+                                        @as(f32, @floatFromInt(bitmap_info.orig_dim[1])) / 1024;
 
                                     const child_align: HHAAlignPoint = bitmap_info.findAlign(
                                         bitmap_piece.child_align_type | @intFromEnum(HHAAlignPointType.ToParent),
                                     );
+                                    height_ratio *= child_align.getSize();
 
                                     var initial_position: Vector3 =
                                         entity_ground_point.plus(piece.offset.plus(offset));
@@ -582,6 +584,7 @@ pub fn updateAndRenderEntities(
                                                 piece_sprites[bitmap_piece.parent_piece].worldPositionFromAlignPosition(
                                                     parent_align.getPositionPercent(),
                                                 );
+                                            height_ratio *= parent_align.getSize();
                                         }
                                     }
 
@@ -589,9 +592,13 @@ pub fn updateAndRenderEntities(
                                     const align_percentage: Vector2 = child_align.getPositionPercent();
 
                                     const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(
-                                        bitmap.texture_handle,
-                                        piece.dimension.y(),
+                                        texture_handle,
+                                        piece.dimension.y() * height_ratio,
                                     );
+                                    _ = world_radius.setX(world_dim.x());
+                                    _ = world_radius.setY(world_dim.y());
+                                    _ = world_radius.setZ(0.1);
+
                                     const sprite: SpriteValues = .forUpright(
                                         render_group,
                                         initial_position,
@@ -603,7 +610,7 @@ pub fn updateAndRenderEntities(
                                     );
                                     piece_sprites[piece_index] = sprite;
                                     render_group.pushSprite(
-                                        bitmap.texture_handle,
+                                        texture_handle,
                                         sprite.min_position,
                                         sprite.scaled_x_axis,
                                         sprite.scaled_y_axis,
@@ -634,7 +641,7 @@ pub fn updateAndRenderEntities(
                                         }
                                     }
                                 } else {
-                                    assets.loadBitmap(id, false);
+                                    assets.loadBitmap(id);
                                     render_group.missing_resource_count += 1;
                                 }
                             }

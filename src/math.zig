@@ -8,6 +8,7 @@ pub const SLOW = shared.SLOW;
 
 pub const Vector2 = Vector2Type(f32);
 pub const Vector2i = Vector2Type(i32);
+pub const Vector2u = Vector2Type(u32);
 pub const Vector3 = Vector3Type(f32);
 pub const Vector4 = Vector4Type(f32);
 pub const Color3 = Color3Type(f32);
@@ -55,6 +56,14 @@ fn Vector2Type(comptime ScalarType: type) type {
         }
 
         pub fn y(self: *const Self) ScalarType {
+            return self.values[1];
+        }
+
+        pub fn width(self: *const Self) ScalarType {
+            return self.values[0];
+        }
+
+        pub fn height(self: *const Self) ScalarType {
             return self.values[1];
         }
 

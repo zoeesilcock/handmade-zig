@@ -72,9 +72,9 @@ pub const SpriteValues = struct {
 
 pub fn worldDimFromWorldHeight(texture: RendererTexture, height: f32) Vector2 {
     var width_over_height: f32 = 1;
-    if (texture.height != 0) {
+    if (texture.values.height != 0) {
         width_over_height =
-            @as(f32, @floatFromInt(texture.width)) / @as(f32, @floatFromInt(texture.height));
+            @as(f32, @floatFromInt(texture.values.width)) / @as(f32, @floatFromInt(texture.values.height));
     }
 
     const result: Vector2 = .new(

@@ -196,7 +196,7 @@ pub const HHAAsset = extern struct {
         sound: HHASound,
         font: HHAFont,
         max_union_size: [13]u64,
-    } = undefined,
+    } align(1) = undefined,
 };
 comptime {
     std.debug.assert(@sizeOf(HHAAsset) == (16 * 8));
@@ -216,12 +216,12 @@ pub const HHAAlignPointType = enum(u16) {
 };
 
 pub const HHAAlignPoint = extern struct {
-    position_percent: [2]u16 = [1]u16{0} ** 2,
-    size: u16 = 0,
-    align_type: u16 = 0,
+    position_percent: [2]u16 align(1) = [1]u16{0} ** 2,
+    size: u16 align(1) = 0,
+    align_type: u16 align(1) = 0,
 
     pub fn set(
-        self: *HHAAlignPoint,
+        self: *align(1) HHAAlignPoint,
         align_point_type: HHAAlignPointType,
         to_parent: bool,
         size: f32,
@@ -277,10 +277,10 @@ pub const HHAAlignPoint = extern struct {
 pub const HHA_BITMAP_ALIGN_POINT_COUNT = 12;
 pub const HHABitmap = extern struct {
     // These are imported from txt file augmentation of the PNG.
-    align_points: [HHA_BITMAP_ALIGN_POINT_COUNT]HHAAlignPoint = [1]HHAAlignPoint{.{}} ** HHA_BITMAP_ALIGN_POINT_COUNT,
+    align_points: [HHA_BITMAP_ALIGN_POINT_COUNT]HHAAlignPoint align(1) = [1]HHAAlignPoint{.{}} ** HHA_BITMAP_ALIGN_POINT_COUNT,
 
-    dim: [2]u16 = [1]u16{0} ** 2,
-    reserved: [2]u16 = [1]u16{0} ** 2,
+    dim: [2]u16 align(1) = [1]u16{0} ** 2,
+    orig_dim: [2]u16 align(1) = [1]u16{0} ** 2,
 
     // Data looks like this:
     //
@@ -311,10 +311,11 @@ pub const HHASoundChain = enum(u32) {
     Advance,
 };
 
+pub const HHA_MAX_SOUND_SAMPLE_COUNT = 24000;
 pub const HHASound = extern struct {
-    sample_count: u32,
-    channel_count: u32,
-    chain: HHASoundChain,
+    sample_count: u32 align(1),
+    channel_count: u32 align(1),
+    chain: HHASoundChain align(1),
 
     // Data looks like this:
     //
@@ -327,11 +328,11 @@ pub const HHAFontGlyph = extern struct {
 };
 
 pub const HHAFont = extern struct {
-    one_past_highest_code_point: u32,
-    glyph_count: u32,
-    ascender_height: f32,
-    descender_height: f32,
-    external_leading: f32,
+    one_past_highest_code_point: u32 align(1),
+    glyph_count: u32 align(1),
+    ascender_height: f32 align(1),
+    descender_height: f32 align(1),
+    external_leading: f32 align(1),
 
     // Data looks like this:
     //

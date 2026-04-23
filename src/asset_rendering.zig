@@ -19,7 +19,6 @@ const RenderGroup = renderer.RenderGroup;
 const RendererTexture = renderer.RendererTexture;
 const RenderEntryLightingTransfer = renderer.RenderEntryLightingTransfer;
 const LoadedFont = asset.LoadedFont;
-const LoadedBitmap = asset.LoadedBitmap;
 const LightingTextures = lighting.LightingTextures;
 const LightingPointState = renderer.LightingPointState;
 const LightingBox = renderer.LightingBox;
@@ -32,7 +31,7 @@ pub const UsedBitmapDim = struct {
 };
 
 pub fn getBitmapDim(
-    bitmap: *const LoadedBitmap,
+    texture_handle: RendererTexture,
     height: f32,
     offset: Vector3,
     align_percentage: Vector2,
@@ -44,10 +43,9 @@ pub fn getBitmapDim(
     var dim = UsedBitmapDim{};
 
     var width_over_height: f32 = 1;
-    const texture_handle: RendererTexture = bitmap.texture_handle;
-    if (texture_handle.height != 0) {
+    if (texture_handle.values.height != 0) {
         width_over_height =
-            @as(f32, @floatFromInt(texture_handle.width)) / @as(f32, @floatFromInt(texture_handle.height));
+            @as(f32, @floatFromInt(texture_handle.values.width)) / @as(f32, @floatFromInt(texture_handle.values.height));
     }
 
     dim.size = .new(
@@ -71,7 +69,7 @@ pub fn pushBitmapWithDim(
     group: *RenderGroup,
     upright: bool,
     dim: *UsedBitmapDim,
-    bitmap: *LoadedBitmap,
+    texture_handle: RendererTexture,
     height: f32,
     offset: Vector3,
     color: Color,
@@ -82,10 +80,9 @@ pub fn pushBitmapWithDim(
     _ = offset;
     _ = align_percentage;
 
-    const texture_handle: RendererTexture = bitmap.texture_handle;
     if (group.getCurrentQuads(1, texture_handle) != null) {
-        const bitmap_width: u32 = texture_handle.width;
-        const bitmap_height: u32 = texture_handle.height;
+        const bitmap_width: u32 = texture_handle.values.width;
+        const bitmap_height: u32 = texture_handle.values.height;
         const x_axis2: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
         const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
         const size: Vector2 = dim.size;
@@ -149,7 +146,7 @@ pub fn pushBitmapWithDim(
 
 pub fn pushBitmap(
     group: *RenderGroup,
-    bitmap: *LoadedBitmap,
+    texture_handle: RendererTexture,
     height: f32,
     offset: Vector3,
     color: Color,
@@ -157,14 +154,13 @@ pub fn pushBitmap(
     opt_x_axis: ?Vector2,
     opt_y_axis: ?Vector2,
 ) void {
-    const texture_handle: RendererTexture = bitmap.texture_handle;
-    const bitmap_width: u32 = texture_handle.width;
-    const bitmap_height: u32 = texture_handle.height;
+    const bitmap_width: u32 = texture_handle.values.width;
+    const bitmap_height: u32 = texture_handle.values.height;
     if (bitmap_width > 0 and bitmap_height > 0) {
         const x_axis2: Vector2 = opt_x_axis orelse Vector2.new(1, 0);
         const y_axis2: Vector2 = opt_y_axis orelse Vector2.new(0, 1);
         var dim = getBitmapDim(
-            bitmap,
+            texture_handle,
             height,
             offset,
             align_percentage,
@@ -176,7 +172,7 @@ pub fn pushBitmap(
             group,
             false,
             &dim,
-            bitmap,
+            texture_handle,
             height,
             offset,
             color,
@@ -198,10 +194,11 @@ pub fn pushBitmapId(
     opt_y_axis: ?Vector2,
 ) void {
     if (opt_id) |id| {
-        if (group.assets.getBitmap(id)) |bitmap| {
+        const texture_handle: RendererTexture = group.assets.getBitmap(id);
+        if (texture_handle.isValid()) {
             pushBitmap(
                 group,
-                bitmap,
+                texture_handle,
                 height,
                 offset,
                 color,
@@ -210,7 +207,7 @@ pub fn pushBitmapId(
                 opt_y_axis,
             );
         } else {
-            group.assets.loadBitmap(id, false);
+            group.assets.loadBitmap(id);
             group.missing_resource_count += 1;
         }
     }
@@ -245,9 +242,10 @@ pub fn pushCubeBitmapId(
     opt_light_store_in: ?*LightingPointState,
 ) void {
     if (opt_id) |id| {
-        if (group.assets.getBitmap(id)) |bitmap| {
+        const texture_handle: RendererTexture = group.assets.getBitmap(id);
+        if (texture_handle.isValid()) {
             group.pushCube(
-                bitmap.texture_handle,
+                texture_handle,
                 position,
                 radius,
                 color,
@@ -257,7 +255,7 @@ pub fn pushCubeBitmapId(
                 null,
             );
         } else {
-            group.assets.loadBitmap(id, false);
+            group.assets.loadBitmap(id);
             group.missing_resource_count += 1;
         }
     }

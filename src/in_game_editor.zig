@@ -348,10 +348,11 @@ pub const InGameEditor = struct {
 
         if (self.mode == .EditingAssets) {
             result.dest_group = &self.hot_group;
-            result.clip_space_mouse_position = input.clip_space_mouse_position.xy();
-            result.highlight_id = self.highlight_id;
-            result.highlight_color = .new(1, 1, 0, 1);
             result.dest_group.?.asset_count = 0;
+
+            result.highlight_color = .new(1, 1, 0, 1);
+            result.highlight_id = self.highlight_id;
+            result.clip_space_mouse_position = input.clip_space_mouse_position.xy();
         }
 
         return result;
@@ -405,8 +406,16 @@ pub const InGameEditor = struct {
                 .fromPointerAndLine(@ptrCast(&hha_section_name), @src()),
                 .fromSlice(hha_section_name),
             )) {
+                var should_save: bool = false;
                 layout.beginRow();
                 if (layout.button(.fromPointerAndLine(self, @src()), "SAVE", self.isDirty(), null)) {
+                    should_save = true;
+                }
+                if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT & SAVE", true, null)) {
+                    asset_mod.checkForArtChanges(self.assets);
+                    should_save = true;
+                }
+                if (should_save) {
                     self.clean_undo_sentinel_next = self.undo_sentinel.next;
                 }
                 layout.endRow();

@@ -34,7 +34,7 @@ const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
 const SortEntry = sort.SortEntry;
-const ObjectTransform = renderer.ObjectTransform;
+const RendererTexture = renderer.RendererTexture;
 const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const TransientClipRect = renderer.TransientClipRect;
@@ -1616,14 +1616,15 @@ fn drawDebugElement(
 
     switch (element.type) {
         .BitmapId => {
-            var opt_bitmap: ?*asset.LoadedBitmap = null;
+            var texture_handle: RendererTexture = .empty;
             const bitmap_scale = view.data.inline_block.dimension.y();
 
             const opt_event: ?*DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else null;
             if (opt_event) |event| {
-                if (render_group.assets.getBitmap(event.data.BitmapId)) |bitmap| {
+                texture_handle = render_group.assets.getBitmap(id);
+                if (texture_handle.isValid()) {
                     var dim = asset_rendering.getBitmapDim(
-                        bitmap,
+                        texture_handle,
                         bitmap_scale,
                         Vector3.zero(),
                         .zero(),
@@ -1631,7 +1632,6 @@ fn drawDebugElement(
                         null,
                     );
                     _ = view.data.inline_block.dimension.setX(dim.size.x());
-                    opt_bitmap = bitmap;
                 }
             }
 
@@ -1646,10 +1646,10 @@ fn drawDebugElement(
                 Color.black(),
             );
 
-            if (opt_bitmap) |bitmap| {
+            if (texture_handle.isValid()) {
                 asset_rendering.pushBitmap(
                     render_group,
-                    bitmap,
+                    texture_handle,
                     bitmap_scale,
                     layout_element.bounds.min.toVector3(1).plus(ui.backing_transform),
                     Color.white(),

@@ -207,6 +207,8 @@ fn readHHAV0(source_file: std.Io.File, hha: *LoadedHHA, allocator: std.mem.Alloc
                         );
                         dest_asset.info.bitmap.dim[0] = @truncate(bitmap.dim[0]);
                         dest_asset.info.bitmap.dim[1] = @truncate(bitmap.dim[1]);
+                        dest_asset.info.bitmap.orig_dim[0] = dest_asset.info.bitmap.dim[0];
+                        dest_asset.info.bitmap.orig_dim[1] = dest_asset.info.bitmap.dim[1];
                         dest_asset.info.bitmap.align_points[0].set(.Default, true, 1, alignment_percentage);
 
                         dest_asset.data_size = 4 * bitmap.dim[0] * bitmap.dim[1];

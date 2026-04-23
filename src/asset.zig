@@ -19,6 +19,7 @@ const INTERNAL = shared.INTERNAL;
 
 // Types.
 const Vector2 = math.Vector2;
+const Vector2u = math.Vector2u;
 const Vector3 = math.Vector3;
 const Color = math.Color;
 const TransientState = shared.TransientState;
@@ -58,6 +59,7 @@ const ASSET_IMPORT_GRID_MAX = 8;
 const name_tags = file_formats.name_tags;
 const HHA_VERSION = file_formats.HHA_VERSION;
 const HHA_MAGIC_VALUE = file_formats.HHA_MAGIC_VALUE;
+const HHA_MAX_SOUND_SAMPLE_COUNT = file_formats.HHA_MAX_SOUND_SAMPLE_COUNT;
 const ASSET_MAX_SPRITE_DIM = file_formats.ASSET_MAX_SPRITE_DIM;
 const ASSET_MAX_PLATE_DIM = file_formats.ASSET_MAX_PLATE_DIM;
 const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
@@ -87,7 +89,12 @@ const ImportGridTags = struct {
 
 const Asset = struct {
     state: u32 = 0,
-    header: ?*AssetMemoryHeader,
+    handle: union {
+        texture_handle: RendererTexture,
+        loaded_at_sample_index: u64,
+        font: LoadedFont,
+    },
+    last_used_generation: u32,
 
     hha: HHAAsset,
     annotation: HHAAnnotation,
@@ -96,29 +103,6 @@ const Asset = struct {
     asset_index_in_file: u32,
 
     next_of_type: u32,
-};
-
-const AssetHeaderType = enum(u32) {
-    None,
-    Bitmap,
-    Sound,
-    Font,
-};
-
-// TODO. At some point we should move to fixed size blocks, perhaps one for cutscene plates and one for in-game
-// artworks, like a 64x64, 1024x1024, and 2048x1024 grouping.
-pub const AssetMemoryHeader = extern struct {
-    next: ?*AssetMemoryHeader,
-    previous: ?*AssetMemoryHeader,
-    asset_type: AssetHeaderType,
-    asset_index: u32,
-    total_size: u32,
-    generation_id: u32,
-    data: extern union {
-        bitmap: LoadedBitmap,
-        sound: LoadedSound,
-        font: LoadedFont,
-    },
 };
 
 pub const AssetVector = struct {
@@ -230,10 +214,6 @@ pub const Assets = struct {
 
     game_state: *shared.State,
 
-    memory_sentinel: AssetMemoryBlock,
-
-    loaded_asset_sentinel: AssetMemoryHeader,
-
     tag_range: [ASSET_TAG_COUNT]f32 = [1]f32{1000000} ** ASSET_TAG_COUNT,
 
     file_count: u32,
@@ -253,6 +233,12 @@ pub const Assets = struct {
     source_file_hash: [256]?*SourceFile = [1]?*SourceFile{null} ** 256,
 
     operation_lock: u32,
+    used_generation: u32,
+
+    sample_count: u32,
+    sample_buffer: [*]i16,
+    sample_buffer_base_index: u64,
+    sample_buffer_load_index: u32,
 
     normal_texture_handle_count: u32 = 0,
     special_texture_handle_count: u32 = 0,
@@ -285,10 +271,8 @@ pub const Assets = struct {
 
         assets.white_pixel = 0xffffffff;
         const op: TextureOp = .{
-            .update = .{
-                .texture = renderer.referToTexture(0, 1, 1),
-                .data = @ptrCast(&assets.white_pixel),
-            },
+            .texture = renderer.referToTexture(0, 1, 1),
+            .data = @ptrCast(&assets.white_pixel),
         };
         renderer.addOp(assets.texture_queue, &op);
 
@@ -524,10 +508,6 @@ pub const Assets = struct {
 
         std.debug.assert(asset_count == assets.asset_count);
 
-        if (INTERNAL) {
-            checkForArtChanges(assets);
-        }
-
         return assets;
     }
 
@@ -672,24 +652,6 @@ pub const Assets = struct {
         return result;
     }
 
-    fn insertAssetHeaderAtFront(self: *Assets, header: *AssetMemoryHeader) void {
-        const sentinel = &self.loaded_asset_sentinel;
-
-        header.previous = sentinel;
-        header.next = sentinel.next;
-
-        header.next.?.previous = header;
-        header.previous.?.next = header;
-    }
-
-    fn removeAssetHeaderFromList(self: *Assets, header: *AssetMemoryHeader) void {
-        _ = self;
-        header.previous.?.next = header.next;
-        header.next.?.previous = header.previous;
-        header.next = null;
-        header.previous = null;
-    }
-
     fn getFile(self: *Assets, file_index: u32) *AssetFile {
         std.debug.assert(file_index < self.file_count);
         return &self.files[file_index];
@@ -781,7 +743,7 @@ pub const Assets = struct {
         self: *Assets,
         opt_id: ?BitmapId,
     ) void {
-        self.loadBitmap(opt_id, false);
+        self.loadBitmap(opt_id);
     }
 
     fn dimensionsRequireSpecialTexture(self: *Assets, width: u32, height: u32) bool {
@@ -792,7 +754,6 @@ pub const Assets = struct {
     pub fn loadBitmap(
         self: *Assets,
         opt_id: ?BitmapId,
-        immediate: bool,
     ) void {
         TimedBlock.beginFunction(@src(), .LoadBitmap);
         defer TimedBlock.endFunction(@src(), .LoadBitmap);
@@ -808,120 +769,89 @@ pub const Assets = struct {
                     .seq_cst,
                     .seq_cst,
                 ) == null) {
-                    var opt_task: ?*shared.TaskWithMemory = null;
+                    const info = asset.hha.info.bitmap;
+                    const width = types.safeTruncateUInt32ToUInt16(info.dim[0]);
+                    const height = types.safeTruncateUInt32ToUInt16(info.dim[1]);
 
-                    if (!immediate) {
-                        opt_task = handmade.beginTaskWithMemory(self.game_state, false);
-                    }
+                    if (renderer.beginTextureOp(self.texture_queue, width, height)) |texture_op| {
+                        const opt_task: ?*shared.TaskWithMemory = handmade.beginTaskWithMemory(self.game_state, false);
 
-                    if (immediate or opt_task != null) {
-                        const info = asset.hha.info.bitmap;
+                        if (opt_task != null) {
+                            var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
+                            const bitmap_width: u32 = width;
+                            const bitmap_height: u32 = height;
+                            bitmap.texture_handle = .empty;
 
-                        var size = AssetMemorySize{};
-                        const width = types.safeTruncateUInt32ToUInt16(info.dim[0]);
-                        const height = types.safeTruncateUInt32ToUInt16(info.dim[1]);
-                        size.section = 4 * width;
-                        size.data = size.section * height;
-                        size.total = size.data + @sizeOf(AssetMemoryHeader);
+                            var texture_handle: u32 = 0;
+                            if (self.dimensionsRequireSpecialTexture(@intCast(bitmap_width), @intCast(bitmap_height))) {
+                                texture_handle = renderer.specialTextureIndexFrom(self.next_special_texture_handle);
+                                self.next_special_texture_handle += 1;
+                                if (self.next_special_texture_handle >= self.special_texture_handle_count) {
+                                    self.next_special_texture_handle = 0;
+                                }
+                            } else {
+                                std.debug.assert(
+                                    self.next_free_texture_handle < self.normal_texture_handle_count,
+                                );
 
-                        asset.header = self.acquireAssetMemory(types.align16(size.total), id.value, .Bitmap);
+                                texture_handle = self.next_free_texture_handle;
+                                self.next_free_texture_handle += 1;
+                            }
 
-                        var bitmap: *LoadedBitmap = @ptrCast(@alignCast(&asset.header.?.data.bitmap));
-                        const bitmap_width: u32 = width;
-                        const bitmap_height: u32 = height;
-                        bitmap.memory = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
-                        bitmap.texture_handle = .empty;
+                            texture_op.texture = renderer.referToTexture(texture_handle, bitmap_width, bitmap_height);
 
-                        var texture_handle: u32 = 0;
-                        if (self.dimensionsRequireSpecialTexture(@intCast(bitmap_width), @intCast(bitmap_height))) {
-                            texture_handle = renderer.specialTextureIndexFrom(self.next_special_texture_handle);
-                            self.next_special_texture_handle += 1;
-                            if (self.next_special_texture_handle >= self.special_texture_handle_count) {
-                                self.next_special_texture_handle = 0;
+                            var work = LoadAssetWork{
+                                .task = undefined,
+                                .asset = asset,
+                                .handle = self.getFileHandleFor(asset.file_index),
+                                .offset = asset.hha.data_offset,
+                                // .size = size.data,
+                                .destination = @ptrCast(texture_op.data),
+                                .finalize_operation = .Bitmap,
+                                .final_state = AssetState.Loaded.toInt(),
+                                .texture_op = texture_op,
+                                .texture_queue = self.texture_queue,
+                            };
+
+                            if (opt_task) |task| {
+                                work.task = task;
+
+                                const task_work: *LoadAssetWork = task.arena.pushStruct(
+                                    LoadAssetWork,
+                                    ArenaPushParams.noClear(),
+                                );
+                                task_work.* = work;
+                                shared.platform.addQueueEntry(
+                                    self.game_state.low_priority_queue,
+                                    doLoadAssetWork,
+                                    task_work,
+                                );
+                            } else {
+                                renderer.cancelTextureOp(self.texture_queue, texture_op);
                             }
                         } else {
-                            std.debug.assert(
-                                self.next_free_texture_handle < self.normal_texture_handle_count,
-                            );
-
-                            texture_handle = self.next_free_texture_handle;
-                            self.next_free_texture_handle += 1;
+                            @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
                         }
-                        bitmap.texture_handle = renderer.referToTexture(texture_handle, bitmap_width, bitmap_height);
-
-                        var work = LoadAssetWork{
-                            .task = undefined,
-                            .asset = asset,
-                            .handle = self.getFileHandleFor(asset.file_index),
-                            .offset = asset.hha.data_offset,
-                            .size = size.data,
-                            .destination = @ptrCast(bitmap.memory),
-                            .finalize_operation = .Bitmap,
-                            .final_state = AssetState.Loaded.toInt(),
-                            .texture_queue = self.texture_queue,
-                        };
-
-                        if (opt_task) |task| {
-                            work.task = task;
-
-                            const task_work: *LoadAssetWork = task.arena.pushStruct(
-                                LoadAssetWork,
-                                ArenaPushParams.noClear(),
-                            );
-                            task_work.* = work;
-                            shared.platform.addQueueEntry(
-                                self.game_state.low_priority_queue,
-                                doLoadAssetWork,
-                                task_work,
-                            );
-                        } else {
-                            doLoadAssetWorkDirectly(&work);
-                        }
-                    } else {
-                        @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
                     }
-                } else if (immediate) {
-                    // The asset is already queued on another thread, wait until that asset loading is completed.
-                    const state: *volatile u32 = &asset.state;
-                    while (state.* == AssetState.Queued.toInt()) {}
                 }
             }
         }
     }
 
-    fn getAssetMemoryHeader(self: *Assets, id: u32) ?*AssetMemoryHeader {
-        std.debug.assert(id <= self.asset_count);
-        const asset = &self.assets[id];
+    pub fn getBitmap(self: *Assets, id: BitmapId) RendererTexture {
+        const asset: ?*Asset = self.getAsset(id.value);
+        std.debug.assert(asset.?.hha.type == .Bitmap);
 
-        var result: ?*AssetMemoryHeader = null;
-
-        self.beginAssetLock();
-        defer self.endAssetLock();
-
-        if (asset.state == AssetState.Loaded.toInt()) {
-            if (asset.header) |header| {
-                result = header;
-                self.removeAssetHeaderFromList(result.?);
-                self.insertAssetHeaderAtFront(result.?);
-            }
-        }
-
-        return result;
-    }
-
-    pub fn getBitmap(self: *Assets, id: BitmapId) ?*LoadedBitmap {
-        var result: ?*LoadedBitmap = null;
-
-        if (self.getAssetMemoryHeader(id.value)) |header| {
-            result = &header.data.bitmap;
-        }
+        asset.?.last_used_generation = self.used_generation;
+        const result: RendererTexture = asset.?.handle.texture_handle;
 
         return result;
     }
 
     pub fn getBitmapInfo(self: *Assets, id: BitmapId) *HHABitmap {
-        std.debug.assert(id.value <= self.asset_count);
-        return &self.assets[id.value].hha.info.bitmap;
+        const asset: ?*Asset = self.getAsset(id.value);
+        std.debug.assert(asset.?.hha.type == .Bitmap);
+        return &asset.?.hha.info.bitmap;
     }
 
     pub fn getFirstBitmap(self: *Assets, type_id: AssetBasicCategory) ?BitmapId {
@@ -960,8 +890,9 @@ pub const Assets = struct {
     }
 
     pub fn getSoundInfo(self: *Assets, id: SoundId) *HHASound {
-        std.debug.assert(id.value <= self.asset_count);
-        return &self.assets[id.value].hha.info.sound;
+        const asset: ?*Asset = self.getAsset(id.value);
+        std.debug.assert(asset.?.hha.type == .Sound);
+        return &asset.?.hha.info.sound;
     }
 
     pub fn prefetchSound(
@@ -1031,12 +962,11 @@ pub const Assets = struct {
         }
     }
 
-    pub fn getSound(self: *Assets, id: SoundId) ?*LoadedSound {
-        var result: ?*LoadedSound = null;
+    pub fn getSoundSamples(self: *Assets, id: SoundId) ?[*]i16 {
+        const asset: ?*Asset = self.getAsset(id.value);
+        std.debug.assert(asset.?.hha.type == .Sound);
 
-        if (self.getAssetMemoryHeader(id.value)) |header| {
-            result = &header.data.sound;
-        }
+        const result: ?[*]u16 = null;
 
         return result;
     }
@@ -1095,87 +1025,62 @@ pub const Assets = struct {
 
     pub fn loadFont(
         self: *Assets,
-        opt_id: ?FontId,
+        id: ?FontId,
         immediate: bool,
     ) void {
-        TimedBlock.beginFunction(@src(), .LoadFont);
-        defer TimedBlock.endFunction(@src(), .LoadFont);
+        var asset = &self.assets[id.?.value];
+        std.debug.assert(asset.state == @intFromEnum(AssetState.Unloaded));
 
-        if (opt_id) |id| {
-            var asset = &self.assets[id.value];
-            if (id.isValid()) {
-                if (@cmpxchgStrong(
-                    u32,
-                    &asset.state,
-                    AssetState.Unloaded.toInt(),
-                    AssetState.Queued.toInt(),
-                    .seq_cst,
-                    .seq_cst,
-                ) == null) {
-                    var opt_task: ?*shared.TaskWithMemory = null;
+        var opt_task: ?*shared.TaskWithMemory = null;
 
-                    if (!immediate) {
-                        opt_task = handmade.beginTaskWithMemory(self.game_state, false);
-                    }
+        if (!immediate) {
+            opt_task = handmade.beginTaskWithMemory(self.game_state, false);
+        }
 
-                    if (immediate or opt_task != null) {
-                        const info: HHAFont = asset.hha.info.font;
+        const info: HHAFont = asset.hha.info.font;
 
-                        const horizontal_advance_size: u32 = @sizeOf(f32) * info.glyph_count * info.glyph_count;
-                        const glyphs_size: u32 = info.glyph_count * @sizeOf(HHAFontGlyph);
-                        const unicode_map_size: u32 = @sizeOf(u16) * info.one_past_highest_code_point;
-                        const size_data: u32 = glyphs_size + horizontal_advance_size;
-                        const size_total: u32 = size_data + @sizeOf(AssetMemoryHeader) + unicode_map_size;
+        const horizontal_advance_size: u32 = @sizeOf(f32) * info.glyph_count * info.glyph_count;
+        const glyphs_size: u32 = info.glyph_count * @sizeOf(HHAFontGlyph);
+        const unicode_map_size: u32 = @sizeOf(u16) * info.one_past_highest_code_point;
+        const size_data: u32 = glyphs_size + horizontal_advance_size;
+        const size_total: u32 = size_data + unicode_map_size;
 
-                        asset.header = self.acquireAssetMemory(types.align16(size_total), id.value, .Font);
+        const asset_memory: [*]u8 = self.acquireAssetMemory(types.align16(size_total));
 
-                        var font: *LoadedFont = @ptrCast(@alignCast(&asset.header.?.data.font));
-                        font.bitmap_id_offset = self.getFile(asset.file_index).asset_base;
-                        font.glyphs = @ptrCast(@as([*]AssetMemoryHeader, @ptrCast(asset.header)) + 1);
-                        font.horizontal_advance =
-                            @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.glyphs)) + glyphs_size));
-                        font.unicode_map =
-                            @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.horizontal_advance)) + horizontal_advance_size));
+        var font: *LoadedFont = @ptrCast(@alignCast(&asset.data.font));
+        font.bitmap_id_offset = self.getFile(asset.file_index).asset_base;
+        font.glyphs = @ptrCast(asset_memory);
+        font.horizontal_advance =
+            @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.glyphs)) + glyphs_size));
+        font.unicode_map =
+            @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.horizontal_advance)) + horizontal_advance_size));
 
-                        memory.zeroSize(unicode_map_size, @ptrCast(font.unicode_map));
+        memory.zeroSize(unicode_map_size, @ptrCast(font.unicode_map));
 
-                        var work = LoadAssetWork{
-                            .task = undefined,
-                            .asset = asset,
-                            .handle = self.getFileHandleFor(asset.file_index),
-                            .offset = asset.hha.data_offset,
-                            .size = size_data,
-                            .destination = @ptrCast(font.glyphs),
-                            .finalize_operation = .Font,
-                            .final_state = AssetState.Loaded.toInt(),
-                            .texture_queue = null,
-                        };
+        const file_handle: *PlatformFileHandle = self.getFileHandleFor(asset.file_index);
+        shared.platform.readDataFromFile(
+            file_handle,
+            asset.hha.data_offset,
+            size_data,
+            @ptrCast(font.glyphs),
+        );
 
-                        if (opt_task) |task| {
-                            work.task = task;
+        if (shared.platform.noFileErrors(file_handle)) {
+            asset.state = @intFromEnum(AssetState.Loaded);
 
-                            const task_work: *LoadAssetWork = task.arena.pushStruct(
-                                LoadAssetWork,
-                                ArenaPushParams.noClear(),
-                            );
-                            task_work.* = work;
-                            shared.platform.addQueueEntry(
-                                self.game_state.low_priority_queue,
-                                doLoadAssetWork,
-                                task_work,
-                            );
-                        } else {
-                            doLoadAssetWorkDirectly(&work);
-                        }
-                    } else {
-                        @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
-                    }
-                } else if (immediate) {
-                    // The asset is already queued on another thread, wait until that asset loading is completed.
-                    const state: *volatile u32 = &asset.state;
-                    while (state.* == AssetState.Queued.toInt()) {}
-                }
+            const font: *LoadedFont = &work.asset.header.?.data.font;
+            const info: *HHAFont = &work.asset.hha.info.font;
+
+            var glyph_index: u32 = 1;
+            while (glyph_index < info.glyph_count) : (glyph_index += 1) {
+                const glyph: *HHAFontGlyph = &font.glyphs[glyph_index];
+
+                std.debug.assert(glyph.unicode_code_point < info.one_past_highest_code_point);
+                std.debug.assert(@as(u16, @intCast(glyph_index)) == glyph_index);
+                font.unicode_map[glyph.unicode_code_point] = @intCast(glyph_index);
             }
+        } else {
+            //
         }
     }
 
@@ -1187,21 +1092,22 @@ pub const Assets = struct {
     }
 
     pub fn getFont(self: *Assets, id: FontId) ?*LoadedFont {
+        const asset: ?*Asset = self.getAsset(id.value);
+        std.debug.assert(asset.?.hha.type == .Font);
+
         var result: ?*LoadedFont = null;
 
-        if (self.getAssetMemoryHeader(id.value)) |header| {
-            result = &header.data.font;
+        if (asset.?.state == @intFromEnum(AssetState.Loaded)) {
+            result = asset.?.handle.font;
         }
-
-        // var fake_font = LoadedFont{};
-        // result = &fake_font;
 
         return result;
     }
 
     pub fn getFontInfo(self: *Assets, id: FontId) *HHAFont {
-        std.debug.assert(id.value <= self.asset_count);
-        return &self.assets[id.value].hha.info.font;
+        const asset: ?*Asset = self.getAsset(id.value);
+        std.debug.assert(asset.?.hha.type == .Font);
+        return &asset.?.hha.info.font;
     }
 
     pub fn getBestMatchFont(
@@ -1366,17 +1272,6 @@ pub const WritableBitmap = struct {
     pitch: i32 = 0,
 };
 
-pub const LoadedBitmap = extern struct {
-    memory: ?[*]u8, // TODO: Really, we only need texture transfer buffers now.
-    texture_handle: RendererTexture,
-};
-
-pub const LoadedSound = extern struct {
-    samples: [2]?[*]i16 = undefined,
-    sample_count: u32 = undefined,
-    channel_count: u32 = undefined,
-};
-
 pub const LoadedFont = extern struct {
     glyphs: [*]HHAFontGlyph,
     horizontal_advance: [*]f32,
@@ -1414,12 +1309,6 @@ pub const LoadedFont = extern struct {
     }
 };
 
-const FinalizeLoadAssetOperation = enum(u8) {
-    None,
-    Font,
-    Bitmap,
-};
-
 const LoadAssetWork = struct {
     task: *shared.TaskWithMemory,
     asset: *Asset,
@@ -1429,48 +1318,25 @@ const LoadAssetWork = struct {
     size: u64,
     destination: *anyopaque,
 
-    finalize_operation: FinalizeLoadAssetOperation,
     final_state: u32,
 
+    texture_op: ?*TextureOp,
     texture_queue: ?*renderer.TextureQueue,
 };
 
-fn doLoadAssetWorkDirectly(
-    work: *LoadAssetWork,
-) callconv(.c) void {
-    TimedBlock.beginFunction(@src(), .LoadAssetWorkDirectly);
-    defer TimedBlock.endFunction(@src(), .LoadAssetWorkDirectly);
+fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
+    _ = queue;
+
+    TimedBlock.beginFunction(@src(), .DoLoadAssetWork);
+    defer TimedBlock.endFunction(@src(), .DoLoadAssetWork);
+
+    const work: *LoadAssetWork = @ptrCast(@alignCast(data));
 
     shared.platform.readDataFromFile(work.handle, work.offset, work.size, work.destination);
 
     if (shared.platform.noFileErrors(work.handle)) {
-        switch (work.finalize_operation) {
-            .None => {
-                // Nothing to do.
-            },
-            .Font => {
-                const font: *LoadedFont = &work.asset.header.?.data.font;
-                const info: *HHAFont = &work.asset.hha.info.font;
-
-                var glyph_index: u32 = 1;
-                while (glyph_index < info.glyph_count) : (glyph_index += 1) {
-                    const glyph: *HHAFontGlyph = &font.glyphs[glyph_index];
-
-                    std.debug.assert(glyph.unicode_code_point < info.one_past_highest_code_point);
-                    std.debug.assert(@as(u16, @intCast(glyph_index)) == glyph_index);
-                    font.unicode_map[glyph.unicode_code_point] = @intCast(glyph_index);
-                }
-            },
-            .Bitmap => {
-                const bitmap: *LoadedBitmap = &work.asset.header.?.data.bitmap;
-                const op: TextureOp = .{
-                    .update = .{
-                        .texture = bitmap.texture_handle,
-                        .data = @ptrCast(bitmap.memory),
-                    },
-                };
-                renderer.addOp(work.texture_queue.?, &op);
-            },
+        if (work.texture_op) |texture_op| {
+            renderer.completeTextureOp(work.texture_queue.?, texture_op);
         }
     }
 
@@ -1478,16 +1344,7 @@ fn doLoadAssetWorkDirectly(
         memory.zeroSize(work.size, @ptrCast(work.destination));
     }
 
-    work.asset.state = work.final_state;
-}
-
-fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
-    _ = queue;
-
-    const work: *LoadAssetWork = @ptrCast(@alignCast(data));
-
-    doLoadAssetWorkDirectly(work);
-
+    work.asset.state = @intFromEnum(AssetState.Loaded);
     handmade.endTaskWithMemory(work.task);
 }
 
@@ -1556,6 +1413,7 @@ fn writeImageToHHA(
     info: ImportSourceInfo,
     tags: ImportGridTag,
     file: *SourceFile,
+    orig_dim: Vector2u,
     source_image: ImageU32,
     temp_arena: *MemoryArena,
     tile_x_index: u32,
@@ -1596,6 +1454,8 @@ fn writeImageToHHA(
 
             hha_asset.info.bitmap.dim[0] = @intCast(source_image.width);
             hha_asset.info.bitmap.dim[1] = @intCast(source_image.height);
+            hha_asset.info.bitmap.orig_dim[0] = @intCast(orig_dim.width());
+            hha_asset.info.bitmap.orig_dim[1] = @intCast(orig_dim.height());
             hha_asset.first_tag_index = tags.first_tag_index;
             hha_asset.one_past_last_tag_index = tags.one_past_last_tag_index;
             hha_asset.type = .Bitmap;
@@ -1696,6 +1556,7 @@ fn processPlateImport(
     source_image: ImageU32,
     temp_arena: *MemoryArena,
 ) void {
+    const orig_dim: Vector2u = .new(source_image.width, source_image.height);
     const donwsample_count: u32 = getDownsampleCountForFit(source_image, ASSET_MAX_PLATE_DIM, ASSET_MAX_PLATE_DIM);
     const prepared_image: ImageU32 = extractImage(
         source_image,
@@ -1706,7 +1567,7 @@ fn processPlateImport(
         temp_arena,
     );
     const dest_image: ImageU32 = downsample(prepared_image, donwsample_count);
-    writeImageToHHA(assets, info, tags, file, dest_image, temp_arena, 0, 0);
+    writeImageToHHA(assets, info, tags, file, orig_dim, dest_image, temp_arena, 0, 0);
 }
 
 fn processSingleTileImport(
@@ -1717,6 +1578,7 @@ fn processSingleTileImport(
     source_image: ImageU32,
     temp_arena: *MemoryArena,
 ) void {
+    const orig_dim: Vector2u = .new(source_image.width, source_image.height);
     const donwsample_count: u32 = getDownsampleCountForFit(source_image, ASSET_MAX_SPRITE_DIM, ASSET_MAX_SPRITE_DIM);
     const prepared_image: ImageU32 = extractImage(
         source_image,
@@ -1727,7 +1589,7 @@ fn processSingleTileImport(
         temp_arena,
     );
     const dest_image: ImageU32 = downsample(prepared_image, donwsample_count);
-    writeImageToHHA(assets, info, tags, file, dest_image, temp_arena, 0, 0);
+    writeImageToHHA(assets, info, tags, file, orig_dim, dest_image, temp_arena, 0, 0);
 }
 
 fn processMultiTileImport(
@@ -1740,9 +1602,6 @@ fn processMultiTileImport(
 ) void {
     const border_dimension: u32 = 8;
     const tile_dimension: u32 = 1024;
-
-    const size_test: ImageU32 = .{ .width = tile_dimension, .height = tile_dimension, .pixels = undefined };
-    const downsample_count: u32 = getDownsampleCountForFit(size_test, ASSET_MAX_SPRITE_DIM, ASSET_MAX_SPRITE_DIM);
 
     const x_count_max: u32 = file.asset_indices[0].len;
     const y_count_max: u32 = file.asset_indices.len;
@@ -1855,8 +1714,14 @@ fn processMultiTileImport(
                     temp_arena,
                 );
 
+                const downsample_count: u32 = getDownsampleCountForFit(
+                    tile_image,
+                    ASSET_MAX_SPRITE_DIM,
+                    ASSET_MAX_SPRITE_DIM,
+                );
+                const orig_dim: Vector2u = .new(tile_image.width, tile_image.height);
                 const dest_image: ImageU32 = downsample(tile_image, downsample_count);
-                writeImageToHHA(assets, info, grid_tags, file, dest_image, temp_arena, x_index, y_index);
+                writeImageToHHA(assets, info, grid_tags, file, orig_dim, dest_image, temp_arena, x_index, y_index);
             }
         }
     }

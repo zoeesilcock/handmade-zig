@@ -1735,8 +1735,8 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
     while (opt_op) |op| : (opt_op = op.next) {
         allocateTexture(
             open_gl,
-            op.update.texture,
-            op.update.data,
+            op.texture,
+            op.data,
         );
     }
 
@@ -2142,8 +2142,8 @@ fn allocateTexture(open_gl: *OpenGL, texture: RendererTexture, data: *anyopaque)
             GL_TEXTURE_2D_ARRAY,
             0,
             open_gl.default_sprite_texture_format,
-            texture.width,
-            texture.height,
+            texture.values.width,
+            texture.values.height,
             1,
             0,
             gl.GL_BGRA_EXT,
@@ -2161,8 +2161,8 @@ fn allocateTexture(open_gl: *OpenGL, texture: RendererTexture, data: *anyopaque)
             0,
             0,
             @intCast(texture_index),
-            texture.width,
-            texture.height,
+            texture.values.width,
+            texture.values.height,
             1,
             gl.GL_BGRA_EXT,
             gl.GL_UNSIGNED_BYTE,
