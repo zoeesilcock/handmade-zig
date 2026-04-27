@@ -1729,18 +1729,76 @@ fn bindTexture(slot: u32, target: u32, handle: u32) void {
 }
 
 pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
-    const pending: TextureOpList = renderer.dequeuePending(queue);
+    while (queue.op_count > 0) {
+        const op: *TextureOp = &queue.ops[queue.first_op_index];
 
-    var opt_op: ?*TextureOp = pending.first;
-    while (opt_op) |op| : (opt_op = op.next) {
-        allocateTexture(
-            open_gl,
-            op.texture,
-            op.data,
-        );
+        if (op.state == .PendingLoad) {
+            break;
+        } else if (op.state == .ReadyToTransfer) {
+            const texture: RendererTexture = op.texture;
+            const data: *anyopaque = op.data;
+
+            if (renderer.isSpecialTexture(op.texture)) {
+                const handle: u32 = getSpecialTextureHandleFor(open_gl, texture);
+                gl.glBindTexture(GL_TEXTURE_2D_ARRAY, handle);
+                // gl.glTexImage2D(
+                //     gl.GL_TEXTURE_2D,
+                //     0,
+                //     open_gl.default_sprite_texture_format,
+                //     texture.width,
+                //     texture.height,
+                //     0,
+                //     gl.GL_BGRA_EXT,
+                //     gl.GL_UNSIGNED_BYTE,
+                //     data,
+                // );
+                platform.optGLTexImage3D.?(
+                    GL_TEXTURE_2D_ARRAY,
+                    0,
+                    open_gl.default_sprite_texture_format,
+                    texture.values.width,
+                    texture.values.height,
+                    1,
+                    0,
+                    gl.GL_BGRA_EXT,
+                    gl.GL_UNSIGNED_BYTE,
+                    data,
+                );
+            } else {
+                const texture_index: u32 = renderer.textureIndexFrom(texture);
+                std.debug.assert(texture_index < open_gl.max_texture_count);
+
+                gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
+                platform.optGLTexSubImage3D.?(
+                    GL_TEXTURE_2D_ARRAY,
+                    0,
+                    0,
+                    0,
+                    @intCast(texture_index),
+                    texture.values.width,
+                    texture.values.height,
+                    1,
+                    gl.GL_BGRA_EXT,
+                    gl.GL_UNSIGNED_BYTE,
+                    data,
+                );
+            }
+
+            gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
+        } else {
+            std.debug.assert(op.state == .Empty);
+        }
+
+        std.debug.assert(queue.transfer_memory_used_count >= op.transfer_memory_count);
+        queue.transfer_memory_used_count -= op.transfer_memory_count;
+        queue.transfer_memory_first_used = op.transfer_memory_last_used;
+
+        queue.op_count -= 1;
+        queue.first_op_index += 1;
+        if (queue.first_op_index >= queue.ops.len) {
+            queue.first_op_index = 0;
+        }
     }
-
-    renderer.enqueueFree(queue, pending);
 }
 
 fn getSpecialTextureHandleFor(open_gl: *OpenGL, texture: RendererTexture) u32 {
@@ -1824,6 +1882,8 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     if (!settings.equals(&open_gl.current_settings)) {
         changeToSettings(open_gl, settings);
     }
+
+    manageTextures(open_gl, &open_gl.header.texture_queue);
 
     const use_render_targets: bool = platform.optGLBindFramebufferEXT != null;
     std.debug.assert(use_render_targets);
@@ -2121,56 +2181,6 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         );
         gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
     }
-}
-
-fn allocateTexture(open_gl: *OpenGL, texture: RendererTexture, data: *anyopaque) void {
-    if (renderer.isSpecialTexture(texture)) {
-        const handle: u32 = getSpecialTextureHandleFor(open_gl, texture);
-        gl.glBindTexture(GL_TEXTURE_2D_ARRAY, handle);
-        // gl.glTexImage2D(
-        //     gl.GL_TEXTURE_2D,
-        //     0,
-        //     open_gl.default_sprite_texture_format,
-        //     texture.width,
-        //     texture.height,
-        //     0,
-        //     gl.GL_BGRA_EXT,
-        //     gl.GL_UNSIGNED_BYTE,
-        //     data,
-        // );
-        platform.optGLTexImage3D.?(
-            GL_TEXTURE_2D_ARRAY,
-            0,
-            open_gl.default_sprite_texture_format,
-            texture.values.width,
-            texture.values.height,
-            1,
-            0,
-            gl.GL_BGRA_EXT,
-            gl.GL_UNSIGNED_BYTE,
-            data,
-        );
-    } else {
-        const texture_index: u32 = renderer.textureIndexFrom(texture);
-        std.debug.assert(texture_index < open_gl.max_texture_count);
-
-        gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
-        platform.optGLTexSubImage3D.?(
-            GL_TEXTURE_2D_ARRAY,
-            0,
-            0,
-            0,
-            @intCast(texture_index),
-            texture.values.width,
-            texture.values.height,
-            1,
-            gl.GL_BGRA_EXT,
-            gl.GL_UNSIGNED_BYTE,
-            data,
-        );
-    }
-
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
 }
 
 fn drawLineVertices(

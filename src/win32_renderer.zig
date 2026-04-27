@@ -5,9 +5,7 @@ pub const LOAD_RENDERER_ENTRY = "win32LoadRenderer";
 
 pub const win32LoadRendererType = ?*const fn (
     opt_window_dc: ?win32.HDC,
-    max_quad_count_per_frame: u32,
-    max_texture_count: u32,
-    max_special_texture_count: u32,
+    limits: *renderer.PlatformRendererLimits,
 ) callconv(.c) ?*renderer.PlatformRenderer;
 
 pub fn loadRendererDLL(file_name: [*:0]const u8) win32LoadRendererType {
@@ -22,9 +20,7 @@ pub fn loadRendererDLL(file_name: [*:0]const u8) win32LoadRendererType {
 
 pub fn initDefaultRenderer(
     window: win32.HWND,
-    max_quad_count_per_frame: u32,
-    max_texture_count: u32,
-    max_special_texture_count: u32,
+    limits: *renderer.PlatformRendererLimits,
 ) *renderer.PlatformRenderer {
     // Load the renderer DLL and get the address of the init function.
     const win32LoadRenderer: win32LoadRendererType = loadRendererDLL("win32-handmade-opengl.dll");
@@ -42,12 +38,7 @@ pub fn initDefaultRenderer(
     // Initialize OpenGL so that we can render to our window. The win32 OpenGL startup code is contained within
     // `win32_handmade_opengl.dll`, so we get the DC for our window and pass that to its `win32LoadRenderer`
     // function so it can do all the startup for us.
-    const platform_renderer: *renderer.PlatformRenderer = win32LoadRenderer.?(
-        win32.GetDC(window),
-        max_quad_count_per_frame,
-        max_texture_count,
-        max_special_texture_count,
-    ).?;
+    const platform_renderer: *renderer.PlatformRenderer = win32LoadRenderer.?(win32.GetDC(window), limits).?;
 
     return platform_renderer;
 }

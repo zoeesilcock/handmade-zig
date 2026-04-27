@@ -162,8 +162,8 @@ pub const AudioState = struct {
                 var dest1 = real_channel1;
 
                 while (total_chunks_to_mix > 0 and !sound_finished) {
-                    const opt_loaded_sound = assets.getSound(playing_sound.id);
-                    if (opt_loaded_sound) |loaded_sound| {
+                    if (assets.getSoundSamples(playing_sound.id)) |samples| {
+                        const loaded_sound: *file_formats.HHASound = assets.getSoundInfo(playing_sound.id);
                         const next_sound_in_chain = assets.getNextSoundInChain(playing_sound.id);
                         assets.prefetchSound(next_sound_in_chain);
 
@@ -252,25 +252,25 @@ pub const AudioState = struct {
                                 const sample_index: I32_4x = @intFromFloat(sample_pos);
                                 const fraction: F32_4x = sample_pos - @as(F32_4x, @floatFromInt(sample_index));
                                 const sample_value_f = F32_4x{
-                                    @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[0])]),
-                                    @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[1])]),
-                                    @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[2])]),
-                                    @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[3])]),
+                                    @floatFromInt(samples[@intCast(sample_index[0])]),
+                                    @floatFromInt(samples[@intCast(sample_index[1])]),
+                                    @floatFromInt(samples[@intCast(sample_index[2])]),
+                                    @floatFromInt(samples[@intCast(sample_index[3])]),
                                 };
                                 const sample_value_c = F32_4x{
-                                    @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[0] + 1)]),
-                                    @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[1] + 1)]),
-                                    @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[2] + 1)]),
-                                    @floatFromInt(loaded_sound.samples[0].?[@intCast(sample_index[3] + 1)]),
+                                    @floatFromInt(samples[@intCast(sample_index[0] + 1)]),
+                                    @floatFromInt(samples[@intCast(sample_index[1] + 1)]),
+                                    @floatFromInt(samples[@intCast(sample_index[2] + 1)]),
+                                    @floatFromInt(samples[@intCast(sample_index[3] + 1)]),
                                 };
                                 sample_value = ((one - fraction) * sample_value_f) + (fraction * sample_value_c);
                             } else {
                                 // Without linear interpolation.
                                 sample_value = F32_4x{
-                                    @floatFromInt(loaded_sound.samples[0].?[intrinsics.roundReal32ToUInt32(sample_position + 0 * sample_velocity)]),
-                                    @floatFromInt(loaded_sound.samples[0].?[intrinsics.roundReal32ToUInt32(sample_position + 1 * sample_velocity)]),
-                                    @floatFromInt(loaded_sound.samples[0].?[intrinsics.roundReal32ToUInt32(sample_position + 2 * sample_velocity)]),
-                                    @floatFromInt(loaded_sound.samples[0].?[intrinsics.roundReal32ToUInt32(sample_position + 3 * sample_velocity)]),
+                                    @floatFromInt(samples[intrinsics.roundReal32ToUInt32(sample_position + 0 * sample_velocity)]),
+                                    @floatFromInt(samples[intrinsics.roundReal32ToUInt32(sample_position + 1 * sample_velocity)]),
+                                    @floatFromInt(samples[intrinsics.roundReal32ToUInt32(sample_position + 2 * sample_velocity)]),
+                                    @floatFromInt(samples[intrinsics.roundReal32ToUInt32(sample_position + 3 * sample_velocity)]),
                                 };
                             }
 

@@ -1621,7 +1621,7 @@ fn drawDebugElement(
 
             const opt_event: ?*DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else null;
             if (opt_event) |event| {
-                texture_handle = render_group.assets.getBitmap(id);
+                texture_handle = render_group.assets.getBitmap(event.data.BitmapId);
                 if (texture_handle.isValid()) {
                     var dim = asset_rendering.getBitmapDim(
                         texture_handle,

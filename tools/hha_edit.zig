@@ -27,7 +27,6 @@ const HHAAlignPoint = file_formats.HHAAlignPoint;
 const HHASound = file_formats.HHASound;
 const HHAFont = file_formats.HHAFont;
 const HHAFontGlyph = file_formats.HHAFontGlyph;
-const AssetMemoryHeader = asset.AssetMemoryHeader;
 
 pub const std_options: std.Options = .{
     .logFn = myLogFn,
@@ -225,7 +224,7 @@ fn readHHAV0(source_file: std.Io.File, hha: *LoadedHHA, allocator: std.mem.Alloc
                         const glyphs_size: u32 = font.glyph_count * @sizeOf(HHAFontGlyph);
                         const unicode_map_size: u32 = @sizeOf(u16) * font.one_past_highest_code_point;
                         const size_data: u32 = glyphs_size + horizontal_advance_size;
-                        dest_asset.data_size = size_data + @sizeOf(AssetMemoryHeader) + unicode_map_size;
+                        dest_asset.data_size = size_data + unicode_map_size;
                     },
                     else => {
                         std.log.err("ERROR: Asset {d} has illegal type.", .{asset_index});

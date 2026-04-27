@@ -49,7 +49,7 @@ pub fn build(b: *std.Build) void {
         addLibrary(b, build_options, target, optimize, package);
     }
 
-    if (package == .All or package == .Game or package == .RendererLibrary) {
+    if (package == .All or package == .Game or package == .RendererLibrary or package == .RendererTest) {
         addRendererLibrary(b, build_options, target, optimize, package);
     }
 

@@ -288,24 +288,19 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         var gpa: std.heap.DebugAllocator(.{}) = .init;
         const allocator = gpa.allocator();
 
-        // Allocate a set of operations for submitting textures. We allocate as many as we think we will want
-        // in-flight at a given time. For this render test, we really only need a few, because we only load 5 or 6
-        // textures. But in a real engine, you want to makesure you have as many ops allocated as textures you might
-        // download during a single frame.
-        var texture_queue: TextureQueue = .{};
-        var texture_op_memory: [256]TextureOp = undefined;
-        renderer.initTextureQueue(&texture_queue, @sizeOf(@TypeOf(texture_op_memory)), &texture_op_memory);
-
         // Load the renderer DLL and initialize the default renderer.
-        const max_quad_count_per_frame: u32 = 1 << 18;
-        const max_texture_count: u32 = 256;
-        const platform_renderer: *PlatformRenderer =
-            win32_renderer.initDefaultRenderer(window, max_quad_count_per_frame, max_texture_count, 0);
+        var limits: renderer.PlatformRendererLimits = .{
+            .max_quad_count_per_frame = 1 << 18,
+            .max_texture_count = 256,
+            .max_special_texture_count = 0,
+            .texture_transfer_buffer_size = 16 * 1024 * 1024,
+        };
+        const platform_renderer: *PlatformRenderer = win32_renderer.initDefaultRenderer(window, &limits);
 
         // Initialize the test scene. This has nothing to do with the renderer API, it's just a way of making a data
         // structure we can use later to figure out what we want to render ever frame.
         var scene: TestScene = .{};
-        initTestScene(&texture_queue, &scene, allocator, io);
+        initTestScene(&platform_renderer.texture_queue, &scene, allocator, io);
 
         // Get camera parameters for viewing a scene (at meter scale) from a reasonable 3rd-person perspective.
         var camera: Camera = .standard;
@@ -341,10 +336,6 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             } else {
                 camera.orbit = camera_shift_t;
             }
-
-            // Before rendering, kick off any texture downloads we may need. This isn't really necessary per frame in
-            // this app because it doesn't stream textures in during rendering.
-            platform_renderer.processTextureQueue(platform_renderer, &texture_queue);
 
             // Tell the rendere to being rendering a framethat occupies `draw_region` inside a window that is
             // `window_width` by `window_height` in size.
@@ -500,20 +491,17 @@ fn loadBMP(
     allocator: std.mem.Allocator,
     io: std.Io,
 ) RendererTexture {
-    var result: ?LoadedBitmap = null;
+    var texture: RendererTexture = .empty;
+
     const read_result = readEntireFile(file_name, allocator, io);
 
     if (read_result.content_size > 0) {
         const header = @as(*BitmapHeader, @ptrCast(@alignCast(@constCast(read_result.contents))));
+        const pixels: [*]align(@alignOf(u8)) u32 =
+            @ptrFromInt(@intFromPtr(read_result.contents.ptr) + header.bitmap_offset);
 
         std.debug.assert(header.height >= 0);
         std.debug.assert(header.compression == 3);
-
-        result = LoadedBitmap{
-            .memory = @ptrFromInt(@intFromPtr(read_result.contents.ptr) + header.bitmap_offset),
-            .width = header.width,
-            .height = header.height,
-        };
 
         const alpha_mask = ~(header.red_mask | header.green_mask | header.blue_mask);
         const alpha_scan = intrinsics.findLeastSignificantSetBit(alpha_mask);
@@ -531,47 +519,43 @@ fn loadBMP(
         const blue_shift_down = @as(u5, @intCast(blue_scan.index));
         const alpha_shift_down = @as(u5, @intCast(alpha_scan.index));
 
-        var source_dest: [*]align(@alignOf(u8)) u32 = @ptrCast(result.?.memory);
-        var x: u32 = 0;
-        while (x < header.width) : (x += 1) {
-            var y: u32 = 0;
-            while (y < header.height) : (y += 1) {
-                const color = source_dest[0];
-                var texel = Color.new(
-                    @floatFromInt((color & header.red_mask) >> red_shift_down),
-                    @floatFromInt((color & header.green_mask) >> green_shift_down),
-                    @floatFromInt((color & header.blue_mask) >> blue_shift_down),
-                    @floatFromInt((color & alpha_mask) >> alpha_shift_down),
-                );
-                texel = math.sRGB255ToLinear1(texel);
-                _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
-                texel = math.linear1ToSRGB255(texel);
+        if (renderer.beginTextureOp(texture_queue, @intCast(header.width), @intCast(header.height))) |op| {
+            texture = renderer.referToTexture(texture_index, @intCast(header.width), @intCast(header.height));
+            op.texture = texture;
 
-                source_dest[0] = ((@as(u32, @intFromFloat(texel.a() + 0.5)) << 24) |
-                    (@as(u32, @intFromFloat(texel.r() + 0.5)) << 16) |
-                    (@as(u32, @intFromFloat(texel.g() + 0.5)) << 8) |
-                    (@as(u32, @intFromFloat(texel.b() + 0.5)) << 0));
+            var source: [*]align(@alignOf(u8)) u32 = @ptrCast(pixels);
+            var dest: [*]align(@alignOf(u8)) u32 = @ptrCast(op.data);
 
-                source_dest += 1;
+            var x: u32 = 0;
+            while (x < header.width) : (x += 1) {
+                var y: u32 = 0;
+                while (y < header.height) : (y += 1) {
+                    const color = source[0];
+                    source += 1;
+                    var texel = Color.new(
+                        @floatFromInt((color & header.red_mask) >> red_shift_down),
+                        @floatFromInt((color & header.green_mask) >> green_shift_down),
+                        @floatFromInt((color & header.blue_mask) >> blue_shift_down),
+                        @floatFromInt((color & alpha_mask) >> alpha_shift_down),
+                    );
+                    texel = math.sRGB255ToLinear1(texel);
+                    _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
+                    texel = math.linear1ToSRGB255(texel);
+
+                    dest[0] = ((@as(u32, @intFromFloat(texel.a() + 0.5)) << 24) |
+                        (@as(u32, @intFromFloat(texel.r() + 0.5)) << 16) |
+                        (@as(u32, @intFromFloat(texel.g() + 0.5)) << 8) |
+                        (@as(u32, @intFromFloat(texel.b() + 0.5)) << 0));
+
+                    dest += 1;
+                }
             }
+
+            renderer.completeTextureOp(texture_queue, op);
+        } else {
+            std.log.err("Out of texture transfer operations.", .{});
         }
     }
-
-    result.?.pitch = result.?.width * 4;
-
-    const texture: RendererTexture = renderer.referToTexture(
-        texture_index,
-        @intCast(result.?.width),
-        @intCast(result.?.height),
-    );
-
-    const texture_op: TextureOp = .{
-        .update = .{
-            .texture = texture,
-            .data = result.?.memory.?,
-        },
-    };
-    renderer.addOp(texture_queue, &texture_op);
 
     return texture;
 }

@@ -232,9 +232,15 @@ pub const MemoryArena = extern struct {
         if (arena.current_block) |current_block| {
             std.debug.assert(current_block.used >= temp_memory.used);
             current_block.used = temp_memory.used;
-            std.debug.assert(self.temp_count > 0);
         }
 
+        std.debug.assert(self.temp_count > 0);
+        self.temp_count -= 1;
+    }
+
+    pub fn keepTemporaryMemory(self: *MemoryArena, temp_memory: TemporaryMemory) void {
+        _ = temp_memory;
+        std.debug.assert(self.temp_count > 0);
         self.temp_count -= 1;
     }
 

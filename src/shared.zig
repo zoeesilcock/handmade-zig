@@ -6,6 +6,7 @@ pub const HIT_POINT_SUB_COUNT = 4;
 pub const BITMAP_BYTES_PER_PIXEL = 4;
 pub const NORMAL_TEXTURE_COUNT = 256;
 pub const SPECIAL_TEXTURE_COUNT = 16;
+pub const TEXTURE_TRANSFER_BUFFER_SIZE = 128 * 1024 * 1024;
 
 pub const math = @import("math.zig");
 pub const types = @import("types.zig");

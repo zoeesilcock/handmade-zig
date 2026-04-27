@@ -2071,20 +2071,15 @@ pub export fn wWinMain(
             }
             const renderer_dc = win32.GetDC(window_handle);
 
-            var texture_queue: TextureQueue = .{};
-            var texture_op_memory: [256]TextureOp = undefined;
-            renderer.initTextureQueue(&texture_queue, @sizeOf(@TypeOf(texture_op_memory)), &texture_op_memory);
-
             const max_quad_count_per_frame: u32 = 1 << 18;
-            const max_texture_count: u32 = shared.NORMAL_TEXTURE_COUNT;
-            const max_special_texture_count: u32 = shared.SPECIAL_TEXTURE_COUNT;
+            var limits: renderer.PlatformRendererLimits = .{
+                .max_quad_count_per_frame = max_quad_count_per_frame,
+                .max_texture_count = shared.NORMAL_TEXTURE_COUNT,
+                .max_special_texture_count = shared.SPECIAL_TEXTURE_COUNT,
+                .texture_transfer_buffer_size = shared.TEXTURE_TRANSFER_BUFFER_SIZE,
+            };
             const platform_renderer: *PlatformRenderer =
-                win32_renderer.initDefaultRenderer(
-                    window_handle,
-                    max_quad_count_per_frame,
-                    max_texture_count,
-                    max_special_texture_count,
-                );
+                win32_renderer.initDefaultRenderer(window_handle, &limits);
 
             var high_priority_startups: [6]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 6;
             var high_priority_queue = shared.PlatformWorkQueue{};
@@ -2140,7 +2135,7 @@ pub export fn wWinMain(
                 .high_priority_queue = &high_priority_queue,
                 .low_priority_queue = &low_priority_queue,
                 .debug_state = null,
-                .texture_queue = &texture_queue,
+                .texture_queue = &platform_renderer.texture_queue,
             };
 
             if (samples != null) {
@@ -2308,7 +2303,7 @@ pub export fn wWinMain(
                                 if (seconds_left_until_flip > 0) {
                                     expected_bytes_until_flip =
                                         @intFromFloat((seconds_left_until_flip / target_seconds_per_frame) *
-                                        @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
+                                            @as(f32, @floatFromInt(expected_sound_bytes_per_frame)));
                                 }
 
                                 const expected_frame_boundary_byte: std.os.windows.DWORD = play_cursor + expected_bytes_until_flip;
@@ -2450,7 +2445,6 @@ pub export fn wWinMain(
                     TimedBlock.beginBlock(@src(), .FrameDisplay);
 
                     // Output game to screen.
-                    platform_renderer.processTextureQueue(platform_renderer, game_memory.texture_queue);
                     platform_renderer.endFrame(platform_renderer, frame);
 
                     flip_wall_clock = getWallClock();

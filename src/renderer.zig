@@ -53,10 +53,31 @@ pub const LIGHT_POINTS_PER_CHUNK = 24;
 pub const TEXTURE_ARRAY_DIM = 512.0;
 pub const SPECIAL_TEXTURE_BIT = 0x8000_0000;
 
-const processTextureQueueType = fn (
-    platform_renderer: *PlatformRenderer,
-    texture_queue: *TextureQueue,
-) callconv(.c) void;
+const TextureOpState = enum(u32) {
+    Empty,
+    PendingLoad,
+    ReadyToTransfer,
+};
+
+pub const TextureOp = extern struct {
+    texture: RendererTexture,
+    data: *anyopaque,
+    transfer_memory_count: u32,
+    transfer_memory_last_used: u32,
+    state: TextureOpState,
+};
+
+pub const TextureQueue = extern struct {
+    transfer_memory_count: u32,
+    transfer_memory_first_used: u32,
+    transfer_memory_used_count: u32,
+    transfer_memory: [*]u8,
+
+    op_count: u32,
+    first_op_index: u32,
+    ops: [256]TextureOp,
+};
+
 const beginFrameType = fn (
     platform_renderer: *PlatformRenderer,
     window_width: i32,
@@ -65,8 +86,15 @@ const beginFrameType = fn (
 ) callconv(.c) ?*RenderCommands;
 const endFrameType = fn (platform_renderer: *PlatformRenderer, frame: *RenderCommands) callconv(.c) void;
 
+pub const PlatformRendererLimits = extern struct {
+    max_quad_count_per_frame: u32,
+    max_texture_count: u32,
+    max_special_texture_count: u32,
+    texture_transfer_buffer_size: u32,
+};
+
 pub const PlatformRenderer = extern struct {
-    processTextureQueue: *const processTextureQueueType = undefined,
+    texture_queue: TextureQueue = undefined,
     beginFrame: *const beginFrameType = undefined,
     endFrame: *const endFrameType = undefined,
 };
@@ -147,25 +175,6 @@ pub const LightingBox = extern struct {
 pub const LightingPointState = extern struct {
     last_pps: Color3,
     last_direction: Vector3,
-};
-
-pub const TextureOpList = extern struct {
-    first: ?*TextureOp = null,
-    last: ?*TextureOp = null,
-};
-
-pub const TextureOp = struct {
-    next: ?*TextureOp = null,
-
-    texture: RendererTexture,
-    data: *anyopaque,
-};
-
-pub const TextureQueue = extern struct {
-    mutex: TicketMutex = undefined,
-
-    pending: TextureOpList = .{},
-    first_free: ?*TextureOp = null,
 };
 
 pub const RenderCommands = extern struct {
@@ -1505,69 +1514,71 @@ fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
     );
 }
 
-pub fn dequeuePending(queue: *TextureQueue) TextureOpList {
-    queue.mutex.begin();
-    const result: TextureOpList = queue.pending;
-    queue.pending.first = null;
-    queue.pending.last = null;
-    queue.mutex.end();
+pub fn beginTextureOp(queue: *TextureQueue, width: u32, height: u32) ?*TextureOp {
+    var result: ?*TextureOp = null;
+
+    if (queue.op_count < queue.ops.len) {
+        const size_requested: u32 = width * height * 4;
+        var size_available: u32 = 0;
+
+        var memory_at: u32 = queue.transfer_memory_first_used + queue.transfer_memory_used_count;
+        if (memory_at >= queue.transfer_memory_count) {
+            memory_at -= queue.transfer_memory_count;
+
+            // The used space wraps around, one continuous usable space.
+            size_available = queue.transfer_memory_first_used - memory_at;
+        } else {
+            // The used space doesn't wrap, two usable spaces on either side.
+            size_available = (queue.transfer_memory_count - memory_at);
+            if (size_available < size_requested) {
+                memory_at = 0;
+                size_available = queue.transfer_memory_first_used - memory_at;
+            }
+        }
+
+        if (size_requested <= size_available) {
+            const op_index: u32 = queue.first_op_index + queue.op_count;
+            queue.op_count += 1;
+
+            result = &queue.ops[@mod(op_index, queue.ops.len)];
+
+            result.?.data = queue.transfer_memory + memory_at;
+            result.?.transfer_memory_count = size_requested;
+            result.?.transfer_memory_last_used = memory_at + size_requested;
+            result.?.state = .PendingLoad;
+
+            queue.transfer_memory_used_count += size_requested;
+
+            std.debug.assert(memory_at < queue.transfer_memory_count);
+            std.debug.assert(result.?.transfer_memory_last_used < queue.transfer_memory_count);
+        }
+    }
+
     return result;
 }
 
-pub fn enqueueFree(queue: *TextureQueue, list: TextureOpList) void {
-    if (list.last != null) {
-        queue.mutex.begin();
-        list.last.?.next = queue.first_free;
-        queue.first_free = list.first;
-        queue.mutex.end();
-    }
-}
-
-pub fn beginTextureOp(queue: *TextureQueue, width: f32, height: f32) ?*TextureOp {
+pub fn completeTextureOp(queue: *TextureQueue, op: *TextureOp) void {
     _ = queue;
-    _ = width;
-    _ = height;
-    return null;
+    op.state = .ReadyToTransfer;
 }
 
-pub fn completeTextureOp(queue: *TextureQueue, texture_op: *TextureOp) void {
+pub fn cancelTextureOp(queue: *TextureQueue, op: *TextureOp) void {
     _ = queue;
-    _ = texture_op;
+    op.state = .Empty;
 }
 
-pub fn addOp(queue: *TextureQueue, source: *const TextureOp) void {
-    queue.mutex.begin();
+pub fn initTextureQueue(
+    queue: *TextureQueue,
+    requested_transfer_buffer_size: u32,
+    transfer_memory: *anyopaque,
+) void {
+    queue.transfer_memory_count = requested_transfer_buffer_size;
+    queue.transfer_memory_first_used = 0;
+    queue.transfer_memory_used_count = 0;
+    queue.transfer_memory = @ptrCast(transfer_memory);
 
-    std.debug.assert(queue.first_free != null);
-
-    const dest: *TextureOp = queue.first_free.?;
-    queue.first_free = dest.next;
-
-    dest.* = source.*;
-
-    std.debug.assert(dest.next == null);
-
-    if (queue.pending.last != null) {
-        queue.pending.last.?.next = dest;
-        queue.pending.last = dest;
-    } else {
-        queue.pending.first = dest;
-        queue.pending.last = dest;
-    }
-
-    queue.mutex.end();
-}
-
-pub fn initTextureQueue(queue: *TextureQueue, memory_size: usize, texture_ops_memory: *anyopaque) void {
-    const texture_op_count: usize = memory_size / @sizeOf(TextureOp);
-    queue.first_free = @ptrCast(@alignCast(texture_ops_memory));
-
-    var texture_op_index: usize = 0;
-    while (texture_op_index < (texture_op_count - 1)) : (texture_op_index += 1) {
-        const first_free: [*]TextureOp = @ptrCast(queue.first_free.?);
-        var op: [*]TextureOp = first_free + texture_op_index;
-        op[0].next = @ptrCast(first_free + texture_op_index + 1);
-    }
+    queue.op_count = 0;
+    queue.first_op_index = 0;
 }
 
 pub fn referToTexture(index: u32, width: u32, height: u32) RendererTexture {
