@@ -29,7 +29,6 @@ const RenderCommands = renderer.RenderCommands;
 const RendererTexture = renderer.RendererTexture;
 const LightingPointState = renderer.LightingPointState;
 const LightingBox = renderer.LightingBox;
-const LoadedBitmap = asset.LoadedBitmap;
 const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
@@ -895,8 +894,8 @@ pub fn lightingTest(
     solution: *LightingSolution,
     lighting_queue: *shared.PlatformWorkQueue,
 ) void {
-    TimedBlock.beginHudFunction(@src(), .LightingTest);
-    defer TimedBlock.endHudFunction(@src(), .LightingTest);
+    TimedBlock.beginFunction(@src(), .LightingTest);
+    defer TimedBlock.endFunction(@src(), .LightingTest);
 
     solution.sample_table[0] = Vector3.new(0.2, 0, 1).normalizeOrZero();
     solution.sample_table[1] = Vector3.new(-0.2, 0, 1).normalizeOrZero();

@@ -602,7 +602,7 @@ pub const Assets = struct {
                     AssetState.Queued.toInt(),
                     .seq_cst,
                     .seq_cst,
-                ) == null) {
+                ) != null) {
                     asset.handle.texture_handle = .empty;
                     asset.state = AssetState.Unloaded.toInt();
                 }

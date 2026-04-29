@@ -109,16 +109,11 @@ const TemporaryMemory = memory.TemporaryMemory;
 const ArenaPushParams = memory.ArenaPushParams;
 const State = shared.State;
 const WorldPosition = world.WorldPosition;
-const AddLowEntityResult = shared.AddLowEntityResult;
 const RenderGroup = renderer.RenderGroup;
 const Assets = asset.Assets;
-const AssetTypeId = asset.AssetTypeId;
 const AssetTagId = file_formats.AssetTagId;
 const AssetFontType = file_formats.AssetFontType;
-const LoadedBitmap = asset.LoadedBitmap;
 const LoadedFont = asset.LoadedFont;
-const Particle = shared.Particle;
-const ParticleCel = shared.ParticleCel;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const EditableHitTest = in_game_editor.EditableHitTest;
@@ -137,6 +132,7 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "Renderer");
         {
+            DebugInterface.debugUIHUD(@src(), .Rendering);
             DebugInterface.debugValue(@src(), &render_commands.settings.multisample_debug, "Renderer_MultisampleDebug");
             DebugInterface.debugValue(@src(), &render_commands.settings.multisampling_hint, "Renderer_Multisampling");
             DebugInterface.debugValue(@src(), &render_commands.settings.pixelation_hint, "Renderer_Pixelation");
@@ -150,6 +146,7 @@ pub export fn updateAndRender(
             DebugInterface.debugEndDataBlock(@src());
             DebugInterface.debugBeginDataBlock(@src(), "Lighting");
             {
+                DebugInterface.debugUIHUD(@src(), .Lighting);
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_ShowReflectors, "Renderer_Lighting_ShowReflectors");
             }
             DebugInterface.debugEndDataBlock(@src());
@@ -179,6 +176,7 @@ pub export fn updateAndRender(
 
         DebugInterface.debugBeginDataBlock(@src(), "Profile");
         {
+            DebugInterface.debugUIHUD(@src(), .Profiling);
             DebugInterface.debugUIElement(@src(), .LastFrameInfo, "LastFrameInfo");
             DebugInterface.debugUIElement(@src(), .DebugMemoryInfo, "DebugMemoryInfo");
             DebugInterface.debugUIElement(@src(), .TopClocksList, "updateAndRender");
@@ -233,6 +231,24 @@ pub export fn updateAndRender(
 
     state.frame_arena_temp = state.frame_arena.beginTemporaryMemory();
 
+    if (input.f_key_pressed[1]) {
+        state.dev_mode = .None;
+    } else if (input.f_key_pressed[2]) {
+        state.dev_mode = .EditingAssets;
+    } else if (input.f_key_pressed[3]) {
+        state.dev_mode = .None;
+    } else if (input.f_key_pressed[4]) {
+        state.dev_mode = .None;
+    } else if (input.f_key_pressed[5]) {
+        state.dev_mode = .Profiling;
+    } else if (input.f_key_pressed[6]) {
+        state.dev_mode = .Rendering;
+    } else if (input.f_key_pressed[7]) {
+        state.dev_mode = .Lighting;
+    } else if (input.f_key_pressed[8]) {
+        state.dev_mode = .Memory;
+    }
+
     DebugInterface.debugBeginDataBlock(@src(), "Memory");
     {
         DebugInterface.debugValue(@src(), &state.mode_arena, "ModeArena");
@@ -258,7 +274,7 @@ pub export fn updateAndRender(
     //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
     // }
 
-    var hit_test: EditableHitTest = state.editor.beginHitTest(input);
+    var hit_test: EditableHitTest = state.editor.beginHitTest(input, state.dev_mode);
 
     var rerun: bool = true;
     while (rerun) {

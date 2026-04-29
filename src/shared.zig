@@ -33,7 +33,6 @@ const Color3 = math.Color3;
 const Color = math.Color;
 const Buffer = types.Buffer;
 const String = types.String;
-const LoadedBitmap = asset.LoadedBitmap;
 const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
 const RenderCommands = renderer.RenderCommands;
@@ -1100,6 +1099,17 @@ pub const Memory = struct {
     executable_reloaded: bool = false,
 };
 
+pub const DEV_MODE_COUNT = @typeInfo(DevMode).@"enum".fields.len;
+pub const DevMode = enum(u32) {
+    None,
+    EditingAssets,
+    Profiling,
+    Rendering,
+    Lighting,
+    Memory,
+    Dump,
+};
+
 pub const State = struct {
     total_arena: MemoryArena = undefined,
     audio_arena: MemoryArena = undefined,
@@ -1128,6 +1138,7 @@ pub const State = struct {
     audio_state: audio.AudioState = undefined,
     music: *PlayingSound = undefined,
 
+    dev_mode: DevMode,
     dev_ui: DevUI,
     editor: in_game_editor.InGameEditor,
 
@@ -1166,11 +1177,6 @@ pub const TaskWithMemory = struct {
     arena: MemoryArena,
 
     memory_flush: TemporaryMemory,
-};
-
-pub const GroundBuffer = extern struct {
-    position: world.WorldPosition = undefined,
-    bitmap: LoadedBitmap,
 };
 
 pub const ControlledHero = struct {

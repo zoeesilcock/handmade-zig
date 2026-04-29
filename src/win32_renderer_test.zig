@@ -65,7 +65,7 @@ fn initTestScene(
 ) void {
     scene.grass_texture = loadBMP(texture_queue, "test_cube_grass.bmp", 1, allocator, io);
     scene.wall_texture = loadBMP(texture_queue, "test_cube_wall.bmp", 2, allocator, io);
-    scene.tree_texture = loadBMP(texture_queue, "test_sprite_tree.bmp", 2, allocator, io);
+    scene.tree_texture = loadBMP(texture_queue, "test_sprite_tree.bmp", 3, allocator, io);
     scene.head_texture = loadBMP(texture_queue, "test_sprite_head.bmp", 4, allocator, io);
     scene.cover_texture = loadBMP(texture_queue, "test_cover_grass.bmp", 5, allocator, io);
 
@@ -453,13 +453,6 @@ const BitmapHeader = packed struct {
     red_mask: u32,
     green_mask: u32,
     blue_mask: u32,
-};
-
-const LoadedBitmap = extern struct {
-    memory: ?[*]void,
-    width: i32 = 0,
-    height: i32 = 0,
-    pitch: i32 = 0,
 };
 
 const EntireFile = struct {

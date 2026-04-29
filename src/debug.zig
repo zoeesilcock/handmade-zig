@@ -22,6 +22,7 @@ const DebugEvent = debug_interface.DebugEvent;
 const DevUI = dev_ui.DevUI;
 const TooltipBuffer = dev_ui.TooltipBuffer;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
+const DevMode = shared.DevMode;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
@@ -35,12 +36,14 @@ const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
 const SortEntry = sort.SortEntry;
 const RendererTexture = renderer.RendererTexture;
+const RenderCommands = renderer.RenderCommands;
 const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const TransientClipRect = renderer.TransientClipRect;
 
 const debug_color_table = shared.debug_color_table;
 
+const DEV_MODE_COUNT = shared.DEV_MODE_COUNT;
 const MAX_FRAME_COUNT = 256;
 pub const MAX_VARIABLE_STACK_DEPTH = 64;
 
@@ -166,6 +169,9 @@ pub const DebugState = struct {
     root_group: *DebugVariableLink,
     function_group: *DebugVariableLink,
     profile_group: *DebugVariableLink,
+
+    dev_mode_links: [DEV_MODE_COUNT]?*DebugVariableLink = [1]?*DebugVariableLink{null} ** DEV_MODE_COUNT,
+
     tree_sentinel: DebugTree,
 
     paused: bool,
@@ -187,12 +193,6 @@ pub const DebugState = struct {
 
     // Per-frame storage management.
     first_free_stored_event: ?*DebugStoredEvent,
-
-    root_info_size: u32,
-    root_info: [*:0]u8,
-
-    function_info_size: u32,
-    function_info: [*:0]u8,
 
     //
     //
@@ -342,6 +342,24 @@ pub const DebugState = struct {
         self.first_free_block = free_block;
     }
 
+    fn createNameElement(
+        self: *DebugState,
+        name_length: u32,
+        name: [*:0]const u8,
+        opt_debug_type: ?DebugType,
+    ) *DebugElement {
+        const debug_type = opt_debug_type orelse .Name;
+        var result: *DebugElement = self.debug_arena.pushStruct(
+            DebugElement,
+            ArenaPushParams.aligned(@alignOf(DebugElement), true),
+        );
+
+        result.name = self.debug_arena.pushAndNullTerminateString(name_length, name);
+        result.type = debug_type;
+
+        return result;
+    }
+
     fn getOrCreateGroupWithName(
         self: *DebugState,
         parent: *DebugVariableLink,
@@ -351,13 +369,15 @@ pub const DebugState = struct {
         var result: ?*DebugVariableLink = null;
         var link: *DebugVariableLink = parent.first_child;
         while (link != parent.getSentinel()) : (link = link.next) {
-            if (shared.stringsWithOneLengthAreEqual(name, name_length, link.name)) {
-                result = link;
+            if (link.element) |link_element| {
+                if (shared.stringsWithOneLengthAreEqual(name, name_length, link_element.name)) {
+                    result = link;
+                }
             }
         }
 
         if (result == null) {
-            result = self.createVariableLink(name_length, name);
+            result = self.createVariableLink(self.createNameElement(name_length, name, null));
             _ = addLinkToGroup(parent, result.?);
         }
 
@@ -416,8 +436,7 @@ pub const DebugState = struct {
 
     fn createVariableLink(
         self: *DebugState,
-        opt_name_length: ?u32,
-        opt_name: ?[*:0]const u8,
+        element: ?*DebugElement,
     ) *DebugVariableLink {
         var link: *DebugVariableLink = self.debug_arena.pushStruct(
             DebugVariableLink,
@@ -427,13 +446,7 @@ pub const DebugState = struct {
         link.getSentinel().prev = link.getSentinel();
         link.next = undefined;
         link.prev = undefined;
-        link.element = null;
-
-        if (opt_name_length) |name_length| {
-            if (opt_name) |name| {
-                link.name = self.debug_arena.pushAndNullTerminateString(name_length, name);
-            }
-        }
+        link.element = element;
 
         return link;
     }
@@ -443,7 +456,7 @@ pub const DebugState = struct {
         opt_parent: ?*DebugVariableLink,
         element: ?*DebugElement,
     ) *DebugVariableLink {
-        const link: *DebugVariableLink = self.createVariableLink(null, null);
+        const link: *DebugVariableLink = self.createVariableLink(element);
 
         if (opt_parent) |parent| {
             link.next = parent.getSentinel();
@@ -453,7 +466,6 @@ pub const DebugState = struct {
 
             link.first_child = link.getSentinel();
             link.last_child = link.getSentinel();
-            link.element = element;
         }
 
         return link;
@@ -479,13 +491,9 @@ pub const DebugState = struct {
         source: *DebugVariableLink,
     ) *DebugVariableLink {
         const dest: *DebugVariableLink = self.addElementToGroup(dest_group, source.element);
-        dest.name = source.name;
-
-        if (source.canHaveChildren()) {
-            var child: *DebugVariableLink = source.first_child;
-            while (child != source.getSentinel()) : (child = child.next) {
-                _ = self.cloneVariableLinkInto(dest, child);
-            }
+        var child: *DebugVariableLink = source.first_child;
+        while (child != source.getSentinel()) : (child = child.next) {
+            _ = self.cloneVariableLinkInto(dest, child);
         }
         return dest;
     }
@@ -556,7 +564,6 @@ pub const DebugState = struct {
                 ArenaPushParams.aligned(@alignOf(DebugElement), true),
             );
 
-            result.?.guid = event.guid;
             result.?.guid = self.debug_arena.pushStringZ(event.guid);
             result.?.file_name_count = parsed_name.file_name_count;
             result.?.line_number = parsed_name.line_number;
@@ -567,9 +574,10 @@ pub const DebugState = struct {
 
             var opt_parent_group = parent;
             if (op & @intFromEnum(ElementAddOp.CreateHierarchy) != 0) {
+                var temp: [256:0]u8 = undefined;
                 if (self.getGroupForHierarchicalName(
                     parent orelse self.root_group,
-                    result.?.getName(),
+                    result.?.getName(self, temp.len, &temp),
                     false,
                 )) |hierarchy_parent_group| {
                     opt_parent_group = hierarchy_parent_group;
@@ -716,6 +724,12 @@ pub const DebugState = struct {
                         std.debug.assert(thread.id == event.thread_id);
 
                         self.deallocateOpenDebugBlock(&thread.first_open_data_block);
+                    },
+                    .SetHUD => {
+                        const dev_mode: u32 = event.data.u32;
+                        if (dev_mode < self.dev_mode_links.len) {
+                            self.dev_mode_links[dev_mode] = default_parent_group;
+                        }
                     },
                     else => {
                         if (self.getElementFromEvent(
@@ -870,6 +884,13 @@ pub const DebugTree = struct {
 
     prev: ?*DebugTree,
     next: ?*DebugTree,
+
+    pub const empty: DebugTree = .{
+        .ui_position = .zero(),
+        .group = null,
+        .prev = null,
+        .next = null,
+    };
 };
 
 const DebugViewType = enum(u32) {
@@ -959,8 +980,105 @@ pub const DebugElement = struct {
 
     next_in_hash: ?*DebugElement,
 
-    pub fn getName(self: *DebugElement) [*:0]const u8 {
-        return self.name;
+    pub fn getName(
+        self: *DebugElement,
+        debug_state: *DebugState,
+        comptime buffer_size: usize,
+        buffer: [*:0]u8,
+    ) [*:0]const u8 {
+        var result: [*:0]const u8 = self.name;
+
+        switch (self.type) {
+            .LastFrameInfo => {
+                const mem_stats: DebugPlatformMemoryStats = shared.platform.debugGetMemoryStats();
+                const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
+                _ = shared.formatString(
+                    buffer_size,
+                    buffer,
+                    "%.02fms %de %dp %dd - Mem: %lu blocks, %lu used",
+                    .{
+                        most_recent_frame.wall_seconds_elapsed * 1000,
+                        most_recent_frame.stored_event_count,
+                        most_recent_frame.profile_block_count,
+                        most_recent_frame.data_block_count,
+                        mem_stats.block_count,
+                        mem_stats.total_used,
+                    },
+                );
+                result = buffer;
+            },
+            .FunctionSummary => {
+                var hud_function: ?*DebugElement = null;
+                var buf: [buffer_size]u8 = undefined;
+                var function_name: [*:0]const u8 = undefined;
+                function_name = std.fmt.bufPrintZ(&buf, "(unknown)", .{}) catch "(uknown)";
+
+                const opt_oldest_event: ?*DebugStoredEvent =
+                    self.frames[debug_state.viewing_frame_ordinal].oldest_event;
+                if (opt_oldest_event) |oldest_event| {
+                    const event: *DebugEvent = &oldest_event.data.event;
+                    function_name = event.data.string_pointer;
+                    hud_function = debug_state.getElementFromGuid(function_name);
+                }
+
+                if (hud_function != null) {
+                    var min_duration: u64 = std.math.maxInt(u64);
+                    var max_duration: u64 = 0;
+                    var cur_duration: u64 = 0;
+                    var total_duration: u64 = 0;
+                    var total_count: u32 = 0;
+
+                    var frame_index: u32 = 0;
+                    while (frame_index < MAX_FRAME_COUNT) : (frame_index += 1) {
+                        const frame: *DebugElementFrame = &hud_function.?.frames[frame_index];
+                        var duration: u64 = 0;
+
+                        if (frame.oldest_event != null) {
+                            var opt_event: ?*DebugStoredEvent = frame.oldest_event;
+                            while (opt_event) |sub_event| : (opt_event = sub_event.next) {
+                                const node: *DebugProfileNode = &sub_event.data.profile_node;
+                                duration += node.duration;
+                            }
+
+                            if (min_duration > duration) {
+                                min_duration = duration;
+                            }
+                            if (max_duration < duration) {
+                                max_duration = duration;
+                            }
+                            if (frame_index == debug_state.viewing_frame_ordinal) {
+                                cur_duration = duration;
+                            }
+
+                            total_duration += duration;
+                            total_count += 1;
+                        }
+                    }
+
+                    if (max_duration > 0) {
+                        const cur_kilocycles: u32 = @intCast(cur_duration / 1000);
+                        const min_kilocycles: u32 = @intCast(min_duration / 1000);
+                        const max_kilocycles: u32 = @intCast(max_duration / 1000);
+                        const avg_kilocycles: u32 =
+                            @intFromFloat(math.safeRatio0(@floatFromInt(total_duration), @floatFromInt((1000 * total_count))));
+
+                        _ = shared.formatString(
+                            buffer_size,
+                            buffer,
+                            "%s: %dkcy cur | %dkcy min | %dkcy avg | %dkcy max",
+                            .{ function_name, cur_kilocycles, min_kilocycles, avg_kilocycles, max_kilocycles },
+                        );
+                    }
+                } else {
+                    _ = shared.formatString(buffer_size, buffer, "(%s: function not found)", .{function_name});
+                }
+
+                result = buffer;
+            },
+            else => {},
+        }
+
+        return result;
     }
 };
 
@@ -981,7 +1099,6 @@ pub const DebugVariableLink = struct {
     first_child: *DebugVariableLink,
     last_child: *DebugVariableLink,
 
-    name: [*:0]const u8,
     element: ?*DebugElement,
 
     pub fn getSentinel(self: *DebugVariableLink) *DebugVariableLink {
@@ -990,11 +1107,13 @@ pub const DebugVariableLink = struct {
     }
 
     pub fn canHaveChildren(self: *DebugVariableLink) bool {
-        return self.element == null; //self.first_child != self.getSentinel();
+        return self.first_child != self.getSentinel();
     }
 };
 
 fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *DebugEvent, flags: u32) usize {
+    _ = element;
+
     var at: [*]u8 = buffer;
 
     if (flags & DebugVariableToTextFlag.Declaration.toInt() != 0) {
@@ -1002,16 +1121,10 @@ fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *D
     }
 
     if (flags & DebugVariableToTextFlag.Name.toInt() != 0) {
-        var name = element.guid;
-
-        if (flags & DebugVariableToTextFlag.ShowEntireGUID.toInt() == 0) {
-            var scan = name;
-            while (scan[0] != 0) : (scan += 1) {
-                if (scan[0] == '|' and scan[1] != 0) {
-                    name = scan + 1;
-                }
-            }
-        }
+        const name = if (flags & DebugVariableToTextFlag.ShowEntireGUID.toInt() != 0)
+            event.guid
+        else
+            event.name;
 
         at += shared.formatString(end - at, at, "%s", .{name});
     }
@@ -1282,8 +1395,9 @@ fn drawProfileBars(
 
         if (mouse_position.isInRectangle(region_rect)) {
             const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
+            var temp: [256:0]u8 = undefined;
             _ = shared.formatString(text_buffer.size, text_buffer.data, "%s: %10ucy", .{
-                element.guid,
+                element.getName(debug_state, temp.len, &temp),
                 node.duration,
             });
 
@@ -1363,8 +1477,9 @@ fn drawFrameBars(
 
                 if (mouse_position.isInRectangle(region_rect)) {
                     const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
+                    var temp: [256:0]u8 = undefined;
                     _ = shared.formatString(text_buffer.size, text_buffer.data, "%s: %10ucy", .{
-                        element.guid,
+                        element.getName(debug_state, temp.len, &temp),
                         node.duration,
                     });
 
@@ -1441,8 +1556,8 @@ fn drawTopClocksList(
     _ = root_element;
 
     const ui: *DevUI = &debug_state.dev_ui;
-    const temp = debug_state.debug_arena.beginTemporaryMemory();
-    defer debug_state.debug_arena.endTemporaryMemory(temp);
+    const temp_memory = debug_state.debug_arena.beginTemporaryMemory();
+    defer debug_state.debug_arena.endTemporaryMemory(temp_memory);
 
     var link_count: u32 = 0;
     var total_time: f64 = 0;
@@ -1503,11 +1618,12 @@ fn drawTopClocksList(
         running_sum += stats.sum;
 
         var buffer: [256]u8 = undefined;
+        var temp: [256:0]u8 = undefined;
         _ = shared.formatString(buffer.len, &buffer, "%10ucy %05.02f%% %4d %s", .{
             @as(u32, @intFromFloat(stats.sum)),
             percent_coefficient * stats.sum,
             stats.count,
-            element.getName(),
+            element.getName(debug_state, temp.len, &temp),
         });
         dev_ui.textOutAt(
             ui,
@@ -1612,6 +1728,10 @@ fn drawDebugElement(
     const item_color: Color = if (is_hot) Color.new(1, 1, 0, 1) else Color.white();
     const view: *DebugView = debug_state.getOrCreateDebugView(debug_id);
 
+    var null_event: DebugEvent = .{
+        .guid = element.guid,
+        .event_type = element.type,
+    };
     const opt_oldest_event: ?*DebugStoredEvent = element.frames[debug_state.viewing_frame_ordinal].oldest_event;
 
     switch (element.type) {
@@ -1672,7 +1792,8 @@ fn drawDebugElement(
             }
 
             layout.beginRow();
-            layout.label(std.mem.span(element.getName()));
+            var temp: [256:0]u8 = undefined;
+            layout.label(std.mem.span(element.getName(debug_state, temp.len, &temp)));
             layout.booleanButton(
                 "Occupancy",
                 element.type == .ArenaOccupancy,
@@ -1845,15 +1966,9 @@ fn drawDebugElement(
                 element,
             );
         },
-        .LastFrameInfo => {
-            const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
-            var text: [128:0]u8 = undefined;
-            _ = shared.formatString(text.len, &text, "Viewing frame time: %.02fms %de %dp %dd", .{
-                most_recent_frame.wall_seconds_elapsed * 1000,
-                most_recent_frame.stored_event_count,
-                most_recent_frame.profile_block_count,
-                most_recent_frame.data_block_count,
-            });
+        .LastFrameInfo, .FunctionSummary => {
+            var text: [256:0]u8 = undefined;
+            _ = element.getName(debug_state, text.len, &text);
             _ = dev_ui.basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         .DebugMemoryInfo => {
@@ -1864,10 +1979,6 @@ fn drawDebugElement(
             // _ = dev_ui.basicTextElement(&text, layout, item_interaction, null, null, null, null);
         },
         else => {
-            var null_event: DebugEvent = .{
-                .guid = element.guid,
-                .event_type = element.type,
-            };
             const event: *DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else &null_event;
             var text: [256:0]u8 = undefined;
             _ = debugEventToText(&text, @ptrFromInt(@intFromPtr(&text) + text.len), element, event, DebugVariableToTextFlag.displayFlags());
@@ -1890,7 +2001,8 @@ fn drawTreeLink(debug_state: *DebugState, layout: *dev_ui.Layout, tree: *DebugTr
             item_interaction = dev_ui.Interaction.fromLink(link, .TearValue);
         }
 
-        const text = std.mem.span(link.name);
+        var temp_name: [256:0]u8 = undefined;
+        const text: [:0]const u8 = std.mem.span(link.element.?.getName(debug_state, temp_name.len, &temp_name));
         const text_bounds = dev_ui.getTextSize(ui, text);
         var dim: Vector2 = Vector2.new(text_bounds.getDimension().x(), layout.line_advance);
 
@@ -1923,6 +2035,16 @@ fn drawTreeLink(debug_state: *DebugState, layout: *dev_ui.Layout, tree: *DebugTr
     }
 }
 
+fn drawTree(debug_state: *DebugState, tree: *DebugTree, position: Vector2, group: ?*DebugVariableLink) void {
+    var layout: dev_ui.Layout = dev_ui.Layout.begin(&debug_state.dev_ui, position);
+
+    if (group) |tree_group| {
+        drawTreeLink(debug_state, &layout, tree, tree_group);
+    }
+
+    layout.end();
+}
+
 fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
     const ui: *DevUI = &debug_state.dev_ui;
     const render_group: *RenderGroup = &ui.render_group;
@@ -1931,12 +2053,6 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
     while (opt_tree) |tree| : (opt_tree = tree.next) {
         if (tree == &debug_state.tree_sentinel) {
             break;
-        }
-
-        var layout: dev_ui.Layout = dev_ui.Layout.begin(ui, tree.ui_position);
-
-        if (tree.group) |tree_group| {
-            drawTreeLink(debug_state, &layout, tree, tree_group);
         }
 
         const move_interaction: dev_ui.Interaction = dev_ui.Interaction{
@@ -1955,7 +2071,7 @@ fn drawTrees(debug_state: *DebugState, mouse_position: Vector2) void {
             ui.next_hot_interaction = move_interaction;
         }
 
-        layout.end();
+        drawTree(debug_state, tree, tree.ui_position, tree.group);
     }
 
     // var new_hot_menu_index: u32 = debug_variable_list.len;
@@ -2191,17 +2307,10 @@ fn debugInit(
 
     memory.zeroStruct(MemoryArena, &debug_state.per_frame_arena);
 
-    debug_state.root_group = debug_state.createVariableLink(4, "Root");
-    debug_state.root_info_size = 256;
-    debug_state.root_info = @ptrCast(debug_state.debug_arena.pushSize(debug_state.root_info_size, null));
-    debug_state.root_group.name = debug_state.root_info;
+    debug_state.root_group = debug_state.createVariableLink(debug_state.createNameElement(4, "Root", null));
+    debug_state.function_group = debug_state.createVariableLink(debug_state.createNameElement(9, "Functions", null));
 
-    debug_state.function_group = debug_state.createVariableLink(9, "Functions");
-    debug_state.function_info_size = 256;
-    debug_state.function_info = @ptrCast(debug_state.debug_arena.pushSize(debug_state.function_info_size, null));
-    debug_state.function_group.name = debug_state.function_info;
-
-    debug_state.profile_group = debug_state.createVariableLink(7, "Profile");
+    debug_state.profile_group = debug_state.createVariableLink(debug_state.createNameElement(7, "Profile", null));
 
     var root_profile_event: DebugEvent = .{
         .guid = DebugEvent.debugName(@src(), .RootProfile, "RootProfile"),
@@ -2219,6 +2328,12 @@ fn debugInit(
     );
 
     debug_state.dev_ui.init(assets);
+
+    debug_state.dev_mode_links[@intFromEnum(DevMode.Profiling)] = debug_state.profile_group;
+    debug_state.dev_mode_links[@intFromEnum(DevMode.Rendering)] = null;
+    debug_state.dev_mode_links[@intFromEnum(DevMode.Lighting)] = null;
+    debug_state.dev_mode_links[@intFromEnum(DevMode.Memory)] = null;
+    debug_state.dev_mode_links[@intFromEnum(DevMode.Dump)] = debug_state.root_group;
 
     return debug_state;
 }
@@ -2239,80 +2354,31 @@ fn debugStart(
     debug_state.dev_ui.beginFrame(assets, commands, input);
 }
 
-fn debugEnd(debug_state: *DebugState, input: *const shared.GameInput) void {
+fn debugEnd(
+    debug_state: *DebugState,
+    input: *const shared.GameInput,
+    game_memory: *shared.Memory,
+) void {
     TimedBlock.beginFunction(@src(), .DebugEnd);
     defer TimedBlock.endFunction(@src(), .DebugEnd);
 
     const ui: *DevUI = &debug_state.dev_ui;
-    const mem_stats: DebugPlatformMemoryStats = shared.platform.debugGetMemoryStats();
 
-    // Set the text shown in the root node of the debug menu.
-    const most_recent_frame: *DebugFrame = &debug_state.frames[debug_state.viewing_frame_ordinal];
-    _ = shared.formatString(
-        debug_state.root_info_size,
-        debug_state.root_info,
-        "%.02fms %de %dp %dd - Mem: %lu blocks, %lu used",
-        .{
-            most_recent_frame.wall_seconds_elapsed * 1000,
-            most_recent_frame.stored_event_count,
-            most_recent_frame.profile_block_count,
-            most_recent_frame.data_block_count,
-            mem_stats.block_count,
-            mem_stats.total_used,
-        },
-    );
+    // drawTrees(debug_state, ui.mouse_position);
 
-    if (debug_state.getElementFromGuid(shared.global_debug_table.hud_function)) |hud_element| {
-        var min_duration: u64 = std.math.maxInt(u64);
-        var max_duration: u64 = 0;
-        var cur_duration: u64 = 0;
-        var total_duration: u64 = 0;
-        var total_count: u32 = 0;
-
-        var frame_index: u32 = 0;
-        while (frame_index < MAX_FRAME_COUNT) : (frame_index += 1) {
-            const frame: *DebugElementFrame = &hud_element.frames[frame_index];
-            var duration: u64 = 0;
-
-            if (frame.oldest_event != null) {
-                var opt_event: ?*DebugStoredEvent = frame.oldest_event;
-                while (opt_event) |event| : (opt_event = event.next) {
-                    const node: *DebugProfileNode = &event.data.profile_node;
-                    duration += node.duration;
-                }
-
-                if (min_duration > duration) {
-                    min_duration = duration;
-                }
-                if (max_duration < duration) {
-                    max_duration = duration;
-                }
-                if (frame_index == debug_state.viewing_frame_ordinal) {
-                    cur_duration = duration;
-                }
-
-                total_duration += duration;
-                total_count += 1;
-            }
-        }
-
-        if (max_duration > 0) {
-            const cur_kilocycles: u32 = @intCast(cur_duration / 1000);
-            const min_kilocycles: u32 = @intCast(min_duration / 1000);
-            const max_kilocycles: u32 = @intCast(max_duration / 1000);
-            const avg_kilocycles: u32 =
-                @intFromFloat(math.safeRatio0(@floatFromInt(total_duration), @floatFromInt((1000 * total_count))));
-
-            _ = shared.formatString(
-                debug_state.function_info_size,
-                debug_state.function_info,
-                "%s: %dkcy cur | %dkcy min | %dkcy avg | %dkcy max",
-                .{ hud_element.name, cur_kilocycles, min_kilocycles, avg_kilocycles, max_kilocycles },
+    if (game_memory.game_state) |state| {
+        const dev_mode_index: u32 = @intFromEnum(state.dev_mode);
+        if (dev_mode_index < debug_state.dev_mode_links.len) {
+            var ignored: DebugTree = .empty;
+            drawTree(
+                debug_state,
+                &ignored,
+                .new(ui.ui_space.min.x(), ui.ui_space.max.y()),
+                debug_state.dev_mode_links[dev_mode_index],
             );
         }
     }
 
-    drawTrees(debug_state, ui.mouse_position);
     interact(debug_state, input, ui.mouse_position, ui.delta_mouse_position);
     debug_state.dev_ui.endFrame();
 }
@@ -2330,7 +2396,7 @@ fn getGameAssets(game_memory: *shared.Memory) ?*asset.Assets {
 pub fn frameEnd(
     game_memory: *shared.Memory,
     input: *shared.GameInput,
-    commands: *renderer.RenderCommands,
+    render_commands: *renderer.RenderCommands,
 ) callconv(.c) void {
     memory.zeroStruct(DebugEvent, &shared.global_debug_table.edit_event);
 
@@ -2349,8 +2415,8 @@ pub fn frameEnd(
         if (getGameAssets(game_memory)) |assets| {
             game_memory.debug_state = debugInit(
                 assets,
-                @intCast(commands.settings.width),
-                @intCast(commands.settings.height),
+                @intCast(render_commands.settings.width),
+                @intCast(render_commands.settings.height),
             );
         }
     }
@@ -2359,12 +2425,12 @@ pub fn frameEnd(
         if (getGameAssets(game_memory)) |assets| {
             debugStart(
                 debug_state,
-                commands,
+                render_commands,
                 assets,
                 input,
             );
             debug_state.collateDebugRecords(event_count, &shared.global_debug_table.events[event_array_index]);
-            debugEnd(debug_state, input);
+            debugEnd(debug_state, input, game_memory);
         }
     }
 }

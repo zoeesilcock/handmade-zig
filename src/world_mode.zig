@@ -39,7 +39,6 @@ const ControlledHero = shared.ControlledHero;
 const GameInputMouseButton = shared.GameInputMouseButton;
 const WorldPosition = world.WorldPosition;
 const WorldRoom = world.WorldRoom;
-const LoadedBitmap = asset.LoadedBitmap;
 const PlayingSound = audio.PlayingSound;
 const BitmapId = file_formats.BitmapId;
 const RenderGroup = renderer.RenderGroup;
@@ -390,6 +389,28 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
     arena.clear();
 }
 
+fn debugLighting(
+    world_mode: *GameModeWorld,
+) void {
+    DebugInterface.debugValue(@src(), &world_mode.show_lighting, "ShowLighting");
+    DebugInterface.debugValue(@src(), &world_mode.test_lighting.update_debug_lines, "UpdateDebugLines");
+
+    if (DebugInterface.debugValue(@src(), &world_mode.test_lighting.accumulating, "Accumulation")) {
+        if (!world_mode.test_lighting.accumulating) {
+            world_mode.test_lighting.accumulation_count = 0;
+        }
+    }
+
+    DebugInterface.debugValue(@src(), &world_mode.test_lighting.debug_box_draw_depth, "DebugBoxDrawDepth");
+
+    DebugInterface.debugValue(@src(), &world_mode.updating_lighting, "UpdatingLighting");
+
+    if (DebugInterface.debugButton(@src(), &world_mode.updating_lighting, "Lighting Pattern")) {
+        world_mode.lighting_pattern += 1;
+        lighting.generateLightingPattern(&world_mode.test_lighting, world_mode.lighting_pattern);
+    }
+}
+
 pub fn updateAndRenderWorld(
     state: *shared.State,
     world_mode: *GameModeWorld,
@@ -514,40 +535,6 @@ pub fn updateAndRenderWorld(
     var light_bounds: Rectangle3 = world_camera_rect;
     _ = light_bounds.min.setZ(sim_bounds.min.z());
     _ = light_bounds.max.setZ(sim_bounds.max.z());
-
-    if (input.f_key_pressed[1]) {
-        world_mode.show_lighting = !world_mode.show_lighting;
-    }
-
-    if (input.f_key_pressed[2]) {
-        world_mode.test_lighting.update_debug_lines = !world_mode.test_lighting.update_debug_lines;
-    }
-
-    if (input.f_key_pressed[3]) {
-        if (world_mode.test_lighting.accumulating) {
-            world_mode.test_lighting.accumulating = false;
-            world_mode.test_lighting.accumulation_count = 0;
-        } else {
-            world_mode.test_lighting.accumulating = true;
-        }
-    }
-
-    if (input.f_key_pressed[4]) {
-        world_mode.updating_lighting = !world_mode.updating_lighting;
-    }
-
-    if (input.f_key_pressed[5]) {
-        if (world_mode.test_lighting.debug_box_draw_depth > 0) {
-            world_mode.test_lighting.debug_box_draw_depth -= 1;
-        }
-    }
-    if (input.f_key_pressed[6]) {
-        world_mode.test_lighting.debug_box_draw_depth += 1;
-    }
-    if (input.f_key_pressed[9]) {
-        world_mode.lighting_pattern += 1;
-        lighting.generateLightingPattern(&world_mode.test_lighting, world_mode.lighting_pattern);
-    }
 
     const light_textures: *LightingTextures =
         asset_rendering.pushLighting(&render_group, &state.frame_arena, light_bounds);

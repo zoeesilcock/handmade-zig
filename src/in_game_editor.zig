@@ -17,13 +17,14 @@ const Vector2 = math.Vector2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const GameInput = shared.GameInput;
+const DevMode = shared.DevMode;
+const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const RenderCommands = renderer.RenderCommands;
 const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const Assets = asset_mod.Assets;
 const LoadedFont = asset_mod.LoadedFont;
 const AssetFile = asset_mod.AssetFile;
-const LoadedBitmap = asset_mod.LoadedBitmap;
 const BitmapId = file_formats.BitmapId;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
@@ -34,8 +35,6 @@ const LoadedHHAAnnotation = file_formats.LoadedHHAAnnotation;
 const HHAFont = file_formats.HHAFont;
 const FontId = file_formats.FontId;
 const MemoryArena = memory.MemoryArena;
-const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
-const ObjectTransform = renderer.ObjectTransform;
 
 const HHA_ALIGN_POINT_TYPE_COUNT = file_formats.HHA_ALIGN_POINT_TYPE_COUNT;
 const HHA_BITMAP_ALIGN_POINT_COUNT = file_formats.HHA_BITMAP_ALIGN_POINT_COUNT;
@@ -183,11 +182,6 @@ const InGameEdit = struct {
     }
 };
 
-const InGameEditorMode = enum(u32) {
-    None,
-    EditingAssets,
-};
-
 pub const InGameEditor = struct {
     undo_memory: MemoryArena = .{},
     assets: *Assets,
@@ -195,7 +189,7 @@ pub const InGameEditor = struct {
     active_group: EditableAssetGroup = .empty,
     hot_group: EditableAssetGroup = .empty,
 
-    mode: InGameEditorMode = .None,
+    dev_mode: DevMode,
     active_asset_index: u32 = 0,
     highlight_id: DevId,
 
@@ -337,16 +331,12 @@ pub const InGameEditor = struct {
         self.undo_sentinel.pushFirst(edit.?);
     }
 
-    pub fn beginHitTest(self: *InGameEditor, input: *GameInput) EditableHitTest {
+    pub fn beginHitTest(self: *InGameEditor, input: *GameInput, dev_mode: DevMode) EditableHitTest {
         var result: EditableHitTest = .{ .editor = self };
 
-        if (input.f_key_pressed[9]) {
-            self.mode = .None;
-        } else if (input.f_key_pressed[10]) {
-            self.mode = .EditingAssets;
-        }
+        self.dev_mode = dev_mode;
 
-        if (self.mode == .EditingAssets) {
+        if (self.dev_mode == .EditingAssets) {
             result.dest_group = &self.hot_group;
             result.dest_group.?.asset_count = 0;
 
@@ -359,13 +349,10 @@ pub const InGameEditor = struct {
     }
 
     pub fn updateAndRender(self: *InGameEditor, ui: *DevUI) void {
-        if (self.mode != .None) {
+        if (self.dev_mode == .EditingAssets) {
             var layout: dev_ui.Layout = .beginBox(
                 ui,
-                .fromMinMax(
-                    ui.ui_space.min,
-                    .new(ui.ui_space.min.x() + 700, 0),
-                ),
+                .fromMinMax(ui.ui_space.min, .new(ui.ui_space.min.x() + 700, ui.ui_space.max.y())),
                 null,
             );
             layout.to_execute = self.to_execute;
@@ -433,7 +420,7 @@ pub const InGameEditor = struct {
                 layout.endSection();
             }
 
-            switch (self.mode) {
+            switch (self.dev_mode) {
                 .EditingAssets => self.assetEditor(&layout),
                 else => {},
             }

@@ -16,8 +16,6 @@ const Rectangle2 = math.Rectangle2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const MemoryArena = memory.MemoryArena;
-const LoadedBitmap = asset.LoadedBitmap;
-const LoadedSound = asset.LoadedSound;
 const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
@@ -35,7 +33,6 @@ pub const INTERNAL = @import("build_options").internal;
 pub const MAX_DEBUG_REGIONS_PER_FRAME = 2 * 4096;
 
 pub const DebugTable = extern struct {
-    hud_function: [*:0]const u8 = "",
     edit_event: DebugEvent = DebugEvent{},
     mouse_position: Vector2 = .zero(),
     record_increment: u32 = 0,
@@ -53,6 +50,8 @@ pub const DebugTable = extern struct {
 
 pub const DebugType = if (INTERNAL) enum(u32) {
     Unknown,
+
+    Name,
 
     FrameMarker,
     BeginBlock,
@@ -82,10 +81,12 @@ pub const DebugType = if (INTERNAL) enum(u32) {
     ThreadIntervalGraph,
     FrameBarGraph,
     LastFrameInfo,
+    FunctionSummary,
     DebugMemoryInfo,
     FrameSlider,
     TopClocksList,
     ArenaOccupancy,
+    SetHUD,
 } else enum(u32) {};
 
 pub const DebugEvent = if (INTERNAL) extern struct {
@@ -98,7 +99,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     data: extern union {
         value_debug_event: *DebugEvent,
         debug_id: DevId,
-        string_pointer: [*]const u8,
+        string_pointer: [*:0]const u8,
         bool: bool,
         u8: u8,
         u16: u16,
@@ -162,7 +163,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         const guids_match = shared.global_debug_table.edit_event.guid == self.guid;
         // TODO: Could we use comptime to avoid duplicating this logic for each type?
         switch (@TypeOf(source)) {
-            [*]const u8 => {
+            [*:0]const u8 => {
                 self.event_type = .StringPointer;
                 self.data = .{ .string_pointer = dest.* };
             },
@@ -329,16 +330,6 @@ pub const TimedBlock = if (INTERNAL) struct {
         end(DebugEvent.debugName(source, counter, "END_BLOCK_"), "END_BLOCK_");
     }
 
-    pub fn beginHudFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        const debug_name = DebugEvent.debugName(source, counter, source.fn_name);
-        shared.global_debug_table.hud_function = debug_name;
-        begin(debug_name, source.fn_name);
-    }
-
-    pub fn endHudFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        endFunction(source, counter);
-    }
-
     fn begin(guid: [*:0]const u8, name: [*:0]const u8) void {
         _ = DebugEvent.record(.BeginBlock, guid, name);
     }
@@ -385,16 +376,6 @@ pub const TimedBlock = if (INTERNAL) struct {
     }
 
     pub fn endFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        _ = source;
-        _ = counter;
-    }
-
-    pub fn beginHudFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
-        _ = source;
-        _ = counter;
-    }
-
-    pub fn endHudFunction(comptime source: std.builtin.SourceLocation, comptime counter: @TypeOf(.EnumLiteral)) void {
         _ = source;
         _ = counter;
     }
@@ -449,7 +430,7 @@ pub const DebugInterface = if (INTERNAL) struct {
         comptime field_name: []const u8,
     ) void {
         const guid = DebugEvent.debugName(source, null, field_name);
-        var event = DebugEvent.record(.Unknown, guid, source.fn_name);
+        var event = DebugEvent.record(.Unknown, guid, @ptrCast(field_name));
         event.setValue(value_ptr.*, value_ptr);
     }
 
@@ -466,6 +447,17 @@ pub const DebugInterface = if (INTERNAL) struct {
         comptime name: []const u8,
     ) void {
         _ = DebugEvent.record(element_type, @ptrCast(name), source.fn_name);
+    }
+
+    pub fn debugUIHUD(
+        comptime source: std.builtin.SourceLocation,
+        comptime value: shared.DevMode,
+    ) void {
+        const guid = DebugEvent.debugName(source, null, @tagName(value));
+        var event = DebugEvent.record(.Unknown, guid, @ptrCast(@tagName(value)));
+
+        event.data.u32 = @intFromEnum(value);
+        event.event_type = .SetHUD;
     }
 
     pub fn debugBeginArray(array: anytype) void {
