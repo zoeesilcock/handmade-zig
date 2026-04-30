@@ -99,6 +99,7 @@ const GenOptionType = enum(u32) {
 pub const GenRoomSpec = struct {
     required_dimension: GenVector3,
     stone_floor: bool,
+    outdoors: bool,
 };
 
 pub const GenRoom = struct {
@@ -767,6 +768,11 @@ fn createForest(gen: *WorldGenerator) GenForest {
 fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     var result: GenOrphanage = .{};
 
+    var garden_spec: *GenRoomSpec = genSpec(gen);
+    garden_spec.outdoors = true;
+    var basic_forest_spec: *GenRoomSpec = genSpec(gen);
+    basic_forest_spec.outdoors = true;
+
     var bedroom_spec: *GenRoomSpec = genSpec(gen);
     bedroom_spec.stone_floor = true;
 
@@ -774,8 +780,6 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     const main_room_spec: *GenRoomSpec = genSpec(gen);
     const tailor_room_spec: *GenRoomSpec = genSpec(gen);
     const kitchen_spec: *GenRoomSpec = genSpec(gen);
-    const garden_spec: *GenRoomSpec = genSpec(gen);
-    const basic_forest_spec: *GenRoomSpec = genSpec(gen);
     const vertical_hallway_spec: *GenRoomSpec = genSpec(gen);
     const horizontal_hallway_spec: *GenRoomSpec = genSpec(gen);
 

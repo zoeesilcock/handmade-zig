@@ -186,13 +186,19 @@ pub fn addCat(region: *SimRegion, world_position: WorldPosition, standing_on: Tr
     // entity.brain_id = sim.addBrain(region);
     entity.occupying = standing_on;
 
-    const body: *EntityVisiblePiece = addPiece(entity, .Body, 1.5, .new(0, 0, 1), .white(), null);
-    const head: *EntityVisiblePiece = addPiece(entity, .Head, 1, .new(0, 0, 1.2), .white(), null);
+    const body: *EntityVisiblePiece = addPiece(entity, .Body, 1, .new(0, 0, 0), .white(), null);
+    const head: *EntityVisiblePiece = addPiece(entity, .Head, 1, .new(0, 0, 0.1), .white(), null);
 
     connectPieceToWorld(entity, body, .Default);
     connectPiece(entity, body, .BaseOfNeck, head, .Default);
 
-    placeEntity(region, entity, world_position);
+    _ = world_position;
+    const position: WorldPosition = world_mod.mapIntoChunkSpace(
+        region.world,
+        region.origin,
+        standing_on.getSimSpaceTraversable().position,
+    );
+    placeEntity(region, entity, position);
 
     return entity;
 }

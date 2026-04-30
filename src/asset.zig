@@ -87,7 +87,7 @@ const ImportGridTags = struct {
     tags: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]ImportGridTag,
 };
 
-const Asset = struct {
+pub const Asset = struct {
     state: u32 = 0,
     handle: union(enum) {
         texture_handle: RendererTexture,
@@ -492,13 +492,13 @@ pub const Assets = struct {
         return assets;
     }
 
-    fn getFile(self: *Assets, file_index: u32) *AssetFile {
+    pub fn getFile(self: *Assets, file_index: u32) ?*AssetFile {
         std.debug.assert(file_index < self.file_count);
         return &self.files[file_index];
     }
 
     fn getFileHandleFor(self: *Assets, file_index: u32) *shared.PlatformFileHandle {
-        return &self.getFile(file_index).handle;
+        return &self.getFile(file_index).?.handle;
     }
 
     pub fn getAsset(self: *Assets, asset_index: u32) ?*Asset {
@@ -906,7 +906,7 @@ pub const Assets = struct {
             asset.handle = .{ .font = .{} };
         }
         var font: *LoadedFont = @ptrCast(@alignCast(&asset.handle.font));
-        font.bitmap_id_offset = self.getFile(asset.file_index).asset_base;
+        font.bitmap_id_offset = self.getFile(asset.file_index).?.asset_base;
         font.glyphs = @ptrCast(@alignCast(asset_memory));
         font.horizontal_advance =
             @ptrCast(@alignCast(@as([*]u8, @ptrCast(font.glyphs)) + glyphs_size));
@@ -1785,7 +1785,7 @@ fn parsePieces(
     return result;
 }
 
-pub fn checkForArtChanges(assets: *Assets) void {
+pub fn importChangedAssets(assets: *Assets) void {
     if (assets.default_append_hha_index != 0) {
         var file_group = shared.platform.getAllFilesOfTypeBegin(.PNG);
         defer shared.platform.getAllFilesOfTypeEnd(&file_group);
@@ -1848,16 +1848,18 @@ pub fn checkForArtChanges(assets: *Assets) void {
                 }
             }
         }
+    }
+}
 
-        var file_index: u32 = 1;
-        while (file_index < assets.file_count) : (file_index += 1) {
-            const file: *AssetFile = @ptrCast(assets.files + file_index);
-            if (file.modified) {
-                var temp_arena: MemoryArena = .{};
-                defer temp_arena.clear();
+pub fn writeAllHHAModifications(assets: *Assets) void {
+    var file_index: u32 = 1;
+    while (file_index < assets.file_count) : (file_index += 1) {
+        const file: *AssetFile = @ptrCast(assets.files + file_index);
+        if (file.modified) {
+            var temp_arena: MemoryArena = .{};
+            defer temp_arena.clear();
 
-                assets.writeModificationsToHHA(file_index, &temp_arena);
-            }
+            assets.writeModificationsToHHA(file_index, &temp_arena);
         }
     }
 }

@@ -216,15 +216,6 @@ pub const Entity = extern struct {
         self.flags = self.flags & ~flags;
     }
 
-    pub fn getGroundPoint(self: *const Entity) Vector3 {
-        return self.position;
-    }
-
-    pub fn getGroundPointFor(self: *const Entity, position: Vector3) Vector3 {
-        _ = self;
-        return position;
-    }
-
     pub fn getStairGround(self: *const Entity, at_ground_point: Vector3) f32 {
         const region_rectangle = Rectangle2.fromCenterDimension(self.position.xy(), self.walkable_dimension);
         const barycentric = region_rectangle.getBarycentricPosition(at_ground_point.xy()).clamp01();
@@ -471,7 +462,7 @@ pub fn updateAndRenderEntities(
 
             TimedBlock.beginBlock(@src(), .EntityRender);
             if (opt_render_group) |render_group| {
-                const entity_ground_point: Vector3 = entity.getGroundPoint();
+                const entity_ground_point: Vector3 = entity.position;
 
                 var match_vector = asset.AssetVector{};
                 match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
@@ -573,8 +564,7 @@ pub fn updateAndRenderEntities(
                                     );
                                     height_ratio *= child_align.getSize();
 
-                                    var initial_position: Vector3 =
-                                        entity_ground_point.plus(piece.offset.plus(offset));
+                                    var initial_position: Vector3 = entity_ground_point.plus(offset);
                                     if (bitmap_piece.parent_align_type != 0) {
                                         if (parent_bitmap_info) |parent_info| {
                                             const parent_align: HHAAlignPoint = parent_info.findAlign(
@@ -589,6 +579,7 @@ pub fn updateAndRenderEntities(
                                     }
 
                                     bitmap_infos[piece_index] = bitmap_info;
+                                    initial_position = initial_position.plus(piece.offset);
                                     const align_percentage: Vector2 = child_align.getPositionPercent();
 
                                     const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(
@@ -662,7 +653,18 @@ pub fn updateAndRenderEntities(
                             render_group.pushVolumeOutline(
                                 .fromCenterHalfDimension(entity_ground_point.plus(piece.offset), world_radius),
                                 hit_test.highlight_color,
-                                0.1,
+                                0.001,
+                            );
+
+                            render_group.pushCube(
+                                render_group.white_texture,
+                                entity.position,
+                                .splat(0.06),
+                                .new(1, 1, 1, 1),
+                                null,
+                                null,
+                                null,
+                                3,
                             );
                         }
                     }
@@ -699,18 +701,16 @@ pub fn updateAndRenderEntities(
                                 color = .new(1, 0.5, 0, 1);
                             }
 
-                            render_group.pushRectangle(
-                                traversable.position,
-                                Vector2.new(1.4, 1.4),
-                                color,
+                            render_group.pushCube(
+                                render_group.white_texture,
+                                entity_ground_point.plus(traversable.position),
+                                .splat(0.04),
+                                .new(1, 0, 1, 1),
+                                null,
+                                null,
+                                null,
+                                3,
                             );
-
-                            // render_group.pushRectangleOutline(
-                            //     Vector2.new(1.2, 1.2),
-                            //     traversable.position,
-                            //     Color.new(0, 0, 0, 1),
-                            //     0.1,
-                            // );
                         }
                     }
                 }

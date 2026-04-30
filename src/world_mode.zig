@@ -76,12 +76,11 @@ const ReservedBrainId = brains.ReservedBrainId;
 
 pub const GameCamera = struct {
     following_entity_index: EntityId = .{},
-    position: WorldPosition,
-    simulation_center: WorldPosition,
-    offset_z: f32,
 
+    simulation_center: WorldPosition,
+
+    position: WorldPosition,
     target_position: WorldPosition,
-    target_offset_z: f32,
 
     in_special: EntityId,
     time_in_special: f32,
@@ -423,8 +422,6 @@ pub fn updateAndRenderWorld(
 
     const result = false;
 
-    var camera_offset: Vector3 = .new(0, 0, world_mode.camera.offset_z);
-
     const mouse_position: Vector2 = input.clip_space_mouse_position.xy();
     const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
     if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Left.toInt()].isDown()) {
@@ -432,7 +429,7 @@ pub fn updateAndRenderWorld(
         world_mode.debug_camera_orbit -= rotation_speed * d_mouse_p.x();
         world_mode.debug_camera_pitch += rotation_speed * d_mouse_p.y();
     } else if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Middle.toInt()].isDown()) {
-        const zoom_speed: f32 = (camera_offset.z() + world_mode.debug_camera_dolly) * 3;
+        const zoom_speed: f32 = (world_mode.debug_camera_dolly) * 3;
         world_mode.debug_camera_dolly -= zoom_speed * d_mouse_p.y();
     }
 
@@ -446,7 +443,6 @@ pub fn updateAndRenderWorld(
     const focal_length: f32 = 1.5;
     world_mode.camera_pitch = 0.125 * math.PI32;
     world_mode.camera_orbit = 0;
-    world_mode.camera_dolly = 0;
 
     const background_color: Color = .new(0.15, 0.15, 0.15, 0);
     var render_group = RenderGroup.begin(
@@ -461,13 +457,12 @@ pub fn updateAndRenderWorld(
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
-    var delta_from_sim: Vector3 = world.subtractPositions(
+    const delta_from_sim: Vector3 = world.subtractPositions(
         world_mode.world,
         &world_mode.camera.position,
         &world_mode.camera.simulation_center,
     );
-    var camera_ot: Vector3 =
-        camera_o.timesV(camera_offset.plus(delta_from_sim).plus(.new(0, 0, world_mode.camera_dolly)));
+    var camera_ot: Vector3 = delta_from_sim;
     const camera_z: Vector3 = camera_o.getColumn(2);
     var fog: renderer.FogParams = .{
         .direction = camera_z.negated(),
@@ -494,7 +489,7 @@ pub fn updateAndRenderWorld(
     if (world_mode.use_debug_camera) {
         camera_o =
             Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
-        camera_ot = camera_o.timesV(camera_offset.plus(.new(0, 0, world_mode.debug_camera_dolly)));
+        camera_ot = camera_o.timesV(.new(0, 0, world_mode.debug_camera_dolly));
         render_group.setCameraTransform(
             focal_length,
             camera_o.getColumn(0),
@@ -509,10 +504,7 @@ pub fn updateAndRenderWorld(
         );
     }
 
-    DebugInterface.debugValue(@src(), &delta_from_sim, "DeltaFromSim");
-    DebugInterface.debugValue(@src(), &world_mode.camera.offset_z, "CameraOffsetZ");
-
-    const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget(world_mode.camera.offset_z);
+    const world_camera_rect: Rectangle3 = render_group.getCameraRectangleAtTarget(8);
     const screen_bounds: Rectangle2 = .fromCenterDimension(.zero(), .new(
         world_camera_rect.max.x() - world_camera_rect.min.x(),
         world_camera_rect.max.y() - world_camera_rect.min.y(),
@@ -602,17 +594,21 @@ pub fn updateAndRenderWorld(
                 &world_mode.camera,
                 camera_following_entity,
                 input.frame_delta_time,
+                camera_z,
             );
             world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
         }
 
-        // render_group.pushCubeLight(
-        //     world_mode.debug_light_position,
-        //     0.5,
-        //     .new(1, 1, 1),
-        //     1,
-        //     @ptrCast(&world_mode.debug_light_store),
-        // );
+        if (true) {
+            asset_rendering.pushCubeLight(
+                &render_group,
+                world_mode.debug_light_position,
+                .splat(0.5),
+                .new(1, 1, 1),
+                1,
+                @ptrCast(&world_mode.debug_light_store),
+            );
+        }
 
         const frame_to_frame_camera_delta_position: Vector3 =
             world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
@@ -738,127 +734,3 @@ pub fn updateAndRenderWorld(
 
     return result;
 }
-
-// fn renderTest(
-//     world_mode: *GameModeWorld,
-//     transient_state: TransientState,
-//     input: *shared.GameInput,
-//     render_group: *RenderGroup,
-//     draw_buffer: *asset.LoadedBitmap,
-// ) void {
-//     const map_colors: [3]Color = .{
-//         Color.new(1, 0, 0, 1),
-//         Color.new(0, 1, 0, 1),
-//         Color.new(0, 0, 1, 1),
-//     };
-//
-//     const checker_width = 16;
-//     const checker_height = 16;
-//     const checker_dimension = Vector2.new(checker_width, checker_height);
-//     for (&transient_state.env_maps, 0..) |*map, map_index| {
-//         const lod: *LoadedBitmap = &map.lod[0];
-//         const clip_rect: Rectangle2i = Rectangle2i.new(0, 0, lod.width, lod.height);
-//
-//         var row_checker_on = false;
-//         var y: u32 = 0;
-//         while (y < lod.height) : (y += checker_height) {
-//             var checker_on = row_checker_on;
-//             var x: u32 = 0;
-//             while (x < lod.width) : (x += checker_width) {
-//                 const min_position = Vector2.newU(x, y);
-//                 const max_position = min_position.plus(checker_dimension);
-//                 const color = if (checker_on) map_colors[map_index] else Color.new(0, 0, 0, 1);
-//                 renderer.drawRectangle(lod, min_position, max_position, color, clip_rect, true);
-//                 renderer.drawRectangle(lod, min_position, max_position, color, clip_rect, false);
-//                 checker_on = !checker_on;
-//             }
-//
-//             row_checker_on = !row_checker_on;
-//         }
-//     }
-//     transient_state.env_maps[0].z_position = -1.5;
-//     transient_state.env_maps[1].z_position = 0;
-//     transient_state.env_maps[2].z_position = 1.5;
-//
-//     world_mode.time += input.frame_delta_time;
-//     const angle = 0.1 * world_mode.time;
-//     // const angle: f32 = 0;
-//
-//     const screen_center = Vector2.new(
-//         0.5 * @as(f32, @floatFromInt(draw_buffer.width)),
-//         0.5 * @as(f32, @floatFromInt(draw_buffer.height)),
-//     );
-//     const origin = screen_center;
-//     const scale = 100.0;
-//
-//     var x_axis = Vector2.zero();
-//     var y_axis = Vector2.zero();
-//
-//     // const displacement = Vector2.zero();
-//     const displacement = Vector2.new(
-//         100.0 * intrinsics.cos(5.0 * angle),
-//         100.0 * intrinsics.sin(3.0 * angle),
-//     );
-//
-//     if (true) {
-//         x_axis = Vector2.new(intrinsics.cos(10 * angle), intrinsics.sin(10 * angle)).scaledTo(scale);
-//         y_axis = x_axis.perp();
-//     } else if (false) {
-//         x_axis = Vector2.new(intrinsics.cos(angle), intrinsics.sin(angle)).scaledTo(scale);
-//         y_axis = Vector2.new(intrinsics.cos(angle + 1.0), intrinsics.sin(angle + 1.0)).scaledTo(50.0 + 50.0 * intrinsics.cos(angle));
-//     } else {
-//         x_axis = Vector2.new(scale, 0);
-//         y_axis = Vector2.new(0, scale);
-//     }
-//
-//     const color = Color.new(1, 1, 1, 1);
-//     // const color_angle = 5.0 * angle;
-//     // const color =
-//     //     Color.new(
-//     //     0.5 + 0.5 * intrinsics.sin(color_angle),
-//     //     0.5 + 0.5 * intrinsics.sin(2.9 * color_angle),
-//     //     0.5 + 0.5 * intrinsics.sin(9.9 * color_angle),
-//     //     0.5 + 0.5 * intrinsics.sin(10 * color_angle),
-//     // );
-//
-//     _ = render_group.pushCoordinateSystem(
-//         origin.minus(x_axis.scaledTo(0.5)).minus(y_axis.scaledTo(0.5)).plus(displacement),
-//         x_axis,
-//         y_axis,
-//         color,
-//         &world_mode.test_diffuse,
-//         &world_mode.test_normal,
-//         &transient_state.env_maps[2],
-//         &transient_state.env_maps[1],
-//         &transient_state.env_maps[0],
-//     );
-//
-//     var map_position = Vector2.zero();
-//     for (&transient_state.env_maps) |*map| {
-//         const lod: *LoadedBitmap = &map.lod[0];
-//
-//         x_axis = Vector2.newI(lod.width, 0).scaledTo(0.5);
-//         y_axis = Vector2.newI(0, lod.height).scaledTo(0.5);
-//
-//         _ = render_group.pushCoordinateSystem(
-//             map_position,
-//             x_axis,
-//             y_axis,
-//             Color.new(1, 1, 1, 1),
-//             lod,
-//             null,
-//             undefined,
-//             undefined,
-//             undefined,
-//         );
-//
-//         map_position = map_position.plus(y_axis.plus(Vector2.new(0, 6)));
-//     }
-//
-//     if (false) {
-//         render_group.pushSaturation(0.5 + 0.5 * intrinsics.sin(10.0 * world_mode.time));
-//     }
-//
-//     render_group.renderToOutput(transient_state.high_priority_queue, draw_buffer);
-//     render_group.endRender();
-// }

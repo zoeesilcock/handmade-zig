@@ -739,15 +739,13 @@ pub fn moveEntity(
     }
 }
 
-/// It is mandatory that the camera "center" be the sim region center for this code to work properly, because it
-/// cannot add the offset from the sim center to the camera as a displacement or it will fail when moving between
-/// rooms at the changeover point.
 pub fn updateCameraForEntityMovement(
     world_ptr: *World,
     sim_region: *SimRegion,
     camera: *GameCamera,
     entity: *Entity,
     delta_time: f32,
+    camera_z: Vector3,
 ) void {
     std.debug.assert(entity.id.value == camera.following_entity_index.value);
 
@@ -823,32 +821,25 @@ pub fn updateCameraForEntityMovement(
         }
 
         camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
+        target_position = target_position.plus(camera_z.scaledTo(target_offset_z));
         camera.target_position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
-        camera.target_offset_z = target_offset_z;
     }
 
     var position: Vector3 = world.subtractPositions(
         world_ptr,
         &camera.position,
-        &camera.simulation_center,
+        &sim_region.origin,
     );
     const target_position: Vector3 = world.subtractPositions(
         world_ptr,
         &camera.target_position,
-        &camera.simulation_center,
+        &sim_region.origin,
     );
-
-    var offset_z: f32 = camera.offset_z;
-    const target_offset_z: f32 = camera.target_offset_z;
 
     const delta_position: Vector3 = target_position.minus(position);
     position = position.plus(delta_position.scaledTo(delta_time));
 
-    const delta_offset_z: f32 = target_offset_z - offset_z;
-    offset_z += delta_time * delta_offset_z;
-
-    camera.position = world.mapIntoChunkSpace(world_ptr, camera.simulation_center, position);
-    camera.offset_z = offset_z;
+    camera.position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, position);
 }
 
 pub const TraversableSearchFlag = enum(u8) {

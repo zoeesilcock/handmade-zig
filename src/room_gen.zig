@@ -113,11 +113,16 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             const tile_x: i32 = min_tile_x + x_index;
             const tile_y: i32 = min_tile_y + y_index;
 
-            const on_boundary: bool =
+            var on_boundary: bool =
                 x_index == 0 or
                 x_index == (x_count - 1) or
                 y_index == 0 or
                 y_index == (y_count - 1);
+
+            if (spec.outdoors) {
+                on_boundary = false;
+            }
+
             var on_connection: bool = false;
 
             var opt_room_connection: ?*GenRoomConnection = room.first_connection;
@@ -147,7 +152,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 (x_index == x_count - 2 and y_index == 1) or
                 (x_index == x_count - 2 and y_index == y_count - 2);
 
-            if (on_lamp) {
+            if (on_lamp and false) {
                 entity_gen.addLamp(
                     region,
                     position,
@@ -172,28 +177,17 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 entity.addTag(.Wood, 1);
             } else {
                 entity.addTag(.Floor, 1);
-                entity.addTag(if (spec.stone_floor) .Stone else .Wood, 1);
+                if (spec.outdoors) {
+                    entity.addTag(.Grass, 1);
+                } else {
+                    entity.addTag(if (spec.stone_floor) .Stone else .Wood, 1);
+                }
                 randomize_top = true;
 
                 if (!on_lamp) {
                     entity.traversable_count = 1;
                     entity.traversables[0].position = Vector3.zero();
                     entity.traversables[0].occupier = null;
-
-                    if (pending_entity != null) {
-                        var ref: TraversableReference = .init;
-                        ref.entity.ptr = entity;
-                        ref.entity.index = entity.id;
-
-                        const placed_entity: *Entity = pending_entity.?.creator(region, position, ref);
-                        var tag_index: u32 = 0;
-                        while (tag_index < pending_entity.?.tag_count) : (tag_index += 1) {
-                            const tag: *GenEntityTag = &pending_entity.?.tags[tag_index];
-                            placed_entity.addTag(tag.tag_id, tag.value);
-                        }
-
-                        pending_entity = pending_entity.?.next;
-                    }
                 }
             }
 
@@ -227,6 +221,21 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             }
 
             entity_gen.placeEntity(region, entity, position);
+
+            if (entity.traversable_count == 1 and pending_entity != null) {
+                var ref: TraversableReference = .init;
+                ref.entity.ptr = entity;
+                ref.entity.index = entity.id;
+
+                const placed_entity: *Entity = pending_entity.?.creator(region, position, ref);
+                var tag_index: u32 = 0;
+                while (tag_index < pending_entity.?.tag_count) : (tag_index += 1) {
+                    const tag: *GenEntityTag = &pending_entity.?.tags[tag_index];
+                    placed_entity.addTag(tag.tag_id, tag.value);
+                }
+
+                pending_entity = pending_entity.?.next;
+            }
         }
     }
 

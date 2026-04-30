@@ -24,6 +24,7 @@ const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const Assets = asset_mod.Assets;
 const LoadedFont = asset_mod.LoadedFont;
+const Asset = asset_mod.Asset;
 const AssetFile = asset_mod.AssetFile;
 const BitmapId = file_formats.BitmapId;
 const HHAAsset = file_formats.HHAAsset;
@@ -180,6 +181,17 @@ const InGameEdit = struct {
     pub fn pushFirst(self: *InGameEdit, edit: *InGameEdit) void {
         self.link(edit);
     }
+
+    pub fn hasEdit(self: *InGameEdit, match: ?*InGameEdit) bool {
+        var result: bool = (self == match);
+
+        var test_edit: ?*InGameEdit = self.next;
+        while (!result and test_edit != self) : (test_edit = test_edit.?.next) {
+            result = (test_edit == match);
+        }
+
+        return result;
+    }
 };
 
 pub const InGameEditor = struct {
@@ -195,7 +207,7 @@ pub const InGameEditor = struct {
 
     main_section: dev_ui.SectionPicker,
 
-    clean_undo_sentinel_next: ?*InGameEdit, // Tells us whether we are "dirty" or not.
+    clean_edit: ?*InGameEdit, // Tells us whether we are "dirty" or not.
     undo_sentinel: InGameEdit,
     redo_sentinel: InGameEdit,
     in_progress_sentinel: InGameEdit,
@@ -212,13 +224,13 @@ pub const InGameEditor = struct {
         self.undo_sentinel.sentinelize();
         self.redo_sentinel.sentinelize();
         self.in_progress_sentinel.sentinelize();
-        self.clean_undo_sentinel_next = self.undo_sentinel.next;
+        self.clean_edit = self.undo_sentinel.next;
 
         self.draw_align_point = [1]bool{true} ** HHA_BITMAP_ALIGN_POINT_COUNT;
     }
 
     fn isDirty(self: *InGameEditor) bool {
-        return self.undo_sentinel.next != self.clean_undo_sentinel_next;
+        return self.undo_sentinel.next != self.clean_edit;
     }
 
     fn undoAvailable(self: *InGameEditor) bool {
@@ -267,6 +279,17 @@ pub const InGameEditor = struct {
         }
 
         return result.?;
+    }
+
+    fn getAssetForEdit(self: *InGameEditor, edit: *InGameEdit) ?*Asset {
+        var result: ?*Asset = null;
+        switch (edit.edit_type) {
+            .AlignPointEdit => {
+                result = self.assets.getAsset(edit.operation.align_point_edit.asset_index);
+            },
+            else => {},
+        }
+        return result;
     }
 
     fn editAlignPoint(
@@ -348,6 +371,33 @@ pub const InGameEditor = struct {
         return result;
     }
 
+    fn findCleanEditList(self: *InGameEditor) ?*InGameEdit {
+        var result: ?*InGameEdit = null;
+        if (self.undo_sentinel.hasEdit(self.clean_edit)) {
+            result = &self.undo_sentinel;
+        } else {
+            result = &self.redo_sentinel;
+            std.debug.assert(self.redo_sentinel.hasEdit(self.clean_edit));
+        }
+        return result;
+    }
+
+    fn saveAllChanges(self: *InGameEditor) void {
+        const list: ?*InGameEdit = self.findCleanEditList();
+        var edit: ?*InGameEdit = list.?.next;
+        while (edit != self.clean_edit) : (edit = edit.?.next) {
+            if (self.getAssetForEdit(edit.?)) |asset| {
+                if (self.assets.getFile(asset.file_index)) |file| {
+                    file.modified = true;
+                }
+            }
+        }
+
+        self.clean_edit = self.undo_sentinel.next;
+
+        asset_mod.writeAllHHAModifications(self.assets);
+    }
+
     pub fn updateAndRender(self: *InGameEditor, ui: *DevUI) void {
         if (self.dev_mode == .EditingAssets) {
             var layout: dev_ui.Layout = .beginBox(
@@ -393,17 +443,13 @@ pub const InGameEditor = struct {
                 .fromPointerAndLine(@ptrCast(&hha_section_name), @src()),
                 .fromSlice(hha_section_name),
             )) {
-                var should_save: bool = false;
                 layout.beginRow();
                 if (layout.button(.fromPointerAndLine(self, @src()), "SAVE", self.isDirty(), null)) {
-                    should_save = true;
+                    self.saveAllChanges();
                 }
                 if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT & SAVE", true, null)) {
-                    asset_mod.checkForArtChanges(self.assets);
-                    should_save = true;
-                }
-                if (should_save) {
-                    self.clean_undo_sentinel_next = self.undo_sentinel.next;
+                    asset_mod.importChangedAssets(self.assets);
+                    self.saveAllChanges();
                 }
                 layout.endRow();
 
@@ -412,8 +458,15 @@ pub const InGameEditor = struct {
 
                 layout.beginRow();
                 if (layout.button(.fromPointerAndLine(self, @src()), "REVERT", self.isDirty(), null)) {
-                    while (self.clean_undo_sentinel_next != self.undo_sentinel.next) {
-                        self.undo();
+                    if (self.undo_sentinel.hasEdit(self.clean_edit)) {
+                        while (self.clean_edit != self.undo_sentinel.next) {
+                            self.undo();
+                        }
+                    } else {
+                        std.debug.assert(self.redo_sentinel.hasEdit(self.clean_edit));
+                        while (self.clean_edit != self.undo_sentinel.next) {
+                            self.redo();
+                        }
                     }
                 }
                 layout.endRow();

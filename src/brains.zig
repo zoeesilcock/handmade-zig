@@ -292,7 +292,7 @@ fn executeBrainHero(
             head.position = body.position.plus(acceleration).plus(Vector3.new(0, 0, 0.25 * inverse_clutch));
 
             if (hop_requested) {
-                var d_target: Vector3 = acceleration_normal.scaledTo(2.0);
+                var d_target: Vector3 = acceleration_normal.scaledTo(1.25);
 
                 if (@abs(d_target.x()) > @abs(d_target.y())) {
                     _ = d_target.setY(0);
