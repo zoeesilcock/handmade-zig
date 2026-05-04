@@ -19,29 +19,8 @@ zig build -fwine -Dtarget=x86_64-windows && (cd data && ../zig-out/bin/handmade-
 
 ## Assets
 Graphical and audio assets are not included as they are not created by me. The following assets from the pre-order data need to be present to run the game:
-* `handmade_hero_legacy_art.zip/v0_hhas` to be in the `/data` directory.
-* `handmade_hero_legacy_art.zip/png_art_packs` to be in the `/art` directory.
-    * Rename the file called `title_screen.png` to `plate_title_screen.png`.
-    * Rename the file called `hand_fire.png` to `hand_undead_bones_dark.png`.
-    * Rename the file called `hand_glove.png` to `hand_glove_fingers.png`.
-    * Rename the file called `hand_skeleton.png` to `hand_undead_bones.png`.
-    * Rename the file called `block_forest_01.png` to `block_floor_grass.png`.
-    * Rename the file called `block_orphanage_01.png` to `block_wall_manmade_wood_drywall.png`.
-    * Rename the file called `block_orphanage_02.png` to `block_floor_manmade_wood.png`.
-    * Rename the file called `block_orphanage_03.png` to `block_floor_manmade_stone.png`.
-    * Rename the file called `character_template.png` to `template_character.png`.
-    * Rename the file called `item_template.png` to `template_item.png`.
-    * Rename the file called `character_mummy.png` to `character_undead_wrapped.png`.
-    * Rename the file called `character_skeleton.png` to `character_undead_bones.png`.
-    * Rename the file called `character_skeleton_broken.png` to `character_undead_bones_broken.png`.
-    * Rename the file called `character_skeleton_dark.png` to `character_undead_bones_dark.png`.
-    * Rename the file called `character_hannah.png` to `character_cat_birman_ghost.png`.
-    * Rename the file called `character_fred.png` to `character_cat_brown_tabby.png`.
-    * Rename the file called `character_molly.png` to `character_cat_gray_tabby.png`.
-    * Rename the file called `character_hero.png` to `character_orphan_00.png`.
-    * Move all `character_**_**.png` files to a subdirectory called `pending`.
-
-Until we reach `v2_hhas` the .hha files in `/data` need to be rewritten using `hha-edit -- rewrite`, see below.
+* `handmade_hero_legacy_art.zip/v2_hhas` to be in the `/data` directory.
+* `handmade_hero_legacy_art.zip/v2_art` to be in the `/art` directory.
 
 ### Packing the assets
 The asset builder can be used to generate HHA files based on the early data located at `handmade_hero_legacy_art/early_data`, they are expected to be in the `/data` directory.

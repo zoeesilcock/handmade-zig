@@ -801,12 +801,20 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     // const side_alley: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage Side Alley");
 
     _ = addOption(gen, main_room, .Cat);
+    _ = addOption(gen, main_room, .Orphan);
     _ = addOption(gen, bedroom_a, .Cat);
+    _ = addOption(gen, bedroom_a, .Orphan);
     _ = addOption(gen, bedroom_b, .Cat);
+    _ = addOption(gen, bedroom_b, .Orphan);
     _ = addOption(gen, bedroom_c, .Cat);
+    _ = addOption(gen, bedroom_c, .Orphan);
     _ = addOption(gen, bedroom_d, .Cat);
+    _ = addOption(gen, bedroom_d, .Orphan);
     _ = addOption(gen, tailor_room, .Cat);
+    _ = addOption(gen, tailor_room, .Orphan);
     _ = addOption(gen, kitchen, .Cat);
+    _ = addOption(gen, kitchen, .Orphan);
+    _ = addOption(gen, garden, .Orphan);
 
     setSize(gen, main_room_spec, 13, 13, null);
     setSize(gen, tailor_room_spec, 8, 6, null);
@@ -887,6 +895,26 @@ fn placeCat(gen: *WorldGenerator) ?*GenEntity {
     return result;
 }
 
+fn placeOrphan(gen: *WorldGenerator, orphan_name_tag: AssetTagId) ?*GenEntity {
+    var result: ?*GenEntity = null;
+    var iterator: GenOptionIterator = .iterateOptions(gen, .Orphan);
+    while (iterator.isValid()) : (iterator.advance()) {
+        if (iterator.room) |room| {
+            // TODO: Check this room to see if it meets our other criteria.
+            if (true) {
+                result = addEntity(gen, &entity_gen.addOrphan);
+                _ = addTag(gen, result.?, .Orphan, 1);
+                placeEntity(gen, result.?, room);
+                iterator.finish();
+            }
+        }
+    }
+    if (result) |entity| {
+        _ = addTag(gen, entity, orphan_name_tag, 1);
+    }
+    return result;
+}
+
 pub fn createWorldNew(world: *World) GenResult {
     var result: GenResult = .{ .initial_camera_position = undefined };
 
@@ -910,6 +938,21 @@ pub fn createWorldNew(world: *World) GenResult {
     const molly: ?*GenEntity = placeCat(gen);
     _ = addTag(gen, molly.?, .Gray, 1);
     _ = addTag(gen, molly.?, .Tabby, 1);
+
+    _ = placeOrphan(gen, .Baby);
+    _ = placeOrphan(gen, .Brahm);
+    _ = placeOrphan(gen, .Carla);
+    _ = placeOrphan(gen, .Cassidy);
+    _ = placeOrphan(gen, .Drew);
+    _ = placeOrphan(gen, .Dylan);
+    _ = placeOrphan(gen, .Giles);
+    _ = placeOrphan(gen, .Kline);
+    _ = placeOrphan(gen, .Laird);
+    _ = placeOrphan(gen, .Lambert);
+    _ = placeOrphan(gen, .Rhoda);
+    _ = placeOrphan(gen, .Slade);
+    _ = placeOrphan(gen, .Sunny);
+    _ = placeOrphan(gen, .Viva);
 
     layout(gen, world, start_room);
     generateWorld(gen, world);

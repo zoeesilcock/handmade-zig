@@ -401,7 +401,10 @@ pub fn updateAndRenderEntities(
                         entity.movement_mode = .Planted;
                         entity.bob_delta_time = -2;
 
-                        particles.spawnFire(particle_cache, entity.position);
+                        if (false) {
+                            // TODO: Put in real dust particles.
+                            particles.spawnFire(particle_cache, entity.position);
+                        }
                     }
 
                     entity.movement_time += 4 * delta_time;

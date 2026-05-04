@@ -273,7 +273,7 @@ pub fn pushCubeLight(
         group.white_texture,
         position,
         radius,
-        color.toColor(1),
+        color.toColor(0),
         null,
         emission,
         opt_light_store,

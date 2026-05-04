@@ -70,6 +70,37 @@ pub const AssetTagId = enum(u32) {
     Broken,
     Wrapped,
 
+    Orphan,
+
+    Baby,
+    Hero,
+    Brahm,
+    Carla,
+    Cassidy,
+    Drew,
+    Dylan,
+    Giles,
+    Kline,
+    Laird,
+    Lambert,
+    Rhoda,
+    Slade,
+    Sunny,
+    Viva,
+
+    Cook,
+    Earth,
+    Fall,
+    Health,
+    Fauna,
+    Speed,
+    Spring,
+    Strength,
+    Summer,
+    Tailor,
+    Tank,
+    Winter,
+
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
     }
@@ -420,6 +451,37 @@ pub const name_tags = [_]NameTag{
     .{ .name = .fromSlice("undead"), .id = .Undead },
     .{ .name = .fromSlice("broken"), .id = .Broken },
     .{ .name = .fromSlice("wrapped"), .id = .Wrapped },
+
+    .{ .name = .fromSlice("orphan"), .id = .Orphan },
+
+    .{ .name = .fromSlice("baby"), .id = .Baby },
+    .{ .name = .fromSlice("hero"), .id = .Hero },
+    .{ .name = .fromSlice("brahm"), .id = .Brahm },
+    .{ .name = .fromSlice("carla"), .id = .Carla },
+    .{ .name = .fromSlice("cassidy"), .id = .Cassidy },
+    .{ .name = .fromSlice("drew"), .id = .Drew },
+    .{ .name = .fromSlice("dylan"), .id = .Dylan },
+    .{ .name = .fromSlice("giles"), .id = .Giles },
+    .{ .name = .fromSlice("kline"), .id = .Kline },
+    .{ .name = .fromSlice("laird"), .id = .Laird },
+    .{ .name = .fromSlice("lambert"), .id = .Lambert },
+    .{ .name = .fromSlice("rhoda"), .id = .Rhoda },
+    .{ .name = .fromSlice("slade"), .id = .Slade },
+    .{ .name = .fromSlice("sunny"), .id = .Sunny },
+    .{ .name = .fromSlice("viva"), .id = .Viva },
+
+    .{ .name = .fromSlice("cook"), .id = .Cook },
+    .{ .name = .fromSlice("earth"), .id = .Earth },
+    .{ .name = .fromSlice("fall"), .id = .Fall },
+    .{ .name = .fromSlice("health"), .id = .Health },
+    .{ .name = .fromSlice("fauna"), .id = .Fauna },
+    .{ .name = .fromSlice("speed"), .id = .Speed },
+    .{ .name = .fromSlice("spring"), .id = .Spring },
+    .{ .name = .fromSlice("strength"), .id = .Strength },
+    .{ .name = .fromSlice("summer"), .id = .Summer },
+    .{ .name = .fromSlice("tailor"), .id = .Tailor },
+    .{ .name = .fromSlice("tank"), .id = .Tank },
+    .{ .name = .fromSlice("winter"), .id = .Winter },
 };
 
 pub fn tagNameFromID(tag_id: AssetTagId) String {
@@ -429,6 +491,7 @@ pub fn tagNameFromID(tag_id: AssetTagId) String {
 pub fn tagIdFromName(name: String) AssetTagId {
     var result: AssetTagId = .None;
     var name_index: u32 = 0;
+    // TODO: Refactor this to use comptime instead of the `name_tags` array.
     while (name_index < name_tags.len) : (name_index += 1) {
         if (shared.stringBuffersEqual(name, name_tags[name_index].name)) {
             result = name_tags[name_index].id;

@@ -77,7 +77,7 @@ pub fn addPiece(
     return addPieceV3(entity, category, .new(0, height, 0), offset, color, opt_movement_flags);
 }
 
-fn connectPiece(
+pub fn connectPiece(
     entity: *Entity,
     parent: *EntityVisiblePiece,
     parent_type: HHAAlignPointType,
@@ -96,7 +96,7 @@ fn connectPiece(
     std.debug.assert(@intFromPtr(parent) < @intFromPtr(child));
 }
 
-fn connectPieceToWorld(
+pub fn connectPieceToWorld(
     entity: *Entity,
     child: *EntityVisiblePiece,
     child_type: HHAAlignPointType,
@@ -183,6 +183,32 @@ pub fn addCat(region: *SimRegion, world_position: WorldPosition, standing_on: Tr
     entity.addFlags(EntityFlags.Collides.toInt());
 
     // entity.brain_slot = BrainSlot.forField(BrainCat, "body");
+    // entity.brain_id = sim.addBrain(region);
+    entity.occupying = standing_on;
+
+    const body: *EntityVisiblePiece = addPiece(entity, .Body, 1, .new(0, 0, 0), .white(), null);
+    const head: *EntityVisiblePiece = addPiece(entity, .Head, 1, .new(0, 0, 0.1), .white(), null);
+
+    connectPieceToWorld(entity, body, .Default);
+    connectPiece(entity, body, .BaseOfNeck, head, .Default);
+
+    _ = world_position;
+    const position: WorldPosition = world_mod.mapIntoChunkSpace(
+        region.world,
+        region.origin,
+        standing_on.getSimSpaceTraversable().position,
+    );
+    placeEntity(region, entity, position);
+
+    return entity;
+}
+
+pub fn addOrphan(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) *Entity {
+    var entity = addEntity(region);
+
+    entity.addFlags(EntityFlags.Collides.toInt());
+
+    // entity.brain_slot = BrainSlot.forField(BrainOrphan, "body");
     // entity.brain_id = sim.addBrain(region);
     entity.occupying = standing_on;
 

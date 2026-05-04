@@ -556,11 +556,84 @@ pub const InGameEditor = struct {
         }
     }
 
+    fn annotationLabel(
+        layout: *dev_ui.Layout,
+        temp_arena: *MemoryArena,
+        asset_file: *AssetFile,
+        name: []const u8,
+        count: u32,
+        offset: u64,
+    ) void {
+        layout.beginRow();
+        const value: String = asset_mod.readAssetString(
+            asset_file,
+            temp_arena,
+            count,
+            offset,
+        );
+        layout.labelF("%s: %S", .{ name, value });
+        layout.endRow();
+    }
+
     fn assetEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
+        var temp_arena: MemoryArena = .{};
+        defer temp_arena.clear();
+
         const asset_index: u32 = self.active_asset_index;
 
         if (self.assets.getAsset(self.active_asset_index)) |asset| {
+            const asset_file: *AssetFile = self.assets.getFile(asset.file_index).?;
             const hha: *const HHAAsset = &asset.hha;
+            const annotation: *HHAAnnotation = &asset.annotation;
+
+            var info_section_name: []const u8 = "Info";
+            if (layout.beginSection(
+                &self.main_section,
+                .fromPointerAndLine(@ptrCast(&info_section_name), @src()),
+                .fromSlice(info_section_name),
+            )) {
+                annotationLabel(
+                    layout,
+                    &temp_arena,
+                    asset_file,
+                    "Source",
+                    annotation.source_file_base_name_count,
+                    annotation.source_file_base_name_offset,
+                );
+                annotationLabel(
+                    layout,
+                    &temp_arena,
+                    asset_file,
+                    "Name",
+                    annotation.asset_name_count,
+                    annotation.asset_name_offset,
+                );
+                annotationLabel(
+                    layout,
+                    &temp_arena,
+                    asset_file,
+                    "Description",
+                    annotation.asset_description_count,
+                    annotation.asset_description_offset,
+                );
+                annotationLabel(
+                    layout,
+                    &temp_arena,
+                    asset_file,
+                    "Author",
+                    annotation.author_count,
+                    annotation.author_offset,
+                );
+                annotationLabel(
+                    layout,
+                    &temp_arena,
+                    asset_file,
+                    "Errors",
+                    annotation.error_stream_count,
+                    annotation.error_stream_offset,
+                );
+                layout.endSection();
+            }
 
             switch (hha.type) {
                 .Bitmap => {

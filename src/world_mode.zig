@@ -250,31 +250,30 @@ fn addPlayer(
         world_mode.camera.following_entity_index = body.id;
     }
 
-    const hero_scale = 3;
     const color: Color = .white();
-    if (true) {
-        _ = entity_gen.addPiece(body, .Shadow, hero_scale * 1.0, .zero(), .new(1, 1, 1, entity_gen.shadow_alpha), null);
-        _ = entity_gen.addPiece(
-            body,
-            .Body,
-            hero_scale * 1.2,
-            .new(0, 0, 0),
-            color,
-            @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
-        );
-        _ = entity_gen.addPiece(
-            body,
-            .Cape,
-            hero_scale * 1.2,
-            .new(0, -0.1, 0),
-            color,
-            @intFromEnum(EntityVisiblePieceFlag.AxesDeform) | @intFromEnum(EntityVisiblePieceFlag.BobOffset),
-        );
+    const hero_scale = 1.25;
 
-        _ = entity_gen.addPiece(head, .Head, hero_scale * 1.2, .new(0, -0.7, 0), color, null);
+    body.addTag(.Orphan, 1);
+    body.addTag(.Spring, 1);
+    body.addTag(.Viva, 1);
 
-        _ = entity_gen.addPiece(glove, .Hand, hero_scale * 0.25, .new(0, 0, 0), color, null);
-    }
+    glove.addTag(.Glove, 1);
+    glove.addTag(.Fingers, 1);
+
+    const body_piece: *EntityVisiblePiece = entity_gen.addPiece(
+        body,
+        .Body,
+        hero_scale,
+        .new(0, 0, 0),
+        color,
+        @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
+    );
+    const head_piece: *EntityVisiblePiece = entity_gen.addPiece(body, .Head, hero_scale, .new(0, 0, 0.025), color, null);
+    const glove_piece: *EntityVisiblePiece = entity_gen.addPiece(glove, .Hand, hero_scale, .new(0, 0, 0), color, null);
+
+    entity_gen.connectPieceToWorld(body, body_piece, .Default);
+    entity_gen.connectPiece(body, body_piece, .BaseOfNeck, head_piece, .Default);
+    entity_gen.connectPieceToWorld(glove, glove_piece, .Default);
 
     entity_gen.placeEntity(sim_region, glove, position);
     entity_gen.placeEntity(sim_region, head, position);
@@ -527,6 +526,9 @@ pub fn updateAndRenderWorld(
     var light_bounds: Rectangle3 = world_camera_rect;
     _ = light_bounds.min.setZ(sim_bounds.min.z());
     _ = light_bounds.max.setZ(sim_bounds.max.z());
+    light_bounds = light_bounds.addRadius(.new(7, 6, 0));
+    _ = light_bounds.min.setY(light_bounds.min.y() + 2);
+    _ = light_bounds.max.setY(light_bounds.max.y() + 2);
 
     const light_textures: *LightingTextures =
         asset_rendering.pushLighting(&render_group, &state.frame_arena, light_bounds);

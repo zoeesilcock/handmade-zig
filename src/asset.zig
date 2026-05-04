@@ -130,7 +130,7 @@ const AssetMemorySize = struct {
     section: u32 = 0,
 };
 
-const AssetFile = struct {
+pub const AssetFile = struct {
     handle: PlatformFileHandle,
     header: HHAHeader,
     tag_base: u32,
@@ -700,7 +700,7 @@ pub const Assets = struct {
 
     pub fn getBitmapInfo(self: *Assets, id: BitmapId) *HHABitmap {
         const asset: ?*Asset = self.getAsset(id.value);
-        std.debug.assert(asset.?.hha.type == .Bitmap);
+        std.debug.assert(id.value == 0 or asset.?.hha.type == .Bitmap);
         return &asset.?.hha.info.bitmap;
     }
 
@@ -1531,7 +1531,7 @@ fn processMultiTileImport(
                     min_x -= border_dimension;
                 } else {
                     min_x = 0;
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into left %u-pixel border.\n", .{
+                    stream.output(&file.errors, @src(), "Tile %u, %u extends into left %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1542,7 +1542,7 @@ fn processMultiTileImport(
                     max_x += border_dimension;
                 } else {
                     max_x = tile_dimension - 1;
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into right %u-pixel border.\n", .{
+                    stream.output(&file.errors, @src(), "Tile %u, %u extends into right %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1553,7 +1553,7 @@ fn processMultiTileImport(
                     min_y -= border_dimension;
                 } else {
                     min_y = 0;
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into top %u-pixel border.\n", .{
+                    stream.output(&file.errors, @src(), "Tile %u, %u extends into top %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1564,7 +1564,7 @@ fn processMultiTileImport(
                     max_y += border_dimension;
                 } else {
                     max_y = tile_dimension - 1;
-                    stream.output(&file.errors, @src(), "Tile %u, &u extends into bottom %u-pixel border.\n", .{
+                    stream.output(&file.errors, @src(), "Tile %u, %u extends into bottom %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1685,6 +1685,70 @@ fn endTags(builder: *TagBuilder, cagegory: AssetBasicCategory, tag_string_in: St
     return result;
 }
 
+fn importHead(
+    assets: *Assets,
+    file_name: String,
+    errors: *Stream,
+    x_index: u32,
+    y_index: u32,
+) ImportGridTag {
+    var result: ImportGridTag = .{};
+
+    if (x_index <= 2) {
+        var builder: TagBuilder = beginTags(assets);
+        addTag(
+            &builder,
+            .FacingDirection,
+            @as(f32, @floatFromInt(@mod(y_index, 4))) * math.TAU32 / 4.0,
+        );
+
+        switch (x_index) {
+            0 => addTag(&builder, .Idle, 1),
+            1 => addTag(&builder, .Surprise, 1),
+            2 => addTag(&builder, .Anger, 1),
+            else => unreachable,
+        }
+
+        result = endTags(&builder, .Head, file_name, errors);
+    }
+
+    return result;
+}
+
+fn importBody(
+    assets: *Assets,
+    file_name: String,
+    errors: *Stream,
+    x_index: u32,
+    y_index: u32,
+) ImportGridTag {
+    var result: ImportGridTag = .{};
+
+    if (x_index <= 6) {
+        var builder: TagBuilder = beginTags(assets);
+        addTag(
+            &builder,
+            .FacingDirection,
+            @as(f32, @floatFromInt(@mod(y_index, 4))) * math.TAU32 / 4.0,
+        );
+
+        switch (x_index) {
+            0 => addTag(&builder, .Idle, 1),
+            1 => addTag(&builder, .DodgeLeft, 1),
+            2 => addTag(&builder, .DodgeRight, 1),
+            3 => addTag(&builder, .Move, 1),
+            4 => addTag(&builder, .Hit, 1),
+            5 => addTag(&builder, .Attack1, 1),
+            6 => addTag(&builder, .Attack2, 1),
+            else => unreachable,
+        }
+
+        result = endTags(&builder, .Body, file_name, errors);
+    }
+
+    return result;
+}
+
 fn parsePieces(
     assets: *Assets,
     file_name_in: String,
@@ -1703,53 +1767,37 @@ fn parsePieces(
         var builder: TagBuilder = beginTags(assets);
         tag.* = endTags(&builder, .Block, file_name, errors);
         result = .SingleTile;
-    } else if (shared.stringBufferEquals(name_token.text, "character")) {
+    } else if (shared.stringBufferEquals(name_token.text, "head")) {
         var y_index: u32 = 0;
         while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
             var x_index: u32 = 0;
             while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+                tags.tags[y_index][x_index] = importHead(assets, file_name, errors, x_index, y_index);
+            }
+        }
 
+        result = .MultiTile;
+    } else if (shared.stringBufferEquals(name_token.text, "body")) {
+        var y_index: u32 = 0;
+        while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+            var x_index: u32 = 0;
+            while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+                tags.tags[y_index][x_index] = importBody(assets, file_name, errors, x_index, y_index);
+            }
+        }
+
+        result = .MultiTile;
+    } else if (shared.stringBufferEquals(name_token.text, "character")) {
+        var y_index: u32 = 0;
+        while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+            var x_index: u32 = 0;
+            const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+
+            while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
                 if (y_index <= 3) {
-                    if (x_index <= 6) {
-                        var builder: TagBuilder = beginTags(assets);
-                        addTag(
-                            &builder,
-                            .FacingDirection,
-                            @as(f32, @floatFromInt(@mod(y_index, 4))) * math.TAU32 / 4.0,
-                        );
-
-                        switch (x_index) {
-                            0 => addTag(&builder, .Idle, 1),
-                            1 => addTag(&builder, .DodgeLeft, 1),
-                            2 => addTag(&builder, .DodgeRight, 1),
-                            3 => addTag(&builder, .Move, 1),
-                            4 => addTag(&builder, .Hit, 1),
-                            5 => addTag(&builder, .Attack1, 1),
-                            6 => addTag(&builder, .Attack2, 1),
-                            else => unreachable,
-                        }
-
-                        tag.* = endTags(&builder, .Body, file_name, errors);
-                    }
+                    tag.* = importBody(assets, file_name, errors, x_index, y_index);
                 } else {
-                    if (x_index <= 2) {
-                        var builder: TagBuilder = beginTags(assets);
-                        addTag(
-                            &builder,
-                            .FacingDirection,
-                            @as(f32, @floatFromInt(@mod(y_index, 4))) * math.TAU32 / 4.0,
-                        );
-
-                        switch (x_index) {
-                            0 => addTag(&builder, .Idle, 1),
-                            1 => addTag(&builder, .Surprise, 1),
-                            2 => addTag(&builder, .Anger, 1),
-                            else => unreachable,
-                        }
-
-                        tag.* = endTags(&builder, .Head, file_name, errors);
-                    }
+                    tag.* = importHead(assets, file_name, errors, x_index, y_index - 4);
                 }
             }
         }
@@ -1862,4 +1910,18 @@ pub fn writeAllHHAModifications(assets: *Assets) void {
             assets.writeModificationsToHHA(file_index, &temp_arena);
         }
     }
+}
+
+pub fn readAssetString(
+    file: *AssetFile,
+    arena: *MemoryArena,
+    count: u32,
+    offset: u64,
+) String {
+    const result: String = .{
+        .count = count,
+        .data = arena.pushSize(count, null),
+    };
+    shared.platform.readDataFromFile(&file.handle, offset, result.count, result.data);
+    return result;
 }

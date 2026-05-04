@@ -1547,6 +1547,13 @@ pub fn beginTextureOp(queue: *TextureQueue, width: u32, height: u32) ?*TextureOp
             result.?.transfer_memory_last_used = memory_at + size_requested;
             result.?.state = .PendingLoad;
 
+            if (false) {
+                var index: u32 = 0;
+                while (index < result.?.transfer_memory_count) : (index += 1) {
+                    @as([*]u8, @ptrCast(result.?.data))[index] = 0xff;
+                }
+            }
+
             queue.transfer_memory_used_count += size_requested;
 
             std.debug.assert(memory_at < queue.transfer_memory_count);
