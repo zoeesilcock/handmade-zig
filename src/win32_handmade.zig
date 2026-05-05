@@ -480,7 +480,11 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBl
         block.next = sentinel;
         block.block.size = size;
         block.block.flags = flags;
-        block.looping_flags = if (isInLoop()) @intFromEnum(MemoryBlockLoopingFlag.AllocatedDuringLooping) else 0;
+        block.looping_flags = 0;
+
+        if (isInLoop() and (flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
+            block.looping_flags = @intFromEnum(MemoryBlockLoopingFlag.AllocatedDuringLooping);
+        }
 
         global_state.memory_mutex.begin();
         block.prev = sentinel.prev;
@@ -510,7 +514,7 @@ fn freeMemoryBlock(block: *MemoryBlock) void {
 fn deallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.c) void {
     if (opt_platform_block) |platform_block| {
         var block: *MemoryBlock = @ptrCast(platform_block);
-        if (isInLoop()) {
+        if (isInLoop() and (platform_block.flags & @intFromEnum(PlatformMemoryBlockFlags.NotRestored)) == 0) {
             block.looping_flags = @intFromEnum(MemoryBlockLoopingFlag.FreedDuringLooping);
         } else {
             freeMemoryBlock(block);

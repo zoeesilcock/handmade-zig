@@ -206,6 +206,10 @@ pub export fn updateAndRender(
         );
         game_memory.game_state = state;
 
+        state.frame_arena =
+            @ptrCast(@alignCast(memory.bootsrapPushSize(@sizeOf(MemoryArena), 0, .nonRestored(), null)));
+        state.frame_arena_temp = state.frame_arena.beginTemporaryMemory();
+
         state.audio_state.initialize(&state.audio_arena);
 
         state.high_priority_queue = game_memory.high_priority_queue;
@@ -219,24 +223,19 @@ pub export fn updateAndRender(
 
         state.assets = Assets.allocate(types.megabytes(256), state, game_memory.texture_queue);
 
-        state.frame_arena_temp = state.frame_arena.beginTemporaryMemory();
-
         state.dev_ui.init(state.assets);
         state.editor.init(state.assets);
     }
 
     state.frame_arena.endTemporaryMemory(state.frame_arena_temp);
-    std.debug.assert(state.frame_arena.current_block == null);
-    state.frame_arena.checkArena();
-
     state.frame_arena_temp = state.frame_arena.beginTemporaryMemory();
 
     if (input.f_key_pressed[1]) {
         state.dev_mode = .None;
     } else if (input.f_key_pressed[2]) {
-        state.dev_mode = .EditingAssets;
+        state.dev_mode = .Camera;
     } else if (input.f_key_pressed[3]) {
-        state.dev_mode = .None;
+        state.dev_mode = .EditingAssets;
     } else if (input.f_key_pressed[4]) {
         state.dev_mode = .None;
     } else if (input.f_key_pressed[5]) {
@@ -335,7 +334,7 @@ pub export fn getSoundSamples(
     sound_buffer: *shared.SoundOutputBuffer,
 ) void {
     if (game_memory.game_state) |state| {
-        state.audio_state.outputPlayingSounds(sound_buffer, state.assets, &state.frame_arena);
+        state.audio_state.outputPlayingSounds(sound_buffer, state.assets, state.frame_arena);
         // audio.outputSineWave(sound_buffer, shared.MIDDLE_C, state);
     }
 }

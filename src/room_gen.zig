@@ -18,6 +18,7 @@ const Entity = entities.Entity;
 const EntityVisiblePiece = entities.EntityVisiblePiece;
 const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
 const TraversableReference = entities.TraversableReference;
+const CameraBehavior = entities.CameraBehavior;
 const World = world_mod.World;
 const WorldPosition = world_mod.WorldPosition;
 const WorldGenerator = world_gen.WorldGenerator;
@@ -34,30 +35,34 @@ const X = 0;
 const Y = 1;
 const Z = 2;
 
-fn getCameraOffsetZForDimension(x_count: i32, y_count: i32) f32 {
-    var x_distance: f32 = 10;
-    if (x_count == 14) {
-        x_distance = 11;
-    } else if (x_count == 15) {
-        x_distance = 12;
-    } else if (x_count == 16) {
-        x_distance = 13;
-    } else if (x_count >= 17) {
+fn getCameraOffsetZForDimension(x_count: i32, y_count: i32, camera_behaviour: *u32) f32 {
+    var x_distance: f32 = 13;
+    if (x_count == 12) {
         x_distance = 14;
+    } else if (x_count == 13) {
+        x_distance = 15;
+    } else if (x_count == 14) {
+        x_distance = 16;
+        camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerX);
+    } else if (x_count >= 15) {
+        x_distance = 17;
+        camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerX);
     }
 
-    var y_distance: f32 = 10;
+    var y_distance: f32 = 13;
     if (y_count == 10) {
-        y_distance = 11;
+        y_distance = 15;
     } else if (y_count == 11) {
-        y_distance = 12;
+        y_distance = 17;
     } else if (y_count == 12) {
-        y_distance = 13;
+        y_distance = 19;
+        camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerY);
     } else if (y_count >= 13) {
-        y_distance = 14;
+        y_distance = 21;
+        camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerY);
     }
 
-    const result: f32 = 1.2 * @max(x_distance, y_distance);
+    const result: f32 = @max(x_distance, y_distance);
 
     return result;
 }
@@ -123,12 +128,22 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 on_boundary = false;
             }
 
+            var t_stair: f32 = 0;
             var on_connection: bool = false;
+            var stairwell: bool = false;
 
             var opt_room_connection: ?*GenRoomConnection = room.first_connection;
             while (opt_room_connection) |room_connection| : (opt_room_connection = room_connection.next) {
                 const connection: *GenConnection = room_connection.connection;
                 if (connection.volume.isInVolume(tile_x, tile_y, floor_tile_z)) {
+                    if (room_connection.placed_direction == .Up or
+                        room_connection.placed_direction == .Down)
+                    {
+                        stairwell = true;
+                        t_stair =
+                            @as(f32, @floatFromInt(tile_y - connection.volume.min[1] + 1)) /
+                            @as(f32, @floatFromInt(connection.volume.max[1] - connection.volume.min[1] + 2));
+                    }
                     on_connection = true;
                 }
             }
@@ -146,13 +161,15 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             var color: Color = .newFromSRGB(0.31, 0.49, 0.32, 1);
             var wall_height: f32 = 0.5;
 
-            const on_lamp: bool =
+            var on_lamp: bool =
                 (x_index == 1 and y_index == 1) or
                 (x_index == 1 and y_index == y_count - 2) or
                 (x_index == x_count - 2 and y_index == 1) or
                 (x_index == x_count - 2 and y_index == y_count - 2);
 
-            if (on_lamp and false) {
+            on_lamp = false;
+
+            if (on_lamp) {
                 entity_gen.addLamp(
                     region,
                     position,
@@ -197,6 +214,10 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             _ = position.offset.setY(position.offset.y() + 0);
             _ = position.offset.setZ(position.offset.z() + wall_height + 0.5 * series.randomUnilateral());
 
+            if (stairwell) {
+                _ = position.offset.setZ(position.offset.z() - (t_stair * tile_dimension.z()));
+            }
+
             color = .newFromSRGB(0.8, 0.8, 0.8, 1);
             var piece: *EntityVisiblePiece = entity_gen.addPieceV3(
                 entity,
@@ -222,7 +243,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
 
             entity_gen.placeEntity(region, entity, position);
 
-            if (entity.traversable_count == 1 and pending_entity != null) {
+            if (!stairwell and entity.traversable_count == 1 and pending_entity != null) {
                 var ref: TraversableReference = .init;
                 ref.entity.ptr = entity;
                 ref.entity.index = entity.id;
@@ -269,7 +290,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
     camera_room.collision_volume = .fromMinMax(min_room_position, max_room_position);
 
     camera_room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
-    _ = camera_room.camera_offset.setZ(getCameraOffsetZForDimension(x_count, y_count));
+    _ = camera_room.camera_offset.setZ(getCameraOffsetZForDimension(x_count, y_count, &camera_room.camera_behavior));
     entity_gen.placeEntity(region, camera_room, change_center);
 
     const world_room: *world_mod.WorldRoom =

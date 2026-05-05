@@ -122,9 +122,10 @@ pub const EntityVisiblePiece = extern struct {
 pub const CameraBehavior = enum(u32) {
     Inspect = 0x1,
     Offset = 0x2,
-    ViewPlayer = 0x4,
-    GeneralVelocityConstraint = 0x8,
-    DirectionalVelocityConstraint = 0x10,
+    ViewPlayerX = 0x4,
+    ViewPlayerY = 0x8,
+    GeneralVelocityConstraint = 0x10,
+    DirectionalVelocityConstraint = 0x20,
 };
 
 pub const Entity = extern struct {

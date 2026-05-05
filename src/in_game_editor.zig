@@ -399,7 +399,9 @@ pub const InGameEditor = struct {
     }
 
     pub fn updateAndRender(self: *InGameEditor, ui: *DevUI) void {
-        if (self.dev_mode == .EditingAssets) {
+        if (@intFromEnum(self.dev_mode) > @intFromEnum(DevMode.FirstEditor) and
+            @intFromEnum(self.dev_mode) < @intFromEnum(DevMode.LastEditor))
+        {
             var layout: dev_ui.Layout = .beginBox(
                 ui,
                 .fromMinMax(ui.ui_space.min, .new(ui.ui_space.min.x() + 700, ui.ui_space.max.y())),
@@ -437,43 +439,8 @@ pub const InGameEditor = struct {
             layout.sectionPicker(&self.main_section);
             layout.endRow();
 
-            var hha_section_name: []const u8 = "HHA";
-            if (layout.beginSection(
-                &self.main_section,
-                .fromPointerAndLine(@ptrCast(&hha_section_name), @src()),
-                .fromSlice(hha_section_name),
-            )) {
-                layout.beginRow();
-                if (layout.button(.fromPointerAndLine(self, @src()), "SAVE", self.isDirty(), null)) {
-                    self.saveAllChanges();
-                }
-                if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT & SAVE", true, null)) {
-                    asset_mod.importChangedAssets(self.assets);
-                    self.saveAllChanges();
-                }
-                layout.endRow();
-
-                layout.beginRow();
-                layout.endRow();
-
-                layout.beginRow();
-                if (layout.button(.fromPointerAndLine(self, @src()), "REVERT", self.isDirty(), null)) {
-                    if (self.undo_sentinel.hasEdit(self.clean_edit)) {
-                        while (self.clean_edit != self.undo_sentinel.next) {
-                            self.undo();
-                        }
-                    } else {
-                        std.debug.assert(self.redo_sentinel.hasEdit(self.clean_edit));
-                        while (self.clean_edit != self.undo_sentinel.next) {
-                            self.redo();
-                        }
-                    }
-                }
-                layout.endRow();
-                layout.endSection();
-            }
-
             switch (self.dev_mode) {
+                .Camera => self.cameraEditor(&layout),
                 .EditingAssets => self.assetEditor(&layout),
                 else => {},
             }
@@ -575,9 +542,56 @@ pub const InGameEditor = struct {
         layout.endRow();
     }
 
+    fn cameraEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
+        layout.beginRow();
+        if (layout.button(.fromPointerAndLine(self, @src()), "SAVE_STARTUP_LOCATION", null, null)) {
+            //
+        }
+        if (layout.button(.fromPointerAndLine(self, @src()), "LOAD_STARTUP_LOCATION", null, null)) {
+            //
+        }
+        layout.endRow();
+    }
+
     fn assetEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
         var temp_arena: MemoryArena = .{};
         defer temp_arena.clear();
+
+        var hha_section_name: []const u8 = "HHA";
+        if (layout.beginSection(
+            &self.main_section,
+            .fromPointerAndLine(@ptrCast(&hha_section_name), @src()),
+            .fromSlice(hha_section_name),
+        )) {
+            layout.beginRow();
+            if (layout.button(.fromPointerAndLine(self, @src()), "SAVE", self.isDirty(), null)) {
+                self.saveAllChanges();
+            }
+            if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT & SAVE", true, null)) {
+                asset_mod.importChangedAssets(self.assets);
+                self.saveAllChanges();
+            }
+            layout.endRow();
+
+            layout.beginRow();
+            layout.endRow();
+
+            layout.beginRow();
+            if (layout.button(.fromPointerAndLine(self, @src()), "REVERT", self.isDirty(), null)) {
+                if (self.undo_sentinel.hasEdit(self.clean_edit)) {
+                    while (self.clean_edit != self.undo_sentinel.next) {
+                        self.undo();
+                    }
+                } else {
+                    std.debug.assert(self.redo_sentinel.hasEdit(self.clean_edit));
+                    while (self.clean_edit != self.undo_sentinel.next) {
+                        self.redo();
+                    }
+                }
+            }
+            layout.endRow();
+            layout.endSection();
+        }
 
         const asset_index: u32 = self.active_asset_index;
 

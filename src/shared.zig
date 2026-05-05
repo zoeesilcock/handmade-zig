@@ -1102,7 +1102,12 @@ pub const Memory = struct {
 pub const DEV_MODE_COUNT = @typeInfo(DevMode).@"enum".fields.len;
 pub const DevMode = enum(u32) {
     None,
+
+    FirstEditor,
+    Camera,
     EditingAssets,
+    LastEditor,
+
     Profiling,
     Rendering,
     Lighting,
@@ -1116,7 +1121,7 @@ pub const State = struct {
     mode_arena: MemoryArena = undefined,
 
     frame_arena_temp: TemporaryMemory = undefined,
-    frame_arena: MemoryArena = undefined, // Cleared once per frame.
+    frame_arena: *MemoryArena = undefined, // Cleared once per frame.
 
     controlled_heroes: [MAX_CONTROLLER_COUNT]ControlledHero = [1]ControlledHero{undefined} ** MAX_CONTROLLER_COUNT,
 

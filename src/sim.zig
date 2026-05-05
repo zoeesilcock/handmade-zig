@@ -55,10 +55,10 @@ pub const SimRegion = extern struct {
     brain_count: u32 = 0,
     brains: [*]Brain,
 
-    entity_hash: [4096]EntityHash = [1]EntityHash{undefined} ** 4096,
+    entity_hash: [8192]EntityHash = [1]EntityHash{undefined} ** 8192,
     brain_hash: [256]BrainHash = [1]BrainHash{undefined} ** 256,
 
-    entity_hash_occupancy: [4096 / 64]u64,
+    entity_hash_occupancy: [8192 / 64]u64,
     brain_hash_occupancy: [256 / 64]u64,
 
     null_entity: Entity,
@@ -809,8 +809,12 @@ pub fn updateCameraForEntityMovement(
                     target_position = special_camera.position;
                 }
 
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayer)) != 0) {
-                    target_position = entity.position;
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerX)) != 0) {
+                    _ = target_position.setX(entity.position.x());
+                }
+
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerY)) != 0) {
+                    _ = target_position.setY(entity.position.y());
                 }
 
                 if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Offset)) != 0) {
@@ -844,6 +848,7 @@ pub fn updateCameraForEntityMovement(
 
 pub const TraversableSearchFlag = enum(u8) {
     Unoccupied = 0x1,
+    ClippedZ = 0x2,
 };
 
 pub fn getClosestTraversable(
@@ -866,16 +871,21 @@ pub fn getClosestTraversable(
 
             if ((flags & @intFromEnum(TraversableSearchFlag.Unoccupied) == 0) or point.occupier == null) {
                 var to_point: Vector3 = point.position.minus(from_position);
+                if ((flags & @intFromEnum(TraversableSearchFlag.ClippedZ) == 0) or
+                    (to_point.z() >= -2 and to_point.z() <= 2))
+                {
+                    if (flags & @intFromEnum(TraversableSearchFlag.ClippedZ) == 1) {
+                        _ = to_point.setZ(0);
+                    }
 
-                // _ = to_point.setZ(math.clampAboveZero(intrinsics.absoluteValue(to_point.z() - 1.5)));
-
-                const test_distance_squared = to_point.lengthSquared();
-                if (closest_distance_squared > test_distance_squared) {
-                    result.entity.ptr = test_entity;
-                    result.entity.index = test_entity.id;
-                    result.index = point_index;
-                    closest_distance_squared = test_distance_squared;
-                    found = true;
+                    const test_distance_squared = to_point.lengthSquared();
+                    if (closest_distance_squared > test_distance_squared) {
+                        result.entity.ptr = test_entity;
+                        result.entity.index = test_entity.id;
+                        result.index = point_index;
+                        closest_distance_squared = test_distance_squared;
+                        found = true;
+                    }
                 }
             }
         }

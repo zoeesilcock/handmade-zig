@@ -70,11 +70,15 @@ pub fn getBoxSurfaceParams(surface_index: u32) BoxSurfaceParams {
     };
 }
 
-pub fn getSurfaceIndex(axis_index: u32, positive: u32) u32 {
+pub fn getOtherSide(side: u32) u32 {
+    return @mod(side + 1, 2);
+}
+
+pub fn getSurfaceIndex(axis_index: u32, positive: u32) BoxSurfaceIndex {
     std.debug.assert(positive <= 1);
     std.debug.assert(axis_index <= 2);
 
-    return (axis_index << 1) | positive;
+    return @enumFromInt((axis_index << 1) | positive);
 }
 
 pub fn getSurfaceIndexFromDirectionMask(direction_mask: u32) BoxSurfaceIndex {
@@ -89,7 +93,7 @@ pub fn getSurfaceIndexFromDirectionMask(direction_mask: u32) BoxSurfaceIndex {
 }
 
 pub fn getSurfaceMask(axis_index: u32, positive: u32) u32 {
-    return @as(u8, 1) << @intCast(getSurfaceIndex(axis_index, positive));
+    return @as(u8, 1) << @intCast(@intFromEnum(getSurfaceIndex(axis_index, positive)));
 }
 
 pub fn getSurfaceMaskFromSurface(surface_index: BoxSurfaceIndex) u32 {

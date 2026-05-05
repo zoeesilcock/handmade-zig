@@ -115,11 +115,26 @@ pub const GenRoom = struct {
     first_entity: ?*GenEntity,
 
     debug_label: if (INTERNAL) []const u8 else void,
+
+    pub fn getRoomConnectionTo(self: *GenRoom, to_room: *GenRoom) ?*GenRoomConnection {
+        var result: ?*GenRoomConnection = null;
+
+        var test_connection = self.first_connection;
+        while (test_connection) |connection| : (test_connection = connection.next) {
+            if (connection.connection.getOtherRoom(self) == to_room) {
+                result = connection;
+            }
+        }
+
+        return result;
+    }
 };
 
 pub const GenRoomConnection = struct {
     connection: *GenConnection,
     next: ?*GenRoomConnection,
+
+    placed_direction: BoxSurfaceIndex,
 
     pub fn getOtherRoom(self: *const GenRoomConnection, from_room: *GenRoom) *GenRoom {
         return self.connection.getOtherRoom(from_room);
@@ -370,6 +385,7 @@ fn placeRoom(
     if (opt_room_connection) |room_connection| {
         const connection: *GenConnection = room_connection.connection;
         const other_room: *GenRoom = connection.getOtherRoom(room);
+        const other_room_connection = room.getRoomConnectionTo(other_room);
 
         var dimension: u32 = 0;
         while (!result and dimension < 3) : (dimension += 1) {
@@ -420,6 +436,11 @@ fn placeRoom(
                             door.max[dimension] = door_at;
 
                             connection.volume = door;
+
+                            room_connection.placed_direction =
+                                box_mod.getSurfaceIndex(dimension, box_mod.getOtherSide(side));
+                            other_room_connection.placed_direction =
+                                box_mod.getSurfaceIndex(dimension, side);
                         }
                     }
                 }
@@ -499,6 +520,7 @@ fn placeRoomAlongEdge(
 ) bool {
     std.debug.assert(connection.couldGoDirectionByMask(base_room, box_mod.getSurfaceMaskFromSurface(surface_index)));
 
+    var add_radius: GenVector3 = .{ 0, 0, 0 };
     var relative_x_axis: u32 = 0;
     var relative_y_axis: u32 = 0;
     var relative_z_axis: u32 = 0;
@@ -533,12 +555,14 @@ fn placeRoomAlongEdge(
             relative_y_axis = 1;
             relative_z_axis = 2;
             relative_z_axis_min = true;
+            add_radius = .{ 1, 1, 0 };
         },
         .Up => {
             relative_x_axis = 0;
             relative_y_axis = 1;
             relative_z_axis = 2;
             relative_z_axis_min = false;
+            add_radius = .{ 1, 1, 0 };
         },
     }
 
@@ -599,7 +623,16 @@ fn placeRoomAlongEdge(
                 door.min[relative_z_axis] = max_door;
                 door.max[relative_z_axis] = min_door;
 
+                door.addRadius(add_radius);
+
                 connection.volume = door;
+
+                const room_connection = room.getRoomConnectionTo(base_room).?;
+                const other_room_connection = base_room.getRoomConnectionTo(room).?;
+                room_connection.placed_direction =
+                    box_mod.getSurfaceIndex(relative_z_axis, box_mod.getOtherSide(@intFromBool(relative_z_axis_min)));
+                other_room_connection.placed_direction =
+                    box_mod.getSurfaceIndex(relative_z_axis, @intFromBool(relative_z_axis_min));
 
                 break;
             } else {
@@ -801,7 +834,7 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     // const side_alley: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage Side Alley");
 
     _ = addOption(gen, main_room, .Cat);
-    _ = addOption(gen, main_room, .Orphan);
+    // _ = addOption(gen, main_room, .Orphan);
     _ = addOption(gen, bedroom_a, .Cat);
     _ = addOption(gen, bedroom_a, .Orphan);
     _ = addOption(gen, bedroom_b, .Cat);
@@ -957,12 +990,13 @@ pub fn createWorldNew(world: *World) GenResult {
     layout(gen, world, start_room);
     generateWorld(gen, world);
 
-    const hero_room: GenVolume = orphanage.hero_bedroom.?.volume;
+    // const hero_room: GenVolume = orphanage.hero_bedroom.?.volume;
+    const hero_room: GenVolume = orphanage.forest_entrance.?.volume;
 
     result.initial_camera_position = room_gen.chunkPositionFromTilePosition(
         gen,
         @divFloor(hero_room.min[X] + hero_room.max[X], 2),
-        @divFloor(hero_room.min[Y] + hero_room.max[Y], 2),
+        @divFloor(hero_room.min[Y] + hero_room.max[Y], 2) - 4,
         @divFloor(hero_room.min[Z] + hero_room.max[Z], 2),
         null,
     );

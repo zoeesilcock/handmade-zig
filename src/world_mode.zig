@@ -68,6 +68,7 @@ const EntityVisiblePiece = entities.EntityVisiblePiece;
 const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
 const CameraBehavior = entities.CameraBehavior;
 const SimRegion = sim.SimRegion;
+const TraversableSearchFlag = sim.TraversableSearchFlag;
 const Brain = brains.Brain;
 const BrainId = brains.BrainId;
 const BrainSlot = brains.BrainSlot;
@@ -199,7 +200,12 @@ fn checkForJoiningPlayers(
                         controlled_hero.* = shared.ControlledHero{};
 
                         var traversable: TraversableReference = undefined;
-                        if (sim.getClosestTraversable(sim_region, .zero(), &traversable, 0)) {
+                        if (sim.getClosestTraversable(
+                            sim_region,
+                            .zero(),
+                            &traversable,
+                            @intFromEnum(TraversableSearchFlag.Unoccupied),
+                        )) {
                             controlled_hero.brain_id = .{ .value = @as(u32, @intCast(controller_index)) + @intFromEnum(ReservedBrainId.FirstHero) };
                             addPlayer(world_mode, sim_region, traversable, controlled_hero.brain_id);
                         }
@@ -464,13 +470,13 @@ pub fn updateAndRenderWorld(
     var camera_ot: Vector3 = delta_from_sim;
     const camera_z: Vector3 = camera_o.getColumn(2);
     var fog: renderer.FogParams = .{
-        .direction = camera_z.negated(),
+        .direction = .new(0, 0, -1),
         .start_distance = 15,
         .end_distance = 30,
     };
     var alpha_clip: renderer.AlphaClipParams = .{
-        .delta_start_distance = 2,
-        .delta_end_distance = 2.25,
+        .delta_start_distance = 8,
+        .delta_end_distance = 10,
     };
     render_group.setCameraTransform(
         focal_length,
@@ -531,7 +537,7 @@ pub fn updateAndRenderWorld(
     _ = light_bounds.max.setY(light_bounds.max.y() + 2);
 
     const light_textures: *LightingTextures =
-        asset_rendering.pushLighting(&render_group, &state.frame_arena, light_bounds);
+        asset_rendering.pushLighting(&render_group, state.frame_arena, light_bounds);
 
     if (false) {
         var sim_work: [16]WorldSimWork = undefined;
@@ -562,7 +568,7 @@ pub fn updateAndRenderWorld(
     }
 
     var world_sim: WorldSim = beginSim(
-        &state.frame_arena,
+        state.frame_arena,
         world_mode.world,
         world_mode.camera.simulation_center,
         sim_bounds,
@@ -718,7 +724,7 @@ pub fn updateAndRenderWorld(
         render_group.end();
     }
 
-    endSim(&state.frame_arena, &world_sim);
+    endSim(state.frame_arena, &world_sim);
 
     var heroes_exist: bool = false;
     var controlled_hero_index: u32 = 0;

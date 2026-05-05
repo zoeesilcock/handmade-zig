@@ -143,4 +143,14 @@ pub const GenVolume = struct {
 
         return result;
     }
+
+    pub fn addRadius(self: *GenVolume, radius: GenVector3) void {
+        self.min[0] -= radius[0];
+        self.min[1] -= radius[1];
+        self.min[2] -= radius[2];
+
+        self.max[0] += radius[0];
+        self.max[1] += radius[1];
+        self.max[2] += radius[2];
+    }
 };

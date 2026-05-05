@@ -16,6 +16,7 @@ const EntityFlags = entities.EntityFlags;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
 const ClosestEntity = sim.ClosestEntity;
+const TraversableSearchFlag = sim.TraversableSearchFlag;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const RenderGroup = renderer.RenderGroup;
@@ -302,7 +303,12 @@ fn executeBrainHero(
 
                 const hop_target_position: Vector3 = body.position.plus(d_target);
                 var traversable: TraversableReference = undefined;
-                if (sim.getClosestTraversable(sim_region, hop_target_position, &traversable, 0)) {
+                if (sim.getClosestTraversable(
+                    sim_region,
+                    hop_target_position,
+                    &traversable,
+                    @intFromEnum(TraversableSearchFlag.ClippedZ),
+                )) {
                     if (!traversable.equals(body.occupying)) {
                         body.came_from = body.occupying;
                         if (sim.transactionalOccupy(body, &body.occupying, traversable)) {
