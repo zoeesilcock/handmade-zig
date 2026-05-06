@@ -1464,8 +1464,8 @@ pub const RenderGroup = extern struct {
         new_setup.fog_direction = fog_params.direction;
         new_setup.fog_start_distance = fog_params.start_distance;
         new_setup.fog_end_distance = fog_params.end_distance;
-        new_setup.clip_alpha_start_distance = near_clip_plane + alpha_clip_params.delta_start_distance;
-        new_setup.clip_alpha_end_distance = near_clip_plane + alpha_clip_params.delta_end_distance;
+        new_setup.clip_alpha_start_distance = alpha_clip_params.delta_start_distance;
+        new_setup.clip_alpha_end_distance = alpha_clip_params.delta_end_distance;
 
         render_transform.x = camera_x;
         render_transform.y = camera_y;

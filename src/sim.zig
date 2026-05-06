@@ -797,38 +797,59 @@ pub fn updateCameraForEntityMovement(
         camera.in_special.clear();
     }
 
+    var entity_focus_z: f32 = 8;
+    var room_focus_z: f32 = entity_focus_z;
     if (opt_in_room) |in_room| {
-        const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
-        const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
-        var target_position: Vector3 = simulation_center;
-        var target_offset_z: f32 = in_room.camera_offset.z();
+        if (!in_room.id.equals(camera.in_room)) {
+            const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
+            const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
 
-        if (opt_special_camera) |special_camera| {
-            if (camera.time_in_special > special_camera.camera_min_time) {
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Inspect)) != 0) {
-                    target_position = special_camera.position;
-                }
+            var target_position: Vector3 = simulation_center;
+            var target_offset_z: f32 = in_room.camera_offset.z();
 
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerX)) != 0) {
-                    _ = target_position.setX(entity.position.x());
-                }
+            if (opt_special_camera) |special_camera| {
+                if (camera.time_in_special > special_camera.camera_min_time) {
+                    if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Inspect)) != 0) {
+                        target_position = special_camera.position;
+                    }
 
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerY)) != 0) {
-                    _ = target_position.setY(entity.position.y());
-                }
+                    if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerX)) != 0) {
+                        _ = target_position.setX(entity.position.x());
+                    }
 
-                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Offset)) != 0) {
-                    target_offset_z = special_camera.camera_offset.z();
-                    _ = target_position.setXY(target_position.xy().plus(special_camera.camera_offset.xy()));
+                    if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerY)) != 0) {
+                        _ = target_position.setY(entity.position.y());
+                    }
+
+                    if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Offset)) != 0) {
+                        target_offset_z = special_camera.camera_offset.z();
+                        _ = target_position.setXY(target_position.xy().plus(special_camera.camera_offset.xy()));
+                    }
                 }
             }
-        }
 
-        camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
-        target_position = target_position.plus(camera_z.scaledTo(target_offset_z));
-        camera.target_position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
+            camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
+            const camera_arm: Vector3 = camera_z.scaledTo(target_offset_z);
+            target_position = target_position.plus(camera_arm);
+
+            camera.target_position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
+            room_focus_z = camera_arm.z();
+            entity_focus_z = target_position.minus(entity.position).z();
+
+            camera.t_interpolation = 0;
+            camera.from_position = camera.position;
+            camera.in_room = in_room.id;
+        }
     }
 
+    camera.target_expected_focus_min_z = @min(room_focus_z, entity_focus_z);
+    camera.target_expected_focus_max_z = @max(room_focus_z, entity_focus_z);
+
+    var from_position: Vector3 = world.subtractPositions(
+        world_ptr,
+        &camera.from_position,
+        &sim_region.origin,
+    );
     var position: Vector3 = world.subtractPositions(
         world_ptr,
         &camera.position,
@@ -840,8 +861,21 @@ pub fn updateCameraForEntityMovement(
         &sim_region.origin,
     );
 
-    const delta_position: Vector3 = target_position.minus(position);
-    position = position.plus(delta_position.scaledTo(delta_time));
+    const t: f32 = camera.t_interpolation;
+    const u: f32 = 0;
+    const v: f32 = 0;
+    const a: f32 = (v + u - 2);
+    const b: f32 = (3 - 2 * u - v);
+    const c: f32 = u;
+    const bezier_magic: f32 = (a * t * t * t) + (b * t * t + c * t);
+    position = from_position.lerp(target_position, bezier_magic);
+    camera.t_interpolation = math.clampf01(camera.t_interpolation + delta_time);
+
+    const delta_min_z: f32 = camera.target_expected_focus_min_z - camera.expected_focus_min_z;
+    camera.expected_focus_min_z += delta_time * delta_min_z;
+
+    const delta_max_z: f32 = camera.target_expected_focus_max_z - camera.expected_focus_max_z;
+    camera.expected_focus_max_z += delta_time * delta_max_z;
 
     camera.position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, position);
 }

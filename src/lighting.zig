@@ -506,7 +506,7 @@ fn computeLightPropagation(
     const sample_point_entropy: u32 = series.randomInt();
 
     // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
-    const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0);
+    const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.4);
     // const ground_color: Color3 = .new(0.3, 0.2, 0.1);
     // const sun_direction: Vector3 = Vector3.new(1, 1, 1).normalizeOrZero();
 

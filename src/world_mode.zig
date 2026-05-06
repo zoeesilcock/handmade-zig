@@ -81,10 +81,19 @@ pub const GameCamera = struct {
     simulation_center: WorldPosition,
 
     position: WorldPosition,
+    from_position: WorldPosition,
     target_position: WorldPosition,
+    t_interpolation: f32,
+
+    expected_focus_min_z: f32,
+    target_expected_focus_min_z: f32,
+    expected_focus_max_z: f32,
+    target_expected_focus_max_z: f32,
 
     in_special: EntityId,
     time_in_special: f32,
+
+    in_room: EntityId,
 };
 
 pub const GameModeWorld = struct {
@@ -117,6 +126,11 @@ pub const GameModeWorld = struct {
     show_lighting: bool,
     lighting_pattern: u32,
     test_lighting: LightingSolution,
+
+    fog_min: f32,
+    fog_span: f32,
+    alpha_min: f32,
+    alpha_span: f32,
 };
 
 const WorldSim = struct {
@@ -167,6 +181,11 @@ pub fn playWorld(state: *State) void {
     );
     lighting.initLighting(&world_mode.test_lighting, &state.mode_arena);
     world_mode.updating_lighting = true;
+
+    world_mode.fog_min = 6;
+    world_mode.fog_span = 24;
+    world_mode.alpha_min = 3.5;
+    world_mode.alpha_span = 1;
 
     world_mode.particle_cache =
         state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false));
@@ -468,15 +487,18 @@ pub fn updateAndRenderWorld(
         &world_mode.camera.simulation_center,
     );
     var camera_ot: Vector3 = delta_from_sim;
+
+    const focus_min_z: f32 = world_mode.camera.expected_focus_min_z;
+    const focus_max_z: f32 = world_mode.camera.expected_focus_max_z;
     const camera_z: Vector3 = camera_o.getColumn(2);
     var fog: renderer.FogParams = .{
         .direction = .new(0, 0, -1),
-        .start_distance = 15,
-        .end_distance = 30,
+        .start_distance = focus_max_z + world_mode.fog_min,
+        .end_distance = focus_max_z + (world_mode.fog_min + world_mode.fog_span),
     };
     var alpha_clip: renderer.AlphaClipParams = .{
-        .delta_start_distance = 8,
-        .delta_end_distance = 10,
+        .delta_start_distance = focus_min_z - (world_mode.alpha_min + world_mode.alpha_span),
+        .delta_end_distance = focus_min_z - world_mode.alpha_min,
     };
     render_group.setCameraTransform(
         focal_length,
@@ -532,7 +554,7 @@ pub fn updateAndRenderWorld(
     var light_bounds: Rectangle3 = world_camera_rect;
     _ = light_bounds.min.setZ(sim_bounds.min.z());
     _ = light_bounds.max.setZ(sim_bounds.max.z());
-    light_bounds = light_bounds.addRadius(.new(7, 6, 0));
+    light_bounds = light_bounds.addRadius(.new(4, 3, 0));
     _ = light_bounds.min.setY(light_bounds.min.y() + 2);
     _ = light_bounds.max.setY(light_bounds.max.y() + 2);
 

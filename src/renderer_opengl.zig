@@ -373,8 +373,7 @@ pub const OpenGL = extern struct {
     multisampling: bool = false,
     depth_peel_count: u32 = 0,
 
-    // TODO: Why do we need so much more memory than Casey does?
-    push_buffer_memory: [8 * 65536]u8 = undefined,
+    push_buffer_memory: [65536]u8 = undefined,
     vertex_array: [*]TexturedVertex = undefined,
     index_array: [*]u16 = undefined,
     bitmap_array: [*]RendererTexture = undefined,
@@ -858,11 +857,10 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  float FogAmount = clamp01MapToRange(FogStartDistance, FogEndDistance, FogDistance);
         \\  float AlphaAmount = clamp01MapToRange(ClipAlphaStartDistance, ClipAlphaEndDistance, FogDistance);
         \\  vec4 ModColor = AlphaAmount * FragColor * TexSample;
-        \\
         \\  if (ModColor.a > AlphaThreshold)
         \\  {
         \\    vec4 SurfaceReflection;
-        \\    SurfaceReflection.rgb = mix(ModColor.rgb, FogColor.rgb, FogAmount);
+        \\    SurfaceReflection.rgb = mix(ModColor.rgb, FogColor.rgb * ModColor.a, FogAmount);
         \\    SurfaceReflection.a = ModColor.a;
         \\
         \\#if ShaderSimTexWriteSRGB

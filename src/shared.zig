@@ -1134,7 +1134,7 @@ pub const State = struct {
     assets: *Assets,
 
     current_mode: GameMode = undefined,
-    mode: union {
+    mode: union(GameModeUnion) {
         title_screen: *cutscene.GameModeTitleScreen,
         cutscene: *cutscene.GameModeCutscene,
         world: *world_mode.GameModeWorld,
@@ -1168,6 +1168,12 @@ pub const GameMode = enum {
     TitleScreen,
     Cutscene,
     World,
+};
+
+const GameModeUnion = enum {
+    title_screen,
+    cutscene,
+    world,
 };
 
 pub const HeroBitmapIds = struct {

@@ -8,6 +8,7 @@ const asset_rendering = @import("asset_rendering.zig");
 const file_formats = @import("file_formats.zig");
 const memory = @import("memory.zig");
 const dev_ui = @import("dev_ui.zig");
+const world_mode_mod = @import("world_mode.zig");
 
 // Types.
 const DevUI = dev_ui.DevUI;
@@ -36,6 +37,7 @@ const LoadedHHAAnnotation = file_formats.LoadedHHAAnnotation;
 const HHAFont = file_formats.HHAFont;
 const FontId = file_formats.FontId;
 const MemoryArena = memory.MemoryArena;
+const GameModeWorld = world_mode_mod.GameModeWorld;
 
 const HHA_ALIGN_POINT_TYPE_COUNT = file_formats.HHA_ALIGN_POINT_TYPE_COUNT;
 const HHA_BITMAP_ALIGN_POINT_COUNT = file_formats.HHA_BITMAP_ALIGN_POINT_COUNT;
@@ -398,7 +400,7 @@ pub const InGameEditor = struct {
         asset_mod.writeAllHHAModifications(self.assets);
     }
 
-    pub fn updateAndRender(self: *InGameEditor, ui: *DevUI) void {
+    pub fn updateAndRender(self: *InGameEditor, ui: *DevUI, game_state: *shared.State) void {
         if (@intFromEnum(self.dev_mode) > @intFromEnum(DevMode.FirstEditor) and
             @intFromEnum(self.dev_mode) < @intFromEnum(DevMode.LastEditor))
         {
@@ -440,7 +442,11 @@ pub const InGameEditor = struct {
             layout.endRow();
 
             switch (self.dev_mode) {
-                .Camera => self.cameraEditor(&layout),
+                .Camera => {
+                    if (game_state.mode == .world) {
+                        cameraEditor(&layout, game_state.mode.world);
+                    }
+                },
                 .EditingAssets => self.assetEditor(&layout),
                 else => {},
             }
@@ -542,15 +548,29 @@ pub const InGameEditor = struct {
         layout.endRow();
     }
 
-    fn cameraEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
+    fn cameraEditor(layout: *dev_ui.Layout, world_mode: *GameModeWorld) void {
         layout.beginRow();
-        if (layout.button(.fromPointerAndLine(self, @src()), "SAVE_STARTUP_LOCATION", null, null)) {
+        if (layout.button(.fromPointerAndLine(world_mode, @src()), "SAVE_STARTUP_LOCATION", null, null)) {
             //
         }
-        if (layout.button(.fromPointerAndLine(self, @src()), "LOAD_STARTUP_LOCATION", null, null)) {
+        if (layout.button(.fromPointerAndLine(world_mode, @src()), "LOAD_STARTUP_LOCATION", null, null)) {
             //
         }
         layout.endRow();
+
+        layout.labelF("ExpectedFloorMinZ: %.02f -> %.02f", .{
+            world_mode.camera.expected_focus_min_z,
+            world_mode.camera.target_expected_focus_min_z,
+        });
+        layout.labelF("ExpectedFloorMaxZ: %.02f -> %.02f", .{
+            world_mode.camera.expected_focus_max_z,
+            world_mode.camera.target_expected_focus_max_z,
+        });
+
+        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), "FogMin", 0, &world_mode.fog_min, 50);
+        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), "FogSpan", 0, &world_mode.fog_span, 50);
+        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), "AlphaMin", 0, &world_mode.alpha_min, 50);
+        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), "AlphaSpan", 0, &world_mode.alpha_span, 50);
     }
 
     fn assetEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {

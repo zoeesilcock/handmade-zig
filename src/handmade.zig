@@ -310,7 +310,7 @@ pub export fn updateAndRender(
     state.editor.endHitTest(input, &hit_test);
 
     state.dev_ui.beginFrame(state.assets, render_commands, input);
-    state.editor.updateAndRender(&state.dev_ui);
+    state.editor.updateAndRender(&state.dev_ui, state);
     state.editor.interact(&state.dev_ui, input);
     state.dev_ui.endFrame();
 

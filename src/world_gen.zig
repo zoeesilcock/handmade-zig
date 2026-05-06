@@ -990,8 +990,8 @@ pub fn createWorldNew(world: *World) GenResult {
     layout(gen, world, start_room);
     generateWorld(gen, world);
 
-    // const hero_room: GenVolume = orphanage.hero_bedroom.?.volume;
-    const hero_room: GenVolume = orphanage.forest_entrance.?.volume;
+    const hero_room: GenVolume = orphanage.hero_bedroom.?.volume;
+    // const hero_room: GenVolume = orphanage.forest_entrance.?.volume;
 
     result.initial_camera_position = room_gen.chunkPositionFromTilePosition(
         gen,

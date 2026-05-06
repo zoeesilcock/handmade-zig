@@ -874,6 +874,40 @@ pub const Layout = struct {
             self.edit_occurred = true;
         }
     }
+
+    pub fn editablePositionX(
+        self: *Layout,
+        id: DevId,
+        label_text: [:0]const u8,
+        min_x: f32,
+        x: *f32,
+        max_x: f32,
+    ) void {
+        var temp: [64]u8 = undefined;
+        const length: usize = shared.formatString(temp.len, &temp, "%s(%.02f)", .{ label_text, x.* });
+
+        const interaction: Interaction = .{
+            .id = id,
+            .interaction_type = .Draggable,
+        };
+
+        _ = basicTextElement(
+            @ptrCast(temp[0..length]),
+            self,
+            interaction,
+            .new(0.8, 0.8, 0.8, 1),
+            .white(),
+            self.thickness,
+            .new(0.7, 0.5, 0.3, 0.5),
+        );
+
+        if (interaction.equals(self.ui.interaction)) {
+            const delta_x: f32 = 0.001 * (max_x - min_x);
+
+            x.* = math.clampf(min_x, x.* + delta_x * self.ui.delta_mouse_position.x(), max_x);
+            self.edit_occurred = true;
+        }
+    }
 };
 
 pub const LayoutElement = struct {
