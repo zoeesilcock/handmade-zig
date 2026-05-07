@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 // Defaults.
-const FORCE_RELEASE_MODE = false;
+const FORCE_RELEASE_MODE = true;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
 const SLOW_DEFAULT = true;

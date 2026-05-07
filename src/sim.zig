@@ -797,87 +797,121 @@ pub fn updateCameraForEntityMovement(
         camera.in_special.clear();
     }
 
-    var entity_focus_z: f32 = 8;
-    var room_focus_z: f32 = entity_focus_z;
-    if (opt_in_room) |in_room| {
-        if (!in_room.id.equals(camera.in_room)) {
-            const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
-            const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
-
-            var target_position: Vector3 = simulation_center;
-            var target_offset_z: f32 = in_room.camera_offset.z();
-
-            if (opt_special_camera) |special_camera| {
-                if (camera.time_in_special > special_camera.camera_min_time) {
-                    if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Inspect)) != 0) {
-                        target_position = special_camera.position;
-                    }
-
-                    if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerX)) != 0) {
-                        _ = target_position.setX(entity.position.x());
-                    }
-
-                    if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerY)) != 0) {
-                        _ = target_position.setY(entity.position.y());
-                    }
-
-                    if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Offset)) != 0) {
-                        target_offset_z = special_camera.camera_offset.z();
-                        _ = target_position.setXY(target_position.xy().plus(special_camera.camera_offset.xy()));
-                    }
-                }
-            }
-
-            camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
-            const camera_arm: Vector3 = camera_z.scaledTo(target_offset_z);
-            target_position = target_position.plus(camera_arm);
-
-            camera.target_position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
-            room_focus_z = camera_arm.z();
-            entity_focus_z = target_position.minus(entity.position).z();
-
-            camera.t_interpolation = 0;
-            camera.from_position = camera.position;
-            camera.in_room = in_room.id;
-        }
-    }
-
-    camera.target_expected_focus_min_z = @min(room_focus_z, entity_focus_z);
-    camera.target_expected_focus_max_z = @max(room_focus_z, entity_focus_z);
-
-    var from_position: Vector3 = world.subtractPositions(
-        world_ptr,
-        &camera.from_position,
-        &sim_region.origin,
-    );
     var position: Vector3 = world.subtractPositions(
         world_ptr,
         &camera.position,
         &sim_region.origin,
     );
-    const target_position: Vector3 = world.subtractPositions(
+    var target_position: Vector3 = world.subtractPositions(
         world_ptr,
         &camera.target_position,
         &sim_region.origin,
     );
+    var new_target_position: Vector3 = target_position;
+    var entity_focus_z: f32 = 8;
+    var room_focus_z: f32 = entity_focus_z;
+    if (opt_in_room) |in_room| {
+        const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
+        const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
 
-    const t: f32 = camera.t_interpolation;
-    const u: f32 = 0;
-    const v: f32 = 0;
-    const a: f32 = (v + u - 2);
-    const b: f32 = (3 - 2 * u - v);
-    const c: f32 = u;
-    const bezier_magic: f32 = (a * t * t * t) + (b * t * t + c * t);
-    position = from_position.lerp(target_position, bezier_magic);
-    camera.t_interpolation = math.clampf01(camera.t_interpolation + delta_time);
+        new_target_position = simulation_center;
+        var target_offset_z: f32 = in_room.camera_offset.z();
 
-    const delta_min_z: f32 = camera.target_expected_focus_min_z - camera.expected_focus_min_z;
-    camera.expected_focus_min_z += delta_time * delta_min_z;
+        if (opt_special_camera) |special_camera| {
+            if (camera.time_in_special > special_camera.camera_min_time) {
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Inspect)) != 0) {
+                    new_target_position = special_camera.position;
+                }
 
-    const delta_max_z: f32 = camera.target_expected_focus_max_z - camera.expected_focus_max_z;
-    camera.expected_focus_max_z += delta_time * delta_max_z;
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerX)) != 0) {
+                    _ = new_target_position.setX(entity.position.x());
+                }
 
-    camera.position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, position);
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.ViewPlayerY)) != 0) {
+                    _ = new_target_position.setY(entity.position.y());
+                }
+
+                if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Offset)) != 0) {
+                    target_offset_z = special_camera.camera_offset.z();
+                    _ = new_target_position.setXY(new_target_position.xy().plus(special_camera.camera_offset.xy()));
+                }
+            }
+        }
+
+        camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
+        const camera_arm: Vector3 = camera_z.scaledTo(target_offset_z);
+        new_target_position = new_target_position.plus(camera_arm);
+
+        room_focus_z = camera_arm.z();
+        entity_focus_z = new_target_position.minus(entity.position).z();
+    }
+
+    camera.target_expected_focus_min_z = @min(room_focus_z, entity_focus_z);
+    camera.target_expected_focus_max_z = @max(room_focus_z, entity_focus_z);
+
+    {
+        const a: f32 = 10;
+        const b: f32 = 6;
+
+        target_position = new_target_position;
+
+        const total_delta_position: Vector3 = target_position.minus(position);
+        const dp_target: Vector3 = .zero();
+
+        var ddp: Vector3 = target_position.minus(position).scaledTo(a).plus(dp_target.minus(camera.dp).scaledTo(b));
+        var dp: Vector3 = ddp.scaledTo(delta_time).plus(camera.dp);
+
+        const delta_position: Vector3 = ddp.scaledTo(0.5 * delta_time * delta_time).plus(camera.dp.scaledTo(delta_time));
+        if (delta_position.lengthSquared() < total_delta_position.lengthSquared()) {
+            position = position.plus(delta_position);
+        } else {
+            position = target_position;
+            dp = dp_target;
+            ddp = .zero();
+        }
+
+        camera.position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, position);
+        camera.dp = dp;
+        camera.target_position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
+    }
+
+    {
+        const a: f32 = 60;
+        const b: f32 = 6;
+
+        const dp_target: f32 = 0;
+        const ddp: f32 =
+            a * (camera.target_expected_focus_min_z - camera.expected_focus_min_z) +
+            b * (dp_target - camera.d_expected_focus_min_z);
+        // var dp: f32 = delta_time * ddp + camera.d_expected_focus_min_z;
+
+        const delta_position: f32 = 0.5 * delta_time * delta_time * ddp + delta_time * camera.d_expected_focus_min_z;
+        if (math.square(delta_position) < math.square(camera.target_expected_focus_min_z - camera.expected_focus_min_z)) {
+            camera.expected_focus_min_z += delta_position;
+        } else {
+            camera.expected_focus_min_z = camera.target_expected_focus_min_z;
+            camera.d_expected_focus_min_z = 0;
+        }
+    }
+
+    {
+        const a: f32 = 60;
+        const b: f32 = 6;
+
+        const dp_target: f32 = 0;
+        const ddp: f32 =
+            a * (camera.target_expected_focus_max_z - camera.expected_focus_max_z) +
+            b * (dp_target - camera.d_expected_focus_max_z);
+        // var dp: f32 = delta_time * ddp + camera.d_expected_focus_max_z;
+
+        const delta_position: f32 = 0.5 * delta_time * delta_time * ddp + delta_time * camera.d_expected_focus_max_z;
+        if (math.square(delta_position) < math.square(camera.target_expected_focus_max_z - camera.expected_focus_max_z)) {
+            camera.expected_focus_max_z += delta_position;
+        } else {
+            camera.expected_focus_max_z = camera.target_expected_focus_max_z;
+            camera.d_expected_focus_max_z = 0;
+        }
+    }
 }
 
 pub const TraversableSearchFlag = enum(u8) {

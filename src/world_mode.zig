@@ -81,9 +81,11 @@ pub const GameCamera = struct {
     simulation_center: WorldPosition,
 
     position: WorldPosition,
-    from_position: WorldPosition,
     target_position: WorldPosition,
-    t_interpolation: f32,
+
+    dp: Vector3,
+    d_expected_focus_min_z: f32,
+    d_expected_focus_max_z: f32,
 
     expected_focus_min_z: f32,
     target_expected_focus_min_z: f32,
@@ -92,8 +94,6 @@ pub const GameCamera = struct {
 
     in_special: EntityId,
     time_in_special: f32,
-
-    in_room: EntityId,
 };
 
 pub const GameModeWorld = struct {
