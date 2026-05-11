@@ -1,10 +1,27 @@
 const std = @import("std");
+const box = @import("box.zig");
 
 const X = 0;
 const Y = 1;
 const Z = 2;
 
 pub const GenVector3 = [3]i32;
+
+pub fn plusV3(a: GenVector3, b: GenVector3) GenVector3 {
+    const result: GenVector3 = .{
+        a[0] + b[0],
+        a[1] + b[1],
+        a[2] + b[2],
+    };
+    return result;
+}
+
+pub fn getDirection(direction: box.BoxSurfaceIndex) GenVector3 {
+    var result: GenVector3 = .{ 0, 0, 0 };
+    const params: box.BoxSurfaceParams = box.getBoxSurfaceParams(@intFromEnum(direction));
+    result[params.axis_index] = if (params.positive > 0) 1 else -1;
+    return result;
+}
 
 /// Volumes include their min and their max. They are inclusive on both ends of the interval.
 pub const GenVolume = struct {

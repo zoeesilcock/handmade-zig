@@ -1,5 +1,6 @@
 const math = @import("math.zig");
 const sim = @import("sim.zig");
+const box = @import("box.zig");
 const gen_math = @import("gen_math.zig");
 const world_gen = @import("world_gen.zig");
 const entities = @import("entities.zig");
@@ -25,15 +26,127 @@ const WorldGenerator = world_gen.WorldGenerator;
 const GenRoom = world_gen.GenRoom;
 const GenRoomSpec = world_gen.GenRoomSpec;
 const GenVector3 = gen_math.GenVector3;
+const GenVolume = gen_math.GenVolume;
 const GenRoomConnection = world_gen.GenRoomConnection;
 const GenConnection = world_gen.GenConnection;
 const GenEntity = entity_gen.GenEntity;
 const GenEntityTag = entity_gen.GenEntityTag;
+const GenEntityFlag = entity_gen.GenEntityFlag;
+const GenEntityGroup = entity_gen.GenEntityGroup;
 const BrainSlot = brains.BrainSlot;
+const BoxSurfaceIndex = box.BoxSurfaceIndex;
 
 const X = 0;
 const Y = 1;
 const Z = 2;
+const BOX_SURFACE_INDEX_COUNT = box.BOX_SURFACE_INDEX_COUNT;
+
+pub const GenRoomTileQuery = struct {
+    found: bool = false,
+    volume: GenVolume = .zero(),
+};
+
+const GenRoomTile = struct {
+    open: bool,
+    structural: ?*Entity,
+};
+
+const GenRoomGrid = struct {
+    dimension: GenVector3,
+
+    tiles: [*]GenRoomTile,
+
+    pub fn findPlaceToPutEntityGroup(self: *GenRoomGrid, entity_group: *GenEntityGroup) GenRoomTileQuery {
+        var result: GenRoomTileQuery = .{};
+
+        var z: i32 = 0;
+        while (z < self.dimension[2]) : (z += 1) {
+            var y: i32 = 0;
+            while (y < self.dimension[1]) : (y += 1) {
+                var x: i32 = 0;
+                while (x < self.dimension[0]) : (x += 1) {
+                    const tile_position: GenVector3 = .{ x, y, z };
+                    if (self.recursiveOpenTileSearch(tile_position, entity_group.first_entity.?)) {
+                        result.found = true;
+                        result.volume.min = tile_position;
+                        result.volume.max = tile_position;
+
+                        break;
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    fn recursiveOpenTileSearch(
+        self: *GenRoomGrid,
+        tile_position: GenVector3,
+        entity: *GenEntity,
+    ) bool {
+        var result: bool = false;
+
+        if (self.getTileFromV3(tile_position)) |tile| {
+            if (tile.open) {
+                std.debug.assert(tile.structural != null);
+                tile.open = false;
+
+                if (entity.next) |next_entity| {
+                    var direction: u32 = 0;
+                    while (direction < BOX_SURFACE_INDEX_COUNT) : (direction += 1) {
+                        const direction_index: BoxSurfaceIndex = @enumFromInt(direction);
+                        const mask: u32 = box.getSurfaceMaskFromSurface(direction_index);
+                        if ((entity.allowed_directions_for_next & mask) != 0) {
+                            const next_tile_delta: GenVector3 = gen_math.getDirection(direction_index);
+                            if (self.recursiveOpenTileSearch(
+                                gen_math.plusV3(tile_position, next_tile_delta),
+                                next_entity,
+                            )) {
+                                entity.next_direction_used = direction_index;
+                                result = true;
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    result = true;
+                }
+
+                if (!result) {
+                    tile.open = true;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    fn getTile(self: *GenRoomGrid, x_index: i32, y_index: i32, z_index: i32) ?*GenRoomTile {
+        var result: ?*GenRoomTile = null;
+        const dimension: GenVector3 = self.dimension;
+
+        if (x_index >= 0 and
+            y_index >= 0 and
+            z_index >= 0 and
+            x_index < dimension[0] and
+            y_index < dimension[1] and
+            z_index < dimension[2])
+        {
+            result = @ptrCast(self.tiles + @as(usize, @intCast(
+                (dimension[0] * dimension[1] * z_index) +
+                    (dimension[0] * y_index) +
+                    x_index,
+            )));
+        }
+
+        return result;
+    }
+
+    fn getTileFromV3(self: *GenRoomGrid, position: GenVector3) ?*GenRoomTile {
+        return self.getTile(position[0], position[1], position[2]);
+    }
+};
 
 fn getCameraOffsetZForDimension(x_count: i32, y_count: i32, camera_behaviour: *u32) f32 {
     var x_distance: f32 = 13;
@@ -69,7 +182,6 @@ fn getCameraOffsetZForDimension(x_count: i32, y_count: i32, camera_behaviour: *u
 
 pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
     const spec: *GenRoomSpec = room.spec;
-    var pending_entity: ?*GenEntity = room.first_entity;
     const dimension: GenVector3 = room.volume.getDimension();
     const min_tile_x: i32 = room.volume.min[X];
     const x_count: i32 = dimension[X];
@@ -103,6 +215,10 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
     const change_memory = gen.temp_memory.beginTemporaryMemory();
     defer gen.temp_memory.endTemporaryMemory(change_memory);
 
+    var grid: *GenRoomGrid = gen.temp_memory.pushStruct(GenRoomGrid, null);
+    grid.dimension = dimension;
+    grid.tiles = gen.temp_memory.pushArray(@intCast(dimension[0] * dimension[1] * dimension[2]), GenRoomTile, null);
+
     const region: *SimRegion = sim.beginWorldChange(
         &gen.temp_memory,
         world,
@@ -115,8 +231,12 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
     while (y_index < y_count) : (y_index += 1) {
         var x_index: i32 = 0;
         while (x_index < x_count) : (x_index += 1) {
+            const z_index: i32 = 0;
+            var tile: *GenRoomTile = grid.getTile(x_index, y_index, z_index).?;
+
             const tile_x: i32 = min_tile_x + x_index;
             const tile_y: i32 = min_tile_y + y_index;
+            // const tile_z: i32 = floor_tile_z;
 
             var on_boundary: bool =
                 x_index == 0 or
@@ -242,21 +362,39 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             }
 
             entity_gen.placeEntity(region, entity, position);
+            tile.structural = entity;
+            tile.open = (!stairwell and entity.traversable_count == 1);
+        }
+    }
 
-            if (!stairwell and entity.traversable_count == 1 and pending_entity != null) {
-                var ref: TraversableReference = .init;
-                ref.entity.ptr = entity;
-                ref.entity.index = entity.id;
+    var opt_entity_group: ?*GenEntityGroup = room.first_entity_group;
+    while (opt_entity_group) |entity_group| : (opt_entity_group = entity_group.next) {
+        const query: GenRoomTileQuery = grid.findPlaceToPutEntityGroup(entity_group);
+        std.debug.assert(query.found);
 
-                const placed_entity: *Entity = pending_entity.?.creator(region, position, ref);
-                var tag_index: u32 = 0;
-                while (tag_index < pending_entity.?.tag_count) : (tag_index += 1) {
-                    const tag: *GenEntityTag = &pending_entity.?.tags[tag_index];
-                    placed_entity.addTag(tag.tag_id, tag.value);
-                }
+        var tile_position: GenVector3 = query.volume.min;
 
-                pending_entity = pending_entity.?.next;
+        var opt_pending_entity: ?*GenEntity = entity_group.first_entity;
+        while (opt_pending_entity) |pending_entity| : (opt_pending_entity = pending_entity.next) {
+            const tile: *GenRoomTile = grid.getTileFromV3(tile_position).?;
+            var ref: TraversableReference = .init;
+            var ground_position: Vector3 = .zero();
+            if (tile.structural) |structural| {
+                ref.entity.ptr = structural;
+                ref.entity.index = structural.id;
+                ground_position = ref.getSimSpaceTraversable().position;
+            } else {
+                unreachable;
             }
+
+            const placed_entity: *Entity = pending_entity.creator(region, ground_position, ref);
+            var tag_index: u32 = 0;
+            while (tag_index < pending_entity.tag_count) : (tag_index += 1) {
+                const tag: *GenEntityTag = &pending_entity.tags[tag_index];
+                placed_entity.addTag(tag.tag_id, tag.value);
+            }
+
+            tile_position = gen_math.plusV3(tile_position, gen_math.getDirection(pending_entity.next_direction_used));
         }
     }
 

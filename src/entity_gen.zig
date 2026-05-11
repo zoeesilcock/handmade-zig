@@ -1,9 +1,11 @@
 const shared = @import("shared.zig");
 const math = @import("math.zig");
 const sim = @import("sim.zig");
+const box = @import("box.zig");
 const entities = @import("entities.zig");
 const file_formats = @import("file_formats.zig");
 const world_gen = @import("world_gen.zig");
+const room_gen = @import("room_gen.zig");
 const world_mod = @import("world.zig");
 const brains = @import("brains.zig");
 const std = @import("std");
@@ -24,6 +26,7 @@ const Rectangle3 = math.Rectangle3;
 const SimRegion = sim.SimRegion;
 const WorldGenerator = world_gen.WorldGenerator;
 const WorldPosition = world_mod.WorldPosition;
+const GenRoomTileQuery = room_gen.GenRoomTileQuery;
 const AssetTagId = file_formats.AssetTagId;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const HHAAlignPointType = file_formats.HHAAlignPointType;
@@ -39,16 +42,28 @@ pub const GenEntityTag = struct {
     value: f32,
 };
 
-pub const createEntityType: type =
-    fn (region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) *Entity;
+pub const CreateEntityType: type =
+    fn (region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity;
+
+const GenEntityFlag = enum(u32) {
+    IsNotOccupier = 0x1,
+};
 
 pub const GenEntity = struct {
     next: ?*GenEntity,
-    creator: *const createEntityType = undefined,
+    creator: *const CreateEntityType = undefined,
 
     tags: [14]GenEntityTag,
     tag_count: u32,
-    flags: u32,
+
+    gen_flags: u32 = 0, // Flags of GenEntityFlag.
+    allowed_directions_for_next: u32, // Flags of BoxSurfaceMask.
+    next_direction_used: box.BoxSurfaceIndex,
+};
+
+pub const GenEntityGroup = struct {
+    next: ?*GenEntityGroup,
+    first_entity: ?*GenEntity,
 };
 
 pub fn makeSimpleGroundedCollision(
@@ -177,7 +192,8 @@ fn initHitPoints(entity: *Entity, count: u32) void {
     }
 }
 
-pub fn addCat(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) *Entity {
+pub fn addCat(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
+    _ = position;
     var entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
@@ -192,18 +208,13 @@ pub fn addCat(region: *SimRegion, world_position: WorldPosition, standing_on: Tr
     connectPieceToWorld(entity, body, .Default);
     connectPiece(entity, body, .BaseOfNeck, head, .Default);
 
-    _ = world_position;
-    const position: WorldPosition = world_mod.mapIntoChunkSpace(
-        region.world,
-        region.origin,
-        standing_on.getSimSpaceTraversable().position,
-    );
-    placeEntity(region, entity, position);
+    entity.position = standing_on.getSimSpaceTraversable().position;
 
     return entity;
 }
 
-pub fn addOrphan(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) *Entity {
+pub fn addOrphan(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
+    _ = position;
     var entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
@@ -218,13 +229,7 @@ pub fn addOrphan(region: *SimRegion, world_position: WorldPosition, standing_on:
     connectPieceToWorld(entity, body, .Default);
     connectPiece(entity, body, .BaseOfNeck, head, .Default);
 
-    _ = world_position;
-    const position: WorldPosition = world_mod.mapIntoChunkSpace(
-        region.world,
-        region.origin,
-        standing_on.getSimSpaceTraversable().position,
-    );
-    placeEntity(region, entity, position);
+    entity.position = standing_on.getSimSpaceTraversable().position;
 
     return entity;
 }

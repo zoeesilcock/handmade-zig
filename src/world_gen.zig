@@ -23,6 +23,7 @@ const GameModeWorld = world_mode_mod.GameModeWorld;
 const Entity = entities.Entity;
 const GenEntity = entity_gen.GenEntity;
 const GenEntityTag = entity_gen.GenEntityTag;
+const GenEntityGroup = entity_gen.GenEntityGroup;
 const TraversableReference = entities.TraversableReference;
 const CameraBehavior = entities.CameraBehavior;
 const SimRegion = sim.SimRegion;
@@ -112,7 +113,7 @@ pub const GenRoom = struct {
     volume: GenVolume,
     generation_index: u32,
 
-    first_entity: ?*GenEntity,
+    first_entity_group: ?*GenEntityGroup,
 
     debug_label: if (INTERNAL) []const u8 else void,
 
@@ -886,16 +887,37 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     return result;
 }
 
-fn addEntity(gen: *WorldGenerator, creator: *const entity_gen.createEntityType) *GenEntity {
+fn addEntity(gen: *WorldGenerator, creator: *const entity_gen.CreateEntityType) *GenEntity {
     var result: *GenEntity = gen.temp_memory.pushStruct(GenEntity, null);
     result.creator = creator;
     return result;
 }
 
-fn placeEntity(gen: *WorldGenerator, entity: *GenEntity, room: *GenRoom) void {
+fn addEntityGroup(gen: *WorldGenerator, room: *GenRoom) *GenEntityGroup {
+    var group: *GenEntityGroup = gen.temp_memory.pushStruct(GenEntityGroup, null);
+    group.next = room.first_entity_group;
+    room.first_entity_group = group;
+    return group;
+}
+
+fn placeEntityInGroup(gen: *WorldGenerator, entity: *GenEntity, group: *GenEntityGroup) void {
     _ = gen;
-    entity.next = room.first_entity;
-    room.first_entity = entity;
+    entity.next = group.first_entity;
+    group.first_entity = entity;
+}
+
+fn placeEntity(gen: *WorldGenerator, entity: *GenEntity, room: *GenRoom) void {
+    const group: *GenEntityGroup = addEntityGroup(gen, room);
+    placeEntityInGroup(gen, entity, group);
+}
+
+fn appendEntity(gen: *WorldGenerator, parent: *GenEntity, direction_mask: u32, child: *GenEntity) void {
+    _ = gen;
+    std.debug.assert(child.next == null);
+
+    child.next = parent.next;
+    parent.next = child;
+    parent.allowed_directions_for_next = direction_mask;
 }
 
 fn addTag(gen: *WorldGenerator, entity: *GenEntity, tag_id: AssetTagId, value: f32) *GenEntityTag {
@@ -938,6 +960,11 @@ fn placeOrphan(gen: *WorldGenerator, orphan_name_tag: AssetTagId) ?*GenEntity {
                 result = addEntity(gen, &entity_gen.addOrphan);
                 _ = addTag(gen, result.?, .Orphan, 1);
                 placeEntity(gen, result.?, room);
+
+                const child = addEntity(gen, &entity_gen.addCat);
+                _ = addTag(gen, child, .Cat, 1);
+                appendEntity(gen, result.?, box_mod.BoxMask_North, child);
+
                 iterator.finish();
             }
         }

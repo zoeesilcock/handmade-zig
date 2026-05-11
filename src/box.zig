@@ -24,12 +24,14 @@ pub const BoxSurfaceIndex = enum(u32) {
     Up,
 };
 
-const BoxMask_West: u32 = (1 << @intFromEnum(BoxSurfaceIndex.West));
-const BoxMask_East: u32 = (1 << @intFromEnum(BoxSurfaceIndex.East));
-const BoxMask_South: u32 = (1 << @intFromEnum(BoxSurfaceIndex.South));
-const BoxMask_North: u32 = (1 << @intFromEnum(BoxSurfaceIndex.North));
-const BoxMask_Down: u32 = (1 << @intFromEnum(BoxSurfaceIndex.Down));
-const BoxMask_Up: u32 = (1 << @intFromEnum(BoxSurfaceIndex.Up));
+pub const BOX_SURFACE_INDEX_COUNT = @typeInfo(BoxSurfaceIndex).@"enum".fields.len;
+
+pub const BoxMask_West: u32 = (1 << @intFromEnum(BoxSurfaceIndex.West));
+pub const BoxMask_East: u32 = (1 << @intFromEnum(BoxSurfaceIndex.East));
+pub const BoxMask_South: u32 = (1 << @intFromEnum(BoxSurfaceIndex.South));
+pub const BoxMask_North: u32 = (1 << @intFromEnum(BoxSurfaceIndex.North));
+pub const BoxMask_Down: u32 = (1 << @intFromEnum(BoxSurfaceIndex.Down));
+pub const BoxMask_Up: u32 = (1 << @intFromEnum(BoxSurfaceIndex.Up));
 
 pub const BoxSurfaceMask = enum(u32) {
     West = BoxMask_West,

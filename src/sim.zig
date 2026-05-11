@@ -341,11 +341,11 @@ pub fn beginWorldChange(
     sim_region.origin = origin;
     sim_region.bounds = bounds;
     sim_region.updatable_bounds = sim_region.bounds;
-    sim_region.max_entity_count = 4096;
+    sim_region.max_entity_count = 8192;
     sim_region.entity_count = 0;
     sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, Entity, ArenaPushParams.noClear());
 
-    sim_region.max_brain_count = 256;
+    sim_region.max_brain_count = 512;
     sim_region.brain_count = 0;
     sim_region.brains = sim_arena.pushArray(sim_region.max_brain_count, Brain, ArenaPushParams.noClear());
 
@@ -781,7 +781,9 @@ pub fn updateCameraForEntityMovement(
             }
 
             if (pass) {
-                opt_special_camera = test_entity;
+                if (test_entity != opt_in_room or opt_special_camera == null) {
+                    opt_special_camera = test_entity;
+                }
             }
         }
     }
@@ -812,7 +814,9 @@ pub fn updateCameraForEntityMovement(
     var room_focus_z: f32 = entity_focus_z;
     if (opt_in_room) |in_room| {
         const room_volume: Rectangle3 = in_room.collision_volume.offsetBy(in_room.position);
+
         const simulation_center: Vector3 = room_volume.getCenter().xy().toVector3(room_volume.min.z());
+        camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
 
         new_target_position = simulation_center;
         var target_offset_z: f32 = in_room.camera_offset.z();
@@ -832,13 +836,14 @@ pub fn updateCameraForEntityMovement(
                 }
 
                 if ((special_camera.camera_behavior & @intFromEnum(CameraBehavior.Offset)) != 0) {
-                    target_offset_z = special_camera.camera_offset.z();
+                    new_target_position = special_camera.position;
                     _ = new_target_position.setXY(new_target_position.xy().plus(special_camera.camera_offset.xy()));
+
+                    target_offset_z = special_camera.camera_offset.z();
                 }
             }
         }
 
-        camera.simulation_center = world.mapIntoChunkSpace(world_ptr, sim_region.origin, simulation_center);
         const camera_arm: Vector3 = camera_z.scaledTo(target_offset_z);
         new_target_position = new_target_position.plus(camera_arm);
 
