@@ -49,6 +49,38 @@ pub const DEBUG = @import("builtin").mode == std.builtin.OptimizeMode.Debug;
 pub const INTERNAL = @import("build_options").internal;
 pub const SLOW = @import("build_options").slow;
 
+pub fn dlistInit(sentinel: anytype) void {
+    sentinel.next = sentinel;
+    sentinel.prev = sentinel;
+}
+
+pub fn dlistInsert(sentinel: anytype, element: anytype) void {
+    element.next = sentinel.next;
+    element.prev = sentinel.prev;
+    element.next.?.prev = element;
+    element.prev.?.next = element;
+}
+
+pub fn dlistInsertLast(sentinel: anytype, element: anytype) void {
+    element.next = sentinel;
+    element.prev = sentinel.prev;
+    element.next.?.prev = element;
+    element.prev.?.next = element;
+}
+
+pub fn dlistRemove(element: anytype) void {
+    if (element.next != null) {
+        element.next.?.prev = element.prev;
+        element.prev.?.next = element.next;
+    }
+    element.next = null;
+    element.prev = null;
+}
+
+pub fn dlistIsEmpty(sentinel: anytype) bool {
+    return sentinel.next == sentinel;
+}
+
 pub fn shortTypeName(comptime T: type) []const u8 {
     const full_type_name = @typeName(T);
     comptime var last_dot: usize = 0;

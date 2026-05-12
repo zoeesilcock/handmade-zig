@@ -757,7 +757,6 @@ pub fn updateAndRenderWorld(
     }
 
     if (!heroes_exist) {
-        std.log.info("uuhmkaaaay", .{});
         cutscene.playTitleScreen(state);
     }
 

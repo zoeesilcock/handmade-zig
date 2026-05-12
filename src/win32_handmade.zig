@@ -1128,7 +1128,7 @@ fn processKeyboardInput(
     const alt_was_down: bool = if ((message.lParam & (1 << 29) != 0)) true else false;
     // const shift_was_down: bool = win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0;
     const was_down: bool = if ((message.lParam & (1 << 30) != 0)) true else false;
-    const is_down: bool = if ((message.lParam & (1 << 31) == 0)) true else false;
+    const is_down: bool = if ((message.lParam & @as(isize, @intCast(1 << 31)) == 0)) true else false;
 
     if (is_down != was_down) {
         switch (vk_code) {

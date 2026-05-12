@@ -62,7 +62,6 @@ const TextureOpState = enum(u32) {
 pub const TextureOp = extern struct {
     texture: RendererTexture,
     data: *anyopaque,
-    transfer_memory_count: u32,
     transfer_memory_last_used: u32,
     state: TextureOpState,
 };
@@ -70,6 +69,7 @@ pub const TextureOp = extern struct {
 pub const TextureQueue = extern struct {
     transfer_memory_count: u32,
     transfer_memory_first_used: u32,
+    transfer_memory_last_used: u32,
     transfer_memory_used_count: u32,
     transfer_memory: [*]u8,
 
@@ -1521,10 +1521,15 @@ pub fn beginTextureOp(queue: *TextureQueue, width: u32, height: u32) ?*TextureOp
         const size_requested: u32 = width * height * 4;
         var size_available: u32 = 0;
 
-        var memory_at: u32 = queue.transfer_memory_first_used + queue.transfer_memory_used_count;
-        if (memory_at >= queue.transfer_memory_count) {
-            memory_at -= queue.transfer_memory_count;
-
+        var memory_at: u32 = queue.transfer_memory_last_used;
+        if (queue.transfer_memory_last_used == queue.transfer_memory_first_used) {
+            // The used space is either the entire buffer or none of the buffer, and we disabmbiguate between those
+            // two by just checking if there are any ops outstanding.
+            if (queue.op_count == 0) {
+                size_available = queue.transfer_memory_count;
+            }
+        }
+        if (queue.transfer_memory_last_used < queue.transfer_memory_first_used) {
             // The used space wraps around, one continuous usable space.
             size_available = queue.transfer_memory_first_used - memory_at;
         } else {
@@ -1543,7 +1548,6 @@ pub fn beginTextureOp(queue: *TextureQueue, width: u32, height: u32) ?*TextureOp
             result = &queue.ops[@mod(op_index, queue.ops.len)];
 
             result.?.data = queue.transfer_memory + memory_at;
-            result.?.transfer_memory_count = size_requested;
             result.?.transfer_memory_last_used = memory_at + size_requested;
             result.?.state = .PendingLoad;
 
@@ -1554,10 +1558,10 @@ pub fn beginTextureOp(queue: *TextureQueue, width: u32, height: u32) ?*TextureOp
                 }
             }
 
-            queue.transfer_memory_used_count += size_requested;
+            queue.transfer_memory_last_used = result.?.transfer_memory_last_used;
 
             std.debug.assert(memory_at < queue.transfer_memory_count);
-            std.debug.assert(result.?.transfer_memory_last_used < queue.transfer_memory_count);
+            std.debug.assert(result.?.transfer_memory_last_used <= queue.transfer_memory_count);
         }
     }
 
@@ -1581,7 +1585,7 @@ pub fn initTextureQueue(
 ) void {
     queue.transfer_memory_count = requested_transfer_buffer_size;
     queue.transfer_memory_first_used = 0;
-    queue.transfer_memory_used_count = 0;
+    queue.transfer_memory_last_used = 0;
     queue.transfer_memory = @ptrCast(transfer_memory);
 
     queue.op_count = 0;

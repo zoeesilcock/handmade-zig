@@ -156,7 +156,7 @@ const intro_cutscene: []const LayeredScene = &.{
             SceneLayer{ .position = Vector3.new(0, 0, -8), .height = 12 }, // Background.
             SceneLayer{ .position = Vector3.new(0, 0, -5), .height = 8 }, // Snow.
             SceneLayer{ .position = Vector3.new(1, -1, -3), .height = 3 }, // Scared child.
-            SceneLayer{ .position = Vector3.new(0.85, -0.95, -3), .height = 0.5 }, // Tears.
+            SceneLayer{ .position = Vector3.new(0.85, -0.95, -2.9), .height = 0.5 }, // Tears.
             SceneLayer{ .position = Vector3.new(-2, -1, -2.5), .height = 2 }, // Other child.
             SceneLayer{ .position = Vector3.new(0.2, 0.5, -1), .height = 1 }, // Garland.
         },

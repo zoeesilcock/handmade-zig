@@ -223,7 +223,7 @@ pub fn pushFont(
         opt_font = group.assets.getFont(id);
 
         if (opt_font == null) {
-            group.assets.loadFont(id, false);
+            group.assets.loadFont(id);
             group.missing_resource_count += 1;
         }
     }

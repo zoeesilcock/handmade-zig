@@ -180,8 +180,6 @@ const GLTexImage3D: type = fn (target: u32, level: i32, internalformat: i32, wid
 pub var optGLTexImage3D: ?*const GLTexImage3D = null;
 const GLTexSubImage3D: type = fn (target: u32, level: i32, xoffset: i32, yoffset: i32, zoffset: i32, width: isize, height: isize, depth: isize, format: u32, type: u32, pixels: ?*const anyopaque) callconv(.winapi) void;
 pub var optGLTexSubImage3D: ?*const GLTexSubImage3D = null;
-const GLTexStorage3D: type = fn (target: u32, level: i32, internalformat: u32, width: i32, height: i32, depth: isize) callconv(.winapi) void;
-pub var optGLTexStorage3D: ?*const GLTexStorage3D = null;
 
 const opengl_flags: c_int = if (INTERNAL)
     // 0 | opengl.WGL_CONTEXT_DEBUG_BIT_ARB
@@ -472,7 +470,6 @@ pub fn initOpenGL(
         optGLBindFragDataLocation = @ptrCast(win32.wglGetProcAddress("glBindFragDataLocation"));
         optGLTexImage3D = @ptrCast(win32.wglGetProcAddress("glTexImage3D"));
         optGLTexSubImage3D = @ptrCast(win32.wglGetProcAddress("glTexSubImage3D"));
-        optGLTexStorage3D = @ptrCast(win32.wglGetProcAddress("glTexStorage3D"));
 
         if (optGLDrawArrays == null) {
             const opengl32 = win32.LoadLibraryA("opengl32.dll");
@@ -521,7 +518,6 @@ pub fn initOpenGL(
         std.debug.assert(optGLBindFragDataLocation != null);
         std.debug.assert(optGLTexImage3D != null);
         std.debug.assert(optGLTexSubImage3D != null);
-        std.debug.assert(optGLTexStorage3D != null);
 
         optWglSwapIntervalEXT = @ptrCast(win32.wglGetProcAddress("wglSwapIntervalEXT"));
         if (optWglSwapIntervalEXT) |wglSwapIntervalEXT| {

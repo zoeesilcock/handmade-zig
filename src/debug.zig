@@ -368,7 +368,7 @@ pub const DebugState = struct {
     ) ?*DebugVariableLink {
         var result: ?*DebugVariableLink = null;
         var link: *DebugVariableLink = parent.first_child;
-        while (link != parent.getSentinel()) : (link = link.next) {
+        while (link != parent.getSentinel()) : (link = link.next.?) {
             if (link.element) |link_element| {
                 if (shared.stringsWithOneLengthAreEqual(name, name_length, link_element.name)) {
                     result = link;
@@ -442,10 +442,9 @@ pub const DebugState = struct {
             DebugVariableLink,
             ArenaPushParams.aligned(@alignOf(DebugVariableLink), true),
         );
-        link.getSentinel().next = link.getSentinel();
-        link.getSentinel().prev = link.getSentinel();
-        link.next = undefined;
-        link.prev = undefined;
+        shared.dlistInit(link.getSentinel());
+        link.next = null;
+        link.prev = null;
         link.element = element;
 
         return link;
@@ -459,11 +458,7 @@ pub const DebugState = struct {
         const link: *DebugVariableLink = self.createVariableLink(element);
 
         if (opt_parent) |parent| {
-            link.next = parent.getSentinel();
-            link.prev = parent.getSentinel().prev;
-            link.next.prev = link;
-            link.prev.next = link;
-
+            shared.dlistInsertLast(parent.getSentinel(), link);
             link.first_child = link.getSentinel();
             link.last_child = link.getSentinel();
         }
@@ -475,10 +470,7 @@ pub const DebugState = struct {
         parent: *DebugVariableLink,
         link: *DebugVariableLink,
     ) void {
-        link.next = parent.getSentinel();
-        link.prev = parent.getSentinel().prev;
-        link.next.prev = link;
-        link.prev.next = link;
+        shared.dlistInsertLast(parent.getSentinel(), link);
     }
 
     fn cloneVariableLink(self: *DebugState, source: *DebugVariableLink) *DebugVariableLink {
@@ -492,7 +484,7 @@ pub const DebugState = struct {
     ) *DebugVariableLink {
         const dest: *DebugVariableLink = self.addElementToGroup(dest_group, source.element);
         var child: *DebugVariableLink = source.first_child;
-        while (child != source.getSentinel()) : (child = child.next) {
+        while (child != source.getSentinel()) : (child = child.next.?) {
             _ = self.cloneVariableLinkInto(dest, child);
         }
         return dest;
@@ -782,10 +774,7 @@ pub const DebugState = struct {
         tree.group = group;
         tree.ui_position = position;
 
-        tree.next = self.tree_sentinel.next;
-        tree.prev = &self.tree_sentinel;
-        tree.next.?.prev = tree;
-        tree.prev.?.next = tree;
+        shared.dlistInsert(&self.tree_sentinel, tree);
 
         return tree;
     }
@@ -1093,8 +1082,8 @@ pub const DebugParsedName = struct {
 };
 
 pub const DebugVariableLink = struct {
-    next: *DebugVariableLink,
-    prev: *DebugVariableLink,
+    next: ?*DebugVariableLink,
+    prev: ?*DebugVariableLink,
 
     first_child: *DebugVariableLink,
     last_child: *DebugVariableLink,
@@ -1561,8 +1550,8 @@ fn drawTopClocksList(
 
     var link_count: u32 = 0;
     var total_time: f64 = 0;
-    var link: *DebugVariableLink = debug_state.profile_group.getSentinel().next;
-    while (link != debug_state.profile_group.getSentinel()) : (link = link.next) {
+    var link: ?*DebugVariableLink = debug_state.profile_group.getSentinel().next;
+    while (link != debug_state.profile_group.getSentinel()) : (link = link.?.next) {
         link_count += 1;
     }
 
@@ -1572,15 +1561,15 @@ fn drawTopClocksList(
 
     link = debug_state.profile_group.getSentinel().next;
     var index: u32 = 0;
-    while (link != debug_state.profile_group.getSentinel()) : (link = link.next) {
+    while (link != debug_state.profile_group.getSentinel()) : (link = link.?.next) {
         defer index += 1;
 
-        std.debug.assert(link.first_child == link.getSentinel());
+        std.debug.assert(link.?.first_child == link.?.getSentinel());
 
         var entry: *ClockEntry = &entries[index];
         var sort_entry: *SortEntry = &sort_a[index];
 
-        if (link.element) |element| {
+        if (link.?.element) |element| {
             entry.element = element;
             entry.stats = DebugStatistic.begin();
 
@@ -2023,7 +2012,7 @@ fn drawTreeLink(debug_state: *DebugState, layout: *dev_ui.Layout, tree: *DebugTr
             layout.depth += 1;
 
             var sublink: *DebugVariableLink = link.first_child;
-            while (sublink != link.getSentinel()) : (sublink = sublink.next) {
+            while (sublink != link.getSentinel()) : (sublink = sublink.next.?) {
                 drawTreeLink(debug_state, layout, tree, sublink);
             }
 

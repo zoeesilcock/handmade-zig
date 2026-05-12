@@ -402,9 +402,6 @@ pub const OpenGL = extern struct {
     light_buffer_count: u32 = 0,
     light_buffers: [12]LightBuffer = undefined,
 
-    debug_light_buffer_index: i32 = 0,
-    debug_light_buffer_texture_index: i32 = 0,
-
     render_commands: RenderCommands,
 };
 
@@ -578,30 +575,18 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     gl.glGenTextures(1, &open_gl.texture_array);
     gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
 
-    if (true) {
-        platform.optGLTexStorage3D.?(
-            GL_TEXTURE_2D_ARRAY,
-            1,
-            @intCast(open_gl.default_sprite_texture_format),
-            renderer.TEXTURE_ARRAY_DIM,
-            renderer.TEXTURE_ARRAY_DIM,
-            open_gl.max_texture_count,
-        );
-        std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
-    } else {
-        platform.optGLTexImage3D.?(
-            GL_TEXTURE_2D_ARRAY,
-            0,
-            open_gl.default_sprite_texture_format,
-            512,
-            512,
-            open_gl.max_texture_count,
-            0,
-            gl.GL_BGRA_EXT,
-            gl.GL_UNSIGNED_BYTE,
-            null,
-        );
-    }
+    platform.optGLTexImage3D.?(
+        GL_TEXTURE_2D_ARRAY,
+        0,
+        open_gl.default_sprite_texture_format,
+        512,
+        512,
+        open_gl.max_texture_count,
+        0,
+        gl.GL_BGRA_EXT,
+        gl.GL_UNSIGNED_BYTE,
+        null,
+    );
 
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
@@ -1787,8 +1772,6 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
             std.debug.assert(op.state == .Empty);
         }
 
-        std.debug.assert(queue.transfer_memory_used_count >= op.transfer_memory_count);
-        queue.transfer_memory_used_count -= op.transfer_memory_count;
         queue.transfer_memory_first_used = op.transfer_memory_last_used;
 
         queue.op_count -= 1;
@@ -2149,36 +2132,6 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
     platform.optGLActiveTexture.?(GL_TEXTURE0);
     useProgramEnd(&open_gl.final_stretch);
-
-    open_gl.debug_light_buffer_index = math.clampi32(
-        0,
-        open_gl.debug_light_buffer_index,
-        @intCast(open_gl.light_buffer_count - 1),
-    );
-    open_gl.debug_light_buffer_texture_index = math.clampi32(0, open_gl.debug_light_buffer_texture_index, 4);
-    if (open_gl.debug_light_buffer_texture_index > 0) {
-        const light_buffer: *LightBuffer = &open_gl.light_buffers[@intCast(open_gl.debug_light_buffer_index)];
-        platform.optGLBindFramebufferEXT.?(
-            GL_READ_FRAMEBUFFER,
-            light_buffer.write_all_framebuffer,
-        );
-        platform.optGLBindFramebufferEXT.?(GL_DRAW_FRAMEBUFFER, 0);
-        gl.glReadBuffer(GL_COLOR_ATTACHMENT0 + @as(u32, @intCast(open_gl.debug_light_buffer_texture_index - 1)));
-        gl.glViewport(draw_region.min.x(), draw_region.min.y(), window_width, window_height);
-        platform.optGLBlitFrameBuffer.?(
-            0,
-            0,
-            light_buffer.width,
-            light_buffer.height,
-            draw_region.min.x(),
-            draw_region.min.y(),
-            draw_region.max.x(),
-            draw_region.max.y(),
-            gl.GL_COLOR_BUFFER_BIT,
-            gl.GL_NEAREST,
-        );
-        gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
-    }
 }
 
 fn drawLineVertices(

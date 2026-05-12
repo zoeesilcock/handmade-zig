@@ -87,14 +87,20 @@ const ImportGridTags = struct {
     tags: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]ImportGridTag,
 };
 
+const AssetLRULink = struct {
+    prev: ?*AssetLRULink = null,
+    next: ?*AssetLRULink = null,
+};
+
 pub const Asset = struct {
+    lru: AssetLRULink,
+
     state: u32 = 0,
     handle: union(enum) {
         texture_handle: RendererTexture,
         loaded_at_sample_index: u64,
         font: LoadedFont,
     },
-    last_used_generation: u32,
 
     hha: HHAAsset,
     annotation: HHAAnnotation,
@@ -232,9 +238,6 @@ pub const Assets = struct {
 
     source_file_hash: [256]?*SourceFile = [1]?*SourceFile{null} ** 256,
 
-    operation_lock: u32,
-    used_generation: u32,
-
     sample_count: u32,
     sample_buffer: [*]i16,
     sample_buffer_base_index: u64,
@@ -245,6 +248,9 @@ pub const Assets = struct {
 
     next_special_texture_handle: u32 = 0,
     next_free_texture_handle: u32,
+
+    special_texture_lru_sentinel: AssetLRULink,
+    regular_texture_lru_sentinel: AssetLRULink,
 
     pub fn allocate(
         memory_size: MemoryIndex,
@@ -268,6 +274,9 @@ pub const Assets = struct {
         assets.texture_queue = texture_queue;
         assets.normal_texture_handle_count = shared.NORMAL_TEXTURE_COUNT;
         assets.special_texture_handle_count = shared.SPECIAL_TEXTURE_COUNT;
+
+        shared.dlistInit(&assets.special_texture_lru_sentinel);
+        shared.dlistInit(&assets.regular_texture_lru_sentinel);
 
         const op = renderer.beginTextureOp(texture_queue, 1, 1);
         std.debug.assert(op != null);
@@ -610,6 +619,40 @@ pub const Assets = struct {
         }
     }
 
+    fn acquireTextureHandle(self: *Assets, dimension: Vector2u) u32 {
+        var opt_replace_sentinel: ?*AssetLRULink = null;
+        var result: u32 = 0;
+        if (self.dimensionsRequireSpecialTexture(@intCast(dimension.x()), @intCast(dimension.y()))) {
+            if (self.next_special_texture_handle < self.special_texture_handle_count) {
+                result = renderer.specialTextureIndexFrom(self.next_special_texture_handle);
+                self.next_special_texture_handle += 1;
+            } else {
+                opt_replace_sentinel = &self.special_texture_lru_sentinel;
+            }
+        } else {
+            if (self.next_free_texture_handle < self.normal_texture_handle_count) {
+                result = self.next_free_texture_handle;
+                self.next_free_texture_handle += 1;
+            } else {
+                opt_replace_sentinel = &self.regular_texture_lru_sentinel;
+            }
+        }
+
+        if (opt_replace_sentinel) |replace_sentinel| {
+            std.debug.assert(!shared.dlistIsEmpty(replace_sentinel));
+
+            const first: *AssetLRULink = replace_sentinel.next.?;
+            shared.dlistRemove(first);
+            const replace_asset: *Asset = @ptrCast(first);
+            replace_asset.state = AssetState.Unloaded.toInt();
+            result = replace_asset.handle.texture_handle.values.index;
+
+            replace_asset.handle = .{ .texture_handle = .empty };
+        }
+
+        return result;
+    }
+
     pub fn loadBitmap(self: *Assets, opt_id: ?BitmapId) void {
         TimedBlock.beginFunction(@src(), .LoadBitmap);
         defer TimedBlock.endFunction(@src(), .LoadBitmap);
@@ -636,22 +679,7 @@ pub const Assets = struct {
                             const bitmap_width: u32 = width;
                             const bitmap_height: u32 = height;
 
-                            var texture_handle: u32 = 0;
-                            if (self.dimensionsRequireSpecialTexture(@intCast(bitmap_width), @intCast(bitmap_height))) {
-                                texture_handle = renderer.specialTextureIndexFrom(self.next_special_texture_handle);
-                                self.next_special_texture_handle += 1;
-                                if (self.next_special_texture_handle >= self.special_texture_handle_count) {
-                                    self.next_special_texture_handle = 0;
-                                }
-                            } else {
-                                std.debug.assert(
-                                    self.next_free_texture_handle < self.normal_texture_handle_count,
-                                );
-
-                                texture_handle = self.next_free_texture_handle;
-                                self.next_free_texture_handle += 1;
-                            }
-
+                            const texture_handle: u32 = self.acquireTextureHandle(.new(info.dim[0], info.dim[1]));
                             asset.handle = .{
                                 .texture_handle = renderer.referToTexture(texture_handle, bitmap_width, bitmap_height),
                             };
@@ -692,8 +720,17 @@ pub const Assets = struct {
         const asset: ?*Asset = self.getAsset(id.value);
         std.debug.assert(id.value == 0 or asset.?.hha.type == .Bitmap);
 
-        asset.?.last_used_generation = self.used_generation;
         const result: RendererTexture = asset.?.handle.texture_handle;
+
+        if (result.isValid()) {
+            const info = &asset.?.hha.info.bitmap;
+            shared.dlistRemove(&asset.?.lru);
+            if (self.dimensionsRequireSpecialTexture(@intCast(info.dim[0]), @intCast(info.dim[1]))) {
+                shared.dlistInsertLast(&self.special_texture_lru_sentinel, &asset.?.lru);
+            } else {
+                shared.dlistInsertLast(&self.regular_texture_lru_sentinel, &asset.?.lru);
+            }
+        }
 
         return result;
     }
@@ -879,16 +916,9 @@ pub const Assets = struct {
     pub fn loadFont(
         self: *Assets,
         id: ?FontId,
-        immediate: bool,
     ) void {
         var asset = &self.assets[id.?.value];
         std.debug.assert(asset.state == @intFromEnum(AssetState.Unloaded));
-
-        var opt_task: ?*shared.TaskWithMemory = null;
-
-        if (!immediate) {
-            opt_task = handmade.beginTaskWithMemory(self.game_state, false);
-        }
 
         const info: HHAFont = asset.hha.info.font;
 
