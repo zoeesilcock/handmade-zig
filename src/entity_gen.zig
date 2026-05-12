@@ -234,6 +234,21 @@ pub fn addOrphan(region: *SimRegion, position: Vector3, standing_on: Traversable
     return entity;
 }
 
+pub fn addConversation(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
+    _ = standing_on;
+
+    const entity: *Entity = addEntity(region);
+    const dimension: Vector3 = .new(0.5, 0.5, 0.5);
+    entity.collision_volume =
+        Rectangle3.fromCenterDimension(.new(0, 0, 0.5 * dimension.z()), dimension).addRadius(.splat(0.1));
+    entity.camera_behavior = @intFromEnum(entities.CameraBehavior.Offset);
+    _ = entity.camera_offset.setZ(room_gen.getCameraOffsetZForCloseup());
+    _ = entity.camera_offset.setY(2);
+    entity.position = position;
+
+    return entity;
+}
+
 fn addMonster(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) void {
     var entity = addEntity(region);
 

@@ -75,15 +75,15 @@ pub const BrainId = extern struct {
 pub const BrainType = enum(u16) {
     BrainHero,
 
-    // These are special types which are used to mark special entities,
-    // but these entities do not get actual brains (the brain ID value is set to 0).
-    BrainRoom,
-
     // Test brains.
     BrainSnake,
     BrainFamiliar,
     BrainFloatyThing,
     BrainMonster,
+
+    // These are special types which are used to mark special entities,
+    // but these entities do not get actual brains (the brain ID value is set to 0).
+    BrainRoom,
 };
 
 pub const ReservedBrainId = enum(u32) {
@@ -265,7 +265,7 @@ fn executeBrainHero(
 
     const opt_glove: ?*Entity = parts.glove;
     if (opt_glove) |glove| {
-        if (glove.movement_mode != .AngleOffset) {
+        if (glove.movement_mode != .Floating) {
             attacked = false;
         }
     }
@@ -346,10 +346,13 @@ fn executeBrainHero(
                     glove.angle_start = glove.angle_current;
                     glove.angle_target = if (glove.angle_current > 0) -0.25 * math.TAU32 else 0.25 * math.TAU32;
                     glove.angle_swipe_distance = 2;
-                }
 
-                glove.angle_base = body.position;
-                glove.facing_direction = body.facing_direction;
+                    glove.angle_base = body.position;
+                    glove.facing_direction = body.facing_direction;
+                } else {
+                    glove.movement_mode = .Floating;
+                    glove.position = body.position.plus(.new(0.5, 0, 0.5));
+                }
             }
         }
     }

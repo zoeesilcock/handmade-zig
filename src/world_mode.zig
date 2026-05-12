@@ -84,8 +84,7 @@ pub const GameCamera = struct {
     target_position: WorldPosition,
 
     dp: Vector3,
-    d_expected_focus_min_z: f32,
-    d_expected_focus_max_z: f32,
+    movement_mask: Vector3 = .zero(),
 
     expected_focus_min_z: f32,
     target_expected_focus_min_z: f32,
@@ -184,8 +183,8 @@ pub fn playWorld(state: *State) void {
 
     world_mode.fog_min = 6;
     world_mode.fog_span = 24;
-    world_mode.alpha_min = 3.5;
-    world_mode.alpha_span = 1;
+    world_mode.alpha_min = 2.75;
+    world_mode.alpha_span = 0.75;
 
     world_mode.particle_cache =
         state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false));

@@ -148,6 +148,10 @@ const GenRoomGrid = struct {
     }
 };
 
+pub fn getCameraOffsetZForCloseup() f32 {
+    return 6;
+}
+
 fn getCameraOffsetZForDimension(x_count: i32, y_count: i32, camera_behaviour: *u32) f32 {
     var x_distance: f32 = 13;
     if (x_count == 12) {

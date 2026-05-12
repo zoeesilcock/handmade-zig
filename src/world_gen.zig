@@ -959,11 +959,11 @@ fn placeOrphan(gen: *WorldGenerator, orphan_name_tag: AssetTagId) ?*GenEntity {
             if (true) {
                 result = addEntity(gen, &entity_gen.addOrphan);
                 _ = addTag(gen, result.?, .Orphan, 1);
+                _ = addTag(gen, result.?, .FacingDirection, 0.75 * math.TAU32);
                 placeEntity(gen, result.?, room);
 
-                const child = addEntity(gen, &entity_gen.addCat);
-                _ = addTag(gen, child, .Cat, 1);
-                appendEntity(gen, result.?, box_mod.BoxMask_North, child);
+                const child = addEntity(gen, &entity_gen.addConversation);
+                appendEntity(gen, result.?, box_mod.BoxMask_South, child);
 
                 iterator.finish();
             }

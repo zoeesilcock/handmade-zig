@@ -689,7 +689,11 @@ pub fn updateAndRenderEntities(
                                 color = .new(1, 0, 1, 1);
                             }
 
-                            render_group.pushVolumeOutline(entity.collision_volume, color, 0.01);
+                            render_group.pushVolumeOutline(
+                                entity.collision_volume.offsetBy(entity_ground_point),
+                                color,
+                                0.01,
+                            );
                         }
                     }
 
