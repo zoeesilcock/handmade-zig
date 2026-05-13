@@ -41,6 +41,9 @@ const DEBUG_WINDOW_INACTIVE_OPACITY = 255;
 const DEBUG_TIME_MARKER_COUNT = 30;
 const STATE_FILE_NAME_COUNT = win32.MAX_PATH;
 
+export var NvOptimusEnablement: std.os.windows.DWORD = 0x01;
+export var AmdPowerXpressRequestHighPerformance: std.os.windows.DWORD = 0x01;
+
 // Build options.
 const INTERNAL = shared.INTERNAL;
 const DEBUG = shared.DEBUG;
@@ -68,6 +71,7 @@ const TextureQueue = renderer.TextureQueue;
 const TextureOp = renderer.TextureOp;
 const RenderCommands = renderer.RenderCommands;
 const Rectangle2i = math.Rectangle2i;
+const Vector2u = math.Vector2u;
 const String = types.String;
 const TicketMutex = types.TicketMutex;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
@@ -80,27 +84,13 @@ pub var running: bool = false;
 pub var paused: bool = false;
 pub var software_rendering: bool = false;
 var global_state: Win32State = .{};
-var back_buffer: OffscreenBuffer = .{};
 var opt_secondary_buffer: ?*win32.IDirectSoundBuffer = undefined;
 var perf_count_frequency: i64 = 0;
 var show_debug_cursor = INTERNAL;
 var window_placement: win32.WINDOWPLACEMENT = undefined;
 var global_debug_table_: debug_interface.DebugTable = if (INTERNAL) debug_interface.DebugTable{} else undefined;
 var global_debug_table = &global_debug_table_;
-
-const OffscreenBuffer = struct {
-    info: win32.BITMAPINFO = undefined,
-    memory: ?*anyopaque = undefined,
-    width: i32 = 0,
-    height: i32 = 0,
-    pitch: usize = 0,
-    bytes_per_pixel: i32 = BYTES_PER_PIXEL,
-};
-
-const WindowDimension = struct {
-    width: i32,
-    height: i32,
-};
+var global_enforced_aspect_ratio: Vector2u = .new(16, 9);
 
 const SoundOutput = struct {
     samples_per_second: u32,
@@ -523,87 +513,6 @@ fn deallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.c) void
 }
 
 const DebugFunctions = if (INTERNAL) struct {
-    pub fn debugFreeFileMemory(mem: *anyopaque) callconv(.c) void {
-        _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
-    }
-
-    pub fn debugReadEntireFile(file_name: [*:0]const u8) callconv(.c) shared.DebugReadFileResult {
-        var result = shared.DebugReadFileResult{};
-
-        const file_handle: win32.HANDLE = win32.CreateFileA(
-            file_name,
-            win32.FILE_GENERIC_READ,
-            win32.FILE_SHARE_READ,
-            null,
-            win32.FILE_CREATION_DISPOSITION.OPEN_EXISTING,
-            win32.FILE_FLAGS_AND_ATTRIBUTES{},
-            null,
-        );
-
-        if (file_handle != win32.INVALID_HANDLE_VALUE) {
-            var file_size: win32.LARGE_INTEGER = undefined;
-            if (win32.GetFileSizeEx(file_handle, &file_size) != 0) {
-                const file_size32 = types.safeTruncateI64(file_size.QuadPart);
-
-                if (win32.VirtualAlloc(
-                    null,
-                    file_size32,
-                    win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-                    win32.PAGE_READWRITE,
-                )) |file_contents| {
-                    var bytes_read: u32 = undefined;
-                    const read_result = win32.ReadFile(
-                        file_handle,
-                        file_contents,
-                        file_size32,
-                        &bytes_read,
-                        null,
-                    );
-
-                    if (read_result != 0 and bytes_read == file_size32) {
-                        // File read successfully.
-                        result.contents = file_contents;
-                        result.content_size = file_size32;
-                    } else {
-                        debugFreeFileMemory(result.contents);
-                        result.contents = undefined;
-                    }
-                }
-            }
-
-            _ = win32.CloseHandle(file_handle);
-        }
-
-        return result;
-    }
-
-    pub fn debugWriteEntireFile(file_name: [*:0]const u8, content_size: u32, contents: *anyopaque) callconv(.c) bool {
-        var result: bool = false;
-
-        const file_handle: win32.HANDLE = win32.CreateFileA(
-            file_name,
-            win32.FILE_GENERIC_WRITE,
-            win32.FILE_SHARE_NONE,
-            null,
-            win32.FILE_CREATION_DISPOSITION.CREATE_ALWAYS,
-            win32.FILE_FLAGS_AND_ATTRIBUTES{},
-            null,
-        );
-
-        if (file_handle != win32.INVALID_HANDLE_VALUE) {
-            var bytes_written: u32 = undefined;
-
-            if (win32.WriteFile(file_handle, contents, content_size, &bytes_written, null) != 0) {
-                // File written successfully.
-                result = bytes_written == content_size;
-            }
-
-            _ = win32.CloseHandle(file_handle);
-        }
-
-        return result;
-    }
-
     pub fn debugExecuteSystemCommand(
         path: [*:0]const u8,
         command: [*:0]const u8,
@@ -828,7 +737,7 @@ fn processMouseInput(
     new_input: *shared.GameInput,
     window: win32.HWND,
     draw_region: Rectangle2i,
-    window_dimension: WindowDimension,
+    window_dimension: Vector2u,
 ) void {
     TimedBlock.beginBlock(@src(), .ProcessMouseInput);
     defer TimedBlock.endBlock(@src(), .ProcessMouseInput);
@@ -838,7 +747,7 @@ fn processMouseInput(
         _ = win32.ScreenToClient(window, &mouse_point);
 
         const mouse_x: f32 = @as(f32, @floatFromInt(mouse_point.x));
-        const mouse_y: f32 = @as(f32, @floatFromInt((window_dimension.height - 1) - mouse_point.y));
+        const mouse_y: f32 = @as(f32, @floatFromInt((@as(i32, @intCast(window_dimension.height())) - 1) - mouse_point.y));
         new_input.clip_space_mouse_position = .new(
             math.clampBinormalMapToRange(
                 @as(f32, @floatFromInt(draw_region.min.x())),
@@ -1394,58 +1303,14 @@ fn fillSoundBuffer(sound_output: *SoundOutput, secondary_buffer: *win32.IDirectS
     }
 }
 
-fn getWindowDimension(window: win32.HWND) WindowDimension {
+fn getWindowDimension(window: win32.HWND) Vector2u {
     var client_rect: win32.RECT = undefined;
     _ = win32.GetClientRect(window, &client_rect);
 
-    return WindowDimension{
-        .width = client_rect.right - client_rect.left,
-        .height = client_rect.bottom - client_rect.top,
-    };
-}
-
-fn resizeDIBSection(buffer: *OffscreenBuffer, width: i32, height: i32) void {
-    if (buffer.memory) |mem| {
-        _ = win32.VirtualFree(mem, 0, win32.MEM_RELEASE);
-    }
-
-    buffer.width = width;
-    buffer.height = height;
-
-    buffer.info = win32.BITMAPINFO{
-        .bmiHeader = win32.BITMAPINFOHEADER{
-            .biSize = @sizeOf(win32.BITMAPINFOHEADER),
-            .biWidth = buffer.width,
-            .biHeight = buffer.height,
-            .biPlanes = 1,
-            .biBitCount = 32,
-            .biCompression = win32.BI_RGB,
-            .biSizeImage = 0,
-            .biXPelsPerMeter = 0,
-            .biYPelsPerMeter = 0,
-            .biClrUsed = 0,
-            .biClrImportant = 0,
-        },
-        .bmiColors = undefined,
-    };
-
-    buffer.pitch = types.align16(@intCast(buffer.width * BYTES_PER_PIXEL));
-    const bitmap_memory_size: usize = @intCast((@as(i32, @intCast(buffer.pitch)) * buffer.height) + 1);
-    buffer.memory = win32.VirtualAlloc(
-        null,
-        bitmap_memory_size,
-        win32.VIRTUAL_ALLOCATION_TYPE{ .RESERVE = 1, .COMMIT = 1 },
-        win32.PAGE_READWRITE,
+    return Vector2u.new(
+        @intCast(client_rect.right - client_rect.left),
+        @intCast(client_rect.bottom - client_rect.top),
     );
-}
-
-fn getGameBuffer() shared.OffscreenBuffer {
-    return shared.OffscreenBuffer{
-        .memory = back_buffer.memory,
-        .width = back_buffer.width,
-        .height = back_buffer.height,
-        .pitch = back_buffer.pitch,
-    };
 }
 
 fn windowProcedure(
@@ -1461,10 +1326,8 @@ fn windowProcedure(
             running = false;
         },
         win32.WM_WINDOWPOSCHANGING => {
-            var mutable_l_param: win32.LPARAM = l_param;
-
             if (win32.GetKeyState(@intFromEnum(win32.VK_SHIFT)) & (1 << 7) != 0) {
-                var new_pos: *win32.WINDOWPOS = @ptrCast(&mutable_l_param);
+                var new_pos: *win32.WINDOWPOS = @ptrFromInt(@as(usize, @intCast(l_param)));
                 var window_rect: win32.RECT = undefined;
                 var client_rect: win32.RECT = undefined;
                 if (win32.GetWindowRect(window, &window_rect) == 1) {
@@ -1473,32 +1336,57 @@ fn windowProcedure(
                         const client_height = (client_rect.bottom - client_rect.top);
                         const width_add = (window_rect.right - window_rect.left) - client_width;
                         const height_add = (window_rect.bottom - window_rect.top) - client_height;
-                        const render_width = back_buffer.width;
-                        const render_height = back_buffer.height;
-                        const new_cx = @divFloor((render_width * (new_pos.cy - height_add)), render_height);
-                        const new_cy = @divFloor((render_height * (new_pos.cx - width_add)), render_width);
+                        const render_width: i32 = @intCast(global_enforced_aspect_ratio.width());
+                        const render_height: i32 = @intCast(global_enforced_aspect_ratio.height());
 
-                        if (@abs(new_pos.cx - new_cx) > @abs(new_pos.cy - new_cy)) {
-                            new_pos.cx = new_cx + width_add;
-                        } else {
-                            new_pos.cy = new_cy + height_add;
+                        if (render_width > 0 and render_height > 0) {
+                            const new_cx = @divFloor((render_width * (new_pos.cy - height_add)), render_height);
+                            const new_cy = @divFloor((render_height * (new_pos.cx - width_add)), render_width);
+
+                            if (@abs(new_pos.cx - new_cx) > @abs(new_pos.cy - new_cy)) {
+                                new_pos.cx = new_cx + width_add;
+                            } else {
+                                new_pos.cy = new_cy + height_add;
+                            }
                         }
-
-                        mutable_l_param = @as(*win32.LPARAM, @ptrCast(new_pos)).*;
                     }
                 }
             }
 
-            if (l_param != mutable_l_param) {
-                std.log.info("l_param changed", .{});
+            result = win32.DefWindowProcW(window, message, w_param, l_param);
+        },
+        win32.WM_WINDOWPOSCHANGED => {
+            const new_pos: *win32.WINDOWPOS = @ptrFromInt(@as(usize, @intCast(l_param)));
+
+            var becomingFullscreen: bool = false;
+            var monitor_info: win32.MONITORINFO = undefined;
+            monitor_info.cbSize = @sizeOf(win32.MONITORINFO);
+            if (win32.GetMonitorInfoW(
+                win32.MonitorFromWindow(window, win32.MONITOR_DEFAULTTOPRIMARY),
+                &monitor_info,
+            ) != 0) {
+                const monitor_width: i32 = monitor_info.rcMonitor.right - monitor_info.rcMonitor.left;
+                const monitor_height: i32 = monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top;
+
+                becomingFullscreen = (monitor_info.rcMonitor.left == new_pos.x and
+                    monitor_info.rcMonitor.top == new_pos.y and
+                    monitor_width == new_pos.cx and
+                    monitor_height == new_pos.cy);
             }
 
-            result = win32.DefWindowProcW(window, message, w_param, mutable_l_param);
+            const old_style = win32.GetWindowLongW(window, win32.GWL_STYLE);
+            const fullscreen_style: i32 = old_style & ~@as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW));
+            const windowed_style: i32 = old_style | @as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW));
+            const new_style = if (becomingFullscreen) fullscreen_style else windowed_style;
+            if (old_style != new_style) {
+                _ = win32.SetWindowLongW(window, win32.GWL_STYLE, new_style);
+            }
+            result = win32.DefWindowProcW(window, message, w_param, l_param);
         },
         win32.WM_SETCURSOR => {
             if (show_debug_cursor) {
-                _ = win32.SetCursor(win32.LoadCursorW(null, win32.IDC_ARROW));
-                // result = win32.DefWindowProcW(window, message, w_param, l_param);
+                // _ = win32.SetCursor(win32.LoadCursorW(null, win32.IDC_ARROW));
+                result = win32.DefWindowProcW(window, message, w_param, l_param);
             } else {
                 _ = win32.SetCursor(null);
             }
@@ -1545,7 +1433,6 @@ fn toggleFullscreen(window: win32.HWND) void {
             win32.GetMonitorInfoW(win32.MonitorFromWindow(window, win32.MONITOR_DEFAULTTOPRIMARY), &monitor_info) != 0)
         {
             // Set fullscreen.
-            _ = win32.SetWindowLongW(window, win32.GWL_STYLE, style & ~@as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
             _ = win32.SetWindowPos(
                 window,
                 if (INTERNAL or DEBUG) win32.HWND_NOTOPMOST else win32.HWND_TOPMOST,
@@ -1558,7 +1445,6 @@ fn toggleFullscreen(window: win32.HWND) void {
         }
     } else {
         // Set windowed.
-        _ = win32.SetWindowLongW(window, win32.GWL_STYLE, style | @as(i32, @bitCast(win32.WS_OVERLAPPEDWINDOW)));
         _ = win32.SetWindowPlacement(window, &window_placement);
         _ = win32.SetWindowPos(
             window,
@@ -2002,7 +1888,6 @@ pub export fn wWinMain(
 
     loadXInput();
 
-    resizeDIBSection(&back_buffer, WIDTH, HEIGHT);
     platform = shared.Platform{
         .addQueueEntry = addQueueEntry,
         .completeAllQueuedWork = completeAllQueuedWork,
@@ -2021,9 +1906,6 @@ pub export fn wWinMain(
     shared.platform = platform;
 
     if (INTERNAL) {
-        platform.debugFreeFileMemory = DebugFunctions.debugFreeFileMemory;
-        platform.debugReadEntireFile = DebugFunctions.debugReadEntireFile;
-        platform.debugWriteEntireFile = DebugFunctions.debugWriteEntireFile;
         platform.debugExecuteSystemCommand = DebugFunctions.debugExecuteSystemCommand;
         platform.debugGetProcessState = DebugFunctions.debugGetProcessState;
         platform.debugGetMemoryStats = DebugFunctions.debugGetMemoryStats;
@@ -2189,19 +2071,22 @@ pub export fn wWinMain(
                     //
 
                     // TimedBlock.beginBlock(@src(), .InputProcessing);
+
+                    const render_dimensions: Vector2u = .new(WIDTH, HEIGHT);
                     const window_dimension = getWindowDimension(window_handle);
                     const draw_region = math.aspectRatioFit(
-                        @intCast(back_buffer.width),
-                        @intCast(back_buffer.height),
-                        @intCast(window_dimension.width),
-                        @intCast(window_dimension.height),
+                        render_dimensions.width(),
+                        render_dimensions.height(),
+                        window_dimension.width(),
+                        window_dimension.height(),
                     );
-                    const frame: *RenderCommands = platform_renderer.beginFrame(
+                    var frame: *RenderCommands = platform_renderer.beginFrame(
                         platform_renderer,
-                        window_dimension.width,
-                        window_dimension.height,
+                        @intCast(window_dimension.width()),
+                        @intCast(window_dimension.height()),
                         draw_region,
                     ).?;
+                    frame.settings.render_dim = render_dimensions;
 
                     TimedBlock.beginBlock(@src(), .ControllerClearing);
                     const old_keyboard_controller = &old_input.controllers[0];

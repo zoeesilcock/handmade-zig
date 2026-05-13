@@ -332,7 +332,7 @@ fn addOption(gen: *WorldGenerator, room: *GenRoom, option_type: GenOptionType) *
 
     if (array.option_count == array.max_option_count) {
         array.max_option_count += 100;
-        const new_options: [*]GenOption = gen.temp_memory.pushArray(array.max_option_count, GenOption, null);
+        const new_options: [*]GenOption = gen.memory.pushArray(array.max_option_count, GenOption, null);
         _ = shared.copyArray(array.option_count, GenOption, array.options, new_options);
         array.options = new_options;
     }
@@ -764,6 +764,8 @@ fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
 
             _ = connectByMask(gen, prev_room, room, @intFromEnum(BoxSurfaceMask.Planar));
             prev_room = room;
+
+            _ = placeSnake(gen, room);
         }
 
         // TODO: Need a utility here that removes path rooms when they are chosen, to avoid over-connecting a room
@@ -888,13 +890,13 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
 }
 
 fn addEntity(gen: *WorldGenerator, creator: *const entity_gen.CreateEntityType) *GenEntity {
-    var result: *GenEntity = gen.temp_memory.pushStruct(GenEntity, null);
+    var result: *GenEntity = gen.memory.pushStruct(GenEntity, null);
     result.creator = creator;
     return result;
 }
 
 fn addEntityGroup(gen: *WorldGenerator, room: *GenRoom) *GenEntityGroup {
-    var group: *GenEntityGroup = gen.temp_memory.pushStruct(GenEntityGroup, null);
+    var group: *GenEntityGroup = gen.memory.pushStruct(GenEntityGroup, null);
     group.next = room.first_entity_group;
     room.first_entity_group = group;
     return group;
@@ -947,6 +949,14 @@ fn placeCat(gen: *WorldGenerator) ?*GenEntity {
             }
         }
     }
+    return result;
+}
+
+fn placeSnake(gen: *WorldGenerator, room: *GenRoom) ?*GenEntity {
+    var result: ?*GenEntity = null;
+    result = addEntity(gen, &entity_gen.addSnake);
+    _ = addTag(gen, result.?, .Bones, 1);
+    placeEntity(gen, result.?, room);
     return result;
 }
 

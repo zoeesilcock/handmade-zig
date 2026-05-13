@@ -844,28 +844,28 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  vec4 ModColor = AlphaAmount * FragColor * TexSample;
         \\  if (ModColor.a > AlphaThreshold)
         \\  {
-        \\    vec4 SurfaceReflection;
-        \\    SurfaceReflection.rgb = mix(ModColor.rgb, FogColor.rgb * ModColor.a, FogAmount);
-        \\    SurfaceReflection.a = ModColor.a;
-        \\
-        \\#if ShaderSimTexWriteSRGB
-        \\    SurfaceReflection.rgb = sqrt(SurfaceReflection.rgb);
-        \\#endif
+        \\    vec3 SurfaceReflection = ModColor.rgb;
         \\
         \\#if LIGHTING_DISABLED
         \\#else
         \\    if (FragLightIndex != 0)
         \\    {
         \\      vec3 L = SumLight();
-        \\      SurfaceReflection.rgb *= L;
+        \\      SurfaceReflection *= L;
         \\    }
         \\#endif
         \\
+        \\    SurfaceReflection.rgb = mix(SurfaceReflection.rgb, FogColor.rgb * ModColor.a, FogAmount);
         \\    SurfaceReflection.r = clamp(SurfaceReflection.r, 0.0, 1.0);
         \\    SurfaceReflection.g = clamp(SurfaceReflection.g, 0.0, 1.0);
         \\    SurfaceReflection.b = clamp(SurfaceReflection.b, 0.0, 1.0);
         \\
-        \\    BlendUnitColor = SurfaceReflection;
+        \\#if ShaderSimTexWriteSRGB
+        \\    SurfaceReflection = sqrt(SurfaceReflection);
+        \\#endif
+        \\
+        \\    BlendUnitColor.rgb = SurfaceReflection.rgb;
+        \\    BlendUnitColor.a = ModColor.a;
         \\  }
         \\  else
         \\  {
@@ -1403,8 +1403,8 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     }
     std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
-    const status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
-    std.debug.assert(status == GL_FRAME_BUFFER_COMPLETE);
+    const frame_buffer_status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
+    std.debug.assert(frame_buffer_status == GL_FRAME_BUFFER_COMPLETE);
 
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
     gl.glBindTexture(slot, 0);
@@ -1417,8 +1417,8 @@ fn bindFrameBuffer(framebuffer: ?*Framebuffer, render_width: i32, render_height:
         glBindFramebuffer(GL_FRAMEBUFFER, if (framebuffer) |f| f.framebuffer_handle else 0);
         gl.glViewport(0, 0, render_width, render_height);
 
-        const status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
-        std.debug.assert(status == GL_FRAME_BUFFER_COMPLETE);
+        const frame_buffer_status: u32 = platform.optGLCheckFramebufferStatusEXT.?(GL_FRAMEBUFFER);
+        std.debug.assert(frame_buffer_status == GL_FRAME_BUFFER_COMPLETE);
     }
 }
 
@@ -1492,8 +1492,8 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
 
     open_gl.multisampling = settings.multisampling_hint;
 
-    const render_width: i32 = @intCast(settings.width);
-    const render_height: i32 = @intCast(settings.height);
+    const render_width: i32 = @intCast(settings.render_dim.width());
+    const render_height: i32 = @intCast(settings.render_dim.height());
 
     var depth_peel_flags: u32 = @intFromEnum(FramebufferFlags.Depth);
     const multisampled_resolve_flags = depth_peel_flags;
@@ -1792,19 +1792,16 @@ fn getSpecialTextureHandleFor(open_gl: *OpenGL, texture: RendererTexture) u32 {
 
 pub fn beginFrame(
     open_gl: *OpenGL,
-    window_width: i32,
-    window_height: i32,
+    window_width: u32,
+    window_height: u32,
     draw_region: Rectangle2i,
 ) callconv(.c) *RenderCommands {
     var commands: *RenderCommands = &open_gl.render_commands;
 
     commands.settings = open_gl.current_settings;
-    commands.settings.width = @intCast(draw_region.getWidth());
-    commands.settings.height = @intCast(draw_region.getHeight());
 
-    commands.window_width = window_width;
-    commands.window_height = window_height;
-    commands.draw_region = draw_region;
+    commands.os_window_dim = .new(window_width, window_height);
+    commands.os_draw_region = draw_region;
 
     commands.max_push_buffer_size = open_gl.push_buffer_memory.len * @sizeOf(u8);
     commands.push_buffer_base = &open_gl.push_buffer_memory;
@@ -1824,9 +1821,9 @@ pub fn beginFrame(
 }
 
 pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
-    const draw_region: Rectangle2i = commands.draw_region;
-    const window_width: i32 = commands.window_width;
-    const window_height: i32 = commands.window_height;
+    const draw_region: Rectangle2i = commands.os_draw_region;
+    const window_width: i32 = @intCast(commands.os_window_dim.width());
+    const window_height: i32 = @intCast(commands.os_window_dim.height());
 
     gl.glDepthMask(gl.GL_TRUE);
     gl.glColorMask(gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE);
@@ -1869,8 +1866,8 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
     const use_render_targets: bool = platform.optGLBindFramebufferEXT != null;
     std.debug.assert(use_render_targets);
 
-    const render_width: i32 = @intCast(settings.width);
-    const render_height: i32 = @intCast(settings.height);
+    const render_width: i32 = @intCast(settings.render_dim.width());
+    const render_height: i32 = @intCast(settings.render_dim.height());
 
     std.debug.assert(open_gl.depth_peel_count > 0);
     const max_render_target_index: u32 = open_gl.depth_peel_count - 1;

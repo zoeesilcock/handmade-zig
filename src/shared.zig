@@ -903,9 +903,6 @@ const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]
 const allocateMemoryType: type = fn (size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBlock;
 const deallocateMemoryType: type = fn (memory: ?*PlatformMemoryBlock) callconv(.c) void;
 
-const debugFreeFileMemoryType = fn (memory: *anyopaque) callconv(.c) void;
-const debugWriteEntireFileType = fn (file_name: [*:0]const u8, memory_size: u32, memory: *anyopaque) callconv(.c) bool;
-const debugReadEntireFileType: type = fn (file_name: [*:0]const u8) callconv(.c) DebugReadFileResult;
 const debugExecuteSystemCommandType: type = fn (path: [*:0]const u8, command: [*:0]const u8, command_line: [*:0]const u8) callconv(.c) DebugExecutingProcess;
 const debugGetProcessStateType: type = fn (process: DebugExecutingProcess) callconv(.c) DebugExecutingProcessState;
 const debugGetMemoryStatsType = fn () callconv(.c) DebugPlatformMemoryStats;
@@ -930,9 +927,6 @@ pub const Platform = if (INTERNAL) extern struct {
     allocateMemory: *const allocateMemoryType = undefined,
     deallocateMemory: *const deallocateMemoryType = undefined,
 
-    debugFreeFileMemory: *const debugFreeFileMemoryType = undefined,
-    debugWriteEntireFile: *const debugWriteEntireFileType = undefined,
-    debugReadEntireFile: *const debugReadEntireFileType = undefined,
     debugExecuteSystemCommand: *const debugExecuteSystemCommandType = undefined,
     debugGetProcessState: *const debugGetProcessStateType = undefined,
     debugGetMemoryStats: *const debugGetMemoryStatsType = undefined,

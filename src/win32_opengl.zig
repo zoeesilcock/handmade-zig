@@ -546,8 +546,8 @@ fn processTextureQueue(platform_renderer: *PlatformRenderer, texture_queue: *Tex
 
 fn beginFrame(
     platform_renderer: *PlatformRenderer,
-    window_width: i32,
-    window_height: i32,
+    window_width: u32,
+    window_height: u32,
     draw_region: Rectangle2i,
 ) callconv(.c) ?*RenderCommands {
     const result: ?*RenderCommands = opengl.beginFrame(

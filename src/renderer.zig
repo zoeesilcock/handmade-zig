@@ -30,6 +30,7 @@ var global_config = &@import("config.zig").global_config;
 const MemoryArena = memory.MemoryArena;
 const Vector2 = math.Vector2;
 const Vector2i = math.Vector2i;
+const Vector2u = math.Vector2u;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Color = math.Color;
@@ -80,8 +81,8 @@ pub const TextureQueue = extern struct {
 
 const beginFrameType = fn (
     platform_renderer: *PlatformRenderer,
-    window_width: i32,
-    window_height: i32,
+    window_width: u32,
+    window_height: u32,
     draw_region: Rectangle2i,
 ) callconv(.c) ?*RenderCommands;
 const endFrameType = fn (platform_renderer: *PlatformRenderer, frame: *RenderCommands) callconv(.c) void;
@@ -112,8 +113,7 @@ pub const TexturedVertex = extern struct {
 };
 
 pub const RenderSettings = extern struct {
-    width: u32 = 0,
-    height: u32 = 0,
+    render_dim: Vector2u = .zero(), // Actual size of our render back buffers.
     depth_peel_count_hint: u32 = 0,
     multisampling_hint: bool = false,
     pixelation_hint: bool = false,
@@ -124,8 +124,16 @@ pub const RenderSettings = extern struct {
     pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
         const type_info = @typeInfo(@TypeOf(self.*));
         inline for (type_info.@"struct".fields) |struct_field| {
-            if (@field(self, struct_field.name) != @field(b, struct_field.name)) {
-                return false;
+            if (struct_field.type == Vector2u) {
+                if (@field(self, struct_field.name).width() != @field(b, struct_field.name).width() or
+                    @field(self, struct_field.name).height() != @field(b, struct_field.name).height())
+                {
+                    return false;
+                }
+            } else {
+                if (@field(self, struct_field.name) != @field(b, struct_field.name)) {
+                    return false;
+                }
             }
         }
         return true;
@@ -180,9 +188,11 @@ pub const LightingPointState = extern struct {
 pub const RenderCommands = extern struct {
     settings: RenderSettings = .{},
 
-    window_width: i32,
-    window_height: i32,
-    draw_region: Rectangle2i,
+    // These two should not be used for anything drawing related! They are just there to let you know the shape of
+    // the container window into which you are drawing. The render_dim field contains the actual width/height you
+    // would use for drawing.
+    os_window_dim: Vector2u,
+    os_draw_region: Rectangle2i, // This is a subsection of the window which we are drawing to.
 
     max_push_buffer_size: u32 = 0,
     push_buffer_base: [*]u8 = undefined,
@@ -1448,8 +1458,8 @@ pub const RenderGroup = extern struct {
         const is_debug: bool = (flags & @intFromEnum(CameraTransformFlag.IsDebug)) != 0;
 
         const b: f32 = math.safeRatio1(
-            @as(f32, @floatFromInt(self.commands.settings.width)),
-            @as(f32, @floatFromInt(self.commands.settings.height)),
+            @floatFromInt(self.commands.settings.render_dim.width()),
+            @floatFromInt(self.commands.settings.render_dim.height()),
         );
 
         var new_setup: RenderSetup = self.last_setup;

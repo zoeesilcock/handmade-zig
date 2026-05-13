@@ -24,6 +24,7 @@ const TooltipBuffer = dev_ui.TooltipBuffer;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
 const DevMode = shared.DevMode;
 const Vector2 = math.Vector2;
+const Vector2u = math.Vector2u;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
 const Color = math.Color;
@@ -2277,11 +2278,7 @@ fn endInteract(debug_state: *DebugState, input: *const shared.GameInput, mouse_p
     ui.interaction.clear();
 }
 
-fn debugInit(
-    assets: *Assets,
-    width: i32,
-    height: i32,
-) *DebugState {
+fn debugInit(assets: *Assets, render_dim: Vector2u) *DebugState {
     var debug_state: *DebugState = memory.bootstrapPushStruct(
         DebugState,
         "debug_arena",
@@ -2309,11 +2306,17 @@ fn debugInit(
 
     _ = debug_state.addTree(
         debug_state.root_group,
-        Vector2.new(-0.5 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
+        Vector2.new(
+            -0.5 * @as(f32, @floatFromInt(render_dim.width())),
+            0.5 * @as(f32, @floatFromInt(render_dim.height())),
+        ),
     );
     _ = debug_state.addTree(
         debug_state.function_group,
-        Vector2.new(0.0 * @as(f32, @floatFromInt(width)), 0.5 * @as(f32, @floatFromInt(height))),
+        Vector2.new(
+            0.0 * @as(f32, @floatFromInt(render_dim.width())),
+            0.5 * @as(f32, @floatFromInt(render_dim.height())),
+        ),
     );
 
     debug_state.dev_ui.init(assets);
@@ -2402,11 +2405,7 @@ pub fn frameEnd(
 
     if (game_memory.debug_state == null) {
         if (getGameAssets(game_memory)) |assets| {
-            game_memory.debug_state = debugInit(
-                assets,
-                @intCast(render_commands.settings.width),
-                @intCast(render_commands.settings.height),
-            );
+            game_memory.debug_state = debugInit(assets, render_commands.settings.render_dim);
         }
     }
 

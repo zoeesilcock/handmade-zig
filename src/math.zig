@@ -47,6 +47,13 @@ fn Vector2Type(comptime ScalarType: type) type {
             } };
         }
 
+        pub fn fromV2u(self: Vector2u) Vector2 {
+            return .new(
+                @floatFromInt(self.x()),
+                @floatFromInt(self.y()),
+            );
+        }
+
         pub fn perp(self: *const Self) Self {
             return Self{ .values = .{ -self.values[1], self.values[0] } };
         }
@@ -882,6 +889,15 @@ fn Rectangle2Type(comptime ScalarType: type) type {
             }
 
             return result;
+        }
+
+        pub fn toRectangle2(self: Rectangle2i) Rectangle2 {
+            return .new(
+                @floatFromInt(self.min.x()),
+                @floatFromInt(self.min.y()),
+                @floatFromInt(self.max.x()),
+                @floatFromInt(self.max.y()),
+            );
         }
 
         const Shared = RectangleShared(2, VectorType, ScalarType, Self);

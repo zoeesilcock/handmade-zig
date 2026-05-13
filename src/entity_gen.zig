@@ -266,13 +266,12 @@ fn addMonster(region: *SimRegion, world_position: WorldPosition, standing_on: Tr
     placeEntity(region, entity, world_position);
 }
 
-fn addSnakeSegment(
-    region: *SimRegion,
-    world_position: WorldPosition,
-    standing_on: TraversableReference,
-    brain_id: BrainId,
-    segment_index: u32,
-) void {
+pub fn addSnake(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
+    // TODO: Implement these again.
+    const segment_index: u32 = 0;
+    const brain_id = sim.addBrain(region);
+    // \TODO
+
     var entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
@@ -283,11 +282,14 @@ fn addSnakeSegment(
 
     initHitPoints(entity, 3);
 
-    _ = addPiece(entity, .Shadow, 1.5, .zero(), .new(1, 1, 1, 0.5), null);
-    _ = addPiece(entity, if (segment_index != 0) .Body else .Head, 1.5, .zero(), .white(), null);
-    addPieceLight(entity, 0.1, .new(0, 0, 0.5), 1.0, .new(1, 1, 0));
+    const body = addPiece(entity, if (segment_index != 0) .Body else .Head, 1.5, .new(0, 0, 0.5), .white(), null);
+    _ = addPieceLight(entity, 0.5, .new(0, 0, 1), 0.5, .new(1, 1, 0));
 
-    placeEntity(region, entity, world_position);
+    connectPieceToWorld(entity, body, .Default);
+
+    entity.position = position;
+
+    return entity;
 }
 
 pub fn addLamp(

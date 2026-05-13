@@ -86,16 +86,15 @@ pub const DevUI = struct {
     }
 
     pub fn beginFrame(self: *DevUI, assets: *Assets, commands: *RenderCommands, input: *const GameInput) void {
-        const width: f32 = @floatFromInt(commands.window_width);
-        const height: f32 = @floatFromInt(commands.window_height);
+        const region_dim: Vector2 = .fromV2u(commands.settings.render_dim);
 
         self.render_group =
             RenderGroup.begin(assets, commands, @intFromEnum(RenderGroupFlags.ClearDepth), null);
         self.font = asset_rendering.pushFont(&self.render_group, self.font_id);
         self.render_group.setCameraTransform(
             1,
-            .new(2 / width, 0, 0),
-            .new(0, 2 / width, 0),
+            .new(2 / region_dim.width(), 0, 0),
+            .new(0, 2 / region_dim.width(), 0),
             .new(0, 0, 1),
             .zero(),
             @intFromEnum(renderer.CameraTransformFlag.IsOrthographic),
@@ -107,7 +106,7 @@ pub const DevUI = struct {
 
         self.ui_space = .fromCenterDimension(
             .new(0, 0),
-            .new(width, height),
+            region_dim,
         );
 
         self.default_clip_rect = self.render_group.last_setup.clip_rect;
