@@ -1,0 +1,5 @@
+// These are the assets for the introduction cutscene.
+
+plate "title_screen.png"
+{
+}

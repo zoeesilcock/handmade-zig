@@ -316,13 +316,12 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             // Get the size of the window.
             var client_rect: win32.RECT = undefined;
             _ = win32.GetClientRect(window, &client_rect);
-            const window_width: i32 = client_rect.right - client_rect.left;
-            const window_height: i32 = client_rect.bottom - client_rect.top;
+            const window_width: u32 = @intCast(client_rect.right - client_rect.left);
+            const window_height: u32 = @intCast(client_rect.bottom - client_rect.top);
 
             // Fit to 16:9 drawing region. This is not necessary if you don't want a fixed aspect ratio, you can just
             // use the whole thing.
-            const draw_region: Rectangle2i =
-                math.aspectRatioFit(16, 9, @intCast(window_width), @intCast(window_height));
+            const draw_region: Rectangle2i = math.aspectRatioFit(16, 9, window_width, window_height);
 
             // Test rotation and panning by animating the camera location in two sequential circles: one orbit,
             // then one panned circle with the orientation locked to forward.

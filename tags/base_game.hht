@@ -1,0 +1,255 @@
+
+default
+{
+    Author = "Anna Rettberg";
+    Description = "These are the original in-game assets for the base game."
+};
+
+block "block_forest_01.png"
+{
+    Tags = floor, grass;
+};
+
+block "block_orphanage_01.png"
+{
+    Tags = wall, manmade, wood, drywall;
+};
+
+block "block_orphanage_02.png"
+{
+    Tags = floor, manmade, wood;
+};
+
+block "block_orphanage_03.png"
+{
+    Tags = floor, manmade, stone;
+};
+
+body "body_hero.png"
+{
+    Tags = orphan, hero;
+};
+
+body "body_orphan_01.png"
+{
+    Tags = orphan, earth;
+};
+
+body "body_orphan_02.png"
+{
+    Tags = orphan, tailor;
+};
+
+body "body_orphan_03.png"
+{
+    Tags = orphan, cook;
+};
+
+body "body_orphan_04.png"
+{
+    Tags = orphan, fauna;
+};
+
+body "body_orphan_05.png"
+{
+    Tags = orphan, dark;
+};
+
+body "body_orphan_06.png"
+{
+    Tags = orphan, strength;
+};
+
+body "body_orphan_07.png"
+{
+    Tags = orphan, winter;
+};
+
+body "body_orphan_08.png"
+{
+    Tags = orphan, health;
+};
+
+body "body_orphan_09.png"
+{
+    Tags = orphan, spring;
+};
+
+body "body_orphan_10.png"
+{
+    Tags = orphan, baby;
+};
+
+body "body_orphan_11.png"
+{
+    Tags = orphan, fall;
+};
+
+body "body_orphan_12.png"
+{
+    Tags = orphan, tank;
+};
+
+body "body_orphan_13.png"
+{
+    Tags = orphan, summer;
+};
+
+body "body_orphan_14.png"
+{
+    Tags = orphan, speed;
+};
+
+character "character_fred.png"
+{
+    Tags = cat, brown, tabby;
+};
+
+character "character_hannah.png"
+{
+    Tags = cat, birman, ghost;
+};
+
+character "character_krampus.png"
+{
+    Tags = krampus;
+};
+
+character "character_molly.png"
+{
+    Tags = cat, gray, tabby;
+};
+
+character "character_mummy.png"
+{
+    Tags = undead, bones, wrapped;
+};
+
+character "character_skeleton.png"
+{
+    Tags = undead, bones;
+};
+
+character "character_skeleton_broken.png"
+{
+    Tags = undead, bones, broken;
+};
+
+character "character_skeleton_dark.png"
+{
+    Tags = undead, bones, dark;
+};
+
+cover "cover_forest.png"
+{
+};
+
+hand "hand_fire.png"
+{
+    Tags = undead, bones, dark;
+};
+
+hand "hand_glove.png"
+{
+    Tags = glove, fingers;
+};
+
+hand "hand_skeleton.png"
+{
+    Tags = undead, bones;
+};
+
+head "head_hero.png"
+{
+    Tags = orphan, hero;
+};
+
+head "head_orphan_01.png"
+{
+    Tags = orphan, sunny;
+};
+
+head "head_orphan_02.png"
+{
+    Tags = orphan, lambert;
+};
+
+head "head_orphan_03.png"
+{
+    Tags = orphan, carla;
+};
+
+head "head_orphan_04.png"
+{
+    Tags = orphan, cassidy;
+};
+
+head "head_orphan_05.png"
+{
+    Tags = orphan, drew;
+};
+
+head "head_orphan_06.png"
+{
+    Tags = orphan, kline;
+};
+
+head "head_orphan_07.png"
+{
+    Tags = orphan, giles;
+};
+
+head "head_orphan_08.png"
+{
+    Tags = orphan, slade;
+};
+
+head "head_orphan_09.png"
+{
+    Tags = orphan, brahm;
+};
+
+head "head_orphan_10.png"
+{
+    Tags = orphan, baby;
+};
+
+head "head_orphan_11.png"
+{
+    Tags = orphan, viva;
+};
+
+head "head_orphan_12.png"
+{
+    Tags = orphan, dylan;
+};
+
+head "head_orphan_13.png"
+{
+    Tags = orphan, rhoda;
+};
+
+head "head_orphan_14.png"
+{
+    Tags = orphan, laird;
+};
+
+item "item_hat_01.png"
+{
+};
+
+item "item_hat_02.png"
+{
+};
+
+item "item_hat_03.png"
+{
+};
+
+obstacles "obstacles_forest.png"
+{
+};
+
+obstacles "obstacles_orphanage.png"
+{
+};

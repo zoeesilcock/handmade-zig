@@ -8,3 +8,4 @@ zig-pkg
 /docgen_tmp/
 data/*
 art/*
+sources/*
