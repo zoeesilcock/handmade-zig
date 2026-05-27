@@ -8,6 +8,7 @@ const asset = @import("asset.zig");
 const math = @import("math.zig");
 const sort = @import("sort.zig");
 const debug_interface = @import("debug_interface.zig");
+const handmade = @import("handmade.zig");
 const std = @import("std");
 
 pub const GL_NUM_EXTENSIONS = 0x821D;
@@ -238,7 +239,7 @@ const TextureOp = renderer.TextureOp;
 const SpriteFlag = renderer.SpriteFlag;
 const SpriteEdge = renderer.SpriteEdge;
 
-const debug_color_table = shared.debug_color_table;
+const debug_color_table = handmade.debug_color_table;
 var global_config = &@import("config.zig").global_config;
 
 // TODO: How do we avoid having this import here?

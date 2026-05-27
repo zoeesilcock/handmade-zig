@@ -13,6 +13,8 @@ const file_formats_v0 = shared.file_formats_v0;
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 const gl = @import("renderer_opengl.zig").gl;
+const tokenizer_mod = @import("tokenizer.zig");
+const hht = @import("hht.zig");
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
@@ -51,6 +53,7 @@ const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
 const RendererTexture = renderer.RendererTexture;
 const ImageU32 = png.ImageU32;
+const Token = tokenizer_mod.Token;
 
 pub const AssetTagId = file_formats.AssetTagId;
 pub const ASSET_CATEGORY_COUNT = file_formats.ASSET_CATEGORY_COUNT;
@@ -1623,15 +1626,10 @@ fn processMultiTileImport(
     }
 }
 
-const Token = struct {
-    text: String = .empty,
-    value: f32 = 1,
-};
-
 fn popToken(source: *String) Token {
     var result: Token = .{
         .text = source.*,
-        .value = 1,
+        .f32 = 1,
     };
 
     var skip: u32 = 0;
@@ -1690,7 +1688,7 @@ fn endTags(builder: *TagBuilder, cagegory: AssetBasicCategory, tag_string_in: St
         if (name_token.text.count > 0) {
             const tag_id: AssetTagId = file_formats.tagIdFromName(name_token.text);
             if (tag_id != .None) {
-                addTag(builder, tag_id, name_token.value);
+                addTag(builder, tag_id, name_token.f32);
             } else {
                 stream.output(
                     errors,

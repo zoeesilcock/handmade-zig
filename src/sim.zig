@@ -1,3 +1,4 @@
+// Foo!
 const shared = @import("shared.zig");
 const memory = @import("memory.zig");
 const math = @import("math.zig");
@@ -40,6 +41,7 @@ const DebugInterface = debug_interface.DebugInterface;
 const ParticleSystem = particles.ParticleSystem;
 const ParticleCache = particles.ParticleCache;
 
+// introspect(SimRegion)
 pub const SimRegion = extern struct {
     world: *World,
 

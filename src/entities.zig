@@ -11,6 +11,7 @@ const particles = @import("particles.zig");
 const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
 const file_formats = shared.file_formats;
+const handmade = @import("handmade.zig");
 const debug_interface = @import("debug_interface.zig");
 const in_game_editor = @import("in_game_editor.zig");
 const std = @import("std");
@@ -626,7 +627,7 @@ pub fn updateAndRenderEntities(
                                                         ap.getPositionPercent(),
                                                     ),
                                                     .splat(0.04),
-                                                    shared.getDebugColor4(ap_index, null),
+                                                    handmade.getDebugColor4(ap_index, null),
                                                     null,
                                                     null,
                                                     null,

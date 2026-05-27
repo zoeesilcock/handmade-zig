@@ -1,4 +1,5 @@
 const std = @import("std");
+const shared = @import("shared.zig");
 const types = @import("types.zig");
 
 pub const INTERNAL = @import("build_options").internal;
@@ -45,6 +46,10 @@ pub const Buffer = struct {
         }
 
         return result;
+    }
+
+    pub fn equals(self: String, other: String) bool {
+        return shared.stringBuffersEqual(self, other);
     }
 };
 

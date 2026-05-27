@@ -8,6 +8,7 @@ const math = @import("math.zig");
 const config = @import("config.zig");
 const sim = @import("sim.zig");
 const sort = @import("sort.zig");
+const handmade = @import("handmade.zig");
 const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
 const dev_ui = @import("dev_ui.zig");
@@ -42,7 +43,7 @@ const RenderGroup = renderer.RenderGroup;
 const RenderGroupFlags = renderer.RenderGroupFlags;
 const TransientClipRect = renderer.TransientClipRect;
 
-const debug_color_table = shared.debug_color_table;
+const debug_color_table = handmade.debug_color_table;
 
 const DEV_MODE_COUNT = shared.DEV_MODE_COUNT;
 const MAX_FRAME_COUNT = 256;

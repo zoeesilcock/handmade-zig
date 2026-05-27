@@ -118,6 +118,35 @@ const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
 const EditableHitTest = in_game_editor.EditableHitTest;
 
+pub const debug_color_table = [_]Color3{
+    Color3.new(1, 0, 0),
+    Color3.new(0, 1, 0),
+    Color3.new(0, 0, 1),
+    Color3.new(1, 1, 0),
+    Color3.new(0, 1, 1),
+    Color3.new(1, 0, 1),
+    Color3.new(1, 0.5, 0),
+    Color3.new(1, 0, 0.5),
+    Color3.new(0.5, 1, 0),
+    Color3.new(0, 1, 0.5),
+    Color3.new(0.5, 0, 1),
+    Color3.new(1, 0.75, 0.5),
+    Color3.new(1, 0.5, 0.75),
+    Color3.new(0.75, 1, 0.5),
+    Color3.new(0.5, 1, 0.75),
+    Color3.new(0.5, 0.75, 1),
+};
+
+pub fn getDebugColor3(value: u32) Color3 {
+    const result = debug_color_table[@mod(value, debug_color_table.len)];
+    return result;
+}
+pub fn getDebugColor4(value: u32, opt_alpha: ?f32) Color {
+    const alpha: f32 = opt_alpha orelse 1;
+    const result: Color = getDebugColor3(value).toColor(alpha);
+    return result;
+}
+
 pub export fn updateAndRender(
     platform: shared.Platform,
     game_memory: *shared.Memory,

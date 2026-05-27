@@ -8,6 +8,7 @@ const asset_rendering = @import("asset_rendering.zig");
 const file_formats = @import("file_formats.zig");
 const memory = @import("memory.zig");
 const dev_ui = @import("dev_ui.zig");
+const handmade = @import("handmade.zig");
 const world_mode_mod = @import("world_mode.zig");
 
 // Types.
@@ -695,7 +696,7 @@ pub const InGameEditor = struct {
                             layout.beginRow();
                             const draw_toggle: *bool = &self.draw_align_point[point_index];
                             const button_color: Color = if (draw_toggle.*)
-                                shared.getDebugColor4(point_index, null)
+                                handmade.getDebugColor4(point_index, null)
                             else
                                 .new(0.25, 0.25, 0.25, 1);
                             if (layout.button(

@@ -6,6 +6,7 @@ const types = shared.types;
 const file_formats = shared.file_formats;
 const file_formats_v0 = shared.file_formats_v0;
 const intrinsics = shared.intrinsics;
+const hht = shared.hht;
 
 // Types.
 const String = types.String;
@@ -74,11 +75,13 @@ const LoadedHHA = struct {
     data_store: []const u8 = undefined,
 };
 
-fn readEntireFile(file: std.Io.File, allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
-    var result: []const u8 = undefined;
+fn readEntireFile(file: std.Io.File, allocator: std.mem.Allocator, io: std.Io) !String {
+    var result: String = .empty;
 
     var file_reader = file.reader(io, &.{});
-    result = try file_reader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32)));
+    const contents = file_reader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32))) catch "";
+    result.data = @ptrCast(@constCast(contents));
+    result.count = @intCast(contents.len);
 
     return result;
 }
@@ -313,7 +316,7 @@ fn readHHA(source_file_name: []const u8, allocator: std.mem.Allocator, io: std.I
     if (std.Io.Dir.cwd().openFile(io, source_file_name, .{ .mode = .read_only })) |source_file| {
         defer source_file.close(io);
 
-        result.?.data_store = readEntireFile(source_file, allocator, io) catch undefined;
+        result.?.data_store = (readEntireFile(source_file, allocator, io) catch undefined).toSlice();
 
         result.?.magic_value = @as([*]const u32, @ptrCast(@alignCast(result.?.data_store)))[0];
         result.?.source_version = @as([*]const u32, @ptrCast(@alignCast(result.?.data_store)))[1];
@@ -718,6 +721,26 @@ pub fn main(init: std.process.Init) !void {
             } else {
                 std.log.err("File {s} already exists.", .{file_name});
             }
+        } else if (std.mem.eql(u8, args[1], "-checkhht")) {
+            const file_name: []const u8 = args[2];
+
+            if (fileExists(file_name, init.io)) {
+                if (std.Io.Dir.cwd().openFile(
+                    init.io,
+                    file_name,
+                    .{ .mode = .read_only },
+                )) |source| {
+                    defer source.close(init.io);
+
+                    const file_contents = try readEntireFile(source, allocator, init.io);
+                    var tokenizer: shared.tokenizer.Tokenizer = .init(file_contents);
+                    hht.parseHHT(&tokenizer);
+                } else |err| {
+                    std.log.err("Unable to open file {s} for writing. {s}", .{ file_name, @errorName(err) });
+                }
+            } else {
+                std.log.err("File {s} doesn't exist.", .{file_name});
+            }
         } else {
             print_usage = true;
         }
@@ -730,5 +753,6 @@ pub fn main(init: std.process.Init) !void {
         std.log.err("Usage: {s} -rewrite (source.hha) (dest.hha)", .{args[0]});
         std.log.err("Usage: {s} -info (source.hha)", .{args[0]});
         std.log.err("Usage: {s} -dump (source.hha)", .{args[0]});
+        std.log.err("Usage: {s} -checkhht (source.hha)", .{args[0]});
     }
 }

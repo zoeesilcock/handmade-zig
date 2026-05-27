@@ -2,7 +2,7 @@
 default
 {
     Author = "Anna Rettberg";
-    Description = "These are the original in-game assets for the base game."
+    Description = "These are the original in-game assets for the base game.";
 };
 
 block "block_forest_01.png"

@@ -291,6 +291,11 @@ fn addSimplePreprocessor(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
+    const shared_module = b.addModule("shared", .{
+        .root_source_file = b.path("src/shared.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     const simple_preprocessor_exe = b.addExecutable(.{
         .name = "simple-preprocessor",
         .root_module = b.createModule(.{
@@ -302,6 +307,7 @@ fn addSimplePreprocessor(
     });
     simple_preprocessor_exe.stack_size = 0x100000; // 1MB.
     simple_preprocessor_exe.root_module.addOptions("build_options", build_options);
+    simple_preprocessor_exe.root_module.addImport("shared", shared_module);
 
     b.installArtifact(simple_preprocessor_exe);
 
