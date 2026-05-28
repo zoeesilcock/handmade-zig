@@ -1,5 +1,67 @@
 // These are the assets for the introduction cutscene.
 
-plate "title_screen.png"
-{
-};
+plate "title_screen.png" {Tags = ShotIndex(12), LayerIndex(1) }
+
+plate "shot1_1.png" {Tags = ShotIndex(1),LayerIndex(1)};
+plate "shot1_2.png" {Tags = ShotIndex(1),LayerIndex(2)};
+plate "shot1_3.png" {Tags = ShotIndex(1),LayerIndex(3)};
+plate "shot1_4.png" {Tags = ShotIndex(1),LayerIndex(4)};
+plate "shot1_5.png" {Tags = ShotIndex(1),LayerIndex(5)};
+plate "shot1_6.png" {Tags = ShotIndex(1),LayerIndex(6)};
+plate "shot1_7.png" {Tags = ShotIndex(1),LayerIndex(7)};
+plate "shot1_8.png" {Tags = ShotIndex(1),LayerIndex(8)};
+
+plate "shot2_1.png" {Tags = ShotIndex(2),LayerIndex(1)};
+plate "shot2_2.png" {Tags = ShotIndex(2),LayerIndex(2)};
+plate "shot2_3.png" {Tags = ShotIndex(2),LayerIndex(3)};
+plate "shot3_1.png" {Tags = ShotIndex(3),LayerIndex(1)};
+plate "shot3_2.png" {Tags = ShotIndex(3),LayerIndex(2)};
+plate "shot3_3.png" {Tags = ShotIndex(3),LayerIndex(3)};
+plate "shot3_4.png" {Tags = ShotIndex(3),LayerIndex(4)};
+
+plate "shot4_1.png" {Tags = ShotIndex(4),LayerIndex(1)};
+plate "shot4_2.png" {Tags = ShotIndex(4),LayerIndex(2)};
+plate "shot4_3.png" {Tags = ShotIndex(4),LayerIndex(3)};
+plate "shot4_4.png" {Tags = ShotIndex(4),LayerIndex(4)};
+plate "shot4_5.png" {Tags = ShotIndex(4),LayerIndex(5)};
+
+plate "shot5_1.png" {Tags = ShotIndex(5),LayerIndex(1)};
+plate "shot5_2.png" {Tags = ShotIndex(5),LayerIndex(2)};
+plate "shot5_3.png" {Tags = ShotIndex(5),LayerIndex(3)};
+plate "shot5_4.png" {Tags = ShotIndex(5),LayerIndex(4)};
+plate "shot5_5.png" {Tags = ShotIndex(5),LayerIndex(5)};
+
+plate "shot6_1.png" {Tags = ShotIndex(6),LayerIndex(1)};
+plate "shot6_2.png" {Tags = ShotIndex(6),LayerIndex(2)};
+plate "shot6_3.png" {Tags = ShotIndex(6),LayerIndex(3)};
+plate "shot6_4.png" {Tags = ShotIndex(6),LayerIndex(4)};
+plate "shot6_5.png" {Tags = ShotIndex(6),LayerIndex(5)};
+plate "shot6_6.png" {Tags = ShotIndex(6),LayerIndex(6)};
+
+plate "shot7_1.png" {Tags = ShotIndex(7),LayerIndex(1)};
+plate "shot7_2.png" {Tags = ShotIndex(7),LayerIndex(2)};
+
+plate "shot8_1.png" {Tags = ShotIndex(8),LayerIndex(1)};
+plate "shot8_2.png" {Tags = ShotIndex(8),LayerIndex(2)};
+plate "shot8_3.png" {Tags = ShotIndex(8),LayerIndex(3)};
+plate "shot8_4.png" {Tags = ShotIndex(8),LayerIndex(4)};
+
+plate "shot9_1.png" {Tags = ShotIndex(9),LayerIndex(1)};
+plate "shot9_2.png" {Tags = ShotIndex(9),LayerIndex(2)};
+plate "shot9_3.png" {Tags = ShotIndex(9),LayerIndex(3)};
+plate "shot9_4.png" {Tags = ShotIndex(9),LayerIndex(4)};
+
+plate "shot10_1.png" {Tags = ShotIndex(10),LayerIndex(1)};
+plate "shot10_2.png" {Tags = ShotIndex(10),LayerIndex(2)};
+plate "shot10_3.png" {Tags = ShotIndex(10),LayerIndex(3)};
+plate "shot10_4.png" {Tags = ShotIndex(10),LayerIndex(4)};
+plate "shot10_5.png" {Tags = ShotIndex(10),LayerIndex(5)};
+plate "shot10_6.png" {Tags = ShotIndex(10),LayerIndex(6)};
+
+plate "shot11_1.png" {Tags = ShotIndex(11),LayerIndex(1)};
+plate "shot11_2.png" {Tags = ShotIndex(11),LayerIndex(2)};
+plate "shot11_3.png" {Tags = ShotIndex(11),LayerIndex(3)};
+plate "shot11_4.png" {Tags = ShotIndex(11),LayerIndex(4)};
+plate "shot11_5.png" {Tags = ShotIndex(11),LayerIndex(5)};
+plate "shot11_6.png" {Tags = ShotIndex(11),LayerIndex(6)};
+plate "shot11_7.png" {Tags = ShotIndex(11),LayerIndex(7)};

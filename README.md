@@ -25,7 +25,9 @@ Graphical and audio assets are not included as they are not created by me. The f
 * `handmade_hero_legacy_art.zip/png_art_packs` to be in `/sources/base_game/art`.
     * Exclude all `character_orphan_**.png` files.
     * Exclude the `character_hero.png` file.
+
 * `title_screen.png` to be in the `/sources/intro_cutscene/art` directory.
+* `handmade_hero_day_536_art.zip/sources/intro_cutscene/art` to be in the `/sources/intro_cutscene/art` directory.
 
 ### Packing the assets
 The asset builder can be used to generate HHA files based on the early data located at `handmade_hero_legacy_art/early_data`, they are expected to be in the `/data` directory.

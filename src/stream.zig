@@ -102,7 +102,7 @@ pub const Stream = struct {
 
         const result: ?[*]u8 = self.contents.advance(size);
         if (result == null) {
-            output(self.errors, @src(), "File underflow", .{});
+            _ = outputWithSrc(self.errors, @src(), "File underflow", .{});
             self.underflowed = true;
         }
 
@@ -131,19 +131,33 @@ pub const Stream = struct {
     }
 };
 
-pub fn output(
+pub fn outputWithSrc(
     output_stream: ?*Stream,
     comptime source: std.builtin.SourceLocation,
     comptime format: []const u8,
     args: anytype,
-) void {
+) usize {
+    return output(source.file, source.line, output_stream, format, args);
+}
+
+pub fn output(
+    file_name: [:0]const u8,
+    line_number: u32,
+    output_stream: ?*Stream,
+    comptime format: []const u8,
+    args: anytype,
+) usize {
+    var size: usize = 0;
+
     if (output_stream) |stream| {
         var buffer: [1024]u8 = undefined;
-        const size: usize = shared.formatString(buffer.len, @ptrCast(&buffer), @ptrCast(format), args);
+        size = shared.formatString(buffer.len, @ptrCast(&buffer), @ptrCast(format), args);
 
         const contents = stream.arena.?.pushCopy(size, &buffer);
         var chunk = stream.appendChunk(size, @ptrCast(contents));
-        chunk.line = source.line;
-        chunk.file_name = source.file;
+        chunk.line = line_number;
+        chunk.file_name = file_name;
     }
+
+    return size;
 }

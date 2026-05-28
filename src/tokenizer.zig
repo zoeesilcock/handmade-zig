@@ -1,12 +1,14 @@
 const std = @import("std");
 const shared = @import("shared.zig");
 const types = @import("types.zig");
+const stream = @import("stream.zig");
 
 // Types.
 const String = types.String;
 
 const TokenType = enum(u32) {
     Unknown,
+
     Comma,
     Colon,
     Period,
@@ -19,15 +21,20 @@ const TokenType = enum(u32) {
     OpenBrace,
     CloseBrace,
     Equals,
-    EndOfStream,
+
     String,
     Identifier,
+    Number,
+
     Comment,
+    EndOfStream,
 };
 
 pub const Token = struct {
-    token_type: TokenType = undefined,
+    file_name: [:0]const u8 = "",
+    line_number: u32 = 0,
 
+    token_type: TokenType = undefined,
     text: String = .empty,
     f32: f32 = 0,
     i32: i32 = 0,
@@ -38,8 +45,13 @@ pub const Token = struct {
 };
 
 pub const Tokenizer = struct {
+    file_name: [:0]const u8 = "",
+    line_number: u32 = 0,
+    error_stream: *stream.Stream = undefined,
+
     input: String,
     at: [2]u8 = [1]u8{undefined} ** 2,
+
     has_error: bool = false,
 
     pub fn init(input: String) Tokenizer {
@@ -57,10 +69,14 @@ pub const Tokenizer = struct {
         self.refill();
     }
 
-    pub fn encounteredError(self: *Tokenizer, on_token: Token, message: [*:0]const u8) void {
+    pub fn encounteredError(self: *Tokenizer, on_token: Token, comptime message: [:0]const u8, args: anytype) void {
         self.has_error = true;
-        _ = on_token;
-        _ = message;
+        _ = stream.output(on_token.file_name, on_token.line_number, self.error_stream, message, args);
+    }
+
+    pub fn encounteredErrorUnknown(self: *Tokenizer, comptime message: [:0]const u8, args: anytype) void {
+        self.has_error = true;
+        _ = stream.output(self.file_name, self.line_number, self.error_stream, message, args);
     }
 
     fn refill(self: *Tokenizer) void {
@@ -83,6 +99,9 @@ pub const Tokenizer = struct {
         if (token.text.count > 0) {
             token.text.count = 0;
         }
+
+        token.file_name = self.file_name;
+        token.line_number = self.line_number;
 
         const c = self.at[0];
         self.advanceChars(1);
@@ -139,12 +158,33 @@ pub const Tokenizer = struct {
                     }
 
                     token.text.count = @intFromPtr(self.input.data) - @intFromPtr(token.text.data);
+                } else if (shared.isNumber(c)) {
+                    var number: f32 = 0;
+                    while (shared.isNumber(self.at[0])) {
+                        const digit: f32 = @floatFromInt(self.at[0] - '0');
+                        number = number * 10 + digit;
+
+                        self.advanceChars(1);
+                    }
+
+                    if (self.at[0] == '.') {
+                        var coefficient: f32 = 0.1;
+                        while (shared.isNumber(self.at[0])) {
+                            const digit: f32 = @floatFromInt(self.at[0] - '0');
+                            number = digit * coefficient;
+                            coefficient *= 0.1;
+
+                            self.advanceChars(1);
+                        }
+                    }
+
+                    token.token_type = .Number;
+                    token.f32 = number;
+                    token.i32 = @intFromFloat(number);
+                    token.text.count = @intFromPtr(self.input.data) - @intFromPtr(token.text.data);
                 } else {
                     token.token_type = .Unknown;
                 }
-                // else if (shared.isNumber(c)) {
-                //     parseNumber();
-                // }
             },
         }
 
@@ -178,7 +218,7 @@ pub const Tokenizer = struct {
         const token: Token = self.getToken();
 
         if (token.token_type != desired_type) {
-            self.encounteredError(token, "Unexpected token type");
+            self.encounteredError(token, "Unexpected token type", .{});
         }
 
         return token;

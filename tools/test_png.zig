@@ -54,7 +54,7 @@ fn readEntireFile(file_name: []const u8, allocator: std.mem.Allocator, errors: *
 
     const result: Stream = .makeReadStream(buffer, errors);
     if (open_error) |err| {
-        stream.output(result.errors, @src(), "Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
+        _ = stream.outputWithSrc(result.errors, @src(), "Cannot find file '{s}': {s}", .{ file_name, @errorName(err) });
     }
 
     return result;
@@ -188,7 +188,12 @@ fn writeBMPImageTopDownRGBA(
 
         try writer.flush();
     } else |err| {
-        stream.output(errors, @src(), "Unable to write output file '%s': %s\n", .{ output_file_name, @errorName(err) });
+        _ = stream.outputWithSrc(
+            errors,
+            @src(),
+            "Unable to write output file '%s': %s\n",
+            .{ output_file_name, @errorName(err) },
+        );
     }
 }
 
@@ -240,11 +245,11 @@ pub fn main(init: std.process.Init) !void {
         const out_file_name_rgb: [:0]const u8 = args[2];
         const out_file_name_alpha: [:0]const u8 = args[3];
 
-        stream.output(&info_stream, @src(), "Loading PNG %s...\n", .{in_file_name});
+        _ = stream.outputWithSrc(&info_stream, @src(), "Loading PNG %s...\n", .{in_file_name});
         const file: Stream = try readEntireFile(in_file_name, allocator, &error_stream, init.io);
         const image: ImageU32 = png.parsePNG(&arena, file, &info_stream);
 
-        stream.output(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_rgb});
+        _ = stream.outputWithSrc(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_rgb});
         try writeBMPImageTopDownRGBA(
             image.width,
             image.height,
@@ -254,7 +259,7 @@ pub fn main(init: std.process.Init) !void {
             &error_stream,
             init.io,
         );
-        stream.output(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_alpha});
+        _ = stream.outputWithSrc(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_alpha});
         try writeBMPImageTopDownRGBA(
             image.width,
             image.height,
@@ -265,7 +270,7 @@ pub fn main(init: std.process.Init) !void {
             init.io,
         );
     } else {
-        stream.output(
+        _ = stream.outputWithSrc(
             &error_stream,
             @src(),
             "Usage: %s (png file to load) (bmp file to write RGB to) (bmp file to write alpha to)\n",

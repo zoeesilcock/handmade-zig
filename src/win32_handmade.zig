@@ -173,9 +173,65 @@ const Win32PlatformFileGroup = extern struct {
     arena: MemoryArena,
 };
 
+fn utf8FromUTF16(arena: *MemoryArena, name_size: usize, name: [*:0]const u16) [*:0]u8 {
+    const result_storage: usize = 4 * name_size + 1;
+    var result: [*:0]u8 = @ptrCast(arena.pushSize(result_storage + 1, null));
+    const result_size: usize = @intCast(win32.WideCharToMultiByte(
+        win32.CP_UTF8,
+        0,
+        name,
+        @intCast(name_size),
+        @ptrCast(result),
+        @intCast(result_storage),
+        null,
+        null,
+    ));
+    result[result_size] = 0;
+    return result;
+}
+
+fn utf16FromUTF8(arena: *MemoryArena, name_size: usize, name: [*:0]const u8) [*:0]u16 {
+    const result_storage: usize = 2 * name_size;
+    var result: [*:0]u8 = @ptrCast(arena.pushSize(result_storage + 2, null));
+    const result_size: usize = @intCast(win32.MultiByteToWideChar(
+        win32.CP_UTF8,
+        0,
+        name,
+        @intCast(name_size),
+        @ptrCast(result),
+        @intCast(result_storage),
+        null,
+        null,
+    ));
+    result[result_size] = 0;
+    return result;
+}
+
+fn allocateFileInfo(
+    file_group: *shared.PlatformFileGroup,
+    data: *win32.WIN32_FILE_ATTRIBUTE_DATA,
+) *shared.PlatformFileInfo {
+    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
+    var info: *shared.PlatformFileInfo = win32_file_group.arena.pushStruct(
+        shared.PlatformFileInfo,
+        .aligned(@alignOf(shared.PlatformFileInfo), false),
+    );
+
+    info.next = file_group.first_file_info;
+    info.file_date =
+        (@as(u64, @intCast(data.ftLastWriteTime.dwHighDateTime)) << @as(u64, 32)) |
+        @as(u64, @intCast(data.ftLastWriteTime.dwLowDateTime));
+    info.file_size =
+        (@as(u64, @intCast(data.nFileSizeHigh)) << @as(u64, 32)) | @as(u64, @intCast(data.nFileSizeLow));
+    file_group.first_file_info = info;
+    file_group.file_count += 1;
+
+    return info;
+}
+
 fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shared.PlatformFileGroup {
     var result: shared.PlatformFileGroup = .{};
-    var win32_file_group: *Win32PlatformFileGroup = memory.bootstrapPushStruct(
+    const win32_file_group: *Win32PlatformFileGroup = memory.bootstrapPushStruct(
         Win32PlatformFileGroup,
         "arena",
         null,
@@ -194,13 +250,9 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
             stem = win32.L("data\\");
             wildcard = win32.L("data\\*.hhs");
         },
-        shared.PlatformFileTypes.PNG => {
-            stem = win32.L("art\\");
-            wildcard = win32.L("art\\*.png");
-        },
-        shared.PlatformFileTypes.WAV => {
-            stem = win32.L("sound\\");
-            wildcard = win32.L("sound\\*.wav");
+        shared.PlatformFileTypes.HHT => {
+            stem = win32.L("data\\");
+            wildcard = win32.L("data\\*.hht");
         },
     }
 
@@ -214,17 +266,7 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
     var find_handle = win32.FindFirstFileW(wildcard, &find_data);
 
     while (@as(*anyopaque, @ptrCast(&find_handle)) != win32.INVALID_HANDLE_VALUE) {
-        result.file_count += 1;
-        var info: *shared.PlatformFileInfo = win32_file_group.arena.pushStruct(
-            shared.PlatformFileInfo,
-            .aligned(@alignOf(shared.PlatformFileInfo), false),
-        );
-        info.next = result.first_file_info;
-        info.file_date =
-            (@as(u64, @intCast(find_data.ftLastWriteTime.dwHighDateTime)) << @as(u64, 32)) |
-            @as(u64, @intCast(find_data.ftLastWriteTime.dwLowDateTime));
-        info.file_size =
-            (@as(u64, @intCast(find_data.nFileSizeHigh)) << @as(u64, 32)) | @as(u64, @intCast(find_data.nFileSizeLow));
+        const info: *shared.PlatformFileInfo = allocateFileInfo(&result, @ptrCast(&find_data));
 
         const base_name_begin: [*:0]const u16 = @ptrCast(&find_data.cFileName);
         var base_name_end: ?[*:0]const u16 = null;
@@ -241,19 +283,7 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
         }
 
         const base_name_size: usize = base_name_end.? - base_name_begin;
-        const base_name_storage: usize = 4 * base_name_size + 1;
-        info.base_name = @ptrCast(win32_file_group.arena.pushSize(base_name_storage + 1, null));
-        const base_name_utf8_size: usize = @intCast(win32.WideCharToMultiByte(
-            win32.CP_UTF8,
-            0,
-            base_name_begin,
-            @intCast(base_name_size),
-            @ptrCast(info.base_name),
-            @intCast(base_name_storage),
-            null,
-            null,
-        ));
-        info.base_name[base_name_utf8_size] = 0;
+        info.base_name = utf8FromUTF16(&win32_file_group.arena, base_name_size, base_name_begin);
 
         // This will not be technically correct if you use Unicode file names.
         var lower: [*:0]u8 = info.base_name;
@@ -272,8 +302,6 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
             @ptrFromInt(@intFromPtr(info.platform) + stem_size * @sizeOf(u16)),
         );
 
-        result.first_file_info = info;
-
         if (win32.FindNextFileW(find_handle, &find_data) == 0) {
             break;
         }
@@ -287,6 +315,20 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
 fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.c) void {
     const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
     win32_file_group.arena.clear();
+}
+
+fn getFileByPath(file_group: *shared.PlatformFileGroup, path: [*:0]const u8) callconv(.c) *shared.PlatformFileInfo {
+    const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
+    var result: *shared.PlatformFileInfo = undefined;
+
+    const path_16: [*:0]const u16 = utf16FromUTF8(win32_file_group.memory, types.stringLength(path), path);
+
+    var data: win32.WIN32_FILE_ATTRIBUTE_DATA = undefined;
+    if (win32.GetFileAttributesExW(path_16, &data)) {
+        result = allocateFileInfo(file_group, &data);
+    }
+
+    return result;
 }
 
 fn openFile(

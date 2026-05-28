@@ -307,6 +307,7 @@ fn addSimplePreprocessor(
     });
     simple_preprocessor_exe.stack_size = 0x100000; // 1MB.
     simple_preprocessor_exe.root_module.addOptions("build_options", build_options);
+    shared_module.addOptions("build_options", build_options);
     simple_preprocessor_exe.root_module.addImport("shared", shared_module);
 
     b.installArtifact(simple_preprocessor_exe);

@@ -6,7 +6,6 @@ const types = shared.types;
 const file_formats = shared.file_formats;
 const file_formats_v0 = shared.file_formats_v0;
 const intrinsics = shared.intrinsics;
-const hht = shared.hht;
 
 // Types.
 const String = types.String;
@@ -721,26 +720,6 @@ pub fn main(init: std.process.Init) !void {
             } else {
                 std.log.err("File {s} already exists.", .{file_name});
             }
-        } else if (std.mem.eql(u8, args[1], "-checkhht")) {
-            const file_name: []const u8 = args[2];
-
-            if (fileExists(file_name, init.io)) {
-                if (std.Io.Dir.cwd().openFile(
-                    init.io,
-                    file_name,
-                    .{ .mode = .read_only },
-                )) |source| {
-                    defer source.close(init.io);
-
-                    const file_contents = try readEntireFile(source, allocator, init.io);
-                    var tokenizer: shared.tokenizer.Tokenizer = .init(file_contents);
-                    hht.parseHHT(&tokenizer);
-                } else |err| {
-                    std.log.err("Unable to open file {s} for writing. {s}", .{ file_name, @errorName(err) });
-                }
-            } else {
-                std.log.err("File {s} doesn't exist.", .{file_name});
-            }
         } else {
             print_usage = true;
         }
@@ -753,6 +732,5 @@ pub fn main(init: std.process.Init) !void {
         std.log.err("Usage: {s} -rewrite (source.hha) (dest.hha)", .{args[0]});
         std.log.err("Usage: {s} -info (source.hha)", .{args[0]});
         std.log.err("Usage: {s} -dump (source.hha)", .{args[0]});
-        std.log.err("Usage: {s} -checkhht (source.hha)", .{args[0]});
     }
 }

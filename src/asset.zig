@@ -14,7 +14,6 @@ const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 const gl = @import("renderer_opengl.zig").gl;
 const tokenizer_mod = @import("tokenizer.zig");
-const hht = @import("hht.zig");
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
@@ -54,6 +53,7 @@ const TextureOp = renderer.TextureOp;
 const RendererTexture = renderer.RendererTexture;
 const ImageU32 = png.ImageU32;
 const Token = tokenizer_mod.Token;
+const Tokenizer = tokenizer_mod.Tokenizer;
 
 pub const AssetTagId = file_formats.AssetTagId;
 pub const ASSET_CATEGORY_COUNT = file_formats.ASSET_CATEGORY_COUNT;
@@ -78,6 +78,11 @@ const ImportSourceInfo = struct {
     name: String = .empty,
     description: String = .empty,
     author: String = .empty,
+};
+
+const ImportTagArray = struct {
+    first_tag_index: u32 = 0,
+    one_past_last_tag_index: u32 = 0,
 };
 
 const ImportGridTag = struct {
@@ -476,7 +481,7 @@ pub const Assets = struct {
                                 grid_asset_index.* = global_asset_index;
                             } else {
                                 const conflict: *Asset = &assets.assets[grid_asset_index.*];
-                                stream.output(
+                                _ = stream.outputWithSrc(
                                     &source_file.errors,
                                     @src(),
                                     "{s}({d},{d}): Asset {d} and {d} occupy same slot in spritesheet and cannot be edited properly.\n",
@@ -1677,37 +1682,27 @@ fn addTag(builder: *TagBuilder, tag_id: AssetTagId, value: f32) void {
     }
 }
 
-fn endTags(builder: *TagBuilder, cagegory: AssetBasicCategory, tag_string_in: String, errors: *Stream) ImportGridTag {
+fn endTags(
+    builder: *TagBuilder,
+    tokenizer: *Tokenizer,
+    category: AssetBasicCategory,
+    append_tags: ImportTagArray,
+) ImportGridTag {
     var result: ImportGridTag = .{};
 
-    addTag(builder, .BasicCategory, @floatFromInt(@as(u32, @intFromEnum(cagegory))));
-
-    var tag_string: String = tag_string_in;
-    while (true) {
-        const name_token: Token = popToken(&tag_string);
-        if (name_token.text.count > 0) {
-            const tag_id: AssetTagId = file_formats.tagIdFromName(name_token.text);
-            if (tag_id != .None) {
-                addTag(builder, tag_id, name_token.f32);
-            } else {
-                stream.output(
-                    errors,
-                    @src(),
-                    "Unrecognized tag name: %.*s.\n",
-                    .{ @as(u32, @intCast(name_token.text.count)), name_token.text.data },
-                );
-            }
-        } else {
-            break;
-        }
+    addTag(builder, .BasicCategory, @floatFromInt(@as(u32, @intFromEnum(category))));
+    var tag_index: u32 = append_tags.first_tag_index;
+    while (tag_index < append_tags.one_past_last_tag_index) : (tag_index += 1) {
+        const source_tag: *HHATag = @ptrCast(builder.assets.tags + tag_index);
+        addTag(builder, source_tag.id, source_tag.value);
     }
 
-    result.type_id = cagegory;
+    result.type_id = category;
     result.first_tag_index = builder.first_tag_index;
     result.one_past_last_tag_index = builder.assets.tag_count;
 
     if (builder.has_error) {
-        stream.output(errors, @src(), "Out of tag space.\n", .{});
+        tokenizer.encounteredErrorUnknown("Out of tag space.", .{});
     }
 
     return result;
@@ -1715,8 +1710,8 @@ fn endTags(builder: *TagBuilder, cagegory: AssetBasicCategory, tag_string_in: St
 
 fn importHead(
     assets: *Assets,
-    file_name: String,
-    errors: *Stream,
+    tokenizer: *Tokenizer,
+    append_tags: ImportTagArray,
     x_index: u32,
     y_index: u32,
 ) ImportGridTag {
@@ -1737,7 +1732,7 @@ fn importHead(
             else => unreachable,
         }
 
-        result = endTags(&builder, .Head, file_name, errors);
+        result = endTags(&builder, tokenizer, .Head, append_tags);
     }
 
     return result;
@@ -1745,8 +1740,8 @@ fn importHead(
 
 fn importBody(
     assets: *Assets,
-    file_name: String,
-    errors: *Stream,
+    tokenizer: *Tokenizer,
+    append_tags: ImportTagArray,
     x_index: u32,
     y_index: u32,
 ) ImportGridTag {
@@ -1771,7 +1766,7 @@ fn importBody(
             else => unreachable,
         }
 
-        result = endTags(&builder, .Body, file_name, errors);
+        result = endTags(&builder, tokenizer, .Body, append_tags);
     }
 
     return result;
@@ -1779,43 +1774,39 @@ fn importBody(
 
 fn parsePieces(
     assets: *Assets,
-    file_name_in: String,
-    info: *ImportSourceInfo,
+    tokenizer: *Tokenizer,
+    append_tags: ImportTagArray,
+    type_token: Token,
     tags: *ImportGridTags,
-    errors: *Stream,
 ) ImportType {
-    _ = info;
     var result: ImportType = .None;
 
-    var file_name: String = file_name_in;
-    const name_token: Token = popToken(&file_name);
-
-    if (shared.stringBufferEquals(name_token.text, "block")) {
+    if (type_token.equals("block")) {
         const tag: *ImportGridTag = &tags.tags[0][0];
         var builder: TagBuilder = beginTags(assets);
-        tag.* = endTags(&builder, .Block, file_name, errors);
+        tag.* = endTags(&builder, tokenizer, .Block, append_tags);
         result = .SingleTile;
-    } else if (shared.stringBufferEquals(name_token.text, "head")) {
+    } else if (type_token.equals("head")) {
         var y_index: u32 = 0;
         while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
             var x_index: u32 = 0;
             while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                tags.tags[y_index][x_index] = importHead(assets, file_name, errors, x_index, y_index);
+                tags.tags[y_index][x_index] = importHead(assets, tokenizer, append_tags, x_index, y_index);
             }
         }
 
         result = .MultiTile;
-    } else if (shared.stringBufferEquals(name_token.text, "body")) {
+    } else if (type_token.equals("body")) {
         var y_index: u32 = 0;
         while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
             var x_index: u32 = 0;
             while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                tags.tags[y_index][x_index] = importBody(assets, file_name, errors, x_index, y_index);
+                tags.tags[y_index][x_index] = importBody(assets, tokenizer, append_tags, x_index, y_index);
             }
         }
 
         result = .MultiTile;
-    } else if (shared.stringBufferEquals(name_token.text, "character")) {
+    } else if (type_token.equals("character")) {
         var y_index: u32 = 0;
         while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
             var x_index: u32 = 0;
@@ -1823,17 +1814,18 @@ fn parsePieces(
 
             while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
                 if (y_index <= 3) {
-                    tag.* = importBody(assets, file_name, errors, x_index, y_index);
+                    tag.* = importBody(assets, tokenizer, append_tags, x_index, y_index);
                 } else {
-                    tag.* = importHead(assets, file_name, errors, x_index, y_index - 4);
+                    tag.* = importHead(assets, tokenizer, append_tags, x_index, y_index - 4);
                 }
             }
         }
 
         result = .MultiTile;
-    } else if (shared.stringBufferEquals(name_token.text, "cover")) {
-        //
-    } else if (shared.stringBufferEquals(name_token.text, "hand")) {
+    } else if (type_token.equals("cover")) {
+        // TODO: Item tags.
+        result = .MultiTile;
+    } else if (type_token.equals("hand")) {
         var y_index: u32 = 0;
         while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
             var x_index: u32 = 0;
@@ -1842,28 +1834,200 @@ fn parsePieces(
                 if (x_index == 0 and y_index < 4) {
                     var builder: TagBuilder = beginTags(assets);
                     addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
-                    tag.* = endTags(&builder, .Hand, file_name, errors);
+                    tag.* = endTags(&builder, tokenizer, .Hand, append_tags);
                 }
             }
         }
 
         result = .MultiTile;
-    } else if (shared.stringBufferEquals(name_token.text, "item")) {
-        //
-    } else if (shared.stringBufferEquals(name_token.text, "obstacles")) {
-        //
-    } else if (shared.stringBufferEquals(name_token.text, "plate")) {
-        //
+    } else if (type_token.equals("item")) {
+        // TODO: Item tags.
+        result = .MultiTile;
+    } else if (type_token.equals("obstacles")) {
+        // TODO: Item tags.
+        result = .MultiTile;
+    } else if (type_token.equals("plate")) {
+        // TODO: Item tags.
+        result = .Plate;
     } else {
-        stream.output(errors, @src(), "Unrecognized type of import artwork.\n", .{});
+        // stream.output(errors, @src(), "Unrecognized type of import artwork.\n", .{});
+        tokenizer.encounteredErrorUnknown("Unrecognized type of import artwork.", .{});
     }
 
     return result;
 }
 
+pub fn writeAllHHAModifications(assets: *Assets) void {
+    var file_index: u32 = 1;
+    while (file_index < assets.file_count) : (file_index += 1) {
+        const file: *AssetFile = @ptrCast(assets.files + file_index);
+        if (file.modified) {
+            var temp_arena: MemoryArena = .{};
+            defer temp_arena.clear();
+
+            assets.writeModificationsToHHA(file_index, &temp_arena);
+        }
+    }
+}
+
+pub fn readAssetString(
+    file: *AssetFile,
+    arena: *MemoryArena,
+    count: u32,
+    offset: u64,
+) String {
+    const result: String = .{
+        .count = count,
+        .data = arena.pushSize(count, null),
+    };
+    shared.platform.readDataFromFile(&file.handle, offset, result.count, result.data);
+    return result;
+}
+
+pub fn parseHHT(tokenizer: *Tokenizer, assets: *Assets, source_info: *ImportSourceInfo) void {
+    const context: HHTContext = .{
+        .assets = assets,
+        .info = source_info,
+    };
+
+    while (tokenizer.parsing()) {
+        const token: Token = tokenizer.getToken();
+
+        if (token.token_type == .Comment) {
+            continue;
+        }
+
+        if (token.token_type == .Identifier) {
+            parseTopLevelBlock(tokenizer, context, token);
+        } else if (token.token_type == .EndOfStream) {
+            break;
+        } else {
+            tokenizer.encounteredError(token, "Unexpected top-level token.", .{});
+            break;
+        }
+    }
+}
+
+const HHTContext = struct {
+    assets: *Assets,
+    source_info: *ImportSourceInfo,
+    default_fields: HHTFields = .{},
+};
+
+const HHTFields = struct {
+    author: String = .empty,
+    description: String = .empty,
+    hha: String = .empty,
+};
+
+fn parseTopLevelBlock(
+    tokenizer: *Tokenizer,
+    context: *HHTContext,
+    block_token: Token,
+) void {
+    var found: bool = false;
+    var file_name: Token = .{};
+    var fields_: HHTFields = .{};
+    var fields: *HHTFields = &fields_;
+
+    if (block_token.equals("default")) {
+        fields = &context.default_fields;
+        found = true;
+    } else {
+        const append: ImportTagArray = .{};
+        var tags: ImportGridTags = .{};
+        const import_type: ImportType = parsePieces(
+            context.assets,
+            tokenizer,
+            append,
+            block_token,
+            context.source_info,
+            &tags,
+        );
+
+        if (import_type != .None) {
+            file_name = tokenizer.requireToken(.String);
+            fields.* = context.default_fields;
+            found = true;
+        } else {
+            tokenizer.encounteredError(block_token, "Unrecognized import type", .{});
+        }
+    }
+
+    if (found) {
+        _ = tokenizer.requireToken(.OpenBrace);
+        while (tokenizer.parsing()) {
+            const token: Token = tokenizer.getToken();
+            if (token.token_type == .CloseBrace) {
+                break;
+            } else if (token.equals("Author")) {
+                _ = tokenizer.requireToken(.Equals);
+                fields.author = tokenizer.requireToken(.String).text;
+                _ = tokenizer.requireToken(.SemiColon);
+            } else if (token.equals("Description")) {
+                _ = tokenizer.requireToken(.Equals);
+                fields.description = tokenizer.requireToken(.String).text;
+                _ = tokenizer.requireToken(.SemiColon);
+            } else if (token.equals("HHA")) {
+                _ = tokenizer.requireToken(.Equals);
+                fields.hha = tokenizer.requireToken(.String).text;
+                _ = tokenizer.requireToken(.SemiColon);
+            } else if (token.equals("Tags")) {
+                _ = tokenizer.requireToken(.Equals);
+                parseTagList(tokenizer);
+            } else {
+                tokenizer.encounteredError(token, "Expected field name.", .{});
+            }
+        }
+        _ = tokenizer.requireToken(.SemiColon);
+    } else {
+        tokenizer.encounteredError(block_token, "Unexpected block type.", .{});
+    }
+}
+
+fn parseTagList(tokenizer: *Tokenizer) void {
+    while (tokenizer.parsing()) {
+        const token: Token = tokenizer.getToken();
+        if (token.token_type == .SemiColon) {
+            break;
+        } else if (token.token_type == .Identifier) {
+            const check: Token = tokenizer.getToken();
+            if (check.token_type == .OpenParen) {
+                const value: Token = tokenizer.requireToken(.Number);
+                _ = value;
+                _ = tokenizer.requireToken(.CloseParen);
+            }
+
+            // if (name_token.text.count > 0) {
+            //     const tag_id: AssetTagId = file_formats.tagIdFromName(name_token.text);
+            //     if (tag_id != .None) {
+            //         addTag(builder, tag_id, name_token.f32);
+            //     } else {
+            //         stream.output(
+            //             errors,
+            //             @src(),
+            //             "Unrecognized tag name: %.*s.\n",
+            //             .{ @as(u32, @intCast(name_token.text.count)), name_token.text.data },
+            //         );
+            //     }
+            // } else {
+            //     break;
+            // }
+
+            if (check.token_type == .SemiColon) {
+                break;
+            } else if (check.token_type != .Comma) {
+                tokenizer.encounteredError(token, "Expected comma or semicolon.", .{});
+            }
+        } else if (token.token_type == .Comma) {} else {
+            tokenizer.encounteredError(token, "Expected a tag name.", .{});
+        }
+    }
+}
+
 pub fn importChangedAssets(assets: *Assets) void {
-    if (assets.default_append_hha_index != 0) {
-        var file_group = shared.platform.getAllFilesOfTypeBegin(.PNG);
+    if (false and assets.default_append_hha_index != 0) {
+        var file_group = shared.platform.getAllFilesOfTypeBegin(.HHT);
         defer shared.platform.getAllFilesOfTypeEnd(&file_group);
 
         // TODO: Do a sweep mark to set all assets to "unseen", then mark each one we see so we can detect
@@ -1925,31 +2089,4 @@ pub fn importChangedAssets(assets: *Assets) void {
             }
         }
     }
-}
-
-pub fn writeAllHHAModifications(assets: *Assets) void {
-    var file_index: u32 = 1;
-    while (file_index < assets.file_count) : (file_index += 1) {
-        const file: *AssetFile = @ptrCast(assets.files + file_index);
-        if (file.modified) {
-            var temp_arena: MemoryArena = .{};
-            defer temp_arena.clear();
-
-            assets.writeModificationsToHHA(file_index, &temp_arena);
-        }
-    }
-}
-
-pub fn readAssetString(
-    file: *AssetFile,
-    arena: *MemoryArena,
-    count: u32,
-    offset: u64,
-) String {
-    const result: String = .{
-        .count = count,
-        .data = arena.pushSize(count, null),
-    };
-    shared.platform.readDataFromFile(&file.handle, offset, result.count, result.data);
-    return result;
 }

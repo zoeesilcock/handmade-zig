@@ -409,7 +409,7 @@ fn filterReconstruct(height: u32, width: u32, decompressed_pixels: []u8, final_p
                 }
             },
             else => {
-                stream.output(errors, @src(), "Unrecognized row filter: %d.\n", .{filter});
+                _ = stream.outputWithSrc(errors, @src(), "Unrecognized row filter: %d.\n", .{filter});
             },
         }
 
@@ -443,19 +443,19 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                     endianSwap(&chunk_footer.crc);
 
                     if (chunk_header.chunkTypeU32() == fourcc("IHDR")) {
-                        stream.output(info, @src(), "IHDR\n", .{});
+                        _ = stream.outputWithSrc(info, @src(), "IHDR\n", .{});
 
                         const ihdr: *IHeader = @ptrCast(@alignCast(chunk_data));
                         endianSwap(&ihdr.width);
                         endianSwap(&ihdr.height);
 
-                        stream.output(info, @src(), "    width: %u\n", .{ihdr.width});
-                        stream.output(info, @src(), "    height: %u\n", .{ihdr.height});
-                        stream.output(info, @src(), "    bit_depth: %u\n", .{ihdr.bit_depth});
-                        stream.output(info, @src(), "    color_type: %u\n", .{ihdr.color_type});
-                        stream.output(info, @src(), "    compression_method: %u\n", .{ihdr.compression_method});
-                        stream.output(info, @src(), "    filter_method: %u\n", .{ihdr.filter_method});
-                        stream.output(info, @src(), "    interlace_method: %u\n", .{ihdr.interlace_method});
+                        _ = stream.outputWithSrc(info, @src(), "    width: %u\n", .{ihdr.width});
+                        _ = stream.outputWithSrc(info, @src(), "    height: %u\n", .{ihdr.height});
+                        _ = stream.outputWithSrc(info, @src(), "    bit_depth: %u\n", .{ihdr.bit_depth});
+                        _ = stream.outputWithSrc(info, @src(), "    color_type: %u\n", .{ihdr.color_type});
+                        _ = stream.outputWithSrc(info, @src(), "    compression_method: %u\n", .{ihdr.compression_method});
+                        _ = stream.outputWithSrc(info, @src(), "    filter_method: %u\n", .{ihdr.filter_method});
+                        _ = stream.outputWithSrc(info, @src(), "    interlace_method: %u\n", .{ihdr.interlace_method});
 
                         if (ihdr.bit_depth == 8 and
                             ihdr.color_type == 6 and
@@ -468,7 +468,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                             supported = true;
                         }
                     } else if (chunk_header.chunkTypeU32() == fourcc("IDAT")) {
-                        stream.output(info, @src(), "IDAT (%u)\n", .{chunk_header.length});
+                        _ = stream.outputWithSrc(info, @src(), "IDAT (%u)\n", .{chunk_header.length});
 
                         _ = compressed_data.appendChunk(
                             chunk_header.length,
@@ -480,7 +480,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
         }
 
         if (supported) {
-            stream.output(info, @src(), "Examining ZLIB headers...\n", .{});
+            _ = stream.outputWithSrc(info, @src(), "Examining ZLIB headers...\n", .{});
 
             if (compressed_data.consumeType(IDataHeader)) |idat_header| {
                 const cm: u8 = idat_header.zlib_method_flags & 0xf;
@@ -489,16 +489,16 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                 const fdict: u8 = (idat_header.additional_flags >> 5) & 0x1;
                 const flevel: u8 = idat_header.additional_flags >> 6;
 
-                stream.output(info, @src(), "    cm: %u\n", .{cm});
-                stream.output(info, @src(), "    cinfo: %u\n", .{cinfo});
-                stream.output(info, @src(), "    fcheck: %u\n", .{fcheck});
-                stream.output(info, @src(), "    fdict: %u\n", .{fdict});
-                stream.output(info, @src(), "    flevel: %u\n", .{flevel});
+                _ = stream.outputWithSrc(info, @src(), "    cm: %u\n", .{cm});
+                _ = stream.outputWithSrc(info, @src(), "    cinfo: %u\n", .{cinfo});
+                _ = stream.outputWithSrc(info, @src(), "    fcheck: %u\n", .{fcheck});
+                _ = stream.outputWithSrc(info, @src(), "    fdict: %u\n", .{fdict});
+                _ = stream.outputWithSrc(info, @src(), "    flevel: %u\n", .{flevel});
 
                 supported = (cm == 8 and fdict == 0);
 
                 if (supported) {
-                    stream.output(info, @src(), "Decompressing...\n", .{});
+                    _ = stream.outputWithSrc(info, @src(), "Decompressing...\n", .{});
 
                     final_pixels = allocatePixels(arena, width, height, 4, null);
                     const decompressed_pixels: []u8 = allocatePixels(arena, width, height, 4, 1);
@@ -518,7 +518,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                             var len: u16 = @intCast(compressed_data.consumeBits(16));
                             const nlen: u16 = @intCast(compressed_data.consumeBits(16));
                             if (len != ~nlen) {
-                                stream.output(compressed_data.errors, @src(), "LEN/NLEN mismatch.\n", .{});
+                                _ = stream.outputWithSrc(compressed_data.errors, @src(), "LEN/NLEN mismatch.\n", .{});
                             }
 
                             while (len > 0) {
@@ -541,7 +541,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                                 len -= use_len;
                             }
                         } else if (btype == 3) {
-                            stream.output(compressed_data.errors, @src(), "BTYPE of %u encountered.\n", .{btype});
+                            _ = stream.outputWithSrc(compressed_data.errors, @src(), "BTYPE of %u encountered.\n", .{btype});
                         } else {
                             var literal_length_distance_table: [512]u32 = undefined;
                             var literal_length_huffman: Huffman = allocateHuffman(arena, 15);
@@ -590,7 +590,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                                     } else if (encoded_length == 18) {
                                         repeat_count = 11 + compressed_data.consumeBits(7);
                                     } else {
-                                        stream.output(compressed_data.errors, @src(), "Encoded length of %u encountered.\n", .{encoded_length});
+                                        _ = stream.outputWithSrc(compressed_data.errors, @src(), "Encoded length of %u encountered.\n", .{encoded_length});
                                     }
 
                                     while (repeat_count > 0) : (repeat_count -= 1) {
@@ -621,7 +621,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                                     }
                                 }
                             } else {
-                                stream.output(compressed_data.errors, @src(), "BTYPE of %u encountered.\n", .{btype});
+                                _ = stream.outputWithSrc(compressed_data.errors, @src(), "BTYPE of %u encountered.\n", .{btype});
                             }
 
                             literal_length_huffman.compute(hlit, &literal_length_distance_table, null);
@@ -676,7 +676,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
         }
     }
 
-    stream.output(info, @src(), "Supported: %s\n", .{if (supported) "true" else "false"});
+    _ = stream.outputWithSrc(info, @src(), "Supported: %s\n", .{if (supported) "true" else "false"});
 
     const result: ImageU32 = .{
         .width = width,

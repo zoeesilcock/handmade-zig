@@ -12,7 +12,6 @@ pub const math = @import("math.zig");
 pub const types = @import("types.zig");
 pub const intrinsics = @import("intrinsics.zig");
 pub const tokenizer = @import("tokenizer.zig");
-pub const hht = @import("hht.zig");
 const memory = @import("memory.zig");
 const world = @import("world.zig");
 const world_mode = @import("world_mode.zig");
@@ -859,8 +858,7 @@ pub const PlatformFileGroup = extern struct {
 pub const PlatformFileTypes = enum(u32) {
     AssetFile,
     SaveGameFile,
-    PNG,
-    WAV,
+    HHT,
 };
 
 pub const PlatformMemoryBlockFlags = enum(u64) {
@@ -903,6 +901,7 @@ const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(
 
 const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.c) PlatformFileGroup;
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.c) void;
+const getFileByPathType: type = fn (file_group: *PlatformFileGroup, path: [*:0]const u8) callconv(.c) *PlatformFileInfo;
 const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFileInfo, mode_flags: u32) callconv(.c) PlatformFileHandle;
 const closeFileType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) void;
 const readDataFromFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
@@ -927,6 +926,7 @@ pub const Platform = if (INTERNAL) extern struct {
 
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
+    getFileByName: *const getFileByPathType = undefined,
     openFile: *const openFileType = undefined,
     closeFile: *const closeFileType = undefined,
     readDataFromFile: *const readDataFromFileType = undefined,
