@@ -119,7 +119,7 @@ pub fn radixSort(entry_count: u32, first: [*]SortEntry, temp: [*]SortEntry) void
 
     var byte_index: u32 = 0;
     while (byte_index < 32) : (byte_index += 8) {
-        var sort_key_offsets: [256]u32 = [1]u32{0} ** 256;
+        var sort_key_offsets: [256]u32 = @splat(0);
 
         // First pass, count how many of each key.
         var index: u32 = 0;

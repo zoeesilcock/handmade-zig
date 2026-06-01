@@ -282,7 +282,7 @@ const OpenGLProgramCommon = extern struct {
     vert_texture_index_id: i32 = 0,
 
     sampler_count: u32,
-    samplers: [16]i32 = [1]i32{0} ** 16,
+    samplers: [16]i32 = @splat(0),
 };
 
 const ZBiasProgram = extern struct {
@@ -389,8 +389,8 @@ pub const OpenGL = extern struct {
 
     // Dynamic resources that get recreated when settings change.
     resolve_frame_buffer: Framebuffer = .{},
-    depth_peel_buffers: [16]Framebuffer = [1]Framebuffer{.{}} ** 16,
-    depth_peel_resolve_buffers: [16]Framebuffer = [1]Framebuffer{.{}} ** 16,
+    depth_peel_buffers: [16]Framebuffer = @splat(.{}),
+    depth_peel_resolve_buffers: [16]Framebuffer = @splat(.{}),
     z_bias_no_depth_peel: ZBiasProgram = undefined, // Pass 0.
     z_bias_depth_peel: ZBiasProgram = undefined, // Passes 1 through n.
     peel_composite: OpenGLProgramCommon = undefined, // Composite all passes.

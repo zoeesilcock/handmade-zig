@@ -828,7 +828,7 @@ pub const PlatformWorkQueue = extern struct {
     next_entry_to_read: u32 = 0,
     semaphore_handle: ?*anyopaque = null,
 
-    entries: [256]WorkQueueEntry = [1]WorkQueueEntry{WorkQueueEntry{}} ** 256,
+    entries: [256]WorkQueueEntry = @splat(.{}),
 };
 
 pub const PlatformFileHandle = extern struct {
@@ -999,17 +999,17 @@ pub const GameInputMouseButton = enum(u8) {
 pub const GameInput = extern struct {
     frame_delta_time: f32 = 0,
 
-    controllers: [MAX_CONTROLLER_COUNT]ControllerInput = [1]ControllerInput{ControllerInput{}} ** MAX_CONTROLLER_COUNT,
+    controllers: [MAX_CONTROLLER_COUNT]ControllerInput = @splat(.{}),
 
     quit_requested: bool = false,
 
     // For debugging only.
-    mouse_buttons: [MOUSE_BUTTON_COUNT]ControllerButtonState = [1]ControllerButtonState{ControllerButtonState{}} ** MOUSE_BUTTON_COUNT,
+    mouse_buttons: [MOUSE_BUTTON_COUNT]ControllerButtonState = @splat(.{}),
     clip_space_mouse_position: math.Vector3 = .zero(),
     shift_down: bool = false,
     alt_down: bool = false,
     control_down: bool = false,
-    f_key_pressed: [13]bool = [1]bool{false} ** 13, // Index 1 is F1, etc. Index 0 is not used.
+    f_key_pressed: [13]bool = @splat(false), // Index 1 is F1, etc. Index 0 is not used.
 
     pub fn getController(self: *GameInput, controller_index: u32) *ControllerInput {
         std.debug.assert(controller_index < self.controllers.len);
@@ -1131,13 +1131,13 @@ pub const State = struct {
     frame_arena_temp: TemporaryMemory = undefined,
     frame_arena: *MemoryArena = undefined, // Cleared once per frame.
 
-    controlled_heroes: [MAX_CONTROLLER_COUNT]ControlledHero = [1]ControlledHero{undefined} ** MAX_CONTROLLER_COUNT,
+    controlled_heroes: [MAX_CONTROLLER_COUNT]ControlledHero = @splat(undefined),
 
     is_initialized: bool = false,
 
     high_priority_queue: *PlatformWorkQueue,
     low_priority_queue: *PlatformWorkQueue,
-    tasks: [4]TaskWithMemory = [1]TaskWithMemory{undefined} ** 4,
+    tasks: [4]TaskWithMemory = @splat(undefined),
 
     assets: *Assets,
 

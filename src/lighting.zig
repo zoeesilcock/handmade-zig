@@ -53,11 +53,11 @@ pub const LightingSolution = extern struct {
     box_count: u16 = 0,
     boxes: [*]LightingBox = undefined,
 
-    scratch_a: [LIGHT_DATA_WIDTH]u16 = [1]u16{0} ** LIGHT_DATA_WIDTH,
-    scratch_b: [LIGHT_DATA_WIDTH]u16 = [1]u16{0} ** LIGHT_DATA_WIDTH,
+    scratch_a: [LIGHT_DATA_WIDTH]u16 = @splat(0),
+    scratch_b: [LIGHT_DATA_WIDTH]u16 = @splat(0),
 
     box_reference_count: u16 = 0,
-    box_table: [LIGHT_DATA_WIDTH]u16 = [1]u16{0} ** LIGHT_DATA_WIDTH,
+    box_table: [LIGHT_DATA_WIDTH]u16 = @splat(0),
     root_box_index: u16,
 
     point_count: u16,

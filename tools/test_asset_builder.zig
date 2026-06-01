@@ -780,14 +780,14 @@ const VERY_LARGE_NUMBER = 4096; // 4096 should be enough for anybody.
 
 pub const Assets = struct {
     tag_count: u32 = 0,
-    tags: [VERY_LARGE_NUMBER]HHATag = [1]HHATag{undefined} ** VERY_LARGE_NUMBER,
+    tags: [VERY_LARGE_NUMBER]HHATag = @splat(undefined),
 
     asset_count: u32 = 0,
-    asset_sources: [VERY_LARGE_NUMBER]AssetSource = [1]AssetSource{undefined} ** VERY_LARGE_NUMBER,
-    assets: [VERY_LARGE_NUMBER]HHAAsset = [1]HHAAsset{undefined} ** VERY_LARGE_NUMBER,
+    asset_sources: [VERY_LARGE_NUMBER]AssetSource = @splat(undefined),
+    assets: [VERY_LARGE_NUMBER]HHAAsset = @splat(undefined),
 
     asset_type_count: u32 = 0,
-    asset_types: [ASSET_TYPE_ID_COUNT]HHAAssetType = [1]HHAAssetType{HHAAssetType{}} ** ASSET_TYPE_ID_COUNT,
+    asset_types: [ASSET_TYPE_ID_COUNT]HHAAssetType = @splat(undefined),
 
     debug_asset_type: ?*HHAAssetType = null,
     asset_index: u32 = 0,

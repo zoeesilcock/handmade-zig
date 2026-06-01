@@ -121,7 +121,7 @@ pub const Asset = struct {
 };
 
 pub const AssetVector = struct {
-    e: [ASSET_TAG_COUNT]f32 = [1]f32{0} ** ASSET_TAG_COUNT,
+    e: [ASSET_TAG_COUNT]f32 = @splat(0),
 };
 
 const AssetState = enum(u32) {
@@ -184,8 +184,7 @@ const SourceFile = struct {
     file_checksum: u64,
 
     // Note: [Y][X], asset index in the Assets.assets array.
-    asset_indices: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]u32 =
-        [1][ASSET_IMPORT_GRID_MAX]u32{[1]u32{0} ** ASSET_IMPORT_GRID_MAX} ** ASSET_IMPORT_GRID_MAX,
+    asset_indices: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]u32 = @splat(@splat(0)),
 
     errors: Stream,
 
@@ -229,7 +228,7 @@ pub const Assets = struct {
 
     game_state: *shared.State,
 
-    tag_range: [ASSET_TAG_COUNT]f32 = [1]f32{1000000} ** ASSET_TAG_COUNT,
+    tag_range: [ASSET_TAG_COUNT]f32 = @splat(1000000),
 
     file_count: u32,
     files: [*]AssetFile,
@@ -244,7 +243,7 @@ pub const Assets = struct {
 
     first_asset_of_type: [ASSET_CATEGORY_COUNT]u32,
 
-    source_file_hash: [256]?*SourceFile = [1]?*SourceFile{null} ** 256,
+    source_file_hash: [256]?*SourceFile = @splat(null),
 
     sample_count: u32,
     sample_buffer: [*]i16,

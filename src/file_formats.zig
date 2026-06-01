@@ -153,13 +153,13 @@ pub const HHAHeader = extern struct {
     tag_count: u32 align(1) = 0,
     asset_count: u32 align(1) = 0,
 
-    reserved32: [12]u32 align(1) = [1]u32{0} ** 12,
+    reserved32: [12]u32 align(1) = @splat(0),
 
     tags: u64 align(1) = undefined, // [tag_count]HHATag
     assets: u64 align(1) = undefined, // [asset_count]HHAAsset
     annotations: u64 align(1) = undefined, // [asset_count]HHAAnnotation
 
-    reserved64: [5]u64 align(1) = [1]u64{0} ** 5,
+    reserved64: [5]u64 align(1) = @splat(0),
 };
 comptime {
     std.debug.assert(@sizeOf(HHAHeader) == (16 * 4 + 8 * 8));
@@ -188,7 +188,7 @@ pub const HHAAnnotation = extern struct {
     author_offset: u64 align(1) = 0,
     error_stream_offset: u64 align(1) = 0,
     hht_block_checksum: u64 align(1) = 0,
-    reserved: [3]u64 align(1) = [1]u64{0} ** 3,
+    reserved: [3]u64 align(1) = @splat(0),
 
     error_stream_count: u32 align(1) = 0,
     reserved32: u32 align(1) = 0,
@@ -199,7 +199,7 @@ pub const HHAAnnotation = extern struct {
 
     sprite_sheet_x: u32 align(1) = 0,
     sprite_sheet_y: u32 align(1) = 0,
-    reserved32_2: [2]u32 align(1) = [1]u32{0} ** 2,
+    reserved32_2: [2]u32 align(1) = @splat(0),
 };
 comptime {
     std.debug.assert(@sizeOf(HHAAnnotation) == (16 * 8));
@@ -251,7 +251,7 @@ pub const HHAAlignPointType = enum(u16) {
 };
 
 pub const HHAAlignPoint = extern struct {
-    position_percent: [2]u16 align(1) = [1]u16{0} ** 2,
+    position_percent: [2]u16 align(1) = @splat(0),
     size: u16 align(1) = 0,
     align_type: u16 align(1) = 0,
 
@@ -312,10 +312,10 @@ pub const HHAAlignPoint = extern struct {
 pub const HHA_BITMAP_ALIGN_POINT_COUNT = 12;
 pub const HHABitmap = extern struct {
     // These are imported from txt file augmentation of the PNG.
-    align_points: [HHA_BITMAP_ALIGN_POINT_COUNT]HHAAlignPoint align(1) = [1]HHAAlignPoint{.{}} ** HHA_BITMAP_ALIGN_POINT_COUNT,
+    align_points: [HHA_BITMAP_ALIGN_POINT_COUNT]HHAAlignPoint align(1) = @splat(.{}),
 
-    dim: [2]u16 align(1) = [1]u16{0} ** 2,
-    orig_dim: [2]u16 align(1) = [1]u16{0} ** 2,
+    dim: [2]u16 align(1) = @splat(0),
+    orig_dim: [2]u16 align(1) = @splat(0),
 
     // Data looks like this:
     //

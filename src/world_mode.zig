@@ -105,7 +105,7 @@ pub const GameModeWorld = struct {
     effects_entropy: random.Series,
 
     next_particle: u32 = 0,
-    particles: [256]Particle = [1]Particle{Particle{}} ** 256,
+    particles: [256]Particle = @splat(.{}),
     particle_cels: [particles.PARTICLE_CEL_DIM][particles.PARTICLE_CEL_DIM]ParticleCel = undefined,
     particle_cache: *ParticleCache,
 

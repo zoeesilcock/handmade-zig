@@ -175,7 +175,7 @@ pub const LightingBox = extern struct {
     reflection_color: Color3,
     transparency: f32,
     emission: f32,
-    light_index: [7]u16 = [1]u16{0} ** 7,
+    light_index: [7]u16 = @splat(0),
     child_count: u16 = 0,
     first_child_index: u16,
 };

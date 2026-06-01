@@ -69,8 +69,8 @@ pub const HHAHeaderV0 = extern struct {
 };
 
 pub const HHABitmapV0 = extern struct {
-    dim: [2]u32 = [1]u32{0} ** 2,
-    alignment_percentage: [2]f32 = [1]f32{0} ** 2,
+    dim: [2]u32 = @splat(0),
+    alignment_percentage: [2]f32 = @splat(0),
 };
 
 pub const HHAAssetV0 = extern struct {

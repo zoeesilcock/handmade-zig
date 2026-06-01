@@ -166,13 +166,13 @@ pub const DebugState = struct {
     debug_arena: MemoryArena,
     per_frame_arena: MemoryArena,
 
-    element_hash: [1024]?*DebugElement = [1]?*DebugElement{null} ** 1024,
-    view_hash: [4096]*DebugView = [1]*DebugView{undefined} ** 4096,
+    element_hash: [1024]?*DebugElement = @splat(null),
+    view_hash: [4096]*DebugView = @splat(undefined),
     root_group: *DebugVariableLink,
     function_group: *DebugVariableLink,
     profile_group: *DebugVariableLink,
 
-    dev_mode_links: [DEV_MODE_COUNT]?*DebugVariableLink = [1]?*DebugVariableLink{null} ** DEV_MODE_COUNT,
+    dev_mode_links: [DEV_MODE_COUNT]?*DebugVariableLink = @splat(null),
 
     tree_sentinel: DebugTree,
 
@@ -183,7 +183,7 @@ pub const DebugState = struct {
     most_recent_frame_ordinal: u32,
     collation_frame_ordinal: u32,
     oldest_frame_ordinal: u32,
-    frames: [MAX_FRAME_COUNT]DebugFrame = [1]DebugFrame{undefined} ** MAX_FRAME_COUNT,
+    frames: [MAX_FRAME_COUNT]DebugFrame = @splat(undefined),
     collation_frame: DebugFrame,
 
     root_profile_element: ?*DebugElement,
@@ -206,7 +206,7 @@ pub const DebugState = struct {
     menu_active: bool,
 
     selected_id_count: u32,
-    selected_id: [64]DevId = [1]DevId{undefined} ** 64,
+    selected_id: [64]DevId = @splat(undefined),
 
     left_edge: f32 = 0,
     right_edge: f32 = 0,
@@ -967,7 +967,7 @@ pub const DebugElement = struct {
 
     value_was_edited: bool,
 
-    frames: [MAX_FRAME_COUNT]DebugElementFrame = [1]DebugElementFrame{undefined} ** MAX_FRAME_COUNT,
+    frames: [MAX_FRAME_COUNT]DebugElementFrame = @splat(undefined),
 
     next_in_hash: ?*DebugElement,
 

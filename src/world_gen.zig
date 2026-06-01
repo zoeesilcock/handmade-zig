@@ -195,7 +195,7 @@ const GenDungeon = struct {
 };
 
 const GenForest = struct {
-    exits: [4]?*GenRoom = [1]?*GenRoom{null} ** 4,
+    exits: [4]?*GenRoom = @splat(null),
 };
 
 const GenOrphanage = struct {
@@ -1129,7 +1129,7 @@ pub fn createWorld(world_mode: *world_mode_mod.GameModeWorld) void {
 //         }
 //     }
 //
-//     var stair_positions: [4]WorldPosition = [1]WorldPosition{undefined} ** 4;
+//     var stair_positions: [4]WorldPosition = @splat(undefined);
 //     offset_y = -1;
 //     while (offset_y <= 2) : (offset_y += 1) {
 //         const offset_x: i32 = 3;

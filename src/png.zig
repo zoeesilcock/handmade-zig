@@ -76,7 +76,7 @@ const Huffman = struct {
     fn compute(self: *Huffman, symbol_count: u32, symbol_code_length: [*]u32, opt_symbol_addend: ?u32) void {
         const symbol_addend = opt_symbol_addend orelse 0;
 
-        var code_length_histogram: [PNG_HUFFMAN_MAX_BIT_COUNT]u32 = [1]u32{0} ** PNG_HUFFMAN_MAX_BIT_COUNT;
+        var code_length_histogram: [PNG_HUFFMAN_MAX_BIT_COUNT]u32 = @splat(0);
         var symbol_index: u32 = 0;
         while (symbol_index < symbol_count) : (symbol_index += 1) {
             const count: u32 = symbol_code_length[symbol_index];
@@ -561,7 +561,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
                                 const hclen_swizzle =
                                     [_]u32{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
                                 std.debug.assert(hclen <= hclen_swizzle.len);
-                                var hclen_table: [hclen_swizzle.len]u32 = [1]u32{0} ** hclen_swizzle.len;
+                                var hclen_table: [hclen_swizzle.len]u32 = @splat(0);
 
                                 var index: u32 = 0;
                                 while (index < hclen) : (index += 1) {

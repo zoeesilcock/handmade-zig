@@ -173,7 +173,7 @@ fn rleCompress(stats: *StatGroup, in_size: usize, in_base: [*]const u8, max_out_
     const MAX_LITERAL_COUNT = 255;
     const MAX_RUN_COUNT = 255;
     var literal_count: u32 = 0;
-    var literals: [MAX_LITERAL_COUNT]u8 = [1]u8{0} ** MAX_LITERAL_COUNT;
+    var literals: [MAX_LITERAL_COUNT]u8 = @splat(0);
 
     var in: [*]const u8 = in_base;
     var out: [*]u8 = out_base;
@@ -265,7 +265,7 @@ fn lzCompress(stats: *StatGroup, in_size: usize, in_base: [*]const u8, max_out_s
     const MAX_RUN_COUNT = 255;
     const MAX_LOOKBACK_COUNT = 255;
     var literal_count: u32 = 0;
-    var literals: [MAX_LITERAL_COUNT]u8 = [1]u8{0} ** MAX_LITERAL_COUNT;
+    var literals: [MAX_LITERAL_COUNT]u8 = @splat(0);
 
     var in: [*]const u8 = in_base;
     var out: [*]u8 = out_base;
@@ -431,7 +431,7 @@ const Stat = struct {
 const StatGroup = struct {
     uncompressed_bytes: usize = 0,
     compressed_bytes: usize = 0,
-    stats: [STAT_COUNT]Stat = [1]Stat{.{}} ** STAT_COUNT,
+    stats: [STAT_COUNT]Stat = @splat(.{}),
 };
 
 fn getStatName(stat_type: StatType) []const u8 {

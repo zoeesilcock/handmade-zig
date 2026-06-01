@@ -229,7 +229,7 @@ pub const InGameEditor = struct {
         self.in_progress_sentinel.sentinelize();
         self.clean_edit = self.undo_sentinel.next;
 
-        self.draw_align_point = [1]bool{true} ** HHA_BITMAP_ALIGN_POINT_COUNT;
+        self.draw_align_point = @splat(true);
     }
 
     fn isDirty(self: *InGameEditor) bool {

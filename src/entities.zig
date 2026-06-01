@@ -151,8 +151,8 @@ pub const Entity = extern struct {
     // Everything below here is not worked out yet.
     //
     tag_count: u32 = 0,
-    tags: [8]AssetTagId = [1]AssetTagId{.None} ** 8,
-    tag_values: [8]f32 = [1]f32{0} ** 8,
+    tags: [8]AssetTagId = @splat(.None),
+    tag_values: [8]f32 = @splat(0),
     flags: u32 = 0,
 
     position: Vector3 = Vector3.zero(),
@@ -499,7 +499,7 @@ pub fn updateAndRenderEntities(
 
                 TimedBlock.beginBlock(@src(), .EntityRenderPieces);
 
-                var bitmap_infos: [ENTITY_MAX_PIECE_COUNT]?*HHABitmap = [1]?*HHABitmap{null} ** ENTITY_MAX_PIECE_COUNT;
+                var bitmap_infos: [ENTITY_MAX_PIECE_COUNT]?*HHABitmap = @splat(null);
                 var piece_sprites: [ENTITY_MAX_PIECE_COUNT]SpriteValues = undefined;
 
                 var piece_index: u32 = 0;

@@ -210,7 +210,7 @@ pub const AudioState = struct {
                             chunks_to_mix = chunks_remaining_in_sound;
                         }
 
-                        var volume_ends_at: [output_channel_count]u32 = [1]u32{0} ** output_channel_count;
+                        var volume_ends_at: [output_channel_count]u32 = @splat(0);
 
                         // Limit the output to the end of the current volume fade.
                         {

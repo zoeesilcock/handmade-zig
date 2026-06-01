@@ -57,8 +57,8 @@ pub const SimRegion = extern struct {
     brain_count: u32 = 0,
     brains: [*]Brain,
 
-    entity_hash: [8192]EntityHash = [1]EntityHash{undefined} ** 8192,
-    brain_hash: [256]BrainHash = [1]BrainHash{undefined} ** 256,
+    entity_hash: [8192]EntityHash = @splat(undefined),
+    brain_hash: [256]BrainHash = @splat(undefined),
 
     entity_hash_occupancy: [8192 / 64]u64,
     brain_hash_occupancy: [256 / 64]u64,

@@ -50,7 +50,7 @@ pub const Tokenizer = struct {
     error_stream: *stream.Stream = undefined,
 
     input: String,
-    at: [2]u8 = [1]u8{undefined} ** 2,
+    at: [2]u8 = @splat(undefined),
 
     has_error: bool = false,
 

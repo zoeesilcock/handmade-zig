@@ -1266,7 +1266,7 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
             if (row_count != col_count) unreachable else if (row_count == 2) Vector2Type(f32) else if (row_count == 3) Vector3Type(f32) else if (row_count == 4) Vector4Type(f32);
 
         // Row major storage.
-        values: [row_count]VectorType = [1]VectorType{.zero()} ** row_count,
+        values: [row_count]VectorType = @splat(.zero()),
 
         const Self = @This();
 

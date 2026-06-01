@@ -39,9 +39,7 @@ pub const DebugTable = extern struct {
     current_event_array_index: u32 = 0,
     event_array_index_event_index: u64 = 0,
 
-    events: [2][16 * 65536]DebugEvent = [1][16 * 65536]DebugEvent{
-        [1]DebugEvent{DebugEvent{}} ** (16 * 65536),
-    } ** 2,
+    events: [2][16 * 65536]DebugEvent = @splat(@splat(.{})),
 
     pub fn setEventRecording(self: *DebugTable, enabled: bool) void {
         self.record_increment = if (enabled) 1 else 0;

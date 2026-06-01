@@ -49,7 +49,7 @@ const TestSceneElement = struct {
 const TestScene = struct {
     min_position: Vector3 = .zero(),
     elements: [TEST_SCENE_DIM_Y][TEST_SCENE_DIM_X]TestSceneElement =
-        [1][TEST_SCENE_DIM_X]TestSceneElement{[1]TestSceneElement{.{ .element_type = .Grass, .cube_uv_layout = .default }} ** TEST_SCENE_DIM_X} ** TEST_SCENE_DIM_Y,
+        @splat(@splat(.{ .element_type = .Grass, .cube_uv_layout = .default })),
     grass_texture: RendererTexture = .empty,
     wall_texture: RendererTexture = .empty,
     tree_texture: RendererTexture = .empty,

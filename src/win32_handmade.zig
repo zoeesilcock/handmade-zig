@@ -692,7 +692,7 @@ fn timeIsValid(time: win32.FILETIME) bool {
 
 fn loadGameCode(state: *Win32State, source_dll_name: [*:0]const u8) Game {
     var result = Game{};
-    var temp_dll_name = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    var temp_dll_name: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
 
     while (state.temp_dll_number < 1024) {
         buildExePathFileNameWithNumber(state, state.temp_dll_number, "handmade_temp.dll", &temp_dll_name);
@@ -1509,7 +1509,7 @@ fn getSecondsElapsed(start: win32.LARGE_INTEGER, end: win32.LARGE_INTEGER) f32 {
 }
 
 fn getExeFileName(state: *Win32State) void {
-    state.exe_file_name = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    state.exe_file_name = @splat(0);
 
     _ = win32.GetModuleFileNameA(null, &state.exe_file_name, @sizeOf(u8) * STATE_FILE_NAME_COUNT);
 
@@ -1562,7 +1562,7 @@ fn verifyMemoryListIntegrity() void {
 }
 
 fn beginRecordingInput(state: *Win32State, input_recording_index: u32) void {
-    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    var file_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
     getInputFileLocation(state, true, @intCast(input_recording_index), &file_path);
     state.recording_handle = win32.CreateFileA(
         &file_path,
@@ -1649,7 +1649,7 @@ fn clearBlocksByMask(state: *Win32State, mask: u64) void {
 fn beginInputPlayback(state: *Win32State, input_playing_index: u32) void {
     clearBlocksByMask(state, @intFromEnum(MemoryBlockLoopingFlag.AllocatedDuringLooping));
 
-    var file_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    var file_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
     getInputFileLocation(state, true, @intCast(input_playing_index), &file_path);
     state.playback_handle = win32.CreateFileA(
         &file_path,
@@ -1908,14 +1908,14 @@ pub export fn wWinMain(
         shared.global_debug_table = global_debug_table;
     }
 
-    var exe_full_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    var exe_full_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
     buildExePathFileName(state, "handmade-zig.exe", &exe_full_path);
-    var temp_exe_full_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    var temp_exe_full_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
     buildExePathFileName(state, "handmade-zig-temp.exe", &temp_exe_full_path);
-    var delete_exe_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    var delete_exe_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
     buildExePathFileName(state, "handmade-zig-old.exe", &delete_exe_path);
 
-    var source_dll_path = [_:0]u8{0} ** STATE_FILE_NAME_COUNT;
+    var source_dll_path: [STATE_FILE_NAME_COUNT:0]u8 = @splat(0);
     buildExePathFileName(state, "handmade.dll", &source_dll_path);
 
     var performance_frequency: win32.LARGE_INTEGER = undefined;
@@ -2008,11 +2008,11 @@ pub export fn wWinMain(
             const platform_renderer: *PlatformRenderer =
                 win32_renderer.initDefaultRenderer(window_handle, &limits);
 
-            var high_priority_startups: [6]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 6;
+            var high_priority_startups: [6]ThreadStartup = @splat(.{});
             var high_priority_queue = shared.PlatformWorkQueue{};
             makeQueue(&high_priority_queue, high_priority_startups.len, @ptrCast(&high_priority_startups));
 
-            var low_priority_startups: [2]ThreadStartup = [1]ThreadStartup{ThreadStartup{}} ** 2;
+            var low_priority_startups: [2]ThreadStartup = @splat(.{});
             var low_priority_queue = shared.PlatformWorkQueue{};
             makeQueue(&low_priority_queue, low_priority_startups.len, @ptrCast(&low_priority_startups));
 
@@ -2049,7 +2049,7 @@ pub export fn wWinMain(
             )));
 
             const debug_time_marker_index: u32 = 0;
-            var debug_time_markers: [DEBUG_TIME_MARKER_COUNT]DebugTimeMarker = [1]DebugTimeMarker{DebugTimeMarker{}} ** DEBUG_TIME_MARKER_COUNT;
+            var debug_time_markers: [DEBUG_TIME_MARKER_COUNT]DebugTimeMarker = @splat(.{});
 
             initDirectSound(window_handle, sound_output.samples_per_second, sound_output.secondary_buffer_size);
             if (opt_secondary_buffer) |secondary_buffer| {
@@ -2067,8 +2067,8 @@ pub export fn wWinMain(
 
             if (samples != null) {
                 // TODO: This currently doesn't support connecting controllers after the game has started.
-                var xbox_controller_present: [win32.XUSER_MAX_COUNT]bool = [1]bool{true} ** win32.XUSER_MAX_COUNT;
-                var game_input = [1]shared.GameInput{shared.GameInput{}} ** 2;
+                var xbox_controller_present: [win32.XUSER_MAX_COUNT]bool = @splat(true);
+                var game_input: [2]shared.GameInput = @splat(.{});
                 var new_input = &game_input[0];
                 var old_input = &game_input[1];
 
@@ -2140,7 +2140,7 @@ pub export fn wWinMain(
                     TimedBlock.endBlock(@src(), .ControllerClearing);
 
                     TimedBlock.beginBlock(@src(), .MessageProcessing);
-                    new_input.f_key_pressed = [1]bool{false} ** 13;
+                    new_input.f_key_pressed = @splat(false);
                     processPendingMessages(state, window_handle, new_keyboard_controller, new_input);
                     TimedBlock.endBlock(@src(), .MessageProcessing);
 
