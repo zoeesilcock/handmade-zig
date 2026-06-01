@@ -78,6 +78,7 @@ const ImportSourceInfo = struct {
     name: String = .empty,
     description: String = .empty,
     author: String = .empty,
+    append_hha_index: u32 = 0,
 };
 
 const ImportTagArray = struct {
@@ -92,7 +93,7 @@ const ImportGridTag = struct {
 };
 
 const ImportGridTags = struct {
-    tags: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]ImportGridTag,
+    tags: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]ImportGridTag = @splat(@splat(.{})),
 };
 
 const AssetLRULink = struct {
@@ -146,11 +147,11 @@ const AssetMemorySize = struct {
 
 pub const AssetFile = struct {
     handle: PlatformFileHandle,
+    stem: String,
     header: HHAHeader,
     tag_base: u32,
     asset_base: u32,
     high_water_mark: u64,
-    allow_editing: bool,
     modified: bool,
 
     pub fn retractWaterMark(self: *AssetFile, count: u64, offset: u64, size: u64) bool {
@@ -188,8 +189,8 @@ const SourceFile = struct {
 
     errors: Stream,
 
-    pub fn getOrCreateFromHashValue(assets: *Assets, unmodded_hash_value: u32, base_name: [*:0]const u8) *SourceFile {
-        const hash_value: u32 = @mod(unmodded_hash_value, @as(u32, @intCast(assets.source_file_hash.len)));
+    pub fn getOrCreateFromHashValue(assets: *Assets, base_name: [*:0]const u8) *SourceFile {
+        const hash_value: u32 = @mod(shared.stringHashOfZ(base_name), @as(u32, @intCast(assets.source_file_hash.len)));
 
         var match: ?*SourceFile = null;
         var opt_source_file: ?*SourceFile = assets.source_file_hash[hash_value];
@@ -213,7 +214,7 @@ const SourceFile = struct {
     }
 
     pub fn getOrCreateFromDate(assets: *Assets, base_name: [*:0]u8, file_date: u64, file_checksum: u64) *SourceFile {
-        var result: *SourceFile = .getOrCreateFromHashValue(assets, shared.stringHashOfZ(base_name), base_name);
+        var result: *SourceFile = .getOrCreateFromHashValue(assets, base_name);
         if (result.file_date == 0 or result.file_date > file_date) {
             result.file_date = file_date;
             result.file_checksum = file_checksum;
@@ -232,7 +233,6 @@ pub const Assets = struct {
 
     file_count: u32,
     files: [*]AssetFile,
-    default_append_hha_index: u32,
 
     max_tag_count: u32,
     tag_count: u32,
@@ -320,6 +320,8 @@ pub const Assets = struct {
                 defer file_index += 1;
 
                 const file_handle = shared.platform.openFile(&file_group, file_info, open_flags);
+                const stem: String = types.removePath(types.removeExtension(.wrapZ(file_info.base_name)));
+                file.stem = arena.pushStringSized(stem);
                 file.tag_base = assets.tag_count;
                 file.asset_base = assets.asset_count - 1;
                 file.handle = file_handle;
@@ -353,13 +355,6 @@ pub const Assets = struct {
                     file.retractWaterMark(file.header.asset_count, file.header.assets, @sizeOf(HHAAsset)))
                 {
                     // Do nothing
-                }
-
-                if (INTERNAL) {
-                    if (shared.stringsAreEqual(file_info.base_name, "local")) {
-                        file.allow_editing = true;
-                        assets.default_append_hha_index = file_index;
-                    }
                 }
             }
         }
@@ -451,7 +446,7 @@ pub const Assets = struct {
                             asset.hha.one_past_last_tag_index += (file.tag_base - 1);
                         }
 
-                        if (file.allow_editing) {
+                        if (INTERNAL) {
                             // TODO: This is very inefficent, and we could modify the file format to keep a separate
                             // array of file names (or we could has file names based on their location in the file as
                             // well, and only read them once). But at the moment we just read the source name directly,
@@ -1093,7 +1088,6 @@ pub const Assets = struct {
     pub fn writeModificationsToHHA(self: *Assets, file_index: u32, temp_arena: *MemoryArena) void {
         const file: *AssetFile = &self.files[file_index];
 
-        std.debug.assert(file.allow_editing);
         file.modified = false;
 
         var asset_count: u32 = 1; // First asset entry is skipped as the null asset!
@@ -1344,10 +1338,7 @@ fn writeImageToHHA(
             const bitmap_id: BitmapId = .{ .value = asset_index };
             assets.unloadBitmap(bitmap_id);
 
-            if (asset.file_index == 0) {
-                asset.file_index = assets.default_append_hha_index;
-            }
-
+            asset.file_index = info.append_hha_index;
             std.debug.assert(asset.file_index != 0);
 
             const asset_file: *AssetFile = &assets.files[asset.file_index];
@@ -1411,10 +1402,10 @@ fn writeImageToHHA(
 
             Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, @ptrCast(source_image.pixels));
         } else {
-            stream.output(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!\n", .{});
+            _ = stream.outputWithSrc(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!\n", .{});
         }
     } else {
-        stream.output(&file.errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
+        _ = stream.outputWithSrc(&file.errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
     }
 }
 
@@ -1512,7 +1503,7 @@ fn processMultiTileImport(
 
     var x_count: u32 = image.width / tile_dimension;
     if (x_count > x_count_max) {
-        stream.output(&file.errors, @src(), "Tile column count of %u exceeds maximum of %u columns.\n", .{
+        _ = stream.outputWithSrc(&file.errors, @src(), "Tile column count of %u exceeds maximum of %u columns.\n", .{
             x_count,
             x_count_max,
         });
@@ -1520,7 +1511,7 @@ fn processMultiTileImport(
     }
     var y_count: u32 = image.height / tile_dimension;
     if (y_count > y_count_max) {
-        stream.output(&file.errors, @src(), "Tile row count of %u exceeds maximum of %u rows.\n", .{
+        _ = stream.outputWithSrc(&file.errors, @src(), "Tile row count of %u exceeds maximum of %u rows.\n", .{
             y_count,
             y_count_max,
         });
@@ -1569,7 +1560,7 @@ fn processMultiTileImport(
                     min_x -= border_dimension;
                 } else {
                     min_x = 0;
-                    stream.output(&file.errors, @src(), "Tile %u, %u extends into left %u-pixel border.\n", .{
+                    _ = stream.outputWithSrc(&file.errors, @src(), "Tile %u, %u extends into left %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1580,7 +1571,7 @@ fn processMultiTileImport(
                     max_x += border_dimension;
                 } else {
                     max_x = tile_dimension - 1;
-                    stream.output(&file.errors, @src(), "Tile %u, %u extends into right %u-pixel border.\n", .{
+                    _ = stream.outputWithSrc(&file.errors, @src(), "Tile %u, %u extends into right %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1591,7 +1582,7 @@ fn processMultiTileImport(
                     min_y -= border_dimension;
                 } else {
                     min_y = 0;
-                    stream.output(&file.errors, @src(), "Tile %u, %u extends into top %u-pixel border.\n", .{
+                    _ = stream.outputWithSrc(&file.errors, @src(), "Tile %u, %u extends into top %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1602,7 +1593,7 @@ fn processMultiTileImport(
                     max_y += border_dimension;
                 } else {
                     max_y = tile_dimension - 1;
-                    stream.output(&file.errors, @src(), "Tile %u, %u extends into bottom %u-pixel border.\n", .{
+                    _ = stream.outputWithSrc(&file.errors, @src(), "Tile %u, %u extends into bottom %u-pixel border.\n", .{
                         x_index,
                         y_index,
                         border_dimension,
@@ -1884,10 +1875,16 @@ pub fn readAssetString(
     return result;
 }
 
-pub fn parseHHT(tokenizer: *Tokenizer, assets: *Assets, source_info: *ImportSourceInfo) void {
-    const context: HHTContext = .{
+pub fn parseHHT(
+    temp_arena: *MemoryArena,
+    file_group: *shared.PlatformFileGroup,
+    tokenizer: *Tokenizer,
+    assets: *Assets,
+) void {
+    var context: HHTContext = .{
+        .file_group = file_group,
         .assets = assets,
-        .info = source_info,
+        .temp_arena = temp_arena,
     };
 
     while (tokenizer.parsing()) {
@@ -1898,7 +1895,7 @@ pub fn parseHHT(tokenizer: *Tokenizer, assets: *Assets, source_info: *ImportSour
         }
 
         if (token.token_type == .Identifier) {
-            parseTopLevelBlock(tokenizer, context, token);
+            parseTopLevelBlock(tokenizer, &context, token);
         } else if (token.token_type == .EndOfStream) {
             break;
         } else {
@@ -1910,109 +1907,199 @@ pub fn parseHHT(tokenizer: *Tokenizer, assets: *Assets, source_info: *ImportSour
 
 const HHTContext = struct {
     assets: *Assets,
-    source_info: *ImportSourceInfo,
     default_fields: HHTFields = .{},
+    file_group: *shared.PlatformFileGroup,
+    temp_arena: *MemoryArena,
 };
 
 const HHTFields = struct {
+    name: String = .empty,
     author: String = .empty,
     description: String = .empty,
     hha: String = .empty,
 };
+
+fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool) u32 {
+    var result: u32 = 0;
+
+    var hha_index: u32 = 1;
+    while (hha_index < assets.file_count) : (hha_index += 1) {
+        const file: *AssetFile = @ptrCast(assets.files + hha_index);
+        if (file.stem.equals(stem)) {
+            result = hha_index;
+            break;
+        }
+    }
+
+    if (create_if_not_found and result == 0) {
+        // Create a blank HHA here?
+    }
+
+    return result;
+}
 
 fn parseTopLevelBlock(
     tokenizer: *Tokenizer,
     context: *HHTContext,
     block_token: Token,
 ) void {
-    var found: bool = false;
+    const temp_arena: *MemoryArena = context.temp_arena;
+    var fields: HHTFields = context.default_fields;
+    const is_default: bool = block_token.equals("default");
     var file_name: Token = .{};
-    var fields_: HHTFields = .{};
-    var fields: *HHTFields = &fields_;
 
-    if (block_token.equals("default")) {
-        fields = &context.default_fields;
-        found = true;
-    } else {
-        const append: ImportTagArray = .{};
-        var tags: ImportGridTags = .{};
-        const import_type: ImportType = parsePieces(
-            context.assets,
-            tokenizer,
-            append,
-            block_token,
-            context.source_info,
-            &tags,
-        );
-
-        if (import_type != .None) {
-            file_name = tokenizer.requireToken(.String);
-            fields.* = context.default_fields;
-            found = true;
-        } else {
-            tokenizer.encounteredError(block_token, "Unrecognized import type", .{});
-        }
+    if (is_default) {
+        file_name = tokenizer.requireToken(.String);
     }
 
-    if (found) {
-        _ = tokenizer.requireToken(.OpenBrace);
-        while (tokenizer.parsing()) {
-            const token: Token = tokenizer.getToken();
-            if (token.token_type == .CloseBrace) {
-                break;
-            } else if (token.equals("Author")) {
-                _ = tokenizer.requireToken(.Equals);
-                fields.author = tokenizer.requireToken(.String).text;
-                _ = tokenizer.requireToken(.SemiColon);
-            } else if (token.equals("Description")) {
-                _ = tokenizer.requireToken(.Equals);
-                fields.description = tokenizer.requireToken(.String).text;
-                _ = tokenizer.requireToken(.SemiColon);
-            } else if (token.equals("HHA")) {
-                _ = tokenizer.requireToken(.Equals);
-                fields.hha = tokenizer.requireToken(.String).text;
-                _ = tokenizer.requireToken(.SemiColon);
-            } else if (token.equals("Tags")) {
-                _ = tokenizer.requireToken(.Equals);
-                parseTagList(tokenizer);
+    var append_tags: ImportTagArray = .{};
+
+    _ = tokenizer.requireToken(.OpenBrace);
+    while (tokenizer.parsing()) {
+        const token: Token = tokenizer.getToken();
+        if (token.token_type == .CloseBrace) {
+            break;
+        } else if (token.equals("Name")) {
+            _ = tokenizer.requireToken(.Equals);
+            fields.name = tokenizer.requireToken(.String).text;
+            _ = tokenizer.requireToken(.SemiColon);
+        } else if (token.equals("Author")) {
+            _ = tokenizer.requireToken(.Equals);
+            fields.author = tokenizer.requireToken(.String).text;
+            _ = tokenizer.requireToken(.SemiColon);
+        } else if (token.equals("Description")) {
+            _ = tokenizer.requireToken(.Equals);
+            fields.description = tokenizer.requireToken(.String).text;
+            _ = tokenizer.requireToken(.SemiColon);
+        } else if (token.equals("HHA")) {
+            _ = tokenizer.requireToken(.Equals);
+            fields.hha = tokenizer.requireToken(.String).text;
+            _ = tokenizer.requireToken(.SemiColon);
+        } else if (token.equals("Tags")) {
+            _ = tokenizer.requireToken(.Equals);
+            append_tags = parseTagList(context.assets, tokenizer);
+        } else {
+            tokenizer.encounteredError(token, "Expected field name.", .{});
+        }
+    }
+    _ = tokenizer.requireToken(.SemiColon);
+
+    if (tokenizer.parsing()) {
+        if (is_default) {
+            context.default_fields = fields;
+        } else {
+            const temp_marker: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
+            defer temp_arena.endTemporaryMemory(temp_marker);
+
+            var buf: [4096]u8 = undefined;
+            const sub_dir: []const u8 = "art";
+            const length =
+                shared.formatString(buf.len, &buf, "source/%S/%s/%S", .{ fields.hha, sub_dir, file_name.text });
+            const path = buf[0..length];
+
+            if (shared.platform.getFileByPath(context.file_group, @ptrCast(path))) |file_info| {
+                const match: *SourceFile = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
+
+                if (match.file_date != file_info.file_date) {
+                    var tags: ImportGridTags = .{};
+                    // const import_type = parsePieces(
+                    //     assets,
+                    //     .wrapZ(file_info.base_name),
+                    //     &info,
+                    //     &tags,
+                    //     &match.errors,
+                    // );
+                    const import_type: ImportType = parsePieces(
+                        context.assets,
+                        tokenizer,
+                        append_tags,
+                        block_token,
+                        &tags,
+                    );
+
+                    if (import_type != .None) {
+                        var handle: PlatformFileHandle = shared.platform.openFile(
+                            context.file_group,
+                            @constCast(file_info),
+                            @intFromEnum(shared.OpenFileModeFlags.Read),
+                        );
+                        var file_buffer: Buffer = .{
+                            .count = file_info.file_size,
+                        };
+
+                        file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
+
+                        shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
+                        shared.platform.closeFile(&handle);
+
+                        // We update this first, because assets that get packed from here on out need to be able to
+                        // stamp themselves with the right data.
+                        match.file_date = file_info.file_date;
+                        match.file_checksum = shared.checksumOf(file_buffer, null);
+
+                        const content_stream: Stream = .makeReadStream(file_buffer, &match.errors);
+                        const image = png.parsePNG(temp_arena, content_stream, null);
+                        const info: ImportSourceInfo = .{
+                            .name = fields.name,
+                            .description = fields.description,
+                            .author = fields.author,
+                            .append_hha_index = getOrCreateHHAByStem(context.assets, fields.hha, true),
+                        };
+
+                        if (info.append_hha_index != 0) {
+                            switch (import_type) {
+                                .Plate => {
+                                    processPlateImport(context.assets, info, tags.tags[0][0], match, image, temp_arena);
+                                },
+                                .SingleTile => {
+                                    processSingleTileImport(context.assets, info, tags.tags[0][0], match, image, temp_arena);
+                                },
+                                .MultiTile => {
+                                    processMultiTileImport(context.assets, info, &tags, match, image, temp_arena);
+                                },
+                                else => unreachable,
+                            }
+                        } else {
+                            tokenizer.encounteredErrorUnknown("Couldn't open HHA %S for writing.", .{fields.hha});
+                        }
+                    } else {
+                        tokenizer.encounteredError(block_token, "Unexpected block type.", .{});
+                    }
+                }
             } else {
-                tokenizer.encounteredError(token, "Expected field name.", .{});
+                tokenizer.encounteredError(file_name, "File not found (looked in %s)", .{path});
             }
         }
-        _ = tokenizer.requireToken(.SemiColon);
-    } else {
-        tokenizer.encounteredError(block_token, "Unexpected block type.", .{});
     }
 }
 
-fn parseTagList(tokenizer: *Tokenizer) void {
+fn parseTagList(assets: *Assets, tokenizer: *Tokenizer) ImportTagArray {
+    var builder: TagBuilder = beginTags(assets);
+
     while (tokenizer.parsing()) {
         const token: Token = tokenizer.getToken();
         if (token.token_type == .SemiColon) {
             break;
         } else if (token.token_type == .Identifier) {
+            var tag_value: f32 = 1;
+
             const check: Token = tokenizer.getToken();
             if (check.token_type == .OpenParen) {
                 const value: Token = tokenizer.requireToken(.Number);
-                _ = value;
+                tag_value = value.f32;
                 _ = tokenizer.requireToken(.CloseParen);
             }
 
-            // if (name_token.text.count > 0) {
-            //     const tag_id: AssetTagId = file_formats.tagIdFromName(name_token.text);
-            //     if (tag_id != .None) {
-            //         addTag(builder, tag_id, name_token.f32);
-            //     } else {
-            //         stream.output(
-            //             errors,
-            //             @src(),
-            //             "Unrecognized tag name: %.*s.\n",
-            //             .{ @as(u32, @intCast(name_token.text.count)), name_token.text.data },
-            //         );
-            //     }
-            // } else {
-            //     break;
-            // }
+            const tag_id: AssetTagId = file_formats.tagIdFromName(token.text);
+            if (tag_id != .None) {
+                addTag(&builder, tag_id, tag_value);
+            } else {
+                tokenizer.encounteredError(
+                    token,
+                    "Unrecognized tag name: %S.\n",
+                    .{token.text.data},
+                );
+            }
 
             if (check.token_type == .SemiColon) {
                 break;
@@ -2023,10 +2110,19 @@ fn parseTagList(tokenizer: *Tokenizer) void {
             tokenizer.encounteredError(token, "Expected a tag name.", .{});
         }
     }
+
+    var result: ImportTagArray = .{};
+    const temp: ImportGridTag = endTags(&builder, tokenizer, .None, result);
+    result.first_tag_index = temp.first_tag_index;
+    result.one_past_last_tag_index = temp.one_past_last_tag_index;
+    return result;
 }
 
 pub fn importChangedAssets(assets: *Assets) void {
-    if (false and assets.default_append_hha_index != 0) {
+    if (INTERNAL) {
+        var temp_arena: MemoryArena = .{};
+        defer temp_arena.clear();
+
         var file_group = shared.platform.getAllFilesOfTypeBegin(.HHT);
         defer shared.platform.getAllFilesOfTypeEnd(&file_group);
 
@@ -2035,57 +2131,29 @@ pub fn importChangedAssets(assets: *Assets) void {
 
         var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
         while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
-            // var anchor: [*]u8 = file_info.base_name;
-            const hash_value: u32 = 0;
+            // Note: At the moment we can afford to parse the HHTs every time, so we don't try to do a separated
+            // file date checking.
 
-            const match: *SourceFile = .getOrCreateFromHashValue(assets, hash_value, file_info.base_name);
-
-            if (match.file_date != file_info.file_date) {
-                var info: ImportSourceInfo = .{
-                    .author = .fromSlice("Anna Rettberg"),
+            // const match: *SourceFile = .getOrCreateFromHashValue(assets, file_info.base_name);
+            //
+            // if (match.file_date != file_info.file_date)
+            {
+                var handle: PlatformFileHandle = shared.platform.openFile(
+                    &file_group,
+                    @constCast(file_info),
+                    @intFromEnum(shared.OpenFileModeFlags.Read),
+                );
+                var file_buffer: Buffer = .{
+                    .count = file_info.file_size,
                 };
 
-                var tags: ImportGridTags = .{ .tags = undefined };
-                const import_type = parsePieces(
-                    assets,
-                    .wrapZ(file_info.base_name),
-                    &info,
-                    &tags,
-                    &match.errors,
-                );
-                if (import_type != .None) {
-                    var temp_arena: MemoryArena = .{};
-                    defer temp_arena.clear();
+                file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
 
-                    var handle: PlatformFileHandle = shared.platform.openFile(
-                        &file_group,
-                        @constCast(file_info),
-                        @intFromEnum(shared.OpenFileModeFlags.Read),
-                    );
-                    var file_buffer: Buffer = .{
-                        .count = file_info.file_size,
-                    };
+                shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
+                shared.platform.closeFile(&handle);
 
-                    file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
-
-                    shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
-                    shared.platform.closeFile(&handle);
-
-                    // We update this first, because assets that get packed from here on out need to be able to stamp
-                    // themselves with the right data.
-                    match.file_date = file_info.file_date;
-                    match.file_checksum = shared.checksumOf(file_buffer, null);
-
-                    const content_stream: Stream = .makeReadStream(file_buffer, &match.errors);
-                    const image = png.parsePNG(&temp_arena, content_stream, null);
-
-                    switch (import_type) {
-                        .Plate => processPlateImport(assets, info, tags.tags[0][0], match, image, &temp_arena),
-                        .SingleTile => processSingleTileImport(assets, info, tags.tags[0][0], match, image, &temp_arena),
-                        .MultiTile => processMultiTileImport(assets, info, &tags, match, image, &temp_arena),
-                        else => unreachable,
-                    }
-                }
+                var tokenizer: Tokenizer = .init(file_buffer);
+                parseHHT(&temp_arena, &file_group, &tokenizer, assets);
             }
         }
     }

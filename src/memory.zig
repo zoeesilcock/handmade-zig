@@ -184,6 +184,14 @@ pub const MemoryArena = extern struct {
         return result;
     }
 
+    pub fn pushStringSized(self: *MemoryArena, source: String) String {
+        var result: String = .{
+            .count = source.count,
+        };
+        result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source.data))));
+        return result;
+    }
+
     pub fn pushAndNullTerminateString(self: *MemoryArena, length: u32, source: [*:0]const u8) [*:0]const u8 {
         var dest = self.pushSize(length + 1, ArenaPushParams.noClear());
 

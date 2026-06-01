@@ -192,16 +192,14 @@ fn utf8FromUTF16(arena: *MemoryArena, name_size: usize, name: [*:0]const u16) [*
 
 fn utf16FromUTF8(arena: *MemoryArena, name_size: usize, name: [*:0]const u8) [*:0]u16 {
     const result_storage: usize = 2 * name_size;
-    var result: [*:0]u8 = @ptrCast(arena.pushSize(result_storage + 2, null));
+    var result: [*:0]u16 = @ptrCast(@alignCast(arena.pushSize(result_storage + 2, null)));
     const result_size: usize = @intCast(win32.MultiByteToWideChar(
         win32.CP_UTF8,
-        0,
+        .{},
         name,
         @intCast(name_size),
-        @ptrCast(result),
+        @ptrCast(@alignCast(result)),
         @intCast(result_storage),
-        null,
-        null,
     ));
     result[result_size] = 0;
     return result;
@@ -317,14 +315,14 @@ fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.c) void
     win32_file_group.arena.clear();
 }
 
-fn getFileByPath(file_group: *shared.PlatformFileGroup, path: [*:0]const u8) callconv(.c) *shared.PlatformFileInfo {
+fn getFileByPath(file_group: *shared.PlatformFileGroup, path: [*:0]const u8) callconv(.c) ?*shared.PlatformFileInfo {
     const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
-    var result: *shared.PlatformFileInfo = undefined;
+    var result: ?*shared.PlatformFileInfo = null;
 
-    const path_16: [*:0]const u16 = utf16FromUTF8(win32_file_group.memory, types.stringLength(path), path);
+    const path_16: [*:0]const u16 = utf16FromUTF8(&win32_file_group.arena, types.stringLength(path), path);
 
     var data: win32.WIN32_FILE_ATTRIBUTE_DATA = undefined;
-    if (win32.GetFileAttributesExW(path_16, &data)) {
+    if (win32.GetFileAttributesExW(path_16, win32.GetFileExInfoStandard, &data) != 0) {
         result = allocateFileInfo(file_group, &data);
     }
 
@@ -1936,6 +1934,7 @@ pub export fn wWinMain(
 
         .getAllFilesOfTypeBegin = getAllFilesOfTypeBegin,
         .getAllFilesOfTypeEnd = getAllFilesOfTypeEnd,
+        .getFileByPath = getFileByPath,
         .openFile = openFile,
         .closeFile = closeFile,
         .readDataFromFile = readDataFromFile,

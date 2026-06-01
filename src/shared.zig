@@ -901,7 +901,7 @@ const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(
 
 const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.c) PlatformFileGroup;
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.c) void;
-const getFileByPathType: type = fn (file_group: *PlatformFileGroup, path: [*:0]const u8) callconv(.c) *PlatformFileInfo;
+const getFileByPathType: type = fn (file_group: *PlatformFileGroup, path: [*:0]const u8) callconv(.c) ?*PlatformFileInfo;
 const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFileInfo, mode_flags: u32) callconv(.c) PlatformFileHandle;
 const closeFileType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) void;
 const readDataFromFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
@@ -926,7 +926,7 @@ pub const Platform = if (INTERNAL) extern struct {
 
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
-    getFileByName: *const getFileByPathType = undefined,
+    getFileByPath: *const getFileByPathType = undefined,
     openFile: *const openFileType = undefined,
     closeFile: *const closeFileType = undefined,
     readDataFromFile: *const readDataFromFileType = undefined,

@@ -53,6 +53,35 @@ pub const Buffer = struct {
     }
 };
 
+pub fn removeExtension(file_name_init: String) String {
+    var file_name: String = file_name_init;
+    var new_count: usize = file_name.count;
+    var index: usize = 0;
+    while (index < file_name.count) : (index += 1) {
+        if (file_name.data[index] == '.') {
+            new_count = index;
+        } else if (file_name.data[index] == '/' or file_name.data[index] == '\\') {
+            new_count = file_name.count;
+        }
+    }
+    file_name.count = new_count;
+    return file_name;
+}
+
+pub fn removePath(file_name_init: String) String {
+    var file_name: String = file_name_init;
+    var new_start: usize = 0;
+    var index: usize = 0;
+    while (index < file_name.count) : (index += 1) {
+        if (file_name.data[index] == '/' or file_name.data[index] == '\\') {
+            new_start = index + 1;
+        }
+    }
+    file_name.data += new_start;
+    file_name.count -= new_start;
+    return file_name;
+}
+
 pub fn stringLength(opt_string: ?[*:0]const u8) u32 {
     var count: u32 = 0;
     if (opt_string) |string| {

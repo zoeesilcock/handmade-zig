@@ -178,6 +178,8 @@ comptime {
 }
 
 pub const HHAAnnotation = extern struct {
+    // TODO: Should we start also storing machine-specific source_file_date out-of-band so that we don't have to
+    // update HHAs when dates change but checksums don't?
     source_file_date: u64 align(1) = 0,
     source_file_checksum: u64 align(1) = 0,
     source_file_base_name_offset: u64 align(1) = 0,
@@ -185,7 +187,8 @@ pub const HHAAnnotation = extern struct {
     asset_description_offset: u64 align(1) = 0,
     author_offset: u64 align(1) = 0,
     error_stream_offset: u64 align(1) = 0,
-    reserved: [4]u64 align(1) = [1]u64{0} ** 4,
+    hht_block_checksum: u64 align(1) = 0,
+    reserved: [3]u64 align(1) = [1]u64{0} ** 3,
 
     error_stream_count: u32 align(1) = 0,
     reserved32: u32 align(1) = 0,
@@ -205,6 +208,7 @@ comptime {
 pub const LoadedHHAAnnotation = struct {
     source_file_date: u64 align(1) = 0,
     source_file_checksum: u64 align(1) = 0,
+    hht_block_checksum: u64 align(1) = 0,
     sprite_sheet_x: u32 align(1) = 0,
     sprite_sheet_y: u32 align(1) = 0,
 

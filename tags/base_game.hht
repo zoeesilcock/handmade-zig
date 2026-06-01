@@ -3,11 +3,12 @@ default
 {
     Author = "Anna Rettberg";
     Description = "These are the original in-game assets for the base game.";
-    HHA = "base_game.hha";
+    HHA = "base_game";
 };
 
 block "block_forest_01.png"
 {
+    name = "Forest Terrain";
     Tags = floor, grass;
 };
 

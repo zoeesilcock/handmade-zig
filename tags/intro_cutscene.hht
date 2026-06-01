@@ -1,6 +1,18 @@
 // These are the assets for the introduction cutscene.
 
+default
+{
+    Author = "Yangtian Li";
+    Description = "These are the original in-game assets for the base game.";
+    HHA = "intro_cutscene";
+};
+
 plate "title_screen.png" {Tags = ShotIndex(12), LayerIndex(1) }
+
+default
+{
+    Author = "Anna Rettberg";
+};
 
 plate "shot1_1.png" {Tags = ShotIndex(1),LayerIndex(1)};
 plate "shot1_2.png" {Tags = ShotIndex(1),LayerIndex(2)};

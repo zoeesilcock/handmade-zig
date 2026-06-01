@@ -116,31 +116,6 @@ const type_from_id = [_]struct { HHAAssetType, AssetBasicCategory }{
     .{ .Bitmap, .Hand },
 };
 
-fn removeExtension(file_name: *String) void {
-    var new_count: usize = file_name.count;
-    var index: usize = 0;
-    while (index < file_name.count) : (index += 1) {
-        if (file_name.data[index] == '.') {
-            new_count = index;
-        } else if (file_name.data[index] == '/' or file_name.data[index] == '\\') {
-            new_count = file_name.count;
-        }
-    }
-    file_name.count = new_count;
-}
-
-fn removePath(file_name: *String) void {
-    var new_start: usize = 0;
-    var index: usize = 0;
-    while (index < file_name.count) : (index += 1) {
-        if (file_name.data[index] == '/' or file_name.data[index] == '\\') {
-            new_start = index + 1;
-        }
-    }
-    file_name.data += new_start;
-    file_name.count -= new_start;
-}
-
 fn readHHAV0(source_file: std.Io.File, hha: *LoadedHHA, allocator: std.mem.Allocator) void {
     _ = source_file;
 
@@ -156,14 +131,12 @@ fn readHHAV0(source_file: std.Io.File, hha: *LoadedHHA, allocator: std.mem.Alloc
     hha.assets = @ptrCast(allocator.alloc(HHAAsset, hha.asset_count) catch unreachable);
     hha.annotations = @ptrCast(allocator.alloc(LoadedHHAAnnotation, hha.asset_count) catch unreachable);
 
-    var default_annotation: LoadedHHAAnnotation = .{
-        .source_file_base_name = .fromSlice(hha.source_file_name),
+    const default_annotation: LoadedHHAAnnotation = .{
+        .source_file_base_name = types.removePath(types.removeExtension(.fromSlice(hha.source_file_name))),
         .asset_name = .fromSlice("UNKNOWN"),
         .asset_description = .fromSlice("imported by readHHAV0"),
         .author = .fromSlice("hha-edit.exe"),
     };
-    removePath(&default_annotation.source_file_base_name);
-    removeExtension(&default_annotation.source_file_base_name);
 
     hha.annotations[0] = .{};
     hha.assets[0] = .{};
@@ -272,6 +245,7 @@ fn readHHAV2(source_file: std.Io.File, hha: *LoadedHHA, allocator: std.mem.Alloc
 
             dest_annotation[0].source_file_date = source_annotation[0].source_file_date;
             dest_annotation[0].source_file_checksum = source_annotation[0].source_file_checksum;
+            dest_annotation[0].hht_block_checksum = source_annotation[0].hht_block_checksum;
             dest_annotation[0].sprite_sheet_x = source_annotation[0].sprite_sheet_x;
             dest_annotation[0].sprite_sheet_y = source_annotation[0].sprite_sheet_y;
 
@@ -419,6 +393,7 @@ fn writeHHAV2(
         dest_annotation.* = .{
             .source_file_date = source_annotation.source_file_date,
             .source_file_checksum = source_annotation.source_file_checksum,
+            .hht_block_checksum = source_annotation.hht_block_checksum,
             .sprite_sheet_x = source_annotation.sprite_sheet_x,
             .sprite_sheet_y = source_annotation.sprite_sheet_y,
         };
@@ -565,13 +540,14 @@ fn printContents(hha: *LoadedHHA) void {
             }
         }
 
-        std.log.info("            From: {s} {s} {d},{d} (date: {d}, checksum: {d})", .{
+        std.log.info("            From: {s} {s} {d},{d} (date: {d}, checksum: {d}, hht: {d})", .{
             an.asset_name.toSlice(),
             an.source_file_base_name.toSlice(),
             an.sprite_sheet_x,
             an.sprite_sheet_y,
             an.source_file_date,
             an.source_file_checksum,
+            an.hht_block_checksum,
         });
 
         std.log.info("            Data: {d} bytes at {d}", .{ hha_asset.data_size, hha_asset.data_offset });
