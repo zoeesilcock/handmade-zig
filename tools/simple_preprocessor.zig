@@ -186,7 +186,7 @@ pub fn main(init: std.process.Init) anyerror!void {
         const file_contents: String = readEntireFile(file_name, allocator, init.io);
         // defer allocator.free(file_contents.data);
 
-        var tokenizer: Tokenizer = .init(file_contents);
+        var tokenizer: Tokenizer = .init(file_contents, .fromSlice(file_name));
         var parsing: bool = true;
         while (parsing) {
             const token: Token = tokenizer.getToken();

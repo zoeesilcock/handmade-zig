@@ -514,8 +514,8 @@ pub fn alignPointTypeFromName(name: String) HHAAlignPointType {
     var type_index: u32 = 0;
     const type_count: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len;
     while (type_index < type_count) : (type_index += 1) {
-        const align_type: HHAAlignPointType = @intFromEnum(type_index);
-        if (shared.stringBuffersEqual(name, alignPointTypeFromName(align_type))) {
+        const align_type: HHAAlignPointType = @enumFromInt(type_index);
+        if (shared.stringBuffersEqual(name, alignPointNameFromType(align_type))) {
             result = align_type;
             break;
         }

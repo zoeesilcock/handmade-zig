@@ -21,17 +21,21 @@ const TokenType = enum(u32) {
     OpenBrace,
     CloseBrace,
     Equals,
+    Or,
 
     String,
     Identifier,
     Number,
 
+    Spacing,
+    EndOfLine,
     Comment,
     EndOfStream,
 };
 
 pub const Token = struct {
-    file_name: [:0]const u8 = "",
+    file_name: String = .empty,
+    column_number: u32 = 0,
     line_number: u32 = 0,
 
     token_type: TokenType = undefined,
@@ -45,7 +49,8 @@ pub const Token = struct {
 };
 
 pub const Tokenizer = struct {
-    file_name: [:0]const u8 = "",
+    file_name: String = .empty,
+    column_number: u32 = 0,
     line_number: u32 = 0,
     error_stream: *stream.Stream = undefined,
 
@@ -54,9 +59,12 @@ pub const Tokenizer = struct {
 
     has_error: bool = false,
 
-    pub fn init(input: String) Tokenizer {
+    pub fn init(input: String, file_name: String) Tokenizer {
         var result: Tokenizer = .{
             .input = input,
+            .column_number = 1,
+            .line_number = 1,
+            .file_name = file_name,
         };
 
         result.refill();
@@ -65,18 +73,29 @@ pub const Tokenizer = struct {
     }
 
     pub fn advanceChars(self: *Tokenizer, count: u32) void {
+        self.column_number += count;
+
         _ = self.input.advance(count);
         self.refill();
     }
 
-    pub fn encounteredError(self: *Tokenizer, on_token: Token, comptime message: [:0]const u8, args: anytype) void {
-        self.has_error = true;
-        _ = stream.output(on_token.file_name, on_token.line_number, self.error_stream, message, args);
-    }
+    pub fn encounteredError(
+        self: *Tokenizer,
+        opt_on_token: ?Token,
+        comptime message: [:0]const u8,
+        args: anytype,
+    ) void {
+        const on_token: Token = opt_on_token orelse self.peekTokenRaw();
 
-    pub fn encounteredErrorUnknown(self: *Tokenizer, comptime message: [:0]const u8, args: anytype) void {
         self.has_error = true;
-        _ = stream.output(self.file_name, self.line_number, self.error_stream, message, args);
+        _ = stream.outputWithSrc(self.error_stream, @src(), "%S(%u,%u): \"%S\" - ", .{
+            on_token.file_name,
+            on_token.line_number,
+            on_token.column_number,
+            on_token.text,
+        });
+        _ = stream.outputWithSrc(self.error_stream, @src(), message, args);
+        _ = stream.outputWithSrc(self.error_stream, @src(), "\n", .{});
     }
 
     fn refill(self: *Tokenizer) void {
@@ -92,16 +111,26 @@ pub const Tokenizer = struct {
         }
     }
 
-    pub fn getToken(self: *Tokenizer) Token {
-        self.eatAllWhitespace();
+    pub fn peekTokenRaw(self: *Tokenizer) Token {
+        const temp: Tokenizer = self.*;
+        const result: Token = self.getTokenRaw();
+        self.* = temp;
+        return result;
+    }
 
-        var token: Token = .{ .text = self.input };
-        if (token.text.count > 0) {
-            token.text.count = 0;
-        }
+    pub fn peekToken(self: *Tokenizer) Token {
+        const temp: Tokenizer = self.*;
+        const result: Token = self.getToken();
+        self.* = temp;
+        return result;
+    }
 
+    pub fn getTokenRaw(self: *Tokenizer) Token {
+        var token: Token = .{};
         token.file_name = self.file_name;
+        token.column_number = self.column_number;
         token.line_number = self.line_number;
+        token.text = self.input;
 
         const c = self.at[0];
         self.advanceChars(1);
@@ -119,23 +148,10 @@ pub const Tokenizer = struct {
             '}' => token.token_type = .CloseBrace,
             '=' => token.token_type = .Equals,
             '.' => token.token_type = .Period,
-            '/' => {
-                if (self.at[0] == '/') {
-                    self.advanceChars(2);
-
-                    token.token_type = .Comment;
-                    token.text.data = @constCast(self.input.data);
-
-                    while (self.at[0] != 0 and self.at[0] != '(' and !shared.isEndOfLine(self.at[0])) {
-                        self.advanceChars(1);
-                    }
-
-                    token.text.count = @intFromPtr(self.input.data) - @intFromPtr(token.text.data);
-                }
-            },
+            '|' => token.token_type = .Or,
             '"' => {
                 token.token_type = .String;
-                token.text = self.input;
+
                 while (self.at[0] != '"') {
                     if (self.at[0] == '\\' and self.at[1] != 0) {
                         self.advanceChars(1);
@@ -144,20 +160,48 @@ pub const Tokenizer = struct {
                     self.advanceChars(1);
                 }
 
-                token.text.count = @intFromPtr(self.input.data) - @intFromPtr(token.text.data);
-
                 if (self.at[0] == '"') {
                     self.advanceChars(1);
                 }
             },
             else => {
-                if (shared.isAlpha(c)) {
+                if (shared.isSpacing(self.at[0])) {
+                    token.token_type = .Spacing;
+
+                    while (shared.isSpacing(self.at[0])) {
+                        self.advanceChars(1);
+                    }
+                } else if (shared.isEndOfLine(self.at[0])) {
+                    token.token_type = .EndOfLine;
+
+                    if ((self.at[0] == '\r' and self.at[1] == '\n') or
+                        (self.at[0] == '\n' and self.at[1] == '\r'))
+                    {
+                        self.advanceChars(1);
+                    }
+
+                    self.column_number = 1;
+                    self.line_number += 1;
+                } else if (self.at[0] == '/') {
+                    self.advanceChars(2);
+
+                    token.token_type = .Comment;
+                    token.text.data = @constCast(self.input.data);
+
+                    while (!shared.isEndOfLine(self.at[0])) {
+                        self.advanceChars(1);
+                    }
+
+                    // Note: This code path is needed in place of the previous loop for the simple-preprocessor
+                    // to work. Revisit this if we ever need the preprocessor again.
+                    // while (self.at[0] != 0 and self.at[0] != '(' and !shared.isEndOfLine(self.at[0])) {
+                    //     self.advanceChars(1);
+                    // }
+                } else if (shared.isAlpha(c)) {
                     token.token_type = .Identifier;
                     while (shared.isAlpha(self.at[0]) or shared.isNumber(self.at[0]) or self.at[0] == '_') {
                         self.advanceChars(1);
                     }
-
-                    token.text.count = @intFromPtr(self.input.data) - @intFromPtr(token.text.data);
                 } else if (shared.isNumber(c)) {
                     var number: f32 = 0;
                     while (shared.isNumber(self.at[0])) {
@@ -181,24 +225,44 @@ pub const Tokenizer = struct {
                     token.token_type = .Number;
                     token.f32 = number;
                     token.i32 = @intFromFloat(number);
-                    token.text.count = @intFromPtr(self.input.data) - @intFromPtr(token.text.data);
                 } else {
                     token.token_type = .Unknown;
                 }
             },
         }
 
+        token.text.count = @intFromPtr(self.input.data) - @intFromPtr(token.text.data);
+
         return token;
     }
 
-    fn eatAllWhitespace(self: *Tokenizer) void {
+    pub fn getToken(self: *Tokenizer) Token {
+        var token: Token = .{};
+
         while (true) {
-            if (shared.isWhitespace(self.at[0])) {
-                self.advanceChars(1);
+            token = self.getTokenRaw();
+            if (token.token_type == .Spacing or
+                token.token_type == .EndOfLine or
+                token.token_type == .Comment)
+            {
+                // Ignore these when we're getting real tokens.
             } else {
+                if (token.token_type == .String) {
+                    // Skip the quotation marks.
+                    if (token.text.count > 0 and token.text.data[0] == '"') {
+                        token.text.data += 1;
+                        token.text.count -= 1;
+                    }
+
+                    if (token.text.count > 0 and token.text.data[token.text.count - 1] == '"') {
+                        token.text.count -= 1;
+                    }
+                }
                 break;
             }
         }
+
+        return token;
     }
 
     pub fn eatAllUntil(self: *Tokenizer, end: u32) void {
@@ -210,8 +274,12 @@ pub const Tokenizer = struct {
     }
 
     pub fn optionalToken(self: *Tokenizer, desired_type: TokenType) bool {
-        const token: Token = self.getToken();
-        return token.token_type == desired_type;
+        const token: Token = self.peekTokenRaw();
+        const result = token.token_type == desired_type;
+        if (token.token_type == desired_type) {
+            _ = self.getToken();
+        }
+        return result;
     }
 
     pub fn requireToken(self: *Tokenizer, desired_type: TokenType) Token {
@@ -219,6 +287,20 @@ pub const Tokenizer = struct {
 
         if (token.token_type != desired_type) {
             self.encounteredError(token, "Unexpected token type", .{});
+        }
+
+        return token;
+    }
+
+    pub fn requireIntegerRange(self: *Tokenizer, min_value: i32, max_value: i32) Token {
+        const token: Token = self.requireToken(.Number);
+
+        if (token.token_type == .Number) {
+            if (token.i32 >= min_value and token.i32 <= max_value) {
+                // Valid.
+            } else {
+                self.encounteredError(token, "Expected a number between %d and %d.", .{ min_value, max_value });
+            }
         }
 
         return token;

@@ -44,6 +44,8 @@ const HHAFontGlyph = file_formats.HHAFontGlyph;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
+const HHAAlignPoint = file_formats.HHAAlignPoint;
+const HHAAlignPointType = file_formats.HHAAlignPointType;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const PlatformFileHandle = shared.PlatformFileHandle;
 const PlatformFileInfo = shared.PlatformFileInfo;
@@ -66,6 +68,7 @@ const HHA_MAX_SOUND_SAMPLE_COUNT = file_formats.HHA_MAX_SOUND_SAMPLE_COUNT;
 const ASSET_MAX_SPRITE_DIM = file_formats.ASSET_MAX_SPRITE_DIM;
 const ASSET_MAX_PLATE_DIM = file_formats.ASSET_MAX_PLATE_DIM;
 const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
+const HHA_ALIGN_POINT_TYPE_COUNT = file_formats.HHA_ALIGN_POINT_TYPE_COUNT;
 
 const ImportType = enum(u32) {
     None,
@@ -1692,7 +1695,7 @@ fn endTags(
     result.one_past_last_tag_index = builder.assets.tag_count;
 
     if (builder.has_error) {
-        tokenizer.encounteredErrorUnknown("Out of tag space.", .{});
+        tokenizer.encounteredError(null, "Out of tag space.", .{});
     }
 
     return result;
@@ -1841,7 +1844,7 @@ fn parsePieces(
         result = .Plate;
     } else {
         // stream.output(errors, @src(), "Unrecognized type of import artwork.\n", .{});
-        tokenizer.encounteredErrorUnknown("Unrecognized type of import artwork.", .{});
+        tokenizer.encounteredError(null, "Unrecognized type of import artwork.", .{});
     }
 
     return result;
@@ -1909,6 +1912,7 @@ const HHTContext = struct {
     default_fields: HHTFields = .{},
     file_group: *shared.PlatformFileGroup,
     temp_arena: *MemoryArena,
+    hht_write: bool = false, // If true, we are writing a new HHT from the existing one, not importing its values.
 };
 
 const HHTFields = struct {
@@ -1937,6 +1941,11 @@ fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool
     return result;
 }
 
+fn copyAllInputUpToAndIncluding(context: *HHTContext, open_brace: Token) void {
+    _ = context;
+    _ = open_brace;
+}
+
 fn parseTopLevelBlock(
     tokenizer: *Tokenizer,
     context: *HHTContext,
@@ -1947,40 +1956,86 @@ fn parseTopLevelBlock(
     const is_default: bool = block_token.equals("default");
     var file_name: Token = .{};
 
-    if (is_default) {
+    if (!is_default) {
         file_name = tokenizer.requireToken(.String);
     }
 
     var append_tags: ImportTagArray = .{};
 
-    _ = tokenizer.requireToken(.OpenBrace);
+    const open_brace: Token = tokenizer.requireToken(.OpenBrace);
+    copyAllInputUpToAndIncluding(context, open_brace);
+
+    var align_points: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]HHAAlignPoint =
+        @splat(@splat(@splat(.{})));
+
     while (tokenizer.parsing()) {
         const token: Token = tokenizer.getToken();
         if (token.token_type == .CloseBrace) {
+            if (context.hht_write) {
+                // Output the alignment points.
+            }
             break;
         } else if (token.equals("Name")) {
             _ = tokenizer.requireToken(.Equals);
             fields.name = tokenizer.requireToken(.String).text;
-            _ = tokenizer.requireToken(.SemiColon);
         } else if (token.equals("Author")) {
             _ = tokenizer.requireToken(.Equals);
             fields.author = tokenizer.requireToken(.String).text;
-            _ = tokenizer.requireToken(.SemiColon);
         } else if (token.equals("Description")) {
             _ = tokenizer.requireToken(.Equals);
             fields.description = tokenizer.requireToken(.String).text;
-            _ = tokenizer.requireToken(.SemiColon);
         } else if (token.equals("HHA")) {
             _ = tokenizer.requireToken(.Equals);
             fields.hha = tokenizer.requireToken(.String).text;
-            _ = tokenizer.requireToken(.SemiColon);
         } else if (token.equals("Tags")) {
             _ = tokenizer.requireToken(.Equals);
             append_tags = parseTagList(context.assets, tokenizer);
+        } else if (token.equals("Align")) {
+            _ = tokenizer.requireToken(.OpenBracket);
+            const grid_x: i32 = tokenizer.requireIntegerRange(0, ASSET_IMPORT_GRID_MAX - 1).i32;
+            _ = tokenizer.requireToken(.Comma);
+            const grid_y: i32 = tokenizer.requireIntegerRange(0, ASSET_IMPORT_GRID_MAX - 1).i32;
+            const index: i32 = tokenizer.requireIntegerRange(0, HHA_ALIGN_POINT_TYPE_COUNT - 1).i32;
+            _ = tokenizer.requireToken(.CloseBracket);
+            _ = tokenizer.requireToken(.Equals);
+
+            const position_percent0: i32 = tokenizer.requireIntegerRange(0, std.math.maxInt(u16)).i32;
+            _ = tokenizer.requireToken(.Comma);
+            const position_percent1: i32 = tokenizer.requireIntegerRange(0, std.math.maxInt(u16)).i32;
+            _ = tokenizer.requireToken(.Comma);
+            const size: i32 = tokenizer.requireIntegerRange(0, std.math.maxInt(u16)).i32;
+            _ = tokenizer.requireToken(.Comma);
+            const type0: Token = tokenizer.requireToken(.Identifier);
+            var align_type: u16 = @intFromEnum(file_formats.alignPointTypeFromName(type0.text));
+            if (align_type != @intFromEnum(HHAAlignPointType.None)) {
+                var type1: Token = .{};
+                if (tokenizer.optionalToken(.Or)) {
+                    type1 = tokenizer.requireToken(.Identifier);
+                    if (type1.equals("ToParent")) {
+                        align_type |= @intFromEnum(HHAAlignPointType.ToParent);
+                    } else {
+                        tokenizer.encounteredError(type0, "Expected \"ToParent\".", .{});
+                    }
+                }
+
+                if (tokenizer.parsing()) {
+                    var point: *HHAAlignPoint = &align_points[@intCast(grid_y)][@intCast(grid_x)][@intCast(index)];
+                    point.position_percent[0] = @intCast(position_percent0);
+                    point.position_percent[1] = @intCast(position_percent1);
+                    point.size = @intCast(size);
+                    point.align_type = align_type;
+                }
+            } else {
+                tokenizer.encounteredError(type0, "Urecognized alignment point type.", .{});
+            }
         } else {
             tokenizer.encounteredError(token, "Expected field name.", .{});
         }
+
+        _ = tokenizer.requireToken(.SemiColon);
+        copyAllInputUpToAndIncluding(context, open_brace);
     }
+
     _ = tokenizer.requireToken(.SemiColon);
 
     if (tokenizer.parsing()) {
@@ -2059,7 +2114,7 @@ fn parseTopLevelBlock(
                                 else => unreachable,
                             }
                         } else {
-                            tokenizer.encounteredErrorUnknown("Couldn't open HHA %S for writing.", .{fields.hha});
+                            tokenizer.encounteredError(null, "Couldn't open HHA %S for writing.", .{fields.hha});
                         }
                     } else {
                         tokenizer.encounteredError(block_token, "Unexpected block type.", .{});
@@ -2076,10 +2131,11 @@ fn parseTagList(assets: *Assets, tokenizer: *Tokenizer) ImportTagArray {
     var builder: TagBuilder = beginTags(assets);
 
     while (tokenizer.parsing()) {
-        const token: Token = tokenizer.getToken();
+        var token: Token = tokenizer.peekToken();
         if (token.token_type == .SemiColon) {
             break;
         } else if (token.token_type == .Identifier) {
+            token = tokenizer.getToken();
             var tag_value: f32 = 1;
 
             const check: Token = tokenizer.getToken();
@@ -2151,7 +2207,7 @@ pub fn importChangedAssets(assets: *Assets) void {
                 shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
                 shared.platform.closeFile(&handle);
 
-                var tokenizer: Tokenizer = .init(file_buffer);
+                var tokenizer: Tokenizer = .init(file_buffer, .wrapZ(file_info.base_name));
                 parseHHT(&temp_arena, &file_group, &tokenizer, assets);
             }
         }

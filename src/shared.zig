@@ -284,8 +284,12 @@ pub fn isEndOfLine(char: u32) bool {
     return char == '\n' or char == '\r';
 }
 
+pub fn isSpacing(char: u32) bool {
+    return char == ' ' or char == '\t';
+}
+
 pub fn isWhitespace(char: u32) bool {
-    return char == ' ' or char == '\t' or isEndOfLine(char);
+    return isSpacing(char) or isEndOfLine(char);
 }
 
 pub fn isAlpha(char: u32) bool {

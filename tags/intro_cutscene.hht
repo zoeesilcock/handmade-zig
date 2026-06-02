@@ -7,7 +7,7 @@ default
     HHA = "intro_cutscene";
 };
 
-plate "title_screen.png" {Tags = ShotIndex(12), LayerIndex(1) }
+plate "title_screen.png" {Tags = ShotIndex(12), LayerIndex(1);};
 
 default
 {
