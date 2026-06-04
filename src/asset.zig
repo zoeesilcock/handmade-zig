@@ -49,6 +49,7 @@ const HHAAlignPointType = file_formats.HHAAlignPointType;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const PlatformFileHandle = shared.PlatformFileHandle;
 const PlatformFileInfo = shared.PlatformFileInfo;
+const PlatformFileGroup = shared.PlatformFileGroup;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
@@ -75,13 +76,6 @@ const ImportType = enum(u32) {
     Plate,
     SingleTile,
     MultiTile,
-};
-
-const ImportSourceInfo = struct {
-    name: String = .empty,
-    description: String = .empty,
-    author: String = .empty,
-    append_hha_index: u32 = 0,
 };
 
 const ImportTagArray = struct {
@@ -120,6 +114,7 @@ pub const Asset = struct {
     file_index: u32,
     asset_index_in_file: u32,
 
+    asset_type: u32,
     next_of_type: u32,
 };
 
@@ -185,6 +180,7 @@ const SourceFile = struct {
     base_name: String,
     file_date: u64,
     file_checksum: u64,
+    dest_file_index: u32, // Index of the AssetFile to which this source file writes.
 
     // Note: [Y][X], asset index in the Assets.assets array.
     asset_indices: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]u32 = @splat(@splat(0)),
@@ -233,6 +229,9 @@ pub const Assets = struct {
 
     tag_range: [ASSET_TAG_COUNT]f32 = @splat(1000000),
 
+    // TODO: This could just be allocated on demaind now, there is no reasong for it to be an array,
+    // nobody uses it that way.
+    max_file_count: u32,
     file_count: u32,
     files: [*]AssetFile,
 
@@ -300,64 +299,23 @@ pub const Assets = struct {
 
         assets.tag_count = 1;
         assets.asset_count = 1;
+        assets.file_count = 1;
 
         // Load asset headers.
         {
             var file_group = shared.platform.getAllFilesOfTypeBegin(.AssetFile);
             defer shared.platform.getAllFilesOfTypeEnd(&file_group);
 
-            assets.file_count = file_group.file_count + 1;
-            assets.files = arena.pushArray(assets.file_count, AssetFile, null);
-
-            var open_flags: u32 = @intFromEnum(shared.OpenFileModeFlags.Read);
+            assets.max_file_count = file_group.file_count;
             if (INTERNAL) {
-                open_flags |= @intFromEnum(shared.OpenFileModeFlags.Write);
+                assets.max_file_count += 256;
             }
 
-            var file_index: u32 = 1;
+            assets.files = arena.pushArray(assets.max_file_count, AssetFile, null);
+
             var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
             while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
-                std.debug.assert(file_index < assets.file_count);
-                const file: *AssetFile = &assets.files[file_index];
-                defer file_index += 1;
-
-                const file_handle = shared.platform.openFile(&file_group, file_info, open_flags);
-                const stem: String = types.removePath(types.removeExtension(.wrapZ(file_info.base_name)));
-                file.stem = arena.pushStringSized(stem);
-                file.tag_base = assets.tag_count;
-                file.asset_base = assets.asset_count - 1;
-                file.handle = file_handle;
-
-                shared.platform.readDataFromFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
-
-                if (file.header.magic_value != HHA_MAGIC_VALUE) {
-                    shared.platform.fileError(&file.handle, "HHA file has an invalid magic value.");
-                }
-
-                if (file.header.version > HHA_VERSION) {
-                    shared.platform.fileError(&file.handle, "HHA file is of a later version.");
-                }
-
-                if (shared.platform.noFileErrors(&file.handle)) {
-                    // The first asset and tag slot in every HHA is a null,
-                    // so we don't count it as something we will need space for.
-                    if (file.header.tag_count > 0) {
-                        assets.tag_count += (file.header.tag_count - 1);
-                    }
-                    if (file.header.asset_count > 0) {
-                        assets.asset_count += (file.header.asset_count - 1);
-                    }
-                } else {
-                    std.debug.assert(true);
-                }
-
-                file.high_water_mark = file_info.file_size;
-                while (file.retractWaterMark(file.header.tag_count, file.header.tags, @sizeOf(HHATag)) or
-                    file.retractWaterMark(file.header.asset_count, file.header.annotations, @sizeOf(HHAAnnotation)) or
-                    file.retractWaterMark(file.header.asset_count, file.header.assets, @sizeOf(HHAAsset)))
-                {
-                    // Do nothing
-                }
+                _ = initSourceHHA(assets, &file_group, file_info);
             }
         }
 
@@ -437,6 +395,7 @@ pub const Assets = struct {
                         const asset: *Asset = &assets.assets[global_asset_index];
 
                         asset.file_index = file_index;
+                        asset.asset_type = 0;
                         asset.asset_index_in_file = global_asset_index - file.asset_base;
                         asset.hha = hha_asset[0];
                         asset.annotation = hha_annotation.*;
@@ -473,6 +432,8 @@ pub const Assets = struct {
                                 hha_annotation.source_file_date,
                                 hha_annotation.source_file_checksum,
                             );
+                            source_file.dest_file_index = file_index;
+
                             const grid_asset_index: *u32 = &source_file.asset_indices[grid_y][grid_x];
                             if (grid_asset_index.* == 0) {
                                 grid_asset_index.* = global_asset_index;
@@ -504,6 +465,67 @@ pub const Assets = struct {
         std.debug.assert(asset_count == assets.asset_count);
 
         return assets;
+    }
+
+    fn initSourceHHA(
+        assets: *Assets,
+        file_group: *PlatformFileGroup,
+        file_info: *PlatformFileInfo,
+    ) u32 {
+        var file_index: u32 = 0;
+
+        if (assets.file_count < assets.max_file_count) {
+            file_index = assets.file_count;
+            assets.file_count += 1;
+
+            var arena: *MemoryArena = &assets.non_restored_memory;
+            var open_flags: u32 = @intFromEnum(shared.OpenFileModeFlags.Read);
+            if (INTERNAL) {
+                open_flags |= @intFromEnum(shared.OpenFileModeFlags.Write);
+            }
+
+            const file: *AssetFile = &assets.files[file_index];
+
+            const file_handle = shared.platform.openFile(file_group, file_info, open_flags);
+            const stem: String = types.removePath(types.removeExtension(.wrapZ(file_info.base_name)));
+            file.stem = arena.pushStringSized(stem);
+            file.tag_base = assets.tag_count;
+            file.asset_base = assets.asset_count - 1;
+            file.handle = file_handle;
+
+            shared.platform.readDataFromFile(&file.handle, 0, @sizeOf(HHAHeader), &file.header);
+
+            if (file.header.magic_value != HHA_MAGIC_VALUE) {
+                shared.platform.fileError(&file.handle, "HHA file has an invalid magic value.");
+            }
+
+            if (file.header.version > HHA_VERSION) {
+                shared.platform.fileError(&file.handle, "HHA file is of a later version.");
+            }
+
+            if (shared.platform.noFileErrors(&file.handle)) {
+                // The first asset and tag slot in every HHA is a null,
+                // so we don't count it as something we will need space for.
+                if (file.header.tag_count > 0) {
+                    assets.tag_count += (file.header.tag_count - 1);
+                }
+                if (file.header.asset_count > 0) {
+                    assets.asset_count += (file.header.asset_count - 1);
+                }
+            } else {
+                std.debug.assert(true);
+            }
+
+            file.high_water_mark = file_info.file_size;
+            while (file.retractWaterMark(file.header.tag_count, file.header.tags, @sizeOf(HHATag)) or
+                file.retractWaterMark(file.header.asset_count, file.header.annotations, @sizeOf(HHAAnnotation)) or
+                file.retractWaterMark(file.header.asset_count, file.header.assets, @sizeOf(HHAAsset)))
+            {
+                // Do nothing
+            }
+        }
+
+        return file_index;
     }
 
     pub fn getFile(self: *Assets, file_index: u32) ?*AssetFile {
@@ -1154,9 +1176,13 @@ pub const Assets = struct {
     }
 
     pub fn setAssetType(self: *Assets, asset_index: u32, type_id: AssetBasicCategory) void {
+        // TODO: We don't really want to be doing this anymore, we just want a tag-matcing acceleration structure that
+        // we can rebuild during imports, because we ant it to be easy to do things like change the types of assets.
         if (asset_index != 0 and @intFromEnum(type_id) < @typeInfo(AssetBasicCategory).@"enum".fields.len) {
             var asset: *Asset = &self.assets[asset_index];
             std.debug.assert(asset.next_of_type == 0);
+            std.debug.assert(asset.asset_type == 0);
+            asset.asset_type = @intFromEnum(type_id);
             asset.next_of_type = self.first_asset_of_type[@intFromEnum(type_id)];
             self.first_asset_of_type[@intFromEnum(type_id)] = asset_index;
         }
@@ -1306,8 +1332,6 @@ fn downsample(source: ImageU32, downsample_count: u32) ImageU32 {
 
 fn writeImageToHHA(
     assets: *Assets,
-    info: ImportSourceInfo,
-    tags: ImportGridTag,
     file: *SourceFile,
     orig_dim: Vector2u,
     source_image: ImageU32,
@@ -1317,97 +1341,53 @@ fn writeImageToHHA(
 ) void {
     _ = temp_arena;
 
-    if (tags.type_id != .None) {
-        var hha_asset: HHAAsset = .{
-            .info = .{
-                .bitmap = .{},
-            },
-        };
-        hha_asset.info.bitmap.align_points[0].set(.Default, true, 1.0, .new(0.5, 0.5));
-        var asset_index: u32 = file.asset_indices[tile_y_index][tile_x_index];
-        if (asset_index != 0) {
-            const asset: *Asset = &assets.assets[asset_index];
-            hha_asset = asset.hha;
-        } else {
-            asset_index = assets.reserveAsset();
-            assets.setAssetType(asset_index, tags.type_id);
-        }
-
-        if (asset_index != 0) {
-            const asset_data_size: u32 = source_image.getTotalImageSize();
-            var asset: *Asset = &assets.assets[asset_index];
-
-            const bitmap_id: BitmapId = .{ .value = asset_index };
-            assets.unloadBitmap(bitmap_id);
-
-            asset.file_index = info.append_hha_index;
-            std.debug.assert(asset.file_index != 0);
-
-            const asset_file: *AssetFile = &assets.files[asset.file_index];
-            if (hha_asset.data_offset == 0 or hha_asset.data_size < asset_data_size) {
-                hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
-            }
-            hha_asset.data_size = asset_data_size;
-
-            hha_asset.info.bitmap.dim[0] = @intCast(source_image.width);
-            hha_asset.info.bitmap.dim[1] = @intCast(source_image.height);
-            hha_asset.info.bitmap.orig_dim[0] = @intCast(orig_dim.width());
-            hha_asset.info.bitmap.orig_dim[1] = @intCast(orig_dim.height());
-            hha_asset.first_tag_index = tags.first_tag_index;
-            hha_asset.one_past_last_tag_index = tags.one_past_last_tag_index;
-            hha_asset.type = .Bitmap;
-
-            asset.hha = hha_asset;
-            asset.annotation.source_file_date = file.file_date;
-            asset.annotation.source_file_checksum = file.file_checksum;
-            asset.annotation.sprite_sheet_x = tile_x_index;
-            asset.annotation.sprite_sheet_y = tile_y_index;
-
-            assets.writeAssetString(
-                asset_file,
-                info.name,
-                &asset.annotation.asset_name_count,
-                &asset.annotation.asset_name_offset,
-            );
-            assets.writeAssetString(
-                asset_file,
-                info.description,
-                &asset.annotation.asset_description_count,
-                &asset.annotation.asset_description_offset,
-            );
-            assets.writeAssetString(
-                asset_file,
-                info.author,
-                &asset.annotation.author_count,
-                &asset.annotation.author_offset,
-            );
-            assets.writeAssetString(
-                asset_file,
-                file.base_name,
-                &asset.annotation.source_file_base_name_count,
-                &asset.annotation.source_file_base_name_offset,
-            );
-
-            const asset_errors: Stream = .{};
-            const file_error_stream_size: u32 = @intCast(file.errors.getTotalSize());
-            const asset_error_stream_size: u32 = @intCast(asset_errors.getTotalSize());
-            asset.annotation.error_stream_count = file_error_stream_size + asset_error_stream_size;
-            asset.annotation.error_stream_offset = assets.reserveData(asset_file, asset.annotation.error_stream_count);
-            Assets.writeAssetStream(asset_file, asset.annotation.error_stream_offset, &file.errors);
-            Assets.writeAssetStream(
-                asset_file,
-                asset.annotation.error_stream_offset + file_error_stream_size,
-                &asset_errors,
-            );
-
-            file.asset_indices[tile_y_index][tile_x_index] = asset_index;
-
-            Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, @ptrCast(source_image.pixels));
-        } else {
-            _ = stream.outputWithSrc(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!\n", .{});
-        }
+    var hha_asset: HHAAsset = .{
+        .info = .{
+            .bitmap = .{},
+        },
+    };
+    hha_asset.info.bitmap.align_points[0].set(.Default, true, 1.0, .new(0.5, 0.5));
+    var asset_index: u32 = file.asset_indices[tile_y_index][tile_x_index];
+    if (asset_index != 0) {
+        const asset: *Asset = &assets.assets[asset_index];
+        hha_asset = asset.hha;
     } else {
-        _ = stream.outputWithSrc(&file.errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
+        asset_index = assets.reserveAsset();
+    }
+
+    if (asset_index != 0) {
+        const asset_data_size: u32 = source_image.getTotalImageSize();
+        var asset: *Asset = &assets.assets[asset_index];
+
+        const bitmap_id: BitmapId = .{ .value = asset_index };
+        assets.unloadBitmap(bitmap_id);
+
+        asset.file_index = file.dest_file_index;
+        std.debug.assert(asset.file_index != 0);
+
+        const asset_file: *AssetFile = &assets.files[asset.file_index];
+        if (hha_asset.data_offset == 0 or hha_asset.data_size < asset_data_size) {
+            hha_asset.data_offset = assets.reserveData(asset_file, asset_data_size);
+        }
+        hha_asset.data_size = asset_data_size;
+
+        hha_asset.info.bitmap.dim[0] = @intCast(source_image.width);
+        hha_asset.info.bitmap.dim[1] = @intCast(source_image.height);
+        hha_asset.info.bitmap.orig_dim[0] = @intCast(orig_dim.width());
+        hha_asset.info.bitmap.orig_dim[1] = @intCast(orig_dim.height());
+        hha_asset.type = .Bitmap;
+
+        asset.hha = hha_asset;
+        asset.annotation.source_file_date = file.file_date;
+        asset.annotation.source_file_checksum = file.file_checksum;
+        asset.annotation.sprite_sheet_x = tile_x_index;
+        asset.annotation.sprite_sheet_y = tile_y_index;
+
+        file.asset_indices[tile_y_index][tile_x_index] = asset_index;
+
+        Assets.writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, @ptrCast(source_image.pixels));
+    } else {
+        _ = stream.outputWithSrc(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!\n", .{});
     }
 }
 
@@ -1447,8 +1427,6 @@ fn extractImage(
 
 fn processPlateImport(
     assets: *Assets,
-    info: ImportSourceInfo,
-    tags: ImportGridTag,
     file: *SourceFile,
     source_image: ImageU32,
     temp_arena: *MemoryArena,
@@ -1464,13 +1442,11 @@ fn processPlateImport(
         temp_arena,
     );
     const dest_image: ImageU32 = downsample(prepared_image, donwsample_count);
-    writeImageToHHA(assets, info, tags, file, orig_dim, dest_image, temp_arena, 0, 0);
+    writeImageToHHA(assets, file, orig_dim, dest_image, temp_arena, 0, 0);
 }
 
 fn processSingleTileImport(
     assets: *Assets,
-    info: ImportSourceInfo,
-    tags: ImportGridTag,
     file: *SourceFile,
     source_image: ImageU32,
     temp_arena: *MemoryArena,
@@ -1486,13 +1462,11 @@ fn processSingleTileImport(
         temp_arena,
     );
     const dest_image: ImageU32 = downsample(prepared_image, donwsample_count);
-    writeImageToHHA(assets, info, tags, file, orig_dim, dest_image, temp_arena, 0, 0);
+    writeImageToHHA(assets, file, orig_dim, dest_image, temp_arena, 0, 0);
 }
 
 fn processMultiTileImport(
     assets: *Assets,
-    info: ImportSourceInfo,
-    grid_tag_array: *ImportGridTags,
     file: *SourceFile,
     image: ImageU32,
     temp_arena: *MemoryArena,
@@ -1524,7 +1498,6 @@ fn processMultiTileImport(
     while (y_index < y_count) : (y_index += 1) {
         var x_index: u32 = 0;
         while (x_index < x_count) : (x_index += 1) {
-            const grid_tags: ImportGridTag = grid_tag_array.tags[y_index][x_index];
             var min_x: u32 = std.math.maxInt(u32);
             var max_x: u32 = std.math.minInt(u32);
             var min_y: u32 = std.math.maxInt(u32);
@@ -1618,7 +1591,7 @@ fn processMultiTileImport(
                 );
                 const orig_dim: Vector2u = .new(tile_image.width, tile_image.height);
                 const dest_image: ImageU32 = downsample(tile_image, downsample_count);
-                writeImageToHHA(assets, info, grid_tags, file, orig_dim, dest_image, temp_arena, x_index, y_index);
+                writeImageToHHA(assets, file, orig_dim, dest_image, temp_arena, x_index, y_index);
             }
         }
     }
@@ -1679,16 +1652,10 @@ fn endTags(
     builder: *TagBuilder,
     tokenizer: *Tokenizer,
     category: AssetBasicCategory,
-    append_tags: ImportTagArray,
 ) ImportGridTag {
     var result: ImportGridTag = .{};
 
     addTag(builder, .BasicCategory, @floatFromInt(@as(u32, @intFromEnum(category))));
-    var tag_index: u32 = append_tags.first_tag_index;
-    while (tag_index < append_tags.one_past_last_tag_index) : (tag_index += 1) {
-        const source_tag: *HHATag = @ptrCast(builder.assets.tags + tag_index);
-        addTag(builder, source_tag.id, source_tag.value);
-    }
 
     result.type_id = category;
     result.first_tag_index = builder.first_tag_index;
@@ -1704,7 +1671,6 @@ fn endTags(
 fn importHead(
     assets: *Assets,
     tokenizer: *Tokenizer,
-    append_tags: ImportTagArray,
     x_index: u32,
     y_index: u32,
 ) ImportGridTag {
@@ -1725,7 +1691,7 @@ fn importHead(
             else => unreachable,
         }
 
-        result = endTags(&builder, tokenizer, .Head, append_tags);
+        result = endTags(&builder, tokenizer, .Head);
     }
 
     return result;
@@ -1734,7 +1700,6 @@ fn importHead(
 fn importBody(
     assets: *Assets,
     tokenizer: *Tokenizer,
-    append_tags: ImportTagArray,
     x_index: u32,
     y_index: u32,
 ) ImportGridTag {
@@ -1759,7 +1724,7 @@ fn importBody(
             else => unreachable,
         }
 
-        result = endTags(&builder, tokenizer, .Body, append_tags);
+        result = endTags(&builder, tokenizer, .Body);
     }
 
     return result;
@@ -1768,7 +1733,6 @@ fn importBody(
 fn parsePieces(
     assets: *Assets,
     tokenizer: *Tokenizer,
-    append_tags: ImportTagArray,
     type_token: Token,
     tags: *ImportGridTags,
 ) ImportType {
@@ -1777,14 +1741,14 @@ fn parsePieces(
     if (type_token.equals("block")) {
         const tag: *ImportGridTag = &tags.tags[0][0];
         var builder: TagBuilder = beginTags(assets);
-        tag.* = endTags(&builder, tokenizer, .Block, append_tags);
+        tag.* = endTags(&builder, tokenizer, .Block);
         result = .SingleTile;
     } else if (type_token.equals("head")) {
         var y_index: u32 = 0;
         while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
             var x_index: u32 = 0;
             while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                tags.tags[y_index][x_index] = importHead(assets, tokenizer, append_tags, x_index, y_index);
+                tags.tags[y_index][x_index] = importHead(assets, tokenizer, x_index, y_index);
             }
         }
 
@@ -1794,7 +1758,7 @@ fn parsePieces(
         while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
             var x_index: u32 = 0;
             while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                tags.tags[y_index][x_index] = importBody(assets, tokenizer, append_tags, x_index, y_index);
+                tags.tags[y_index][x_index] = importBody(assets, tokenizer, x_index, y_index);
             }
         }
 
@@ -1807,9 +1771,9 @@ fn parsePieces(
 
             while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
                 if (y_index <= 3) {
-                    tag.* = importBody(assets, tokenizer, append_tags, x_index, y_index);
+                    tag.* = importBody(assets, tokenizer, x_index, y_index);
                 } else {
-                    tag.* = importHead(assets, tokenizer, append_tags, x_index, y_index - 4);
+                    tag.* = importHead(assets, tokenizer, x_index, y_index - 4);
                 }
             }
         }
@@ -1827,7 +1791,7 @@ fn parsePieces(
                 if (x_index == 0 and y_index < 4) {
                     var builder: TagBuilder = beginTags(assets);
                     addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
-                    tag.* = endTags(&builder, tokenizer, .Hand, append_tags);
+                    tag.* = endTags(&builder, tokenizer, .Hand);
                 }
             }
         }
@@ -1878,31 +1842,77 @@ pub fn readAssetString(
 }
 
 pub fn parseHHT(
-    temp_arena: *MemoryArena,
-    file_group: *shared.PlatformFileGroup,
-    tokenizer: *Tokenizer,
-    assets: *Assets,
+    context: *HHTContext,
+    file_info: *PlatformFileInfo,
 ) void {
-    var context: HHTContext = .{
-        .file_group = file_group,
-        .assets = assets,
-        .temp_arena = temp_arena,
+    var handle: PlatformFileHandle = shared.platform.openFile(
+        &context.file_group,
+        @constCast(file_info),
+        @intFromEnum(shared.OpenFileModeFlags.Read),
+    );
+    var file_buffer: Buffer = .{
+        .count = file_info.file_size,
     };
+    file_buffer.data = context.temp_arena.pushSize(file_buffer.count, null);
+    shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
+    shared.platform.closeFile(&handle);
+
+    var tokenizer: Tokenizer = .init(file_buffer, .wrapZ(file_info.base_name));
 
     while (tokenizer.parsing()) {
         const token: Token = tokenizer.getToken();
 
-        if (token.token_type == .Comment) {
-            continue;
-        }
+        // Needed for the simple-preprocessor example.
+        // if (token.token_type == .Comment) {
+        //     continue;
+        // }
 
-        if (token.token_type == .Identifier) {
-            parseTopLevelBlock(tokenizer, &context, token);
+        if (token.token_type == .Pound) {
+            const directive = tokenizer.getToken();
+            if (directive.equals("include")) {
+                context.include_depth += 1;
+                if (context.include_depth > 16) {
+                    const file_name: Token = tokenizer.requireToken(.String);
+
+                    var buf: [4096]u8 = undefined;
+                    const length = shared.formatString(buf.len, &buf, "tags/%S", .{file_name.text});
+                    const path = buf[0..length];
+
+                    if (shared.platform.getFileByPath(
+                        &context.file_group,
+                        @ptrCast(path),
+                        @intFromEnum(shared.OpenFileModeFlags.Read),
+                    )) |included_file_info| {
+                        parseHHT(context, included_file_info);
+                        //
+                    } else {
+                        tokenizer.encounteredError(file_name, "Unable to include file.", .{});
+                    }
+                } else {
+                    tokenizer.encounteredError(directive, "Maximum include depth exceeded.", .{});
+                }
+            } else if (directive.equals("hha")) {
+                const hha_stem: Token = tokenizer.requireToken(.String);
+                const hha_index: u32 = getOrCreateHHAByStem(context.assets, hha_stem.text, true);
+                if (hha_index != 0) {
+                    context.hha_stem = hha_stem.text;
+                    context.hha_index = hha_index;
+                } else {
+                    tokenizer.encounteredError(null, "Couldn't open HHA %S for writing.", .{hha_stem.text});
+                }
+            } else {
+                tokenizer.encounteredError(directive, "Unrecongnized directive.", .{});
+            }
+        } else if (token.token_type == .Identifier) {
+            if (context.hha_index != 0) {
+                parseTopLevelBlock(&tokenizer, context, token);
+            } else {
+                tokenizer.encounteredError(token, "Import blocks are not allowed to appear before at least one hha directive.", .{});
+            }
         } else if (token.token_type == .EndOfStream) {
             break;
         } else {
             tokenizer.encounteredError(token, "Unexpected top-level token.", .{});
-            break;
         }
     }
 }
@@ -1910,8 +1920,11 @@ pub fn parseHHT(
 const HHTContext = struct {
     assets: *Assets,
     default_fields: HHTFields = .{},
-    file_group: *shared.PlatformFileGroup,
+    file_group: PlatformFileGroup,
     temp_arena: *MemoryArena,
+    hha_stem: String = .empty,
+    hha_index: u32 = 0,
+    include_depth: u32 = 0,
     hht_write: bool = false, // If true, we are writing a new HHT from the existing one, not importing its values.
 };
 
@@ -1919,7 +1932,6 @@ const HHTFields = struct {
     name: String = .empty,
     author: String = .empty,
     description: String = .empty,
-    hha: String = .empty,
 };
 
 fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool) u32 {
@@ -1935,7 +1947,35 @@ fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool
     }
 
     if (create_if_not_found and result == 0) {
-        // Create a blank HHA here?
+        var file_group = shared.platform.getAllFilesOfTypeBegin(.AssetFile);
+        defer shared.platform.getAllFilesOfTypeEnd(&file_group);
+
+        var buf: [4096]u8 = undefined;
+        const length = shared.formatString(buf.len, &buf, "data/%S.hha", .{stem});
+        const path = buf[0..length];
+
+        const file_info: ?*PlatformFileInfo = shared.platform.getFileByPath(
+            &file_group,
+            @ptrCast(path),
+            @intFromEnum(shared.OpenFileModeFlags.Read) | @intFromEnum(shared.OpenFileModeFlags.Write),
+        );
+        if (file_info != null) {
+            var handle: PlatformFileHandle = shared.platform.openFile(
+                &file_group,
+                @constCast(file_info.?),
+                @intFromEnum(shared.OpenFileModeFlags.Write),
+            );
+            shared.platform.closeFile(&handle);
+
+            if (shared.platform.noFileErrors(&handle)) {
+                var header: HHAHeader = .{};
+                shared.platform.writeDataToFile(&handle, 0, @sizeOf(HHAHeader), &header);
+            }
+
+            if (shared.platform.noFileErrors(&handle)) {
+                result = Assets.initSourceHHA(assets, &file_group, file_info.?);
+            }
+        }
     }
 
     return result;
@@ -1946,25 +1986,151 @@ fn copyAllInputUpToAndIncluding(context: *HHTContext, open_brace: Token) void {
     _ = open_brace;
 }
 
+fn stampAssets(
+    tokenizer: *Tokenizer,
+    assets: *Assets,
+    file: *SourceFile,
+    fields: *HHTFields,
+    grid: *ImportGridTags,
+    append_tags: *ImportTagArray,
+) void {
+    const asset_file = assets.getFile(file.dest_file_index);
+
+    const x_count: u32 = file.asset_indices[0].len;
+    const y_count: u32 = file.asset_indices.len;
+
+    var y_index: u32 = 0;
+    while (y_index < y_count) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < x_count) : (x_index += 1) {
+            const asset_index: u32 = file.asset_indices[y_index][x_index];
+            if (asset_index != 0) {
+                const tags: ImportGridTags = grid.tags[y_index][x_index];
+
+                const asset: *Asset = &assets.assets[asset_index];
+                if (tags.type_id != .None) {
+                    if (asset.asset_type == 0) {
+                        assets.setAssetType(asset_index, tags.type_id);
+                    }
+                } else {
+                    _ = stream.outputWithSrc(&file.errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
+                }
+
+                var builder: TagBuilder = beginTags(assets);
+                var tag_index: u32 = tags.first_tag_index;
+                while (tag_index < tags.one_past_last_tag_index) : (tag_index += 1) {
+                    const source_tag: *HHATag = @ptrCast(builder.assets.tags + tag_index);
+                    addTag(&builder, source_tag.id, source_tag.value);
+                }
+                tag_index = append_tags.first_tag_index;
+                while (tag_index < append_tags.one_past_last_tag_index) : (tag_index += 1) {
+                    const source_tag: *HHATag = @ptrCast(builder.assets.tags + tag_index);
+                    addTag(&builder, source_tag.id, source_tag.value);
+                }
+                const combined_tags: ImportGridTag = endTags(&builder, tokenizer, .None);
+
+                asset.hha.first_tag_index = combined_tags.first_tag_index;
+                asset.hha.one_past_last_tag_index = combined_tags.one_past_last_tag_index;
+
+                assets.writeAssetString(
+                    asset_file,
+                    fields.name,
+                    &asset.annotation.asset_name_count,
+                    &asset.annotation.asset_name_offset,
+                );
+                assets.writeAssetString(
+                    asset_file,
+                    fields.description,
+                    &asset.annotation.asset_description_count,
+                    &asset.annotation.asset_description_offset,
+                );
+                assets.writeAssetString(
+                    asset_file,
+                    fields.author,
+                    &asset.annotation.author_count,
+                    &asset.annotation.author_offset,
+                );
+                assets.writeAssetString(
+                    asset_file,
+                    file.base_name,
+                    &asset.annotation.source_file_base_name_count,
+                    &asset.annotation.source_file_base_name_offset,
+                );
+
+                const asset_errors: Stream = .{};
+                const file_error_stream_size: u32 = @intCast(file.errors.getTotalSize());
+                const asset_error_stream_size: u32 = @intCast(asset_errors.getTotalSize());
+                asset.annotation.error_stream_count = file_error_stream_size + asset_error_stream_size;
+                asset.annotation.error_stream_offset = assets.reserveData(asset_file, asset.annotation.error_stream_count);
+                Assets.writeAssetStream(asset_file, asset.annotation.error_stream_offset, &file.errors);
+                Assets.writeAssetStream(
+                    asset_file,
+                    asset.annotation.error_stream_offset + file_error_stream_size,
+                    &asset_errors,
+                );
+            }
+        }
+    }
+}
+
 fn parseTopLevelBlock(
     tokenizer: *Tokenizer,
     context: *HHTContext,
     block_token: Token,
 ) void {
     const temp_arena: *MemoryArena = context.temp_arena;
+    const temp_marker: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
+    defer temp_arena.endTemporaryMemory(temp_marker);
+
     var fields: HHTFields = context.default_fields;
     const is_default: bool = block_token.equals("default");
-    var file_name: Token = .{};
+
+    var needs_full_rebuild: bool = false;
+    const needs_meta_rebuild: bool = false;
+
+    var tags: ImportGridTags = .{};
+    var import_type: ImportType = .None;
+    var match: ?*SourceFile = null;
+    var file_info: ?*PlatformFileInfo = null;
 
     if (!is_default) {
-        file_name = tokenizer.requireToken(.String);
-    }
+        const file_name: Token = tokenizer.requireToken(.String);
 
-    var append_tags: ImportTagArray = .{};
+        var buf: [4096]u8 = undefined;
+        const sub_dir: []const u8 = "art";
+        const length =
+            shared.formatString(buf.len, &buf, "source/%S/%s/%S", .{ context.hha_stem, sub_dir, file_name.text });
+        const path = buf[0..length];
+
+        file_info = shared.platform.getFileByPath(
+            &context.file_group,
+            @ptrCast(path),
+            @intFromEnum(shared.OpenFileModeFlags.Read),
+        );
+        if (file_info != null) {
+            match = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
+
+            import_type = parsePieces(context.assets, tokenizer, block_token, &tags);
+
+            if (import_type != .None) {
+                if (match.?.file_date != file_info.?.file_date) {
+                    needs_full_rebuild = true;
+                }
+            } else {
+                tokenizer.encounteredError(block_token, "Unexpected block type.", .{});
+            }
+        } else {
+            tokenizer.encounteredError(file_name, "File not found (looked in %s)", .{path});
+        }
+    }
 
     const open_brace: Token = tokenizer.requireToken(.OpenBrace);
     copyAllInputUpToAndIncluding(context, open_brace);
 
+    var append_tags: ImportTagArray = .{};
+    const align_point_written: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]bool =
+        @splat(@splat(@splat(false)));
+    _ = align_point_written;
     var align_points: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]HHAAlignPoint =
         @splat(@splat(@splat(.{})));
 
@@ -1984,9 +2150,6 @@ fn parseTopLevelBlock(
         } else if (token.equals("Description")) {
             _ = tokenizer.requireToken(.Equals);
             fields.description = tokenizer.requireToken(.String).text;
-        } else if (token.equals("HHA")) {
-            _ = tokenizer.requireToken(.Equals);
-            fields.hha = tokenizer.requireToken(.String).text;
         } else if (token.equals("Tags")) {
             _ = tokenizer.requireToken(.Equals);
             append_tags = parseTagList(context.assets, tokenizer);
@@ -2041,87 +2204,51 @@ fn parseTopLevelBlock(
     if (tokenizer.parsing()) {
         if (is_default) {
             context.default_fields = fields;
-        } else {
-            const temp_marker: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
-            defer temp_arena.endTemporaryMemory(temp_marker);
+        } else if (match != null) {
+            if (match.?.dest_file_index != context.hha_index) {
+                match.?.dest_file_index = context.hha_index;
+                needs_full_rebuild = true;
+            }
 
-            var buf: [4096]u8 = undefined;
-            const sub_dir: []const u8 = "art";
-            const length =
-                shared.formatString(buf.len, &buf, "source/%S/%s/%S", .{ fields.hha, sub_dir, file_name.text });
-            const path = buf[0..length];
+            if (needs_full_rebuild) {
+                var handle: PlatformFileHandle = shared.platform.openFile(
+                    &context.file_group,
+                    @constCast(file_info.?),
+                    @intFromEnum(shared.OpenFileModeFlags.Read),
+                );
+                var file_buffer: Buffer = .{
+                    .count = file_info.?.file_size,
+                };
 
-            if (shared.platform.getFileByPath(context.file_group, @ptrCast(path))) |file_info| {
-                const match: *SourceFile = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
+                file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
 
-                if (match.file_date != file_info.file_date) {
-                    var tags: ImportGridTags = .{};
-                    // const import_type = parsePieces(
-                    //     assets,
-                    //     .wrapZ(file_info.base_name),
-                    //     &info,
-                    //     &tags,
-                    //     &match.errors,
-                    // );
-                    const import_type: ImportType = parsePieces(
-                        context.assets,
-                        tokenizer,
-                        append_tags,
-                        block_token,
-                        &tags,
-                    );
+                shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
+                shared.platform.closeFile(&handle);
 
-                    if (import_type != .None) {
-                        var handle: PlatformFileHandle = shared.platform.openFile(
-                            context.file_group,
-                            @constCast(file_info),
-                            @intFromEnum(shared.OpenFileModeFlags.Read),
-                        );
-                        var file_buffer: Buffer = .{
-                            .count = file_info.file_size,
-                        };
+                // We update this first, because assets that get packed from here on out need to be able to
+                // stamp themselves with the right data.
+                match.?.file_date = file_info.?.file_date;
+                match.?.file_checksum = shared.checksumOf(file_buffer, null);
 
-                        file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
+                const content_stream: Stream = .makeReadStream(file_buffer, &match.?.errors);
+                const image = png.parsePNG(temp_arena, content_stream, null);
 
-                        shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
-                        shared.platform.closeFile(&handle);
-
-                        // We update this first, because assets that get packed from here on out need to be able to
-                        // stamp themselves with the right data.
-                        match.file_date = file_info.file_date;
-                        match.file_checksum = shared.checksumOf(file_buffer, null);
-
-                        const content_stream: Stream = .makeReadStream(file_buffer, &match.errors);
-                        const image = png.parsePNG(temp_arena, content_stream, null);
-                        const info: ImportSourceInfo = .{
-                            .name = fields.name,
-                            .description = fields.description,
-                            .author = fields.author,
-                            .append_hha_index = getOrCreateHHAByStem(context.assets, fields.hha, true),
-                        };
-
-                        if (info.append_hha_index != 0) {
-                            switch (import_type) {
-                                .Plate => {
-                                    processPlateImport(context.assets, info, tags.tags[0][0], match, image, temp_arena);
-                                },
-                                .SingleTile => {
-                                    processSingleTileImport(context.assets, info, tags.tags[0][0], match, image, temp_arena);
-                                },
-                                .MultiTile => {
-                                    processMultiTileImport(context.assets, info, &tags, match, image, temp_arena);
-                                },
-                                else => unreachable,
-                            }
-                        } else {
-                            tokenizer.encounteredError(null, "Couldn't open HHA %S for writing.", .{fields.hha});
-                        }
-                    } else {
-                        tokenizer.encounteredError(block_token, "Unexpected block type.", .{});
-                    }
+                switch (import_type) {
+                    .Plate => {
+                        processPlateImport(context.assets, match.?, image, temp_arena);
+                    },
+                    .SingleTile => {
+                        processSingleTileImport(context.assets, match.?, image, temp_arena);
+                    },
+                    .MultiTile => {
+                        processMultiTileImport(context.assets, match.?, image, temp_arena);
+                    },
+                    else => unreachable,
                 }
-            } else {
-                tokenizer.encounteredError(file_name, "File not found (looked in %s)", .{path});
+            }
+
+            if (needs_meta_rebuild and needs_full_rebuild) {
+                stampAssets(tokenizer, context.assets, match, &fields, &tags, &append_tags);
             }
         }
     }
@@ -2167,7 +2294,7 @@ fn parseTagList(assets: *Assets, tokenizer: *Tokenizer) ImportTagArray {
     }
 
     var result: ImportTagArray = .{};
-    const temp: ImportGridTag = endTags(&builder, tokenizer, .None, result);
+    const temp: ImportGridTag = endTags(&builder, tokenizer, .None);
     result.first_tag_index = temp.first_tag_index;
     result.one_past_last_tag_index = temp.one_past_last_tag_index;
     return result;
@@ -2178,38 +2305,16 @@ pub fn importChangedAssets(assets: *Assets) void {
         var temp_arena: MemoryArena = .{};
         defer temp_arena.clear();
 
-        var file_group = shared.platform.getAllFilesOfTypeBegin(.HHT);
-        defer shared.platform.getAllFilesOfTypeEnd(&file_group);
+        var context: HHTContext = .{
+            .file_group = shared.platform.getAllFilesOfTypeBegin(.HHT),
+            .assets = assets,
+            .temp_arena = &temp_arena,
+        };
+        defer shared.platform.getAllFilesOfTypeEnd(&context.file_group);
 
-        // TODO: Do a sweep mark to set all assets to "unseen", then mark each one we see so we can detect
-        // when files have been deleted.
-
-        var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
+        var opt_file_info: ?*PlatformFileInfo = context.file_group.first_file_info;
         while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
-            // Note: At the moment we can afford to parse the HHTs every time, so we don't try to do a separated
-            // file date checking.
-
-            // const match: *SourceFile = .getOrCreateFromHashValue(assets, file_info.base_name);
-            //
-            // if (match.file_date != file_info.file_date)
-            {
-                var handle: PlatformFileHandle = shared.platform.openFile(
-                    &file_group,
-                    @constCast(file_info),
-                    @intFromEnum(shared.OpenFileModeFlags.Read),
-                );
-                var file_buffer: Buffer = .{
-                    .count = file_info.file_size,
-                };
-
-                file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
-
-                shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
-                shared.platform.closeFile(&handle);
-
-                var tokenizer: Tokenizer = .init(file_buffer, .wrapZ(file_info.base_name));
-                parseHHT(&temp_arena, &file_group, &tokenizer, assets);
-            }
+            parseHHT(&context, file_info);
         }
     }
 }

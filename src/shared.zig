@@ -1,5 +1,5 @@
 // Constants.
-pub const MIDDLE_C: u32 = 261;
+pub const MIDDLE_C: u31 = 261;
 pub const TREBLE_C: u32 = 523;
 pub const MAX_CONTROLLER_COUNT: u8 = 5;
 pub const HIT_POINT_SUB_COUNT = 4;
@@ -905,7 +905,7 @@ const completeAllQueuedWorkType: type = fn (queue: *PlatformWorkQueue) callconv(
 
 const getAllFilesOfTypeBeginType: type = fn (file_type: PlatformFileTypes) callconv(.c) PlatformFileGroup;
 const getAllFilesOfTypeEndType: type = fn (file_group: *PlatformFileGroup) callconv(.c) void;
-const getFileByPathType: type = fn (file_group: *PlatformFileGroup, path: [*:0]const u8) callconv(.c) ?*PlatformFileInfo;
+const getFileByPathType: type = fn (file_group: *PlatformFileGroup, path: [*:0]const u8, mode_flags: u32) callconv(.c) ?*PlatformFileInfo;
 const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFileInfo, mode_flags: u32) callconv(.c) PlatformFileHandle;
 const closeFileType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) void;
 const readDataFromFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;

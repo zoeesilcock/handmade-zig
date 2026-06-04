@@ -249,8 +249,8 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
             wildcard = win32.L("data\\*.hhs");
         },
         shared.PlatformFileTypes.HHT => {
-            stem = win32.L("data\\");
-            wildcard = win32.L("data\\*.hht");
+            stem = win32.L("tags\\");
+            wildcard = win32.L("tags\\*.hht");
         },
     }
 
@@ -315,15 +315,19 @@ fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.c) void
     win32_file_group.arena.clear();
 }
 
-fn getFileByPath(file_group: *shared.PlatformFileGroup, path: [*:0]const u8) callconv(.c) ?*shared.PlatformFileInfo {
+fn getFileByPath(file_group: *shared.PlatformFileGroup, path: [*:0]const u8, mode_flags: u32) callconv(.c) ?*shared.PlatformFileInfo {
     const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
     var result: ?*shared.PlatformFileInfo = null;
 
     const path_16: [*:0]const u16 = utf16FromUTF8(&win32_file_group.arena, types.stringLength(path), path);
 
     var data: win32.WIN32_FILE_ATTRIBUTE_DATA = undefined;
-    if (win32.GetFileAttributesExW(path_16, win32.GetFileExInfoStandard, &data) != 0) {
+    if (win32.GetFileAttributesExW(path_16, win32.GetFileExInfoStandard, &data) != 0 or
+        (mode_flags & @intFromEnum(shared.OpenFileModeFlags.Write) != 0))
+    {
         result = allocateFileInfo(file_group, &data);
+        result.?.base_name = @constCast(path);
+        result.?.platform = @ptrCast(@constCast(path_16));
     }
 
     return result;

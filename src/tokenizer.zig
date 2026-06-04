@@ -22,6 +22,7 @@ const TokenType = enum(u32) {
     CloseBrace,
     Equals,
     Or,
+    Pound,
 
     String,
     Identifier,
@@ -149,6 +150,7 @@ pub const Tokenizer = struct {
             '=' => token.token_type = .Equals,
             '.' => token.token_type = .Period,
             '|' => token.token_type = .Or,
+            '#' => token.token_type = .Pound,
             '"' => {
                 token.token_type = .String;
 
@@ -165,27 +167,27 @@ pub const Tokenizer = struct {
                 }
             },
             else => {
-                if (shared.isSpacing(self.at[0])) {
+                if (shared.isSpacing(c)) {
                     token.token_type = .Spacing;
 
                     while (shared.isSpacing(self.at[0])) {
                         self.advanceChars(1);
                     }
-                } else if (shared.isEndOfLine(self.at[0])) {
+                } else if (shared.isEndOfLine(c)) {
                     token.token_type = .EndOfLine;
 
-                    if ((self.at[0] == '\r' and self.at[1] == '\n') or
-                        (self.at[0] == '\n' and self.at[1] == '\r'))
+                    if ((c == '\r' and self.at[0] == '\n') or
+                        (c == '\n' and self.at[0] == '\r'))
                     {
                         self.advanceChars(1);
                     }
 
                     self.column_number = 1;
                     self.line_number += 1;
-                } else if (self.at[0] == '/') {
-                    self.advanceChars(2);
-
+                } else if (c == '/' and self.at[0] == '/') {
                     token.token_type = .Comment;
+
+                    self.advanceChars(2);
                     token.text.data = @constCast(self.input.data);
 
                     while (!shared.isEndOfLine(self.at[0])) {
@@ -203,7 +205,7 @@ pub const Tokenizer = struct {
                         self.advanceChars(1);
                     }
                 } else if (shared.isNumber(c)) {
-                    var number: f32 = 0;
+                    var number: f32 = @floatFromInt(c - '0');
                     while (shared.isNumber(self.at[0])) {
                         const digit: f32 = @floatFromInt(self.at[0] - '0');
                         number = number * 10 + digit;

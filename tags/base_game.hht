@@ -1,9 +1,9 @@
+#hha "base_game"
 
 default
 {
     Author = "Anna Rettberg";
     Description = "These are the original in-game assets for the base game.";
-    HHA = "base_game";
 };
 
 block "block_forest_01.png"
@@ -15,7 +15,6 @@ block "block_forest_01.png"
 block "block_orphanage_01.png"
 {
     Tags = wall, manmade, wood, drywall;
-    Align[0] = 234, 548, 20, Default | ToParent;
 };
 
 block "block_orphanage_02.png"
