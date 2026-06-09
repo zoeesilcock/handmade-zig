@@ -434,7 +434,7 @@ fn writeDataToFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, s
         const file_size32 = types.safeTruncateI64(@intCast(size));
 
         var bytes_written: u32 = undefined;
-        const read_result = win32.WriteFile(
+        const write_result = win32.WriteFile(
             win32_handle,
             source,
             file_size32,
@@ -442,8 +442,8 @@ fn writeDataToFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, s
             &overlapped,
         );
 
-        if (read_result != 0 and bytes_written == file_size32) {
-            // File read successfully.
+        if (write_result != 0 and bytes_written == file_size32) {
+            // File written successfully.
         } else {
             const error_number = win32.GetLastError();
             std.debug.print("Error writing to file: {d}\n", .{@intFromEnum(error_number)});

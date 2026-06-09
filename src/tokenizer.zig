@@ -113,16 +113,14 @@ pub const Tokenizer = struct {
     }
 
     pub fn peekTokenRaw(self: *Tokenizer) Token {
-        const temp: Tokenizer = self.*;
-        const result: Token = self.getTokenRaw();
-        self.* = temp;
+        var temp: Tokenizer = self.*;
+        const result: Token = temp.getTokenRaw();
         return result;
     }
 
     pub fn peekToken(self: *Tokenizer) Token {
-        const temp: Tokenizer = self.*;
-        const result: Token = self.getToken();
-        self.* = temp;
+        var temp: Tokenizer = self.*;
+        const result: Token = temp.getToken();
         return result;
     }
 

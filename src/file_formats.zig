@@ -172,6 +172,10 @@ pub fn hhaCode(a: u32, b: u32, c: u32, d: u32) u32 {
 pub const HHATag = extern struct {
     id: AssetTagId align(1) = .None,
     value: f32 align(1) = 0,
+
+    pub fn equals(self: HHATag, other: HHATag) bool {
+        return self.id == other.id and self.value == other.value;
+    }
 };
 comptime {
     std.debug.assert(@sizeOf(HHATag) == (2 * 4));

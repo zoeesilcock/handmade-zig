@@ -1,6 +1,5 @@
 const std = @import("std");
 const shared = @import("shared.zig");
-const types = @import("types.zig");
 
 pub const INTERNAL = @import("build_options").internal;
 
@@ -190,7 +189,7 @@ pub const DevId = extern struct {
         return .{
             .value = .{
                 .{ .ptr = @ptrCast(pointer) },
-                .{ .ptr = @ptrCast(types.fileAndLine(source)) },
+                .{ .ptr = @ptrCast(fileAndLine(source)) },
             },
         };
     }
@@ -202,7 +201,7 @@ pub const DevId = extern struct {
                     .u32 = .{ a, b },
                 },
                 .{
-                    .ptr = @ptrCast(types.fileAndLine(source)),
+                    .ptr = @ptrCast(fileAndLine(source)),
                 },
             },
         };

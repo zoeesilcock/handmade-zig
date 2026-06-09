@@ -10,6 +10,7 @@ const memory = @import("memory.zig");
 const dev_ui = @import("dev_ui.zig");
 const handmade = @import("handmade.zig");
 const world_mode_mod = @import("world_mode.zig");
+const import = @import("import.zig");
 
 // Types.
 const DevUI = dev_ui.DevUI;
@@ -398,7 +399,7 @@ pub const InGameEditor = struct {
 
         self.clean_edit = self.undo_sentinel.next;
 
-        asset_mod.writeAllHHAModifications(self.assets);
+        import.writeAllHHAModifications(self.assets);
     }
 
     pub fn updateAndRender(self: *InGameEditor, ui: *DevUI, game_state: *shared.State) void {
@@ -539,7 +540,7 @@ pub const InGameEditor = struct {
         offset: u64,
     ) void {
         layout.beginRow();
-        const value: String = asset_mod.readAssetString(
+        const value: String = import.readAssetString(
             asset_file,
             temp_arena,
             count,
@@ -589,7 +590,7 @@ pub const InGameEditor = struct {
                 self.saveAllChanges();
             }
             if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT & SAVE", true, null)) {
-                asset_mod.importChangedAssets(self.assets);
+                import.importChangedAssets(self.assets);
                 self.saveAllChanges();
             }
             layout.endRow();

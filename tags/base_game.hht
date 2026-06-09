@@ -8,7 +8,7 @@ default
 
 block "block_forest_01.png"
 {
-    name = "Forest Terrain";
+    Name = "Forest Terrain";
     Tags = floor, grass;
 };
 
@@ -142,10 +142,6 @@ character "character_skeleton_dark.png"
     Tags = undead, bones, dark;
 };
 
-cover "cover_forest.png"
-{
-};
-
 hand "hand_fire.png"
 {
     Tags = undead, bones, dark;
@@ -236,22 +232,28 @@ head "head_orphan_14.png"
     Tags = orphan, laird;
 };
 
-item "item_hat_01.png"
-{
-};
 
-item "item_hat_02.png"
-{
-};
-
-item "item_hat_03.png"
-{
-};
-
-obstacles "obstacles_forest.png"
-{
-};
-
-obstacles "obstacles_orphanage.png"
-{
-};
+// We haven't done import grids for these yet because we don't know how they work in the game.
+// cover "cover_forest.png"
+// {
+// };
+//
+// item "item_hat_01.png"
+// {
+// };
+//
+// item "item_hat_02.png"
+// {
+// };
+//
+// item "item_hat_03.png"
+// {
+// };
+//
+// obstacles "obstacles_forest.png"
+// {
+// };
+//
+// obstacles "obstacles_orphanage.png"
+// {
+// };

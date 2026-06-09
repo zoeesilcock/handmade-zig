@@ -622,7 +622,7 @@ fn printContents(hha: *LoadedHHA) void {
                 });
             },
             else => {
-                std.log.info("            Type: UKNOWN: ({d})", .{@intFromEnum(hha_asset.type)});
+                std.log.info("            Type: UNKNOWN: ({d})", .{@intFromEnum(hha_asset.type)});
             },
         }
     }
@@ -632,6 +632,137 @@ fn printContents(hha: *LoadedHHA) void {
     while (tag_index < hha.tag_count) : (tag_index += 1) {
         std.log.info("        [{d}]:", .{tag_index});
         printTag(hha, tag_index);
+    }
+}
+
+fn extractBitmapAsset(hha: *LoadedHHA, hha_asset: *HHAAsset, dest_file_name: []const u8, io: std.Io) void {
+    const pixels: [*]const u8 = hha.data_store.ptr + hha_asset.data_offset;
+    writeBMPImageTopDownRGBA(
+        hha_asset.info.bitmap.dim[0],
+        hha_asset.info.bitmap.dim[1],
+        @ptrCast(@alignCast(@constCast(pixels[0..hha_asset.data_size]))),
+        dest_file_name,
+        0,
+        io,
+    ) catch undefined;
+}
+
+const BitmapHeader = packed struct {
+    file_type: u16,
+    file_size: u32,
+    reserved1: u16,
+    reserved2: u16,
+    bitmap_offset: u32,
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bits_per_pxel: u16,
+    compression: u32,
+    size_of_bitmap: u32,
+    horz_resolution: i32,
+    vert_resolution: i32,
+    colors_used: u32,
+    colors_important: u32,
+};
+
+const PixelOp = enum(u32) {
+    SwapRedAndBlue = 0x1,
+    ReplaceAlpha = 0x2,
+    MultiplyAlpha = 0x4,
+    Invert = 0x8,
+};
+
+fn writeBMPImageTopDownRGBA(
+    width: u32,
+    height: u32,
+    pixels: []u32,
+    output_file_name: []const u8,
+    pixel_ops: u32,
+    io: std.Io,
+) !void {
+    const output_pixel_size: u32 = 4 * width * height;
+
+    const replace_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.ReplaceAlpha)) != 0;
+    const swap_red_and_blue: bool = (pixel_ops & @intFromEnum(PixelOp.SwapRedAndBlue)) != 0;
+    const multiply_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.MultiplyAlpha)) != 0;
+    const invert: bool = (pixel_ops & @intFromEnum(PixelOp.Invert)) != 0;
+
+    const header_size: u32 = @sizeOf(BitmapHeader) - 10;
+    const header: BitmapHeader = .{
+        .file_type = 0x4d42,
+        .file_size = header_size + @as(u32, @intCast(pixels.len)),
+        .reserved1 = 0,
+        .reserved2 = 0,
+        .bitmap_offset = header_size,
+        .size = header_size - 14,
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .planes = 1,
+        .bits_per_pxel = 32,
+        .compression = 0,
+        .size_of_bitmap = output_pixel_size,
+        .horz_resolution = 0,
+        .vert_resolution = 0,
+        .colors_used = 0,
+        .colors_important = 0,
+    };
+
+    const mid_point_y: u32 = @divFloor(@as(u32, @intCast(header.height + 1)), 2);
+    var row0: [*]u32 = pixels.ptr;
+    var row1: [*]u32 = row0 + (height - 1) * width;
+    var y: u32 = 0;
+    while (y < mid_point_y) : (y += 1) {
+        var pixel0: [*]u32 = row0;
+        var pixel1: [*]u32 = row1;
+        var x: u32 = 0;
+        while (x < width) : (x += 1) {
+            var color0: u32 = pixel0[0];
+            var color1: u32 = pixel1[0];
+
+            if (swap_red_and_blue) {
+                color0 = math.swapRedAndBlue(color0);
+                color1 = math.swapRedAndBlue(color1);
+            }
+
+            if (replace_alpha) {
+                color0 = math.replaceAlpha(color0);
+                color1 = math.replaceAlpha(color1);
+            }
+
+            if (multiply_alpha) {
+                color0 = math.multiplyAlpha(color0);
+                color1 = math.multiplyAlpha(color1);
+            }
+
+            if (invert) {
+                pixel0[0] = color1;
+                pixel1[0] = color0;
+            } else {
+                pixel0[0] = color0;
+                pixel1[0] = color1;
+            }
+            pixel0 += 1;
+            pixel1 += 1;
+        }
+
+        row0 += width;
+        row1 -= width;
+    }
+
+    if (std.Io.Dir.cwd().createFile(io, output_file_name, .{})) |file| {
+        defer file.close(io);
+
+        var buf: [1024]u8 = undefined;
+        var file_writer = file.writer(io, &buf);
+        const writer = &file_writer.interface;
+
+        try writer.writeAll(std.mem.asBytes(&header)[0..header_size]);
+        try writer.writeAll(std.mem.sliceAsBytes(pixels));
+
+        try writer.flush();
+    } else |err| {
+        std.log.err("Unable to write output file '{s}': {s}", .{ output_file_name, @errorName(err) });
     }
 }
 
@@ -648,6 +779,27 @@ pub fn main(init: std.process.Init) !void {
 
             const hha: ?*LoadedHHA = readHHA(source_file_name, allocator, init.io);
             writeHHA(hha, dest_file_name, allocator, init.io);
+        } else if (std.mem.eql(u8, args[1], "-extract")) {
+            const source_file_name: []const u8 = args[2];
+            const dest_file_stem: []const u8 = args[3];
+
+            if (readHHA(source_file_name, allocator, init.io)) |hha| {
+                var asset_index: u32 = 1;
+                while (asset_index < hha.asset_count) : (asset_index += 1) {
+                    const hha_asset: *HHAAsset = &hha.assets[asset_index];
+
+                    if (hha_asset.type == .Bitmap) {
+                        var dest_file_name: [1024]u8 = undefined;
+                        const length: usize = shared.formatString(
+                            dest_file_name.len,
+                            &dest_file_name,
+                            "%s_%04u.bmp",
+                            .{ dest_file_stem, asset_index },
+                        );
+                        extractBitmapAsset(hha, hha_asset, dest_file_name[0..length], init.io);
+                    }
+                }
+            }
         } else {
             print_usage = true;
         }
@@ -708,5 +860,6 @@ pub fn main(init: std.process.Init) !void {
         std.log.err("Usage: {s} -rewrite (source.hha) (dest.hha)", .{args[0]});
         std.log.err("Usage: {s} -info (source.hha)", .{args[0]});
         std.log.err("Usage: {s} -dump (source.hha)", .{args[0]});
+        std.log.err("Usage: {s} -extract (source.hha) (dest file name stem)", .{args[0]});
     }
 }

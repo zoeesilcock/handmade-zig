@@ -191,7 +191,7 @@ pub fn toLowercase(character: u8) u8 {
 }
 
 pub fn updateStringHash(hash_value: *u32, value: u8) void {
-    hash_value.* %= 65599 * hash_value.* + value;
+    hash_value.* = 65599 *% hash_value.* +% value;
 }
 
 pub fn stringHashOfZ(z: [*:0]const u8) u32 {
@@ -209,7 +209,7 @@ pub fn stringHashOfZ(z: [*:0]const u8) u32 {
 pub fn stringHashOf(string: String) u32 {
     var hash_value: u32 = 0;
 
-    var index: u32 = 0;
+    var index: usize = 0;
     while (index < string.count) : (index += 1) {
         updateStringHash(&hash_value, string.data[index]);
     }
@@ -219,8 +219,8 @@ pub fn stringHashOf(string: String) u32 {
 
 /// This is based on the 128-bit MurmurHash from MurmurHash3.
 fn murmurHashUpdate(h_in: u64, k_in: u64) u64 {
-    const c1: u64 = 0xff51afd7ed558ccd;
-    const c2: u64 = 0xc4ceb9fe1a85ec53;
+    const c1: u64 = 0x87c37b91114253d5;
+    const c2: u64 = 0x4cf5ad432745937f;
 
     const r1: u64 = 31;
     const r2: u64 = 27;
@@ -262,7 +262,7 @@ pub fn checksumOf(buffer: Buffer, opt_seed: ?u64) u64 {
     const count8: u64 = buffer.count - (count64 * @sizeOf(u64));
 
     // TODO: This may be unaligned, we may need to move to an aligned location first.
-    var at: [*]u64 = @ptrCast(@alignCast(buffer.data));
+    var at: [*]align(1) u64 = @ptrCast(buffer.data);
     var index: u64 = 0;
     while (index < count64) : (index += 1) {
         result = murmurHashUpdate(result, at[0]);

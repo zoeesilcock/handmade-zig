@@ -1686,3 +1686,34 @@ pub fn fitCameraDistanceToHalfDimensionV2(
     );
     return result;
 }
+
+pub fn replaceAlpha(color: u32) u32 {
+    const alpha = color >> 24;
+    const result: u32 =
+        (alpha << 24) |
+        (alpha << 16) |
+        (alpha << 8) |
+        (alpha << 0);
+
+    return result;
+}
+
+pub fn multiplyAlpha(color: u32) u32 {
+    var color0: u32 = ((color >> 0) & 0xff);
+    var color1: u32 = ((color >> 8) & 0xff);
+    var color2: u32 = ((color >> 16) & 0xff);
+    const alpha = color >> 24;
+
+    // Quick and dirty lossy multiply, loses one bit.
+    color0 = ((color0 * alpha) >> 8);
+    color1 = ((color1 * alpha) >> 8);
+    color2 = ((color2 * alpha) >> 8);
+
+    const result: u32 =
+        (alpha << 24) |
+        (color2 << 16) |
+        (color1 << 8) |
+        (color0 << 0);
+
+    return result;
+}
