@@ -112,6 +112,26 @@ pub fn copyArray(count: MemoryIndex, comptime T: type, source: *anyopaque, dest:
     return @ptrCast(@alignCast(copy(count * @sizeOf(T), source, dest)));
 }
 
+pub fn memoryIsEqual(count_init: usize, a_init: *anyopaque, b_init: *anyopaque) bool {
+    var count: usize = count_init;
+    var a: [*]u8 = @ptrCast(a_init);
+    var b: [*]u8 = @ptrCast(b_init);
+
+    while (count > 0) : (count -= 1) {
+        if (a[0] != b[0]) {
+            return false;
+        }
+        a += 1;
+        b += 1;
+    }
+
+    return true;
+}
+
+pub fn buffersAreEqual(a: Buffer, b: Buffer) bool {
+    return a.count == b.count and memoryIsEqual(a.count, a.data, b.data);
+}
+
 pub fn stringsAreEqual(a: [*:0]const u8, b: [*:0]const u8) bool {
     var result: bool = a == b;
 
@@ -178,6 +198,50 @@ pub fn stringBufferEquals(a: String, b: [*:0]const u8) bool {
 
 pub fn stringBuffersEqual(a: String, b: String) bool {
     return stringsWithLengthAreEqual(a.data, a.count, b.data, b.count);
+}
+
+pub fn stringsWithLengthAreEqualLowercase(a: [*]const u8, a_length: MemoryIndex, b: [*]const u8, b_length: MemoryIndex) bool {
+    var result: bool = a_length == b_length;
+
+    if (result) {
+        for (0..a_length) |i| {
+            if (toLowercase(a[i]) != toLowercase(b[i])) {
+                result = false;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
+pub fn stringsWithOneLengthAreEqualLowercase(a: [*]const u8, a_length: MemoryIndex, opt_b: ?[*:0]const u8) bool {
+    var result: bool = false;
+
+    if (opt_b) |b| {
+        var at = b;
+
+        for (0..a_length) |i| {
+            if (a[i] == 0 or toLowercase(a[i]) != toLowercase(at[0])) {
+                return false;
+            }
+            at += 1;
+        }
+
+        result = at[0] == 0;
+    } else {
+        result = a_length == 0;
+    }
+
+    return result;
+}
+
+pub fn stringBufferEqualsLowercase(a: String, b: [*:0]const u8) bool {
+    return stringsWithOneLengthAreEqualLowercase(@ptrCast(a.data), a.count, b);
+}
+
+pub fn stringBuffersEqualLowercase(a: String, b: String) bool {
+    return stringsWithLengthAreEqualLowercase(a.data, a.count, b.data, b.count);
 }
 
 pub fn toLowercase(character: u8) u8 {
@@ -910,6 +974,7 @@ const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFi
 const closeFileType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) void;
 const readDataFromFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
 const writeDataToFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, source: *anyopaque) callconv(.c) void;
+const atomicReplaceFileContentsType: type = fn (info: *PlatformFileInfo, size: u64, source: *anyopaque) callconv(.c) void;
 const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) bool;
 const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.c) void;
 
@@ -935,6 +1000,7 @@ pub const Platform = if (INTERNAL) extern struct {
     closeFile: *const closeFileType = undefined,
     readDataFromFile: *const readDataFromFileType = undefined,
     writeDataToFile: *const writeDataToFileType = undefined,
+    atomicReplaceFileContents: *const atomicReplaceFileContentsType = undefined,
     noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
     fileError: *const fileErrorType = undefined,
 

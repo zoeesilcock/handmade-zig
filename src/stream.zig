@@ -161,3 +161,14 @@ pub fn output(
 
     return size;
 }
+
+pub fn copyStreamToBuffer(source: Stream, dest: Buffer) void {
+    std.debug.assert(source.getTotalSize() <= dest.count);
+
+    var data_offset: usize = 0;
+    var opt_chunk: ?*Chunk = source.first;
+    while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
+        _ = shared.copy(chunk.contents.count, chunk.contents.data, dest.data + data_offset);
+        data_offset += chunk.contents.count;
+    }
+}

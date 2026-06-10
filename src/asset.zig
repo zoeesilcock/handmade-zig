@@ -415,7 +415,9 @@ pub const Assets = struct {
 
         std.debug.assert(asset_count == assets.asset_count);
 
-        import.importChangedAssets(assets);
+        if (INTERNAL) {
+            import.synchronizeAssetFileChanges(assets, false);
+        }
 
         return assets;
     }

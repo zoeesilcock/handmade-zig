@@ -8,6 +8,7 @@ const DebugTable = debug_interface.DebugTable;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const String = types.String;
+const Buffer = types.Buffer;
 
 pub const MemoryIndex = usize;
 
@@ -174,6 +175,12 @@ pub const MemoryArena = extern struct {
         }
 
         return @ptrCast(dest);
+    }
+
+    pub fn pushBuffer(self: *MemoryArena, size: usize) Buffer {
+        var result: Buffer = .{ .count = size };
+        result.data = @ptrCast(self.pushSize(result.count, null));
+        return result;
     }
 
     pub fn pushString(self: *MemoryArena, source: [*:0]const u8) String {

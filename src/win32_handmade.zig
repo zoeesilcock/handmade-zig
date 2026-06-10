@@ -452,6 +452,12 @@ fn writeDataToFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, s
     }
 }
 
+fn atomicReplaceFileContents(info: *shared.PlatformFileInfo, size: u64, source: *anyopaque) callconv(.c) void {
+    _ = info;
+    _ = size;
+    _ = source;
+}
+
 fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) callconv(.c) void {
     if (INTERNAL) {
         win32.OutputDebugStringA("WIN32 FILE ERROR: ");
@@ -1943,6 +1949,7 @@ pub export fn wWinMain(
         .closeFile = closeFile,
         .readDataFromFile = readDataFromFile,
         .writeDataToFile = writeDataToFile,
+        .atomicReplaceFileContents = atomicReplaceFileContents,
         .fileError = fileError,
 
         .allocateMemory = allocateMemory,

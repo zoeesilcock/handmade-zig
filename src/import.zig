@@ -87,7 +87,10 @@ const HHTContext = struct {
     hha_stem: String = .empty,
     hha_index: u32 = 0,
     include_depth: u32 = 0,
-    hht_write: bool = false, // If true, we are writing a new HHT from the existing one, not importing its values.
+
+    // These are only non-null when we are rewriting HHTs.
+    hht_out: ?Stream = null,
+    hht_copy_point: ?[*]u8 = null,
 };
 
 const HHTFields = struct {
@@ -682,8 +685,8 @@ fn importBody(
 
         switch (x_index) {
             0 => addTag(&builder, .Idle, 1),
-            1 => addTag(&builder, .DodgeLeft, 1),
-            2 => addTag(&builder, .DodgeRight, 1),
+            1 => addTag(&builder, .Dodge, -1),
+            2 => addTag(&builder, .Dodge, 1),
             3 => addTag(&builder, .Move, 1),
             4 => addTag(&builder, .Hit, 1),
             5 => addTag(&builder, .Attack1, 1),
@@ -777,24 +780,10 @@ fn parsePieces(
 
         result = .Plate;
     } else {
-        // stream.output(errors, @src(), "Unrecognized type of import artwork.\n", .{});
         tokenizer.encounteredError(null, "Unrecognized type of import artwork.", .{});
     }
 
     return result;
-}
-
-pub fn writeAllHHAModifications(assets: *Assets) void {
-    var file_index: u32 = 1;
-    while (file_index < assets.file_count) : (file_index += 1) {
-        const file: *AssetFile = @ptrCast(assets.files + file_index);
-        if (file.modified) {
-            var temp_arena: MemoryArena = .{};
-            defer temp_arena.clear();
-
-            writeModificationsToHHA(assets, file_index, &temp_arena);
-        }
-    }
 }
 
 pub fn readAssetString(
@@ -814,6 +803,7 @@ pub fn readAssetString(
 pub fn parseHHT(
     context: *HHTContext,
     file_info: *PlatformFileInfo,
+    save_changes_to_hhts: bool,
 ) void {
     var handle: PlatformFileHandle = shared.platform.openFile(
         &context.file_group,
@@ -828,6 +818,11 @@ pub fn parseHHT(
     shared.platform.closeFile(&handle);
 
     var tokenizer: Tokenizer = .init(file_buffer, .wrapZ(file_info.base_name));
+
+    if (save_changes_to_hhts) {
+        context.hht_out = Stream.onDemandMemoryStream(context.temp_arena, null);
+        context.hht_copy_point = tokenizer.peekTokenRaw().text.data;
+    }
 
     while (tokenizer.parsing()) {
         const token: Token = tokenizer.getToken();
@@ -853,8 +848,13 @@ pub fn parseHHT(
                         @ptrCast(path),
                         @intFromEnum(shared.OpenFileModeFlags.Read),
                     )) |included_file_info| {
-                        parseHHT(context, included_file_info);
-                        //
+                        const hht_out = context.hht_out;
+                        const hht_copy_point = context.hht_copy_point;
+                        context.hht_out = null;
+                        context.hht_copy_point = null;
+                        parseHHT(context, included_file_info, save_changes_to_hhts);
+                        context.hht_out = hht_out;
+                        context.hht_copy_point = hht_copy_point;
                     } else {
                         tokenizer.encounteredError(file_name, "Unable to include file.", .{});
                     }
@@ -880,11 +880,23 @@ pub fn parseHHT(
                 tokenizer.encounteredError(token, "Import blocks are not allowed to appear before at least one hha directive.", .{});
             }
         } else if (token.token_type == .EndOfStream) {
+            copyAllInputUpToAndIncluding(context, token);
             break;
         } else {
             tokenizer.encounteredError(token, "Unexpected top-level token.", .{});
         }
     }
+
+    if (save_changes_to_hhts and tokenizer.parsing()) {
+        const hht_content: Buffer = context.temp_arena.pushBuffer(context.hht_out.?.getTotalSize());
+        stream.copyStreamToBuffer(context.hht_out.?, hht_content);
+        if (!shared.buffersAreEqual(file_buffer, hht_content)) {
+            shared.platform.atomicReplaceFileContents(file_info, hht_content.count, hht_content.data);
+        }
+    }
+
+    context.hht_out = null;
+    context.hht_copy_point = null;
 }
 
 fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool) u32 {
@@ -940,9 +952,15 @@ fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool
     return result;
 }
 
-fn copyAllInputUpToAndIncluding(context: *HHTContext, open_brace: Token) void {
-    _ = context;
-    _ = open_brace;
+fn copyAllInputUpToAndIncluding(context: *HHTContext, token: Token) void {
+    if (context.hht_out) |*hht_out| {
+        const start: [*]u8 = context.hht_copy_point.?;
+        const end: [*]u8 = token.text.data + token.text.count;
+        if (@intFromPtr(start) < @intFromPtr(end)) {
+            _ = hht_out.appendChunk(end - start, start);
+            context.hht_copy_point = end;
+        }
+    }
 }
 
 fn updateAssetMetadata(
@@ -1074,8 +1092,6 @@ fn parseTopLevelBlock(
     block_token: Token,
 ) void {
     const temp_arena: *MemoryArena = context.temp_arena;
-    const temp_marker: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
-    defer temp_arena.endTemporaryMemory(temp_marker);
 
     var fields: HHTFields = context.default_fields;
     const is_default: bool = block_token.equals("default");
@@ -1131,7 +1147,7 @@ fn parseTopLevelBlock(
     while (tokenizer.parsing()) {
         const token: Token = tokenizer.getToken();
         if (token.token_type == .CloseBrace) {
-            if (context.hht_write) {
+            if (context.hht_out != null) {
                 // Output the alignment points.
             }
             break;
@@ -1189,8 +1205,8 @@ fn parseTopLevelBlock(
             tokenizer.encounteredError(token, "Expected field name.", .{});
         }
 
-        _ = tokenizer.requireToken(.SemiColon);
-        copyAllInputUpToAndIncluding(context, open_brace);
+        const semi_colon = tokenizer.requireToken(.SemiColon);
+        copyAllInputUpToAndIncluding(context, semi_colon);
     }
 
     _ = tokenizer.requireToken(.SemiColon);
@@ -1205,6 +1221,9 @@ fn parseTopLevelBlock(
             }
 
             if (needs_full_rebuild) {
+                const temp_marker: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
+                defer temp_arena.endTemporaryMemory(temp_marker);
+
                 var handle: PlatformFileHandle = shared.platform.openFile(
                     &context.file_group,
                     @constCast(file_info.?),
@@ -1293,20 +1312,7 @@ fn parseTagList(assets: *Assets, tokenizer: *Tokenizer) ImportTagArray {
     return result;
 }
 
-fn writeModificationsToAllHHAs(assets: *Assets) void {
-    var temp_arena: MemoryArena = .{};
-    defer temp_arena.clear();
-
-    var file_index: u32 = 1;
-    while (file_index < assets.file_count) : (file_index += 1) {
-        const file: *AssetFile = &assets.files[file_index];
-        if (file.modified) {
-            writeModificationsToHHA(assets, file_index, &temp_arena);
-        }
-    }
-}
-
-pub fn importChangedAssets(assets: *Assets) void {
+pub fn synchronizeAssetFileChanges(assets: *Assets, save_changes_to_hhts: bool) void {
     if (INTERNAL) {
         var temp_arena: MemoryArena = .{};
         defer temp_arena.clear();
@@ -1320,9 +1326,18 @@ pub fn importChangedAssets(assets: *Assets) void {
 
         var opt_file_info: ?*PlatformFileInfo = context.file_group.first_file_info;
         while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
-            parseHHT(&context, file_info);
+            parseHHT(&context, file_info, save_changes_to_hhts);
         }
 
-        writeModificationsToAllHHAs(assets);
+        var file_index: u32 = 1;
+        while (file_index < assets.file_count) : (file_index += 1) {
+            const file: *AssetFile = @ptrCast(assets.files + file_index);
+            if (file.modified) {
+                const temporary_memory: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
+                defer temp_arena.endTemporaryMemory(temporary_memory);
+
+                writeModificationsToHHA(assets, file_index, &temp_arena);
+            }
+        }
     }
 }

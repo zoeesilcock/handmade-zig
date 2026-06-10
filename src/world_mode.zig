@@ -278,8 +278,8 @@ fn addPlayer(
     const hero_scale = 1.25;
 
     body.addTag(.Orphan, 1);
-    body.addTag(.Spring, 1);
-    body.addTag(.Viva, 1);
+    body.addTag(.Hero, 1);
+    body.addTag(.Hero, 1);
 
     glove.addTag(.Glove, 1);
     glove.addTag(.Fingers, 1);

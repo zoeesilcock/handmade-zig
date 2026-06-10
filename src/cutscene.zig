@@ -76,7 +76,7 @@ const intro_cutscene: []const LayeredScene = &.{
     },
     LayeredScene{
         .shot_index = 1,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .duration = 20,
         .camera_start = Vector3.new(0, 0, 10),
         .camera_end = Vector3.new(-4, -2, 5),
@@ -95,7 +95,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 2,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(1, -1, -4),
         .layers = &.{
@@ -107,7 +107,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 3,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0.5, 0),
         .camera_end = Vector3.new(0, 6.5, -1.5),
         .layers = &.{
@@ -120,7 +120,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 4,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(0, 0, -0.5),
         .layers = &.{
@@ -134,7 +134,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 5,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(0, 0.5, -1),
         .layers = &.{
@@ -149,7 +149,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 6,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(-0.5, 0.5, -1),
         .layers = &.{
@@ -165,7 +165,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 7,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(2, 0, 0),
         .layers = &.{
@@ -177,7 +177,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 8,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(0, -0.5, -1),
         .layers = &.{
@@ -191,7 +191,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 9,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(-0.75, -0.5, -1),
         .layers = &.{
@@ -205,7 +205,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 10,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(-0.1, 0.05, -0.5),
         .layers = &.{
@@ -220,7 +220,7 @@ const intro_cutscene: []const LayeredScene = &.{
     LayeredScene{
         .shot_index = 11,
         .duration = 20,
-        .asset_type = .OpeningCutscene,
+        .asset_type = .Plate,
         .camera_start = Vector3.new(0, 0, 0),
         .camera_end = Vector3.new(0.6, 0.5, -2),
         .layers = &.{
@@ -274,7 +274,7 @@ pub fn updateAndRenderTitleScreen(
     const result = checkForMetaInput(state, input);
 
     if (!result) {
-        const background_color: Color = .new(1, 0.25, 0.25, 0);
+        const background_color: Color = .new(0, 0, 0, 0);
         var render_group = RenderGroup.begin(
             state.assets,
             render_commands,
@@ -293,6 +293,40 @@ pub fn updateAndRenderTitleScreen(
         if (title_screen.time > 10) {
             playIntroCutscene(state);
         } else {
+            const focal_length: f32 = 0.78;
+            render_group.setCameraTransform(
+                focal_length,
+                .new(1, 0, 0),
+                .new(0, 1, 0),
+                .new(0, 0, 1),
+                .new(0, 0, 10),
+                0,
+                0.1,
+                1000,
+                null,
+                null,
+            );
+
+            var match_vector = asset.AssetVector{};
+            var weight_vector = asset.AssetVector{};
+            weight_vector.e[AssetTagId.ShotIndex.toInt()] = 10;
+            weight_vector.e[AssetTagId.LayerIndex.toInt()] = 1;
+            match_vector.e[AssetTagId.ShotIndex.toInt()] = 12;
+            match_vector.e[AssetTagId.LayerIndex.toInt()] = 1;
+            const layer_image = render_group.assets.getBestMatchBitmap(.Plate, &match_vector, &weight_vector);
+
+            const bitmap_info = render_group.assets.getBitmapInfo(layer_image.?);
+            const align_percentage: Vector2 = bitmap_info.getFirstAlign();
+            asset_rendering.pushBitmapId(
+                &render_group,
+                layer_image,
+                10,
+                .new(0, 2, 0),
+                .white(),
+                align_percentage,
+                null,
+                null,
+            );
             title_screen.time += input.frame_delta_time;
         }
 

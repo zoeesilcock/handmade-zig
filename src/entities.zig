@@ -471,8 +471,10 @@ pub fn updateAndRenderEntities(
 
                 var match_vector = asset.AssetVector{};
                 match_vector.e[AssetTagId.FacingDirection.toInt()] = entity.facing_direction;
+                match_vector.e[AssetTagId.Idle.toInt()] = 1;
                 var weight_vector = asset.AssetVector{};
                 weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
+                weight_vector.e[AssetTagId.Idle.toInt()] = 1;
 
                 var match_index: u32 = 0;
                 while (match_index < entity.tag_count) : (match_index += 1) {

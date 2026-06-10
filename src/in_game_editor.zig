@@ -387,19 +387,21 @@ pub const InGameEditor = struct {
     }
 
     fn saveAllChanges(self: *InGameEditor) void {
-        const list: ?*InGameEdit = self.findCleanEditList();
-        var edit: ?*InGameEdit = list.?.next;
-        while (edit != self.clean_edit) : (edit = edit.?.next) {
-            if (self.getAssetForEdit(edit.?)) |asset| {
-                if (self.assets.getFile(asset.file_index)) |file| {
-                    file.modified = true;
+        if (false) {
+            const list: ?*InGameEdit = self.findCleanEditList();
+            var edit: ?*InGameEdit = list.?.next;
+            while (edit != self.clean_edit) : (edit = edit.?.next) {
+                if (self.getAssetForEdit(edit.?)) |asset| {
+                    if (self.assets.getFile(asset.file_index)) |file| {
+                        file.modified = true;
+                    }
                 }
             }
         }
 
         self.clean_edit = self.undo_sentinel.next;
 
-        import.writeAllHHAModifications(self.assets);
+        import.synchronizeAssetFileChanges(self.assets, true);
     }
 
     pub fn updateAndRender(self: *InGameEditor, ui: *DevUI, game_state: *shared.State) void {
@@ -586,11 +588,10 @@ pub const InGameEditor = struct {
             .fromSlice(hha_section_name),
         )) {
             layout.beginRow();
-            if (layout.button(.fromPointerAndLine(self, @src()), "SAVE", self.isDirty(), null)) {
-                self.saveAllChanges();
+            if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT", self.isDirty(), null)) {
+                import.synchronizeAssetFileChanges(self.assets, false);
             }
             if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT & SAVE", true, null)) {
-                import.importChangedAssets(self.assets);
                 self.saveAllChanges();
             }
             layout.endRow();
