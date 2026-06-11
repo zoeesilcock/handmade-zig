@@ -452,10 +452,61 @@ fn writeDataToFile(handle: *shared.PlatformFileHandle, offset: u64, size: u64, s
     }
 }
 
-fn atomicReplaceFileContents(info: *shared.PlatformFileInfo, size: u64, source: *anyopaque) callconv(.c) void {
-    _ = info;
-    _ = size;
-    _ = source;
+fn atomicReplaceFileContents(file_info: *shared.PlatformFileInfo, size: u64, source: *anyopaque) callconv(.c) bool {
+    var result: bool = false;
+    const existing_file_name: [*:0]u16 = @ptrCast(@alignCast(file_info.platform));
+    var last_slash: [*:0]u16 = existing_file_name;
+    var scan: [*:0]u16 = existing_file_name;
+    while (scan[0] != 0) : (scan += 1) {
+        if (scan[0] == '/' or scan[0] == '\\') {
+            last_slash = scan;
+        }
+    }
+
+    var temp_file_name: [STATE_FILE_NAME_COUNT:0]u16 = @splat(0);
+    const restore_slash: u16 = last_slash[0];
+    last_slash[0] = 0;
+    const temp_ok: bool = win32.GetTempFileNameW(existing_file_name, win32.L("hh_"), 0, @ptrCast(&temp_file_name)) != 0;
+    last_slash[0] = restore_slash;
+
+    var security_attributes: win32.SECURITY_ATTRIBUTES = .{
+        .nLength = 0,
+        .lpSecurityDescriptor = null,
+        .bInheritHandle = 0,
+    };
+
+    if (temp_ok) {
+        const file: win32.HANDLE = win32.CreateFileW(
+            &temp_file_name,
+            win32.FILE_GENERIC_WRITE,
+            .{},
+            &security_attributes,
+            win32.CREATE_ALWAYS,
+            win32.FILE_ATTRIBUTE_NORMAL,
+            null,
+        );
+        if (file != win32.INVALID_HANDLE_VALUE) {
+            var bytes_written: u32 = undefined;
+            var write_ok: bool = false;
+            if (win32.WriteFile(file, source, @intCast(size), &bytes_written, null) != 0) {
+                write_ok = bytes_written == size;
+            }
+            _ = win32.CloseHandle(file);
+
+            if (write_ok) {
+                result = win32.MoveFileExW(
+                    @ptrCast(&temp_file_name),
+                    @ptrCast(existing_file_name),
+                    win32.MOVEFILE_REPLACE_EXISTING,
+                ) != 0;
+            }
+        }
+
+        if (!result) {
+            _ = win32.DeleteFileW(&temp_file_name);
+        }
+    }
+    return result;
 }
 
 fn fileError(file_handle: *shared.PlatformFileHandle, message: [*:0]const u8) callconv(.c) void {

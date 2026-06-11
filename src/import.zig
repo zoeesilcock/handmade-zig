@@ -31,14 +31,16 @@ const MemoryArena = memory.MemoryArena;
 const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
 const HHAAsset = file_formats.HHAAsset;
+const HHABitmap = file_formats.HHABitmap;
+const HHAAssetType = file_formats.HHAAssetType;
 const HHAAnnotation = file_formats.HHAAnnotation;
+const HHAAlignPoint = file_formats.HHAAlignPoint;
+const HHAAlignPointType = file_formats.HHAAlignPointType;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const AssetTagId = file_formats.AssetTagId;
-const HHAAlignPoint = file_formats.HHAAlignPoint;
-const HHAAlignPointType = file_formats.HHAAlignPointType;
 const ImageU32 = png.ImageU32;
 const Token = tokenizer_mod.Token;
 const Tokenizer = tokenizer_mod.Tokenizer;
@@ -319,7 +321,6 @@ fn writeImageToHHA(
             .bitmap = .{},
         },
     };
-    hha_asset.info.bitmap.align_points[0].set(.Default, true, 1.0, .new(0.5, 0.5));
     var asset_index: u32 = file.asset_indices[tile_y_index][tile_x_index];
     if (asset_index != 0) {
         const asset: *Asset = &assets.assets[asset_index];
@@ -891,7 +892,7 @@ pub fn parseHHT(
         const hht_content: Buffer = context.temp_arena.pushBuffer(context.hht_out.?.getTotalSize());
         stream.copyStreamToBuffer(context.hht_out.?, hht_content);
         if (!shared.buffersAreEqual(file_buffer, hht_content)) {
-            shared.platform.atomicReplaceFileContents(file_info, hht_content.count, hht_content.data);
+            _ = shared.platform.atomicReplaceFileContents(file_info, hht_content.count, hht_content.data);
         }
     }
 
@@ -953,13 +954,27 @@ fn getOrCreateHHAByStem(assets: *Assets, stem: String, create_if_not_found: bool
 }
 
 fn copyAllInputUpToAndIncluding(context: *HHTContext, token: Token) void {
+    copyAllInputUpTo(context, token, token.text.count);
+}
+
+fn copyAllInputUpToButNotIncluding(context: *HHTContext, token: Token) void {
+    copyAllInputUpTo(context, token, 0);
+}
+
+fn copyAllInputUpTo(context: *HHTContext, token: Token, extra: usize) void {
     if (context.hht_out) |*hht_out| {
         const start: [*]u8 = context.hht_copy_point.?;
-        const end: [*]u8 = token.text.data + token.text.count;
+        const end: [*]u8 = token.text.data + extra;
         if (@intFromPtr(start) < @intFromPtr(end)) {
             _ = hht_out.appendChunk(end - start, start);
             context.hht_copy_point = end;
         }
+    }
+}
+
+fn ignoreAllInputUpToAndIncluding(context: *HHTContext, token: Token) void {
+    if (context.hht_out != null) {
+        context.hht_copy_point = token.text.data + token.text.count;
     }
 }
 
@@ -1138,17 +1153,72 @@ fn parseTopLevelBlock(
     copyAllInputUpToAndIncluding(context, open_brace);
 
     var append_tags: ImportTagArray = .{};
-    const align_point_written: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]bool =
+    var align_point_unprocessed: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]bool =
         @splat(@splat(@splat(false)));
-    _ = align_point_written;
     var align_points: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]HHAAlignPoint =
         @splat(@splat(@splat(.{})));
 
+    if (context.hht_out != null and match != null) {
+        var grid_y: u32 = 0;
+        while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
+            var grid_x: u32 = 0;
+            while (grid_x < ASSET_IMPORT_GRID_MAX) : (grid_x += 1) {
+                const asset_index = match.?.asset_indices[grid_y][grid_x];
+                if (asset_index > 0) {
+                    const asset: ?*Asset = context.assets.getAsset(asset_index);
+                    std.debug.assert(asset != null);
+                    std.debug.assert(asset.?.hha.type == HHAAssetType.Bitmap);
+
+                    const bitmap: *HHABitmap = &asset.?.hha.info.bitmap;
+                    var point_index: u32 = 0;
+                    while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
+                        if (bitmap.align_points[point_index].align_type != @intFromEnum(HHAAlignPointType.None)) {
+                            align_point_unprocessed[grid_y][grid_x][point_index] = true;
+                            align_points[grid_y][grid_x][point_index] = bitmap.align_points[point_index];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     while (tokenizer.parsing()) {
+        var consume_semi_colon: bool = false;
+
         const token: Token = tokenizer.getToken();
         if (token.token_type == .CloseBrace) {
             if (context.hht_out != null) {
-                // Output the alignment points.
+                copyAllInputUpToButNotIncluding(context, token);
+
+                var grid_y: u32 = 0;
+                while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
+                    var grid_x: u32 = 0;
+                    while (grid_x < ASSET_IMPORT_GRID_MAX) : (grid_x += 1) {
+                        var point_index: u32 = 0;
+                        while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
+                            if (align_point_unprocessed[grid_y][grid_x][point_index]) {
+                                const point: *HHAAlignPoint = &align_points[grid_y][grid_y][point_index];
+                                _ = stream.outputWithSrc(
+                                    &context.hht_out.?,
+                                    @src(),
+                                    "    Align[%u,%u][%u] = {%u, %u, %u, %S%s};\n",
+                                    .{
+                                        grid_x,
+                                        grid_y,
+                                        point_index,
+                                        point.position_percent[0],
+                                        point.position_percent[1],
+                                        point.size,
+                                        file_formats.alignPointNameFromType(point.getType()),
+                                        if (point.isToParent()) " | ToParent" else "",
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+
+                copyAllInputUpToAndIncluding(context, token);
             }
             break;
         } else if (token.equals("Name")) {
@@ -1164,6 +1234,8 @@ fn parseTopLevelBlock(
             _ = tokenizer.requireToken(.Equals);
             append_tags = parseTagList(context.assets, tokenizer);
         } else if (token.equals("Align")) {
+            copyAllInputUpToButNotIncluding(context, token);
+
             _ = tokenizer.requireToken(.OpenBracket);
             const grid_x: i32 = tokenizer.requireIntegerRange(0, ASSET_IMPORT_GRID_MAX - 1).i32;
             _ = tokenizer.requireToken(.Comma);
@@ -1191,12 +1263,31 @@ fn parseTopLevelBlock(
                     }
                 }
 
+                const semi_colon = tokenizer.requireToken(.SemiColon);
+                consume_semi_colon = true;
+
                 if (tokenizer.parsing()) {
-                    var point: *HHAAlignPoint = &align_points[@intCast(grid_y)][@intCast(grid_x)][@intCast(index)];
+                    var point: HHAAlignPoint = .{};
                     point.position_percent[0] = @intCast(position_percent0);
                     point.position_percent[1] = @intCast(position_percent1);
                     point.size = @intCast(size);
                     point.align_type = align_type;
+
+                    if (context.hht_out != null) {
+                        if (shared.memoryIsEqual(
+                            @sizeOf(HHAAlignPoint),
+                            &point,
+                            &align_points[@intCast(grid_y)][@intCast(grid_x)][@intCast(index)],
+                        )) {
+                            copyAllInputUpToAndIncluding(context, semi_colon);
+                        } else {
+                            ignoreAllInputUpToAndIncluding(context, semi_colon);
+                        }
+
+                        align_point_unprocessed[@intCast(grid_y)][@intCast(grid_x)][@intCast(index)] = false;
+                    } else {
+                        align_points[@intCast(grid_y)][@intCast(grid_x)][@intCast(index)] = point;
+                    }
                 }
             } else {
                 tokenizer.encounteredError(type0, "Urecognized alignment point type.", .{});
@@ -1205,8 +1296,10 @@ fn parseTopLevelBlock(
             tokenizer.encounteredError(token, "Expected field name.", .{});
         }
 
-        const semi_colon = tokenizer.requireToken(.SemiColon);
-        copyAllInputUpToAndIncluding(context, semi_colon);
+        if (!consume_semi_colon) {
+            const semi_colon = tokenizer.requireToken(.SemiColon);
+            copyAllInputUpToAndIncluding(context, semi_colon);
+        }
     }
 
     _ = tokenizer.requireToken(.SemiColon);
@@ -1261,6 +1354,27 @@ fn parseTopLevelBlock(
             }
 
             updateAssetMetadata(tokenizer, context.assets, match.?, &fields, &tags, append_tags);
+
+            if (context.hht_out == null) {
+                var grid_y: u32 = 0;
+                while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
+                    var grid_x: u32 = 0;
+                    while (grid_x < ASSET_IMPORT_GRID_MAX) : (grid_x += 1) {
+                        const asset_index = match.?.asset_indices[grid_y][grid_x];
+                        if (asset_index > 0) {
+                            const asset: ?*Asset = context.assets.getAsset(asset_index);
+                            std.debug.assert(asset != null);
+                            std.debug.assert(asset.?.hha.type == HHAAssetType.Bitmap);
+
+                            const bitmap: *HHABitmap = &asset.?.hha.info.bitmap;
+                            var point_index: u32 = 0;
+                            while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
+                                bitmap.align_points[point_index] = align_points[grid_y][grid_x][point_index];
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

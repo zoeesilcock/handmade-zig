@@ -325,7 +325,13 @@ pub const HHABitmap = extern struct {
     // pixels: [dim[1]][dim[0]]u16,
 
     pub fn getFirstAlign(self: *HHABitmap) Vector2 {
-        return self.align_points[0].getPositionPercent();
+        var result: Vector2 = .new(0.5, 0.5);
+
+        if (self.align_points[0].align_type != 0) {
+            result = self.align_points[0].getPositionPercent();
+        }
+
+        return result;
     }
 
     pub fn findAlign(self: *HHABitmap, complete_type: u32) HHAAlignPoint {
@@ -337,6 +343,12 @@ pub const HHABitmap = extern struct {
                 result = self.align_points[point_index];
                 break;
             }
+        }
+
+        if (complete_type == (@intFromEnum(HHAAlignPointType.Default) | @intFromEnum(HHAAlignPointType.ToParent)) and
+            result.align_type == 0)
+        {
+            result.set(.Default, true, 1.0, .new(0.5, 0.5));
         }
 
         return result;

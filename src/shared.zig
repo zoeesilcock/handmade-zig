@@ -974,7 +974,7 @@ const openFileType: type = fn (file_group: *PlatformFileGroup, info: *PlatformFi
 const closeFileType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) void;
 const readDataFromFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, dest: *anyopaque) callconv(.c) void;
 const writeDataToFileType: type = fn (handle: *PlatformFileHandle, offset: u64, size: u64, source: *anyopaque) callconv(.c) void;
-const atomicReplaceFileContentsType: type = fn (info: *PlatformFileInfo, size: u64, source: *anyopaque) callconv(.c) void;
+const atomicReplaceFileContentsType: type = fn (info: *PlatformFileInfo, size: u64, source: *anyopaque) callconv(.c) bool;
 const noFileErrorsType: type = fn (file_handle: *PlatformFileHandle) callconv(.c) bool;
 const fileErrorType: type = fn (file_handle: *PlatformFileHandle, message: [*:0]const u8) callconv(.c) void;
 
