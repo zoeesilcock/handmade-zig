@@ -233,8 +233,8 @@ pub fn writeModificationsToHHA(assets: *Assets, file_index: u32, temp_arena: *Me
 }
 
 pub fn setAssetType(assets: *Assets, asset_index: u32, type_id: AssetBasicCategory) void {
-    // TODO: We don't really want to be doing this anymore, we just want a tag-matcing acceleration structure that
-    // we can rebuild during imports, because we ant it to be easy to do things like change the types of assets.
+    // TODO: We don't really want to be doing this anymore, we just want a tag-matching acceleration structure that
+    // we can rebuild during imports, because we want it to be easy to do things like change the types of assets.
     if (asset_index != 0 and @intFromEnum(type_id) < @typeInfo(AssetBasicCategory).@"enum".fields.len) {
         var asset: *Asset = &assets.assets[asset_index];
         std.debug.assert(asset.next_of_type == 0);
@@ -738,9 +738,8 @@ fn parsePieces(
         var y_index: u32 = 0;
         while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
             var x_index: u32 = 0;
-            const tag: *ImportGridTag = &tags.tags[y_index][x_index];
-
             while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+                const tag: *ImportGridTag = &tags.tags[y_index][x_index];
                 if (y_index <= 3) {
                     tag.* = importBody(assets, tokenizer, x_index, y_index);
                 } else {
@@ -1004,6 +1003,10 @@ fn updateAssetMetadata(
                             setAssetType(assets, asset_index, tags.type_id);
                         }
                     } else {
+                        std.log.info(
+                            "Sprite found in what is required to be a blank tile. Asset index: {d}, xy: {d} {d}, size: {d} {d}\n",
+                            .{ asset_index, x_index, y_index, asset.hha.info.bitmap.dim[0], asset.hha.info.bitmap.dim[1] },
+                        );
                         _ = stream.outputWithSrc(&file.errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
                     }
 
@@ -1125,7 +1128,7 @@ fn parseTopLevelBlock(
         const sub_dir: []const u8 = "art";
         const length =
             shared.formatString(buf.len, &buf, "sources/%S/%s/%S", .{ context.hha_stem, sub_dir, file_name.text });
-        const path = buf[0..length];
+        const path: [:0]u8 = @ptrCast(buf[0..length]);
 
         file_info = shared.platform.getFileByPath(
             &context.file_group,

@@ -152,7 +152,10 @@ pub const SourceFile = struct {
 
         if (match == null) {
             match = assets.non_restored_memory.pushStruct(SourceFile, .aligned(@alignOf(SourceFile), true));
-            match.?.base_name = assets.non_restored_memory.pushString(base_name);
+            match.?.base_name = .wrapZ(@constCast(assets.non_restored_memory.pushAndNullTerminateString(
+                types.stringLength(base_name),
+                base_name,
+            )));
             match.?.next_in_hash = assets.source_file_hash[hash_value];
             assets.source_file_hash[hash_value] = match;
 
