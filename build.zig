@@ -61,7 +61,8 @@ pub fn build(b: *std.Build) void {
         addHHAEdit(b, build_options, target, optimize);
     }
 
-    if (package == .All or package == .Preprocessor) {
+    // This project no longer works due to changes in the tokenizer, so it is disabled.
+    if (false and (package == .All or package == .Preprocessor)) {
         addSimplePreprocessor(b, build_options, target, optimize);
     }
 

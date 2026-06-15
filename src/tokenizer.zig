@@ -186,14 +186,19 @@ pub const Tokenizer = struct {
                     token.token_type = .Comment;
 
                     self.advanceChars(2);
-                    token.text.data = @constCast(self.input.data);
 
                     while (!shared.isEndOfLine(self.at[0])) {
                         self.advanceChars(1);
                     }
 
-                    // Note: This code path is needed in place of the previous loop for the simple-preprocessor
-                    // to work. Revisit this if we ever need the preprocessor again.
+                    // Note: This code path is needed in place of the code above for the simple-preprocessor to work.
+                    // Revisit this if we ever need the preprocessor again.
+                    //
+                    // token.token_type = .Comment;
+                    //
+                    // self.advanceChars(2);
+                    // token.text.data = @constCast(self.input.data);
+                    //
                     // while (self.at[0] != 0 and self.at[0] != '(' and !shared.isEndOfLine(self.at[0])) {
                     //     self.advanceChars(1);
                     // }
