@@ -30,6 +30,8 @@ block "block_orphanage_03.png"
 body "body_hero.png"
 {
     Tags = orphan, hero;
+    Align[0,0][0] = 46417, 32767, 771, Default | ToParent;
+    Align[0,0][1] = 40688, 43833, 771, BaseOfNeck;
 };
 
 body "body_orphan_01.png"

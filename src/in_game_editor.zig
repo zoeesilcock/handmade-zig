@@ -1,6 +1,7 @@
 const std = @import("std");
 const shared = @import("shared.zig");
 const types = @import("types.zig");
+const stream = @import("stream.zig");
 const math = @import("math.zig");
 const renderer = @import("renderer.zig");
 const asset_mod = @import("asset.zig");
@@ -16,6 +17,7 @@ const import = @import("import.zig");
 const DevUI = dev_ui.DevUI;
 const DevId = types.DevId;
 const String = types.String;
+const Stream = stream.Stream;
 const Vector2 = math.Vector2;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
@@ -435,10 +437,10 @@ pub const InGameEditor = struct {
             layout.endRow();
 
             layout.beginRow();
-            if (layout.button(.fromPointerAndLine(self, @src()), "UNDO", self.undoAvailable(), null)) {
+            if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("UNDO"), self.undoAvailable(), null)) {
                 self.undo();
             }
-            if (layout.button(.fromPointerAndLine(self, @src()), "REDO", self.redoAvailable(), null)) {
+            if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("REDO"), self.redoAvailable(), null)) {
                 self.redo();
             }
 
@@ -554,10 +556,10 @@ pub const InGameEditor = struct {
 
     fn cameraEditor(layout: *dev_ui.Layout, world_mode: *GameModeWorld) void {
         layout.beginRow();
-        if (layout.button(.fromPointerAndLine(world_mode, @src()), "SAVE_STARTUP_LOCATION", null, null)) {
+        if (layout.button(.fromPointerAndLine(world_mode, @src()), .fromSlice("SAVE_STARTUP_LOCATION"), null, null)) {
             //
         }
-        if (layout.button(.fromPointerAndLine(world_mode, @src()), "LOAD_STARTUP_LOCATION", null, null)) {
+        if (layout.button(.fromPointerAndLine(world_mode, @src()), .fromSlice("LOAD_STARTUP_LOCATION"), null, null)) {
             //
         }
         layout.endRow();
@@ -571,10 +573,10 @@ pub const InGameEditor = struct {
             world_mode.camera.target_expected_focus_max_z,
         });
 
-        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), "FogMin", 0, &world_mode.fog_min, 50);
-        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), "FogSpan", 0, &world_mode.fog_span, 50);
-        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), "AlphaMin", 0, &world_mode.alpha_min, 50);
-        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), "AlphaSpan", 0, &world_mode.alpha_span, 50);
+        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), .fromSlice("FogMin"), 0, &world_mode.fog_min, 50);
+        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), .fromSlice("FogSpan"), 0, &world_mode.fog_span, 50);
+        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), .fromSlice("AlphaMin"), 0, &world_mode.alpha_min, 50);
+        layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), .fromSlice("AlphaSpan"), 0, &world_mode.alpha_span, 50);
     }
 
     fn assetEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
@@ -588,10 +590,10 @@ pub const InGameEditor = struct {
             .fromSlice(hha_section_name),
         )) {
             layout.beginRow();
-            if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT", self.isDirty(), null)) {
+            if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("RELOAD HHTs"), true, null)) {
                 import.synchronizeAssetFileChanges(self.assets, false);
             }
-            if (layout.button(.fromPointerAndLine(self, @src()), "IMPORT & SAVE", true, null)) {
+            if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("SAVE HHTs"), true, null)) {
                 self.saveAllChanges();
             }
             layout.endRow();
@@ -600,7 +602,7 @@ pub const InGameEditor = struct {
             layout.endRow();
 
             layout.beginRow();
-            if (layout.button(.fromPointerAndLine(self, @src()), "REVERT", self.isDirty(), null)) {
+            if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("REVERT"), self.isDirty(), null)) {
                 if (self.undo_sentinel.hasEdit(self.clean_edit)) {
                     while (self.clean_edit != self.undo_sentinel.next) {
                         self.undo();
@@ -613,6 +615,15 @@ pub const InGameEditor = struct {
                 }
             }
             layout.endRow();
+
+            const error_stream: *Stream = &self.assets.error_stream;
+            var opt_chunk: ?*stream.Chunk = error_stream.first;
+            while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
+                layout.beginRow();
+                layout.label(chunk.contents);
+                layout.endRow();
+            }
+
             layout.endSection();
         }
 
@@ -703,7 +714,7 @@ pub const InGameEditor = struct {
                                 .new(0.25, 0.25, 0.25, 1);
                             if (layout.button(
                                 .fromPointerAndLine(draw_toggle, @src()),
-                                @ptrCast(point_name[0..point_name_length]),
+                                .fromSlice(point_name[0..point_name_length]),
                                 align_point_type_int != @intFromEnum(HHAAlignPointType.None),
                                 button_color,
                             )) {
@@ -711,7 +722,12 @@ pub const InGameEditor = struct {
                             }
 
                             if (align_point_type_int == @intFromEnum(HHAAlignPointType.None)) {
-                                if (layout.button(.fromPointerAndLine(point, @src()), "[ADD]", null, null)) {
+                                if (layout.button(
+                                    .fromPointerAndLine(point, @src()),
+                                    .fromSlice("[ADD]"),
+                                    null,
+                                    null,
+                                )) {
                                     self.editAlignPoint(
                                         asset_index,
                                         point_index,
@@ -723,7 +739,12 @@ pub const InGameEditor = struct {
                                 }
                             } else {
                                 const change_block: dev_ui.EditBlock = layout.beginEditBlock();
-                                if (layout.button(.fromPointerAndLine(point, @src()), "[DEL]", null, null)) {
+                                if (layout.button(
+                                    .fromPointerAndLine(point, @src()),
+                                    .fromSlice("[DEL]"),
+                                    null,
+                                    null,
+                                )) {
                                     self.editAlignPoint(
                                         asset_index,
                                         point_index,
@@ -733,11 +754,11 @@ pub const InGameEditor = struct {
                                         .new(0.5, 0.5),
                                     );
                                 }
-                                layout.editableBoolean(.fromPointerAndLine(point, @src()), "ToPar", &to_parent);
-                                layout.editableSize(.fromPointerAndLine(point, @src()), "S", &size);
+                                layout.editableBoolean(.fromPointerAndLine(point, @src()), "", &to_parent);
+                                layout.editableSize(.fromPointerAndLine(point, @src()), .fromSlice("S"), &size);
                                 layout.editablePositionXY(
                                     .fromPointerAndLine(point, @src()),
-                                    "P",
+                                    .fromSlice("P"),
                                     0,
                                     &position_percent.values[0],
                                     1,
@@ -747,7 +768,7 @@ pub const InGameEditor = struct {
                                 );
                                 layout.editableType(
                                     .fromPointerAndLine(point, @src()),
-                                    "",
+                                    .fromSlice(""),
                                     file_formats.alignPointNameFromType(align_point_type),
                                     &align_point_type_int,
                                 );

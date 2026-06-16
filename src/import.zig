@@ -89,6 +89,7 @@ const HHTContext = struct {
     hha_stem: String = .empty,
     hha_index: u32 = 0,
     include_depth: u32 = 0,
+    error_stream: *Stream = undefined,
 
     // These are only non-null when we are rewriting HHTs.
     hht_out: ?Stream = null,
@@ -818,6 +819,7 @@ pub fn parseHHT(
     shared.platform.closeFile(&handle);
 
     var tokenizer: Tokenizer = .init(file_buffer, .wrapZ(file_info.base_name));
+    tokenizer.error_stream = context.error_stream;
 
     if (save_changes_to_hhts) {
         context.hht_out = Stream.onDemandMemoryStream(context.temp_arena, null);
@@ -890,8 +892,29 @@ pub fn parseHHT(
     if (save_changes_to_hhts and tokenizer.parsing()) {
         const hht_content: Buffer = context.temp_arena.pushBuffer(context.hht_out.?.getTotalSize());
         stream.copyStreamToBuffer(context.hht_out.?, hht_content);
-        if (!shared.buffersAreEqual(file_buffer, hht_content)) {
-            _ = shared.platform.atomicReplaceFileContents(file_info, hht_content.count, hht_content.data);
+        if (shared.buffersAreEqual(file_buffer, hht_content)) {
+            _ = stream.outputWithSrc(
+                context.error_stream,
+                @src(),
+                "%S: No changes.\n",
+                .{String.wrapZ(file_info.base_name)},
+            );
+        } else {
+            if (shared.platform.atomicReplaceFileContents(file_info, hht_content.count, hht_content.data)) {
+                _ = stream.outputWithSrc(
+                    context.error_stream,
+                    @src(),
+                    "%S: \\#0f0Replaced\\#fff.\n",
+                    .{String.wrapZ(file_info.base_name)},
+                );
+            } else {
+                _ = stream.outputWithSrc(
+                    context.error_stream,
+                    @src(),
+                    "%S: Replacement \\#f00failed\\#fff.\n",
+                    .{String.wrapZ(file_info.base_name)},
+                );
+            }
         }
     }
 
@@ -1104,6 +1127,24 @@ fn updateAssetMetadata(
     }
 }
 
+fn outPoint(context: *HHTContext, grid_x: u32, grid_y: u32, point_index: u32, point: HHAAlignPoint) void {
+    _ = stream.outputWithSrc(
+        &context.hht_out.?,
+        @src(),
+        "Align[%u,%u][%u] = %u, %u, %u, %S%s;",
+        .{
+            grid_x,
+            grid_y,
+            point_index,
+            point.position_percent[0],
+            point.position_percent[1],
+            point.size,
+            file_formats.alignPointNameFromType(point.getType()),
+            if (point.isToParent()) " | ToParent" else "",
+        },
+    );
+}
+
 fn parseTopLevelBlock(
     tokenizer: *Tokenizer,
     context: *HHTContext,
@@ -1186,7 +1227,7 @@ fn parseTopLevelBlock(
     }
 
     while (tokenizer.parsing()) {
-        var consume_semi_colon: bool = false;
+        var semi_colon: Token = .{};
 
         const token: Token = tokenizer.getToken();
         if (token.token_type == .CloseBrace) {
@@ -1201,21 +1242,9 @@ fn parseTopLevelBlock(
                         while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
                             if (align_point_unprocessed[grid_y][grid_x][point_index]) {
                                 const point: *HHAAlignPoint = &align_points[grid_y][grid_y][point_index];
-                                _ = stream.outputWithSrc(
-                                    &context.hht_out.?,
-                                    @src(),
-                                    "    Align[%u,%u][%u] = {%u, %u, %u, %S%s};\n",
-                                    .{
-                                        grid_x,
-                                        grid_y,
-                                        point_index,
-                                        point.position_percent[0],
-                                        point.position_percent[1],
-                                        point.size,
-                                        file_formats.alignPointNameFromType(point.getType()),
-                                        if (point.isToParent()) " | ToParent" else "",
-                                    },
-                                );
+                                _ = stream.outputWithSrc(&context.hht_out.?, @src(), "    ", .{});
+                                outPoint(context, grid_x, grid_y, point_index, point.*);
+                                _ = stream.outputWithSrc(&context.hht_out.?, @src(), "\n", .{});
                             }
                         }
                     }
@@ -1243,6 +1272,8 @@ fn parseTopLevelBlock(
             const grid_x: i32 = tokenizer.requireIntegerRange(0, ASSET_IMPORT_GRID_MAX - 1).i32;
             _ = tokenizer.requireToken(.Comma);
             const grid_y: i32 = tokenizer.requireIntegerRange(0, ASSET_IMPORT_GRID_MAX - 1).i32;
+            _ = tokenizer.requireToken(.CloseBracket);
+            _ = tokenizer.requireToken(.OpenBracket);
             const index: i32 = tokenizer.requireIntegerRange(0, HHA_ALIGN_POINT_TYPE_COUNT - 1).i32;
             _ = tokenizer.requireToken(.CloseBracket);
             _ = tokenizer.requireToken(.Equals);
@@ -1266,8 +1297,7 @@ fn parseTopLevelBlock(
                     }
                 }
 
-                const semi_colon = tokenizer.requireToken(.SemiColon);
-                consume_semi_colon = true;
+                semi_colon = tokenizer.requireToken(.SemiColon);
 
                 if (tokenizer.parsing()) {
                     var point: HHAAlignPoint = .{};
@@ -1285,6 +1315,11 @@ fn parseTopLevelBlock(
                             copyAllInputUpToAndIncluding(context, semi_colon);
                         } else {
                             ignoreAllInputUpToAndIncluding(context, semi_colon);
+
+                            point = align_points[@intCast(grid_y)][@intCast(grid_x)][@intCast(index)];
+                            if (point.align_type != 0) {
+                                outPoint(context, @intCast(grid_x), @intCast(grid_y), @intCast(index), point);
+                            }
                         }
 
                         align_point_unprocessed[@intCast(grid_y)][@intCast(grid_x)][@intCast(index)] = false;
@@ -1299,8 +1334,8 @@ fn parseTopLevelBlock(
             tokenizer.encounteredError(token, "Expected field name.", .{});
         }
 
-        if (!consume_semi_colon) {
-            const semi_colon = tokenizer.requireToken(.SemiColon);
+        if (!semi_colon.isValid()) {
+            semi_colon = tokenizer.requireToken(.SemiColon);
             copyAllInputUpToAndIncluding(context, semi_colon);
         }
     }
@@ -1440,6 +1475,16 @@ pub fn synchronizeAssetFileChanges(assets: *Assets, save_changes_to_hhts: bool) 
             .temp_arena = &temp_arena,
         };
         defer shared.platform.getAllFilesOfTypeEnd(&context.file_group);
+
+        assets.error_stream_memory.clear();
+        assets.error_stream = .onDemandMemoryStream(&assets.error_stream_memory, null);
+        context.error_stream = &assets.error_stream;
+
+        _ = stream.outputWithSrc(context.error_stream, @src(), "%S #%u\n", .{
+            if (save_changes_to_hhts) String.fromSlice("Save") else String.fromSlice("Load"),
+            assets.save_number,
+        });
+        assets.save_number += 1;
 
         var opt_file_info: ?*PlatformFileInfo = context.file_group.first_file_info;
         while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {

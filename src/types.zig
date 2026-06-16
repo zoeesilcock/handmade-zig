@@ -50,6 +50,10 @@ pub const Buffer = struct {
     pub fn equals(self: String, other: String) bool {
         return shared.stringBuffersEqual(self, other);
     }
+
+    pub fn isValid(self: *const String) bool {
+        return self.count > 0;
+    }
 };
 
 pub fn removeExtension(file_name_init: String) String {

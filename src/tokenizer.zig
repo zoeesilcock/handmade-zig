@@ -47,6 +47,10 @@ pub const Token = struct {
     pub fn equals(self: *const Token, string: [*:0]const u8) bool {
         return shared.stringBufferEquals(self.text, string);
     }
+
+    pub fn isValid(self: *Token) bool {
+        return self.token_type != .Unknown;
+    }
 };
 
 pub const Tokenizer = struct {
@@ -89,7 +93,7 @@ pub const Tokenizer = struct {
         const on_token: Token = opt_on_token orelse self.peekTokenRaw();
 
         self.has_error = true;
-        _ = stream.outputWithSrc(self.error_stream, @src(), "%S(%u,%u): \"%S\" - ", .{
+        _ = stream.outputWithSrc(self.error_stream, @src(), "\\#f00%S(%u,%u)\\#fff: \"%S\" - ", .{
             on_token.file_name,
             on_token.line_number,
             on_token.column_number,
@@ -279,7 +283,7 @@ pub const Tokenizer = struct {
     }
 
     pub fn optionalToken(self: *Tokenizer, desired_type: TokenType) bool {
-        const token: Token = self.peekTokenRaw();
+        const token: Token = self.peekToken();
         const result = token.token_type == desired_type;
         if (token.token_type == desired_type) {
             _ = self.getToken();
@@ -291,7 +295,7 @@ pub const Tokenizer = struct {
         const token: Token = self.getToken();
 
         if (token.token_type != desired_type) {
-            self.encounteredError(token, "Unexpected token type", .{});
+            self.encounteredError(token, "Unexpected token type (expected %s)", .{@tagName(desired_type)});
         }
 
         return token;

@@ -1784,9 +1784,9 @@ fn drawDebugElement(
 
             layout.beginRow();
             var temp: [256:0]u8 = undefined;
-            layout.label(std.mem.span(element.getName(debug_state, temp.len, &temp)));
+            layout.label(.fromSlice(std.mem.span(element.getName(debug_state, temp.len, &temp))));
             layout.booleanButton(
-                "Occupancy",
+                .fromSlice("Occupancy"),
                 element.type == .ArenaOccupancy,
                 dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ArenaOccupancy)),
             );
@@ -1837,19 +1837,19 @@ fn drawDebugElement(
             }
 
             layout.beginRow();
-            layout.actionButton("Root", dev_ui.Interaction.setPointer(debug_id, @ptrCast(&graph.guid), null));
+            layout.actionButton(.fromSlice("Root"), dev_ui.Interaction.setPointer(debug_id, @ptrCast(&graph.guid), null));
             layout.booleanButton(
-                "Threads",
+                .fromSlice("Threads"),
                 element.type == .ThreadIntervalGraph,
                 dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ThreadIntervalGraph)),
             );
             layout.booleanButton(
-                "Frames",
+                .fromSlice("Frames"),
                 element.type == .FrameBarGraph,
                 dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.FrameBarGraph)),
             );
             layout.booleanButton(
-                "Clocks",
+                .fromSlice("Clocks"),
                 element.type == .TopClocksList,
                 dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.TopClocksList)),
             );
@@ -1927,12 +1927,12 @@ fn drawDebugElement(
 
             layout.beginRow();
             layout.booleanButton(
-                "Pause",
+                .fromSlice("Pause"),
                 debug_state.paused,
                 dev_ui.Interaction.setBool(debug_id, &debug_state.paused, !debug_state.paused),
             );
             layout.actionButton(
-                "Oldest",
+                .fromSlice("Oldest"),
                 dev_ui.Interaction.setUInt32(
                     debug_id,
                     &debug_state.viewing_frame_ordinal,
@@ -1940,7 +1940,7 @@ fn drawDebugElement(
                 ),
             );
             layout.actionButton(
-                "Most Recent",
+                .fromSlice("Most Recent"),
                 dev_ui.Interaction.setUInt32(
                     debug_id,
                     &debug_state.viewing_frame_ordinal,
@@ -1960,7 +1960,7 @@ fn drawDebugElement(
         .LastFrameInfo, .FunctionSummary => {
             var text: [256:0]u8 = undefined;
             _ = element.getName(debug_state, text.len, &text);
-            _ = dev_ui.basicTextElement(&text, layout, item_interaction, null, null, null, null);
+            _ = dev_ui.basicTextElement(.wrapZ(&text), layout, item_interaction, null, null, null, null);
         },
         .DebugMemoryInfo => {
             // var text: [128:0]u8 = undefined;
@@ -1973,7 +1973,7 @@ fn drawDebugElement(
             const event: *DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else &null_event;
             var text: [256:0]u8 = undefined;
             _ = debugEventToText(&text, @ptrFromInt(@intFromPtr(&text) + text.len), element, event, DebugVariableToTextFlag.displayFlags());
-            _ = dev_ui.basicTextElement(&text, layout, item_interaction, item_color, null, null, null);
+            _ = dev_ui.basicTextElement(.wrapZ(&text), layout, item_interaction, item_color, null, null, null);
         },
     }
 }

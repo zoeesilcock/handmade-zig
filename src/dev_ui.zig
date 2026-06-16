@@ -289,7 +289,7 @@ const TextOp = enum {
 pub fn textOp(
     ui: *DevUI,
     op: TextOp,
-    text: [:0]const u8,
+    string: String,
     position: Vector2,
     color_in: Color,
     opt_z: ?f32,
@@ -312,45 +312,50 @@ pub fn textOp(
         var char_scale = font_scale;
         var x: f32 = position.x();
 
-        var at: [*]const u8 = @ptrCast(text);
-        while (at[0] != 0) {
-            if (at[0] == '\\' and
-                at[1] == '#' and
-                at[2] != 0 and
-                at[3] != 0 and
-                at[4] != 0)
+        var at_index: u32 = 0;
+        while (at_index < string.count) {
+            const at0: u8 = string.data[at_index];
+            const at1: u8 = if ((at_index + 1) < string.count) string.data[at_index + 1] else 0;
+            const at2: u8 = if ((at_index + 2) < string.count) string.data[at_index + 2] else 0;
+            const at3: u8 = if ((at_index + 3) < string.count) string.data[at_index + 3] else 0;
+            const at4: u8 = if ((at_index + 4) < string.count) string.data[at_index + 4] else 0;
+
+            if (at0 == '\\' and
+                at1 == '#' and
+                at2 != 0 and
+                at3 != 0 and
+                at4 != 0)
             {
                 const c_scale: f32 = 1.0 / 9.0;
                 color = Color.new(
-                    math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0'))),
-                    math.clampf01(c_scale * @as(f32, @floatFromInt(at[3] - '0'))),
-                    math.clampf01(c_scale * @as(f32, @floatFromInt(at[4] - '0'))),
+                    math.clampf01(c_scale * @as(f32, @floatFromInt(at2 - '0'))),
+                    math.clampf01(c_scale * @as(f32, @floatFromInt(at3 - '0'))),
+                    math.clampf01(c_scale * @as(f32, @floatFromInt(at4 - '0'))),
                     1,
                 );
-
-                at += 5;
-            } else if (at[0] == '\\' and
-                at[1] == '^' and
-                at[2] != 0)
+                at_index += 5;
+            } else if (at0 == '\\' and
+                at1 == '^' and
+                at2 != 0)
             {
                 const c_scale: f32 = 1.0 / 9.0;
-                char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at[2] - '0')));
-                at += 3;
+                char_scale = font_scale * math.clampf01(c_scale * @as(f32, @floatFromInt(at2 - '0')));
+                at_index += 3;
             } else {
-                var code_point: u32 = at[0];
+                var code_point: u32 = at0;
 
-                if (at[0] == '\\' and
-                    (shared.isHex(at[1])) and
-                    (shared.isHex(at[2])) and
-                    (shared.isHex(at[3])) and
-                    (shared.isHex(at[4])))
+                if (at0 == '\\' and
+                    (shared.isHex(at1)) and
+                    (shared.isHex(at2)) and
+                    (shared.isHex(at3)) and
+                    (shared.isHex(at4)))
                 {
-                    code_point = ((shared.getHex(at[1]) << 12) |
-                        (shared.getHex(at[2]) << 8) |
-                        (shared.getHex(at[3]) << 4) |
-                        (shared.getHex(at[4]) << 0));
+                    code_point = ((shared.getHex(at1) << 12) |
+                        (shared.getHex(at2) << 8) |
+                        (shared.getHex(at3) << 4) |
+                        (shared.getHex(at4) << 0));
 
-                    at += 4;
+                    at_index += 4;
                 }
 
                 const advance_x: f32 = char_scale * font.getHorizontalAdvanceForPair(
@@ -416,7 +421,7 @@ pub fn textOp(
 
                 prev_code_point = code_point;
 
-                at += 1;
+                at_index += 1;
             }
         }
     }
@@ -518,12 +523,12 @@ pub const Layout = struct {
         self.no_line_feed += 1;
     }
 
-    pub fn label(self: *Layout, name: [:0]const u8) void {
+    pub fn label(self: *Layout, name: String) void {
         const null_interaction: Interaction = .{};
         _ = basicTextElement(name, self, null_interaction, Color.white(), Color.white(), self.thickness, null);
     }
 
-    pub fn actionButton(self: *Layout, name: [:0]const u8, interaction: Interaction) void {
+    pub fn actionButton(self: *Layout, name: String, interaction: Interaction) void {
         _ = basicTextElement(
             name,
             self,
@@ -535,7 +540,7 @@ pub const Layout = struct {
         );
     }
 
-    pub fn booleanButton(self: *Layout, name: [:0]const u8, highlight: bool, interaction: Interaction) void {
+    pub fn booleanButton(self: *Layout, name: String, highlight: bool, interaction: Interaction) void {
         _ = basicTextElement(
             name,
             self,
@@ -608,14 +613,14 @@ pub const Layout = struct {
     pub fn sectionPicker(self: *Layout, picker: *SectionPicker) void {
         const id: DevId = .fromPointer(@ptrCast(picker));
 
-        var left_label: [:0]const u8 = "<";
-        var right_label: [:0]const u8 = ">";
+        const left_label: String = .fromSlice("<");
+        const right_label: String = .fromSlice(">");
 
-        if (self.buttonWithClassifier(id, @ptrCast(&left_label), left_label, null, null)) {
+        if (self.buttonWithClassifier(id, @ptrCast(left_label.data), left_label, null, null)) {
             picker.move = .Previous;
         }
 
-        if (self.buttonWithClassifier(id, @ptrCast(&right_label), right_label, null, null)) {
+        if (self.buttonWithClassifier(id, @ptrCast(right_label.data), right_label, null, null)) {
             picker.move = .Next;
         }
 
@@ -631,14 +636,18 @@ pub const Layout = struct {
     pub fn labelF(self: *Layout, comptime format: [*]const u8, args: anytype) void {
         var temp: [64]u8 = undefined;
         const length: usize = shared.formatString(temp.len, &temp, format, args);
-        self.label(@ptrCast(temp[0..length]));
+        const temp_string: String = .{
+            .count = length,
+            .data = @ptrCast(temp[0..length]),
+        };
+        self.label(temp_string);
     }
 
     pub fn buttonWithClassifier(
         self: *Layout,
         id: DevId,
         classifier: ?*anyopaque,
-        label_text: [:0]const u8,
+        label_text: String,
         opt_enabled: ?bool,
         opt_backdrop_color: ?Color,
     ) bool {
@@ -684,7 +693,7 @@ pub const Layout = struct {
     pub fn button(
         self: *Layout,
         id: DevId,
-        label_text: [:0]const u8,
+        label_text: String,
         opt_enabled: ?bool,
         opt_backdrop_color: ?Color,
     ) bool {
@@ -695,7 +704,11 @@ pub const Layout = struct {
     pub fn buttonF(self: *Layout, id: DevId, enabled: bool, comptime format: [*]const u8, args: anytype) bool {
         var temp: [64]u8 = undefined;
         const length: usize = shared.formatString(temp.len, &temp, format, args);
-        return self.button(id, enabled, @ptrCast(temp[0..length]));
+        const temp_string: String = .{
+            .count = length,
+            .data = @ptrCast(temp[0..length]),
+        };
+        return self.button(id, enabled, temp_string);
     }
 
     pub fn bitmapButton(
@@ -781,28 +794,32 @@ pub const Layout = struct {
         var temp: [64]u8 = undefined;
         const check_mark: [:0]const u8 = if (value.*) "+" else "-";
         const length: usize = shared.formatString(temp.len, &temp, "%s%s", .{ check_mark, label_text });
+        const temp_string: String = .{
+            .count = length,
+            .data = @ptrCast(temp[0..length]),
+        };
         const backdrop_color: Color = if (value.*) .new(0.1, 0.5, 0.1, 1) else .new(0.5, 0.1, 0.1, 1);
 
-        if (self.button(id, @ptrCast(temp[0..length]), true, backdrop_color)) {
+        if (self.button(id, temp_string, true, backdrop_color)) {
             self.edit_occurred = true;
             value.* = !value.*;
         }
     }
 
-    pub fn editableType(self: *Layout, id: DevId, label_text: [:0]const u8, value_name: String, value: *u32) void {
-        var left_label: [:0]const u8 = "<";
-        var right_label: [:0]const u8 = ">";
+    pub fn editableType(self: *Layout, id: DevId, label_text: String, value_name: String, value: *u32) void {
+        const left_label: String = .fromSlice("<");
+        const right_label: String = .fromSlice(">");
 
-        if (label_text.len > 0) {
+        if (label_text.isValid()) {
             self.label(label_text);
         }
 
-        if (self.buttonWithClassifier(id, @ptrCast(&left_label), left_label, null, null)) {
+        if (self.buttonWithClassifier(id, @ptrCast(left_label.data), left_label, null, null)) {
             value.* -= 1;
             self.edit_occurred = true;
         }
 
-        if (self.buttonWithClassifier(id, @ptrCast(&right_label), right_label, null, null)) {
+        if (self.buttonWithClassifier(id, @ptrCast(right_label.data), right_label, null, null)) {
             value.* += 1;
             self.edit_occurred = true;
         }
@@ -810,9 +827,13 @@ pub const Layout = struct {
         self.labelF("%s", .{value_name.data});
     }
 
-    pub fn editableSize(self: *Layout, id: DevId, label_text: [:0]const u8, value: *f32) void {
+    pub fn editableSize(self: *Layout, id: DevId, label_text: String, value: *f32) void {
         var temp: [64]u8 = undefined;
         const length: usize = shared.formatString(temp.len, &temp, "%s(%.02f)", .{ label_text, value.* });
+        const temp_string: String = .{
+            .count = length,
+            .data = @ptrCast(temp[0..length]),
+        };
 
         const interaction: Interaction = .{
             .id = id,
@@ -820,7 +841,7 @@ pub const Layout = struct {
         };
 
         _ = basicTextElement(
-            @ptrCast(temp[0..length]),
+            temp_string,
             self,
             interaction,
             .new(0.8, 0.8, 0.8, 1),
@@ -838,7 +859,7 @@ pub const Layout = struct {
     pub fn editablePositionXY(
         self: *Layout,
         id: DevId,
-        label_text: [:0]const u8,
+        label_text: String,
         min_x: f32,
         x: *f32,
         max_x: f32,
@@ -847,7 +868,11 @@ pub const Layout = struct {
         max_y: f32,
     ) void {
         var temp: [64]u8 = undefined;
-        const length: usize = shared.formatString(temp.len, &temp, "%s(%.02f,%.02f)", .{ label_text, x.*, y.* });
+        const length: usize = shared.formatString(temp.len, &temp, "%S(%.02f,%.02f)", .{ label_text, x.*, y.* });
+        const temp_string: String = .{
+            .count = length,
+            .data = @ptrCast(temp[0..length]),
+        };
 
         const interaction: Interaction = .{
             .id = id,
@@ -855,7 +880,7 @@ pub const Layout = struct {
         };
 
         _ = basicTextElement(
-            @ptrCast(temp[0..length]),
+            temp_string,
             self,
             interaction,
             .new(0.8, 0.8, 0.8, 1),
@@ -877,13 +902,17 @@ pub const Layout = struct {
     pub fn editablePositionX(
         self: *Layout,
         id: DevId,
-        label_text: [:0]const u8,
+        label_text: String,
         min_x: f32,
         x: *f32,
         max_x: f32,
     ) void {
         var temp: [64]u8 = undefined;
-        const length: usize = shared.formatString(temp.len, &temp, "%s(%.02f)", .{ label_text, x.* });
+        const length: usize = shared.formatString(temp.len, &temp, "%S(%.02f)", .{ label_text, x.* });
+        const temp_string: String = .{
+            .count = length,
+            .data = @ptrCast(temp[0..length]),
+        };
 
         const interaction: Interaction = .{
             .id = id,
@@ -891,7 +920,7 @@ pub const Layout = struct {
         };
 
         _ = basicTextElement(
-            @ptrCast(temp[0..length]),
+            temp_string,
             self,
             interaction,
             .new(0.8, 0.8, 0.8, 1),
@@ -1022,7 +1051,7 @@ pub const LayoutElement = struct {
 };
 
 pub fn basicTextElement(
-    text: [:0]const u8,
+    text: String,
     layout: *Layout,
     item_interaction: Interaction,
     opt_color: ?Color,
@@ -1036,7 +1065,7 @@ pub fn basicTextElement(
 
     const item_color = opt_color orelse Color.new(0.8, 0.8, 0.8, 1);
     const hot_color = opt_hot_color orelse Color.white();
-    const text_bounds = getTextSize(ui, text);
+    const text_bounds = getStringSize(ui, text);
     dim = Vector2.new(text_bounds.getDimension().x() + 2 * border, layout.line_advance + 2 * border);
 
     var layout_element: LayoutElement = layout.beginElementRectangle(&dim);
@@ -1057,21 +1086,29 @@ pub fn basicTextElement(
             backdrop_color,
         );
     }
-    textOutAt(ui, text, text_position, if (is_hot) hot_color else item_color, null);
+    stringOutAt(ui, text, text_position, if (is_hot) hot_color else item_color, null);
 
     return dim;
 }
 
 pub fn textOutAt(ui: *DevUI, text: [:0]const u8, position: Vector2, color: Color, opt_z: ?f32) void {
+    _ = textOp(ui, .DrawText, .wrapZ(@constCast(text)), position, color, opt_z);
+}
+
+pub fn stringOutAt(ui: *DevUI, text: String, position: Vector2, color: Color, opt_z: ?f32) void {
     _ = textOp(ui, .DrawText, text, position, color, opt_z);
 }
 
 pub fn getTextSize(ui: *DevUI, text: [:0]const u8) Rectangle2 {
+    return textOp(ui, .SizeText, .wrapZ(@constCast(text)), Vector2.zero(), Color.white(), null);
+}
+
+pub fn getStringSize(ui: *DevUI, text: String) Rectangle2 {
     return textOp(ui, .SizeText, text, Vector2.zero(), Color.white(), null);
 }
 
 pub fn getTextSizeAt(ui: *DevUI, text: [:0]const u8, at: Vector2) Rectangle2 {
-    return textOp(ui, .SizeText, text, at, Color.white(), null);
+    return textOp(ui, .SizeText, .wrapZ(@constCast(text)), at, Color.white(), null);
 }
 
 pub const TooltipBuffer = struct {

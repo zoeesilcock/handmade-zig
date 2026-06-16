@@ -215,6 +215,10 @@ pub const Assets = struct {
     special_texture_lru_sentinel: AssetLRULink,
     regular_texture_lru_sentinel: AssetLRULink,
 
+    save_number: u32 = 0,
+    error_stream_memory: MemoryArena,
+    error_stream: Stream,
+
     pub fn allocate(
         memory_size: MemoryIndex,
         game_state: *shared.State,

@@ -526,7 +526,7 @@ pub fn alignPointNameFromType(align_type: HHAAlignPointType) String {
 pub fn alignPointTypeFromName(name: String) HHAAlignPointType {
     var result: HHAAlignPointType = .None;
     var type_index: u32 = 0;
-    const type_count: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len;
+    const type_count: u32 = @typeInfo(HHAAlignPointType).@"enum".fields.len - 1;
     while (type_index < type_count) : (type_index += 1) {
         const align_type: HHAAlignPointType = @enumFromInt(type_index);
         if (shared.stringBuffersEqualLowercase(name, alignPointNameFromType(align_type))) {
