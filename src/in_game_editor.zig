@@ -754,7 +754,7 @@ pub const InGameEditor = struct {
                                         .new(0.5, 0.5),
                                     );
                                 }
-                                layout.editableBoolean(.fromPointerAndLine(point, @src()), "", &to_parent);
+                                layout.editableBoolean(.fromPointerAndLine(point, @src()), .fromSlice(""), &to_parent);
                                 layout.editableSize(.fromPointerAndLine(point, @src()), .fromSlice("S"), &size);
                                 layout.editablePositionXY(
                                     .fromPointerAndLine(point, @src()),

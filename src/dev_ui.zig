@@ -790,10 +790,10 @@ pub const Layout = struct {
         return result;
     }
 
-    pub fn editableBoolean(self: *Layout, id: DevId, label_text: [:0]const u8, value: *bool) void {
+    pub fn editableBoolean(self: *Layout, id: DevId, label_text: String, value: *bool) void {
         var temp: [64]u8 = undefined;
         const check_mark: [:0]const u8 = if (value.*) "+" else "-";
-        const length: usize = shared.formatString(temp.len, &temp, "%s%s", .{ check_mark, label_text });
+        const length: usize = shared.formatString(temp.len, &temp, "%s%S", .{ check_mark, label_text });
         const temp_string: String = .{
             .count = length,
             .data = @ptrCast(temp[0..length]),
@@ -829,7 +829,7 @@ pub const Layout = struct {
 
     pub fn editableSize(self: *Layout, id: DevId, label_text: String, value: *f32) void {
         var temp: [64]u8 = undefined;
-        const length: usize = shared.formatString(temp.len, &temp, "%s(%.02f)", .{ label_text, value.* });
+        const length: usize = shared.formatString(temp.len, &temp, "%S(%.02f)", .{ label_text, value.* });
         const temp_string: String = .{
             .count = length,
             .data = @ptrCast(temp[0..length]),

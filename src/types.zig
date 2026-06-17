@@ -136,6 +136,10 @@ pub fn align16(value: u32) u32 {
     return (value + 15) & ~@as(u32, 15);
 }
 
+pub fn isPow2(value: u32) bool {
+    return (value & ~(value - 1)) == value;
+}
+
 pub fn incrementPointer(pointer: anytype, offset: i32) @TypeOf(pointer) {
     return if (offset >= 0)
         pointer + @as(usize, @intCast(offset))

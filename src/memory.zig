@@ -113,6 +113,9 @@ pub const MemoryArena = extern struct {
         var result: [*]u8 = undefined;
         const params = in_params orelse ArenaPushParams.default();
 
+        std.debug.assert(params.alignment <= 128);
+        std.debug.assert(types.isPow2(params.alignment));
+
         var aligned_size: MemoryIndex = 0;
         if (self.current_block != null) {
             aligned_size = self.getEffectiveSizeFor(size, params);
@@ -145,6 +148,10 @@ pub const MemoryArena = extern struct {
         self.current_block.?.used += aligned_size;
 
         std.debug.assert(aligned_size >= size);
+
+        // This is just to guarantee that nobody passed in an alignment on their first allocation that was greater
+        // than the page alignment.
+        std.debug.assert(self.current_block.?.used <= self.current_block.?.size);
 
         if (params.flags & @intFromEnum(ArenaPushFlag.ClearToZero) != 0) {
             zeroSize(size, @ptrCast(result));
