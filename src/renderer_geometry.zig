@@ -19,7 +19,7 @@ pub const SpriteValues = struct {
     min_position: Vector3,
     scaled_x_axis: Vector3,
     scaled_y_axis: Vector3,
-    z_bias: f32,
+    z_bias: f32 = 0,
 
     pub fn forUpright(
         render_group: *RenderGroup,
@@ -47,7 +47,8 @@ pub const SpriteValues = struct {
         const min_position: Vector3 = base_position.minus(
             x_axis.scaledTo(align_percentage.x()),
         ).minus(
-            y_axis.scaledTo(align_percentage.y()),
+            Vector3.new(0, world_dim.y(), 0).scaledTo(align_percentage.y()),
+            // y_axis.scaledTo(align_percentage.y()),
         );
 
         return .{
@@ -56,7 +57,7 @@ pub const SpriteValues = struct {
             .scaled_y_axis = y_axis,
             // TODO: This is totally wrong because the sprite may be rotated, we're going to have to have a more
             // consistent way of computing ZBias per vertex.
-            .z_bias = t_camera_up * render_group.world_up.dotProduct(camera_up) * world_dim.y(),
+            // .z_bias = t_camera_up * render_group.world_up.dotProduct(camera_up) * world_dim.y(),
         };
     }
     pub fn worldPositionFromAlignPosition(self: *const SpriteValues, align_percentage: Vector2) Vector3 {

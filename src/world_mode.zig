@@ -114,6 +114,7 @@ pub const GameModeWorld = struct {
     debug_camera_pitch: f32,
     debug_camera_orbit: f32,
     debug_camera_dolly: f32,
+    debug_camera_pan: Vector3,
     debug_light_position: Vector3,
     debug_light_store: [LIGHT_POINTS_PER_CHUNK]LightingPointState,
 
@@ -185,6 +186,7 @@ pub fn playWorld(state: *State) void {
     world_mode.fog_span = 24;
     world_mode.alpha_min = 2.75;
     world_mode.alpha_span = 0.75;
+    world_mode.debug_camera_dolly = 10;
 
     world_mode.particle_cache =
         state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false));
@@ -444,24 +446,7 @@ pub fn updateAndRenderWorld(
     defer TimedBlock.endBlock(@src(), .UpdateAndRenderWorld);
 
     const result = false;
-
-    const mouse_position: Vector2 = input.clip_space_mouse_position.xy();
-    const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
-    if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Left.toInt()].isDown()) {
-        const rotation_speed: f32 = 0.8 * math.PI32;
-        world_mode.debug_camera_orbit -= rotation_speed * d_mouse_p.x();
-        world_mode.debug_camera_pitch += rotation_speed * d_mouse_p.y();
-    } else if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Middle.toInt()].isDown()) {
-        const zoom_speed: f32 = (world_mode.debug_camera_dolly) * 3;
-        world_mode.debug_camera_dolly -= zoom_speed * d_mouse_p.y();
-    }
-
-    if (input.mouse_buttons[GameInputMouseButton.Right.toInt()].wasPressed()) {
-        world_mode.use_debug_camera = !world_mode.use_debug_camera;
-    }
-
-    world_mode.last_mouse_position = mouse_position;
-    DebugInterface.debugSetMousePosition(mouse_position);
+    var reset_debug_cam: bool = false;
 
     const focal_length: f32 = 1.5;
     world_mode.camera_pitch = 0.125 * math.PI32;
@@ -475,8 +460,13 @@ pub fn updateAndRenderWorld(
         background_color,
     );
 
-    const near_clip_plane: f32 = if (world_mode.use_debug_camera) 0.2 else 3;
-    const far_clip_plane: f32 = if (world_mode.use_debug_camera) 1000 + 2.0 * world_mode.debug_camera_dolly else 100;
+    var near_clip_plane: f32 = 3;
+    var far_clip_plane: f32 = 100;
+
+    if (world_mode.use_debug_camera) {
+        near_clip_plane = 0.2;
+        far_clip_plane = 1000 + 2.0 * world_mode.debug_camera_dolly;
+    }
 
     var camera_o: Matrix4x4 =
         Matrix4x4.zRotation(world_mode.camera_orbit).times(.xRotation(world_mode.camera_pitch));
@@ -489,6 +479,8 @@ pub fn updateAndRenderWorld(
 
     const focus_min_z: f32 = world_mode.camera.expected_focus_min_z;
     const focus_max_z: f32 = world_mode.camera.expected_focus_max_z;
+    const camera_x: Vector3 = camera_o.getColumn(0);
+    const camera_y: Vector3 = camera_o.getColumn(1);
     const camera_z: Vector3 = camera_o.getColumn(2);
     var fog: renderer.FogParams = .{
         .direction = .new(0, 0, -1),
@@ -499,10 +491,38 @@ pub fn updateAndRenderWorld(
         .delta_start_distance = focus_min_z - (world_mode.alpha_min + world_mode.alpha_span),
         .delta_end_distance = focus_min_z - world_mode.alpha_min,
     };
+
+    const mouse_position: Vector2 = input.clip_space_mouse_position.xy();
+    const d_mouse_p: Vector2 = mouse_position.minus(world_mode.last_mouse_position);
+    if (world_mode.use_debug_camera) {
+        if (input.alt_down and input.mouse_buttons[GameInputMouseButton.Left.toInt()].isDown()) {
+            const rotation_speed: f32 = 0.8 * math.PI32;
+            world_mode.debug_camera_orbit -= rotation_speed * d_mouse_p.x();
+            world_mode.debug_camera_pitch += rotation_speed * d_mouse_p.y();
+        } else if (input.mouse_buttons[GameInputMouseButton.Middle.toInt()].isDown()) {
+            if (input.alt_down) {
+                const zoom_speed: f32 = 3 * world_mode.debug_camera_dolly;
+                world_mode.debug_camera_dolly -= zoom_speed * d_mouse_p.y();
+            } else {
+                const pan_speed: f32 = 0.5 * world_mode.debug_camera_dolly;
+                const d_pan: Vector3 = camera_x.scaledTo(d_mouse_p.x()).plus(camera_y.scaledTo(d_mouse_p.y()));
+                world_mode.debug_camera_pan = world_mode.debug_camera_pan.minus(d_pan.scaledTo(pan_speed));
+            }
+        }
+    }
+
+    if (input.mouse_buttons[GameInputMouseButton.Right.toInt()].wasPressed()) {
+        world_mode.use_debug_camera = !world_mode.use_debug_camera;
+        reset_debug_cam = world_mode.use_debug_camera;
+    }
+
+    world_mode.last_mouse_position = mouse_position;
+    DebugInterface.debugSetMousePosition(mouse_position);
+
     render_group.setCameraTransform(
         focal_length,
-        camera_o.getColumn(0),
-        camera_o.getColumn(1),
+        camera_x,
+        camera_y,
         camera_z,
         camera_ot,
         0,
@@ -513,15 +533,27 @@ pub fn updateAndRenderWorld(
     );
 
     if (world_mode.use_debug_camera) {
-        camera_o =
+        if (reset_debug_cam) {
+            world_mode.debug_camera_dolly = camera_ot.dotProduct(camera_z);
+            const to_cam: Vector3 = camera_z.scaledTo(world_mode.debug_camera_dolly);
+            world_mode.debug_camera_pan = camera_ot.minus(to_cam);
+            const cam_arm: Vector3 = camera_z;
+            const planar_arm: Vector2 = cam_arm.xy();
+
+            world_mode.debug_camera_orbit = intrinsics.atan2(planar_arm.y(), planar_arm.x()) + (0.5 * math.PI32);
+            world_mode.debug_camera_pitch = intrinsics.atan2(planar_arm.length(), camera_z.z());
+        }
+
+        const debug_camera_o =
             Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
-        camera_ot = camera_o.timesV(.new(0, 0, world_mode.debug_camera_dolly));
+        const to_cam: Vector3 = debug_camera_o.timesV(.new(0, 0, world_mode.debug_camera_dolly));
+        const debug_camera_ot = world_mode.debug_camera_pan.plus(to_cam);
         render_group.setCameraTransform(
             focal_length,
-            camera_o.getColumn(0),
-            camera_o.getColumn(1),
-            camera_o.getColumn(2),
-            camera_ot,
+            debug_camera_o.getColumn(0),
+            debug_camera_o.getColumn(1),
+            debug_camera_o.getColumn(2),
+            debug_camera_ot,
             @intFromEnum(renderer.CameraTransformFlag.IsDebug),
             near_clip_plane,
             far_clip_plane,

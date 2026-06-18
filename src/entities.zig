@@ -392,7 +392,7 @@ pub fn updateAndRenderEntities(
 
                     if (entity.movement_time < t_land) {
                         const t: f32 = math.clamp01MapToRange(t_jump, t_land, entity.movement_time);
-                        const a: Vector3 = Vector3.new(0, -2, 0);
+                        const a: Vector3 = Vector3.new(0, 0, -2);
                         const b: Vector3 = movement_to.minus(movement_from).minus(a);
                         entity.position = a.scaledTo(t * t).plus(b.scaledTo(t)).plus(movement_from);
                     }
