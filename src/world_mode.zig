@@ -503,10 +503,6 @@ pub fn updateAndRenderWorld(
             if (input.alt_down) {
                 const zoom_speed: f32 = 3 * world_mode.debug_camera_dolly;
                 world_mode.debug_camera_dolly -= zoom_speed * d_mouse_p.y();
-            } else {
-                const pan_speed: f32 = 0.5 * world_mode.debug_camera_dolly;
-                const d_pan: Vector3 = camera_x.scaledTo(d_mouse_p.x()).plus(camera_y.scaledTo(d_mouse_p.y()));
-                world_mode.debug_camera_pan = world_mode.debug_camera_pan.minus(d_pan.scaledTo(pan_speed));
             }
         }
     }
@@ -543,10 +539,21 @@ pub fn updateAndRenderWorld(
             world_mode.debug_camera_orbit = intrinsics.atan2(planar_arm.y(), planar_arm.x()) + (0.5 * math.PI32);
             world_mode.debug_camera_pitch = intrinsics.atan2(planar_arm.length(), camera_z.z());
         }
+    }
 
-        const debug_camera_o =
-            Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
-        const to_cam: Vector3 = debug_camera_o.timesV(.new(0, 0, world_mode.debug_camera_dolly));
+    const debug_camera_o =
+        Matrix4x4.zRotation(world_mode.debug_camera_orbit).times(.xRotation(world_mode.debug_camera_pitch));
+    const to_cam: Vector3 = debug_camera_o.timesV(.new(0, 0, world_mode.debug_camera_dolly));
+
+    if (world_mode.use_debug_camera) {
+        if (!input.alt_down and input.mouse_buttons[GameInputMouseButton.Middle.toInt()].isDown()) {
+            const debug_camera_x: Vector3 = debug_camera_o.getColumn(0);
+            const debug_camera_y: Vector3 = debug_camera_o.getColumn(1);
+            const pan_speed: f32 = 0.5 * world_mode.debug_camera_dolly;
+            const d_pan: Vector3 = debug_camera_x.scaledTo(d_mouse_p.x()).plus(debug_camera_y.scaledTo(d_mouse_p.y()));
+            world_mode.debug_camera_pan = world_mode.debug_camera_pan.minus(d_pan.scaledTo(pan_speed));
+        }
+
         const debug_camera_ot = world_mode.debug_camera_pan.plus(to_cam);
         render_group.setCameraTransform(
             focal_length,

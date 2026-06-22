@@ -573,6 +573,8 @@ pub fn updateAndRenderEntities(
 
                                     var initial_position: Vector3 = entity_ground_point.plus(offset);
                                     if (bitmap_piece.parent_align_type != 0) {
+                                        std.debug.assert(piece_index > 0);
+
                                         if (parent_bitmap_info) |parent_info| {
                                             const parent_align: HHAAlignPoint = parent_info.findAlign(
                                                 bitmap_piece.parent_align_type,
@@ -586,7 +588,6 @@ pub fn updateAndRenderEntities(
                                     }
 
                                     bitmap_infos[piece_index] = bitmap_info;
-                                    initial_position = initial_position.plus(piece.offset);
                                     const align_percentage: Vector2 = child_align.getPositionPercent();
 
                                     const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(
@@ -597,15 +598,21 @@ pub fn updateAndRenderEntities(
                                     _ = world_radius.setY(world_dim.y());
                                     _ = world_radius.setZ(0.1);
 
-                                    const sprite: SpriteValues = .forUpright(
+                                    var sprite: SpriteValues = .forUpright(
                                         render_group,
-                                        initial_position,
                                         world_dim,
                                         align_percentage,
                                         x_axis,
                                         y_axis,
                                         null,
                                     );
+                                    _ = sprite.min_position.setZ(0);
+                                    sprite.min_position = sprite.min_position.minus(
+                                        Vector3.new(0, world_dim.y(), 0).scaledTo(align_percentage.y()),
+                                    );
+                                    sprite.min_position = sprite.min_position.plus(initial_position);
+                                    // sprite.min_position = sprite.min_position.plus(piece.offset);
+
                                     piece_sprites[piece_index] = sprite;
                                     render_group.pushSprite(
                                         texture_handle,

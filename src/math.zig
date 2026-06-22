@@ -1170,7 +1170,7 @@ fn MatrixInverseType(comptime InnerType: type) type {
         ) Self {
             const a: f32 = 1;
             const b: f32 = aspect_width_over_height;
-            const c: f32 = focal_length;
+            const c: f32 = focal_length; // Film back distance.
 
             const n: f32 = near_clip_plane; // Near clip plane distance.
             const f: f32 = far_clip_plane; // Far clip plane distance.
