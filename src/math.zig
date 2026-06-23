@@ -1190,8 +1190,8 @@ fn MatrixInverseType(comptime InnerType: type) type {
                 },
                 .inverse = .{
                     .values = .{
-                        .new(1 / a * c, 0, 0, 0),
-                        .new(0, 1 / b * c, 0, 0),
+                        .new(1 / (a * c), 0, 0, 0),
+                        .new(0, 1 / (b * c), 0, 0),
                         .new(0, 0, 0, -1),
                         .new(0, 0, 1 / e, d / e),
                     },
@@ -1338,7 +1338,7 @@ fn MatrixType(comptime row_count: comptime_int, comptime col_count: comptime_int
                 p.y() * self.values[2].values[1] +
                 p.z() * self.values[2].values[2] +
                 p.w() * self.values[2].values[3]);
-            _ = r.setW(p.x() * self.values[2].values[0] +
+            _ = r.setW(p.x() * self.values[3].values[0] +
                 p.y() * self.values[3].values[1] +
                 p.z() * self.values[3].values[2] +
                 p.w() * self.values[3].values[3]);
