@@ -54,7 +54,10 @@ pub const SpriteValues = struct {
             .min_position = min_position,
             .scaled_x_axis = x_axis,
             .scaled_y_axis = y_axis,
-            .z_displacement = align_percentage.y() * world_dim.y() * y_axis_hybrid.z(),
+            // TODO: We need to assess this calculation and perhaps introduce a selecatble alternate version for the
+            // scenario where we have spinning entities.
+            // .z_displacement = align_percentage.y() * world_dim.y() * y_axis_hybrid.z(),
+            .z_displacement = align_percentage.y() * y_axis.z(),
         };
     }
     pub fn worldPositionFromAlignPosition(self: *const SpriteValues, align_percentage: Vector2) Vector3 {

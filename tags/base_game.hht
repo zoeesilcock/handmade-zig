@@ -275,3 +275,53 @@ head "head_orphan_14.png"
 // obstacles "obstacles_orphanage.png"
 // {
 // };
+
+sound "bloop_00.wav"
+{
+    Tags = Bloop, Variant(0);
+}
+
+sound "bloop_01.wav"
+{
+    Tags = Bloop, Variant(1);
+}
+
+sound "bloop_02.wav"
+{
+    Tags = Bloop, Variant(2);
+}
+
+sound "bloop_03.wav"
+{
+    Tags = Bloop, Variant(3);
+}
+
+sound "bloop_04.wav"
+{
+    Tags = Bloop, Variant(4);
+}
+
+sound "crack_00.wav"
+{
+    Tags = Crack;
+}
+
+sound "drop_00.wav"
+{
+    Tags = Drop;
+}
+
+sound "glide_00.wav"
+{
+    Tags = Glide;
+}
+
+sound "puhp_00.wav"
+{
+    Tags = Puhp, Variant(0);
+}
+
+sound "puhp_01.wav"
+{
+    Tags = Puhp, Variant(1);
+}

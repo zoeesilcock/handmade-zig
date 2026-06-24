@@ -100,6 +100,16 @@ pub const AssetTagId = enum(u32) {
     Tank,
     Winter,
 
+    IntroCutscene,
+    TitleScreen,
+
+    Bloop,
+    Crack,
+    Drop,
+    Glide,
+    Puhp,
+    Variant,
+
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
     }

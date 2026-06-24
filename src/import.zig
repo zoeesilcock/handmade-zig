@@ -7,6 +7,7 @@ const stream = @import("stream.zig");
 const memory = @import("memory.zig");
 const file_formats = shared.file_formats;
 const png = @import("png.zig");
+const wav = @import("wav.zig");
 const tokenizer_mod = @import("tokenizer.zig");
 
 // Build options.
@@ -42,6 +43,7 @@ const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const AssetTagId = file_formats.AssetTagId;
 const ImageU32 = png.ImageU32;
+const SoundI16 = wav.SoundI16;
 const Token = tokenizer_mod.Token;
 const Tokenizer = tokenizer_mod.Tokenizer;
 
@@ -55,6 +57,7 @@ const ImportType = enum(u32) {
     Plate,
     SingleTile,
     MultiTile,
+    Audio,
 };
 
 const ImportTagArray = struct {
@@ -570,6 +573,18 @@ fn processMultiTileImport(
             }
         }
     }
+}
+
+fn processAudioImport(
+    assets: *Assets,
+    file: *SourceFile,
+    sound: SoundI16,
+    temp_arena: *MemoryArena,
+) void {
+    _ = assets;
+    _ = file;
+    _ = sound;
+    _ = temp_arena;
 }
 
 fn popToken(source: *String) Token {
@@ -1154,6 +1169,18 @@ fn parseTopLevelBlock(
 
     var fields: HHTFields = context.default_fields;
     const is_default: bool = block_token.equals("default");
+    const is_music: bool = block_token.equals("music");
+    const is_sound: bool = block_token.equals("sound");
+    const is_art: bool = !(is_default or is_music or is_sound);
+
+    var sub_dir: []const u8 = "";
+    if (is_music) {
+        sub_dir = "music";
+    } else if (is_sound) {
+        sub_dir = "sound";
+    } else if (is_art) {
+        sub_dir = "art";
+    }
 
     var needs_full_rebuild: bool = false;
 
@@ -1166,7 +1193,6 @@ fn parseTopLevelBlock(
         const file_name: Token = tokenizer.requireToken(.String);
 
         var buf: [4096]u8 = undefined;
-        const sub_dir: []const u8 = "art";
         const length =
             shared.formatString(buf.len, &buf, "sources/%S/%s/%S", .{ context.hha_stem, sub_dir, file_name.text });
         const path: [:0]u8 = @ptrCast(buf[0..length]);
@@ -1179,7 +1205,11 @@ fn parseTopLevelBlock(
         if (file_info != null) {
             match = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
 
-            import_type = parsePieces(context.assets, tokenizer, block_token, &tags);
+            if (is_sound or is_music) {
+                import_type = .Audio;
+            } else if (is_art) {
+                import_type = parsePieces(context.assets, tokenizer, block_token, &tags);
+            }
 
             if (import_type != .None) {
                 if (match.?.file_date != file_info.?.file_date) {
@@ -1202,23 +1232,25 @@ fn parseTopLevelBlock(
     var align_points: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]HHAAlignPoint =
         @splat(@splat(@splat(.{})));
 
-    if (context.hht_out != null and match != null) {
-        var grid_y: u32 = 0;
-        while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
-            var grid_x: u32 = 0;
-            while (grid_x < ASSET_IMPORT_GRID_MAX) : (grid_x += 1) {
-                const asset_index = match.?.asset_indices[grid_y][grid_x];
-                if (asset_index > 0) {
-                    const asset: ?*Asset = context.assets.getAsset(asset_index);
-                    std.debug.assert(asset != null);
-                    std.debug.assert(asset.?.hha.type == HHAAssetType.Bitmap);
+    if (is_art) {
+        if (context.hht_out != null and match != null) {
+            var grid_y: u32 = 0;
+            while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
+                var grid_x: u32 = 0;
+                while (grid_x < ASSET_IMPORT_GRID_MAX) : (grid_x += 1) {
+                    const asset_index = match.?.asset_indices[grid_y][grid_x];
+                    if (asset_index > 0) {
+                        const asset: ?*Asset = context.assets.getAsset(asset_index);
+                        std.debug.assert(asset != null);
+                        std.debug.assert(asset.?.hha.type == HHAAssetType.Bitmap);
 
-                    const bitmap: *HHABitmap = &asset.?.hha.info.bitmap;
-                    var point_index: u32 = 0;
-                    while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
-                        if (bitmap.align_points[point_index].align_type != @intFromEnum(HHAAlignPointType.None)) {
-                            align_point_unprocessed[grid_y][grid_x][point_index] = true;
-                            align_points[grid_y][grid_x][point_index] = bitmap.align_points[point_index];
+                        const bitmap: *HHABitmap = &asset.?.hha.info.bitmap;
+                        var point_index: u32 = 0;
+                        while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
+                            if (bitmap.align_points[point_index].align_type != @intFromEnum(HHAAlignPointType.None)) {
+                                align_point_unprocessed[grid_y][grid_x][point_index] = true;
+                                align_points[grid_y][grid_x][point_index] = bitmap.align_points[point_index];
+                            }
                         }
                     }
                 }
@@ -1231,7 +1263,7 @@ fn parseTopLevelBlock(
 
         const token: Token = tokenizer.getToken();
         if (token.token_type == .CloseBrace) {
-            if (context.hht_out != null) {
+            if (is_art and context.hht_out != null) {
                 copyAllInputUpToButNotIncluding(context, token);
 
                 var grid_y: u32 = 0;
@@ -1266,6 +1298,10 @@ fn parseTopLevelBlock(
             _ = tokenizer.requireToken(.Equals);
             append_tags = parseTagList(context.assets, tokenizer);
         } else if (token.equals("Align")) {
+            if (!is_art) {
+                tokenizer.encounteredError(token, "Alignment points not allowed on audio assets.", .{});
+            }
+
             copyAllInputUpToButNotIncluding(context, token);
 
             _ = tokenizer.requireToken(.OpenBracket);
@@ -1375,7 +1411,15 @@ fn parseTopLevelBlock(
                 match.?.file_checksum = shared.checksumOf(file_buffer, null);
 
                 const content_stream: Stream = .makeReadStream(file_buffer, &match.?.errors);
-                const image = png.parsePNG(temp_arena, content_stream, null);
+                var image: ImageU32 = undefined;
+                if (is_art) {
+                    image = png.parsePNG(temp_arena, content_stream, null);
+                }
+
+                var sound: SoundI16 = undefined;
+                if (is_sound or is_music) {
+                    sound = wav.parseWAV(temp_arena, content_stream, null);
+                }
 
                 switch (import_type) {
                     .Plate => {
@@ -1387,13 +1431,16 @@ fn parseTopLevelBlock(
                     .MultiTile => {
                         processMultiTileImport(context.assets, match.?, image, temp_arena);
                     },
+                    .Audio => {
+                        processAudioImport(context.assets, match.?, sound, temp_arena);
+                    },
                     else => unreachable,
                 }
             }
 
             updateAssetMetadata(tokenizer, context.assets, match.?, &fields, &tags, append_tags);
 
-            if (context.hht_out == null) {
+            if (is_art and context.hht_out == null) {
                 var grid_y: u32 = 0;
                 while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
                     var grid_x: u32 = 0;
