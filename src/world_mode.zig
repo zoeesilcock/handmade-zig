@@ -294,7 +294,7 @@ fn addPlayer(
         color,
         @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
     );
-    const head_piece: *EntityVisiblePiece = entity_gen.addPiece(body, .Head, hero_scale, .new(0, 0, 0.025), color, null);
+    const head_piece: *EntityVisiblePiece = entity_gen.addPiece(body, .Head, hero_scale, .new(0, 0, 0.15), color, null);
     const glove_piece: *EntityVisiblePiece = entity_gen.addPiece(glove, .Hand, hero_scale, .new(0, 0, 0), color, null);
 
     entity_gen.connectPieceToWorld(body, body_piece, .Default);

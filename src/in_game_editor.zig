@@ -115,6 +115,10 @@ pub const EditableHitTest = struct {
         }
         return result;
     }
+
+    pub fn shouldDrawChildren(self: *EditableHitTest, parent_id: DevId) bool {
+        return self.editor.draw_children or !self.editor.highlight_id.equals(parent_id);
+    }
 };
 
 const InGameEditType = enum {
@@ -221,6 +225,7 @@ pub const InGameEditor = struct {
     to_execute: dev_ui.Interaction,
     next_to_execute: dev_ui.Interaction,
 
+    draw_children: bool,
     draw_align_point: [HHA_BITMAP_ALIGN_POINT_COUNT]bool,
 
     pub fn init(self: *InGameEditor, assets: *Assets) void {
@@ -233,6 +238,7 @@ pub const InGameEditor = struct {
         self.clean_edit = self.undo_sentinel.next;
 
         self.draw_align_point = @splat(true);
+        self.draw_children = true;
     }
 
     fn isDirty(self: *InGameEditor) bool {
@@ -444,7 +450,6 @@ pub const InGameEditor = struct {
                 self.redo();
             }
 
-            layout.sectionPicker(&self.main_section);
             layout.endRow();
 
             switch (self.dev_mode) {
@@ -454,6 +459,7 @@ pub const InGameEditor = struct {
                     }
                 },
                 .EditingAssets => self.assetEditor(&layout),
+                .EditingHHA => self.hhaEditor(&layout),
                 else => {},
             }
 
@@ -474,64 +480,66 @@ pub const InGameEditor = struct {
             ui.next_hot_interaction.interaction_type = .PickAsset;
         }
 
-        const transition_count: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
-        var mouse_button: bool = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down;
-        if (@mod(transition_count, 2) != 0) {
-            mouse_button = !mouse_button;
-        }
-
-        var transition_index: u32 = 0;
-        while (transition_index <= transition_count) : (transition_index += 1) {
-            var mouse_move: bool = false;
-            var mouse_down: bool = false;
-            var mouse_up: bool = false;
-            if (transition_index == 0) {
-                mouse_move = true;
-            } else {
-                mouse_down = mouse_button;
-                mouse_up = !mouse_button;
+        if (!input.alt_down) {
+            const transition_count: u32 = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].half_transitions;
+            var mouse_button: bool = input.mouse_buttons[shared.GameInputMouseButton.Left.toInt()].ended_down;
+            if (@mod(transition_count, 2) != 0) {
+                mouse_button = !mouse_button;
             }
 
-            var end_interaction: bool = false;
+            var transition_index: u32 = 0;
+            while (transition_index <= transition_count) : (transition_index += 1) {
+                var mouse_move: bool = false;
+                var mouse_down: bool = false;
+                var mouse_up: bool = false;
+                if (transition_index == 0) {
+                    mouse_move = true;
+                } else {
+                    mouse_down = mouse_button;
+                    mouse_up = !mouse_button;
+                }
 
-            switch (ui.interaction.interaction_type) {
-                .ImmediateButton, .Draggable => {
-                    if (mouse_up) {
-                        self.next_to_execute = ui.interaction;
-                        end_interaction = true;
-                    }
-                },
-                .PickAsset => {
-                    if (mouse_up) {
-                        self.active_group = self.hot_group;
+                var end_interaction: bool = false;
 
-                        if (self.active_group.asset_count > 0) {
-                            self.setActiveAsset(&self.hot_group.assets[0]);
-                        } else {
-                            self.setActiveAsset(null);
+                switch (ui.interaction.interaction_type) {
+                    .ImmediateButton, .Draggable => {
+                        if (mouse_up) {
+                            self.next_to_execute = ui.interaction;
+                            end_interaction = true;
                         }
-                        end_interaction = true;
-                    }
-                },
-                .None => {
-                    ui.hot_interaction = ui.next_hot_interaction;
+                    },
+                    .PickAsset => {
+                        if (mouse_up) {
+                            self.active_group = self.hot_group;
 
-                    if (mouse_down) {
-                        ui.interaction = ui.hot_interaction;
-                    }
-                },
-                else => {
-                    if (mouse_up) {
-                        end_interaction = true;
-                    }
-                },
+                            if (self.active_group.asset_count > 0) {
+                                self.setActiveAsset(&self.hot_group.assets[0]);
+                            } else {
+                                self.setActiveAsset(null);
+                            }
+                            end_interaction = true;
+                        }
+                    },
+                    .None => {
+                        ui.hot_interaction = ui.next_hot_interaction;
+
+                        if (mouse_down) {
+                            ui.interaction = ui.hot_interaction;
+                        }
+                    },
+                    else => {
+                        if (mouse_up) {
+                            end_interaction = true;
+                        }
+                    },
+                }
+
+                if (end_interaction) {
+                    ui.interaction.clear();
+                }
+
+                mouse_button = !mouse_button;
             }
-
-            if (end_interaction) {
-                ui.interaction.clear();
-            }
-
-            mouse_button = !mouse_button;
         }
     }
 
@@ -579,53 +587,48 @@ pub const InGameEditor = struct {
         layout.editablePositionX(.fromPointerAndLine(world_mode, @src()), .fromSlice("AlphaSpan"), 0, &world_mode.alpha_span, 50);
     }
 
+    fn hhaEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
+        layout.beginRow();
+        if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("RELOAD HHTs"), true, null)) {
+            import.synchronizeAssetFileChanges(self.assets, false);
+        }
+        if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("SAVE HHTs"), true, null)) {
+            self.saveAllChanges();
+        }
+        layout.endRow();
+
+        layout.beginRow();
+        layout.endRow();
+
+        layout.beginRow();
+        if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("REVERT"), self.isDirty(), null)) {
+            if (self.undo_sentinel.hasEdit(self.clean_edit)) {
+                while (self.clean_edit != self.undo_sentinel.next) {
+                    self.undo();
+                }
+            } else {
+                std.debug.assert(self.redo_sentinel.hasEdit(self.clean_edit));
+                while (self.clean_edit != self.undo_sentinel.next) {
+                    self.redo();
+                }
+            }
+        }
+        layout.endRow();
+
+        const error_stream: *Stream = &self.assets.error_stream;
+        var opt_chunk: ?*stream.Chunk = error_stream.first;
+        while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
+            layout.beginRow();
+            layout.label(chunk.contents);
+            layout.endRow();
+        }
+
+        layout.endSection();
+    }
+
     fn assetEditor(self: *InGameEditor, layout: *dev_ui.Layout) void {
         var temp_arena: MemoryArena = .{};
         defer temp_arena.clear();
-
-        var hha_section_name: []const u8 = "HHA";
-        if (layout.beginSection(
-            &self.main_section,
-            .fromPointerAndLine(@ptrCast(&hha_section_name), @src()),
-            .fromSlice(hha_section_name),
-        )) {
-            layout.beginRow();
-            if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("RELOAD HHTs"), true, null)) {
-                import.synchronizeAssetFileChanges(self.assets, false);
-            }
-            if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("SAVE HHTs"), true, null)) {
-                self.saveAllChanges();
-            }
-            layout.endRow();
-
-            layout.beginRow();
-            layout.endRow();
-
-            layout.beginRow();
-            if (layout.button(.fromPointerAndLine(self, @src()), .fromSlice("REVERT"), self.isDirty(), null)) {
-                if (self.undo_sentinel.hasEdit(self.clean_edit)) {
-                    while (self.clean_edit != self.undo_sentinel.next) {
-                        self.undo();
-                    }
-                } else {
-                    std.debug.assert(self.redo_sentinel.hasEdit(self.clean_edit));
-                    while (self.clean_edit != self.undo_sentinel.next) {
-                        self.redo();
-                    }
-                }
-            }
-            layout.endRow();
-
-            const error_stream: *Stream = &self.assets.error_stream;
-            var opt_chunk: ?*stream.Chunk = error_stream.first;
-            while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
-                layout.beginRow();
-                layout.label(chunk.contents);
-                layout.endRow();
-            }
-
-            layout.endSection();
-        }
 
         const asset_index: u32 = self.active_asset_index;
 
@@ -634,169 +637,159 @@ pub const InGameEditor = struct {
             const hha: *const HHAAsset = &asset.hha;
             const annotation: *HHAAnnotation = &asset.annotation;
 
-            var info_section_name: []const u8 = "Info";
-            if (layout.beginSection(
-                &self.main_section,
-                .fromPointerAndLine(@ptrCast(&info_section_name), @src()),
-                .fromSlice(info_section_name),
-            )) {
-                annotationLabel(
-                    layout,
-                    &temp_arena,
-                    asset_file,
-                    "Source",
-                    annotation.source_file_base_name_count,
-                    annotation.source_file_base_name_offset,
-                );
-                annotationLabel(
-                    layout,
-                    &temp_arena,
-                    asset_file,
-                    "Name",
-                    annotation.asset_name_count,
-                    annotation.asset_name_offset,
-                );
-                annotationLabel(
-                    layout,
-                    &temp_arena,
-                    asset_file,
-                    "Description",
-                    annotation.asset_description_count,
-                    annotation.asset_description_offset,
-                );
-                annotationLabel(
-                    layout,
-                    &temp_arena,
-                    asset_file,
-                    "Author",
-                    annotation.author_count,
-                    annotation.author_offset,
-                );
-                annotationLabel(
-                    layout,
-                    &temp_arena,
-                    asset_file,
-                    "Errors",
-                    annotation.error_stream_count,
-                    annotation.error_stream_offset,
-                );
-                layout.endSection();
-            }
-
             switch (hha.type) {
                 .Bitmap => {
                     const bitmap: *HHABitmap = &asset.hha.info.bitmap;
-                    var section_name: []const u8 = "Alignment Points";
-                    if (layout.beginSection(
-                        &self.main_section,
-                        .fromPointerAndLine(@ptrCast(&section_name), @src()),
-                        .fromSlice(section_name),
-                    )) {
-                        var point_index: u32 = 0;
-                        while (point_index < bitmap.align_points.len) : (point_index += 1) {
-                            const point: *HHAAlignPoint = &bitmap.align_points[point_index];
+                    layout.editableBoolean(
+                        .fromPointerAndLine(&self.draw_children, @src()),
+                        .fromSlice("Show children"),
+                        &self.draw_children,
+                    );
 
-                            var to_parent: bool = point.isToParent();
-                            const align_point_type: HHAAlignPointType = point.getType();
-                            var align_point_type_int: u32 = @intFromEnum(align_point_type);
-                            var position_percent: Vector2 = point.getPositionPercent();
-                            var size: f32 = point.getSize();
+                    var point_index: u32 = 0;
+                    while (point_index < bitmap.align_points.len) : (point_index += 1) {
+                        const point: *HHAAlignPoint = &bitmap.align_points[point_index];
 
-                            var point_name: [64]u8 = undefined;
-                            const point_name_length: usize =
-                                shared.formatString(point_name.len, &point_name, "[%d]", .{point_index});
+                        var to_parent: bool = point.isToParent();
+                        const align_point_type: HHAAlignPointType = point.getType();
+                        var align_point_type_int: u32 = @intFromEnum(align_point_type);
+                        var position_percent: Vector2 = point.getPositionPercent();
+                        var size: f32 = point.getSize();
 
-                            layout.beginRow();
-                            const draw_toggle: *bool = &self.draw_align_point[point_index];
-                            const button_color: Color = if (draw_toggle.*)
-                                handmade.getDebugColor4(point_index, null)
-                            else
-                                .new(0.25, 0.25, 0.25, 1);
-                            if (layout.button(
-                                .fromPointerAndLine(draw_toggle, @src()),
-                                .fromSlice(point_name[0..point_name_length]),
-                                align_point_type_int != @intFromEnum(HHAAlignPointType.None),
-                                button_color,
-                            )) {
-                                draw_toggle.* = !draw_toggle.*;
-                            }
+                        var point_name: [64]u8 = undefined;
+                        const point_name_length: usize =
+                            shared.formatString(point_name.len, &point_name, "[%d]", .{point_index});
 
-                            if (align_point_type_int == @intFromEnum(HHAAlignPointType.None)) {
-                                if (layout.button(
-                                    .fromPointerAndLine(point, @src()),
-                                    .fromSlice("[ADD]"),
-                                    null,
-                                    null,
-                                )) {
-                                    self.editAlignPoint(
-                                        asset_index,
-                                        point_index,
-                                        .Default,
-                                        false,
-                                        1,
-                                        .new(0.5, 0.5),
-                                    );
-                                }
-                            } else {
-                                const change_block: dev_ui.EditBlock = layout.beginEditBlock();
-                                if (layout.button(
-                                    .fromPointerAndLine(point, @src()),
-                                    .fromSlice("[DEL]"),
-                                    null,
-                                    null,
-                                )) {
-                                    self.editAlignPoint(
-                                        asset_index,
-                                        point_index,
-                                        .None,
-                                        false,
-                                        1,
-                                        .new(0.5, 0.5),
-                                    );
-                                }
-                                layout.editableBoolean(.fromPointerAndLine(point, @src()), .fromSlice(""), &to_parent);
-                                layout.editableSize(.fromPointerAndLine(point, @src()), .fromSlice("S"), &size);
-                                layout.editablePositionXY(
-                                    .fromPointerAndLine(point, @src()),
-                                    .fromSlice("P"),
-                                    0,
-                                    &position_percent.values[0],
-                                    1,
-                                    0,
-                                    &position_percent.values[1],
-                                    1,
-                                );
-                                layout.editableType(
-                                    .fromPointerAndLine(point, @src()),
-                                    .fromSlice(""),
-                                    file_formats.alignPointNameFromType(align_point_type),
-                                    &align_point_type_int,
-                                );
-
-                                if (layout.endEditBlock(change_block)) {
-                                    if (align_point_type_int == 0) {
-                                        align_point_type_int = HHA_ALIGN_POINT_TYPE_COUNT - 1;
-                                    } else if (align_point_type_int >= HHA_ALIGN_POINT_TYPE_COUNT) {
-                                        align_point_type_int = 1;
-                                    }
-
-                                    self.editAlignPoint(
-                                        asset_index,
-                                        point_index,
-                                        @enumFromInt(align_point_type_int),
-                                        to_parent,
-                                        size,
-                                        position_percent,
-                                    );
-                                }
-                            }
-                            layout.endRow();
+                        layout.beginRow();
+                        const draw_toggle: *bool = &self.draw_align_point[point_index];
+                        const button_color: Color = if (draw_toggle.*)
+                            handmade.getDebugColor4(point_index, null)
+                        else
+                            .new(0.25, 0.25, 0.25, 1);
+                        if (layout.button(
+                            .fromPointerAndLine(draw_toggle, @src()),
+                            .fromSlice(point_name[0..point_name_length]),
+                            align_point_type_int != @intFromEnum(HHAAlignPointType.None),
+                            button_color,
+                        )) {
+                            draw_toggle.* = !draw_toggle.*;
                         }
-                        layout.endSection();
+
+                        if (align_point_type_int == @intFromEnum(HHAAlignPointType.None)) {
+                            if (layout.button(
+                                .fromPointerAndLine(point, @src()),
+                                .fromSlice("[ADD]"),
+                                null,
+                                null,
+                            )) {
+                                self.editAlignPoint(
+                                    asset_index,
+                                    point_index,
+                                    .Default,
+                                    false,
+                                    1,
+                                    .new(0.5, 0.5),
+                                );
+                            }
+                        } else {
+                            const change_block: dev_ui.EditBlock = layout.beginEditBlock();
+                            if (layout.button(
+                                .fromPointerAndLine(point, @src()),
+                                .fromSlice("[DEL]"),
+                                null,
+                                null,
+                            )) {
+                                self.editAlignPoint(
+                                    asset_index,
+                                    point_index,
+                                    .None,
+                                    false,
+                                    1,
+                                    .new(0.5, 0.5),
+                                );
+                            }
+                            layout.editableBoolean(.fromPointerAndLine(point, @src()), .fromSlice("ToPar"), &to_parent);
+                            layout.editableSize(.fromPointerAndLine(point, @src()), .fromSlice("S"), &size);
+                            layout.editablePositionXY(
+                                .fromPointerAndLine(point, @src()),
+                                .fromSlice("P"),
+                                0,
+                                &position_percent.values[0],
+                                1,
+                                0,
+                                &position_percent.values[1],
+                                1,
+                            );
+                            layout.editableType(
+                                .fromPointerAndLine(point, @src()),
+                                .fromSlice(""),
+                                file_formats.alignPointNameFromType(align_point_type),
+                                &align_point_type_int,
+                            );
+
+                            if (layout.endEditBlock(change_block)) {
+                                if (align_point_type_int == 0) {
+                                    align_point_type_int = HHA_ALIGN_POINT_TYPE_COUNT - 1;
+                                } else if (align_point_type_int >= HHA_ALIGN_POINT_TYPE_COUNT) {
+                                    align_point_type_int = 1;
+                                }
+
+                                self.editAlignPoint(
+                                    asset_index,
+                                    point_index,
+                                    @enumFromInt(align_point_type_int),
+                                    to_parent,
+                                    size,
+                                    position_percent,
+                                );
+                            }
+                        }
+                        layout.endRow();
                     }
                 },
                 else => {},
             }
+
+            annotationLabel(
+                layout,
+                &temp_arena,
+                asset_file,
+                "Source",
+                annotation.source_file_base_name_count,
+                annotation.source_file_base_name_offset,
+            );
+            annotationLabel(
+                layout,
+                &temp_arena,
+                asset_file,
+                "Name",
+                annotation.asset_name_count,
+                annotation.asset_name_offset,
+            );
+            annotationLabel(
+                layout,
+                &temp_arena,
+                asset_file,
+                "Description",
+                annotation.asset_description_count,
+                annotation.asset_description_offset,
+            );
+            annotationLabel(
+                layout,
+                &temp_arena,
+                asset_file,
+                "Author",
+                annotation.author_count,
+                annotation.author_offset,
+            );
+            annotationLabel(
+                layout,
+                &temp_arena,
+                asset_file,
+                "Errors",
+                annotation.error_stream_count,
+                annotation.error_stream_offset,
+            );
         }
     }
 

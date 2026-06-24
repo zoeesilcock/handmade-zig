@@ -266,7 +266,7 @@ pub export fn updateAndRender(
     } else if (input.f_key_pressed[3]) {
         state.dev_mode = .EditingAssets;
     } else if (input.f_key_pressed[4]) {
-        state.dev_mode = .None;
+        state.dev_mode = .EditingHHA;
     } else if (input.f_key_pressed[5]) {
         state.dev_mode = .Profiling;
     } else if (input.f_key_pressed[6]) {

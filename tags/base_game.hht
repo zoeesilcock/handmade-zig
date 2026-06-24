@@ -30,8 +30,14 @@ block "block_orphanage_03.png"
 body "body_hero.png"
 {
     Tags = orphan, hero;
-    Align[0,0][0] = 46417, 32767, 771, Default | ToParent;
-    Align[0,0][1] = 40688, 43833, 771, BaseOfNeck;
+    Align[0,0][0] = 41277, 40575, 771, Default | ToParent;
+    Align[0,0][1] = 41068, 43028, 771, BaseOfNeck;
+    Align[0,1][0] = 40959, 40959, 771, Default | ToParent;
+    Align[0,1][1] = 41017, 44172, 771, BaseOfNeck;
+    Align[0,2][0] = 40863, 40575, 771, Default | ToParent;
+    Align[0,2][1] = 42035, 43203, 771, BaseOfNeck;
+    Align[0,3][0] = 40906, 40920, 771, Default | ToParent;
+    Align[0,3][1] = 40958, 43998, 771, BaseOfNeck;
 };
 
 body "body_orphan_01.png"
@@ -102,6 +108,8 @@ body "body_orphan_13.png"
 body "body_orphan_14.png"
 {
     Tags = orphan, speed;
+    Align[0,3][0] = 0, 0, 0, None;
+    Align[0,3][1] = 0, 0, 0, None;
 };
 
 character "character_fred.png"
@@ -122,6 +130,9 @@ character "character_krampus.png"
 character "character_molly.png"
 {
     Tags = cat, gray, tabby;
+    Align[0,0][0] = 41779, 36864, 771, Default | ToParent;
+    Align[0,0][1] = 46055, 44033, 771, BaseOfNeck;
+    Align[0,4][0] = 0, 0, 0, None;
 };
 
 character "character_mummy.png"
@@ -162,6 +173,10 @@ hand "hand_skeleton.png"
 head "head_hero.png"
 {
     Tags = orphan, hero;
+    Align[0,0][0] = 40533, 39189, 771, Default | ToParent;
+    Align[0,1][0] = 40894, 39701, 771, Default | ToParent;
+    Align[0,2][0] = 41526, 39107, 771, Default | ToParent;
+    Align[0,3][0] = 40914, 38824, 771, Default | ToParent;
 };
 
 head "head_orphan_01.png"
@@ -182,6 +197,7 @@ head "head_orphan_03.png"
 head "head_orphan_04.png"
 {
     Tags = orphan, cassidy;
+    Align[0,3][0] = 0, 0, 0, None;
 };
 
 head "head_orphan_05.png"

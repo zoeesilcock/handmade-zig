@@ -215,6 +215,10 @@ pub const DevId = extern struct {
         };
     }
 
+    pub fn copyTypeFrom(self: *DevId, from: DevId) void {
+        self.value[1] = from.value[1];
+    }
+
     pub fn equals(self: DevId, other: DevId) bool {
         return self.value[0].u64 == other.value[0].u64 and
             self.value[1].u64 == other.value[1].u64;

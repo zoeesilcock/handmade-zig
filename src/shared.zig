@@ -1184,6 +1184,7 @@ pub const DevMode = enum(u32) {
     FirstEditor,
     Camera,
     EditingAssets,
+    EditingHHA,
     LastEditor,
 
     Profiling,

@@ -558,96 +558,112 @@ pub fn updateAndRenderEntities(
                     } else {
                         if (opt_assets) |assets| {
                             if (bitmap_id) |id| {
-                                const texture_handle: RendererTexture = assets.getBitmap(id);
-                                if (texture_handle.isValid()) {
-                                    const bitmap_piece: BitmapPiece = piece.extra.bitmap;
-                                    const bitmap_info: *HHABitmap = assets.getBitmapInfo(id);
-                                    const parent_bitmap_info: ?*HHABitmap = bitmap_infos[bitmap_piece.parent_piece];
-                                    var height_ratio: f32 =
-                                        @as(f32, @floatFromInt(bitmap_info.orig_dim[1])) / 1024;
+                                const bitmap_piece: BitmapPiece = piece.extra.bitmap;
+                                const bitmap_info: *HHABitmap = assets.getBitmapInfo(id);
+                                const parent_bitmap_info: ?*HHABitmap = bitmap_infos[bitmap_piece.parent_piece];
+                                var height_ratio: f32 =
+                                    @as(f32, @floatFromInt(bitmap_info.orig_dim[1])) / 1024;
 
-                                    const child_align: HHAAlignPoint = bitmap_info.findAlign(
-                                        bitmap_piece.child_align_type | @intFromEnum(HHAAlignPointType.ToParent),
-                                    );
-                                    height_ratio *= child_align.getSize();
+                                const child_align: HHAAlignPoint = bitmap_info.findAlign(
+                                    bitmap_piece.child_align_type | @intFromEnum(HHAAlignPointType.ToParent),
+                                );
+                                height_ratio *= child_align.getSize();
 
-                                    var initial_position: Vector3 = entity_ground_point.plus(offset);
-                                    if (bitmap_piece.parent_align_type != 0) {
-                                        std.debug.assert(piece_index > 0);
+                                var visible: bool = true;
+                                var initial_position: Vector3 = entity_ground_point.plus(offset);
+                                if (bitmap_piece.parent_align_type != 0) {
+                                    std.debug.assert(piece_index > 0);
 
-                                        if (parent_bitmap_info) |parent_info| {
-                                            const parent_align: HHAAlignPoint = parent_info.findAlign(
-                                                bitmap_piece.parent_align_type,
+                                    if (parent_bitmap_info) |parent_info| {
+                                        const parent_align: HHAAlignPoint = parent_info.findAlign(
+                                            bitmap_piece.parent_align_type,
+                                        );
+                                        initial_position =
+                                            piece_sprites[bitmap_piece.parent_piece].worldPositionFromAlignPosition(
+                                                parent_align.getPositionPercent(),
                                             );
-                                            initial_position =
-                                                piece_sprites[bitmap_piece.parent_piece].worldPositionFromAlignPosition(
-                                                    parent_align.getPositionPercent(),
-                                                );
-                                            height_ratio *= parent_align.getSize();
-                                        }
+                                        height_ratio *= parent_align.getSize();
                                     }
 
-                                    bitmap_infos[piece_index] = bitmap_info;
-                                    const align_percentage: Vector2 = child_align.getPositionPercent();
+                                    var parent_dev_id: types.DevId =
+                                        .fromU32s(entity.id.value, bitmap_piece.parent_piece, @src());
+                                    parent_dev_id.copyTypeFrom(dev_id);
+                                    visible = hit_test.shouldDrawChildren(parent_dev_id);
+                                }
 
-                                    const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(
-                                        texture_handle,
-                                        piece.dimension.y() * height_ratio,
-                                    );
-                                    _ = world_radius.setX(world_dim.x());
-                                    _ = world_radius.setY(world_dim.y());
-                                    _ = world_radius.setZ(0.1);
+                                bitmap_infos[piece_index] = bitmap_info;
+                                const align_percentage: Vector2 = child_align.getPositionPercent();
 
-                                    var sprite: SpriteValues = .forUpright(
-                                        render_group,
-                                        world_dim,
-                                        align_percentage,
-                                        x_axis,
-                                        y_axis,
-                                        null,
-                                    );
-                                    _ = sprite.min_position.setZ(0);
-                                    sprite.min_position = sprite.min_position.minus(
-                                        Vector3.new(0, world_dim.y(), 0).scaledTo(align_percentage.y()),
-                                    );
-                                    sprite.min_position = sprite.min_position.plus(initial_position);
-                                    // sprite.min_position = sprite.min_position.plus(piece.offset);
+                                const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(
+                                    bitmap_info,
+                                    piece.dimension.y() * height_ratio,
+                                );
+                                _ = world_radius.setX(world_dim.x());
+                                _ = world_radius.setY(world_dim.y());
+                                _ = world_radius.setZ(0.1);
 
+                                var sprite: SpriteValues = .forUpright(
+                                    render_group,
+                                    world_dim,
+                                    align_percentage,
+                                    x_axis,
+                                    y_axis,
+                                    null,
+                                );
+                                const camera_z: Vector3 = render_group.game_transform.z;
+                                const h: f32 = sprite.z_displacement;
+                                const cz: f32 = camera_z.z();
+
+                                if (cz > 0.1) { // We don't support head-on cameras.
+                                    const t: f32 = h / cz;
+                                    sprite.min_position = sprite.min_position.plus(
+                                        initial_position.plus(camera_z.scaledTo(t)),
+                                    );
+                                    // sprite.min_position = sprite.min_position.minus(
+                                    //     Vector3.new(0, world_dim.y(), 0).scaledTo(align_percentage.y()),
+                                    // );
+                                    sprite.min_position = sprite.min_position.plus(piece.offset);
                                     piece_sprites[piece_index] = sprite;
-                                    render_group.pushSprite(
-                                        texture_handle,
-                                        sprite.min_position,
-                                        sprite.scaled_x_axis,
-                                        sprite.scaled_y_axis,
-                                        color,
-                                        null,
-                                        null,
-                                    );
 
-                                    if (highlighted) {
-                                        var ap_index: u32 = 0;
-                                        while (ap_index < bitmap_info.align_points.len) : (ap_index += 1) {
-                                            const ap: HHAAlignPoint = bitmap_info.align_points[ap_index];
+                                    const texture_handle: RendererTexture = assets.getBitmap(id);
+                                    if (texture_handle.isValid()) {
+                                        if (visible) {
+                                            render_group.pushSprite(
+                                                texture_handle,
+                                                sprite.min_position,
+                                                sprite.scaled_x_axis,
+                                                sprite.scaled_y_axis,
+                                                color,
+                                                null,
+                                                null,
+                                            );
+                                        }
 
-                                            if (hit_test.shouldDrawAlignPoint(ap_index) and ap.getType() != .None) {
-                                                render_group.pushCube(
-                                                    render_group.white_texture,
-                                                    sprite.worldPositionFromAlignPosition(
-                                                        ap.getPositionPercent(),
-                                                    ),
-                                                    .splat(0.04),
-                                                    handmade.getDebugColor4(ap_index, null),
-                                                    null,
-                                                    null,
-                                                    null,
-                                                    3,
-                                                );
+                                        if (highlighted) {
+                                            var ap_index: u32 = 0;
+                                            while (ap_index < bitmap_info.align_points.len) : (ap_index += 1) {
+                                                const ap: HHAAlignPoint = bitmap_info.align_points[ap_index];
+
+                                                if (hit_test.shouldDrawAlignPoint(ap_index) and ap.getType() != .None) {
+                                                    render_group.pushCube(
+                                                        render_group.white_texture,
+                                                        sprite.worldPositionFromAlignPosition(
+                                                            ap.getPositionPercent(),
+                                                        ),
+                                                        .splat(0.04),
+                                                        handmade.getDebugColor4(ap_index, null),
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        3,
+                                                    );
+                                                }
                                             }
                                         }
+                                    } else {
+                                        assets.loadBitmap(id);
+                                        render_group.missing_resource_count += 1;
                                     }
-                                } else {
-                                    assets.loadBitmap(id);
-                                    render_group.missing_resource_count += 1;
                                 }
                             }
                         }

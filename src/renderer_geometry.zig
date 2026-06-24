@@ -1,5 +1,7 @@
+const shared = @import("shared.zig");
 const renderer = @import("renderer.zig");
 const math = @import("math.zig");
+const file_formats = shared.file_formats;
 
 // Types.
 const RenderGroup = renderer.RenderGroup;
@@ -8,6 +10,7 @@ const RendererTexture = renderer.RendererTexture;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
+const HHABitmap = file_formats.HHABitmap;
 
 pub const GeometryOutput = struct {
     vertices: [*]TexturedVertex,
@@ -19,7 +22,7 @@ pub const SpriteValues = struct {
     min_position: Vector3,
     scaled_x_axis: Vector3,
     scaled_y_axis: Vector3,
-    z_bias: f32 = 0,
+    z_displacement: f32 = 0,
 
     pub fn forUpright(
         render_group: *RenderGroup,
@@ -51,6 +54,7 @@ pub const SpriteValues = struct {
             .min_position = min_position,
             .scaled_x_axis = x_axis,
             .scaled_y_axis = y_axis,
+            .z_displacement = align_percentage.y() * world_dim.y() * y_axis_hybrid.z(),
         };
     }
     pub fn worldPositionFromAlignPosition(self: *const SpriteValues, align_percentage: Vector2) Vector3 {
@@ -64,11 +68,11 @@ pub const SpriteValues = struct {
     }
 };
 
-pub fn worldDimFromWorldHeight(texture: RendererTexture, height: f32) Vector2 {
+pub fn worldDimFromWorldHeight(info: *HHABitmap, height: f32) Vector2 {
     var width_over_height: f32 = 1;
-    if (texture.values.height != 0) {
+    if (info.orig_dim[1] != 0) {
         width_over_height =
-            @as(f32, @floatFromInt(texture.values.width)) / @as(f32, @floatFromInt(texture.values.height));
+            @as(f32, @floatFromInt(info.orig_dim[0])) / @as(f32, @floatFromInt(info.orig_dim[1]));
     }
 
     const result: Vector2 = .new(
