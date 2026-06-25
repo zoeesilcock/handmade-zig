@@ -108,7 +108,9 @@ pub const AssetTagId = enum(u32) {
     Drop,
     Glide,
     Puhp,
+
     Variant,
+    ChannelIndex,
 
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
@@ -373,9 +375,9 @@ pub const HHASoundChain = enum(u32) {
 
 pub const HHA_MAX_SOUND_SAMPLE_COUNT = 24000;
 pub const HHASound = extern struct {
-    sample_count: u32 align(1),
-    channel_count: u32 align(1),
-    chain: HHASoundChain align(1),
+    sample_count: u32 align(1) = 0,
+    channel_count: u32 align(1) = 0,
+    chain: HHASoundChain align(1) = .None,
 
     // Data looks like this:
     //

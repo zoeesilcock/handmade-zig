@@ -608,6 +608,24 @@ pub const Assets = struct {
         }
     }
 
+    pub fn unloadAudio(self: *Assets, opt_id: ?SoundId) void {
+        if (opt_id) |id| {
+            var asset = &self.assets[id.value];
+            if (id.isValid()) {
+                if (@cmpxchgStrong(
+                    u32,
+                    &asset.state,
+                    AssetState.Unloaded.toInt(),
+                    AssetState.Queued.toInt(),
+                    .seq_cst,
+                    .seq_cst,
+                ) != null) {
+                    asset.state = AssetState.Unloaded.toInt();
+                }
+            }
+        }
+    }
+
     fn acquireTextureHandle(self: *Assets, dimension: Vector2u) u32 {
         var opt_replace_sentinel: ?*AssetLRULink = null;
         var result: u32 = 0;

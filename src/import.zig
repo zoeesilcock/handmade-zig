@@ -41,6 +41,7 @@ const AssetBasicCategory = file_formats.AssetBasicCategory;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
+const HHASoundChain = file_formats.HHASoundChain;
 const AssetTagId = file_formats.AssetTagId;
 const ImageU32 = png.ImageU32;
 const SoundI16 = wav.SoundI16;
@@ -85,6 +86,7 @@ const TagBuilder = struct {
 };
 
 const HHTContext = struct {
+    audio_channel_tags: ImportGridTags = .{},
     assets: *Assets,
     default_fields: HHTFields = .{},
     file_group: PlatformFileGroup,
@@ -116,12 +118,12 @@ pub fn reserveTag(assets: *Assets, tag_count: u32) u32 {
     return result;
 }
 
-pub fn reserveAsset(assets: *Assets) u32 {
+pub fn reserveAsset(assets: *Assets, asset_count: u32) u32 {
     var result: u32 = 0;
 
-    if (assets.asset_count < assets.max_asset_count) {
+    if ((assets.asset_count + asset_count) < assets.max_asset_count) {
         result = assets.asset_count;
-        assets.asset_count += 1;
+        assets.asset_count += asset_count;
     }
 
     return result;
@@ -330,7 +332,7 @@ fn writeImageToHHA(
         const asset: *Asset = &assets.assets[asset_index];
         hha_asset = asset.hha;
     } else {
-        asset_index = reserveAsset(assets);
+        asset_index = reserveAsset(assets, 1);
     }
 
     if (asset_index != 0) {
@@ -575,16 +577,102 @@ fn processMultiTileImport(
     }
 }
 
-fn processAudioImport(
-    assets: *Assets,
-    file: *SourceFile,
-    sound: SoundI16,
-    temp_arena: *MemoryArena,
-) void {
-    _ = assets;
-    _ = file;
-    _ = sound;
+fn processAudioImport(assets: *Assets, file: *SourceFile, sound_in: SoundI16, temp_arena: *MemoryArena) void {
     _ = temp_arena;
+
+    var sound: SoundI16 = sound_in;
+
+    const max_channel_count: u32 = ASSET_IMPORT_GRID_MAX * ASSET_IMPORT_GRID_MAX;
+    if (sound.channel_count > max_channel_count) {
+        sound.channel_count = max_channel_count;
+    }
+
+    var channel_index: u32 = 0;
+    while (channel_index < sound.channel_count) : (channel_index += 1) {
+        var reuse_asset: bool = true;
+        const max_sample_count: u32 = 128 * 1024;
+        const total_chunk_count = @divFloor(sound.sample_count + max_sample_count - 1, max_sample_count);
+
+        var asset_index: u32 = file.asset_indices[ASSET_IMPORT_GRID_MAX / 8][@mod(ASSET_IMPORT_GRID_MAX, 8)];
+        if (asset_index != 0) {
+            var chunk_index: u32 = 0;
+            while (chunk_index < total_chunk_count - 1) : (chunk_index += 1) {
+                const asset: *Asset = &assets.assets[asset_index + chunk_index];
+                if (asset.hha.info.sound.chain != .Loop) {
+                    asset_index = 0;
+                    break;
+                }
+            }
+        }
+
+        if (asset_index == 0) {
+            asset_index = reserveAsset(assets, total_chunk_count);
+            reuse_asset = false;
+        }
+
+        if (asset_index != 0) {
+            var samples: [*]i16 = sound.getChannelSamples(channel_index);
+            var sample_count_remaining: u32 = sound.sample_count;
+
+            while (sample_count_remaining > 0) {
+                var chain: HHASoundChain = .None;
+                var sample_count: u32 = sample_count_remaining;
+                if (sample_count > max_sample_count) {
+                    chain = .Advance;
+                    sample_count = max_sample_count;
+                }
+
+                var hha_asset: HHAAsset = .{
+                    .info = .{
+                        .sound = .{},
+                    },
+                };
+
+                if (reuse_asset) {
+                    const asset: *Asset = &assets.assets[asset_index];
+                    hha_asset = asset.hha;
+                }
+
+                if (asset_index != 0) {
+                    const asset_data_size: u32 = sample_count * @sizeOf(i16);
+                    var asset: *Asset = &assets.assets[asset_index];
+
+                    const sound_id: SoundId = .{ .value = asset_index };
+                    assets.unloadAudio(sound_id);
+
+                    asset.file_index = file.dest_file_index;
+                    std.debug.assert(asset.file_index != 0);
+
+                    const asset_file: *AssetFile = &assets.files[asset.file_index];
+                    if (hha_asset.data_offset == 0 or hha_asset.data_size < asset_data_size) {
+                        hha_asset.data_offset = reserveData(assets, asset_file, asset_data_size);
+                    }
+                    hha_asset.data_size = asset_data_size;
+
+                    hha_asset.info.sound.sample_count = sound.sample_count;
+                    hha_asset.info.sound.channel_count = sound.channel_count;
+                    hha_asset.info.sound.chain = chain;
+                    hha_asset.type = .Sound;
+
+                    asset.hha = hha_asset;
+                    asset.annotation.source_file_date = file.file_date;
+                    asset.annotation.source_file_checksum = file.file_checksum;
+                    asset.annotation.sprite_sheet_x = 0;
+                    asset.annotation.sprite_sheet_y = 0;
+
+                    file.asset_indices[0][0] = asset_index;
+
+                    writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, @ptrCast(samples));
+                }
+
+                sample_count_remaining -= sample_count;
+                samples += sample_count;
+                asset_index += 1;
+            }
+        } else {
+            _ = stream.outputWithSrc(&file.errors, @src(), "Out of asset memory - please restart Handmade Hero!\n", .{});
+        }
+    }
 }
 
 fn popToken(source: *String) Token {
@@ -1207,6 +1295,7 @@ fn parseTopLevelBlock(
 
             if (is_sound or is_music) {
                 import_type = .Audio;
+                tags = context.audio_channel_tags;
             } else if (is_art) {
                 import_type = parsePieces(context.assets, tokenizer, block_token, &tags);
             }
@@ -1418,7 +1507,7 @@ fn parseTopLevelBlock(
 
                 var sound: SoundI16 = undefined;
                 if (is_sound or is_music) {
-                    sound = wav.parseWAV(temp_arena, content_stream, null);
+                    sound = wav.parseWAV(temp_arena, file_buffer, &match.?.errors);
                 }
 
                 switch (import_type) {
