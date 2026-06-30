@@ -108,8 +108,6 @@ body "body_orphan_13.png"
 body "body_orphan_14.png"
 {
     Tags = orphan, speed;
-    Align[0,3][0] = 0, 0, 0, None;
-    Align[0,3][1] = 0, 0, 0, None;
 };
 
 character "character_fred.png"
@@ -132,7 +130,6 @@ character "character_molly.png"
     Tags = cat, gray, tabby;
     Align[0,0][0] = 41779, 36864, 771, Default | ToParent;
     Align[0,0][1] = 46055, 44033, 771, BaseOfNeck;
-    Align[0,4][0] = 0, 0, 0, None;
 };
 
 character "character_mummy.png"
@@ -197,7 +194,6 @@ head "head_orphan_03.png"
 head "head_orphan_04.png"
 {
     Tags = orphan, cassidy;
-    Align[0,3][0] = 0, 0, 0, None;
 };
 
 head "head_orphan_05.png"
@@ -279,49 +275,49 @@ head "head_orphan_14.png"
 sound "bloop_00.wav"
 {
     Tags = Bloop, Variant(0);
-}
+};
 
 sound "bloop_01.wav"
 {
     Tags = Bloop, Variant(1);
-}
+};
 
 sound "bloop_02.wav"
 {
     Tags = Bloop, Variant(2);
-}
+};
 
 sound "bloop_03.wav"
 {
     Tags = Bloop, Variant(3);
-}
+};
 
 sound "bloop_04.wav"
 {
     Tags = Bloop, Variant(4);
-}
+};
 
 sound "crack_00.wav"
 {
     Tags = Crack;
-}
+};
 
 sound "drop_00.wav"
 {
     Tags = Drop;
-}
+};
 
 sound "glide_00.wav"
 {
     Tags = Glide;
-}
+};
 
 sound "puhp_00.wav"
 {
     Tags = Puhp, Variant(0);
-}
+};
 
 sound "puhp_01.wav"
 {
     Tags = Puhp, Variant(1);
-}
+};

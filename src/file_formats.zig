@@ -155,6 +155,11 @@ pub const AssetBasicCategory = enum(u32) {
     Item,
     Obstacle,
     Plate,
+    Audio,
+
+    pub fn toString(self: AssetBasicCategory) String {
+        return .fromSlice(@tagName(self));
+    }
 };
 
 pub const HHAHeader = extern struct {
@@ -375,13 +380,15 @@ pub const HHASoundChain = enum(u32) {
 
 pub const HHA_MAX_SOUND_SAMPLE_COUNT = 24000;
 pub const HHASound = extern struct {
+    // The sample_count and channel_count are the total samples and channels for the sound, even though it is broken
+    // up into chunks and split across assets, one per channel per chunk.
     sample_count: u32 align(1) = 0,
     channel_count: u32 align(1) = 0,
     chain: HHASoundChain align(1) = .None,
 
     // Data looks like this:
     //
-    // channels: [channel_count][sample_count]i16,
+    // channels: [sample_count]i16,
 };
 
 pub const HHAFontGlyph = extern struct {
@@ -512,6 +519,18 @@ pub const name_tags = [_]NameTag{
     .{ .name = .fromSlice("Tailor"), .id = .Tailor },
     .{ .name = .fromSlice("Tank"), .id = .Tank },
     .{ .name = .fromSlice("Winter"), .id = .Winter },
+
+    .{ .name = .fromSlice("IntroCutscene"), .id = .IntroCutscene },
+    .{ .name = .fromSlice("TitleScreen"), .id = .TitleScreen },
+
+    .{ .name = .fromSlice("Bloop"), .id = .Bloop },
+    .{ .name = .fromSlice("Crack"), .id = .Crack },
+    .{ .name = .fromSlice("Drop"), .id = .Drop },
+    .{ .name = .fromSlice("Glide"), .id = .Glide },
+    .{ .name = .fromSlice("Puhp"), .id = .Puhp },
+
+    .{ .name = .fromSlice("Variant"), .id = .Variant },
+    .{ .name = .fromSlice("ChannelIndex"), .id = .ChannelIndex },
 };
 
 pub fn tagNameFromID(tag_id: AssetTagId) String {

@@ -79,7 +79,6 @@ pub fn parseWAV(arena: *MemoryArena, contents: Buffer, errors: *Stream) SoundI16
         var sample_data: ?[*]i16 = null;
         var sample_data_size: ?u32 = null;
 
-        iterator = iterator.nextChunk();
         while (iterator.isValid()) : (iterator = iterator.nextChunk()) {
             if (iterator.getType()) |chunk_type_u32| {
                 const chunk_type: WaveChunkId = @enumFromInt(chunk_type_u32);

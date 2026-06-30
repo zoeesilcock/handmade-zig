@@ -505,8 +505,23 @@ fn printContents(hha: *LoadedHHA) void {
     while (asset_index < hha.asset_count) : (asset_index += 1) {
         const hha_asset: *HHAAsset = @ptrCast(hha.assets + asset_index);
         const an: *LoadedHHAAnnotation = @ptrCast(hha.annotations + asset_index);
-        std.log.info("        [{d}] {s} {s} {d},{d}", .{
+
+        var category: String = AssetBasicCategory.None.toString();
+        {
+            var tag_index: u32 = hha_asset.first_tag_index;
+            while (tag_index < hha_asset.one_past_last_tag_index) : (tag_index += 1) {
+                if (tag_index < hha.tag_count) {
+                    const tag: *HHATag = &hha.tags[tag_index];
+                    if (tag.id == .BasicCategory) {
+                        category = @as(AssetBasicCategory, @enumFromInt(@as(u32, @intFromFloat(tag.value)))).toString();
+                    }
+                }
+            }
+        }
+
+        std.log.info("        [{d} - {s}] {s} {s} {d},{d}", .{
             asset_index,
+            category.toSlice(),
             an.asset_name.toSlice(),
             an.source_file_base_name.toSlice(),
             an.sprite_sheet_x,

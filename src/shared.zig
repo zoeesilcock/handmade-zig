@@ -1016,10 +1016,12 @@ pub const Platform = if (INTERNAL) extern struct {
 
     getAllFilesOfTypeBegin: *const getAllFilesOfTypeBeginType = undefined,
     getAllFilesOfTypeEnd: *const getAllFilesOfTypeEndType = undefined,
+    getFileByPath: *const getFileByPathType = undefined,
     openFile: *const openFileType = undefined,
     closeFile: *const closeFileType = undefined,
     readDataFromFile: *const readDataFromFileType = undefined,
     writeDataToFile: *const writeDataToFileType = undefined,
+    atomicReplaceFileContents: *const atomicReplaceFileContentsType = undefined,
     noFileErrors: *const noFileErrorsType = defaultNoFileErrors,
     fileError: *const fileErrorType = undefined,
 

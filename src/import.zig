@@ -75,7 +75,7 @@ const ImportGridTag = struct {
     tags: ImportTagArray = .{},
 };
 
-const ImportGridTags = struct {
+pub const ImportGridTags = struct {
     tags: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]ImportGridTag = @splat(@splat(.{})),
 };
 
@@ -86,7 +86,6 @@ const TagBuilder = struct {
 };
 
 const HHTContext = struct {
-    audio_channel_tags: ImportGridTags = .{},
     assets: *Assets,
     default_fields: HHTFields = .{},
     file_group: PlatformFileGroup,
@@ -593,7 +592,10 @@ fn processAudioImport(assets: *Assets, file: *SourceFile, sound_in: SoundI16, te
         const max_sample_count: u32 = 128 * 1024;
         const total_chunk_count = @divFloor(sound.sample_count + max_sample_count - 1, max_sample_count);
 
-        var asset_index: u32 = file.asset_indices[ASSET_IMPORT_GRID_MAX / 8][@mod(ASSET_IMPORT_GRID_MAX, 8)];
+        const y_index: u32 = channel_index / 8;
+        const x_index: u32 = @mod(channel_index, 8);
+        var asset_index_slot: [*]u32 = @ptrCast(&file.asset_indices[y_index][x_index]);
+        var asset_index: u32 = asset_index_slot[0];
         if (asset_index != 0) {
             var chunk_index: u32 = 0;
             while (chunk_index < total_chunk_count - 1) : (chunk_index += 1) {
@@ -611,6 +613,8 @@ fn processAudioImport(assets: *Assets, file: *SourceFile, sound_in: SoundI16, te
         }
 
         if (asset_index != 0) {
+            asset_index_slot[0] = asset_index;
+
             var samples: [*]i16 = sound.getChannelSamples(channel_index);
             var sample_count_remaining: u32 = sound.sample_count;
 
@@ -659,8 +663,6 @@ fn processAudioImport(assets: *Assets, file: *SourceFile, sound_in: SoundI16, te
                     asset.annotation.source_file_checksum = file.file_checksum;
                     asset.annotation.sprite_sheet_x = 0;
                     asset.annotation.sprite_sheet_y = 0;
-
-                    file.asset_indices[0][0] = asset_index;
 
                     writeAssetData(asset_file, hha_asset.data_offset, asset_data_size, @ptrCast(samples));
                 }
@@ -722,7 +724,6 @@ fn addTag(builder: *TagBuilder, tag_id: AssetTagId, value: f32) void {
 
 fn endTags(
     builder: *TagBuilder,
-    tokenizer: *Tokenizer,
     category: AssetBasicCategory,
 ) ImportGridTag {
     var result: ImportGridTag = .{};
@@ -736,16 +737,11 @@ fn endTags(
     result.tags.first_tag_index = builder.first_tag_index;
     result.tags.one_past_last_tag_index = builder.assets.tag_count;
 
-    if (builder.has_error) {
-        tokenizer.encounteredError(null, "Out of tag space.", .{});
-    }
-
     return result;
 }
 
 fn importHead(
     assets: *Assets,
-    tokenizer: *Tokenizer,
     x_index: u32,
     y_index: u32,
 ) ImportGridTag {
@@ -766,7 +762,7 @@ fn importHead(
             else => unreachable,
         }
 
-        result = endTags(&builder, tokenizer, .Head);
+        result = endTags(&builder, .Head);
     }
 
     return result;
@@ -774,7 +770,6 @@ fn importHead(
 
 fn importBody(
     assets: *Assets,
-    tokenizer: *Tokenizer,
     x_index: u32,
     y_index: u32,
 ) ImportGridTag {
@@ -799,95 +794,100 @@ fn importBody(
             else => unreachable,
         }
 
-        result = endTags(&builder, tokenizer, .Body);
+        result = endTags(&builder, .Body);
     }
 
     return result;
 }
 
-fn parsePieces(
-    assets: *Assets,
-    tokenizer: *Tokenizer,
-    type_token: Token,
-    tags: *ImportGridTags,
-) ImportType {
-    var result: ImportType = .None;
-
-    if (type_token.equals("block")) {
-        const tag: *ImportGridTag = &tags.tags[0][0];
-        var builder: TagBuilder = beginTags(assets);
-        tag.* = endTags(&builder, tokenizer, .Block);
-        result = .SingleTile;
-    } else if (type_token.equals("head")) {
-        var y_index: u32 = 0;
-        while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
-            var x_index: u32 = 0;
-            while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                tags.tags[y_index][x_index] = importHead(assets, tokenizer, x_index, y_index);
-            }
+pub fn createAudioChannelTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    var y_index: u32 = 0;
+    while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+            var builder: TagBuilder = beginTags(assets);
+            const channel_index: u32 = y_index * ASSET_IMPORT_GRID_MAX + x_index;
+            addTag(&builder, .ChannelIndex, @floatFromInt(channel_index));
+            tags.tags[y_index][x_index] = endTags(&builder, .Audio);
         }
-
-        result = .MultiTile;
-    } else if (type_token.equals("body")) {
-        var y_index: u32 = 0;
-        while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
-            var x_index: u32 = 0;
-            while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                tags.tags[y_index][x_index] = importBody(assets, tokenizer, x_index, y_index);
-            }
-        }
-
-        result = .MultiTile;
-    } else if (type_token.equals("character")) {
-        var y_index: u32 = 0;
-        while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
-            var x_index: u32 = 0;
-            while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                const tag: *ImportGridTag = &tags.tags[y_index][x_index];
-                if (y_index <= 3) {
-                    tag.* = importBody(assets, tokenizer, x_index, y_index);
-                } else {
-                    tag.* = importHead(assets, tokenizer, x_index, y_index - 4);
-                }
-            }
-        }
-
-        result = .MultiTile;
-    } else if (type_token.equals("cover")) {
-        // TODO: Item tags.
-        result = .MultiTile;
-    } else if (type_token.equals("hand")) {
-        var y_index: u32 = 0;
-        while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
-            var x_index: u32 = 0;
-            while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
-                const tag: *ImportGridTag = &tags.tags[y_index][x_index];
-                if (x_index == 0 and y_index < 4) {
-                    var builder: TagBuilder = beginTags(assets);
-                    addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
-                    tag.* = endTags(&builder, tokenizer, .Hand);
-                }
-            }
-        }
-
-        result = .MultiTile;
-    } else if (type_token.equals("item")) {
-        // TODO: Item tags.
-        result = .MultiTile;
-    } else if (type_token.equals("obstacles")) {
-        // TODO: Item tags.
-        result = .MultiTile;
-    } else if (type_token.equals("plate")) {
-        const tag: *ImportGridTag = &tags.tags[0][0];
-        var builder: TagBuilder = beginTags(assets);
-        tag.* = endTags(&builder, tokenizer, .Plate);
-
-        result = .Plate;
-    } else {
-        tokenizer.encounteredError(null, "Unrecognized type of import artwork.", .{});
     }
+}
 
-    return result;
+pub fn createArtBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    const tag: *ImportGridTag = &tags.tags[0][0];
+    var builder: TagBuilder = beginTags(assets);
+    tag.* = endTags(&builder, .Block);
+}
+
+pub fn createHeadBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    var y_index: u32 = 0;
+    while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+            tags.tags[y_index][x_index] = importHead(assets, x_index, y_index);
+        }
+    }
+}
+
+pub fn createBodyBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    var y_index: u32 = 0;
+    while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+            tags.tags[y_index][x_index] = importBody(assets, x_index, y_index);
+        }
+    }
+}
+
+pub fn createCharacterBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    var y_index: u32 = 0;
+    while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+            const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+            if (y_index <= 3) {
+                tag.* = importBody(assets, x_index, y_index);
+            } else {
+                tag.* = importHead(assets, x_index, y_index - 4);
+            }
+        }
+    }
+}
+
+pub fn createCoverBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    _ = assets;
+    _ = tags;
+}
+
+pub fn createHandBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    var y_index: u32 = 0;
+    while (y_index < ASSET_IMPORT_GRID_MAX) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < ASSET_IMPORT_GRID_MAX) : (x_index += 1) {
+            const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+            if (x_index == 0 and y_index < 4) {
+                var builder: TagBuilder = beginTags(assets);
+                addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
+                tag.* = endTags(&builder, .Hand);
+            }
+        }
+    }
+}
+
+pub fn createItemBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    _ = assets;
+    _ = tags;
+}
+
+pub fn createObstacleBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    _ = assets;
+    _ = tags;
+}
+
+pub fn createPlateBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    const tag: *ImportGridTag = &tags.tags[0][0];
+    var builder: TagBuilder = beginTags(assets);
+    tag.* = endTags(&builder, .Plate);
 }
 
 pub fn readAssetString(
@@ -1104,7 +1104,6 @@ fn ignoreAllInputUpToAndIncluding(context: *HHTContext, token: Token) void {
 }
 
 fn updateAssetMetadata(
-    tokenizer: *Tokenizer,
     assets: *Assets,
     file: *SourceFile,
     fields: *HHTFields,
@@ -1129,10 +1128,6 @@ fn updateAssetMetadata(
                             setAssetType(assets, asset_index, tags.type_id);
                         }
                     } else {
-                        std.log.info(
-                            "Sprite found in what is required to be a blank tile. Asset index: {d}, xy: {d} {d}, size: {d} {d}\n",
-                            .{ asset_index, x_index, y_index, asset.hha.info.bitmap.dim[0], asset.hha.info.bitmap.dim[1] },
-                        );
                         _ = stream.outputWithSrc(&file.errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
                     }
 
@@ -1173,7 +1168,10 @@ fn updateAssetMetadata(
                             const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
                             addTag(&builder, source_tag.id, source_tag.value);
                         }
-                        const combined_tags: ImportGridTag = endTags(&builder, tokenizer, .None);
+                        const combined_tags: ImportGridTag = endTags(&builder, .None);
+                        if (builder.has_error) {
+                            _ = stream.outputWithSrc(&file.errors, @src(), "Out of tag space.", .{});
+                        }
 
                         asset.hha.first_tag_index = combined_tags.tags.first_tag_index;
                         asset.hha.one_past_last_tag_index = combined_tags.tags.one_past_last_tag_index;
@@ -1256,24 +1254,75 @@ fn parseTopLevelBlock(
     const temp_arena: *MemoryArena = context.temp_arena;
 
     var fields: HHTFields = context.default_fields;
-    const is_default: bool = block_token.equals("default");
-    const is_music: bool = block_token.equals("music");
-    const is_sound: bool = block_token.equals("sound");
-    const is_art: bool = !(is_default or is_music or is_sound);
 
+    //
+    // Determine the import type from the block type.
+    //
+
+    var is_default: bool = false;
+    var is_audio: bool = false;
+    var is_art: bool = false;
+
+    var template_tags: *ImportGridTags = undefined;
+    var import_type: ImportType = .None;
     var sub_dir: []const u8 = "";
-    if (is_music) {
+
+    if (block_token.equals("default")) {
+        is_default = true;
+    } else if (block_token.equals("music")) {
+        import_type = .Audio;
+        template_tags = &context.assets.audio_channel_tags;
+
         sub_dir = "music";
-    } else if (is_sound) {
+        is_audio = true;
+    } else if (block_token.equals("sound")) {
+        import_type = .Audio;
+        template_tags = &context.assets.audio_channel_tags;
+
         sub_dir = "sound";
-    } else if (is_art) {
+        is_audio = true;
+    } else {
+        is_art = true;
         sub_dir = "art";
+
+        if (block_token.equals("block")) {
+            template_tags = &context.assets.art_block_tags;
+            import_type = .SingleTile;
+        } else if (block_token.equals("head")) {
+            template_tags = &context.assets.art_head_tags;
+            import_type = .MultiTile;
+        } else if (block_token.equals("body")) {
+            template_tags = &context.assets.art_body_tags;
+            import_type = .MultiTile;
+        } else if (block_token.equals("character")) {
+            template_tags = &context.assets.art_character_tags;
+            import_type = .MultiTile;
+        } else if (block_token.equals("cover")) {
+            template_tags = &context.assets.art_cover_tags;
+            import_type = .MultiTile;
+        } else if (block_token.equals("hand")) {
+            template_tags = &context.assets.art_hand_tags;
+            import_type = .MultiTile;
+        } else if (block_token.equals("item")) {
+            template_tags = &context.assets.art_item_tags;
+            import_type = .MultiTile;
+        } else if (block_token.equals("obstacles")) {
+            template_tags = &context.assets.art_obstacles_tags;
+            import_type = .MultiTile;
+        } else if (block_token.equals("plate")) {
+            template_tags = &context.assets.art_plate_tags;
+            import_type = .Plate;
+        } else {
+            tokenizer.encounteredError(block_token, "Unexpected block type.", .{});
+        }
     }
+
+    //
+    // Locate the matching asset file.
+    //
 
     var needs_full_rebuild: bool = false;
 
-    var tags: ImportGridTags = .{};
-    var import_type: ImportType = .None;
     var match: ?*SourceFile = null;
     var file_info: ?*PlatformFileInfo = null;
 
@@ -1293,19 +1342,8 @@ fn parseTopLevelBlock(
         if (file_info != null) {
             match = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
 
-            if (is_sound or is_music) {
-                import_type = .Audio;
-                tags = context.audio_channel_tags;
-            } else if (is_art) {
-                import_type = parsePieces(context.assets, tokenizer, block_token, &tags);
-            }
-
-            if (import_type != .None) {
-                if (match.?.file_date != file_info.?.file_date) {
-                    needs_full_rebuild = true;
-                }
-            } else {
-                tokenizer.encounteredError(block_token, "Unexpected block type.", .{});
+            if (match.?.file_date != file_info.?.file_date) {
+                needs_full_rebuild = true;
             }
         } else {
             tokenizer.encounteredError(file_name, "File not found (looked in %s)", .{path});
@@ -1314,6 +1352,10 @@ fn parseTopLevelBlock(
 
     const open_brace: Token = tokenizer.requireToken(.OpenBrace);
     copyAllInputUpToAndIncluding(context, open_brace);
+
+    //
+    // Prepare the existing tag grid.
+    //
 
     var append_tags: ImportTagArray = .{};
     var align_point_unprocessed: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]bool =
@@ -1346,6 +1388,10 @@ fn parseTopLevelBlock(
             }
         }
     }
+
+    //
+    // Parse the contents of the HHT block.
+    //
 
     while (tokenizer.parsing()) {
         var semi_colon: Token = .{};
@@ -1453,7 +1499,7 @@ fn parseTopLevelBlock(
                     }
                 }
             } else {
-                tokenizer.encounteredError(type0, "Urecognized alignment point type.", .{});
+                tokenizer.encounteredError(type0, "Unrecognized alignment point type.", .{});
             }
         } else {
             tokenizer.encounteredError(token, "Expected field name.", .{});
@@ -1466,6 +1512,10 @@ fn parseTopLevelBlock(
     }
 
     _ = tokenizer.requireToken(.SemiColon);
+
+    //
+    // Rebuild the asset contents.
+    //
 
     if (tokenizer.parsing()) {
         if (is_default) {
@@ -1506,11 +1556,12 @@ fn parseTopLevelBlock(
                 }
 
                 var sound: SoundI16 = undefined;
-                if (is_sound or is_music) {
+                if (is_audio) {
                     sound = wav.parseWAV(temp_arena, file_buffer, &match.?.errors);
                 }
 
                 switch (import_type) {
+                    .None => {},
                     .Plate => {
                         processPlateImport(context.assets, match.?, image, temp_arena);
                     },
@@ -1523,11 +1574,10 @@ fn parseTopLevelBlock(
                     .Audio => {
                         processAudioImport(context.assets, match.?, sound, temp_arena);
                     },
-                    else => unreachable,
                 }
             }
 
-            updateAssetMetadata(tokenizer, context.assets, match.?, &fields, &tags, append_tags);
+            updateAssetMetadata(context.assets, match.?, &fields, template_tags, append_tags);
 
             if (is_art and context.hht_out == null) {
                 var grid_y: u32 = 0;
@@ -1596,7 +1646,11 @@ fn parseTagList(assets: *Assets, tokenizer: *Tokenizer) ImportTagArray {
         }
     }
 
-    const result: ImportTagArray = endTags(&builder, tokenizer, .None).tags;
+    const result: ImportTagArray = endTags(&builder, .None).tags;
+    if (builder.has_error) {
+        tokenizer.encounteredError(null, "Out of tag space.", .{});
+    }
+
     return result;
 }
 

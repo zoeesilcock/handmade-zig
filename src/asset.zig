@@ -41,6 +41,7 @@ const PlatformFileGroup = shared.PlatformFileGroup;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
 const RendererTexture = renderer.RendererTexture;
+const ImportGridTags = import.ImportGridTags;
 
 pub const AssetTagId = file_formats.AssetTagId;
 pub const ASSET_CATEGORY_COUNT = file_formats.ASSET_CATEGORY_COUNT;
@@ -183,7 +184,7 @@ pub const Assets = struct {
 
     tag_range: [ASSET_TAG_COUNT]f32 = @splat(1000000),
 
-    // TODO: This could just be allocated on demaind now, there is no reasong for it to be an array,
+    // TODO: This could just be allocated on demaind now, there is no reason for it to be an array,
     // nobody uses it that way.
     max_file_count: u32,
     file_count: u32,
@@ -218,6 +219,17 @@ pub const Assets = struct {
     save_number: u32 = 0,
     error_stream_memory: MemoryArena,
     error_stream: Stream,
+
+    audio_channel_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_block_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_head_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_body_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_character_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_cover_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_hand_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_item_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_obstacles_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_plate_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
 
     pub fn allocate(
         memory_size: MemoryIndex,
@@ -414,7 +426,9 @@ pub const Assets = struct {
                             }
                         }
 
-                        import.setAssetType(assets, global_asset_index, type_id);
+                        if (type_id != .None) {
+                            import.setAssetType(assets, global_asset_index, type_id);
+                        }
                     }
                 }
             }
@@ -423,6 +437,17 @@ pub const Assets = struct {
         std.debug.assert(asset_count == assets.asset_count);
 
         if (INTERNAL) {
+            import.createAudioChannelTagGrid(assets, &assets.audio_channel_tags);
+            import.createArtBlockTagGrid(assets, &assets.art_block_tags);
+            import.createHeadBlockTagGrid(assets, &assets.art_head_tags);
+            import.createBodyBlockTagGrid(assets, &assets.art_body_tags);
+            import.createCharacterBlockTagGrid(assets, &assets.art_character_tags);
+            import.createCoverBlockTagGrid(assets, &assets.art_cover_tags);
+            import.createHandBlockTagGrid(assets, &assets.art_hand_tags);
+            import.createItemBlockTagGrid(assets, &assets.art_item_tags);
+            import.createObstacleBlockTagGrid(assets, &assets.art_obstacles_tags);
+            import.createPlateBlockTagGrid(assets, &assets.art_plate_tags);
+
             import.synchronizeAssetFileChanges(assets, false);
         }
 

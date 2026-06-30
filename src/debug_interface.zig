@@ -303,7 +303,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
             else => "pub const DEBUGUI_",
         };
     }
-} else struct {
+} else extern struct {
     pub fn record(event_type: DebugType, block: [*:0]const u8) *DebugEvent {
         _ = event_type;
         _ = block;
