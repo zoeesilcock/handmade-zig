@@ -1,5 +1,6 @@
 const std = @import("std");
 const shared = @import("shared.zig");
+const asset = @import("asset.zig");
 const random = @import("random.zig");
 const entities = @import("entities.zig");
 const sim = @import("sim.zig");
@@ -341,6 +342,17 @@ fn executeBrainHero(
 
             if (opt_glove) |glove| {
                 if (attacked) {
+                    if (opt_state) |state| {
+                        var match_vector = asset.AssetVector{};
+                        match_vector.e[asset.AssetTagId.Bloop.toInt()] = 1;
+                        var weight_vector = asset.AssetVector{};
+                        weight_vector.e[asset.AssetTagId.Bloop.toInt()] = 1;
+
+                        if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |bloop_id| {
+                            _ = state.audio_state.playSound(bloop_id);
+                        }
+                    }
+
                     glove.movement_time = 0;
                     glove.movement_mode = .AngleAttackSwipe;
                     glove.angle_start = glove.angle_current;
@@ -349,7 +361,7 @@ fn executeBrainHero(
 
                     glove.angle_base = body.position;
                     glove.facing_direction = body.facing_direction;
-                } else {
+                } else if (glove.movement_mode != .AngleAttackSwipe) {
                     glove.movement_mode = .Floating;
                     glove.position = body.position.plus(.new(0.5, 0, 0.5));
                 }

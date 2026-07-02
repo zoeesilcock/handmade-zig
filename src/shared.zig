@@ -1222,7 +1222,7 @@ pub const State = struct {
     } = undefined,
 
     audio_state: audio.AudioState = undefined,
-    music: *PlayingSound = undefined,
+    music: ?*PlayingSound = null,
 
     dev_mode: DevMode,
     dev_ui: DevUI,

@@ -594,7 +594,7 @@ fn processAudioImport(assets: *Assets, file: *SourceFile, sound_in: SoundI16, te
 
         const y_index: u32 = channel_index / 8;
         const x_index: u32 = @mod(channel_index, 8);
-        var asset_index_slot: [*]u32 = @ptrCast(&file.asset_indices[y_index][x_index]);
+        const asset_index_slot: [*]u32 = @ptrCast(&file.asset_indices[y_index][x_index]);
         var asset_index: u32 = asset_index_slot[0];
         if (asset_index != 0) {
             var chunk_index: u32 = 0;

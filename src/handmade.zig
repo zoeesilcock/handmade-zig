@@ -295,12 +295,29 @@ pub export fn updateAndRender(
         }
     }
 
-    // if (false) {
-    //     var music_volume = Vector2.zero();
-    //     _ = music_volume.setY(math.safeRatio0(input.mouse_x, @as(f32, @floatFromInt(buffer.width))));
-    //     _ = music_volume.setX(1.0 - music_volume.y());
-    //     state.audio_state.changeVolume(state.music, 0.01, music_volume);
-    // }
+    if (state.music == null) {
+        var match_vector = asset.AssetVector{};
+        match_vector.e[AssetTagId.IntroCutscene.toInt()] = 1;
+        var weight_vector = asset.AssetVector{};
+        weight_vector.e[AssetTagId.IntroCutscene.toInt()] = 1;
+        weight_vector.e[AssetTagId.ChannelIndex.toInt()] = 1;
+
+        if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |channel1_id| {
+            _ = channel1_id;
+            // state.music = state.audio_state.playSound(channel1_id);
+        }
+
+        match_vector.e[AssetTagId.ChannelIndex.toInt()] = 1;
+        if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |channel2_id| {
+            _ = channel2_id;
+            // state.music = state.audio_state.playSound(channel2_id);
+        }
+    } else {
+        var music_volume = Vector2.zero();
+        _ = music_volume.setY(math.clampf01(input.clip_space_mouse_position.x()));
+        _ = music_volume.setX(1.0 - music_volume.y());
+        state.audio_state.changeVolume(state.music, 0.01, music_volume);
+    }
 
     var hit_test: EditableHitTest = state.editor.beginHitTest(input, state.dev_mode);
 
@@ -368,6 +385,8 @@ pub export fn getSoundSamples(
     }
 }
 
+// TODO: Casey thinks we can now safely remove this function because it isn't actually going to be necessary anymore
+// since textures and audio both read directly into a known location with no temp store.
 pub fn beginTaskWithMemory(game_state: *State, depends_on_game_mode: bool) ?*shared.TaskWithMemory {
     var found_task: ?*shared.TaskWithMemory = null;
 

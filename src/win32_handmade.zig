@@ -1239,7 +1239,7 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
     // Load the library.
     if (win32.LoadLibraryA("dsound.dll")) |library| {
         if (win32.GetProcAddress(library, "DirectSoundCreate")) |procedure| {
-            var DirectSoundCreate: *const fn (?*const win32.Guid, ?*?*win32.IDirectSound, ?*win32.IUnknown) win32.HRESULT = undefined;
+            var DirectSoundCreate: *const fn (?*const win32.Guid, ?*?*win32.IDirectSound, ?*win32.IUnknown) callconv(.winapi) win32.HRESULT = undefined;
             DirectSoundCreate = @as(@TypeOf(DirectSoundCreate), @ptrCast(procedure));
 
             // Create the DirectSound object.
@@ -1295,8 +1295,7 @@ fn initDirectSound(window: win32.HWND, samples_per_second: u32, buffer_size: u32
                     }
 
                     if (win32.SUCCEEDED(direct_sound.vtable.CreateSoundBuffer(direct_sound, &buffer_description, &opt_secondary_buffer, null))) {
-                        if (opt_secondary_buffer) |secondary_buffer| {
-                            _ = secondary_buffer;
+                        if (opt_secondary_buffer != null) {
                             win32.OutputDebugStringA("Secondary buffer created!\n");
                         }
                     }
@@ -2099,7 +2098,7 @@ pub export fn wWinMain(
             };
 
             sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
-            sound_output.safety_bytes = @intFromFloat(@as(f32, @floatFromInt(sound_output.secondary_buffer_size)) / game_update_hz / 2.0);
+            sound_output.safety_bytes = @intFromFloat(@as(f32, @floatFromInt(sound_output.secondary_buffer_size)) / game_update_hz / 3.0);
             var sound_output_info = SoundOutputInfo{ .output_buffer = undefined };
 
             const max_possible_overrun = 2 * 8 * @sizeOf(u16);
@@ -2304,8 +2303,8 @@ pub export fn wWinMain(
                                 if (safety_write_cursor < play_cursor) {
                                     safety_write_cursor += sound_output.secondary_buffer_size;
                                 }
-                                write_cursor += sound_output.safety_bytes;
-                                const audio_card_is_low_latency = (safety_write_cursor < expected_sound_bytes_per_frame);
+                                safety_write_cursor += sound_output.safety_bytes;
+                                const audio_card_is_low_latency = (safety_write_cursor < expected_frame_boundary_byte);
 
                                 var target_cursor: u32 = 0;
                                 if (audio_card_is_low_latency) {

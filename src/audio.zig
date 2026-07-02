@@ -44,34 +44,32 @@ pub const AudioState = struct {
         self.master_volume = Vector2.one();
     }
 
-    pub fn playSound(self: *AudioState, opt_sound_id: ?SoundId) ?*PlayingSound {
+    pub fn playSound(self: *AudioState, sound_id: SoundId) ?*PlayingSound {
         TimedBlock.beginFunction(@src(), .PlaySound);
         defer TimedBlock.endFunction(@src(), .PlaySound);
 
         var result: ?*PlayingSound = null;
 
-        if (opt_sound_id) |sound_id| {
-            if (self.first_free_playing_sound == null) {
-                self.first_free_playing_sound = self.permanent_arena.pushStruct(PlayingSound, null);
-                self.first_free_playing_sound.?.next = null;
-            }
+        if (self.first_free_playing_sound == null) {
+            self.first_free_playing_sound = self.permanent_arena.pushStruct(PlayingSound, null);
+            self.first_free_playing_sound.?.next = null;
+        }
 
-            if (self.first_free_playing_sound) |first_free_sound| {
-                const playing_sound = first_free_sound;
-                self.first_free_playing_sound = self.first_free_playing_sound.?.next;
+        if (self.first_free_playing_sound) |first_free_sound| {
+            const playing_sound = first_free_sound;
+            self.first_free_playing_sound = self.first_free_playing_sound.?.next;
 
-                playing_sound.samples_played = 0;
-                playing_sound.current_volume = Vector2.one();
-                playing_sound.current_volume_velocity = Vector2.zero();
-                playing_sound.target_volume = Vector2.one();
-                playing_sound.id = sound_id;
-                playing_sound.sample_velocity = 1;
+            playing_sound.samples_played = 0;
+            playing_sound.current_volume = Vector2.one();
+            playing_sound.current_volume_velocity = Vector2.zero();
+            playing_sound.target_volume = Vector2.one();
+            playing_sound.id = sound_id;
+            playing_sound.sample_velocity = 1;
 
-                playing_sound.next = self.first_playing_sound;
-                self.first_playing_sound = playing_sound;
+            playing_sound.next = self.first_playing_sound;
+            self.first_playing_sound = playing_sound;
 
-                result = playing_sound;
-            }
+            result = playing_sound;
         }
 
         return result;
@@ -163,7 +161,7 @@ pub const AudioState = struct {
 
                 while (total_chunks_to_mix > 0 and !sound_finished) {
                     if (assets.getSoundSamples(playing_sound.id)) |samples| {
-                        const loaded_sound: *file_formats.HHASound = assets.getSoundInfo(playing_sound.id);
+                        const loaded_sound: *file_formats.HHAAsset = assets.getSoundInfo(playing_sound.id);
                         const next_sound_in_chain = assets.getNextSoundInChain(playing_sound.id);
                         assets.prefetchSound(next_sound_in_chain);
 
@@ -197,9 +195,10 @@ pub const AudioState = struct {
 
                         std.debug.assert(playing_sound.samples_played >= 0);
 
+                        const sample_count: u32 = loaded_sound.data_size / @sizeOf(i16);
                         var chunks_to_mix = total_chunks_to_mix;
                         const chunks_remaining: i32 =
-                            @as(i32, @intCast(loaded_sound.sample_count)) -
+                            @as(i32, @intCast(sample_count)) -
                             intrinsics.roundReal32ToInt32(playing_sound.samples_played);
                         const float_chunks_remaining_in_sound =
                             @as(f32, @floatFromInt(chunks_remaining)) / sample_velocity_chunk;
@@ -220,13 +219,11 @@ pub const AudioState = struct {
                                     const delta_volume: f32 = playing_sound.target_volume.valueAt(channel_index) -
                                         volume.valueAt(channel_index);
 
-                                    if (delta_volume != 0) {
-                                        const volume_chunk_count: u32 =
-                                            @intFromFloat((delta_volume / volume_velocity_chunk.valueAt(channel_index)) + 0.5);
-                                        if (chunks_to_mix > volume_chunk_count) {
-                                            chunks_to_mix = @intCast(volume_chunk_count);
-                                            volume_ends_at[channel_index] = volume_chunk_count;
-                                        }
+                                    const volume_chunk_count: u32 =
+                                        @intFromFloat((delta_volume / volume_velocity_chunk.valueAt(channel_index)) + 0.5);
+                                    if (chunks_to_mix > volume_chunk_count) {
+                                        chunks_to_mix = @intCast(volume_chunk_count);
+                                        volume_ends_at[channel_index] = volume_chunk_count;
                                     }
                                 }
                             }
@@ -292,7 +289,7 @@ pub const AudioState = struct {
                         }
 
                         playing_sound.current_volume.values[0] = volume0[0];
-                        playing_sound.current_volume.values[1] = volume1[0];
+                        playing_sound.current_volume.values[1] = volume1[1];
 
                         // Stop any volume fades that ended.
                         {
@@ -313,13 +310,12 @@ pub const AudioState = struct {
                         total_chunks_to_mix -= chunks_to_mix;
 
                         if (chunks_to_mix == chunks_remaining_in_sound) {
-                            if (next_sound_in_chain) |next_sound| {
-                                playing_sound.id = next_sound;
+                            if (next_sound_in_chain != null and next_sound_in_chain.?.isValid()) {
+                                playing_sound.id = next_sound_in_chain.?;
 
-                                // TODO: This assertion fires, but everything seems to work without it.
-                                // std.debug.assert(playing_sound.samples_played >= @as(f32, @floatFromInt(loaded_sound.sample_count)));
+                                std.debug.assert(playing_sound.samples_played >= @as(f32, @floatFromInt(sample_count)));
 
-                                playing_sound.samples_played -= @floatFromInt(loaded_sound.sample_count);
+                                playing_sound.samples_played -= @floatFromInt(sample_count);
 
                                 if (playing_sound.samples_played < 0) {
                                     playing_sound.samples_played = 0;

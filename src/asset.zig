@@ -67,7 +67,7 @@ pub const Asset = struct {
     state: u32 = 0,
     handle: union(enum) {
         texture_handle: RendererTexture,
-        loaded_at_sample_index: u64,
+        loaded_at_sound_buffer_index: u64,
         font: LoadedFont,
     },
 
@@ -98,12 +98,6 @@ const AssetState = enum(u32) {
 const AssetGroup = struct {
     first_tag_index: u32,
     one_past_last_index: u32,
-};
-
-const AssetMemorySize = struct {
-    total: u32 = 0,
-    data: u32 = 0,
-    section: u32 = 0,
 };
 
 pub const AssetFile = struct {
@@ -176,6 +170,16 @@ pub const SourceFile = struct {
     }
 };
 
+const AssetSoundBufferRanges = struct {
+    sound_buffer_base_index: u64 = 0,
+    sound_buffer_lru_index: u64 = 0,
+};
+
+const SoundBufferMemory = struct {
+    buffer_index: u64 = 0,
+    pointer: *anyopaque = undefined,
+};
+
 pub const Assets = struct {
     non_restored_memory: MemoryArena,
     texture_queue: *renderer.TextureQueue,
@@ -202,10 +206,11 @@ pub const Assets = struct {
 
     source_file_hash: [256]?*SourceFile = @splat(null),
 
-    sample_count: u32,
-    sample_buffer: [*]i16,
-    sample_buffer_base_index: u64,
-    sample_buffer_load_index: u32,
+    sample_buffer_size: u32,
+    sample_buffer: [*]u8,
+    sample_buffer_mapping_mask: u64,
+    sample_buffer_top_index: u64,
+    sample_buffer_lru_range: u32,
 
     normal_texture_handle_count: u32 = 0,
     special_texture_handle_count: u32 = 0,
@@ -248,6 +253,8 @@ pub const Assets = struct {
             ArenaPushParams.aligned(@alignOf(Assets), true),
         );
         var arena: *MemoryArena = &assets.non_restored_memory;
+
+        assets.initSoundMemory(arena);
 
         assets.game_state = game_state;
         assets.texture_queue = texture_queue;
@@ -412,8 +419,14 @@ pub const Assets = struct {
                                 _ = stream.outputWithSrc(
                                     &source_file.errors,
                                     @src(),
-                                    "{s}({d},{d}): Asset {d} and {d} occupy same slot in spritesheet and cannot be edited properly.\n",
-                                    .{ source_file_name, grid_x, grid_y, asset.asset_index_in_file, conflict.asset_index_in_file },
+                                    "%s(%u,%u): Asset %u and %u occupy same slot in spritesheet and cannot be edited properly.\n",
+                                    .{
+                                        source_file_name[0..source_file_name_count],
+                                        grid_x,
+                                        grid_y,
+                                        asset.asset_index_in_file,
+                                        conflict.asset_index_in_file,
+                                    },
                                 );
                             }
                         }
@@ -808,10 +821,10 @@ pub const Assets = struct {
         return result;
     }
 
-    pub fn getSoundInfo(self: *Assets, id: SoundId) *HHASound {
+    pub fn getSoundInfo(self: *Assets, id: SoundId) *HHAAsset {
         const asset: ?*Asset = self.getAsset(id.value);
         std.debug.assert(asset.?.hha.type == .Sound);
-        return &asset.?.hha.info.sound;
+        return &asset.?.hha;
     }
 
     pub fn prefetchSound(
@@ -819,6 +832,61 @@ pub const Assets = struct {
         opt_id: ?SoundId,
     ) void {
         self.loadSound(opt_id);
+
+        // TODO: Casey thinks that we want to force a sample pull here, because that way it will do a copy out of the
+        // LRU region as necessary to ensure that the prefetched sound is not about to be evicted. But we could do some
+        // instrumentationt to see if this actually helps or not.
+        if (opt_id) |id| {
+            _ = self.getSoundSamples(id);
+        }
+    }
+
+    fn getSoundBufferRanges(self: *Assets) AssetSoundBufferRanges {
+        var result: AssetSoundBufferRanges = .{
+            .sound_buffer_base_index = self.sample_buffer_top_index - self.sample_buffer_size,
+        };
+        result.sound_buffer_lru_index = result.sound_buffer_base_index + self.sample_buffer_lru_range;
+        return result;
+    }
+
+    fn getSoundBufferMemory(self: *Assets, loaded_at: u64) *anyopaque {
+        const mask: u64 = self.sample_buffer_mapping_mask;
+        return self.sample_buffer + (loaded_at & mask);
+    }
+
+    fn reserveSoundMemory(self: *Assets, data_size: u32) SoundBufferMemory {
+        const mask: u64 = self.sample_buffer_mapping_mask;
+        var sample_buffer_index: u32 = @intCast(self.sample_buffer_top_index & mask);
+
+        if ((sample_buffer_index + data_size) > self.sample_buffer_size) {
+            sample_buffer_index = 0;
+            self.sample_buffer_top_index = (self.sample_buffer_top_index + data_size) & ~mask;
+        }
+
+        const result: SoundBufferMemory = .{
+            .buffer_index = self.sample_buffer_top_index,
+            .pointer = self.sample_buffer + sample_buffer_index,
+        };
+
+        std.debug.assert(result.pointer == self.getSoundBufferMemory(result.buffer_index));
+        std.debug.assert(
+            (@intFromPtr(result.pointer) + data_size) <= (@intFromPtr(self.sample_buffer) + self.sample_buffer_size),
+        );
+
+        self.sample_buffer_top_index += data_size;
+
+        return result;
+    }
+
+    fn initSoundMemory(self: *Assets, arena: *MemoryArena) void {
+        const sample_buffer_size: u32 = 256 * 1024 * 1024;
+
+        self.sample_buffer_size = sample_buffer_size;
+        self.sample_buffer = arena.pushSize(sample_buffer_size, null);
+
+        self.sample_buffer_mapping_mask = @as(u64, @intCast(sample_buffer_size)) - 1;
+        self.sample_buffer_top_index = 2 * sample_buffer_size;
+        self.sample_buffer_lru_range = 16 * 1024 * 1024;
     }
 
     pub fn loadSound(
@@ -828,67 +896,58 @@ pub const Assets = struct {
         TimedBlock.beginFunction(@src(), .LoadSound);
         defer TimedBlock.endFunction(@src(), .LoadSound);
 
-        _ = self;
-        _ = opt_id;
+        if (opt_id) |id| {
+            var asset = &self.assets[id.value];
 
-        // if (opt_id) |id| {
-        //     var asset = &self.assets[id.value];
-        //
-        //     if (id.isValid() and @cmpxchgStrong(
-        //         u32,
-        //         &asset.state,
-        //         AssetState.Unloaded.toInt(),
-        //         AssetState.Queued.toInt(),
-        //         .seq_cst,
-        //         .seq_cst,
-        //     ) == null) {
-        //         if (handmade.beginTaskWithMemory(self.game_state, false)) |task| {
-        //             const info = asset.hha.info.sound;
-        //
-        //             var size = AssetMemorySize{};
-        //             size.section = info.sample_count * @sizeOf(i16);
-        //             size.data = info.channel_count * size.section;
-        //             size.total = size.data;
-        //
-        //             asset.header = @ptrCast(@alignCast(self.acquireAssetMemory(types.align16(size.total), id.value, .Sound)));
-        //             const sound = &asset.header.?.data.sound;
-        //
-        //             sound.sample_count = info.sample_count;
-        //             sound.channel_count = info.channel_count;
-        //             const channel_size = size.section;
-        //
-        //             const sound_memory: *anyopaque = @ptrCast(asset.header);
-        //             var sound_at: [*]i16 = @ptrCast(@alignCast(sound_memory));
-        //             var channel_index: u32 = 0;
-        //             while (channel_index < sound.channel_count) : (channel_index += 1) {
-        //                 sound.samples[channel_index] = sound_at;
-        //                 sound_at += channel_size;
-        //             }
-        //
-        //             var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork, null);
-        //             work.task = task;
-        //             work.asset = asset;
-        //             work.handle = self.getFileHandleFor(asset.file_index);
-        //             work.offset = asset.hha.data_offset;
-        //             work.size = size.data;
-        //             work.destination = sound_memory;
-        //             work.finalize_operation = .None;
-        //             work.final_state = AssetState.Loaded.toInt();
-        //             work.texture_queue = null;
-        //
-        //             shared.platform.addQueueEntry(self.game_state.low_priority_queue, doLoadAssetWork, work);
-        //         } else {
-        //             @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
-        //         }
-        //     }
-        // }
+            if (id.isValid() and @cmpxchgStrong(
+                u32,
+                &asset.state,
+                AssetState.Unloaded.toInt(),
+                AssetState.Queued.toInt(),
+                .seq_cst,
+                .seq_cst,
+            ) == null) {
+                if (handmade.beginTaskWithMemory(self.game_state, false)) |task| {
+                    const sound_memory: SoundBufferMemory = self.reserveSoundMemory(asset.hha.data_size);
+                    asset.handle = .{ .loaded_at_sound_buffer_index = sound_memory.buffer_index };
+
+                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork, null);
+                    work.task = task;
+                    work.asset = asset;
+                    work.handle = self.getFileHandleFor(asset.file_index);
+                    work.offset = asset.hha.data_offset;
+                    work.size = asset.hha.data_size;
+                    work.destination = sound_memory.pointer;
+                    work.final_state = AssetState.Loaded.toInt();
+                    work.texture_queue = null;
+
+                    shared.platform.addQueueEntry(self.game_state.low_priority_queue, doLoadAssetWork, work);
+                } else {
+                    @atomicStore(u32, &asset.state, AssetState.Unloaded.toInt(), .release);
+                }
+            }
+        }
     }
 
-    pub fn getSoundSamples(self: *Assets, id: SoundId) ?[*]u16 {
-        const asset: ?*Asset = self.getAsset(id.value);
-        std.debug.assert(id.value == 0 or asset.?.hha.type == .Sound);
+    pub fn getSoundSamples(self: *Assets, id: SoundId) ?[*]i16 {
+        const asset: *Asset = self.getAsset(id.value).?;
+        std.debug.assert(id.value == 0 or asset.hha.type == .Sound);
 
-        const result: ?[*]u16 = null;
+        var result: ?[*]i16 = null;
+        if (asset.state == @intFromEnum(AssetState.Loaded)) {
+            const ranges: AssetSoundBufferRanges = self.getSoundBufferRanges();
+            const buffer_index: u64 = asset.handle.loaded_at_sound_buffer_index;
+            if (buffer_index >= ranges.sound_buffer_lru_index) {
+                result = @ptrCast(@alignCast(self.getSoundBufferMemory(buffer_index)));
+            } else if (buffer_index >= ranges.sound_buffer_base_index) {
+                const data_size: u32 = asset.hha.data_size;
+                const sound_memory: SoundBufferMemory = self.reserveSoundMemory(data_size);
+                const source = self.getSoundBufferMemory(buffer_index);
+                result = @ptrCast(@alignCast(sound_memory.pointer));
+                _ = shared.copy(data_size, source, result.?);
+                asset.handle.loaded_at_sound_buffer_index = sound_memory.buffer_index;
+            }
+        }
 
         return result;
     }
@@ -896,7 +955,7 @@ pub const Assets = struct {
     pub fn getNextSoundInChain(self: *Assets, id: SoundId) ?SoundId {
         var result: ?SoundId = null;
 
-        const info = self.getSoundInfo(id);
+        const info: *HHASound = &self.getSoundInfo(id).info.sound;
         switch (info.chain) {
             .None => {},
             .Advance => {
