@@ -11,6 +11,7 @@
         .stb = .{
             .url = "git+https://github.com/nothings/stb#f75e8d1cad7d90d72ef7a4661f1b994ef78b4e31",
             .hash = "N-V-__8AAEcaTgDE_lpMTr7EAvXN7wi8JktW-wfyWRB9KwG6",
+            .lazy = true,
         },
     },
     .paths = .{

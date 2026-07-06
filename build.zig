@@ -14,6 +14,7 @@ const Package = enum {
     Library,
     RendererLibrary,
     AssetBuilder,
+    FontExtractor,
     HHAEdit,
     Preprocessor,
     Compressor,
@@ -55,6 +56,10 @@ pub fn build(b: *std.Build) void {
 
     if (package == .All or package == .AssetBuilder) {
         addAssetBuilder(b, build_options, target, optimize);
+    }
+
+    if (package == .All or package == .FontExtractor) {
+        addFontExtractor(b, build_options, target, optimize);
     }
 
     if (package == .All or package == .HHAEdit) {
@@ -231,8 +236,8 @@ fn addAssetBuilder(
     asset_builder_exe.root_module.addOptions("build_options", build_options);
     asset_builder_exe.root_module.addImport("shared", shared_module);
 
-    const stb_dep = b.dependency("stb", .{});
-    asset_builder_exe.root_module.addIncludePath(stb_dep.path(""));
+    const stb_dep = b.lazyDependency("stb", .{});
+    asset_builder_exe.root_module.addIncludePath(stb_dep.?.path(""));
     asset_builder_exe.root_module.addCSourceFiles(.{ .files = &[_][]const u8{"tools/stb_truetype.c"}, .flags = &[_][]const u8{"-g"} });
 
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
@@ -245,6 +250,43 @@ fn addAssetBuilder(
     const asset_builder_run_step = b.step("build-assets", "Run the test asset builder");
     run_asset_builder.setCwd(b.path("data/"));
     asset_builder_run_step.dependOn(&run_asset_builder.step);
+}
+
+fn addFontExtractor(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const shared_module = b.addModule("shared", .{
+        .root_source_file = b.path("src/shared.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const font_extractor_exe = b.addExecutable(.{
+        .name = "font-extractor",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/hh_font.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    font_extractor_exe.stack_size = 0x100000; // 1MB.
+    font_extractor_exe.root_module.addOptions("build_options", build_options);
+    font_extractor_exe.root_module.addImport("shared", shared_module);
+
+    const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
+    font_extractor_exe.root_module.addImport("win32", zigwin32);
+
+    b.installArtifact(font_extractor_exe);
+
+    // Allow running asset builder from build command.
+    const run_font_extractor = b.addRunArtifact(font_extractor_exe);
+    const font_extractor_run_step = b.step("extract-fonts", "Run the font extractor");
+    run_font_extractor.setCwd(b.path("data/"));
+    font_extractor_run_step.dependOn(&run_font_extractor.step);
 }
 
 fn addHHAEdit(
