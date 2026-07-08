@@ -2,6 +2,9 @@ const std = @import("std");
 const win32 = @import("win32");
 const shared = @import("shared");
 const math = shared.math;
+const types = shared.types;
+const png = shared.png;
+const stream = shared.stream;
 
 pub const UNICODE = true;
 
@@ -42,6 +45,13 @@ pub fn myLogFn(
     }
 }
 
+const PixelOp = enum(u32) {
+    SwapRedAndBlue = 0x1,
+    ReplaceAlpha = 0x2,
+    MultiplyAlpha = 0x4,
+    Invert = 0x8,
+};
+
 const FontGlyph = extern struct {
     unicode_code_point: u32,
     bitmap_id: u32,
@@ -51,7 +61,108 @@ const GlyphResult = extern struct {
     align_percentage: Vector2 = .zero(),
     kerning_change: f32 = 0,
     char_advance: f32 = 0,
+
+    width: u32 = 0,
+    height: u32 = 0,
+    pixels: [*]u32 = undefined,
 };
+
+fn writePNG(
+    width: u32,
+    height: u32,
+    pixels: [*]u32,
+    output_file_name: [:0]const u8,
+    io: std.Io,
+) !void {
+    if (std.Io.Dir.cwd().createFile(io, output_file_name, .{})) |file| {
+        defer file.close(io);
+
+        var buf: [1024]u8 = undefined;
+        var file_writer = file.writer(io, &buf);
+        const writer = &file_writer.interface;
+
+        try writer.writeAll(&png.Signature);
+
+        // IHDR.
+        var ihdr: png.IHeader = .{
+            .width = width,
+            .height = height,
+            .bit_depth = 8,
+            .color_type = 6,
+            .compression_method = 0,
+            .filter_method = 0,
+            .interlace_method = 0,
+        };
+        png.endianSwap(&ihdr.width);
+        png.endianSwap(&ihdr.height);
+
+        var chunk_header: png.ChunkHeader = .{
+            .length = @sizeOf(png.IHeader),
+            .chunk_type = @bitCast(png.fourcc("IHDR")),
+        };
+        var chunk_footer: png.ChunkFooter = .{ .crc = 0 };
+
+        png.endianSwap(&chunk_header.length);
+        chunk_header.endianSwapType();
+        png.endianSwap(&chunk_footer.crc);
+
+        try writer.writeAll(std.mem.asBytes(&chunk_header));
+        try writer.writeAll(std.mem.asBytes(&ihdr));
+        try writer.writeAll(std.mem.asBytes(&chunk_footer));
+        try writer.flush();
+
+        // IDAT.
+        var idat: png.IDataHeader = .{
+            .zlib_method_flags = 8,
+            .additional_flags = 0,
+        };
+
+        // TODO: If we want to support larger than 128x128, we'd need to multiplex this.
+        const b_final_type: u8 = 0x1; // 0x1 or 0x80;
+        const len: u16 = @intCast((width * 4 + 1) * height);
+        const nlen: u16 = ~len;
+
+        chunk_header.length = @sizeOf(png.IDataHeader) + @sizeOf(u8) + @sizeOf(u16) + @sizeOf(u16) + len;
+        chunk_header.chunk_type = @bitCast(png.fourcc("IDAT"));
+        chunk_footer.crc = 0;
+
+        png.endianSwap(&chunk_header.length);
+        chunk_header.endianSwapType();
+        png.endianSwap(&chunk_footer.crc);
+
+        try writer.writeAll(std.mem.asBytes(&chunk_header));
+        try writer.writeAll(std.mem.asBytes(&idat));
+        try writer.writeAll(std.mem.asBytes(&b_final_type));
+        try writer.writeAll(std.mem.asBytes(&len));
+        try writer.writeAll(std.mem.asBytes(&nlen));
+        var y: u32 = 0;
+
+        while (y < height) : (y += 1) {
+            const no_filter: u8 = 0;
+            try writer.writeAll(std.mem.asBytes(&no_filter));
+            const row_start = y * width;
+            const row_end = row_start + width;
+            try writer.writeAll(std.mem.sliceAsBytes(pixels[row_start..row_end]));
+        }
+        try writer.writeAll(std.mem.asBytes(&chunk_footer));
+        try writer.flush();
+
+        // IEND.
+        chunk_header.length = 0;
+        chunk_header.chunk_type = @bitCast(png.fourcc("IEND"));
+        chunk_footer.crc = 0;
+
+        png.endianSwap(&chunk_header.length);
+        chunk_header.endianSwapType();
+        png.endianSwap(&chunk_footer.crc);
+
+        try writer.writeAll(std.mem.asBytes(&chunk_header));
+        try writer.writeAll(std.mem.asBytes(&chunk_footer));
+        try writer.flush();
+    } else |err| {
+        std.log.err("Unable to write output file '{s}': {s}", .{ output_file_name, @errorName(err) });
+    }
+}
 
 fn loadGlyphBMP(
     font_bits: ?*anyopaque,
@@ -59,7 +170,7 @@ fn loadGlyphBMP(
     max_glyph_dim: Vector2u,
     tm_descent: i32,
     device_context: win32.graphics.gdi.CreatedHDC,
-    allocator: std.mem.Allocator,
+    out_memory: []u8,
 ) GlyphResult {
     if (font_bits) |bits| {
         // Clear bits to black.
@@ -122,6 +233,8 @@ fn loadGlyphBMP(
         }
     }
 
+    var result: GlyphResult = .{};
+
     var kerning_change: f32 = 0;
     var align_percentage: Vector2 = .new(0.5, 0.5);
     var char_advance: f32 = 0;
@@ -134,10 +247,12 @@ fn loadGlyphBMP(
         const out_width: u32 = width + 2;
         const out_height: u32 = height + 2;
         const out_pitch: u32 = out_width * bytes_per_pixel;
-        const out_memory: []u8 =
-            allocator.alloc(u8, @intCast(out_height * out_pitch)) catch unreachable;
-        defer allocator.free(out_memory);
+
         @memset(out_memory, 0);
+
+        result.width = out_width;
+        result.height = out_height;
+        result.pixels = @ptrCast(@alignCast(out_memory));
 
         var dest_row: [*]u8 =
             @as([*]u8, @ptrCast(out_memory)) + @as(usize, @intCast((out_height - 1 - 1) * out_pitch));
@@ -180,8 +295,6 @@ fn loadGlyphBMP(
         );
 
         kerning_change = @as(f32, @floatFromInt(@as(i32, @intCast(min_x)) - @as(i32, @intCast(pre_step_x))));
-
-        // TODO: Write out a PNG!
     }
 
     if (false) {
@@ -194,13 +307,31 @@ fn loadGlyphBMP(
         char_advance = @floatFromInt(this_width);
     }
 
-    const result: GlyphResult = .{
-        .align_percentage = align_percentage,
-        .kerning_change = kerning_change,
-        .char_advance = char_advance,
-    };
+    result.align_percentage = align_percentage;
+    result.kerning_change = kerning_change;
+    result.char_advance = char_advance;
 
     return result;
+}
+
+fn sanitize(source_in: [*]const u8, dest_in: [*]u8) void {
+    var source = source_in;
+    var dest = dest_in;
+
+    while (source[0] != 0) {
+        const d = std.ascii.toLower(source[0]);
+
+        if ((d >= 'a' and d <= 'z') or (d >= '0' and d <= '9')) {
+            dest[0] = d;
+        } else {
+            dest[0] = '_';
+        }
+
+        dest += 1;
+        source += 1;
+    }
+
+    dest[0] = 0;
 }
 
 fn extractFont(
@@ -208,8 +339,17 @@ fn extractFont(
     font_name: []const u8,
     pixel_height: u32,
     mask: *CodePointMask,
+    hht_out_writer: *std.Io.Writer,
+    png_dest_dir: []const u8,
     allocator: std.mem.Allocator,
+    io: std.Io,
 ) !void {
+    const name_stem: [*:0]u8 = @ptrCast(try allocator.alloc(u8, font_name.len + 1));
+    sanitize(@ptrCast(font_name), @ptrCast(name_stem));
+
+    const png_out_name_buf: []u8 = try allocator.alloc(u8, types.stringLength(name_stem) + png_dest_dir.len + 128);
+    const png_file_name_only: [*:0]const u8 = @ptrCast(png_out_name_buf[png_dest_dir.len + 1 ..]);
+
     const glyph_count: u32 = mask.glyph_count;
     const one_past_max_font_code_point: u32 = mask.one_past_max_code_point;
     const glyph_code_point: [*]u32 = mask.code_point_from_glyph.?;
@@ -249,6 +389,10 @@ fn extractFont(
             256 + 2 * @as(u32, @intCast(text_metrics.tmMaxCharWidth + text_metrics.tmOverhang)),
             256 + 2 * @as(u32, @intCast(text_metrics.tmHeight + text_metrics.tmOverhang)),
         );
+
+        const out_memory: []u8 =
+            allocator.alloc(u8, @intCast(max_glyph_dim.x() * max_glyph_dim.y() * @sizeOf(u32))) catch unreachable;
+        defer allocator.free(out_memory);
 
         //
         // Setup our Windows rendering buffer.
@@ -301,7 +445,8 @@ fn extractFont(
         @memset(glyph_index_from_code_point, 0);
 
         var glyphs: []FontGlyph = try allocator.alloc(FontGlyph, glyph_count);
-        var horizontal_advance: []f32 = try allocator.alloc(f32, glyph_count * glyph_count);
+        const horizontal_advance_count: u32 = glyph_count * glyph_count;
+        var horizontal_advance: []f32 = try allocator.alloc(f32, horizontal_advance_count);
         @memset(horizontal_advance, 0);
 
         // Reserve space for the null glyph.
@@ -334,6 +479,8 @@ fn extractFont(
         _ = descender_height;
         _ = external_leading;
 
+        try hht_out_writer.print("font \"{s}\" \n{{\n", .{name_stem});
+
         const tm_descent: i32 = text_metrics.tmDescent;
         var glyph_index: u32 = 1;
         while (glyph_index < glyph_count) : (glyph_index += 1) {
@@ -344,7 +491,20 @@ fn extractFont(
                 max_glyph_dim,
                 tm_descent,
                 device_context,
-                allocator,
+                out_memory,
+            );
+
+            const png_out_name: [:0]const u8 = try std.fmt.bufPrintZ(
+                png_out_name_buf,
+                "{s}/{s}_{d:04}.png",
+                .{ png_dest_dir, name_stem, code_point },
+            );
+
+            try writePNG(glyph.width, glyph.height, glyph.pixels, png_out_name, io);
+
+            try hht_out_writer.print(
+                "    glyph[{d}] = \"{s}\", {{{d}, {d}}};\n",
+                .{ glyph_index, png_file_name_only, glyph.align_percentage.x(), glyph.align_percentage.y() },
             );
 
             var other_glyph_index: u32 = 0;
@@ -357,6 +517,24 @@ fn extractFont(
                 }
             }
         }
+
+        try hht_out_writer.print("    HorizontalAdvance =\n        ", .{});
+        var index: u32 = 0;
+        while (index < horizontal_advance_count) : (index += 1) {
+            if (index > 0) {
+                if (@mod(index, 16) == 0) {
+                    try hht_out_writer.print(",\n        ", .{});
+                } else {
+                    try hht_out_writer.print(", ", .{});
+                }
+            }
+
+            try hht_out_writer.print("{d:3}", .{@as(u32, @intFromFloat(horizontal_advance[index]))});
+        }
+        try hht_out_writer.print(";\n", .{});
+
+        try hht_out_writer.print("}};\n", .{});
+        try hht_out_writer.flush();
     } else {
         std.log.err("Unable to load font {s} from {s}.", .{ font_name, ttf_file_name });
     }
@@ -434,13 +612,14 @@ const CharSetCreator = struct {
 
 const char_sets = [_]CharSetCreator{
     .{
-        .name = "test",
+        .name = "Test",
         .description = "Basic character set for testing font creation and display.",
         .function = &createTestCharSet,
     },
 };
 
 pub fn main(init: std.process.Init) !void {
+    const io = init.io;
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
 
@@ -449,11 +628,13 @@ pub fn main(init: std.process.Init) !void {
 
     var print_usage: bool = true;
 
-    if (args.len == 5) {
+    if (args.len == 7) {
         const ttf_file_name: []const u8 = args[1];
         const font_name: []const u8 = args[2];
         const pixel_height: u32 = try std.fmt.parseInt(u32, args[3], 10);
         const char_set_name: []const u8 = args[4];
+        const hht_file_name: []const u8 = args[5];
+        const png_dir_name: []const u8 = args[6];
 
         var char_set_creator: ?*const CharSetCreator = null;
 
@@ -465,28 +646,49 @@ pub fn main(init: std.process.Init) !void {
         }
 
         if (char_set_creator) |creator| {
-            var counter_mask: CodePointMask = .{
-                .glyph_count = 1,
-            };
-            creator.function(&counter_mask);
+            if (std.Io.Dir.cwd().createFile(io, hht_file_name, .{})) |hht_file| {
+                defer hht_file.close(io);
 
-            var mask: CodePointMask = .{
-                .glyph_count = 1,
-                .code_point_from_glyph = @ptrCast(allocator.alloc(u32, counter_mask.glyph_count) catch @panic("OOM")),
-            };
-            @memset(mask.code_point_from_glyph.?[0..counter_mask.glyph_count], 0);
-            creator.function(&mask);
+                var buffer: [1024]u8 = undefined;
+                var file_writer = hht_file.writerStreaming(io, &buffer);
+                const writer = &file_writer.interface;
+                try writer.print(
+                    \\// File: {s}
+                    \\// Date:
+                    \\// Revision:
+                    \\// Creator: {s}
+                    \\// Notice: Extraction of font "{s}"
+                    \\
+                , .{ hht_file_name, args[0], font_name });
 
-            std.log.info("Extracting font {s} - {d} glyphs, codepoint range {d}", .{
-                font_name,
-                mask.glyph_count,
-                mask.one_past_max_code_point,
-            });
+                var counter_mask: CodePointMask = .{
+                    .glyph_count = 1,
+                };
+                creator.function(&counter_mask);
 
-            try extractFont(ttf_file_name, font_name, pixel_height, &mask, allocator);
-            print_usage = false;
+                var mask: CodePointMask = .{
+                    .glyph_count = 1,
+                    .code_point_from_glyph = @ptrCast(allocator.alloc(u32, counter_mask.glyph_count) catch @panic("OOM")),
+                };
+                @memset(mask.code_point_from_glyph.?[0..counter_mask.glyph_count], 0);
+                creator.function(&mask);
 
-            std.log.info("Done!", .{});
+                std.log.info("Extracting font {s} - {d} glyphs, codepoint range {d}", .{
+                    font_name,
+                    mask.glyph_count,
+                    mask.one_past_max_code_point,
+                });
+
+                try extractFont(ttf_file_name, font_name, pixel_height, &mask, writer, png_dir_name, allocator, io);
+                print_usage = false;
+
+                std.log.info("Done!", .{});
+            } else |err| {
+                std.log.err(
+                    "ERROR: Unable to open HHT file \"{s}\" for writing. Error: {s}.",
+                    .{ hht_file_name, @errorName(err) },
+                );
+            }
         } else {
             std.log.err("ERROR: Unrecognized character set \"{s}\".", .{char_set_name});
         }
@@ -494,7 +696,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (print_usage) {
         std.log.err("Usage:", .{});
-        std.log.err("{s} <TTF file name> <font name> <pixel height> <charset>", .{args[0]});
+        std.log.err("{s} <TTF file name> <font name> <pixel height> <charset> <dest hht> <dest dir>", .{args[0]});
         std.log.err("\nSuported <charset> values:", .{});
         for (char_sets) |char_set| {
             std.log.err("{s} - {s}", .{ char_set.name, char_set.description });

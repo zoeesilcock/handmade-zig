@@ -9,6 +9,7 @@ pub const SPECIAL_TEXTURE_COUNT = 16;
 pub const TEXTURE_TRANSFER_BUFFER_SIZE = 128 * 1024 * 1024;
 
 pub const math = @import("math.zig");
+pub const png = @import("png.zig");
 pub const types = @import("types.zig");
 pub const intrinsics = @import("intrinsics.zig");
 pub const tokenizer = @import("tokenizer.zig");

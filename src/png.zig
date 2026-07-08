@@ -9,7 +9,7 @@ const StreamChunk = stream.Chunk;
 const MemoryArena = memory.MemoryArena;
 
 const PNG_HUFFMAN_MAX_BIT_COUNT = 16;
-const Signature: [8]u8 = .{ 137, 80, 78, 71, 13, 10, 26, 10 };
+pub const Signature: [8]u8 = .{ 137, 80, 78, 71, 13, 10, 26, 10 };
 
 pub const ImageU32 = struct {
     width: u32,
@@ -32,20 +32,26 @@ pub const ImageU32 = struct {
     }
 };
 
-const Header = extern struct {
+pub const Header = extern struct {
     signature: [8]u8,
 };
 
-const ChunkHeader = extern struct {
+pub const ChunkHeader = extern struct {
     length: u32 align(1),
     chunk_type: [4]u8 align(1),
 
     pub fn chunkTypeU32(self: *ChunkHeader) u32 {
         return @bitCast(self.chunk_type);
     }
+
+    pub fn endianSwapType(self: *ChunkHeader) void {
+        var chunk_type: u32 = self.chunkTypeU32();
+        endianSwap(&chunk_type);
+        self.chunk_type = @bitCast(chunk_type);
+    }
 };
 
-const IHeader = extern struct {
+pub const IHeader = extern struct {
     width: u32,
     height: u32,
     bit_depth: u8,
@@ -55,16 +61,16 @@ const IHeader = extern struct {
     interlace_method: u8,
 };
 
-const IDataHeader = extern struct {
+pub const IDataHeader = extern struct {
     zlib_method_flags: u8,
     additional_flags: u8,
 };
 
-const IDataFooter = extern struct {
+pub const IDataFooter = extern struct {
     crc: u32,
 };
 
-const ChunkFooter = extern struct {
+pub const ChunkFooter = extern struct {
     crc: u32 align(1),
 };
 
@@ -141,7 +147,7 @@ const HuffmanEntry = struct {
     bits_used: u16,
 };
 
-fn endianSwap(value: *align(1) u32) void {
+pub fn endianSwap(value: *align(1) u32) void {
     if (false) {
         const v: u32 = value.*;
         value.* =
@@ -182,7 +188,7 @@ fn reverseBits(value: u32, bit_count: u32) u32 {
     return result;
 }
 
-fn fourcc(string: []const u8) u32 {
+pub fn fourcc(string: []const u8) u32 {
     // return @as(*const u32, @ptrCast(@alignCast(string.ptr))).*;
 
     return string[0] |
@@ -436,6 +442,7 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
         while (at.contents.count > 0) {
             if (at.consumeType(ChunkHeader)) |chunk_header| {
                 endianSwap(&chunk_header.length);
+                chunk_header.endianSwapType();
 
                 const chunk_data: ?[*c]u8 = at.consumeSize(chunk_header.length);
 
@@ -531,7 +538,8 @@ pub fn parsePNG(arena: *MemoryArena, file: Stream, info: ?*Stream) ImageU32 {
 
                                 var source: ?[*]u8 = compressed_data.consumeSize(use_len);
                                 if (source != null) {
-                                    while (use_len > 0) : (use_len -= 1) {
+                                    var copy_count: u16 = use_len;
+                                    while (copy_count > 0) : (copy_count -= 1) {
                                         dest[0] = source.?[0];
                                         dest.ptr += 1;
                                         source.? += 1;
