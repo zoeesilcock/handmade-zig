@@ -11,6 +11,7 @@ pub const TEXTURE_TRANSFER_BUFFER_SIZE = 128 * 1024 * 1024;
 pub const math = @import("math.zig");
 pub const png = @import("png.zig");
 pub const types = @import("types.zig");
+pub const stream = @import("stream.zig");
 pub const intrinsics = @import("intrinsics.zig");
 pub const tokenizer = @import("tokenizer.zig");
 const memory = @import("memory.zig");
@@ -94,8 +95,8 @@ pub fn shortTypeName(comptime T: type) []const u8 {
     return full_type_name[last_dot..];
 }
 
-pub fn copy(size: MemoryIndex, source_init: *anyopaque, dest_init: *anyopaque) *anyopaque {
-    var source: [*]u8 = @ptrCast(source_init);
+pub fn copy(size: MemoryIndex, source_init: *const anyopaque, dest_init: *anyopaque) *anyopaque {
+    var source: [*]const u8 = @ptrCast(source_init);
     var dest: [*]u8 = @ptrCast(dest_init);
 
     var index: MemoryIndex = size;

@@ -263,6 +263,7 @@ fn addFontExtractor(
         .target = target,
         .optimize = optimize,
     });
+    shared_module.addOptions("build_options", build_options);
 
     const font_extractor_exe = b.addExecutable(.{
         .name = "font-extractor",
@@ -273,7 +274,7 @@ fn addFontExtractor(
             .link_libc = true,
         }),
     });
-    font_extractor_exe.stack_size = 0x100000; // 1MB.
+    font_extractor_exe.stack_size = 0x400000; // 4MB.
     font_extractor_exe.root_module.addOptions("build_options", build_options);
     font_extractor_exe.root_module.addImport("shared", shared_module);
 

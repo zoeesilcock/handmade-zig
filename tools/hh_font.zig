@@ -4,7 +4,12 @@ const shared = @import("shared");
 const math = shared.math;
 const types = shared.types;
 const png = shared.png;
+const memory = png.memory;
 const stream = shared.stream;
+const c = @cImport({
+    @cInclude("stdlib.h");
+    @cInclude("string.h");
+});
 
 pub const UNICODE = true;
 
@@ -15,6 +20,10 @@ const MAX_FONT_HEIGHT: u32 = 1024;
 const Color = math.Color;
 const Vector2 = math.Vector2;
 const Vector2u = math.Vector2u;
+const Stream = stream.Stream;
+const StreamChunk = stream.Chunk;
+const MemoryArena = memory.MemoryArena;
+const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 
 // Logging.
 pub const std_options: std.Options = .{
@@ -66,103 +75,6 @@ const GlyphResult = extern struct {
     height: u32 = 0,
     pixels: [*]u32 = undefined,
 };
-
-fn writePNG(
-    width: u32,
-    height: u32,
-    pixels: [*]u32,
-    output_file_name: [:0]const u8,
-    io: std.Io,
-) !void {
-    if (std.Io.Dir.cwd().createFile(io, output_file_name, .{})) |file| {
-        defer file.close(io);
-
-        var buf: [1024]u8 = undefined;
-        var file_writer = file.writer(io, &buf);
-        const writer = &file_writer.interface;
-
-        try writer.writeAll(&png.Signature);
-
-        // IHDR.
-        var ihdr: png.IHeader = .{
-            .width = width,
-            .height = height,
-            .bit_depth = 8,
-            .color_type = 6,
-            .compression_method = 0,
-            .filter_method = 0,
-            .interlace_method = 0,
-        };
-        png.endianSwap(&ihdr.width);
-        png.endianSwap(&ihdr.height);
-
-        var chunk_header: png.ChunkHeader = .{
-            .length = @sizeOf(png.IHeader),
-            .chunk_type = @bitCast(png.fourcc("IHDR")),
-        };
-        var chunk_footer: png.ChunkFooter = .{ .crc = 0 };
-
-        png.endianSwap(&chunk_header.length);
-        chunk_header.endianSwapType();
-        png.endianSwap(&chunk_footer.crc);
-
-        try writer.writeAll(std.mem.asBytes(&chunk_header));
-        try writer.writeAll(std.mem.asBytes(&ihdr));
-        try writer.writeAll(std.mem.asBytes(&chunk_footer));
-        try writer.flush();
-
-        // IDAT.
-        var idat: png.IDataHeader = .{
-            .zlib_method_flags = 8,
-            .additional_flags = 0,
-        };
-
-        // TODO: If we want to support larger than 128x128, we'd need to multiplex this.
-        const b_final_type: u8 = 0x1; // 0x1 or 0x80;
-        const len: u16 = @intCast((width * 4 + 1) * height);
-        const nlen: u16 = ~len;
-
-        chunk_header.length = @sizeOf(png.IDataHeader) + @sizeOf(u8) + @sizeOf(u16) + @sizeOf(u16) + len;
-        chunk_header.chunk_type = @bitCast(png.fourcc("IDAT"));
-        chunk_footer.crc = 0;
-
-        png.endianSwap(&chunk_header.length);
-        chunk_header.endianSwapType();
-        png.endianSwap(&chunk_footer.crc);
-
-        try writer.writeAll(std.mem.asBytes(&chunk_header));
-        try writer.writeAll(std.mem.asBytes(&idat));
-        try writer.writeAll(std.mem.asBytes(&b_final_type));
-        try writer.writeAll(std.mem.asBytes(&len));
-        try writer.writeAll(std.mem.asBytes(&nlen));
-        var y: u32 = 0;
-
-        while (y < height) : (y += 1) {
-            const no_filter: u8 = 0;
-            try writer.writeAll(std.mem.asBytes(&no_filter));
-            const row_start = y * width;
-            const row_end = row_start + width;
-            try writer.writeAll(std.mem.sliceAsBytes(pixels[row_start..row_end]));
-        }
-        try writer.writeAll(std.mem.asBytes(&chunk_footer));
-        try writer.flush();
-
-        // IEND.
-        chunk_header.length = 0;
-        chunk_header.chunk_type = @bitCast(png.fourcc("IEND"));
-        chunk_footer.crc = 0;
-
-        png.endianSwap(&chunk_header.length);
-        chunk_header.endianSwapType();
-        png.endianSwap(&chunk_footer.crc);
-
-        try writer.writeAll(std.mem.asBytes(&chunk_header));
-        try writer.writeAll(std.mem.asBytes(&chunk_footer));
-        try writer.flush();
-    } else |err| {
-        std.log.err("Unable to write output file '{s}': {s}", .{ output_file_name, @errorName(err) });
-    }
-}
 
 fn loadGlyphBMP(
     font_bits: ?*anyopaque,
@@ -254,8 +166,7 @@ fn loadGlyphBMP(
         result.height = out_height;
         result.pixels = @ptrCast(@alignCast(out_memory));
 
-        var dest_row: [*]u8 =
-            @as([*]u8, @ptrCast(out_memory)) + @as(usize, @intCast((out_height - 1 - 1) * out_pitch));
+        var dest_row: [*]u8 = @as([*]u8, @ptrCast(out_memory)) + out_pitch;
         var source_row: [*]u32 = @as([*]u32, @ptrCast(@alignCast(font_bits.?))) +
             (max_glyph_dim.y() - 1 - @as(u32, @intCast(min_y))) * max_glyph_dim.x();
 
@@ -269,22 +180,13 @@ fn loadGlyphBMP(
                 // const pixel = win32.foundation.GetPixel(device_context, @intCast(x), @intCast(y));
                 // std.debug.assert(pixel == source[0]);
 
-                const gray: f32 = @as(f32, @floatFromInt(source[0] & 0xff));
-                var texel = Color.new(255, 255, 255, gray);
-                texel = math.sRGB255ToLinear1(texel);
-                _ = texel.setRGB(texel.rgb().scaledTo(texel.a()));
-                texel = math.linear1ToSRGB255(texel);
-
-                dest[0] = ((@as(u32, @intFromFloat(texel.a() + 0.5)) << 24) |
-                    (@as(u32, @intFromFloat(texel.r() + 0.5)) << 16) |
-                    (@as(u32, @intFromFloat(texel.g() + 0.5)) << 8) |
-                    (@as(u32, @intFromFloat(texel.b() + 0.5)) << 0));
-
+                const gray: u32 = source[0] & 0xff;
+                dest[0] = ((gray << 24) | 0x00ffffff);
                 dest += 1;
                 source += 1;
             }
 
-            dest_row -= @as(usize, @intCast(out_pitch));
+            dest_row += @as(usize, @intCast(out_pitch));
             source_row -= max_glyph_dim.x();
         }
 
@@ -332,6 +234,33 @@ fn sanitize(source_in: [*]const u8, dest_in: [*]u8) void {
     }
 
     dest[0] = 0;
+}
+
+fn dataStreamToWriter(source: *Stream, dest: *std.Io.Writer) !void {
+    var opt_chunk: ?*StreamChunk = source.first;
+    while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
+        try dest.writeAll(chunk.contents.data[0..chunk.contents.count]);
+        try dest.flush();
+    }
+}
+
+fn crtAllocateMemory(size: memory.MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBlock {
+    _ = flags;
+
+    const total_size: usize = @sizeOf(PlatformMemoryBlock) + size;
+    var block: [*]PlatformMemoryBlock = @ptrCast(@alignCast(c.malloc(total_size)));
+    _ = c.memset(block, 0, total_size);
+
+    block[0].size = size;
+    block[0].base = @ptrCast(block + 1);
+
+    return @ptrCast(block);
+}
+
+fn crtDeallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.c) void {
+    if (opt_platform_block) |block| {
+        c.free(block);
+    }
 }
 
 fn extractFont(
@@ -500,7 +429,23 @@ fn extractFont(
                 .{ png_dest_dir, name_stem, code_point },
             );
 
-            try writePNG(glyph.width, glyph.height, glyph.pixels, png_out_name, io);
+            if (std.Io.Dir.cwd().createFile(io, png_out_name, .{})) |file| {
+                defer file.close(io);
+
+                var temp_arena: MemoryArena = .{};
+                defer temp_arena.clear();
+
+                var png_stream: Stream = .onDemandMemoryStream(&temp_arena, null);
+                try png.writePNG(glyph.width, glyph.height, glyph.pixels, &png_stream);
+
+                var buf: [1024]u8 = undefined;
+                var file_writer = file.writer(io, &buf);
+                const writer = &file_writer.interface;
+
+                try dataStreamToWriter(&png_stream, writer);
+            } else |err| {
+                std.log.err("Unable to open file '{s}' for writing: {s}", .{ png_out_name, @errorName(err) });
+            }
 
             try hht_out_writer.print(
                 "    glyph[{d}] = \"{s}\", {{{d}, {d}}};\n",
@@ -622,6 +567,11 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
+
+    shared.platform = shared.Platform{
+        .allocateMemory = crtAllocateMemory,
+        .deallocateMemory = crtDeallocateMemory,
+    };
 
     // "C:/Windows/Fonts/arial.ttf", "Arial", 128),
     // "C:/Windows/Fonts/LiberationMono-Regular.ttf", "Liberation Mono", 20),

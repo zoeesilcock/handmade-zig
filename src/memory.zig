@@ -218,7 +218,7 @@ pub const MemoryArena = extern struct {
         return @ptrCast(dest);
     }
 
-    pub fn pushCopy(self: *MemoryArena, size: MemoryIndex, source: *anyopaque) *anyopaque {
+    pub fn pushCopy(self: *MemoryArena, size: MemoryIndex, source: *const anyopaque) *anyopaque {
         return shared.copy(size, source, @ptrCast(self.pushSize(size, null)));
     }
 

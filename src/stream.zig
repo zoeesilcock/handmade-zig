@@ -172,3 +172,23 @@ pub fn copyStreamToBuffer(source: Stream, dest: Buffer) void {
         data_offset += chunk.contents.count;
     }
 }
+
+pub fn outputCopy(dest: *Stream, count: usize, data: *const anyopaque) *anyopaque {
+    const result = dest.arena.?.pushCopy(count, data);
+    _ = dest.appendChunk(count, @ptrCast(result));
+    return result;
+}
+
+pub fn outputStructCopy(dest: *Stream, data: anytype) *anyopaque {
+    return outputCopy(dest, @sizeOf(@TypeOf(data.*)), @ptrCast(data));
+}
+
+pub fn outputSize(dest: *Stream, count: usize) *const anyopaque {
+    const result = dest.arena.?.pushSize(count);
+    _ = dest.appendChunk(count, @ptrCast(result));
+    return result;
+}
+
+pub fn outputStruct(dest: *Stream, T: type) *T {
+    return outputSize(dest, @sizeOf(T));
+}
