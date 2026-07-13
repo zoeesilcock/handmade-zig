@@ -221,6 +221,7 @@ pub const Tokenizer = struct {
                     }
 
                     if (self.at[0] == '.') {
+                        self.advanceChars(1);
                         var coefficient: f32 = 0.1;
                         while (shared.isNumber(self.at[0])) {
                             const digit: f32 = @floatFromInt(self.at[0] - '0');

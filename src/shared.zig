@@ -283,6 +283,30 @@ pub fn stringHashOf(string: String) u32 {
     return hash_value;
 }
 
+pub const Adler32 = struct {
+    s1: u32,
+    s2: u32,
+
+    pub fn begin() Adler32 {
+        return .{
+            .s1 = 1,
+            .s2 = 0,
+        };
+    }
+
+    pub fn append(self: *Adler32, size: usize, data: *anyopaque) void {
+        var index: usize = 0;
+        while (index < size) : (index += 1) {
+            self.s1 = @mod((self.s1 + @as([*]u8, @ptrCast(data))[index]), 65521);
+            self.s2 = @mod((self.s2 + self.s1), 65521);
+        }
+    }
+
+    pub fn end(self: *Adler32) u32 {
+        return self.s2 * 65536 + self.s1;
+    }
+};
+
 /// This is based on the 128-bit MurmurHash from MurmurHash3.
 fn murmurHashUpdate(h_in: u64, k_in: u64) u64 {
     const c1: u64 = 0x87c37b91114253d5;

@@ -7,6 +7,7 @@ pub const stream = @import("stream.zig");
 const Stream = stream.Stream;
 const StreamChunk = stream.Chunk;
 const MemoryArena = memory.MemoryArena;
+const Adler32 = shared.Adler32;
 
 const PNG_HUFFMAN_MAX_BIT_COUNT = 16;
 pub const Signature: [8]u8 = .{ 137, 80, 78, 71, 13, 10, 26, 10 };
@@ -203,26 +204,6 @@ fn endBigCRC(skip_n_in: u32, start_chunk: ?*StreamChunk, one_past_last_chunk: ?*
     }
 
     result = result ^ 0xffffffff;
-    endianSwap(&result);
-    return result;
-}
-
-fn endAdler32(start_chunk: ?*StreamChunk, one_past_last_chunk: ?*StreamChunk) u32 {
-    var s1: u32 = 1;
-    var s2: u32 = 0;
-
-    var opt_chunk: ?*StreamChunk = start_chunk;
-    while (opt_chunk != one_past_last_chunk) {
-        const chunk = opt_chunk.?;
-        defer opt_chunk = chunk.next;
-
-        var n: usize = 0;
-        while (n < chunk.contents.count) : (n += 1) {
-            s1 = @mod((s1 + chunk.contents.data[n]), 65521);
-            s2 = @mod((s2 + s1), 65521);
-        }
-    }
-    var result: u32 = s2 * 65536 + s1;
     endianSwap(&result);
     return result;
 }
@@ -822,12 +803,13 @@ pub fn writePNG(
         .additional_flags = 29,
     };
 
-    // TODO: If we want to support larger than 128x128, we'd need to multiplex this.
-    const b_final_type: u8 = 0x1; // 0x1 or 0x80;
-    const len: u16 = @intCast((width * 4 + 1) * height);
-    const nlen: u16 = ~len;
+    const max_chunk_size: u32 = 65535;
 
-    chunk_header.length = @sizeOf(IDataHeader) + @sizeOf(u8) + @sizeOf(u16) + @sizeOf(u16) + len + @sizeOf(u32);
+    const total_length: u32 = (width * 4 + 1) * height;
+    const chunk_count: u32 = (total_length + max_chunk_size - 1) / max_chunk_size;
+
+    const chunk_overhead: u32 = @sizeOf(u8) + @sizeOf(u16) + @sizeOf(u16);
+    chunk_header.length = @sizeOf(IDataHeader) + (chunk_count * chunk_overhead) + total_length + @sizeOf(u32);
     chunk_header.chunk_type = @bitCast(fourcc("IDAT"));
     chunk_footer.crc = 0;
 
@@ -838,18 +820,53 @@ pub fn writePNG(
     _ = stream.outputStructCopy(out, &chunk_header);
     start_crc = out.last;
     _ = stream.outputStructCopy(out, &idat);
-    _ = stream.outputStructCopy(out, &b_final_type);
-    _ = stream.outputStructCopy(out, &len);
-    _ = stream.outputStructCopy(out, &nlen);
-    const n_len_chunk: *StreamChunk = out.last.?;
 
+    var adler: Adler32 = .begin();
+    var b: u32 = 0;
     var y: u32 = 0;
-    while (y < height) : (y += 1) {
-        const no_filter: u8 = 0;
-        _ = stream.outputStructCopy(out, &no_filter);
-        _ = stream.outputCopy(out, width * 4, pixels + y * width);
+    var length_remaining: u32 = total_length;
+    var chunk_index: u32 = 0;
+    while (chunk_index < chunk_count) : (chunk_index += 1) {
+        var len: u16 = max_chunk_size;
+        if (len > length_remaining) {
+            len = @intCast(length_remaining);
+        }
+        const nlen: u16 = ~len;
+        length_remaining -= len;
+
+        const total_row_length: u32 = (4 * width + 1);
+        const b_final_type: u8 = if ((chunk_index + 1) == chunk_count) 0x1 else 0x0;
+        _ = stream.outputStructCopy(out, &b_final_type);
+        _ = stream.outputStructCopy(out, &len);
+        _ = stream.outputStructCopy(out, &nlen);
+
+        while (len > 0) {
+            var no_filter: u8 = 0;
+            var row_length: u32 = 1;
+            var row: [*]u8 = @ptrCast(&no_filter);
+
+            if (b > 0) {
+                row_length = total_row_length - b;
+                if (row_length > len) {
+                    row_length = len;
+                }
+                row = @as([*]u8, @ptrCast(pixels + y * width)) + b - 1;
+            }
+
+            _ = stream.outputCopy(out, row_length, row);
+            adler.append(row_length, row);
+            b += row_length;
+            len -= @intCast(row_length);
+
+            if (b == total_row_length) {
+                b = 0;
+                y += 1;
+            }
+        }
     }
-    const adler32: u32 = endAdler32(n_len_chunk.next, null);
+
+    var adler32: u32 = adler.end();
+    endianSwap(&adler32);
     _ = stream.outputStructCopy(out, &adler32);
     chunk_footer.crc = endBigCRC(4, start_crc, null);
     _ = stream.outputStructCopy(out, &chunk_footer);

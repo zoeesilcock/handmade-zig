@@ -80,6 +80,7 @@ fn loadGlyphBMP(
     font_bits: ?*anyopaque,
     code_point: u32,
     max_glyph_dim: Vector2u,
+    scale: u32,
     tm_descent: i32,
     device_context: win32.graphics.gdi.CreatedHDC,
     out_memory: []u8,
@@ -107,6 +108,43 @@ fn loadGlyphBMP(
     }
 
     _ = win32.graphics.gdi.TextOutW(device_context, pre_step_x, 0, @ptrCast(cheese_point), 1);
+
+    if (scale > 1) {
+        bound_height /= scale;
+        bound_width /= scale;
+
+        var row: [*]u32 = @as([*]u32, @ptrCast(@alignCast(font_bits.?))) + (max_glyph_dim.y() - 1) * max_glyph_dim.x();
+        var sample_row: [*]u32 = @as([*]u32, @ptrCast(@alignCast(font_bits.?))) + (max_glyph_dim.y() - 1) * max_glyph_dim.x();
+        var y: u32 = 0;
+        while (y < bound_height) : (y += 1) {
+            var pixel = row;
+            var sample = sample_row;
+
+            var x: u32 = 0;
+            while (x < bound_width) : (x += 1) {
+                var accumulator: u32 = 0;
+                var sample_inner = sample;
+
+                var y_offset: u32 = 0;
+                while (y_offset < scale) : (y_offset += 1) {
+                    var x_offset: u32 = 0;
+                    while (x_offset < scale) : (x_offset += 1) {
+                        accumulator += sample_inner[x_offset] & 0xff;
+                    }
+                    sample_inner -= max_glyph_dim.x();
+                }
+
+                accumulator /= (scale * scale);
+
+                pixel[0] = accumulator;
+                pixel += 1;
+
+                sample += scale;
+            }
+            row -= max_glyph_dim.x();
+            sample_row -= scale * max_glyph_dim.x();
+        }
+    }
 
     var min_x: u32 = std.math.maxInt(u32);
     var min_y: u32 = std.math.maxInt(u32);
@@ -287,12 +325,25 @@ fn extractFont(
     // Load and select the requested font.
     //
 
+    // Windows has some secret ideas about when it's going to antialias its fonts and when it won't. Sure, they have
+    // a flag you pass that says whether you want it antialiased, but it just says that it may antialias, if the font
+    // is "too large" it won't antialias it. The limit is unknown, but on both Casey's machine and mine the limit
+    // for "LiberationMono-Regular.ttf" was 353, beyond that it refuses to antialias.
+    const scale: u32 = if (pixel_height > 128) 4 else 1;
+
+    const scale_ratio: f32 = 1.0 / @as(f32, @floatFromInt(scale));
+    const sample_pixel_height: u32 = scale * pixel_height;
+    var i_quality: win32.graphics.gdi.FONT_QUALITY = .ANTIALIASED_QUALITY;
+    if (scale > 1) {
+        i_quality = .DEFAULT_QUALITY;
+    }
+
     const device_context: win32.graphics.gdi.CreatedHDC =
         win32.graphics.gdi.CreateCompatibleDC(win32.graphics.gdi.GetDC(null));
 
     _ = win32.graphics.gdi.AddFontResourceExA(@ptrCast(ttf_file_name), .PRIVATE, null);
     if (win32.graphics.gdi.CreateFontA(
-        @intCast(pixel_height),
+        -@as(i32, @intCast(sample_pixel_height)),
         0,
         0,
         0,
@@ -303,7 +354,7 @@ fn extractFont(
         @intFromEnum(win32.graphics.gdi.DEFAULT_CHARSET),
         .DEFAULT_PRECIS,
         win32.graphics.gdi.CLIP_DEFAULT_PRECIS,
-        .ANTIALIASED_QUALITY,
+        i_quality,
         win32.graphics.gdi.FF_DONTCARE,
         @ptrCast(font_name),
     )) |win32_handle| {
@@ -418,6 +469,7 @@ fn extractFont(
                 font_bits,
                 code_point,
                 max_glyph_dim,
+                scale,
                 tm_descent,
                 device_context,
                 out_memory,
@@ -474,7 +526,7 @@ fn extractFont(
                 }
             }
 
-            try hht_out_writer.print("{d:3}", .{@as(u32, @intFromFloat(horizontal_advance[index]))});
+            try hht_out_writer.print("{d:3}", .{@as(u32, @intFromFloat(scale_ratio * horizontal_advance[index]))});
         }
         try hht_out_writer.print(";\n", .{});
 
