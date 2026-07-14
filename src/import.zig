@@ -29,10 +29,13 @@ const Stream = stream.Stream;
 const Buffer = types.Buffer;
 const String = types.String;
 const MemoryArena = memory.MemoryArena;
+const TemporaryMemory = memory.TemporaryMemory;
 const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
+const HHAFont = file_formats.HHAFont;
+const HHAFontGlyph = file_formats.HHAFontGlyph;
 const HHAAssetType = file_formats.HHAAssetType;
 const HHAAnnotation = file_formats.HHAAnnotation;
 const HHAAlignPoint = file_formats.HHAAlignPoint;
@@ -978,6 +981,10 @@ pub fn parseHHT(
             } else {
                 tokenizer.encounteredError(directive, "Unrecongnized directive.", .{});
             }
+        } else if (token.equals("font")) {
+            parseFontBlock(&tokenizer, context, token);
+        } else if (token.equals("default")) {
+            parseDefaultBlock(&tokenizer, context, token);
         } else if (token.token_type == .Identifier) {
             if (context.hha_index != 0) {
                 parseTopLevelBlock(&tokenizer, context, token);
@@ -1102,6 +1109,117 @@ fn ignoreAllInputUpToAndIncluding(context: *HHTContext, token: Token) void {
         context.hht_copy_point = token.text.data + token.text.count;
     }
 }
+fn updateSingleAssetMetadata(
+    assets: *Assets,
+    asset_file: *AssetFile,
+    file_base_name: String,
+    errors: *Stream,
+    fields: *HHTFields,
+    append_tags: ImportTagArray,
+    asset_index: u32,
+    tags: ImportGridTag,
+) void {
+    const asset: *Asset = &assets.assets[asset_index];
+    if (tags.type_id != .None) {
+        if (asset.asset_type == 0) {
+            setAssetType(assets, asset_index, tags.type_id);
+        }
+    } else {
+        _ = stream.outputWithSrc(errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
+    }
+
+    var tags_differ: bool = false;
+    const total_tag_count: u32 = tags.tags.getCount() + append_tags.getCount();
+
+    if (total_tag_count == (asset.hha.one_past_last_tag_index - asset.hha.first_tag_index)) {
+        var test_tag_index: u32 = asset.hha.first_tag_index;
+        var tag_index: u32 = tags.tags.first_tag_index;
+        while (tag_index < tags.tags.one_past_last_tag_index) : (tag_index += 1) {
+            const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
+            if (!assets.tags[test_tag_index].equals(source_tag.*)) {
+                tags_differ = true;
+            }
+            test_tag_index += 1;
+        }
+        tag_index = append_tags.first_tag_index;
+        while (tag_index < append_tags.one_past_last_tag_index) : (tag_index += 1) {
+            const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
+            if (!assets.tags[test_tag_index].equals(source_tag.*)) {
+                tags_differ = true;
+            }
+            test_tag_index += 1;
+        }
+    } else {
+        tags_differ = true;
+    }
+
+    if (tags_differ) {
+        var builder: TagBuilder = beginTags(assets);
+        var tag_index: u32 = tags.tags.first_tag_index;
+        while (tag_index < tags.tags.one_past_last_tag_index) : (tag_index += 1) {
+            const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
+            addTag(&builder, source_tag.id, source_tag.value);
+        }
+        tag_index = append_tags.first_tag_index;
+        while (tag_index < append_tags.one_past_last_tag_index) : (tag_index += 1) {
+            const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
+            addTag(&builder, source_tag.id, source_tag.value);
+        }
+        const combined_tags: ImportGridTag = endTags(&builder, .None);
+        if (builder.has_error) {
+            _ = stream.outputWithSrc(errors, @src(), "Out of tag space.", .{});
+        }
+
+        asset.hha.first_tag_index = combined_tags.tags.first_tag_index;
+        asset.hha.one_past_last_tag_index = combined_tags.tags.one_past_last_tag_index;
+        asset_file.modified = true;
+    }
+
+    updateAssetString(
+        assets,
+        asset_file,
+        fields.name,
+        &asset.annotation.asset_name_count,
+        &asset.annotation.asset_name_offset,
+    );
+    updateAssetString(
+        assets,
+        asset_file,
+        fields.description,
+        &asset.annotation.asset_description_count,
+        &asset.annotation.asset_description_offset,
+    );
+    updateAssetString(
+        assets,
+        asset_file,
+        fields.author,
+        &asset.annotation.author_count,
+        &asset.annotation.author_offset,
+    );
+    updateAssetString(
+        assets,
+        asset_file,
+        file_base_name,
+        &asset.annotation.source_file_base_name_count,
+        &asset.annotation.source_file_base_name_offset,
+    );
+
+    const asset_errors: Stream = .{};
+    const file_error_stream_size: u32 = @intCast(errors.getTotalSize());
+    const asset_error_stream_size: u32 = @intCast(asset_errors.getTotalSize());
+    asset.annotation.error_stream_count = file_error_stream_size + asset_error_stream_size;
+    asset.annotation.error_stream_offset = reserveData(
+        assets,
+        asset_file,
+        asset.annotation.error_stream_count,
+    );
+    writeAssetStream(asset_file, asset.annotation.error_stream_offset, errors);
+    writeAssetStream(
+        asset_file,
+        asset.annotation.error_stream_offset + file_error_stream_size,
+        &asset_errors,
+    );
+}
 
 fn updateAssetMetadata(
     assets: *Assets,
@@ -1121,106 +1239,15 @@ fn updateAssetMetadata(
                 const asset_index: u32 = file.asset_indices[y_index][x_index];
                 if (asset_index != 0) {
                     const tags: ImportGridTag = grid.tags[y_index][x_index];
-
-                    const asset: *Asset = &assets.assets[asset_index];
-                    if (tags.type_id != .None) {
-                        if (asset.asset_type == 0) {
-                            setAssetType(assets, asset_index, tags.type_id);
-                        }
-                    } else {
-                        _ = stream.outputWithSrc(&file.errors, @src(), "Sprite found in what is required to be a blank tile.\n", .{});
-                    }
-
-                    var tags_differ: bool = false;
-                    const total_tag_count: u32 = tags.tags.getCount() + append_tags.getCount();
-
-                    if (total_tag_count == (asset.hha.one_past_last_tag_index - asset.hha.first_tag_index)) {
-                        var test_tag_index: u32 = asset.hha.first_tag_index;
-                        var tag_index: u32 = tags.tags.first_tag_index;
-                        while (tag_index < tags.tags.one_past_last_tag_index) : (tag_index += 1) {
-                            const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
-                            if (!assets.tags[test_tag_index].equals(source_tag.*)) {
-                                tags_differ = true;
-                            }
-                            test_tag_index += 1;
-                        }
-                        tag_index = append_tags.first_tag_index;
-                        while (tag_index < append_tags.one_past_last_tag_index) : (tag_index += 1) {
-                            const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
-                            if (!assets.tags[test_tag_index].equals(source_tag.*)) {
-                                tags_differ = true;
-                            }
-                            test_tag_index += 1;
-                        }
-                    } else {
-                        tags_differ = true;
-                    }
-
-                    if (tags_differ) {
-                        var builder: TagBuilder = beginTags(assets);
-                        var tag_index: u32 = tags.tags.first_tag_index;
-                        while (tag_index < tags.tags.one_past_last_tag_index) : (tag_index += 1) {
-                            const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
-                            addTag(&builder, source_tag.id, source_tag.value);
-                        }
-                        tag_index = append_tags.first_tag_index;
-                        while (tag_index < append_tags.one_past_last_tag_index) : (tag_index += 1) {
-                            const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
-                            addTag(&builder, source_tag.id, source_tag.value);
-                        }
-                        const combined_tags: ImportGridTag = endTags(&builder, .None);
-                        if (builder.has_error) {
-                            _ = stream.outputWithSrc(&file.errors, @src(), "Out of tag space.", .{});
-                        }
-
-                        asset.hha.first_tag_index = combined_tags.tags.first_tag_index;
-                        asset.hha.one_past_last_tag_index = combined_tags.tags.one_past_last_tag_index;
-                        asset_file.modified = true;
-                    }
-
-                    updateAssetString(
-                        assets,
-                        asset_file,
-                        fields.name,
-                        &asset.annotation.asset_name_count,
-                        &asset.annotation.asset_name_offset,
-                    );
-                    updateAssetString(
-                        assets,
-                        asset_file,
-                        fields.description,
-                        &asset.annotation.asset_description_count,
-                        &asset.annotation.asset_description_offset,
-                    );
-                    updateAssetString(
-                        assets,
-                        asset_file,
-                        fields.author,
-                        &asset.annotation.author_count,
-                        &asset.annotation.author_offset,
-                    );
-                    updateAssetString(
+                    updateSingleAssetMetadata(
                         assets,
                         asset_file,
                         file.base_name,
-                        &asset.annotation.source_file_base_name_count,
-                        &asset.annotation.source_file_base_name_offset,
-                    );
-
-                    const asset_errors: Stream = .{};
-                    const file_error_stream_size: u32 = @intCast(file.errors.getTotalSize());
-                    const asset_error_stream_size: u32 = @intCast(asset_errors.getTotalSize());
-                    asset.annotation.error_stream_count = file_error_stream_size + asset_error_stream_size;
-                    asset.annotation.error_stream_offset = reserveData(
-                        assets,
-                        asset_file,
-                        asset.annotation.error_stream_count,
-                    );
-                    writeAssetStream(asset_file, asset.annotation.error_stream_offset, &file.errors);
-                    writeAssetStream(
-                        asset_file,
-                        asset.annotation.error_stream_offset + file_error_stream_size,
-                        &asset_errors,
+                        &file.errors,
+                        fields,
+                        append_tags,
+                        asset_index,
+                        tags,
                     );
                 }
             }
@@ -1246,6 +1273,275 @@ fn outPoint(context: *HHTContext, grid_x: u32, grid_y: u32, point_index: u32, po
     );
 }
 
+fn handleCommonFields(
+    tokenizer: *Tokenizer,
+    context: *HHTContext,
+    token: Token,
+    fields: *HHTFields,
+    append_tags: ?*ImportTagArray,
+) bool {
+    var handled: bool = true;
+
+    if (token.equals("Name")) {
+        _ = tokenizer.requireToken(.Equals);
+        fields.name = tokenizer.requireToken(.String).text;
+    } else if (token.equals("Author")) {
+        _ = tokenizer.requireToken(.Equals);
+        fields.author = tokenizer.requireToken(.String).text;
+    } else if (token.equals("Description")) {
+        _ = tokenizer.requireToken(.Equals);
+        fields.description = tokenizer.requireToken(.String).text;
+    } else if (append_tags != null and token.equals("Tags")) {
+        _ = tokenizer.requireToken(.Equals);
+        append_tags.?.* = parseTagList(context.assets, tokenizer);
+    } else {
+        handled = false;
+    }
+
+    return handled;
+}
+
+fn parseDefaultBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Token) void {
+    _ = block_token;
+
+    var fields: HHTFields = context.default_fields;
+
+    _ = tokenizer.requireToken(.OpenBrace);
+
+    while (tokenizer.parsing()) {
+        // var semi_colon: Token = .{};
+
+        const token: Token = tokenizer.getToken();
+        if (token.token_type == .CloseBrace) {
+            break;
+        } else if (!handleCommonFields(tokenizer, context, token, &fields, null)) {
+            tokenizer.encounteredError(token, "Expected field name.", .{});
+        }
+
+        _ = tokenizer.requireToken(.SemiColon);
+    }
+
+    if (tokenizer.parsing()) {
+        context.default_fields = fields;
+    }
+
+    const semi_colon: Token = tokenizer.requireToken(.SemiColon);
+    copyAllInputUpToAndIncluding(context, semi_colon);
+}
+
+fn requireField(tokenizer: *Tokenizer, toke_type: tokenizer_mod.TokenType, name: [:0]const u8) Token {
+    _ = tokenizer.requireIdentifier(name);
+    _ = tokenizer.requireToken(.Equals);
+    const result: Token = tokenizer.requireToken(toke_type);
+    _ = tokenizer.requireToken(.SemiColon);
+    return result;
+}
+
+fn blocksDiffer(
+    temp_mem: *MemoryArena,
+    file_handle: *PlatformFileHandle,
+    offset: u64,
+    size: u32,
+    test_value: *anyopaque,
+) bool {
+    const temp: TemporaryMemory = temp_mem.beginTemporaryMemory();
+    defer temp_mem.endTemporaryMemory(temp);
+
+    var result: bool = false;
+
+    const file_value: *anyopaque = temp_mem.pushSize(size, .noClear());
+    shared.platform.readDataFromFile(file_handle, offset, size, file_value);
+    if (shared.platform.noFileErrors(file_handle)) {
+        result = shared.memoryIsEqual(size, file_value, test_value);
+    }
+
+    return result;
+}
+
+fn importGlyph(context: *HHTContext, file_name: String, align_point_count: u32, align_point: HHAAlignPoint) u32 {
+    _ = context;
+    _ = file_name;
+    _ = align_point_count;
+    _ = align_point;
+    return 0;
+}
+
+fn parseFontBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Token) void {
+    _ = block_token;
+
+    var fields: HHTFields = context.default_fields;
+    var append_tags: ImportTagArray = .{};
+
+    const font_name = tokenizer.requireToken(.Identifier);
+
+    _ = tokenizer.requireToken(.OpenBrace);
+
+    const glyph_count_token: Token = requireField(tokenizer, .Number, "glyph_count");
+
+    if (tokenizer.parsing() and glyph_count_token.i32 > 0) {
+        const font_source_file: *SourceFile = .getOrCreateFromHashValueString(context.assets, font_name.text);
+        const glyph_count: u32 = @intCast(glyph_count_token.i32);
+
+        var code_points: [*]HHAFontGlyph = context.temp_arena.pushArray(glyph_count, HHAFontGlyph, null);
+        var horizontal_advance: [*]f32 = context.temp_arena.pushArray(glyph_count * glyph_count, f32, null);
+
+        var ascender_height: f32 = 0;
+        var descender_height: f32 = 0;
+        var external_leading: f32 = 0;
+        var one_past_highest_code_point: u32 = 0;
+
+        while (tokenizer.parsing()) {
+            // var semi_colon: Token = .{};
+
+            const token: Token = tokenizer.getToken();
+            if (token.token_type == .CloseBrace) {
+                break;
+            } else if (token.equals("ascender_height")) {
+                _ = tokenizer.requireToken(.Equals);
+                ascender_height = tokenizer.requireToken(.Number).f32;
+            } else if (token.equals("descender_height")) {
+                _ = tokenizer.requireToken(.Equals);
+                descender_height = tokenizer.requireToken(.Number).f32;
+            } else if (token.equals("external_leading")) {
+                _ = tokenizer.requireToken(.Equals);
+                external_leading = tokenizer.requireToken(.Number).f32;
+            } else if (token.equals("glyph")) {
+                const glyph_index_token: Token = tokenizer.requireToken(.Number);
+                const glyph_index: u32 = @intCast(glyph_index_token.i32);
+                _ = tokenizer.requireToken(.Comma);
+                const file_name: Token = tokenizer.requireToken(.String);
+                _ = tokenizer.requireToken(.Comma);
+                const code_point: u32 = @intCast(tokenizer.requireToken(.Number).i32);
+                _ = tokenizer.requireToken(.Comma);
+                const align_x: u32 = @intCast(tokenizer.requireToken(.Number).i32);
+                _ = tokenizer.requireToken(.Comma);
+                const align_y: u32 = @intCast(tokenizer.requireToken(.Number).i32);
+                _ = tokenizer.requireToken(.Comma);
+
+                var align_point: HHAAlignPoint = .{};
+                align_point.set(.Default, true, 1.0, .new(0.5, 0.5));
+
+                if (glyph_index < glyph_count) {
+                    if (align_x < std.math.maxInt(u16) and align_y < std.math.maxInt(u16)) {
+                        code_points[glyph_index].unicode_code_point = code_point;
+                        if (one_past_highest_code_point <= code_point) {
+                            one_past_highest_code_point = code_point + 1;
+                        }
+
+                        align_point.position_percent[0] = @intCast(align_x);
+                        align_point.position_percent[1] = @intCast(align_y);
+                    } else {
+                        tokenizer.encounteredError(glyph_index_token, "Glyph has bad alignment values.", .{});
+                    }
+                } else {
+                    tokenizer.encounteredError(
+                        glyph_index_token,
+                        "Glyph index too high for font (%u exceeds limit of %u).",
+                        .{ glyph_index, glyph_count },
+                    );
+                }
+
+                code_points[glyph_index].bitmap = importGlyph(context, file_name.text, 1, align_point);
+            } else if (token.equals("HorizontalAdvance")) {
+                _ = tokenizer.requireToken(.Equals);
+
+                var read_index: u32 = 0;
+                while (read_index < glyph_count * glyph_count) : (read_index += 1) {
+                    if (read_index > 0) {
+                        _ = tokenizer.requireToken(.Comma);
+                    }
+
+                    horizontal_advance[read_index] = tokenizer.requireToken(.Number).f32;
+                }
+            } else if (!handleCommonFields(tokenizer, context, token, &fields, &append_tags)) {
+                tokenizer.encounteredError(token, "Expected field name.", .{});
+            }
+
+            _ = tokenizer.requireToken(.SemiColon);
+        }
+
+        if (tokenizer.parsing()) {
+            font_source_file.dest_file_index = context.hha_index;
+
+            if (context.assets.getFile(font_source_file.dest_file_index)) |asset_file| {
+                var needs_full_rebuild: bool = false;
+
+                var asset_index: u32 = font_source_file.asset_indices[0][0];
+                if (asset_index != 0) {
+                    needs_full_rebuild = true;
+                    asset_index = reserveAsset(context.assets, 1);
+                }
+
+                const asset: *Asset = @ptrCast(context.assets.assets + asset_index);
+                asset.file_index = font_source_file.dest_file_index;
+
+                var font: *HHAFont = &asset.hha.info.font;
+                const code_points_size: u32 = glyph_count * @sizeOf(HHAFontGlyph);
+                const horizontal_advance_size: u32 = glyph_count * glyph_count * @sizeOf(f32);
+                const data_size: u32 = code_points_size + horizontal_advance_size;
+                needs_full_rebuild = needs_full_rebuild or
+                    asset.hha.data_size != data_size or
+                    font.one_past_highest_code_point != one_past_highest_code_point or
+                    font.glyph_count != glyph_count or
+                    font.ascender_height != ascender_height or
+                    font.descender_height != descender_height or
+                    font.external_leading != external_leading or
+                    blocksDiffer(
+                        context.temp_arena,
+                        &asset_file.handle,
+                        asset.hha.data_offset,
+                        code_points_size,
+                        code_points,
+                    ) or
+                    blocksDiffer(
+                        context.temp_arena,
+                        &asset_file.handle,
+                        asset.hha.data_offset + code_points_size,
+                        horizontal_advance_size,
+                        horizontal_advance,
+                    );
+
+                font.one_past_highest_code_point = one_past_highest_code_point;
+                font.glyph_count = glyph_count;
+                font.ascender_height = ascender_height;
+                font.descender_height = descender_height;
+                font.external_leading = external_leading;
+
+                const extra_tags: ImportGridTag = .{};
+                updateSingleAssetMetadata(
+                    context.assets,
+                    asset_file,
+                    context.hha_stem,
+                    tokenizer.error_stream,
+                    &fields,
+                    append_tags,
+                    asset_index,
+                    extra_tags,
+                );
+
+                if (needs_full_rebuild) {
+                    asset.hha.data_offset = reserveData(context.assets, asset_file, data_size);
+                    writeAssetData(
+                        asset_file,
+                        asset.hha.data_offset,
+                        code_points_size,
+                        @ptrCast(@alignCast(code_points)),
+                    );
+                    writeAssetData(
+                        asset_file,
+                        asset.hha.data_offset + code_points_size,
+                        horizontal_advance_size,
+                        @ptrCast(@alignCast(horizontal_advance)),
+                    );
+                }
+            }
+        }
+    }
+
+    const semi_colon: Token = tokenizer.requireToken(.SemiColon);
+    copyAllInputUpToAndIncluding(context, semi_colon);
+}
+
 fn parseTopLevelBlock(
     tokenizer: *Tokenizer,
     context: *HHTContext,
@@ -1259,7 +1555,6 @@ fn parseTopLevelBlock(
     // Determine the import type from the block type.
     //
 
-    var is_default: bool = false;
     var is_audio: bool = false;
     var is_art: bool = false;
 
@@ -1267,9 +1562,7 @@ fn parseTopLevelBlock(
     var import_type: ImportType = .None;
     var sub_dir: []const u8 = "";
 
-    if (block_token.equals("default")) {
-        is_default = true;
-    } else if (block_token.equals("music")) {
+    if (block_token.equals("music")) {
         import_type = .Audio;
         template_tags = &context.assets.audio_channel_tags;
 
@@ -1326,28 +1619,26 @@ fn parseTopLevelBlock(
     var match: ?*SourceFile = null;
     var file_info: ?*PlatformFileInfo = null;
 
-    if (!is_default) {
-        const file_name: Token = tokenizer.requireToken(.String);
+    const file_name: Token = tokenizer.requireToken(.String);
 
-        var buf: [4096]u8 = undefined;
-        const length =
-            shared.formatString(buf.len, &buf, "sources/%S/%s/%S", .{ context.hha_stem, sub_dir, file_name.text });
-        const path: [:0]u8 = @ptrCast(buf[0..length]);
+    var buf: [4096]u8 = undefined;
+    const length =
+        shared.formatString(buf.len, &buf, "sources/%S/%s/%S", .{ context.hha_stem, sub_dir, file_name.text });
+    const path: [:0]u8 = @ptrCast(buf[0..length]);
 
-        file_info = shared.platform.getFileByPath(
-            &context.file_group,
-            @ptrCast(path),
-            @intFromEnum(shared.OpenFileModeFlags.Read),
-        );
-        if (file_info != null) {
-            match = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
+    file_info = shared.platform.getFileByPath(
+        &context.file_group,
+        @ptrCast(path),
+        @intFromEnum(shared.OpenFileModeFlags.Read),
+    );
+    if (file_info != null) {
+        match = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
 
-            if (match.?.file_date != file_info.?.file_date) {
-                needs_full_rebuild = true;
-            }
-        } else {
-            tokenizer.encounteredError(file_name, "File not found (looked in %s)", .{path});
+        if (match.?.file_date != file_info.?.file_date) {
+            needs_full_rebuild = true;
         }
+    } else {
+        tokenizer.encounteredError(file_name, "File not found (looked in %s)", .{path});
     }
 
     const open_brace: Token = tokenizer.requireToken(.OpenBrace);
@@ -1420,18 +1711,6 @@ fn parseTopLevelBlock(
                 copyAllInputUpToAndIncluding(context, token);
             }
             break;
-        } else if (token.equals("Name")) {
-            _ = tokenizer.requireToken(.Equals);
-            fields.name = tokenizer.requireToken(.String).text;
-        } else if (token.equals("Author")) {
-            _ = tokenizer.requireToken(.Equals);
-            fields.author = tokenizer.requireToken(.String).text;
-        } else if (token.equals("Description")) {
-            _ = tokenizer.requireToken(.Equals);
-            fields.description = tokenizer.requireToken(.String).text;
-        } else if (token.equals("Tags")) {
-            _ = tokenizer.requireToken(.Equals);
-            append_tags = parseTagList(context.assets, tokenizer);
         } else if (token.equals("Align")) {
             if (!is_art) {
                 tokenizer.encounteredError(token, "Alignment points not allowed on audio assets.", .{});
@@ -1501,7 +1780,7 @@ fn parseTopLevelBlock(
             } else {
                 tokenizer.encounteredError(type0, "Unrecognized alignment point type.", .{});
             }
-        } else {
+        } else if (!handleCommonFields(tokenizer, context, token, &fields, &append_tags)) {
             tokenizer.encounteredError(token, "Expected field name.", .{});
         }
 
@@ -1518,9 +1797,7 @@ fn parseTopLevelBlock(
     //
 
     if (tokenizer.parsing()) {
-        if (is_default) {
-            context.default_fields = fields;
-        } else if (match != null) {
+        if (match != null) {
             if (match.?.dest_file_index != context.hha_index) {
                 match.?.dest_file_index = context.hha_index;
                 needs_full_rebuild = true;

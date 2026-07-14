@@ -908,7 +908,7 @@ pub const Assets = struct {
             font.glyph_count += 1;
             const glyph: *HHAFontGlyph = &font.glyphs[glyph_index];
             glyph.unicode_code_point = code_point;
-            glyph.bitmap = result.?;
+            glyph.bitmap = result.?.value;
             font.glyph_index_from_code_point[code_point] = glyph_index;
 
             if (font.one_past_highest_code_point <= code_point) {

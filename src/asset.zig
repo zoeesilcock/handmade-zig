@@ -133,6 +133,12 @@ pub const SourceFile = struct {
 
     errors: Stream,
 
+    pub fn getOrCreateFromHashValueString(assets: *Assets, base_name: String) *SourceFile {
+        _ = assets;
+        _ = base_name;
+        return undefined;
+    }
+
     pub fn getOrCreateFromHashValue(assets: *Assets, base_name: [*:0]const u8) *SourceFile {
         const hash_value: u32 = @mod(shared.stringHashOfZ(base_name), @as(u32, @intCast(assets.source_file_hash.len)));
 
@@ -1144,7 +1150,7 @@ pub const LoadedFont = extern struct {
         _ = assets;
 
         const glyph = self.getGlyphFromCodePoint(info, desired_code_point);
-        var result = self.glyphs[glyph].bitmap;
+        var result: BitmapId = .{ .value = self.glyphs[glyph].bitmap };
         result.value += self.bitmap_id_offset;
 
         return result;

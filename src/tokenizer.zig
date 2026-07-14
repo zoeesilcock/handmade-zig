@@ -6,7 +6,7 @@ const stream = @import("stream.zig");
 // Types.
 const String = types.String;
 
-const TokenType = enum(u32) {
+pub const TokenType = enum(u32) {
     Unknown,
 
     Comma,
@@ -297,6 +297,16 @@ pub const Tokenizer = struct {
 
         if (token.token_type != desired_type) {
             self.encounteredError(token, "Unexpected token type (expected %s)", .{@tagName(desired_type)});
+        }
+
+        return token;
+    }
+
+    pub fn requireIdentifier(self: *Tokenizer, desired_value: [:0]const u8) Token {
+        const token: Token = self.requireToken(.Identifier);
+
+        if (!token.equals(desired_value)) {
+            self.encounteredError(token, "Expected \"%s\"", .{desired_value});
         }
 
         return token;

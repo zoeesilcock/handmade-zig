@@ -393,7 +393,7 @@ pub const HHASound = extern struct {
 
 pub const HHAFontGlyph = extern struct {
     unicode_code_point: u32,
-    bitmap: BitmapId,
+    bitmap: u32,
 };
 
 pub const HHAFont = extern struct {
