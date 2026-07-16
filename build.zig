@@ -285,8 +285,11 @@ fn addFontExtractor(
 
     // Allow running asset builder from build command.
     const run_font_extractor = b.addRunArtifact(font_extractor_exe);
+    if (b.args) |args| {
+        run_font_extractor.addArgs(args);
+    }
     const font_extractor_run_step = b.step("extract-fonts", "Run the font extractor");
-    run_font_extractor.setCwd(b.path("data/"));
+    run_font_extractor.setCwd(b.path("."));
     font_extractor_run_step.dependOn(&run_font_extractor.step);
 }
 
@@ -389,6 +392,9 @@ fn addRaytracer(
     raytracer_exe.stack_size = 0x400000; // 4MB.
     raytracer_exe.root_module.addOptions("build_options", build_options);
     raytracer_exe.root_module.addImport("math", math_module);
+
+    const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
+    raytracer_exe.root_module.addImport("win32", zigwin32);
 
     b.installArtifact(raytracer_exe);
 

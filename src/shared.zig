@@ -391,7 +391,7 @@ pub fn isNumber(char: u32) bool {
 }
 
 pub fn isHex(char: u8) bool {
-    return (char >= '0' and char <= '9') or (char >= 'A' and char <= 'F');
+    return (char >= '0' and char <= '9') or (char >= 'A' and char <= 'F') or (char >= 'a' and char <= 'f');
 }
 
 pub fn getHex(char: u8) u32 {
@@ -399,7 +399,7 @@ pub fn getHex(char: u8) u32 {
 
     if (char >= '0' and char <= '9') {
         result = char - '0';
-    } else if (char >= 'A' and char <= 'F') {
+    } else if (char >= 'A' and char <= 'F' or char >= 'a' and char <= 'f') {
         result = 0xA + (char - 'A');
     }
 

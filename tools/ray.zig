@@ -6,7 +6,6 @@ const lane = @import("ray_lane.zig");
 const win32 = if (PLATFORM == .windows) @import("ray_win32.zig") else @panic("Unsupported platform");
 
 const c = @cImport({
-    @cInclude("stdlib.h");
     @cInclude("math.h");
     @cInclude("time.h");
 });

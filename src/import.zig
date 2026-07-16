@@ -88,6 +88,13 @@ const TagBuilder = struct {
     has_error: bool = false,
 };
 
+const ImportFileMatch = struct {
+    valid: bool = false,
+    needs_full_rebuild: bool = false,
+    source: ?*SourceFile = null,
+    file_info: ?*PlatformFileInfo = null,
+};
+
 const HHTContext = struct {
     assets: *Assets,
     default_fields: HHTFields = .{},
@@ -112,7 +119,7 @@ const HHTFields = struct {
 pub fn reserveTag(assets: *Assets, tag_count: u32) u32 {
     var result: u32 = 0;
 
-    if ((assets.tag_count + tag_count) < assets.max_tag_count) {
+    if ((assets.tag_count + tag_count) <= assets.max_tag_count) {
         result = assets.tag_count;
         assets.tag_count += tag_count;
     }
@@ -123,7 +130,7 @@ pub fn reserveTag(assets: *Assets, tag_count: u32) u32 {
 pub fn reserveAsset(assets: *Assets, asset_count: u32) u32 {
     var result: u32 = 0;
 
-    if ((assets.asset_count + asset_count) < assets.max_asset_count) {
+    if ((assets.asset_count + asset_count) <= assets.max_asset_count) {
         result = assets.asset_count;
         assets.asset_count += asset_count;
     }
@@ -248,8 +255,10 @@ pub fn setAssetType(assets: *Assets, asset_index: u32, type_id: AssetBasicCatego
         std.debug.assert(asset.next_of_type == 0);
         std.debug.assert(asset.asset_type == 0);
         asset.asset_type = @intFromEnum(type_id);
-        asset.next_of_type = assets.first_asset_of_type[@intFromEnum(type_id)];
-        assets.first_asset_of_type[@intFromEnum(type_id)] = asset_index;
+        if (type_id != .None) {
+            asset.next_of_type = assets.first_asset_of_type[@intFromEnum(type_id)];
+            assets.first_asset_of_type[@intFromEnum(type_id)] = asset_index;
+        }
     }
 }
 
@@ -383,7 +392,8 @@ fn extractImage(
 ) ImageU32 {
     const result: ImageU32 = .pushImage(temp_arena, one_past_max_x - min_x, one_past_max_y - min_y);
     var dest_pixel: [*]u32 = @ptrCast(result.pixels);
-    var source_row: [*]u32 = source_image.pixels.ptr + ((one_past_max_y - 1) * source_image.width + min_x);
+    const one: u32 = if (one_past_max_y > 0) 1 else 0;
+    var source_row: [*]u32 = source_image.pixels.ptr + ((one_past_max_y - one) * source_image.width + min_x);
 
     var y: u32 = 0;
     while (y < result.height) : (y += 1) {
@@ -407,34 +417,15 @@ fn extractImage(
     return result;
 }
 
-fn processPlateImport(
-    assets: *Assets,
-    file: *SourceFile,
-    source_image: ImageU32,
-    temp_arena: *MemoryArena,
-) void {
-    const orig_dim: Vector2u = .new(source_image.width, source_image.height);
-    const donwsample_count: u32 = getDownsampleCountForFit(source_image, ASSET_MAX_PLATE_DIM, ASSET_MAX_PLATE_DIM);
-    const prepared_image: ImageU32 = extractImage(
-        source_image,
-        0,
-        0,
-        source_image.width,
-        source_image.height,
-        temp_arena,
-    );
-    const dest_image: ImageU32 = downsample(prepared_image, donwsample_count);
-    writeImageToHHA(assets, file, orig_dim, dest_image, temp_arena, 0, 0);
-}
-
 fn processSingleTileImport(
     assets: *Assets,
     file: *SourceFile,
     source_image: ImageU32,
     temp_arena: *MemoryArena,
+    max_dimension: u32,
 ) void {
     const orig_dim: Vector2u = .new(source_image.width, source_image.height);
-    const donwsample_count: u32 = getDownsampleCountForFit(source_image, ASSET_MAX_SPRITE_DIM, ASSET_MAX_SPRITE_DIM);
+    const donwsample_count: u32 = getDownsampleCountForFit(source_image, max_dimension, max_dimension);
     const prepared_image: ImageU32 = extractImage(
         source_image,
         0,
@@ -944,7 +935,7 @@ pub fn parseHHT(
             const directive = tokenizer.getToken();
             if (directive.equals("include")) {
                 context.include_depth += 1;
-                if (context.include_depth > 16) {
+                if (context.include_depth < 16) {
                     const file_name: Token = tokenizer.requireToken(.String);
 
                     var buf: [4096]u8 = undefined;
@@ -981,10 +972,10 @@ pub fn parseHHT(
             } else {
                 tokenizer.encounteredError(directive, "Unrecongnized directive.", .{});
             }
-        } else if (token.equals("font")) {
-            parseFontBlock(&tokenizer, context, token);
         } else if (token.equals("default")) {
             parseDefaultBlock(&tokenizer, context, token);
+        } else if (token.equals("font")) {
+            parseFontBlock(&tokenizer, context, token);
         } else if (token.token_type == .Identifier) {
             if (context.hha_index != 0) {
                 parseTopLevelBlock(&tokenizer, context, token);
@@ -1358,25 +1349,158 @@ fn blocksDiffer(
     return result;
 }
 
-fn importGlyph(context: *HHTContext, file_name: String, align_point_count: u32, align_point: HHAAlignPoint) u32 {
-    _ = context;
-    _ = file_name;
-    _ = align_point_count;
-    _ = align_point;
-    return 0;
+fn updateAssetDataFromFile(
+    context: *HHTContext,
+    match: ImportFileMatch,
+    import_type: ImportType,
+    append_tags: ImportTagArray,
+    template_tags: *ImportGridTags,
+    fields: *HHTFields,
+    opt_align_points: ?*[ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]HHAAlignPoint,
+) bool {
+    var result = false;
+    var needs_full_rebuild: bool = match.needs_full_rebuild;
+    const temp_arena: *MemoryArena = context.temp_arena;
+
+    if (match.valid) {
+        if (match.source.?.dest_file_index != context.hha_index) {
+            match.source.?.dest_file_index = context.hha_index;
+            needs_full_rebuild = true;
+        }
+
+        if (needs_full_rebuild) {
+            const temp_marker: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
+            defer temp_arena.endTemporaryMemory(temp_marker);
+
+            var handle: PlatformFileHandle = shared.platform.openFile(
+                &context.file_group,
+                @constCast(match.file_info.?),
+                @intFromEnum(shared.OpenFileModeFlags.Read),
+            );
+            var file_buffer: Buffer = .{
+                .count = match.file_info.?.file_size,
+            };
+
+            file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
+
+            shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
+            shared.platform.closeFile(&handle);
+
+            // We update this first, because assets that get packed from here on out need to be able to
+            // stamp themselves with the right data.
+            match.source.?.file_date = match.file_info.?.file_date;
+            match.source.?.file_checksum = shared.checksumOf(file_buffer, null);
+
+            const content_stream: Stream = .makeReadStream(file_buffer, &match.source.?.errors);
+
+            var image: ImageU32 = undefined;
+            var sound: SoundI16 = undefined;
+            switch (import_type) {
+                .None => {},
+                .Plate => {
+                    image = png.parsePNG(temp_arena, content_stream, null);
+                    processSingleTileImport(context.assets, match.source.?, image, temp_arena, ASSET_MAX_PLATE_DIM);
+                },
+                .SingleTile => {
+                    image = png.parsePNG(temp_arena, content_stream, null);
+                    processSingleTileImport(context.assets, match.source.?, image, temp_arena, ASSET_MAX_SPRITE_DIM);
+                },
+                .MultiTile => {
+                    image = png.parsePNG(temp_arena, content_stream, null);
+                    processMultiTileImport(context.assets, match.source.?, image, temp_arena);
+                },
+                .Audio => {
+                    sound = wav.parseWAV(temp_arena, file_buffer, &match.source.?.errors);
+                    processAudioImport(context.assets, match.source.?, sound, temp_arena);
+                },
+            }
+        }
+
+        updateAssetMetadata(context.assets, match.source.?, fields, template_tags, append_tags);
+
+        if (opt_align_points) |align_points| {
+            if (context.hht_out == null) {
+                //
+                // TODO: Shouldn't this be marking the assets as having been changed any time a change is detected
+                // in the alignment points?
+                //
+                var grid_y: u32 = 0;
+                while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
+                    var grid_x: u32 = 0;
+                    while (grid_x < ASSET_IMPORT_GRID_MAX) : (grid_x += 1) {
+                        const asset_index = match.source.?.asset_indices[grid_y][grid_x];
+                        if (asset_index > 0) {
+                            const asset: ?*Asset = context.assets.getAsset(asset_index);
+                            std.debug.assert(asset != null);
+                            std.debug.assert(asset.?.hha.type == HHAAssetType.Bitmap);
+
+                            const bitmap: *HHABitmap = &asset.?.hha.info.bitmap;
+                            var point_index: u32 = 0;
+                            while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
+                                bitmap.align_points[point_index] = align_points[grid_y][grid_x][point_index];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result = true;
+    }
+
+    return result;
+}
+
+fn findMatchingFileFor(
+    context: *HHTContext,
+    tokenizer: *Tokenizer,
+    source_token: Token,
+    sub_dir: []const u8,
+    base_name: String,
+) ImportFileMatch {
+    var result: ImportFileMatch = .{};
+
+    var buf: [4096]u8 = undefined;
+    const length = shared.formatString(
+        buf.len,
+        &buf,
+        "sources/%S/%s/%S",
+        .{ context.hha_stem, sub_dir, base_name },
+    );
+    buf[length] = 0;
+    const path: [:0]u8 = buf[0..length :0];
+
+    result.file_info = shared.platform.getFileByPath(
+        &context.file_group,
+        @ptrCast(path),
+        @intFromEnum(shared.OpenFileModeFlags.Read),
+    );
+    if (result.file_info != null) {
+        result.source = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
+        std.debug.assert(result.source != null);
+        if (result.source.?.file_date != result.file_info.?.file_date) {
+            result.needs_full_rebuild = true;
+        }
+        result.valid = true;
+    } else {
+        tokenizer.encounteredError(source_token, "File not found (looked in %s)", .{path});
+    }
+
+    return result;
 }
 
 fn parseFontBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Token) void {
     _ = block_token;
 
     var fields: HHTFields = context.default_fields;
+    var template_tags: ImportGridTags = .{};
     var append_tags: ImportTagArray = .{};
+    var align_points: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]HHAAlignPoint =
+        @splat(@splat(@splat(.{})));
 
-    const font_name = tokenizer.requireToken(.Identifier);
-
+    const font_name = tokenizer.requireToken(.String);
     _ = tokenizer.requireToken(.OpenBrace);
-
-    const glyph_count_token: Token = requireField(tokenizer, .Number, "glyph_count");
+    const glyph_count_token: Token = requireField(tokenizer, .Number, "GlyphCount");
 
     if (tokenizer.parsing() and glyph_count_token.i32 > 0) {
         const font_source_file: *SourceFile = .getOrCreateFromHashValueString(context.assets, font_name.text);
@@ -1396,40 +1520,44 @@ fn parseFontBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Toke
             const token: Token = tokenizer.getToken();
             if (token.token_type == .CloseBrace) {
                 break;
-            } else if (token.equals("ascender_height")) {
+            } else if (token.equals("AscenderHeight")) {
                 _ = tokenizer.requireToken(.Equals);
                 ascender_height = tokenizer.requireToken(.Number).f32;
-            } else if (token.equals("descender_height")) {
+            } else if (token.equals("DescenderHeight")) {
                 _ = tokenizer.requireToken(.Equals);
                 descender_height = tokenizer.requireToken(.Number).f32;
-            } else if (token.equals("external_leading")) {
+            } else if (token.equals("ExternalLeading")) {
                 _ = tokenizer.requireToken(.Equals);
                 external_leading = tokenizer.requireToken(.Number).f32;
-            } else if (token.equals("glyph")) {
+            } else if (token.equals("Glyph")) {
+                _ = tokenizer.requireToken(.OpenBracket);
                 const glyph_index_token: Token = tokenizer.requireToken(.Number);
+                _ = tokenizer.requireToken(.CloseBracket);
                 const glyph_index: u32 = @intCast(glyph_index_token.i32);
-                _ = tokenizer.requireToken(.Comma);
+
+                _ = tokenizer.requireToken(.Equals);
+
                 const file_name: Token = tokenizer.requireToken(.String);
                 _ = tokenizer.requireToken(.Comma);
                 const code_point: u32 = @intCast(tokenizer.requireToken(.Number).i32);
                 _ = tokenizer.requireToken(.Comma);
+                _ = tokenizer.requireToken(.OpenBrace);
                 const align_x: u32 = @intCast(tokenizer.requireToken(.Number).i32);
                 _ = tokenizer.requireToken(.Comma);
                 const align_y: u32 = @intCast(tokenizer.requireToken(.Number).i32);
-                _ = tokenizer.requireToken(.Comma);
+                _ = tokenizer.requireToken(.CloseBrace);
 
-                var align_point: HHAAlignPoint = .{};
-                align_point.set(.Default, true, 1.0, .new(0.5, 0.5));
+                align_points[0][0][0].set(.Default, true, 1.0, .new(0.5, 0.5));
 
                 if (glyph_index < glyph_count) {
-                    if (align_x < std.math.maxInt(u16) and align_y < std.math.maxInt(u16)) {
+                    if (align_x <= std.math.maxInt(u16) and align_y <= std.math.maxInt(u16)) {
                         code_points[glyph_index].unicode_code_point = code_point;
                         if (one_past_highest_code_point <= code_point) {
                             one_past_highest_code_point = code_point + 1;
                         }
 
-                        align_point.position_percent[0] = @intCast(align_x);
-                        align_point.position_percent[1] = @intCast(align_y);
+                        align_points[0][0][0].position_percent[0] = @intCast(align_x);
+                        align_points[0][0][0].position_percent[1] = @intCast(align_y);
                     } else {
                         tokenizer.encounteredError(glyph_index_token, "Glyph has bad alignment values.", .{});
                     }
@@ -1441,7 +1569,32 @@ fn parseFontBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Toke
                     );
                 }
 
-                code_points[glyph_index].bitmap = importGlyph(context, file_name.text, 1, align_point);
+                if (tokenizer.parsing()) {
+                    const match: ImportFileMatch = findMatchingFileFor(
+                        context,
+                        tokenizer,
+                        glyph_index_token,
+                        "fonts",
+                        file_name.text,
+                    );
+
+                    if (match.valid) {
+                        const null_tags: ImportTagArray = .{};
+                        _ = updateAssetDataFromFile(
+                            context,
+                            match,
+                            .SingleTile,
+                            null_tags,
+                            &template_tags,
+                            &fields,
+                            &align_points,
+                        );
+
+                        code_points[glyph_index].bitmap_id = match.source.?.asset_indices[0][0];
+                    } else {
+                        tokenizer.encounteredError(glyph_index_token, "Unable to load font glyph.", .{});
+                    }
+                }
             } else if (token.equals("HorizontalAdvance")) {
                 _ = tokenizer.requireToken(.Equals);
 
@@ -1464,15 +1617,24 @@ fn parseFontBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Toke
             font_source_file.dest_file_index = context.hha_index;
 
             if (context.assets.getFile(font_source_file.dest_file_index)) |asset_file| {
+                var glyph_index: u32 = 0;
+                while (glyph_index < glyph_count) : (glyph_index += 1) {
+                    code_points[glyph_index].bitmap_id -%= asset_file.asset_base;
+                }
+
                 var needs_full_rebuild: bool = false;
 
                 var asset_index: u32 = font_source_file.asset_indices[0][0];
-                if (asset_index != 0) {
+                if (asset_index == 0) {
                     needs_full_rebuild = true;
                     asset_index = reserveAsset(context.assets, 1);
                 }
 
+                var builder: TagBuilder = beginTags(context.assets);
+                const extra_tags: ImportGridTag = endTags(&builder, .Font);
+
                 const asset: *Asset = @ptrCast(context.assets.assets + asset_index);
+                asset.hha.type = .Font;
                 asset.file_index = font_source_file.dest_file_index;
 
                 var font: *HHAFont = &asset.hha.info.font;
@@ -1507,7 +1669,6 @@ fn parseFontBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Toke
                 font.descender_height = descender_height;
                 font.external_leading = external_leading;
 
-                const extra_tags: ImportGridTag = .{};
                 updateSingleAssetMetadata(
                     context.assets,
                     asset_file,
@@ -1547,15 +1708,12 @@ fn parseTopLevelBlock(
     context: *HHTContext,
     block_token: Token,
 ) void {
-    const temp_arena: *MemoryArena = context.temp_arena;
-
     var fields: HHTFields = context.default_fields;
 
     //
     // Determine the import type from the block type.
     //
 
-    var is_audio: bool = false;
     var is_art: bool = false;
 
     var template_tags: *ImportGridTags = undefined;
@@ -1567,13 +1725,11 @@ fn parseTopLevelBlock(
         template_tags = &context.assets.audio_channel_tags;
 
         sub_dir = "music";
-        is_audio = true;
     } else if (block_token.equals("sound")) {
         import_type = .Audio;
         template_tags = &context.assets.audio_channel_tags;
 
         sub_dir = "sound";
-        is_audio = true;
     } else {
         is_art = true;
         sub_dir = "art";
@@ -1614,32 +1770,15 @@ fn parseTopLevelBlock(
     // Locate the matching asset file.
     //
 
-    var needs_full_rebuild: bool = false;
-
-    var match: ?*SourceFile = null;
-    var file_info: ?*PlatformFileInfo = null;
-
     const file_name: Token = tokenizer.requireToken(.String);
 
-    var buf: [4096]u8 = undefined;
-    const length =
-        shared.formatString(buf.len, &buf, "sources/%S/%s/%S", .{ context.hha_stem, sub_dir, file_name.text });
-    const path: [:0]u8 = @ptrCast(buf[0..length]);
-
-    file_info = shared.platform.getFileByPath(
-        &context.file_group,
-        @ptrCast(path),
-        @intFromEnum(shared.OpenFileModeFlags.Read),
+    const match: ImportFileMatch = findMatchingFileFor(
+        context,
+        tokenizer,
+        file_name,
+        sub_dir,
+        file_name.text,
     );
-    if (file_info != null) {
-        match = .getOrCreateFromHashValue(context.assets, @ptrCast(path));
-
-        if (match.?.file_date != file_info.?.file_date) {
-            needs_full_rebuild = true;
-        }
-    } else {
-        tokenizer.encounteredError(file_name, "File not found (looked in %s)", .{path});
-    }
 
     const open_brace: Token = tokenizer.requireToken(.OpenBrace);
     copyAllInputUpToAndIncluding(context, open_brace);
@@ -1655,12 +1794,12 @@ fn parseTopLevelBlock(
         @splat(@splat(@splat(.{})));
 
     if (is_art) {
-        if (context.hht_out != null and match != null) {
+        if (context.hht_out != null and match.valid) {
             var grid_y: u32 = 0;
             while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
                 var grid_x: u32 = 0;
                 while (grid_x < ASSET_IMPORT_GRID_MAX) : (grid_x += 1) {
-                    const asset_index = match.?.asset_indices[grid_y][grid_x];
+                    const asset_index = match.source.?.asset_indices[grid_y][grid_x];
                     if (asset_index > 0) {
                         const asset: ?*Asset = context.assets.getAsset(asset_index);
                         std.debug.assert(asset != null);
@@ -1797,86 +1936,15 @@ fn parseTopLevelBlock(
     //
 
     if (tokenizer.parsing()) {
-        if (match != null) {
-            if (match.?.dest_file_index != context.hha_index) {
-                match.?.dest_file_index = context.hha_index;
-                needs_full_rebuild = true;
-            }
-
-            if (needs_full_rebuild) {
-                const temp_marker: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
-                defer temp_arena.endTemporaryMemory(temp_marker);
-
-                var handle: PlatformFileHandle = shared.platform.openFile(
-                    &context.file_group,
-                    @constCast(file_info.?),
-                    @intFromEnum(shared.OpenFileModeFlags.Read),
-                );
-                var file_buffer: Buffer = .{
-                    .count = file_info.?.file_size,
-                };
-
-                file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
-
-                shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
-                shared.platform.closeFile(&handle);
-
-                // We update this first, because assets that get packed from here on out need to be able to
-                // stamp themselves with the right data.
-                match.?.file_date = file_info.?.file_date;
-                match.?.file_checksum = shared.checksumOf(file_buffer, null);
-
-                const content_stream: Stream = .makeReadStream(file_buffer, &match.?.errors);
-                var image: ImageU32 = undefined;
-                if (is_art) {
-                    image = png.parsePNG(temp_arena, content_stream, null);
-                }
-
-                var sound: SoundI16 = undefined;
-                if (is_audio) {
-                    sound = wav.parseWAV(temp_arena, file_buffer, &match.?.errors);
-                }
-
-                switch (import_type) {
-                    .None => {},
-                    .Plate => {
-                        processPlateImport(context.assets, match.?, image, temp_arena);
-                    },
-                    .SingleTile => {
-                        processSingleTileImport(context.assets, match.?, image, temp_arena);
-                    },
-                    .MultiTile => {
-                        processMultiTileImport(context.assets, match.?, image, temp_arena);
-                    },
-                    .Audio => {
-                        processAudioImport(context.assets, match.?, sound, temp_arena);
-                    },
-                }
-            }
-
-            updateAssetMetadata(context.assets, match.?, &fields, template_tags, append_tags);
-
-            if (is_art and context.hht_out == null) {
-                var grid_y: u32 = 0;
-                while (grid_y < ASSET_IMPORT_GRID_MAX) : (grid_y += 1) {
-                    var grid_x: u32 = 0;
-                    while (grid_x < ASSET_IMPORT_GRID_MAX) : (grid_x += 1) {
-                        const asset_index = match.?.asset_indices[grid_y][grid_x];
-                        if (asset_index > 0) {
-                            const asset: ?*Asset = context.assets.getAsset(asset_index);
-                            std.debug.assert(asset != null);
-                            std.debug.assert(asset.?.hha.type == HHAAssetType.Bitmap);
-
-                            const bitmap: *HHABitmap = &asset.?.hha.info.bitmap;
-                            var point_index: u32 = 0;
-                            while (point_index < HHA_ALIGN_POINT_TYPE_COUNT) : (point_index += 1) {
-                                bitmap.align_points[point_index] = align_points[grid_y][grid_x][point_index];
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        _ = updateAssetDataFromFile(
+            context,
+            match,
+            import_type,
+            append_tags,
+            template_tags,
+            &fields,
+            if (is_art) &align_points else null,
+        );
     }
 }
 
@@ -1961,6 +2029,7 @@ pub fn synchronizeAssetFileChanges(assets: *Assets, save_changes_to_hhts: bool) 
         var file_index: u32 = 1;
         while (file_index < assets.file_count) : (file_index += 1) {
             const file: *AssetFile = @ptrCast(assets.files + file_index);
+            // TODO: It looks like `modified` is getting marked when it shouldn't be.
             if (file.modified) {
                 const temporary_memory: memory.TemporaryMemory = temp_arena.beginTemporaryMemory();
                 defer temp_arena.endTemporaryMemory(temporary_memory);

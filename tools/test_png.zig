@@ -7,7 +7,6 @@ const math = shared.math;
 const types = shared.types;
 const c = @cImport({
     @cInclude("stdlib.h");
-    @cInclude("string.h");
 });
 
 // Types.
@@ -180,7 +179,7 @@ fn crtAllocateMemory(size: memory.MemoryIndex, flags: u64) callconv(.c) ?*Platfo
 
     const total_size: usize = @sizeOf(PlatformMemoryBlock) + size;
     var block: [*]PlatformMemoryBlock = @ptrCast(@alignCast(c.malloc(total_size)));
-    _ = c.memset(block, 0, total_size);
+    @memset(@as([*]u8, @ptrCast(block))[0..total_size], 0);
 
     block[0].size = size;
     block[0].base = @ptrCast(block + 1);

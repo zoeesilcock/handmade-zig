@@ -806,7 +806,11 @@ pub fn writePNG(
     const max_chunk_size: u32 = 65535;
 
     const total_length: u32 = (width * 4 + 1) * height;
-    const chunk_count: u32 = (total_length + max_chunk_size - 1) / max_chunk_size;
+    var chunk_count: u32 = (total_length + max_chunk_size - 1) / max_chunk_size;
+
+    if (chunk_count == 0) {
+        chunk_count = 1;
+    }
 
     const chunk_overhead: u32 = @sizeOf(u8) + @sizeOf(u16) + @sizeOf(u16);
     chunk_header.length = @sizeOf(IDataHeader) + (chunk_count * chunk_overhead) + total_length + @sizeOf(u32);

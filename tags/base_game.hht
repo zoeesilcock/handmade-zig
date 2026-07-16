@@ -1,5 +1,7 @@
 #hha "base_game"
 
+#include "fonts/LiberationMono.hht"
+
 default
 {
     Author = "Anna Rettberg";

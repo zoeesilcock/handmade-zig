@@ -134,18 +134,12 @@ pub const SourceFile = struct {
     errors: Stream,
 
     pub fn getOrCreateFromHashValueString(assets: *Assets, base_name: String) *SourceFile {
-        _ = assets;
-        _ = base_name;
-        return undefined;
-    }
-
-    pub fn getOrCreateFromHashValue(assets: *Assets, base_name: [*:0]const u8) *SourceFile {
-        const hash_value: u32 = @mod(shared.stringHashOfZ(base_name), @as(u32, @intCast(assets.source_file_hash.len)));
+        const hash_value: u32 = @mod(shared.stringHashOf(base_name), @as(u32, @intCast(assets.source_file_hash.len)));
 
         var match: ?*SourceFile = null;
         var opt_source_file: ?*SourceFile = assets.source_file_hash[hash_value];
         while (opt_source_file) |source_file| : (opt_source_file = source_file.next_in_hash) {
-            if (shared.stringsAreEqual(@ptrCast(source_file.base_name.data), base_name)) {
+            if (shared.stringBuffersEqual(base_name, source_file.base_name)) {
                 match = source_file;
                 break;
             }
@@ -153,10 +147,7 @@ pub const SourceFile = struct {
 
         if (match == null) {
             match = assets.non_restored_memory.pushStruct(SourceFile, .aligned(@alignOf(SourceFile), true));
-            match.?.base_name = .wrapZ(@constCast(assets.non_restored_memory.pushAndNullTerminateString(
-                types.stringLength(base_name),
-                base_name,
-            )));
+            match.?.base_name = assets.non_restored_memory.pushStringSized(base_name);
             match.?.next_in_hash = assets.source_file_hash[hash_value];
             assets.source_file_hash[hash_value] = match;
 
@@ -164,6 +155,10 @@ pub const SourceFile = struct {
         }
 
         return match.?;
+    }
+
+    pub fn getOrCreateFromHashValue(assets: *Assets, base_name: [*:0]const u8) *SourceFile {
+        return getOrCreateFromHashValueString(assets, .wrapZ(@constCast(base_name)));
     }
 
     pub fn getOrCreateFromDate(assets: *Assets, base_name: [*:0]u8, file_date: u64, file_checksum: u64) *SourceFile {
@@ -1150,8 +1145,8 @@ pub const LoadedFont = extern struct {
         _ = assets;
 
         const glyph = self.getGlyphFromCodePoint(info, desired_code_point);
-        var result: BitmapId = .{ .value = self.glyphs[glyph].bitmap };
-        result.value += self.bitmap_id_offset;
+        var result: BitmapId = .{ .value = self.glyphs[glyph].bitmap_id };
+        result.value +%= self.bitmap_id_offset;
 
         return result;
     }

@@ -6,9 +6,9 @@ const types = shared.types;
 const png = shared.png;
 const memory = png.memory;
 const stream = shared.stream;
+const file_formats = shared.file_formats;
 const c = @cImport({
     @cInclude("stdlib.h");
-    @cInclude("string.h");
 });
 
 pub const UNICODE = true;
@@ -24,6 +24,7 @@ const Stream = stream.Stream;
 const StreamChunk = stream.Chunk;
 const MemoryArena = memory.MemoryArena;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
+const HHAAlignPoint = file_formats.HHAAlignPoint;
 
 // Logging.
 pub const std_options: std.Options = .{
@@ -287,7 +288,7 @@ fn crtAllocateMemory(size: memory.MemoryIndex, flags: u64) callconv(.c) ?*Platfo
 
     const total_size: usize = @sizeOf(PlatformMemoryBlock) + size;
     var block: [*]PlatformMemoryBlock = @ptrCast(@alignCast(c.malloc(total_size)));
-    _ = c.memset(block, 0, total_size);
+    @memset(@as([*]u8, @ptrCast(block))[0..total_size], 0);
 
     block[0].size = size;
     block[0].base = @ptrCast(block + 1);
@@ -455,11 +456,11 @@ fn extractFont(
             }
         }
 
-        _ = ascender_height;
-        _ = descender_height;
-        _ = external_leading;
-
         try hht_out_writer.print("font \"{s}\" \n{{\n", .{name_stem});
+        try hht_out_writer.print("    GlyphCount = {d};\n", .{glyph_count});
+        try hht_out_writer.print("    AscenderHeight = {d};\n", .{scale_ratio * ascender_height});
+        try hht_out_writer.print("    DescenderHeight = {d};\n", .{scale_ratio * descender_height});
+        try hht_out_writer.print("    ExternalLeading = {d};\n", .{scale_ratio * external_leading});
 
         const tm_descent: i32 = text_metrics.tmDescent;
         var glyph_index: u32 = 1;
@@ -499,10 +500,16 @@ fn extractFont(
                 std.log.err("Unable to open file '{s}' for writing: {s}", .{ png_out_name, @errorName(err) });
             }
 
-            try hht_out_writer.print(
-                "    glyph[{d}] = \"{s}\", {{{d}, {d}}};\n",
-                .{ glyph_index, png_file_name_only, glyph.align_percentage.x(), glyph.align_percentage.y() },
-            );
+            var align_point: HHAAlignPoint = .{};
+            align_point.set(.Default, true, 1, .new(glyph.align_percentage.x(), glyph.align_percentage.y()));
+
+            try hht_out_writer.print("    Glyph[{d}] = \"{s}\", {d}, {{{d}, {d}}};\n", .{
+                glyph_index,
+                png_file_name_only,
+                code_point,
+                align_point.position_percent[0],
+                align_point.position_percent[1],
+            });
 
             var other_glyph_index: u32 = 0;
             while (other_glyph_index < glyph_count) : (other_glyph_index += 1) {
@@ -526,7 +533,7 @@ fn extractFont(
                 }
             }
 
-            try hht_out_writer.print("{d:3}", .{@as(u32, @intFromFloat(scale_ratio * horizontal_advance[index]))});
+            try hht_out_writer.print("{d:3}", .{scale_ratio * horizontal_advance[index]});
         }
         try hht_out_writer.print(";\n", .{});
 
@@ -540,6 +547,9 @@ fn extractFont(
 fn createTestCharSet(mask: *CodePointMask) void {
     mask.include(' ');
     mask.includeRange('!', '~');
+
+    // Ligatures.
+    mask.includeRange(0xfb00, 0xfb05);
 
     // Kanji owl.
     mask.include(.{ 0x5c0f, 0x8033, 0x6728, 0x514e });

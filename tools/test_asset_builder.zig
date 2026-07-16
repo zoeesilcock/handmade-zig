@@ -270,7 +270,7 @@ fn loadFont(
     // Reserve space for the null glyph.
     font.glyph_count = 1;
     font.glyphs[0].unicode_code_point = 0;
-    font.glyphs[0].bitmap = undefined;
+    font.glyphs[0].bitmap_id = 0;
 
     return font;
 }
@@ -908,7 +908,7 @@ pub const Assets = struct {
             font.glyph_count += 1;
             const glyph: *HHAFontGlyph = &font.glyphs[glyph_index];
             glyph.unicode_code_point = code_point;
-            glyph.bitmap = result.?.value;
+            glyph.bitmap_id = result.?.value;
             font.glyph_index_from_code_point[code_point] = glyph_index;
 
             if (font.one_past_highest_code_point <= code_point) {
