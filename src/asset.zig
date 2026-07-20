@@ -231,10 +231,10 @@ pub const Assets = struct {
     art_head_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
     art_body_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
     art_character_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
-    art_cover_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_particle_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
     art_hand_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
     art_item_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
-    art_obstacles_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
+    art_scenery_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
     art_plate_tags: if (INTERNAL) ImportGridTags else void = if (INTERNAL) .{},
 
     pub fn allocate(
@@ -456,10 +456,10 @@ pub const Assets = struct {
             import.createHeadBlockTagGrid(assets, &assets.art_head_tags);
             import.createBodyBlockTagGrid(assets, &assets.art_body_tags);
             import.createCharacterBlockTagGrid(assets, &assets.art_character_tags);
-            import.createCoverBlockTagGrid(assets, &assets.art_cover_tags);
+            import.createParticleBlockTagGrid(assets, &assets.art_particle_tags);
             import.createHandBlockTagGrid(assets, &assets.art_hand_tags);
             import.createItemBlockTagGrid(assets, &assets.art_item_tags);
-            import.createObstacleBlockTagGrid(assets, &assets.art_obstacles_tags);
+            import.createSceneryBlockTagGrid(assets, &assets.art_scenery_tags);
             import.createPlateBlockTagGrid(assets, &assets.art_plate_tags);
 
             import.synchronizeAssetFileChanges(assets, false);

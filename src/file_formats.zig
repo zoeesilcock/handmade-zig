@@ -112,6 +112,13 @@ pub const AssetTagId = enum(u32) {
     Variant,
     ChannelIndex,
 
+    Flowers,
+    Size,
+    Chair,
+    Lamp,
+    Worn,
+    Hat,
+
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
     }
@@ -151,9 +158,9 @@ pub const AssetBasicCategory = enum(u32) {
 
     // New categories.
     Block,
-    Cover,
+    Particle,
     Item,
-    Obstacle,
+    Scenery,
     Plate,
     Audio,
 
@@ -531,6 +538,13 @@ pub const name_tags = [_]NameTag{
 
     .{ .name = .fromSlice("Variant"), .id = .Variant },
     .{ .name = .fromSlice("ChannelIndex"), .id = .ChannelIndex },
+
+    .{ .name = .fromSlice("Flowers"), .id = .Flowers },
+    .{ .name = .fromSlice("Size"), .id = .Size },
+    .{ .name = .fromSlice("Chair"), .id = .Chair },
+    .{ .name = .fromSlice("Lamp"), .id = .Lamp },
+    .{ .name = .fromSlice("Worn"), .id = .Worn },
+    .{ .name = .fromSlice("Hat"), .id = .Hat },
 };
 
 pub fn tagNameFromID(tag_id: AssetTagId) String {

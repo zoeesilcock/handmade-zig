@@ -55,6 +55,14 @@ body "body_orphan_02.png"
 body "body_orphan_03.png"
 {
     Tags = orphan, cook;
+    Align[0,0][0] = 41277, 40575, 771, Default | ToParent;
+    Align[0,0][1] = 41068, 43028, 771, BaseOfNeck;
+    Align[0,1][0] = 40959, 40959, 771, Default | ToParent;
+    Align[0,1][1] = 41017, 44172, 771, BaseOfNeck;
+    Align[0,2][0] = 40863, 40575, 771, Default | ToParent;
+    Align[0,2][1] = 42035, 43203, 771, BaseOfNeck;
+    Align[0,3][0] = 40906, 40920, 771, Default | ToParent;
+    Align[0,3][1] = 40958, 43998, 771, BaseOfNeck;
 };
 
 body "body_orphan_04.png"
@@ -176,6 +184,10 @@ head "head_hero.png"
     Align[0,1][0] = 40894, 39701, 771, Default | ToParent;
     Align[0,2][0] = 41526, 39107, 771, Default | ToParent;
     Align[0,3][0] = 40914, 38824, 771, Default | ToParent;
+    Align[0,0][1] = 40959, 40959, 771, TopOfHead;
+    Align[0,1][1] = 40959, 40959, 771, TopOfHead;
+    Align[0,2][1] = 40959, 40959, 771, TopOfHead;
+    Align[0,3][1] = 40959, 40959, 771, TopOfHead;
 };
 
 head "head_orphan_01.png"
@@ -248,31 +260,50 @@ head "head_orphan_14.png"
     Tags = orphan, laird;
 };
 
+item "item_hat_01.png"
+{
+    Tags = hat, earth;
+};
 
-// We haven't done import grids for these yet because we don't know how they work in the game.
-// cover "cover_forest.png"
-// {
-// };
-//
-// item "item_hat_01.png"
-// {
-// };
-//
-// item "item_hat_02.png"
-// {
-// };
-//
-// item "item_hat_03.png"
-// {
-// };
-//
-// obstacles "obstacles_forest.png"
-// {
-// };
-//
-// obstacles "obstacles_orphanage.png"
-// {
-// };
+item "item_hat_02.png"
+{
+    Tags = hat, cook;
+};
+
+item "item_hat_03.png"
+{
+    Tags = hat, spring;
+};
+
+particle "particle_flowers_01.png"
+{
+    Tags = flowers, size(0.5);
+};
+
+particle "particle_grass_large_01.png"
+{
+    Tags = grass, size(1);
+};
+
+particle "particle_grass_splotch_01.png"
+{
+    Tags = grass, size(0.5);
+};
+
+particle "particle_stones_01.png"
+{
+    Tags = stone, size(0.5);
+};
+
+scenery "scenery_orphanage_chair_01.png"
+{
+    Tags = orphan, manmade, chair;
+};
+
+scenery "scenery_orphanage_lamp_01.png"
+{
+    Tags = orphan, manmade, lamp;
+};
 
 sound "bloop_00.wav"
 {

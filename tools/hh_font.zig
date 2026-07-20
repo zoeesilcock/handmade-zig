@@ -235,7 +235,7 @@ fn loadGlyphBMP(
                 @as(f32, @floatFromInt(out_height)),
         );
 
-        kerning_change = @as(f32, @floatFromInt(@as(i32, @intCast(min_x)) - @as(i32, @intCast(pre_step_x))));
+        kerning_change = @as(f32, @floatFromInt(min_x)) - @as(f32, @floatFromInt(pre_step_x));
     }
 
     if (false) {

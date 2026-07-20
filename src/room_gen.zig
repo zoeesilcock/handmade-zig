@@ -332,7 +332,9 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 }
             }
 
-            entity.addTag(.Manmade, 1);
+            if (!spec.outdoors) {
+                entity.addTag(.Manmade, 1);
+            }
 
             _ = position.offset.setX(position.offset.x() + 0);
             _ = position.offset.setY(position.offset.y() + 0);

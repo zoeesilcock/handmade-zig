@@ -282,6 +282,7 @@ fn addPlayer(
     body.addTag(.Orphan, 1);
     body.addTag(.Hero, 1);
     body.addTag(.Hero, 1);
+    body.addTag(.Cook, 1);
 
     glove.addTag(.Glove, 1);
     glove.addTag(.Fingers, 1);
@@ -295,10 +296,12 @@ fn addPlayer(
         @intFromEnum(EntityVisiblePieceFlag.AxesDeform),
     );
     const head_piece: *EntityVisiblePiece = entity_gen.addPiece(body, .Head, hero_scale, .new(0, 0, 0.15), color, null);
+    const hat_piece: *EntityVisiblePiece = entity_gen.addPiece(body, .Item, hero_scale, .new(0, 0, 0.2), color, null);
     const glove_piece: *EntityVisiblePiece = entity_gen.addPiece(glove, .Hand, hero_scale, .new(0, 0, 0), color, null);
 
     entity_gen.connectPieceToWorld(body, body_piece, .Default);
     entity_gen.connectPiece(body, body_piece, .BaseOfNeck, head_piece, .Default);
+    entity_gen.connectPiece(body, head_piece, .TopOfHead, hat_piece, .Default);
     entity_gen.connectPieceToWorld(glove, glove_piece, .Default);
 
     entity_gen.placeEntity(sim_region, glove, position);

@@ -848,9 +848,18 @@ pub fn createCharacterBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void 
     }
 }
 
-pub fn createCoverBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
-    _ = assets;
-    _ = tags;
+pub fn createParticleBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    var y_index: u32 = 0;
+    while (y_index < 4) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < 4) : (x_index += 1) {
+            const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+            var builder: TagBuilder = beginTags(assets);
+            const variant: u32 = 4 * y_index + x_index;
+            addTag(&builder, .Variant, (1.0 / 32.0) + (@as(f32, @floatFromInt(variant)) / 15.0));
+            tag.* = endTags(&builder, .Particle);
+        }
+    }
 }
 
 pub fn createHandBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
@@ -869,13 +878,46 @@ pub fn createHandBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
 }
 
 pub fn createItemBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
-    _ = assets;
-    _ = tags;
+    var y_index: u32 = 0;
+    while (y_index < 4) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < 4) : (x_index += 1) {
+            const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+            var builder: TagBuilder = beginTags(assets);
+
+            switch (x_index) {
+                0 => {
+                    addTag(&builder, .Variant, 0.25);
+                    addTag(&builder, .Floor, 1);
+                },
+                1 => {
+                    addTag(&builder, .Variant, 0.75);
+                    addTag(&builder, .Floor, 1);
+                },
+                2 => addTag(&builder, .Worn, 1),
+                else => {},
+            }
+
+            addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
+            tag.* = endTags(&builder, .Item);
+        }
+    }
 }
 
-pub fn createObstacleBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
-    _ = assets;
-    _ = tags;
+pub fn createSceneryBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
+    var y_index: u32 = 0;
+    while (y_index < 4) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < 4) : (x_index += 1) {
+            const tag: *ImportGridTag = &tags.tags[y_index][x_index];
+            if (x_index == 0 and y_index < 4) {
+                var builder: TagBuilder = beginTags(assets);
+                addTag(&builder, .Variant, @as(f32, @floatFromInt(x_index)) / 4.0);
+                addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
+                tag.* = endTags(&builder, .Scenery);
+            }
+        }
+    }
 }
 
 pub fn createPlateBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
@@ -1100,6 +1142,7 @@ fn ignoreAllInputUpToAndIncluding(context: *HHTContext, token: Token) void {
         context.hht_copy_point = token.text.data + token.text.count;
     }
 }
+
 fn updateSingleAssetMetadata(
     assets: *Assets,
     asset_file: *AssetFile,
@@ -1746,8 +1789,8 @@ fn parseTopLevelBlock(
         } else if (block_token.equals("character")) {
             template_tags = &context.assets.art_character_tags;
             import_type = .MultiTile;
-        } else if (block_token.equals("cover")) {
-            template_tags = &context.assets.art_cover_tags;
+        } else if (block_token.equals("particle")) {
+            template_tags = &context.assets.art_particle_tags;
             import_type = .MultiTile;
         } else if (block_token.equals("hand")) {
             template_tags = &context.assets.art_hand_tags;
@@ -1755,8 +1798,8 @@ fn parseTopLevelBlock(
         } else if (block_token.equals("item")) {
             template_tags = &context.assets.art_item_tags;
             import_type = .MultiTile;
-        } else if (block_token.equals("obstacles")) {
-            template_tags = &context.assets.art_obstacles_tags;
+        } else if (block_token.equals("scenery")) {
+            template_tags = &context.assets.art_scenery_tags;
             import_type = .MultiTile;
         } else if (block_token.equals("plate")) {
             template_tags = &context.assets.art_plate_tags;

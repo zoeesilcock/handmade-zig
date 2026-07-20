@@ -295,28 +295,28 @@ pub export fn updateAndRender(
         }
     }
 
-    if (state.music == null) {
-        var match_vector = asset.AssetVector{};
-        match_vector.e[AssetTagId.IntroCutscene.toInt()] = 1;
-        var weight_vector = asset.AssetVector{};
-        weight_vector.e[AssetTagId.IntroCutscene.toInt()] = 1;
-        weight_vector.e[AssetTagId.ChannelIndex.toInt()] = 1;
+    if (false) {
+        if (state.music == null) {
+            var match_vector = asset.AssetVector{};
+            match_vector.e[AssetTagId.IntroCutscene.toInt()] = 1;
+            var weight_vector = asset.AssetVector{};
+            weight_vector.e[AssetTagId.IntroCutscene.toInt()] = 1;
+            weight_vector.e[AssetTagId.ChannelIndex.toInt()] = 1;
 
-        if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |channel1_id| {
-            _ = channel1_id;
-            // state.music = state.audio_state.playSound(channel1_id);
-        }
+            if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |channel1_id| {
+                state.music = state.audio_state.playSound(channel1_id);
+            }
 
-        match_vector.e[AssetTagId.ChannelIndex.toInt()] = 1;
-        if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |channel2_id| {
-            _ = channel2_id;
-            // state.music = state.audio_state.playSound(channel2_id);
+            match_vector.e[AssetTagId.ChannelIndex.toInt()] = 1;
+            if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |channel2_id| {
+                state.music = state.audio_state.playSound(channel2_id);
+            }
+        } else {
+            var music_volume = Vector2.zero();
+            _ = music_volume.setY(math.clampf01(input.clip_space_mouse_position.x()));
+            _ = music_volume.setX(1.0 - music_volume.y());
+            state.audio_state.changeVolume(state.music, 0.01, music_volume);
         }
-    } else {
-        var music_volume = Vector2.zero();
-        _ = music_volume.setY(math.clampf01(input.clip_space_mouse_position.x()));
-        _ = music_volume.setX(1.0 - music_volume.y());
-        state.audio_state.changeVolume(state.music, 0.01, music_volume);
     }
 
     var hit_test: EditableHitTest = state.editor.beginHitTest(input, state.dev_mode);
