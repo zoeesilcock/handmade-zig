@@ -836,6 +836,13 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     const forest_entrance: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage ForestEntrance");
     // const side_alley: *GenRoom = genRoom(gen, basic_forest_spec, "Orphanage Side Alley");
 
+    if (true) {
+        const scenery = addEntity(gen, &entity_gen.addObstacle);
+        _ = addTag(gen, scenery, .Chair, 1);
+        _ = addTag(gen, scenery, .FacingDirection, 0.0 * math.TAU32);
+        placeEntity(gen, scenery, main_room);
+    }
+
     _ = addOption(gen, main_room, .Cat);
     // _ = addOption(gen, main_room, .Orphan);
     _ = addOption(gen, bedroom_a, .Cat);

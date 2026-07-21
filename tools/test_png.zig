@@ -16,6 +16,7 @@ const StreamChunk = stream.Chunk;
 const ImageU32 = png.ImageU32;
 const MemoryArena = memory.MemoryArena;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
+const Rectangle2i = math.Rectangle2i;
 
 const BitmapHeader = packed struct {
     file_type: u16,
@@ -64,7 +65,20 @@ const PixelOp = enum(u32) {
     ReplaceAlpha = 0x2,
     MultiplyAlpha = 0x4,
     Invert = 0x8,
+    ThresholdAlpha = 0x10,
 };
+
+pub fn thresholdAlpha(color: u32) u32 {
+    var alpha = color >> 24;
+
+    if (alpha > 0) {
+        alpha = 0xff;
+    }
+
+    const result: u32 = (alpha << 24) | color;
+
+    return result;
+}
 
 fn writeBMPImageTopDownRGBA(
     width: u32,
@@ -81,6 +95,7 @@ fn writeBMPImageTopDownRGBA(
     const swap_red_and_blue: bool = (pixel_ops & @intFromEnum(PixelOp.SwapRedAndBlue)) != 0;
     const multiply_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.MultiplyAlpha)) != 0;
     const invert: bool = (pixel_ops & @intFromEnum(PixelOp.Invert)) != 0;
+    const threshold_alpha: bool = (pixel_ops & @intFromEnum(PixelOp.ThresholdAlpha)) != 0;
 
     const header_size: u32 = @sizeOf(BitmapHeader) - 10;
     const header: BitmapHeader = .{
@@ -117,6 +132,11 @@ fn writeBMPImageTopDownRGBA(
             if (swap_red_and_blue) {
                 color0 = math.swapRedAndBlue(color0);
                 color1 = math.swapRedAndBlue(color1);
+            }
+
+            if (threshold_alpha) {
+                color0 = thresholdAlpha(color0);
+                color1 = thresholdAlpha(color1);
             }
 
             if (replace_alpha) {
@@ -193,6 +213,199 @@ fn crtDeallocateMemory(opt_platform_block: ?*PlatformMemoryBlock) callconv(.c) v
     }
 }
 
+fn extractImage(
+    source_image: ImageU32,
+    min_x: u32,
+    min_y: u32,
+    one_past_max_x: u32,
+    one_past_max_y: u32,
+    temp_arena: *MemoryArena,
+) ImageU32 {
+    const result: ImageU32 = .pushImage(temp_arena, one_past_max_x - min_x, one_past_max_y - min_y);
+    var dest_pixel: [*]u32 = @ptrCast(result.pixels);
+    const one: u32 = if (one_past_max_y > 0) 1 else 0;
+    var source_row: [*]u32 = source_image.pixels.ptr + ((one_past_max_y - one) * source_image.width + min_x);
+
+    var y: u32 = 0;
+    while (y < result.height) : (y += 1) {
+        var source_pixel: [*]u32 = source_row;
+
+        var x: u32 = 0;
+        while (x < result.width) : (x += 1) {
+            const source_color: u32 = source_pixel[0];
+            source_pixel += 1;
+            dest_pixel[0] = source_color;
+            dest_pixel += 1;
+        }
+
+        source_row -= source_image.width;
+    }
+
+    return result;
+}
+
+fn testMultiTileImport(image: ImageU32, temp_arena: *MemoryArena, error_stream: *Stream, io: std.Io) !void {
+    const border_dimension: u32 = 8;
+    const tile_dimension: u32 = 1024;
+
+    const x_count_max: u32 = 16;
+    const y_count_max: u32 = 16;
+
+    var x_count: u32 = image.width / tile_dimension;
+    if (x_count > x_count_max) {
+        _ = stream.outputWithSrc(error_stream, @src(), "Tile column count of %u exceeds maximum of %u columns.\n", .{
+            x_count,
+            x_count_max,
+        });
+        x_count = x_count_max;
+    }
+    var y_count: u32 = image.height / tile_dimension;
+    if (y_count > y_count_max) {
+        _ = stream.outputWithSrc(error_stream, @src(), "Tile row count of %u exceeds maximum of %u rows.\n", .{
+            y_count,
+            y_count_max,
+        });
+        y_count = y_count_max;
+    }
+
+    var y_index: u32 = 0;
+    while (y_index < y_count) : (y_index += 1) {
+        var x_index: u32 = 0;
+        while (x_index < x_count) : (x_index += 1) {
+            var min_x: u32 = std.math.maxInt(u32);
+            var max_x: u32 = std.math.minInt(u32);
+            var min_y: u32 = std.math.maxInt(u32);
+            var max_y: u32 = std.math.minInt(u32);
+
+            // Calculate bounds of image contents.
+            {
+                var source_row: [*]u32 = image.pixels.ptr +
+                    (y_index * tile_dimension * image.width + x_index * tile_dimension);
+
+                var y: u32 = 0;
+                while (y < tile_dimension) : (y += 1) {
+                    var source_pixel: [*]u32 = source_row;
+
+                    var x: u32 = 0;
+                    while (x < tile_dimension) : (x += 1) {
+                        const source_color: u32 = source_pixel[0];
+                        source_pixel += 1;
+
+                        if (source_color & 0xff000000 != 0) {
+                            min_x = @min(min_x, x);
+                            max_x = @max(max_x, x);
+                            min_y = @min(min_y, y);
+                            max_y = @max(max_y, y);
+                        }
+                    }
+
+                    source_row += image.width;
+                }
+            }
+
+            if (min_x <= max_x) {
+                // There was something in this tile.
+                if (min_x >= border_dimension) {
+                    min_x -= border_dimension;
+                } else {
+                    min_x = 0;
+                    _ = stream.outputWithSrc(error_stream, @src(), "Tile %u, %u extends into left %u-pixel border.\n", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (max_x < (tile_dimension - border_dimension)) {
+                    max_x += border_dimension;
+                } else {
+                    max_x = tile_dimension - 1;
+                    _ = stream.outputWithSrc(error_stream, @src(), "Tile %u, %u extends into right %u-pixel border.\n", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (min_y >= border_dimension) {
+                    min_y -= border_dimension;
+                } else {
+                    min_y = 0;
+                    _ = stream.outputWithSrc(error_stream, @src(), "Tile %u, %u extends into top %u-pixel border.\n", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                if (max_y < (tile_dimension - border_dimension)) {
+                    max_y += border_dimension;
+                } else {
+                    max_y = tile_dimension - 1;
+                    _ = stream.outputWithSrc(error_stream, @src(), "Tile %u, %u extends into bottom %u-pixel border.\n", .{
+                        x_index,
+                        y_index,
+                        border_dimension,
+                    });
+                }
+
+                const extract: Rectangle2i = .new(
+                    @intCast(x_index * tile_dimension + min_x),
+                    @intCast(y_index * tile_dimension + min_y),
+                    @intCast(x_index * tile_dimension + max_x + 1),
+                    @intCast(y_index * tile_dimension + max_y + 1),
+                );
+
+                const extracted: ImageU32 = extractImage(
+                    image,
+                    @intCast(extract.min.x()),
+                    @intCast(extract.min.y()),
+                    @intCast(extract.max.x()),
+                    @intCast(extract.max.y()),
+                    temp_arena,
+                );
+
+                _ = stream.outputWithSrc(error_stream, @src(), "EXTRACTION[%u, %u]: %u, %u -> %u, %u, (%u, %u)\n", .{
+                    x_index,
+                    y_index,
+                    extract.min.x(),
+                    extract.min.y(),
+                    extract.max.x(),
+                    extract.max.y(),
+                    extracted.width,
+                    extracted.height,
+                });
+
+                var out_rgb: [256]u8 = undefined;
+                var out_alpha: [256]u8 = undefined;
+                const out_rgb_name =
+                    try std.fmt.bufPrint(&out_rgb, "C:/tmp/extract{d}{d}_rgb.bmp", .{ x_index, y_index });
+                const out_alpha_name =
+                    try std.fmt.bufPrint(&out_alpha, "C:/tmp/extract{d}{d}_alpha.bmp", .{ x_index, y_index });
+
+                try writeBMPImageTopDownRGBA(
+                    extracted.width,
+                    extracted.height,
+                    extracted.pixels,
+                    out_rgb_name,
+                    @intFromEnum(PixelOp.SwapRedAndBlue) | @intFromEnum(PixelOp.Invert), // | @intFromEnum(PixelOp.MultiplyAlpha),
+                    error_stream,
+                    io,
+                );
+                try writeBMPImageTopDownRGBA(
+                    extracted.width,
+                    extracted.height,
+                    extracted.pixels,
+                    out_alpha_name,
+                    @intFromEnum(PixelOp.ReplaceAlpha) | @intFromEnum(PixelOp.ThresholdAlpha),
+                    error_stream,
+                    io,
+                );
+            }
+        }
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
 
@@ -217,6 +430,10 @@ pub fn main(init: std.process.Init) !void {
         const file: Stream = try readEntireFile(in_file_name, allocator, &error_stream, init.io);
         const image: ImageU32 = png.parsePNG(&arena, file, &info_stream);
 
+        if (false) {
+            try testMultiTileImport(image, &arena, &info_stream, init.io);
+        }
+
         _ = stream.outputWithSrc(&info_stream, @src(), "Writing BMP %s...\n", .{out_file_name_rgb});
         try writeBMPImageTopDownRGBA(
             image.width,
@@ -233,7 +450,7 @@ pub fn main(init: std.process.Init) !void {
             image.height,
             image.pixels,
             out_file_name_alpha,
-            @intFromEnum(PixelOp.ReplaceAlpha),
+            @intFromEnum(PixelOp.ReplaceAlpha), // | @intFromEnum(PixelOp.ThresholdAlpha),
             &error_stream,
             init.io,
         );

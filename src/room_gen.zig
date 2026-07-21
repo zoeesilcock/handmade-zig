@@ -13,6 +13,7 @@ const std = @import("std");
 // Types.
 const Vector3 = math.Vector3;
 const Color = math.Color;
+const Color3 = math.Color3;
 const Rectangle3 = math.Rectangle3;
 const SimRegion = sim.SimRegion;
 const Entity = entities.Entity;
@@ -242,19 +243,19 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             const tile_y: i32 = min_tile_y + y_index;
             // const tile_z: i32 = floor_tile_z;
 
-            var on_boundary: bool =
+            const on_edge: bool =
                 x_index == 0 or
                 x_index == (x_count - 1) or
                 y_index == 0 or
                 y_index == (y_count - 1);
-
-            if (spec.outdoors) {
-                on_boundary = false;
-            }
+            var on_boundary = on_edge;
 
             var t_stair: f32 = 0;
             var on_connection: bool = false;
             var stairwell: bool = false;
+            if (spec.outdoors) {
+                on_boundary = false;
+            }
 
             var opt_room_connection: ?*GenRoomConnection = room.first_connection;
             while (opt_room_connection) |room_connection| : (opt_room_connection = room_connection.next) {
@@ -285,30 +286,12 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             var color: Color = .newFromSRGB(0.31, 0.49, 0.32, 1);
             var wall_height: f32 = 0.5;
 
-            var on_lamp: bool =
-                (x_index == 1 and y_index == 1) or
-                (x_index == 1 and y_index == y_count - 2) or
-                (x_index == x_count - 2 and y_index == 1) or
-                (x_index == x_count - 2 and y_index == y_count - 2);
-
-            on_lamp = false;
-
-            if (on_lamp) {
-                entity_gen.addLamp(
-                    region,
-                    position,
-                    .new(
-                        series.randomFloatBetween(0.4, 0.7),
-                        series.randomFloatBetween(0.4, 0.7),
-                        0.5,
-                    ),
-                );
-            }
-
             if (on_connection) {
                 color = .newFromSRGB(0.21, 0.29, 0.42, 1);
             }
 
+            const place_tree: bool = spec.outdoors and !on_connection and on_edge;
+            const on_lamp: bool = !spec.outdoors and (x_index == x_count - 2 and y_index == 1);
             var randomize_top: bool = false;
             if (on_boundary and !on_connection) {
                 wall_height = 2;
@@ -325,11 +308,9 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 }
                 randomize_top = true;
 
-                if (!on_lamp) {
-                    entity.traversable_count = 1;
-                    entity.traversables[0].position = Vector3.zero();
-                    entity.traversables[0].occupier = null;
-                }
+                entity.traversable_count = 1;
+                entity.traversables[0].position = Vector3.zero();
+                entity.traversables[0].occupier = null;
             }
 
             if (!spec.outdoors) {
@@ -370,6 +351,31 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             entity_gen.placeEntity(region, entity, position);
             tile.structural = entity;
             tile.open = (!stairwell and entity.traversable_count == 1);
+
+            if (tile.open) {
+                var ref: TraversableReference = .init;
+                var ground_position: Vector3 = .zero();
+                ref.entity.ptr = tile.structural;
+                ref.entity.index = tile.structural.?.id;
+                ground_position = ref.getSimSpaceTraversable().position;
+
+                if (place_tree) {
+                    const placed_entity: *Entity = entity_gen.addObstacle(region, ground_position, ref);
+                    placed_entity.addTag(.Evergreen, 1);
+                    placed_entity.addTag(.Winter, series.randomUnilateral());
+                    placed_entity.addTag(.Damaged, series.randomUnilateral());
+                } else if (on_lamp) {
+                    const placed_entity: *Entity = entity_gen.addObstacle(region, ground_position, ref);
+                    placed_entity.addTag(.Lamp, 1);
+
+                    const lamp_light: Color3 = .new(
+                        series.randomFloatBetween(0.4, 0.7),
+                        series.randomFloatBetween(0.4, 0.7),
+                        0.5,
+                    );
+                    entity_gen.addLamp(region, position, lamp_light);
+                }
+            }
         }
     }
 

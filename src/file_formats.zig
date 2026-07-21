@@ -116,8 +116,14 @@ pub const AssetTagId = enum(u32) {
     Size,
     Chair,
     Lamp,
+
     Worn,
     Hat,
+
+    Deprecated_Snow,
+    Tree,
+    Evergreen,
+    Damaged,
 
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
@@ -543,8 +549,14 @@ pub const name_tags = [_]NameTag{
     .{ .name = .fromSlice("Size"), .id = .Size },
     .{ .name = .fromSlice("Chair"), .id = .Chair },
     .{ .name = .fromSlice("Lamp"), .id = .Lamp },
+
     .{ .name = .fromSlice("Worn"), .id = .Worn },
     .{ .name = .fromSlice("Hat"), .id = .Hat },
+
+    .{ .name = .fromSlice("_Deprecated_Snow"), .id = .Deprecated_Snow },
+    .{ .name = .fromSlice("Tree"), .id = .Tree },
+    .{ .name = .fromSlice("Evergreen"), .id = .Evergreen },
+    .{ .name = .fromSlice("Damaged"), .id = .Damaged },
 };
 
 pub fn tagNameFromID(tag_id: AssetTagId) String {

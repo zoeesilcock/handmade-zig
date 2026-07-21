@@ -303,6 +303,25 @@ scenery "scenery_orphanage_chair_01.png"
 scenery "scenery_orphanage_lamp_01.png"
 {
     Tags = orphan, manmade, lamp;
+    Align[0,0][0] = 42153, 37236, 1091, Default | ToParent;
+};
+
+scenery "scenery_evergreen.png"
+{
+    Tags = tree, evergreen, damaged(0), winter(0);
+    Align[0,0][0] = 41037, 36963, 1768, Default | ToParent;
+};
+
+scenery "scenery_evergreen_damaged.png"
+{
+    Tags = tree, evergreen, damaged(1), winter(0);
+    Align[0,0][0] = 41037, 36963, 1768, Default | ToParent;
+};
+
+scenery "scenery_evergreen_snow.png"
+{
+    Tags = tree, evergreen, winter(1), damaged(0);
+    Align[0,0][0] = 41037, 36963, 1768, Default | ToParent;
 };
 
 sound "bloop_00.wav"

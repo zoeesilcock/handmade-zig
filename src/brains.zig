@@ -467,11 +467,20 @@ pub fn executeBrain(
             const opt_head: ?*Entity = parts.segments[0];
 
             if (opt_head) |head| {
-                const delta: Vector3 = .new(
+                var delta: Vector3 = .new(
                     entropy.randomBilateral(),
                     entropy.randomBilateral(),
                     0,
                 );
+
+                if (@abs(delta.x()) > @abs(delta.y())) {
+                    _ = delta.setY(0);
+                } else {
+                    _ = delta.setX(0);
+                }
+
+                delta = delta.normalizeOrZero();
+
                 var traversable: TraversableReference = undefined;
                 if (sim.getClosestTraversable(sim_region, head.position.plus(delta), &traversable, 0)) {
                     if (head.movement_mode == .Planted) {
@@ -479,6 +488,7 @@ pub fn executeBrain(
                             var last_occupying: TraversableReference = head.occupying;
                             head.came_from = head.occupying;
                             if (sim.transactionalOccupy(head, &head.occupying, traversable)) {
+                                head.facing_direction = intrinsics.atan2(delta.y(), delta.x());
                                 head.movement_time = 0;
                                 head.movement_mode = .Hopping;
 

@@ -7,7 +7,7 @@ default
     Description = "These are the original assets for the intro cutscene and title screen.";
 };
 
-plate "title_screen.png" {Tags=TitleScreen,ShotIndex(12),LayerIndex(1);};
+plate "title_screen.png" {Tags=TitleScreen,ShotIndex(1),LayerIndex(1);};
 
 music "music_test.wav"
 {

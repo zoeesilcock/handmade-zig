@@ -477,6 +477,8 @@ fn processMultiTileImport(
             var max_y: u32 = std.math.minInt(u32);
 
             // Calculate bounds of image contents.
+            var valid_pixel_count: u32 = 0;
+            var solid_pixel_count: u32 = 0;
             {
                 var source_row: [*]u32 = image.pixels.ptr +
                     (y_index * tile_dimension * image.width + x_index * tile_dimension);
@@ -489,12 +491,18 @@ fn processMultiTileImport(
                     while (x < tile_dimension) : (x += 1) {
                         const source_color: u32 = source_pixel[0];
                         source_pixel += 1;
+                        const alpha: u32 = source_color >> 24;
 
-                        if (source_color & 0xff000000 != 0) {
+                        if (alpha != 0) {
                             min_x = @min(min_x, x);
                             max_x = @max(max_x, x);
                             min_y = @min(min_y, y);
                             max_y = @max(max_y, y);
+
+                            if (alpha > 16) {
+                                solid_pixel_count += 1;
+                            }
+                            valid_pixel_count += 1;
                         }
                     }
 
@@ -502,7 +510,13 @@ fn processMultiTileImport(
                 }
             }
 
-            if (min_x <= max_x) {
+            var solid_pixels_per_area: f32 = 0;
+            if (valid_pixel_count > 16) {
+                const area: f32 = @floatFromInt((max_x - min_x) * (max_y - min_y));
+                solid_pixels_per_area = @as(f32, @floatFromInt(solid_pixel_count)) / area;
+            }
+
+            if (solid_pixels_per_area > 0.1) {
                 // There was something in this tile.
                 if (min_x >= border_dimension) {
                     min_x -= border_dimension;

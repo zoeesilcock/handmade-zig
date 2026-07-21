@@ -281,8 +281,6 @@ fn addPlayer(
 
     body.addTag(.Orphan, 1);
     body.addTag(.Hero, 1);
-    body.addTag(.Hero, 1);
-    body.addTag(.Cook, 1);
 
     glove.addTag(.Glove, 1);
     glove.addTag(.Fingers, 1);

@@ -309,9 +309,11 @@ pub fn updateAndRenderTitleScreen(
 
             var match_vector = asset.AssetVector{};
             var weight_vector = asset.AssetVector{};
+            weight_vector.e[AssetTagId.TitleScreen.toInt()] = 10;
             weight_vector.e[AssetTagId.ShotIndex.toInt()] = 10;
             weight_vector.e[AssetTagId.LayerIndex.toInt()] = 1;
-            match_vector.e[AssetTagId.ShotIndex.toInt()] = 12;
+            match_vector.e[AssetTagId.TitleScreen.toInt()] = 1;
+            match_vector.e[AssetTagId.ShotIndex.toInt()] = 1;
             match_vector.e[AssetTagId.LayerIndex.toInt()] = 1;
             const layer_image = render_group.assets.getBestMatchBitmap(.Plate, &match_vector, &weight_vector);
 

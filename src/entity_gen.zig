@@ -213,6 +213,22 @@ pub fn addCat(region: *SimRegion, position: Vector3, standing_on: TraversableRef
     return entity;
 }
 
+pub fn addObstacle(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
+    _ = position;
+    var entity = addEntity(region);
+
+    entity.addFlags(EntityFlags.Collides.toInt());
+
+    entity.occupying = standing_on;
+
+    const body: *EntityVisiblePiece = addPiece(entity, .Scenery, 1, .new(0, 0, 0), .white(), null);
+
+    connectPieceToWorld(entity, body, .Default);
+    entity.position = standing_on.getSimSpaceTraversable().position;
+
+    return entity;
+}
+
 pub fn addOrphan(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
     _ = position;
     var entity = addEntity(region);
