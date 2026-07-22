@@ -17,6 +17,7 @@ const Vector3 = math.Vector3;
 const Color = math.Color;
 const V3_4x = simd.V3_4x;
 const V4_4x = simd.V4_4x;
+const F32_4x = simd.F32_4x;
 const RenderGroup = renderer.RenderGroup;
 const EntityId = entities.EntityId;
 const GameModeWorld = @import("world_mode.zig").GameModeWorld;
@@ -49,6 +50,7 @@ const Particle4x = extern struct {
     ddp: V3_4x,
     c: V4_4x,
     dc: V4_4x,
+    size: F32_4x,
     pad: [2]u32,
 };
 
@@ -57,11 +59,13 @@ pub fn initParticleCache(cache: *ParticleCache, assets: *Assets) void {
     cache.particle_entropy = .seed(1234, null, null, null);
 
     var match_vector = asset.AssetVector{};
-    match_vector.e[AssetTagId.FacingDirection.toInt()] = 0;
+    match_vector.e[AssetTagId.Particle.toInt()] = 1;
+    match_vector.e[AssetTagId.Smoke.toInt()] = 1;
     var weight_vector = asset.AssetVector{};
-    weight_vector.e[AssetTagId.FacingDirection.toInt()] = 1;
+    weight_vector.e[AssetTagId.Particle.toInt()] = 1;
+    weight_vector.e[AssetTagId.Smoke.toInt()] = 1;
 
-    cache.fire_system.bitmap_id = assets.getBestMatchBitmap(.Head, &match_vector, &weight_vector);
+    cache.fire_system.bitmap_id = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector);
 }
 
 pub fn updateAndRenderParticleSystem(
@@ -96,18 +100,23 @@ pub fn spawnFire(opt_cache: ?*ParticleCache, at_position_in: Vector3) void {
 
         const a: *Particle4x = &system.particles[particle_index];
 
-        a.p.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.3, 0.3 });
-        a.p.y = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.3, 0.3 });
+        const x_dir: F32_4x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -1, 1 });
+        const y_dir: F32_4x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -1, 1 });
+        const p_scale: F32_4x = @splat(0.3);
+        const dp_scale: F32_4x = @splat(1.2);
+
+        a.p.x = p_scale * x_dir;
+        a.p.y = p_scale * y_dir;
         a.p.z = @splat(0);
         a.p = a.p.plus(at_position);
 
-        a.dp.x = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.5, 0.5 });
-        a.dp.y = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, -0.5, 0.5 });
+        a.dp.x = dp_scale * x_dir;
+        a.dp.y = dp_scale * y_dir;
         a.dp.z = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 1, 3 });
 
         a.ddp.x = @splat(0);
-        a.ddp.y = @splat(-9.8);
-        a.ddp.z = @splat(0);
+        a.ddp.y = @splat(0);
+        a.ddp.z = @splat(-9.8);
 
         a.c.r = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.75, 1 });
         a.c.g = simd.mmSetExpr(RandomSeries.randomFloatBetween, .{ entropy, 0.75, 1 });
@@ -117,7 +126,9 @@ pub fn spawnFire(opt_cache: ?*ParticleCache, at_position_in: Vector3) void {
         a.dc.r = @splat(0);
         a.dc.g = @splat(0);
         a.dc.b = @splat(0);
-        a.dc.a = @splat(-1);
+        a.dc.a = @splat(-3);
+
+        a.size = @splat(0.5);
     }
 }
 
@@ -238,8 +249,7 @@ fn updateAndRenderFire(
 
         // Simulate particle.
         a.p = a.p.plus(a.ddp.scaledTo(0.5 * math.square(delta_time))
-            .plus(a.dp.scaledTo(delta_time)))
-            .plus(frame_displacement);
+            .plus(a.dp.scaledTo(delta_time)));
         a.dp = a.dp.plus(a.ddp.scaledTo(delta_time));
         a.c = a.c.plus(a.dc.scaledTo(delta_time));
 
@@ -270,12 +280,14 @@ fn updateAndRenderFire(
         var sub_index: u32 = 0;
         while (sub_index < 4) : (sub_index += 1) {
             const p: Vector3 = .new(x_array[sub_index], y_array[sub_index], z_array[sub_index]);
-            const c: Color = .new(r_array[sub_index], g_array[sub_index], b_array[sub_index], a_array[sub_index]);
+            var c: Color = .new(r_array[sub_index], g_array[sub_index], b_array[sub_index], a_array[sub_index]);
+
             if (c.a() > 0) {
+                _ = c.setA(c.a() * c.a());
                 asset_rendering.pushBitmapId(
                     render_group,
                     system.bitmap_id,
-                    1,
+                    @as([4]f32, a.size)[sub_index],
                     p,
                     c,
                     .new(0.5, 0.5),
@@ -284,5 +296,9 @@ fn updateAndRenderFire(
                 );
             }
         }
+
+        // Since the frame displacement happens on the next frame we apply displacement after we have rendered the
+        // particles for this frame.
+        a.p = a.p.plus(frame_displacement);
     }
 }

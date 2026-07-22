@@ -350,7 +350,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
 
             entity_gen.placeEntity(region, entity, position);
             tile.structural = entity;
-            tile.open = (!stairwell and entity.traversable_count == 1);
+            tile.open = (!stairwell and !on_connection and entity.traversable_count == 1);
 
             if (tile.open) {
                 var ref: TraversableReference = .init;
@@ -361,8 +361,10 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
 
                 if (place_tree) {
                     const placed_entity: *Entity = entity_gen.addObstacle(region, ground_position, ref);
-                    placed_entity.addTag(.Evergreen, 1);
+                    placed_entity.addTag(.Tree, 1);
+                    placed_entity.addTag(.DarkEnergy, series.randomUnilateral());
                     placed_entity.addTag(.Winter, series.randomUnilateral());
+                    placed_entity.addTag(.Fall, series.randomUnilateral());
                     placed_entity.addTag(.Damaged, series.randomUnilateral());
                 } else if (on_lamp) {
                     const placed_entity: *Entity = entity_gen.addObstacle(region, ground_position, ref);

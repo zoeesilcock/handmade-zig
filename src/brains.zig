@@ -341,7 +341,17 @@ fn executeBrainHero(
             }
 
             if (opt_glove) |glove| {
+                const glove_floor_height: f32 = 0.25;
                 if (attacked) {
+                    glove.movement_time = 0;
+                    glove.movement_mode = .AngleAttackSwipe;
+                    glove.angle_start = glove.angle_current;
+                    glove.angle_target = if (glove.angle_current > 0) -0.25 * math.TAU32 else 0.25 * math.TAU32;
+                    glove.angle_swipe_distance = 2;
+
+                    glove.angle_base = body.position.plus(.new(0, 0, glove_floor_height));
+                    glove.facing_direction = body.facing_direction;
+
                     if (opt_state) |state| {
                         var match_vector = asset.AssetVector{};
                         match_vector.e[asset.AssetTagId.Bloop.toInt()] = 1;
@@ -352,18 +362,13 @@ fn executeBrainHero(
                             _ = state.audio_state.playSound(bloop_id);
                         }
                     }
-
-                    glove.movement_time = 0;
-                    glove.movement_mode = .AngleAttackSwipe;
-                    glove.angle_start = glove.angle_current;
-                    glove.angle_target = if (glove.angle_current > 0) -0.25 * math.TAU32 else 0.25 * math.TAU32;
-                    glove.angle_swipe_distance = 2;
-
-                    glove.angle_base = body.position;
-                    glove.facing_direction = body.facing_direction;
                 } else if (glove.movement_mode != .AngleAttackSwipe) {
                     glove.movement_mode = .Floating;
-                    glove.position = body.position.plus(.new(0.5, 0, 0.5));
+                    glove.position = body.position.plus(
+                        Vector2.arm2(body.facing_direction + glove.angle_current)
+                            .scaledTo(0.6)
+                            .toVector3(glove_floor_height),
+                    );
                 }
             }
         }

@@ -275,53 +275,104 @@ item "item_hat_03.png"
     Tags = hat, spring;
 };
 
-particle "particle_flowers_01.png"
+particle "particles_fire_01.png"
+{
+    Tags = particle, fire;
+};
+
+particle "particles_grass_01.png"
+{
+    Tags = cover, size(0.5), grass;
+};
+
+particle "particles_grass_02.png"
+{
+    Tags = cover, size(1), grass;
+};
+
+particle "particles_grass_03.png"
 {
     Tags = flowers, size(0.5);
 };
 
-particle "particle_grass_large_01.png"
+particle "particles_puffs_01.png"
 {
-    Tags = grass, size(1);
+    Tags = particle, smoke;
 };
 
-particle "particle_grass_splotch_01.png"
+particle "particles_rocks_01.png"
 {
-    Tags = grass, size(0.5);
+    Tags = cover, stone, size(0.5);
 };
 
-particle "particle_stones_01.png"
+particle "particles_stars_01.png"
 {
-    Tags = stone, size(0.5);
+    Tags = particle, stars;
 };
 
-scenery "scenery_orphanage_chair_01.png"
+scenery "scenery_chair_01.png"
+{
+    Tags = orphan, manmade, chair, sofa, size(0.5);
+};
+
+scenery "scenery_chair_02.png"
 {
     Tags = orphan, manmade, chair;
 };
 
-scenery "scenery_orphanage_lamp_01.png"
+scenery "scenery_chair_03.png"
 {
-    Tags = orphan, manmade, lamp;
-    Align[0,0][0] = 42153, 37236, 1091, Default | ToParent;
+    Tags = orphan, manmade, chair;
 };
 
-scenery "scenery_evergreen.png"
+scenery "scenery_chair_04.png"
 {
-    Tags = tree, evergreen, damaged(0), winter(0);
-    Align[0,0][0] = 41037, 36963, 1768, Default | ToParent;
+    Tags = orphan, manmade, chair, sofa, size(1);
 };
 
-scenery "scenery_evergreen_damaged.png"
+scenery "scenery_lamp_01.png"
 {
-    Tags = tree, evergreen, damaged(1), winter(0);
-    Align[0,0][0] = 41037, 36963, 1768, Default | ToParent;
+    Tags = orphan, manmade, lamp, size(0.5);
 };
 
-scenery "scenery_evergreen_snow.png"
+scenery "scenery_lamp_02.png"
 {
-    Tags = tree, evergreen, winter(1), damaged(0);
-    Align[0,0][0] = 41037, 36963, 1768, Default | ToParent;
+    Tags = orphan, manmade, lamp, size(1);
+};
+
+scenery "scenery_rug_01.png"
+{
+    Tags = orphan, manmade, rug;
+};
+
+scenery "scenery_table_01.png"
+{
+    Tags = orphan, manmade, table;
+};
+
+scenery "scenery_tree_01.png"
+{
+    Tags = tree, winter(0), dark(0), fall(0);
+};
+
+scenery "scenery_tree_02.png"
+{
+    Tags = tree, winter(0), dark(0), fall(0), damaged(1);
+};
+
+scenery "scenery_tree_03.png"
+{
+    Tags = tree, winter(0), dark(0), fall(1);
+};
+
+scenery "scenery_tree_04.png"
+{
+    Tags = tree, winter(0), dark(1), fall(0);
+};
+
+scenery "scenery_tree_05.png"
+{
+    Tags = tree, winter(1), dark(0), fall(0);
 };
 
 sound "bloop_00.wav"

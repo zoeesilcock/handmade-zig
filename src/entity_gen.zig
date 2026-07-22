@@ -295,11 +295,14 @@ pub fn addSnake(region: *SimRegion, position: Vector3, standing_on: TraversableR
     entity.brain_slot = BrainSlot.forIndexedField(BrainSnake, "segments", segment_index);
     entity.brain_id = brain_id;
     entity.occupying = standing_on;
+    entity.collision_volume = makeSimpleGroundedCollision(0.75, 0.75, 0.75, 0);
 
     const body = addPiece(entity, if (segment_index != 0) .Body else .Head, 1.5, .new(0, 0, 0.5), .white(), null);
     _ = addPieceLight(entity, 0.5, .new(0, 0, 1), 0.5, .new(1, 1, 0));
 
     connectPieceToWorld(entity, body, .Default);
+
+    initHitPoints(entity, 3);
 
     entity.position = position;
 

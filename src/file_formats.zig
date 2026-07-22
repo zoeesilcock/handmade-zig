@@ -122,8 +122,18 @@ pub const AssetTagId = enum(u32) {
 
     Deprecated_Snow,
     Tree,
-    Evergreen,
+    Deprecated_Evergreen,
     Damaged,
+
+    Stars,
+    Smoke,
+    Cover,
+    Particle,
+    Fire,
+
+    Rug,
+    Table,
+    Sofa,
 
     pub fn toInt(self: AssetTagId) u32 {
         return @intFromEnum(self);
@@ -555,8 +565,18 @@ pub const name_tags = [_]NameTag{
 
     .{ .name = .fromSlice("_Deprecated_Snow"), .id = .Deprecated_Snow },
     .{ .name = .fromSlice("Tree"), .id = .Tree },
-    .{ .name = .fromSlice("Evergreen"), .id = .Evergreen },
+    .{ .name = .fromSlice("Deprecated_Evergreen"), .id = .Deprecated_Evergreen },
     .{ .name = .fromSlice("Damaged"), .id = .Damaged },
+
+    .{ .name = .fromSlice("Stars"), .id = .Stars },
+    .{ .name = .fromSlice("Smoke"), .id = .Smoke },
+    .{ .name = .fromSlice("Cover"), .id = .Cover },
+    .{ .name = .fromSlice("Particle"), .id = .Particle },
+    .{ .name = .fromSlice("Fire"), .id = .Fire },
+
+    .{ .name = .fromSlice("Table"), .id = .Table },
+    .{ .name = .fromSlice("Rug"), .id = .Rug },
+    .{ .name = .fromSlice("Sofa"), .id = .Sofa },
 };
 
 pub fn tagNameFromID(tag_id: AssetTagId) String {

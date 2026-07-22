@@ -377,6 +377,7 @@ pub fn updateAndRenderEntities(
 
             TimedBlock.beginBlock(@src(), .EntityPhysics);
 
+            const start_position: Vector3 = entity.position;
             switch (entity.movement_mode) {
                 .Planted => {},
                 .Hopping => {
@@ -403,10 +404,7 @@ pub fn updateAndRenderEntities(
                         entity.movement_mode = .Planted;
                         entity.bob_delta_time = -2;
 
-                        if (false) {
-                            // TODO: Put in real dust particles.
-                            particles.spawnFire(particle_cache, entity.position);
-                        }
+                        particles.spawnFire(particle_cache, entity.position);
                     }
 
                     entity.movement_time += 4 * delta_time;
@@ -433,7 +431,7 @@ pub fn updateAndRenderEntities(
                         entity.angle_current_distance = entity.angle_base_distance;
                     }
 
-                    entity.movement_time += 10 * delta_time;
+                    entity.movement_time += 5 * delta_time;
                     if (entity.movement_time > 1) {
                         entity.movement_time = 1;
                     }
@@ -459,8 +457,16 @@ pub fn updateAndRenderEntities(
                 entity.bob_delta_time * delta_time;
             entity.bob_delta_time += entity.bob_acceleration * delta_time;
 
-            if (entity.velocity.lengthSquared() > 0 or entity.acceleration.lengthSquared() > 0) {
-                sim.moveEntity(sim_region, entity, delta_time, entity.acceleration);
+            const end_position: Vector3 = entity.position;
+
+            // Feed things into the collision detector here.
+            _ = start_position;
+            _ = end_position;
+
+            if (false) {
+                if (entity.velocity.lengthSquared() > 0 or entity.acceleration.lengthSquared() > 0) {
+                    sim.moveEntity(sim_region, entity, delta_time, entity.acceleration);
+                }
             }
 
             TimedBlock.endBlock(@src(), .EntityPhysics);

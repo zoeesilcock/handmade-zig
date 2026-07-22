@@ -259,6 +259,10 @@ fn addPlayer(
     glove.angle_base_distance = 0.3;
     glove.angle_swipe_distance = 1;
     glove.angle_current_distance = 0.3;
+    glove.collision_volume = .fromCenterDimension(
+        Vector3.new(0, 0, 0),
+        Vector3.new(0.5, 0.5, 0.5),
+    );
 
     // initHitPoints(body, 3);
 
@@ -652,7 +656,7 @@ pub fn updateAndRenderWorld(
 
         // Can we merge the camera update down into the simulation so that we correctly update the camera for the current frame?
 
-        const last_camera_position: WorldPosition = world_mode.camera.position;
+        const last_camera_position: WorldPosition = world_mode.camera.simulation_center;
         if (sim.getEntityByStorageIndex(
             world_sim.sim_region,
             world_mode.camera.following_entity_index,
@@ -668,7 +672,7 @@ pub fn updateAndRenderWorld(
             world_mode.debug_light_position = camera_following_entity.position.plus(.new(0, 0, 2));
         }
 
-        if (true) {
+        if (false) {
             asset_rendering.pushCubeLight(
                 &render_group,
                 world_mode.debug_light_position,
@@ -680,7 +684,7 @@ pub fn updateAndRenderWorld(
         }
 
         const frame_to_frame_camera_delta_position: Vector3 =
-            world.subtractPositions(world_mode.world, &world_mode.camera.position, &last_camera_position);
+            world.subtractPositions(world_mode.world, &world_mode.camera.simulation_center, &last_camera_position);
         particles.updateAndRenderParticleSystem(
             world_mode.particle_cache,
             input.frame_delta_time,
