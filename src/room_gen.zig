@@ -361,7 +361,8 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
 
                 if (place_tree) {
                     const placed_entity: *Entity = entity_gen.addObstacle(region, ground_position, ref);
-                    placed_entity.addTag(.Tree, 1);
+                    // placed_entity.addTag(.Tree, 1);
+                    placed_entity.addTag(.Variant, series.randomUnilateral());
                     placed_entity.addTag(.DarkEnergy, series.randomUnilateral());
                     placed_entity.addTag(.Winter, series.randomUnilateral());
                     placed_entity.addTag(.Fall, series.randomUnilateral());

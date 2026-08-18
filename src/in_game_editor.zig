@@ -32,6 +32,7 @@ const LoadedFont = asset_mod.LoadedFont;
 const Asset = asset_mod.Asset;
 const AssetFile = asset_mod.AssetFile;
 const BitmapId = file_formats.BitmapId;
+const HHATag = file_formats.HHATag;
 const HHAAsset = file_formats.HHAAsset;
 const HHABitmap = file_formats.HHABitmap;
 const HHAAlignPoint = file_formats.HHAAlignPoint;
@@ -748,6 +749,15 @@ pub const InGameEditor = struct {
                     }
                 },
                 else => {},
+            }
+
+            var tag_index: u32 = hha.first_tag_index;
+            while (tag_index < hha.one_past_last_tag_index) : (tag_index += 1) {
+                if (self.assets.getTag(tag_index)) |tag| {
+                    layout.beginRow();
+                    layout.labelF("%S = %f", .{ file_formats.tagNameFromID(tag.id), tag.value });
+                    layout.endRow();
+                }
             }
 
             annotationLabel(

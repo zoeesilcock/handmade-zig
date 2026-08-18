@@ -797,10 +797,6 @@ fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
     return result;
 }
 
-fn createForest(gen: *WorldGenerator) GenForest {
-    _ = gen;
-}
-
 fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     var result: GenOrphanage = .{};
 

@@ -81,8 +81,8 @@ pub const TextureQueue = extern struct {
 
 const beginFrameType = fn (
     platform_renderer: *PlatformRenderer,
-    window_width: u32,
-    window_height: u32,
+    window_dim: Vector2u,
+    render_dim: Vector2u,
     draw_region: Rectangle2i,
 ) callconv(.c) ?*RenderCommands;
 const endFrameType = fn (platform_renderer: *PlatformRenderer, frame: *RenderCommands) callconv(.c) void;
@@ -98,6 +98,10 @@ pub const PlatformRenderer = extern struct {
     texture_queue: TextureQueue = undefined,
     beginFrame: *const beginFrameType = undefined,
     endFrame: *const endFrameType = undefined,
+
+    // This is currently unused by us, but we've added it for other platform maintainers so they can put some context
+    // pointers in there for their own use.
+    platform: *anyopaque = undefined,
 };
 
 pub const TexturedVertex = extern struct {
@@ -1411,13 +1415,6 @@ pub const RenderGroup = extern struct {
         return self.getClipRectByTransform(rectangle.min.toVector3(z), rectangle.getDimension());
     }
 
-    pub fn pushRenderTarget(self: *RenderGroup, render_target_index: u32) u32 {
-        var new_setup: RenderSetup = self.last_setup;
-        new_setup.render_target_index = render_target_index;
-        self.pushSetup(&new_setup);
-        return 0;
-    }
-
     pub fn setCameraTransformToIdentity(
         self: *RenderGroup,
         focal_length: f32,
@@ -1536,10 +1533,10 @@ pub fn beginTextureOp(queue: *TextureQueue, width: u32, height: u32) ?*TextureOp
             // The used space is either the entire buffer or none of the buffer, and we disabmbiguate between those
             // two by just checking if there are any ops outstanding.
             if (queue.op_count == 0) {
+                memory_at = 0;
                 size_available = queue.transfer_memory_count;
             }
-        }
-        if (queue.transfer_memory_last_used < queue.transfer_memory_first_used) {
+        } else if (queue.transfer_memory_last_used < queue.transfer_memory_first_used) {
             // The used space wraps around, one continuous usable space.
             size_available = queue.transfer_memory_first_used - memory_at;
         } else {

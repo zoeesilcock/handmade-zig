@@ -41,6 +41,11 @@ pub fn build(b: *std.Build) void {
     build_options.addOption(bool, "internal", internal);
     build_options.addOption(bool, "slow", slow);
 
+    // Create the data directory that is needed to place packaged assets in.
+    std.Io.Dir.cwd().createDirPath(b.graph.io, "data") catch |err| {
+        std.log.err("Failed to create data directory. Error: {t}", .{err});
+    };
+
     // Add the packages.
     if (package == .All or package == .Game or package == .Executable) {
         addExecutable(b, build_options, target, optimize, package, internal);

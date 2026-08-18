@@ -21,6 +21,7 @@ var running: bool = false;
 const Color = math.Color;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
+const Vector2u = math.Vector2u;
 const Matrix4x4 = math.Matrix4x4;
 const Rectangle2i = math.Rectangle2i;
 const RenderCommands = renderer.RenderCommands;
@@ -312,6 +313,10 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
         // Thene it does a pand around the scene (camera_is_panning == true) with no rotation.
         var camera_is_panning: bool = true;
 
+        // You can set whatever render dimension you want, and it will be aspect-aware stretched to fit the actual
+        // dimensions of the window/screen.
+        const render_dim: Vector2u = .new(1920, 1080);
+
         while (running) {
             // Get the size of the window.
             var client_rect: win32.RECT = undefined;
@@ -321,7 +326,12 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
 
             // Fit to 16:9 drawing region. This is not necessary if you don't want a fixed aspect ratio, you can just
             // use the whole thing.
-            const draw_region: Rectangle2i = math.aspectRatioFit(16, 9, window_width, window_height);
+            const draw_region: Rectangle2i = math.aspectRatioFit(
+                render_dim.x(),
+                render_dim.y(),
+                window_width,
+                window_height,
+            );
 
             // Test rotation and panning by animating the camera location in two sequential circles: one orbit,
             // then one panned circle with the orientation locked to forward.
@@ -340,8 +350,8 @@ fn renderLoop(lp_parameter: ?*anyopaque) callconv(.c) u32 {
             // `window_width` by `window_height` in size.
             const frame: *RenderCommands = platform_renderer.beginFrame(
                 platform_renderer,
-                window_width,
-                window_height,
+                .new(window_width, window_height),
+                render_dim,
                 draw_region,
             ).?;
 

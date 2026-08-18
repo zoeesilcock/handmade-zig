@@ -315,7 +315,11 @@ fn getAllFilesOfTypeEnd(file_group: *shared.PlatformFileGroup) callconv(.c) void
     win32_file_group.arena.clear();
 }
 
-fn getFileByPath(file_group: *shared.PlatformFileGroup, path: [*:0]const u8, mode_flags: u32) callconv(.c) ?*shared.PlatformFileInfo {
+fn getFileByPath(
+    file_group: *shared.PlatformFileGroup,
+    path: [*:0]const u8,
+    mode_flags: u32,
+) callconv(.c) ?*shared.PlatformFileInfo {
     const win32_file_group: *Win32PlatformFileGroup = @ptrCast(@alignCast(file_group.platform));
     var result: ?*shared.PlatformFileInfo = null;
 
@@ -563,7 +567,12 @@ fn allocateMemory(size: MemoryIndex, flags: u64) callconv(.c) ?*PlatformMemoryBl
                 @intFromEnum(PlatformMemoryBlockFlags.OverflowCheck)) != 0)
         {
             var old_protect: win32.PAGE_PROTECTION_FLAGS = undefined;
-            const protected = win32.VirtualProtect(@ptrFromInt(@intFromPtr(block) + protected_offset), page_size, win32.PAGE_NOACCESS, &old_protect);
+            const protected = win32.VirtualProtect(
+                @ptrFromInt(@intFromPtr(block) + protected_offset),
+                page_size,
+                win32.PAGE_NOACCESS,
+                &old_protect,
+            );
             std.debug.assert(protected != 0);
         }
 
@@ -821,7 +830,8 @@ var XInputGetState: *const fn (u32, ?*win32.XINPUT_STATE) callconv(.winapi) isiz
 var XInputSetState: *const fn (u32, ?*win32.XINPUT_VIBRATION) callconv(.winapi) isize = XInputSetStateStub;
 
 fn loadXInput() void {
-    const x_input_library = win32.LoadLibraryA("xinput1_4.dll") orelse win32.LoadLibraryA("xinput1_3.dll") orelse win32.LoadLibraryA("xinput9_1_0.dll");
+    const x_input_library = win32.LoadLibraryA("xinput1_4.dll") orelse win32.LoadLibraryA("xinput1_3.dll") orelse
+        win32.LoadLibraryA("xinput9_1_0.dll");
 
     if (x_input_library) |library| {
         if (win32.GetProcAddress(library, "XInputGetState")) |procedure| {
@@ -848,7 +858,8 @@ fn processMouseInput(
         _ = win32.ScreenToClient(window, &mouse_point);
 
         const mouse_x: f32 = @as(f32, @floatFromInt(mouse_point.x));
-        const mouse_y: f32 = @as(f32, @floatFromInt((@as(i32, @intCast(window_dimension.height())) - 1) - mouse_point.y));
+        const mouse_y: f32 =
+            @as(f32, @floatFromInt((@as(i32, @intCast(window_dimension.height())) - 1) - mouse_point.y));
         new_input.clip_space_mouse_position = .new(
             math.clampBinormalMapToRange(
                 @as(f32, @floatFromInt(draw_region.min.x())),
@@ -2184,8 +2195,8 @@ pub export fn wWinMain(
                     );
                     var frame: *RenderCommands = platform_renderer.beginFrame(
                         platform_renderer,
-                        @intCast(window_dimension.width()),
-                        @intCast(window_dimension.height()),
+                        window_dimension,
+                        render_dimensions,
                         draw_region,
                     ).?;
                     frame.settings.render_dim = render_dimensions;

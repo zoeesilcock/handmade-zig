@@ -76,10 +76,12 @@ const ImportTagArray = struct {
 const ImportGridTag = struct {
     type_id: AssetBasicCategory = .None,
     tags: ImportTagArray = .{},
+    variant_group: u32 = 0,
 };
 
 pub const ImportGridTags = struct {
     tags: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX]ImportGridTag = @splat(@splat(.{})),
+    variant_group_count: u32 = 0,
 };
 
 const TagBuilder = struct {
@@ -872,8 +874,11 @@ pub fn createParticleBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
             const variant: u32 = 4 * y_index + x_index;
             addTag(&builder, .Variant, (1.0 / 32.0) + (@as(f32, @floatFromInt(variant)) / 15.0));
             tag.* = endTags(&builder, .Particle);
+            tag.variant_group = 1;
         }
     }
+
+    tags.variant_group_count = 2;
 }
 
 pub fn createHandBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
@@ -896,6 +901,7 @@ pub fn createItemBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
     while (y_index < 4) : (y_index += 1) {
         var x_index: u32 = 0;
         while (x_index < 4) : (x_index += 1) {
+            var variant_group: u32 = 0;
             const tag: *ImportGridTag = &tags.tags[y_index][x_index];
             var builder: TagBuilder = beginTags(assets);
 
@@ -903,10 +909,12 @@ pub fn createItemBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
                 0 => {
                     addTag(&builder, .Variant, 0.25);
                     addTag(&builder, .Floor, 1);
+                    variant_group = y_index + 1;
                 },
                 1 => {
                     addTag(&builder, .Variant, 0.75);
                     addTag(&builder, .Floor, 1);
+                    variant_group = y_index + 1;
                 },
                 2 => addTag(&builder, .Worn, 1),
                 else => {},
@@ -914,8 +922,11 @@ pub fn createItemBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
 
             addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
             tag.* = endTags(&builder, .Item);
+            tag.variant_group = variant_group;
         }
     }
+
+    tags.variant_group_count = 5;
 }
 
 pub fn createSceneryBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
@@ -924,14 +935,15 @@ pub fn createSceneryBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
         var x_index: u32 = 0;
         while (x_index < 4) : (x_index += 1) {
             const tag: *ImportGridTag = &tags.tags[y_index][x_index];
-            if (x_index == 0 and y_index < 4) {
-                var builder: TagBuilder = beginTags(assets);
-                addTag(&builder, .Variant, @as(f32, @floatFromInt(x_index)) / 4.0);
-                addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
-                tag.* = endTags(&builder, .Scenery);
-            }
+            var builder: TagBuilder = beginTags(assets);
+            addTag(&builder, .Variant, @as(f32, @floatFromInt(x_index)) / 4.0);
+            addTag(&builder, .FacingDirection, @as(f32, @floatFromInt(y_index)) * math.TAU32 / 4.0);
+            tag.* = endTags(&builder, .Scenery);
+            tag.variant_group = y_index + 1;
         }
     }
+
+    tags.variant_group_count = 5;
 }
 
 pub fn createPlateBlockTagGrid(assets: *Assets, tags: *ImportGridTags) void {
@@ -1269,6 +1281,87 @@ fn updateSingleAssetMetadata(
     );
 }
 
+fn updateAssetVariants(
+    assets: *Assets,
+    file: *SourceFile,
+    temp_memory: *MemoryArena,
+    grid: *ImportGridTags,
+) void {
+    if (grid.variant_group_count > 0) {
+        if (assets.getFile(file.dest_file_index)) |asset_file| {
+            _ = asset_file;
+
+            const x_count: u32 = file.asset_indices[0].len;
+            const y_count: u32 = file.asset_indices.len;
+            const variant_count: [*]u32 = temp_memory.pushArray(grid.variant_group_count, u32, null);
+
+            {
+                var y_index: u32 = 0;
+                while (y_index < y_count) : (y_index += 1) {
+                    var x_index: u32 = 0;
+                    while (x_index < x_count) : (x_index += 1) {
+                        const asset_index: u32 = file.asset_indices[y_index][x_index];
+                        if (asset_index != 0) {
+                            const tags: ImportGridTag = grid.tags[y_index][x_index];
+                            if (tags.variant_group != 0) {
+                                std.debug.assert(tags.variant_group < grid.variant_group_count);
+                                variant_count[tags.variant_group] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            const bucket_size: [*]f32 = temp_memory.pushArray(grid.variant_group_count, f32, null);
+            const at_point: [*]f32 = temp_memory.pushArray(grid.variant_group_count, f32, null);
+            {
+                var variant_group_index: u32 = 0;
+                while (variant_group_index < grid.variant_group_count) : (variant_group_index += 1) {
+                    const count: u32 = variant_count[variant_group_index];
+                    if (count != 0) {
+                        const size: f32 = 1.0 / @as(f32, @floatFromInt(count));
+                        bucket_size[variant_group_index] = size;
+                        at_point[variant_group_index] = 0.5 * size;
+                    }
+                }
+            }
+
+            {
+                var y_index: u32 = 0;
+                while (y_index < y_count) : (y_index += 1) {
+                    var x_index: u32 = 0;
+                    while (x_index < x_count) : (x_index += 1) {
+                        const asset_index: u32 = file.asset_indices[y_index][x_index];
+                        if (asset_index != 0) {
+                            // const asset: *Asset = &assets.assets[asset_index];
+                            const tags: ImportGridTag = grid.tags[y_index][x_index];
+                            const variant_group_index: u32 = tags.variant_group;
+                            if (variant_group_index != 0) {
+                                std.debug.assert(variant_group_index < grid.variant_group_count);
+
+                                const point: f32 = at_point[variant_group_index];
+                                at_point[variant_group_index] += bucket_size[variant_group_index];
+
+                                var tag_index: u32 = tags.tags.first_tag_index;
+                                while (tag_index < tags.tags.one_past_last_tag_index) : (tag_index += 1) {
+                                    const source_tag: *HHATag = @ptrCast(assets.tags + tag_index);
+                                    if (source_tag.id == .Variant) {
+                                        // TODO: This would break multi-threaded importing, so we should probably
+                                        // clean up the tags pipeline so we're not just writing to the same grid all
+                                        // the time. We should really change the way we're doing tags now, it's really
+                                        // antiquated at this point.
+                                        source_tag.value = point;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn updateAssetMetadata(
     assets: *Assets,
     file: *SourceFile,
@@ -1473,6 +1566,7 @@ fn updateAssetDataFromFile(
             }
         }
 
+        updateAssetVariants(context.assets, match.source.?, temp_arena, template_tags);
         updateAssetMetadata(context.assets, match.source.?, fields, template_tags, append_tags);
 
         if (opt_align_points) |align_points| {

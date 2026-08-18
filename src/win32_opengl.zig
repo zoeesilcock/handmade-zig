@@ -18,6 +18,7 @@ const RendererTexture = renderer.RendererTexture;
 const RenderCommands = renderer.RenderCommands;
 const PlatformRenderer = renderer.PlatformRenderer;
 const Rectangle2i = math.Rectangle2i;
+const Vector2u = math.Vector2u;
 
 const INTERNAL = shared.INTERNAL;
 
@@ -546,14 +547,14 @@ fn processTextureQueue(platform_renderer: *PlatformRenderer, texture_queue: *Tex
 
 fn beginFrame(
     platform_renderer: *PlatformRenderer,
-    window_width: u32,
-    window_height: u32,
+    window_dim: Vector2u,
+    render_dim: Vector2u,
     draw_region: Rectangle2i,
 ) callconv(.c) ?*RenderCommands {
     const result: ?*RenderCommands = opengl.beginFrame(
         @ptrCast(@alignCast(platform_renderer)),
-        window_width,
-        window_height,
+        window_dim,
+        render_dim,
         draw_region,
     );
     return result;

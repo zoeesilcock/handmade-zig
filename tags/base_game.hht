@@ -358,21 +358,30 @@ scenery "scenery_tree_01.png"
 scenery "scenery_tree_02.png"
 {
     Tags = tree, winter(0), dark(0), fall(0), damaged(1);
+    Align[1,0][0] = 41498, 37907, 2251, Default | ToParent;
+    Align[0,0][0] = 40959, 40959, 1625, Default | ToParent;
 };
 
 scenery "scenery_tree_03.png"
 {
     Tags = tree, winter(0), dark(0), fall(1);
+    Align[3,0][0] = 41085, 36237, 1890, Default | ToParent;
+    Align[2,0][0] = 41570, 37584, 2114, Default | ToParent;
+    Align[0,0][0] = 41665, 37191, 1868, Default | ToParent;
 };
 
 scenery "scenery_tree_04.png"
 {
     Tags = tree, winter(0), dark(1), fall(0);
+    Align[1,0][0] = 41026, 37889, 2065, Default | ToParent;
+    Align[0,0][0] = 42661, 37076, 1590, Default | ToParent;
 };
 
 scenery "scenery_tree_05.png"
 {
     Tags = tree, winter(1), dark(0), fall(0);
+    Align[1,0][0] = 39845, 36534, 1916, Default | ToParent;
+    Align[0,0][0] = 40748, 36820, 1820, Default | ToParent;
 };
 
 sound "bloop_00.wav"

@@ -216,28 +216,22 @@ const RendererTexture = renderer.RendererTexture;
 const RenderGroup = renderer.RenderGroup;
 const RenderSetup = renderer.RenderSetup;
 const TextureQueue = renderer.TextureQueue;
-const TextureOpList = renderer.TextureOpList;
 const RenderEntryHeader = renderer.RenderEntryHeader;
 const RenderEntryTexturedQuads = renderer.RenderEntryTexturedQuads;
 const RenderEntryLightingTransfer = renderer.RenderEntryLightingTransfer;
 const RenderEntryBeginPeels = renderer.RenderEntryBeginPeels;
 const RenderEntryFullClear = renderer.RenderEntryFullClear;
-const RenderEntryBitmap = renderer.RenderEntryBitmap;
-const RenderEntryCube = renderer.RenderEntryCube;
-const RenderEntryRectangle = renderer.RenderEntryRectangle;
-const RenderEntrySaturation = renderer.RenderEntrySaturation;
 const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
+const Vector2u = math.Vector2u;
 const Color = math.Color;
 const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
-const SpriteFlag = renderer.SpriteFlag;
-const SpriteEdge = renderer.SpriteEdge;
 
 const debug_color_table = handmade.debug_color_table;
 var global_config = &@import("config.zig").global_config;
@@ -470,6 +464,11 @@ pub const Info = struct {
 
         if (major > 2 or (major == 2 and minor >= 1)) {
             result.gl_ext_texture_srgb = true;
+        }
+
+        if (major >= 3) {
+            // Version 3 should have this feature, even if it isn't reported on certain platforms.
+            result.gl_arb_framebuffer_object = true;
         }
 
         return result;
@@ -1356,6 +1355,9 @@ fn framebufferTexImage(open_gl: *OpenGL, slot: u32, format: i32, filter_type: i3
 }
 
 fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, color_buffer_count: u32) Framebuffer {
+    std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
+    std.debug.assert(width > 0 and height > 0);
+
     var result: Framebuffer = .{};
     const multisampled: bool = (flags & @intFromEnum(FramebufferFlags.Multisampled)) != 0;
     const filtered: bool = (flags & @intFromEnum(FramebufferFlags.Filtered)) != 0;
@@ -1793,15 +1795,16 @@ fn getSpecialTextureHandleFor(open_gl: *OpenGL, texture: RendererTexture) u32 {
 
 pub fn beginFrame(
     open_gl: *OpenGL,
-    window_width: u32,
-    window_height: u32,
+    window_dim: Vector2u,
+    render_dim: Vector2u,
     draw_region: Rectangle2i,
 ) callconv(.c) *RenderCommands {
     var commands: *RenderCommands = &open_gl.render_commands;
 
     commands.settings = open_gl.current_settings;
+    commands.settings.render_dim = render_dim;
 
-    commands.os_window_dim = .new(window_width, window_height);
+    commands.os_window_dim = window_dim;
     commands.os_draw_region = draw_region;
 
     commands.max_push_buffer_size = open_gl.push_buffer_memory.len * @sizeOf(u8);

@@ -544,6 +544,12 @@ pub const Assets = struct {
         return asset;
     }
 
+    pub fn getTag(self: *Assets, tag_index: u32) ?*HHATag {
+        std.debug.assert(tag_index <= self.tag_count);
+        const tag = &self.tags[tag_index];
+        return tag;
+    }
+
     pub fn getFirstAsset(self: *Assets, type_id: AssetBasicCategory) ?u32 {
         TimedBlock.beginFunction(@src(), .GetFirstAsset);
         defer TimedBlock.endFunction(@src(), .GetFirstAsset);
