@@ -45,6 +45,7 @@ pub const WorldGenerator = struct {
     world: *World,
     tile_dimension: Vector3,
 
+    first_apron: ?*GenApron,
     first_room: ?*GenRoom,
     first_connection: ?*GenConnection,
 
@@ -101,6 +102,17 @@ pub const GenRoomSpec = struct {
     required_dimension: GenVector3,
     stone_floor: bool,
     outdoors: bool,
+    apron: ?*GenApronSpec,
+};
+
+pub const GenApronSpec = struct {
+    trees: bool,
+};
+
+pub const GenApron = struct {
+    global_next: ?*GenApron,
+    spec: *GenApronSpec,
+    volume: GenVolume,
 };
 
 pub const GenRoom = struct {
@@ -267,8 +279,9 @@ pub const GenRoomStackEntry = struct {
     prev: ?*GenRoomStackEntry,
 };
 
-fn genSpec(gen: *WorldGenerator) *GenRoomSpec {
-    const spec: *GenRoomSpec = gen.memory.pushStruct(GenRoomSpec, null);
+fn genSpec(gen: *WorldGenerator, apron_spec: ?*GenApronSpec) *GenRoomSpec {
+    var spec: *GenRoomSpec = gen.memory.pushStruct(GenRoomSpec, .aligned(@alignOf(GenRoomSpec), true));
+    spec.apron = apron_spec;
     return spec;
 }
 
@@ -284,6 +297,21 @@ fn genRoom(gen: *WorldGenerator, spec: *GenRoomSpec, label: []const u8) *GenRoom
     gen.first_room = room;
 
     return room;
+}
+
+fn genApronSpec(gen: *WorldGenerator) *GenApronSpec {
+    const spec: *GenApronSpec = gen.memory.pushStruct(GenApronSpec, .aligned(@alignOf(GenApronSpec), true));
+    return spec;
+}
+
+pub fn genApron(gen: *WorldGenerator, spec: *GenApronSpec) *GenApron {
+    var apron: *GenApron = gen.memory.pushStruct(GenApron, .aligned(@alignOf(GenApron), true));
+
+    apron.spec = spec;
+    apron.global_next = gen.first_apron;
+    gen.first_apron = apron;
+
+    return apron;
 }
 
 fn addRoomConnection(gen: *WorldGenerator, room: *GenRoom, connection: *GenConnection) *GenRoomConnection {
@@ -624,7 +652,7 @@ fn placeRoomAlongEdge(
                 door.min[relative_z_axis] = max_door;
                 door.max[relative_z_axis] = min_door;
 
-                door.addRadius(add_radius);
+                _ = door.addRadius(add_radius);
 
                 connection.volume = door;
 
@@ -725,6 +753,11 @@ fn generateWorld(gen: *WorldGenerator, world: *World) void {
     while (opt_room) |room| : (opt_room = room.global_next) {
         room_gen.generateRoom(gen, world, room);
     }
+
+    var opt_apron: ?*GenApron = gen.first_apron;
+    while (opt_apron) |apron| : (opt_apron = apron.global_next) {
+        room_gen.generateApron(gen, world, apron);
+    }
 }
 
 fn endWorldGen(gen: *WorldGenerator) void {
@@ -735,7 +768,7 @@ fn endWorldGen(gen: *WorldGenerator) void {
 fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
     var result: GenDungeon = .{};
 
-    const dungeon_spec: *GenRoomSpec = genSpec(gen);
+    const dungeon_spec: *GenRoomSpec = genSpec(gen, null);
     setSize(gen, dungeon_spec, 17, 9, 1);
 
     var opt_room_above: ?*GenRoom = null;
@@ -800,20 +833,21 @@ fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
 fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
     var result: GenOrphanage = .{};
 
-    var garden_spec: *GenRoomSpec = genSpec(gen);
+    const apron_spec: *GenApronSpec = genApronSpec(gen);
+    var garden_spec: *GenRoomSpec = genSpec(gen, apron_spec);
     garden_spec.outdoors = true;
-    var basic_forest_spec: *GenRoomSpec = genSpec(gen);
+    var basic_forest_spec: *GenRoomSpec = genSpec(gen, apron_spec);
     basic_forest_spec.outdoors = true;
 
-    var bedroom_spec: *GenRoomSpec = genSpec(gen);
+    var bedroom_spec: *GenRoomSpec = genSpec(gen, apron_spec);
     bedroom_spec.stone_floor = true;
 
-    const save_slot_spec: *GenRoomSpec = genSpec(gen);
-    const main_room_spec: *GenRoomSpec = genSpec(gen);
-    const tailor_room_spec: *GenRoomSpec = genSpec(gen);
-    const kitchen_spec: *GenRoomSpec = genSpec(gen);
-    const vertical_hallway_spec: *GenRoomSpec = genSpec(gen);
-    const horizontal_hallway_spec: *GenRoomSpec = genSpec(gen);
+    const save_slot_spec: *GenRoomSpec = genSpec(gen, apron_spec);
+    const main_room_spec: *GenRoomSpec = genSpec(gen, apron_spec);
+    const tailor_room_spec: *GenRoomSpec = genSpec(gen, apron_spec);
+    const kitchen_spec: *GenRoomSpec = genSpec(gen, apron_spec);
+    const vertical_hallway_spec: *GenRoomSpec = genSpec(gen, apron_spec);
+    const horizontal_hallway_spec: *GenRoomSpec = genSpec(gen, apron_spec);
 
     const main_room: *GenRoom = genRoom(gen, main_room_spec, "Orphanage Main Room");
     const tailor_room: *GenRoom = genRoom(gen, tailor_room_spec, "Orphanage Tailor's Room");

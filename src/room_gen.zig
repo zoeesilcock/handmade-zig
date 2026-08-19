@@ -26,6 +26,8 @@ const WorldPosition = world_mod.WorldPosition;
 const WorldGenerator = world_gen.WorldGenerator;
 const GenRoom = world_gen.GenRoom;
 const GenRoomSpec = world_gen.GenRoomSpec;
+const GenApron = world_gen.GenApron;
+const GenApronSpec = world_gen.GenApronSpec;
 const GenVector3 = gen_math.GenVector3;
 const GenVolume = gen_math.GenVolume;
 const GenRoomConnection = world_gen.GenRoomConnection;
@@ -153,29 +155,29 @@ pub fn getCameraOffsetZForCloseup() f32 {
     return 6;
 }
 
-fn getCameraOffsetZForDimension(x_count: i32, y_count: i32, camera_behaviour: *u32) f32 {
+fn getCameraOffsetZForDimension(dimension: GenVector3, camera_behaviour: *u32) f32 {
     var x_distance: f32 = 13;
-    if (x_count == 12) {
+    if (dimension[X] == 12) {
         x_distance = 14;
-    } else if (x_count == 13) {
+    } else if (dimension[X] == 13) {
         x_distance = 15;
-    } else if (x_count == 14) {
+    } else if (dimension[X] == 14) {
         x_distance = 16;
         camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerX);
-    } else if (x_count >= 15) {
+    } else if (dimension[X] >= 15) {
         x_distance = 17;
         camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerX);
     }
 
     var y_distance: f32 = 13;
-    if (y_count == 10) {
+    if (dimension[Y] == 10) {
         y_distance = 15;
-    } else if (y_count == 11) {
+    } else if (dimension[Y] == 11) {
         y_distance = 17;
-    } else if (y_count == 12) {
+    } else if (dimension[Y] == 12) {
         y_distance = 19;
         camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerY);
-    } else if (y_count >= 13) {
+    } else if (dimension[Y] >= 13) {
         y_distance = 21;
         camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerY);
     }
@@ -187,67 +189,58 @@ fn getCameraOffsetZForDimension(x_count: i32, y_count: i32, camera_behaviour: *u
 
 pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
     const spec: *GenRoomSpec = room.spec;
-    const dimension: GenVector3 = room.volume.getDimension();
-    const min_tile_x: i32 = room.volume.min[X];
-    const x_count: i32 = dimension[X];
-    const min_tile_y: i32 = room.volume.min[Y];
-    const y_count: i32 = dimension[Y];
-    const min_tile_z: i32 = room.volume.min[Z];
-    const z_count: i32 = dimension[Z];
+    const tile_count: GenVector3 = room.volume.getDimension();
+    const min_tile: GenVector3 = room.volume.min;
 
-    const floor_tile_z: i32 = min_tile_z;
+    const floor_tile_z: i32 = min_tile[Z];
     const tile_dimension: Vector3 = gen.tile_dimension;
+
+    const change_base_position: WorldPosition = chunkPositionFromTilePositionV3(gen, min_tile, null);
+
+    const room_dimensions: Vector3 = .new(
+        @as(f32, @floatFromInt(tile_count[X])) * tile_dimension.x(),
+        @as(f32, @floatFromInt(tile_count[Y])) * tile_dimension.y(),
+        @as(f32, @floatFromInt(tile_count[Z])) * tile_dimension.z(),
+    );
+    const min_room_position: Vector3 = Vector3.new(tile_dimension.x(), tile_dimension.y(), 0).scaledTo(-0.5);
+    const max_room_position: Vector3 = min_room_position.plus(room_dimensions);
 
     var series = &world.game_entropy;
 
-    const change_center: WorldPosition =
-        chunkPositionFromTilePosition(
-            gen,
-            min_tile_x + @divFloor(x_count, 2),
-            min_tile_y + @divFloor(y_count, 2),
-            min_tile_z + @divFloor(z_count, 2),
-            null,
-        );
-    const change_rectangle: Rectangle3 = .fromCenterDimension(
-        .zero(),
-        .new(
-            tile_dimension.x() * @as(f32, @floatFromInt(x_count + 8)),
-            tile_dimension.y() * @as(f32, @floatFromInt(y_count + 8)),
-            tile_dimension.z() * @as(f32, @floatFromInt(z_count + 4)),
-        ),
-    );
+    const change_rect: Rectangle3 =
+        Rectangle3.fromMinMax(min_room_position, max_room_position).addRadius(tile_dimension);
 
     const change_memory = gen.temp_memory.beginTemporaryMemory();
     defer gen.temp_memory.endTemporaryMemory(change_memory);
 
     var grid: *GenRoomGrid = gen.temp_memory.pushStruct(GenRoomGrid, null);
-    grid.dimension = dimension;
-    grid.tiles = gen.temp_memory.pushArray(@intCast(dimension[0] * dimension[1] * dimension[2]), GenRoomTile, null);
+    grid.dimension = tile_count;
+    grid.tiles = gen.temp_memory.pushArray(@intCast(gen_math.getTotalVolume(tile_count)), GenRoomTile, null);
 
-    const region: *SimRegion = sim.beginWorldChange(
-        &gen.temp_memory,
-        world,
-        change_center,
-        change_rectangle,
-        0,
-    );
+    const region: *SimRegion = sim.beginWorldChange(&gen.temp_memory, world, change_base_position, change_rect, 0);
 
     var y_index: i32 = 0;
-    while (y_index < y_count) : (y_index += 1) {
+    while (y_index < tile_count[Y]) : (y_index += 1) {
         var x_index: i32 = 0;
-        while (x_index < x_count) : (x_index += 1) {
+        while (x_index < tile_count[X]) : (x_index += 1) {
+            var position: Vector3 = .new(
+                tile_dimension.x() * @as(f32, @floatFromInt(x_index)),
+                tile_dimension.y() * @as(f32, @floatFromInt(y_index)),
+                0,
+            );
+
             const z_index: i32 = 0;
             var tile: *GenRoomTile = grid.getTile(x_index, y_index, z_index).?;
 
-            const tile_x: i32 = min_tile_x + x_index;
-            const tile_y: i32 = min_tile_y + y_index;
+            const tile_x: i32 = min_tile[X] + x_index;
+            const tile_y: i32 = min_tile[Y] + y_index;
             // const tile_z: i32 = floor_tile_z;
 
             const on_edge: bool =
                 x_index == 0 or
-                x_index == (x_count - 1) or
+                x_index == (tile_count[X] - 1) or
                 y_index == 0 or
-                y_index == (y_count - 1);
+                y_index == (tile_count[Y] - 1);
             var on_boundary = on_edge;
 
             var t_stair: f32 = 0;
@@ -273,14 +266,6 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 }
             }
 
-            var position: WorldPosition = chunkPositionFromTilePosition(
-                gen,
-                tile_x,
-                tile_y,
-                floor_tile_z,
-                null,
-            );
-
             const entity: *Entity = entity_gen.addEntity(region);
 
             var color: Color = .newFromSRGB(0.31, 0.49, 0.32, 1);
@@ -291,7 +276,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
             }
 
             const place_tree: bool = spec.outdoors and !on_connection and on_edge;
-            const on_lamp: bool = !spec.outdoors and (x_index == x_count - 2 and y_index == 1);
+            const on_lamp: bool = !spec.outdoors and (x_index == tile_count[X] - 2 and y_index == 1);
             var randomize_top: bool = false;
             if (on_boundary and !on_connection) {
                 wall_height = 2;
@@ -317,12 +302,12 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 entity.addTag(.Manmade, 1);
             }
 
-            _ = position.offset.setX(position.offset.x() + 0);
-            _ = position.offset.setY(position.offset.y() + 0);
-            _ = position.offset.setZ(position.offset.z() + wall_height + 0.5 * series.randomUnilateral());
+            _ = position.setX(position.x() + 0);
+            _ = position.setY(position.y() + 0);
+            _ = position.setZ(position.z() + wall_height + 0.5 * series.randomUnilateral());
 
             if (stairwell) {
-                _ = position.offset.setZ(position.offset.z() - (t_stair * tile_dimension.z()));
+                _ = position.setZ(position.z() - (t_stair * tile_dimension.z()));
             }
 
             color = .newFromSRGB(0.8, 0.8, 0.8, 1);
@@ -348,7 +333,7 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
                 );
             }
 
-            entity_gen.placeEntity(region, entity, position);
+            entity.position = position;
             tile.structural = entity;
             tile.open = (!stairwell and !on_connection and entity.traversable_count == 1);
 
@@ -413,42 +398,117 @@ pub fn generateRoom(gen: *WorldGenerator, world: *World, room: *GenRoom) void {
         }
     }
 
-    var half_tile_dimension: Vector3 = tile_dimension.scaledTo(0.5);
-    _ = half_tile_dimension.setZ(0);
-    const min_room_world_position: WorldPosition = chunkPositionFromTilePosition(
-        gen,
-        min_tile_x,
-        min_tile_y,
-        min_tile_z,
-        half_tile_dimension.negated(),
-    );
-    const max_room_world_position: WorldPosition = chunkPositionFromTilePosition(
-        gen,
-        min_tile_x + x_count,
-        min_tile_y + y_count,
-        min_tile_z + z_count,
-        half_tile_dimension.negated(),
-    );
-
-    const min_room_position: Vector3 = sim.mapIntoSimSpace(
-        region,
-        min_room_world_position,
-    );
-    const max_room_position: Vector3 = sim.mapIntoSimSpace(
-        region,
-        max_room_world_position,
-    );
-
     const camera_room: *Entity = entity_gen.addEntity(region);
     camera_room.collision_volume = .fromMinMax(min_room_position, max_room_position);
 
     camera_room.brain_slot = BrainSlot.forSpecialBrain(.BrainRoom);
-    _ = camera_room.camera_offset.setZ(getCameraOffsetZForDimension(x_count, y_count, &camera_room.camera_behavior));
-    entity_gen.placeEntity(region, camera_room, change_center);
+    _ = camera_room.camera_offset.setZ(getCameraOffsetZForDimension(tile_count, &camera_room.camera_behavior));
+    camera_room.position = .new(0, 0, 0);
 
     const world_room: *world_mod.WorldRoom =
-        world_mod.addWorldRoom(world, min_room_world_position, max_room_world_position);
+        world_mod.addWorldRoom(
+            world,
+            world_mod.mapIntoChunkSpace(world, change_base_position, min_room_position),
+            world_mod.mapIntoChunkSpace(world, change_base_position, max_room_position),
+        );
     _ = world_room;
+
+    sim.endWorldChange(region);
+
+    if (spec.apron) |apron_spec| {
+        const apron: *GenApron = world_gen.genApron(gen, apron_spec);
+        apron.volume = room.volume.addRadius(.{ 8, 8, 0 });
+    }
+}
+
+pub fn generateApron(gen: *WorldGenerator, world: *World, apron: *GenApron) void {
+    // const spec: *GenApronSpec = apron.spec;
+    const dimension: GenVector3 = apron.volume.getDimension();
+    const min_tile_x: i32 = apron.volume.min[X];
+    const x_count: i32 = dimension[X];
+    const min_tile_y: i32 = apron.volume.min[Y];
+    const y_count: i32 = dimension[Y];
+    const min_tile_z: i32 = apron.volume.min[Z];
+    const z_count: i32 = dimension[Z];
+    const floor_tile_z: i32 = min_tile_z;
+    const tile_dimension: Vector3 = gen.tile_dimension;
+
+    const change_center: WorldPosition =
+        chunkPositionFromTilePosition(
+            gen,
+            min_tile_x + @divFloor(x_count, 2),
+            min_tile_y + @divFloor(y_count, 2),
+            min_tile_z + @divFloor(z_count, 2),
+            null,
+        );
+    const change_rectangle: Rectangle3 = .fromCenterDimension(
+        .zero(),
+        .new(
+            tile_dimension.x() * @as(f32, @floatFromInt(x_count + 8)),
+            tile_dimension.y() * @as(f32, @floatFromInt(y_count + 8)),
+            tile_dimension.z() * @as(f32, @floatFromInt(z_count + 4)),
+        ),
+    );
+
+    const change_memory = gen.temp_memory.beginTemporaryMemory();
+    defer gen.temp_memory.endTemporaryMemory(change_memory);
+
+    const region: *SimRegion = sim.beginWorldChange(
+        &gen.temp_memory,
+        world,
+        change_center,
+        change_rectangle,
+        0,
+    );
+
+    // var series = &world.game_entropy;
+
+    var y_index: i32 = 0;
+    while (y_index < y_count) : (y_index += 1) {
+        var x_index: i32 = 0;
+        while (x_index < x_count) : (x_index += 1) {
+            const tile_x: i32 = min_tile_x + x_index;
+            const tile_y: i32 = min_tile_y + y_index;
+            // const tile_z: i32 = floor_tile_z;
+
+            const wall_height: f32 = 0.5;
+            const cube_position: Vector3 = .new(0, 0, -0.5 * wall_height);
+            const cube_half_dimension: Vector3 = .new(0.7, 0.7, 0.5 * wall_height);
+            const collision_region: Rectangle3 = .fromCenterHalfDimension(cube_position, cube_half_dimension);
+            const query_region: Rectangle3 =
+                .fromCenterHalfDimension(cube_position, cube_half_dimension.plus(.new(-0.1, -0.1, 0)));
+
+            var world_position: WorldPosition = chunkPositionFromTilePosition(
+                gen,
+                tile_x,
+                tile_y,
+                floor_tile_z,
+                null,
+            );
+            _ = world_position.offset.setZ(world_position.offset.z() + 0.5 * wall_height);
+            const position: Vector3 = world_mod.subtractPositions(region.world, &world_position, &region.origin);
+
+            if (!sim.overlappingEntitiesExist(region, query_region.offsetBy(position))) {
+                var entity: *Entity = entity_gen.addEntity(region);
+                entity.collision_volume = collision_region;
+                const color: Color = .newFromSRGB(0.5, 0.5, 0.5, 1);
+                const piece: *EntityVisiblePiece = entity_gen.addPieceV3(
+                    entity,
+                    .Block,
+                    cube_half_dimension,
+                    cube_position,
+                    color,
+                    @intFromEnum(EntityVisiblePieceFlag.Cube),
+                );
+                _ = piece;
+
+                entity.addTag(.Floor, 1);
+                entity.addTag(.Grass, 1);
+
+                entity.position = position;
+            }
+        }
+    }
 
     sim.endWorldChange(region);
 }
@@ -473,4 +533,12 @@ pub fn chunkPositionFromTilePosition(
     std.debug.assert(world_mod.isVector3Canonical(gen.world, result.offset));
 
     return result;
+}
+
+pub fn chunkPositionFromTilePositionV3(
+    gen: *WorldGenerator,
+    abs_tile: GenVector3,
+    opt_additional_offset: ?Vector3,
+) WorldPosition {
+    return chunkPositionFromTilePosition(gen, abs_tile[X], abs_tile[Y], abs_tile[Z], opt_additional_offset);
 }

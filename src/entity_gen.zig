@@ -174,10 +174,6 @@ pub fn addEntity(region: *SimRegion) *Entity {
     return entity;
 }
 
-pub fn placeEntity(region: *SimRegion, entity: *Entity, chunk_position: WorldPosition) void {
-    entity.position = world_mod.subtractPositions(region.world, &chunk_position, &region.origin);
-}
-
 fn initHitPoints(entity: *Entity, count: u32) void {
     std.debug.assert(count <= entity.hit_points.len);
 
@@ -265,7 +261,7 @@ pub fn addConversation(region: *SimRegion, position: Vector3, standing_on: Trave
     return entity;
 }
 
-fn addMonster(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) void {
+fn addMonster(region: *SimRegion, position: Vector3, standing_on: TraversableReference) void {
     var entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
@@ -279,7 +275,7 @@ fn addMonster(region: *SimRegion, world_position: WorldPosition, standing_on: Tr
     _ = addPiece(entity, .Shadow, 4.5, .zero(), .new(1, 1, 1, 0.5), null);
     _ = addPiece(entity, .Body, 4.5, .zero(), .white(), null);
 
-    placeEntity(region, entity, world_position);
+    entity.position = position;
 }
 
 pub fn addSnake(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
@@ -309,19 +305,15 @@ pub fn addSnake(region: *SimRegion, position: Vector3, standing_on: TraversableR
     return entity;
 }
 
-pub fn addLamp(
-    region: *SimRegion,
-    world_position: WorldPosition,
-    color: Color3,
-) void {
+pub fn addLamp(region: *SimRegion, position: Vector3, color: Color3) void {
     const entity = addEntity(region);
 
     _ = addPieceLight(entity, 0.5, .new(0, 0, 2.5), 1.0, color);
 
-    placeEntity(region, entity, world_position);
+    entity.position = position;
 }
 
-fn addFamiliar(region: *SimRegion, world_position: WorldPosition, standing_on: TraversableReference) void {
+fn addFamiliar(region: *SimRegion, position: Vector3, standing_on: TraversableReference) void {
     const entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
@@ -333,5 +325,5 @@ fn addFamiliar(region: *SimRegion, world_position: WorldPosition, standing_on: T
     _ = addPiece(entity, .Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
     _ = addPiece(entity, .Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
 
-    placeEntity(region, entity, world_position);
+    entity.position = position;
 }

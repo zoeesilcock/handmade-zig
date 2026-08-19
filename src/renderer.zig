@@ -1232,7 +1232,7 @@ pub const RenderGroup = extern struct {
         color: Color,
         thickness: f32,
     ) void {
-        if (self.getCurrentQuads(6, self.white_texture) != null) {
+        if (self.getCurrentQuads(12, self.white_texture) != null) {
             const texture: RendererTexture = self.white_texture;
 
             const nx: f32 = rectangle.min.x();

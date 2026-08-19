@@ -242,11 +242,7 @@ fn addPlayer(
     standing_on: TraversableReference,
     brain_id: BrainId,
 ) void {
-    const position: WorldPosition = world.mapIntoChunkSpace(
-        sim_region.world,
-        sim_region.origin,
-        standing_on.getSimSpaceTraversable().position,
-    );
+    const position: Vector3 = standing_on.getSimSpaceTraversable().position;
     var body = entity_gen.addEntity(sim_region);
     const head = entity_gen.addEntity(sim_region);
     head.collision_volume = entity_gen.makeSimpleGroundedCollision(1, 0.5, 0.6, 0.7);
@@ -306,9 +302,9 @@ fn addPlayer(
     entity_gen.connectPiece(body, head_piece, .TopOfHead, hat_piece, .Default);
     entity_gen.connectPieceToWorld(glove, glove_piece, .Default);
 
-    entity_gen.placeEntity(sim_region, glove, position);
-    entity_gen.placeEntity(sim_region, head, position);
-    entity_gen.placeEntity(sim_region, body, position);
+    glove.position = position;
+    head.position = position;
+    body.position = position;
 }
 
 fn beginSim(

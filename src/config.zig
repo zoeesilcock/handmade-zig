@@ -10,6 +10,9 @@ pub const Config = struct {
     Particles_ShowGrid: bool = false,
     Game_SkipIntro: bool = true,
     Simulation_TimestepPercentage: f32 = 100,
+    // This feature causes the renderer push buffer to overflow, likely due to one of our structs being bigger than
+    // Casey's. The current solution is to increase the size of the push_buffer_memory array on the OpenGL string in
+    // renderer_opengl.zig.
     Simulation_VisualizeCollisionVolumes: bool = true,
     Simulation_InspectSelectedEntity: bool = true,
 };

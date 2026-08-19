@@ -741,6 +741,10 @@ pub fn moveEntity(
     }
 }
 
+pub fn isRoom(entity: *Entity) bool {
+    return entity.brain_slot.type == @intFromEnum(BrainType.BrainRoom);
+}
+
 pub fn updateCameraForEntityMovement(
     world_ptr: *World,
     sim_region: *SimRegion,
@@ -757,7 +761,7 @@ pub fn updateCameraForEntityMovement(
     while (test_index < sim_region.entity_count) : (test_index += 1) {
         const test_entity: *Entity = &sim_region.entities[test_index];
 
-        if (test_entity.brain_slot.type == @intFromEnum(BrainType.BrainRoom)) {
+        if (isRoom(test_entity)) {
             if (entityOverlapsEntity(entity, test_entity)) {
                 opt_in_room = test_entity;
             }
@@ -924,6 +928,21 @@ pub fn updateCameraForEntityMovement(
     camera.target_position = world.mapIntoChunkSpace(world_ptr, sim_region.origin, target_position);
 }
 
+pub fn overlappingEntitiesExist(sim_region: *SimRegion, bounds: Rectangle3) bool {
+    var result: bool = false;
+    var test_entity_index: u32 = 0;
+    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
+        const test_entity = &sim_region.entities[test_entity_index];
+
+        if (entityOverlapsRectangle(test_entity.position, test_entity.collision_volume, bounds)) {
+            result = true;
+            break;
+        }
+    }
+
+    return result;
+}
+
 pub const TraversableSearchFlag = enum(u8) {
     Unoccupied = 0x1,
     ClippedZ = 0x2,
@@ -940,9 +959,9 @@ pub fn getClosestTraversable(
 
     var found: bool = false;
     var closest_distance_squared: f32 = math.square(1000);
-    var hero_entity_index: u32 = 0;
-    while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
-        const test_entity = &sim_region.entities[hero_entity_index];
+    var test_entity_index: u32 = 0;
+    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
+        const test_entity = &sim_region.entities[test_entity_index];
         var point_index: u32 = 0;
         while (point_index < test_entity.traversable_count) : (point_index += 1) {
             const point: EntityTraversablePoint = test_entity.getSimSpaceTraversable(point_index);

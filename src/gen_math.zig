@@ -23,6 +23,10 @@ pub fn getDirection(direction: box.BoxSurfaceIndex) GenVector3 {
     return result;
 }
 
+pub fn getTotalVolume(dimension: GenVector3) i32 {
+    return dimension[X] * dimension[Y] * dimension[Z];
+}
+
 /// Volumes include their min and their max. They are inclusive on both ends of the interval.
 pub const GenVolume = struct {
     min: GenVector3,
@@ -161,13 +165,17 @@ pub const GenVolume = struct {
         return result;
     }
 
-    pub fn addRadius(self: *GenVolume, radius: GenVector3) void {
-        self.min[0] -= radius[0];
-        self.min[1] -= radius[1];
-        self.min[2] -= radius[2];
+    pub fn addRadius(self: *GenVolume, radius: GenVector3) GenVolume {
+        var result = self.*;
 
-        self.max[0] += radius[0];
-        self.max[1] += radius[1];
-        self.max[2] += radius[2];
+        result.min[0] -= radius[0];
+        result.min[1] -= radius[1];
+        result.min[2] -= radius[2];
+
+        result.max[0] += radius[0];
+        result.max[1] += radius[1];
+        result.max[2] += radius[2];
+
+        return result;
     }
 };
