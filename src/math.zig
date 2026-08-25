@@ -920,6 +920,7 @@ fn Rectangle2Type(comptime ScalarType: type) type {
         pub const intersects = Shared.intersects;
         pub const getArea = Shared.getArea;
         pub const hasArea = Shared.hasArea;
+        pub const makeRelative = Shared.makeRelative;
     };
 }
 
@@ -966,6 +967,12 @@ fn Rectangle3Type(comptime ScalarType: type) type {
             };
         }
 
+        pub fn getMinZCenterPosition(self: *const Self) VectorType {
+            var result = self.getCenter();
+            _ = result.setZ(self.getMinCorner().z());
+            return result;
+        }
+
         const Shared = RectangleShared(3, VectorType, ScalarType, Self);
         pub const invertedInfinity = if (ScalarType == f32) Shared.invertedInfinityFloat else Shared.invertedInfinityInt;
         pub const zero = Shared.zero;
@@ -986,6 +993,7 @@ fn Rectangle3Type(comptime ScalarType: type) type {
         pub const intersects = Shared.intersects;
         pub const getArea = Shared.getArea;
         pub const hasArea = Shared.hasArea;
+        pub const makeRelative = Shared.makeRelative;
     };
 }
 
@@ -1115,6 +1123,10 @@ fn RectangleShared(
 
         pub fn hasArea(self: *const Self) bool {
             return (self.min.x() < self.max.x() and self.min.y() < self.max.y());
+        }
+
+        pub fn makeRelative(self: *const Self, position: VectorType) Self {
+            return self.offsetBy(position.negated());
         }
     };
 }

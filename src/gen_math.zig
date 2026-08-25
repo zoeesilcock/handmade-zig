@@ -9,9 +9,9 @@ pub const GenVector3 = [3]i32;
 
 pub fn plusV3(a: GenVector3, b: GenVector3) GenVector3 {
     const result: GenVector3 = .{
-        a[0] + b[0],
-        a[1] + b[1],
-        a[2] + b[2],
+        a[X] + b[X],
+        a[Y] + b[Y],
+        a[Z] + b[Z],
     };
     return result;
 }
@@ -25,6 +25,14 @@ pub fn getDirection(direction: box.BoxSurfaceIndex) GenVector3 {
 
 pub fn getTotalVolume(dimension: GenVector3) i32 {
     return dimension[X] * dimension[Y] * dimension[Z];
+}
+
+pub fn isInArrayBounds(bounds: GenVector3, position: GenVector3) bool {
+    const result: bool =
+        (position[X] >= 0 and position[X] < bounds[X]) and
+        (position[Y] >= 0 and position[Y] < bounds[Y]) and
+        (position[Z] >= 0 and position[Z] < bounds[Z]);
+    return result;
 }
 
 /// Volumes include their min and their max. They are inclusive on both ends of the interval.
@@ -163,6 +171,10 @@ pub const GenVolume = struct {
             (z >= self.min[Z] and z <= self.max[Z]);
 
         return result;
+    }
+
+    pub fn isInVolumeV3(self: *GenVolume, position: GenVector3) bool {
+        return self.isInVolume(position[X], position[Y], position[Z]);
     }
 
     pub fn addRadius(self: *GenVolume, radius: GenVector3) GenVolume {

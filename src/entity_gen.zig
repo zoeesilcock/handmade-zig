@@ -26,7 +26,6 @@ const Rectangle3 = math.Rectangle3;
 const SimRegion = sim.SimRegion;
 const WorldGenerator = world_gen.WorldGenerator;
 const WorldPosition = world_mod.WorldPosition;
-const GenRoomTileQuery = room_gen.GenRoomTileQuery;
 const AssetTagId = file_formats.AssetTagId;
 const AssetBasicCategory = file_formats.AssetBasicCategory;
 const HHAAlignPointType = file_formats.HHAAlignPointType;

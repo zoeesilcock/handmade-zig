@@ -11,6 +11,7 @@ const sim = @import("sim.zig");
 const entities = @import("entities.zig");
 const brains = @import("brains.zig");
 const memory = @import("memory.zig");
+const edit_grid = @import("edit_grid.zig");
 const file_formats = @import("file_formats.zig");
 const std = @import("std");
 
@@ -652,7 +653,7 @@ fn placeRoomAlongEdge(
                 door.min[relative_z_axis] = max_door;
                 door.max[relative_z_axis] = min_door;
 
-                _ = door.addRadius(add_radius);
+                door = door.addRadius(add_radius);
 
                 connection.volume = door;
 
@@ -694,9 +695,7 @@ fn getRandomDirectionFromMask(gen: *WorldGenerator, direction_mask: u32) BoxSurf
     return result;
 }
 
-fn layout(gen: *WorldGenerator, world: *World, start_at_room: *GenRoom) void {
-    _ = world;
-
+fn layout(gen: *WorldGenerator, start_at_room: *GenRoom) void {
     const change_memory = gen.temp_memory.beginTemporaryMemory();
     defer gen.temp_memory.endTemporaryMemory(change_memory);
 
@@ -748,15 +747,15 @@ fn layout(gen: *WorldGenerator, world: *World, start_at_room: *GenRoom) void {
     }
 }
 
-fn generateWorld(gen: *WorldGenerator, world: *World) void {
+fn generateWorld(gen: *WorldGenerator) void {
     var opt_room: ?*GenRoom = gen.first_room;
     while (opt_room) |room| : (opt_room = room.global_next) {
-        room_gen.generateRoom(gen, world, room);
+        room_gen.generateRoom(gen, room);
     }
 
     var opt_apron: ?*GenApron = gen.first_apron;
     while (opt_apron) |apron| : (opt_apron = apron.global_next) {
-        room_gen.generateApron(gen, world, apron);
+        room_gen.generateApron(gen, apron);
     }
 }
 
@@ -1061,13 +1060,13 @@ pub fn createWorldNew(world: *World) GenResult {
     _ = placeOrphan(gen, .Sunny);
     _ = placeOrphan(gen, .Viva);
 
-    layout(gen, world, start_room);
-    generateWorld(gen, world);
+    layout(gen, start_room);
+    generateWorld(gen);
 
     const hero_room: GenVolume = orphanage.hero_bedroom.?.volume;
     // const hero_room: GenVolume = orphanage.forest_entrance.?.volume;
 
-    result.initial_camera_position = room_gen.chunkPositionFromTilePosition(
+    result.initial_camera_position = edit_grid.chunkPositionFromTilePosition(
         gen,
         @divFloor(hero_room.min[X] + hero_room.max[X], 2),
         @divFloor(hero_room.min[Y] + hero_room.max[Y], 2) - 4,
