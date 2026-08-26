@@ -28,7 +28,7 @@ pub const SoundI16 = struct {
             .samples = undefined,
         };
         const size: u32 = result.getTotalSoundSize();
-        result.samples = arena.pushArray(size, i16, null)[0..size];
+        result.samples = arena.pushArray(size, i16, null, @src())[0..size];
         return result;
     }
 

@@ -484,15 +484,33 @@ pub const DebugInterface = if (INTERNAL) struct {
         _ = position;
     }
 
+    pub fn debugValue(source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {
+        _ = source;
+        _ = parent;
+        _ = field_name;
+    }
+
     pub fn debugStruct(source: std.builtin.SourceLocation, parent: anytype) void {
         _ = source;
         _ = parent;
     }
 
-    pub fn debugValue(source: std.builtin.SourceLocation, parent: anytype, comptime field_name: []const u8) void {
+    pub fn debugUIElement(
+        comptime source: std.builtin.SourceLocation,
+        comptime element_type: DebugType,
+        comptime name: []const u8,
+    ) void {
         _ = source;
-        _ = parent;
-        _ = field_name;
+        _ = element_type;
+        _ = name;
+    }
+
+    pub fn debugUIHUD(
+        comptime source: std.builtin.SourceLocation,
+        comptime value: shared.DevMode,
+    ) void {
+        _ = source;
+        _ = value;
     }
 
     pub fn debugBeginArray(array: anytype) void {

@@ -973,6 +973,12 @@ fn Rectangle3Type(comptime ScalarType: type) type {
             return result;
         }
 
+        pub fn getMaxZCenterPosition(self: *const Self) VectorType {
+            var result = self.getCenter();
+            _ = result.setZ(self.getMaxCorner().z());
+            return result;
+        }
+
         const Shared = RectangleShared(3, VectorType, ScalarType, Self);
         pub const invertedInfinity = if (ScalarType == f32) Shared.invertedInfinityFloat else Shared.invertedInfinityInt;
         pub const zero = Shared.zero;

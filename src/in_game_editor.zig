@@ -286,7 +286,7 @@ pub const InGameEditor = struct {
         }
 
         if (result == null) {
-            result = self.undo_memory.pushStruct(InGameEdit, null);
+            result = self.undo_memory.pushStruct(InGameEdit, null, @src());
             result.?.* = match.*;
             self.in_progress_sentinel.pushFirst(result.?);
         }

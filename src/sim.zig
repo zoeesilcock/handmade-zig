@@ -329,7 +329,7 @@ pub fn beginWorldChange(
     defer TimedBlock.endFunction(@src(), .BeginWorldChange);
 
     TimedBlock.beginBlock(@src(), .SimArenaAlloc);
-    var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, ArenaPushParams.aligned(16, false));
+    var sim_region: *SimRegion = sim_arena.pushStruct(SimRegion, ArenaPushParams.aligned(16, false), @src());
     TimedBlock.endBlock(@src(), .SimArenaAlloc);
 
     TimedBlock.beginBlock(@src(), .SimArenaClear);
@@ -345,11 +345,11 @@ pub fn beginWorldChange(
     sim_region.updatable_bounds = sim_region.bounds;
     sim_region.max_entity_count = 8192;
     sim_region.entity_count = 0;
-    sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, Entity, ArenaPushParams.noClear());
+    sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, Entity, ArenaPushParams.noClear(), @src());
 
     sim_region.max_brain_count = 512;
     sim_region.brain_count = 0;
-    sim_region.brains = sim_arena.pushArray(sim_region.max_brain_count, Brain, ArenaPushParams.noClear());
+    sim_region.brains = sim_arena.pushArray(sim_region.max_brain_count, Brain, ArenaPushParams.noClear(), @src());
 
     const min_chunk_position = world.mapIntoChunkSpace(
         sim_region.world,

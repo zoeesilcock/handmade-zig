@@ -51,7 +51,7 @@ pub const AudioState = struct {
         var result: ?*PlayingSound = null;
 
         if (self.first_free_playing_sound == null) {
-            self.first_free_playing_sound = self.permanent_arena.pushStruct(PlayingSound, null);
+            self.first_free_playing_sound = self.permanent_arena.pushStruct(PlayingSound, null, @src());
             self.first_free_playing_sound.?.next = null;
         }
 
@@ -124,11 +124,13 @@ pub const AudioState = struct {
             chunk_count,
             F32_4x,
             ArenaPushParams.alignedNoClear(16),
+            @src(),
         );
         const real_channel1: [*]F32_4x = temp_arena.pushArray(
             chunk_count,
             F32_4x,
             ArenaPushParams.alignedNoClear(16),
+            @src(),
         );
 
         const seconds_per_sample = 1.0 / @as(f32, @floatFromInt(sound_buffer.samples_per_second));

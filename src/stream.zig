@@ -112,7 +112,7 @@ pub const Stream = struct {
     }
 
     pub fn appendChunk(self: *Stream, size: usize, contents: [*]align(1) u8) *Chunk {
-        const chunk: *Chunk = self.arena.?.pushStruct(Chunk, .aligned(@alignOf(Chunk), false));
+        const chunk: *Chunk = self.arena.?.pushStruct(Chunk, .aligned(@alignOf(Chunk), false), @src());
         chunk.contents.count = size;
         chunk.contents.data = @ptrCast(contents);
         chunk.next = null;
@@ -153,7 +153,7 @@ pub fn output(
         var buffer: [1024]u8 = undefined;
         size = shared.formatString(buffer.len, @ptrCast(&buffer), @ptrCast(format), args);
 
-        const contents = stream.arena.?.pushCopy(size, &buffer);
+        const contents = stream.arena.?.pushCopy(size, &buffer, @src());
         var chunk = stream.appendChunk(size, @ptrCast(contents));
         chunk.line = line_number;
         chunk.file_name = file_name;
@@ -174,7 +174,7 @@ pub fn copyStreamToBuffer(source: Stream, dest: Buffer) void {
 }
 
 pub fn outputCopy(dest: *Stream, count: usize, data: *const anyopaque) *anyopaque {
-    const result = dest.arena.?.pushCopy(count, data);
+    const result = dest.arena.?.pushCopy(count, data, @src());
     _ = dest.appendChunk(count, @ptrCast(result));
     return result;
 }
@@ -184,7 +184,7 @@ pub fn outputStructCopy(dest: *Stream, data: anytype) *anyopaque {
 }
 
 pub fn outputSize(dest: *Stream, count: usize) *const anyopaque {
-    const result = dest.arena.?.pushSize(count);
+    const result = dest.arena.?.pushSize(count, null, @src());
     _ = dest.appendChunk(count, @ptrCast(result));
     return result;
 }

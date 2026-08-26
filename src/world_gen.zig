@@ -230,7 +230,7 @@ pub const GenRoomStack = struct {
         std.debug.assert(room != null);
 
         if (self.first_free == null) {
-            self.first_free = self.memory.pushStruct(GenRoomStackEntry, null);
+            self.first_free = self.memory.pushStruct(GenRoomStackEntry, null, @src());
         }
 
         var entry: *GenRoomStackEntry = self.first_free.?;
@@ -281,13 +281,13 @@ pub const GenRoomStackEntry = struct {
 };
 
 fn genSpec(gen: *WorldGenerator, apron_spec: ?*GenApronSpec) *GenRoomSpec {
-    var spec: *GenRoomSpec = gen.memory.pushStruct(GenRoomSpec, .aligned(@alignOf(GenRoomSpec), true));
+    var spec: *GenRoomSpec = gen.memory.pushStruct(GenRoomSpec, .aligned(@alignOf(GenRoomSpec), true), @src());
     spec.apron = apron_spec;
     return spec;
 }
 
 fn genRoom(gen: *WorldGenerator, spec: *GenRoomSpec, label: []const u8) *GenRoom {
-    var room: *GenRoom = gen.memory.pushStruct(GenRoom, .aligned(@alignOf(GenRoom), true));
+    var room: *GenRoom = gen.memory.pushStruct(GenRoom, .aligned(@alignOf(GenRoom), true), @src());
     room.spec = spec;
 
     if (INTERNAL) {
@@ -301,12 +301,12 @@ fn genRoom(gen: *WorldGenerator, spec: *GenRoomSpec, label: []const u8) *GenRoom
 }
 
 fn genApronSpec(gen: *WorldGenerator) *GenApronSpec {
-    const spec: *GenApronSpec = gen.memory.pushStruct(GenApronSpec, .aligned(@alignOf(GenApronSpec), true));
+    const spec: *GenApronSpec = gen.memory.pushStruct(GenApronSpec, .aligned(@alignOf(GenApronSpec), true), @src());
     return spec;
 }
 
 pub fn genApron(gen: *WorldGenerator, spec: *GenApronSpec) *GenApron {
-    var apron: *GenApron = gen.memory.pushStruct(GenApron, .aligned(@alignOf(GenApron), true));
+    var apron: *GenApron = gen.memory.pushStruct(GenApron, .aligned(@alignOf(GenApron), true), @src());
 
     apron.spec = spec;
     apron.global_next = gen.first_apron;
@@ -316,7 +316,7 @@ pub fn genApron(gen: *WorldGenerator, spec: *GenApronSpec) *GenApron {
 }
 
 fn addRoomConnection(gen: *WorldGenerator, room: *GenRoom, connection: *GenConnection) *GenRoomConnection {
-    var room_connection: *GenRoomConnection = gen.memory.pushStruct(GenRoomConnection, null);
+    var room_connection: *GenRoomConnection = gen.memory.pushStruct(GenRoomConnection, null, @src());
 
     room_connection.connection = connection;
     room_connection.next = room.first_connection;
@@ -328,7 +328,7 @@ fn addRoomConnection(gen: *WorldGenerator, room: *GenRoom, connection: *GenConne
 
 fn connectByMask(gen: *WorldGenerator, a: *GenRoom, b: *GenRoom, opt_direction_mask: ?u32) *GenConnection {
     const direction_mask: u32 = opt_direction_mask orelse @intFromEnum(box_mod.BoxSurfaceMask.Planar);
-    var connection: *GenConnection = gen.memory.pushStruct(GenConnection, null);
+    var connection: *GenConnection = gen.memory.pushStruct(GenConnection, null, @src());
 
     connection.direction_from_a_mask = direction_mask;
     connection.a = a;
@@ -361,7 +361,7 @@ fn addOption(gen: *WorldGenerator, room: *GenRoom, option_type: GenOptionType) *
 
     if (array.option_count == array.max_option_count) {
         array.max_option_count += 100;
-        const new_options: [*]GenOption = gen.memory.pushArray(array.max_option_count, GenOption, null);
+        const new_options: [*]GenOption = gen.memory.pushArray(array.max_option_count, GenOption, null, @src());
         _ = shared.copyArray(array.option_count, GenOption, array.options, new_options);
         array.options = new_options;
     }
@@ -488,7 +488,7 @@ fn placeRoom(
         var final_volume: GenVolume = .zero();
         for (0..3) |dimension| {
             var min: i32 = min_volume.min[dimension];
-            var max: i32 = min_volume.min[dimension];
+            var max: i32 = max_volume.max[dimension];
 
             if (((max - min) + 1) > max_allowed_dimension[dimension]) {
                 max = min + max_allowed_dimension[dimension] - 1;
@@ -787,7 +787,7 @@ fn createDungeon(gen: *WorldGenerator, floor_count: i32) GenDungeon {
         var prev_room: *GenRoom = floor_entrance_room;
         const path_count: i32 = gen.entropy.randomIntBetween(4 + @divFloor(floor_index, 2), 6 + floor_index);
 
-        var chain: [*]*GenRoom = temp.arena.pushArray(@intCast(path_count), *GenRoom, null);
+        var chain: [*]*GenRoom = temp.arena.pushArray(@intCast(path_count), *GenRoom, null, @src());
 
         var path_index: u32 = 0;
         while (path_index < path_count) : (path_index += 1) {
@@ -926,13 +926,13 @@ fn createOrphanage(gen: *WorldGenerator) GenOrphanage {
 }
 
 fn addEntity(gen: *WorldGenerator, creator: *const entity_gen.CreateEntityType) *GenEntity {
-    var result: *GenEntity = gen.memory.pushStruct(GenEntity, null);
+    var result: *GenEntity = gen.memory.pushStruct(GenEntity, null, @src());
     result.creator = creator;
     return result;
 }
 
 fn addEntityGroup(gen: *WorldGenerator, room: *GenRoom) *GenEntityGroup {
-    var group: *GenEntityGroup = gen.memory.pushStruct(GenEntityGroup, null);
+    var group: *GenEntityGroup = gen.memory.pushStruct(GenEntityGroup, null, @src());
     group.next = room.first_entity_group;
     room.first_entity_group = group;
     return group;

@@ -28,7 +28,7 @@ pub const ImageU32 = struct {
             .pixels = undefined,
         };
         const size: u32 = result.getTotalImageSize();
-        result.pixels = arena.pushArray(size, u32, null)[0..size];
+        result.pixels = arena.pushArray(size, u32, null, @src())[0..size];
         return result;
     }
 };
@@ -267,7 +267,7 @@ fn allocatePixels(
 ) []u8 {
     const extra_bytes: u32 = opt_extra_bytes orelse 0;
     const size: u32 = width * height * bytes_per_pixel + (extra_bytes * height);
-    return arena.pushSize(size, null)[0..size];
+    return arena.pushSize(size, null, @src())[0..size];
 }
 
 fn allocateHuffman(arena: *MemoryArena, max_code_length_in_bits: u32) Huffman {
@@ -276,7 +276,7 @@ fn allocateHuffman(arena: *MemoryArena, max_code_length_in_bits: u32) Huffman {
     var result: Huffman = .{};
     result.max_code_length_in_bits = max_code_length_in_bits;
     result.entry_count = (@as(u32, 1) << @as(u5, @intCast(max_code_length_in_bits)));
-    result.entries = arena.pushArray(result.entry_count, HuffmanEntry, null)[0..result.entry_count];
+    result.entries = arena.pushArray(result.entry_count, HuffmanEntry, null, @src())[0..result.entry_count];
     return result;
 }
 

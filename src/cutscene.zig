@@ -259,7 +259,7 @@ fn checkForMetaInput(state: *shared.State, input: *shared.GameInput) bool {
 pub fn playTitleScreen(state: *shared.State) void {
     state.setGameMode(.TitleScreen);
 
-    var title_screen: *GameModeTitleScreen = state.mode_arena.pushStruct(GameModeTitleScreen, null);
+    var title_screen: *GameModeTitleScreen = state.mode_arena.pushStruct(GameModeTitleScreen, null, @src());
     title_screen.time = 0;
 
     state.mode = .{ .title_screen = title_screen };
@@ -341,7 +341,7 @@ pub fn updateAndRenderTitleScreen(
 pub fn playIntroCutscene(state: *shared.State) void {
     state.setGameMode(.Cutscene);
 
-    var cutscene: *GameModeCutscene = state.mode_arena.pushStruct(GameModeCutscene, null);
+    var cutscene: *GameModeCutscene = state.mode_arena.pushStruct(GameModeCutscene, null, @src());
     cutscene.cutscene_id = .Intro;
     cutscene.time = 0;
 

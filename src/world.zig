@@ -124,7 +124,7 @@ pub const WorldPosition = extern struct {
 };
 
 pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryArena) *World {
-    var world: *World = parent_arena.pushStruct(World, null);
+    var world: *World = parent_arena.pushStruct(World, null, @src());
 
     world.chunk_dimension_in_meters = chunk_dimension_in_meters;
     world.first_free = null;
@@ -175,7 +175,7 @@ fn useChunkSpace(
 ) *anyopaque {
     if (chunk.first_block == null or !chunk.first_block.?.hasRoomFor(size)) {
         if (world.first_free_block == null) {
-            world.first_free_block = world.arena.pushStruct(WorldEntityBlock, null);
+            world.first_free_block = world.arena.pushStruct(WorldEntityBlock, null, @src());
             world.first_free_block.?.next = null;
         }
 
@@ -277,7 +277,7 @@ fn getWorldChunk(
     if (result == null) {
         if (opt_memory_arena) |memory_arena| {
             if (world.first_free_chunk == null) {
-                world.first_free_chunk = memory_arena.pushStruct(WorldChunk, ArenaPushParams.noClear());
+                world.first_free_chunk = memory_arena.pushStruct(WorldChunk, ArenaPushParams.noClear(), @src());
                 world.first_free_chunk.?.next_in_hash = null;
             }
 

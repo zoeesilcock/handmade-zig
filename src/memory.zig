@@ -10,6 +10,9 @@ const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const String = types.String;
 const Buffer = types.Buffer;
 
+// Build options.
+pub const INTERNAL = @import("build_options").internal;
+
 pub const MemoryIndex = usize;
 
 pub const TemporaryMemory = struct {
@@ -109,7 +112,13 @@ pub const MemoryArena = extern struct {
         return aligned_size;
     }
 
-    pub fn pushSize(self: *MemoryArena, size: MemoryIndex, in_params: ?ArenaPushParams) [*]u8 {
+    pub fn pushSize(
+        self: *MemoryArena,
+        size: MemoryIndex,
+        in_params: ?ArenaPushParams,
+        comptime source: std.builtin.SourceLocation,
+    ) [*]u8 {
+        _ = source;
         var result: [*]u8 = undefined;
         const params = in_params orelse ArenaPushParams.default();
 
@@ -160,66 +169,103 @@ pub const MemoryArena = extern struct {
         return result;
     }
 
-    pub fn pushStruct(self: *MemoryArena, comptime T: type, params: ?ArenaPushParams) *T {
-        return @as(*T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T), params))));
+    pub fn pushStruct(
+        self: *MemoryArena,
+        comptime T: type,
+        params: ?ArenaPushParams,
+        comptime source: std.builtin.SourceLocation,
+    ) *T {
+        return @as(*T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T), params, source))));
     }
 
-    pub fn pushArray(self: *MemoryArena, count: MemoryIndex, comptime T: type, params: ?ArenaPushParams) [*]T {
-        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, params))));
+    pub fn pushArray(
+        self: *MemoryArena,
+        count: MemoryIndex,
+        comptime T: type,
+        params: ?ArenaPushParams,
+        comptime source: std.builtin.SourceLocation,
+    ) [*]T {
+        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, params, source))));
     }
 
-    pub fn pushStringZ(self: *MemoryArena, source: [*:0]const u8) [*:0]const u8 {
-        var size: u32 = types.stringLength(source);
+    pub fn pushStringZ(
+        self: *MemoryArena,
+        source_string: [*:0]const u8,
+        comptime source: std.builtin.SourceLocation,
+    ) [*:0]const u8 {
+        var size: u32 = types.stringLength(source_string);
 
         // Include the sentinel.
         size += 1;
 
-        var dest = self.pushSize(size, ArenaPushParams.noClear());
+        var dest = self.pushSize(size, ArenaPushParams.noClear(), source);
 
         var char_index: u32 = 0;
         while (char_index < size) : (char_index += 1) {
-            dest[char_index] = source[char_index];
+            dest[char_index] = source_string[char_index];
         }
 
         return @ptrCast(dest);
     }
 
-    pub fn pushBuffer(self: *MemoryArena, size: usize) Buffer {
+    pub fn pushBuffer(
+        self: *MemoryArena,
+        size: usize,
+        comptime source: std.builtin.SourceLocation,
+    ) Buffer {
         var result: Buffer = .{ .count = size };
-        result.data = @ptrCast(self.pushSize(result.count, null));
+        result.data = @ptrCast(self.pushSize(result.count, null, source));
         return result;
     }
 
-    pub fn pushString(self: *MemoryArena, source: [*:0]const u8) String {
+    pub fn pushString(
+        self: *MemoryArena,
+        source_string: [*:0]const u8,
+        comptime source: std.builtin.SourceLocation,
+    ) String {
         var result: String = .{
-            .count = types.stringLength(source),
+            .count = types.stringLength(source_string),
         };
-        result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source))));
+        result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source_string)), source));
         return result;
     }
 
-    pub fn pushStringSized(self: *MemoryArena, source: String) String {
+    pub fn pushStringSized(
+        self: *MemoryArena,
+        source_string: String,
+        comptime source: std.builtin.SourceLocation,
+    ) String {
         var result: String = .{
-            .count = source.count,
+            .count = source_string.count,
         };
-        result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source.data))));
+        result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source_string.data)), source));
         return result;
     }
 
-    pub fn pushAndNullTerminateString(self: *MemoryArena, length: u32, source: [*:0]const u8) [*:0]const u8 {
-        var dest = self.pushSize(length + 1, ArenaPushParams.noClear());
+    pub fn pushAndNullTerminateString(
+        self: *MemoryArena,
+        length: u32,
+        source_string: [*:0]const u8,
+        comptime source: std.builtin.SourceLocation,
+    ) [*:0]const u8 {
+        var dest = self.pushSize(length + 1, ArenaPushParams.noClear(), source);
 
         var char_index: u32 = 0;
         while (char_index < length) : (char_index += 1) {
-            dest[char_index] = source[char_index];
+            dest[char_index] = source_string[char_index];
         }
         dest[length] = 0;
 
         return @ptrCast(dest);
     }
 
-    pub fn pushCopy(self: *MemoryArena, size: MemoryIndex, source: *const anyopaque) *anyopaque {
-        return shared.copy(size, source, @ptrCast(self.pushSize(size, null)));
+    pub fn pushCopy(
+        self: *MemoryArena,
+        size: MemoryIndex,
+        source_string: *const anyopaque,
+        comptime source: std.builtin.SourceLocation,
+    ) *anyopaque {
+        return shared.copy(size, source_string, @ptrCast(self.pushSize(size, null, source)));
     }
 
     pub fn beginTemporaryMemory(self: *MemoryArena) TemporaryMemory {
@@ -321,7 +367,7 @@ pub fn bootsrapPushSize(
     bootstrap.allocation_flags = bootstrap_params.allocation_flags;
     bootstrap.minimum_block_size = bootstrap_params.minimum_block_size;
 
-    const struct_ptr: *anyopaque = bootstrap.pushSize(struct_size, params);
+    const struct_ptr: *anyopaque = bootstrap.pushSize(struct_size, params, @src());
     const arena_ptr: *MemoryArena = @ptrFromInt(@intFromPtr(struct_ptr) + offset_to_arena);
     arena_ptr.* = bootstrap;
 

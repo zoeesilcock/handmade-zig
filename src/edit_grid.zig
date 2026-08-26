@@ -61,7 +61,7 @@ pub const EditGrid = struct {
         const arena: *MemoryArena = &gen.temp_memory;
         const temp_memory: TemporaryMemory = arena.beginTemporaryMemory();
 
-        var self: *EditGrid = arena.pushStruct(EditGrid, null);
+        var self: *EditGrid = arena.pushStruct(EditGrid, null, @src());
 
         self.gen = gen;
         self.arena = arena;
@@ -86,7 +86,12 @@ pub const EditGrid = struct {
         const change_rect: Rectangle3 = self.room_dim.addRadius(self.tile_dimension.scaledTo(1));
         self.region = sim.beginWorldChange(arena, gen.world, self.base_position, change_rect, 0);
 
-        self.tiles = arena.pushArray(@intCast(gen_math.getTotalVolume(self.tile_count)), EditTileContents, null);
+        self.tiles = arena.pushArray(
+            @intCast(gen_math.getTotalVolume(self.tile_count)),
+            EditTileContents,
+            null,
+            @src(),
+        );
 
         return self;
     }
@@ -221,6 +226,10 @@ pub const EditTile = struct {
 
     pub fn getMinZCenterPosition(self: *EditTile) Vector3 {
         return self.getTotalVolume().getMinZCenterPosition();
+    }
+
+    pub fn getMaxZCenterPosition(self: *EditTile) Vector3 {
+        return self.getTotalVolume().getMaxZCenterPosition();
     }
 
     pub fn getTotalVolume(self: *EditTile) Rectangle3 {

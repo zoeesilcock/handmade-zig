@@ -175,7 +175,7 @@ const Win32PlatformFileGroup = extern struct {
 
 fn utf8FromUTF16(arena: *MemoryArena, name_size: usize, name: [*:0]const u16) [*:0]u8 {
     const result_storage: usize = 4 * name_size + 1;
-    var result: [*:0]u8 = @ptrCast(arena.pushSize(result_storage + 1, null));
+    var result: [*:0]u8 = @ptrCast(arena.pushSize(result_storage + 1, null, @src()));
     const result_size: usize = @intCast(win32.WideCharToMultiByte(
         win32.CP_UTF8,
         0,
@@ -192,7 +192,7 @@ fn utf8FromUTF16(arena: *MemoryArena, name_size: usize, name: [*:0]const u16) [*
 
 fn utf16FromUTF8(arena: *MemoryArena, name_size: usize, name: [*:0]const u8) [*:0]u16 {
     const result_storage: usize = 2 * name_size;
-    var result: [*:0]u16 = @ptrCast(@alignCast(arena.pushSize(result_storage + 2, null)));
+    var result: [*:0]u16 = @ptrCast(@alignCast(arena.pushSize(result_storage + 2, null, @src())));
     const result_size: usize = @intCast(win32.MultiByteToWideChar(
         win32.CP_UTF8,
         .{},
@@ -213,6 +213,7 @@ fn allocateFileInfo(
     var info: *shared.PlatformFileInfo = win32_file_group.arena.pushStruct(
         shared.PlatformFileInfo,
         .aligned(@alignOf(shared.PlatformFileInfo), false),
+        @src(),
     );
 
     info.next = file_group.first_file_info;
@@ -291,7 +292,7 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
 
         const c_file_name_size: usize = (scan - &find_data.cFileName) + 1;
         info.platform =
-            win32_file_group.arena.pushArray(stem_size + c_file_name_size, u16, .aligned(@alignOf(u16), false));
+            win32_file_group.arena.pushArray(stem_size + c_file_name_size, u16, .aligned(@alignOf(u16), false), @src());
         _ = shared.copyArray(stem_size, u16, @ptrCast(@constCast(stem)), info.platform);
         _ = shared.copyArray(
             c_file_name_size,

@@ -279,9 +279,11 @@ pub export fn updateAndRender(
 
     DebugInterface.debugBeginDataBlock(@src(), "Memory");
     {
+        DebugInterface.debugUIHUD(@src(), .Memory);
         DebugInterface.debugValue(@src(), &state.mode_arena, "ModeArena");
         DebugInterface.debugValue(@src(), &state.audio_arena, "AudioArena");
-        DebugInterface.debugValue(@src(), &state.frame_arena, "FrameArena");
+        DebugInterface.debugValue(@src(), state.frame_arena, "FrameArena");
+        DebugInterface.debugValue(@src(), &state.assets.non_restored_memory, "AssetArena");
     }
     DebugInterface.debugEndDataBlock(@src());
 

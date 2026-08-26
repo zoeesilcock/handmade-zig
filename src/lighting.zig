@@ -881,10 +881,10 @@ fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
 pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
     solution.series = .seed(1234, null, null, null);
     solution.max_work_count = 256;
-    solution.works = arena.pushArray(solution.max_work_count, LightingWork, .aligned(64, true));
-    solution.accumulated_weight = arena.pushArray(LIGHT_DATA_WIDTH, f32, .aligned(64, true));
-    solution.accumulated_pps = arena.pushArray(LIGHT_DATA_WIDTH, Color3, .aligned(64, true));
-    solution.average_direction_to_light = arena.pushArray(LIGHT_DATA_WIDTH, Vector3, .aligned(64, true));
+    solution.works = arena.pushArray(solution.max_work_count, LightingWork, .aligned(64, true), @src());
+    solution.accumulated_weight = arena.pushArray(LIGHT_DATA_WIDTH, f32, .aligned(64, true), @src());
+    solution.accumulated_pps = arena.pushArray(LIGHT_DATA_WIDTH, Color3, .aligned(64, true), @src());
+    solution.average_direction_to_light = arena.pushArray(LIGHT_DATA_WIDTH, Vector3, .aligned(64, true), @src());
 
     generateLightingPattern(solution, 0);
 }

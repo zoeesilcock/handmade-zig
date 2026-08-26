@@ -41,8 +41,7 @@ pub const GenEntityTag = struct {
     value: f32,
 };
 
-pub const CreateEntityType: type =
-    fn (region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity;
+pub const CreateEntityType: type = fn (region: *SimRegion) *Entity;
 
 const GenEntityFlag = enum(u32) {
     IsNotOccupier = 0x1,
@@ -64,6 +63,27 @@ pub const GenEntityGroup = struct {
     next: ?*GenEntityGroup,
     first_entity: ?*GenEntity,
 };
+
+pub fn genEntityAtPosition(
+    region: *SimRegion,
+    creator: *const CreateEntityType,
+    position: Vector3,
+) *Entity {
+    var result: *Entity = creator(region);
+    result.position = position;
+    return result;
+}
+
+pub fn genEntityAtTraversable(
+    region: *SimRegion,
+    creator: *const CreateEntityType,
+    standing_on: TraversableReference,
+) *Entity {
+    var result: *Entity = creator(region);
+    result.position = standing_on.getSimSpaceTraversable().position;
+    result.occupying = standing_on;
+    return result;
+}
 
 pub fn makeSimpleGroundedCollision(
     x_dimension: f32,
@@ -187,15 +207,13 @@ fn initHitPoints(entity: *Entity, count: u32) void {
     }
 }
 
-pub fn addCat(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
-    _ = position;
+pub fn addCat(region: *SimRegion) *Entity {
     var entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
 
     // entity.brain_slot = BrainSlot.forField(BrainCat, "body");
     // entity.brain_id = sim.addBrain(region);
-    entity.occupying = standing_on;
 
     const body: *EntityVisiblePiece = addPiece(entity, .Body, 1, .new(0, 0, 0), .white(), null);
     const head: *EntityVisiblePiece = addPiece(entity, .Head, 1, .new(0, 0, 0.1), .white(), null);
@@ -203,36 +221,31 @@ pub fn addCat(region: *SimRegion, position: Vector3, standing_on: TraversableRef
     connectPieceToWorld(entity, body, .Default);
     connectPiece(entity, body, .BaseOfNeck, head, .Default);
 
-    entity.position = standing_on.getSimSpaceTraversable().position;
-
     return entity;
 }
 
-pub fn addObstacle(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
-    _ = position;
-    var entity = addEntity(region);
+pub fn addInanimate(region: *SimRegion) *Entity {
+    const entity = addEntity(region);
+    const body: *EntityVisiblePiece = addPiece(entity, .Scenery, 1, .new(0, 0, 0), .white(), null);
+    connectPieceToWorld(entity, body, .Default);
+    return entity;
+}
+
+pub fn addObstacle(region: *SimRegion) *Entity {
+    var entity = addInanimate(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
 
-    entity.occupying = standing_on;
-
-    const body: *EntityVisiblePiece = addPiece(entity, .Scenery, 1, .new(0, 0, 0), .white(), null);
-
-    connectPieceToWorld(entity, body, .Default);
-    entity.position = standing_on.getSimSpaceTraversable().position;
-
     return entity;
 }
 
-pub fn addOrphan(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
-    _ = position;
+pub fn addOrphan(region: *SimRegion) *Entity {
     var entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
 
     // entity.brain_slot = BrainSlot.forField(BrainOrphan, "body");
     // entity.brain_id = sim.addBrain(region);
-    entity.occupying = standing_on;
 
     const body: *EntityVisiblePiece = addPiece(entity, .Body, 1, .new(0, 0, 0), .white(), null);
     const head: *EntityVisiblePiece = addPiece(entity, .Head, 1, .new(0, 0, 0.1), .white(), null);
@@ -240,14 +253,10 @@ pub fn addOrphan(region: *SimRegion, position: Vector3, standing_on: Traversable
     connectPieceToWorld(entity, body, .Default);
     connectPiece(entity, body, .BaseOfNeck, head, .Default);
 
-    entity.position = standing_on.getSimSpaceTraversable().position;
-
     return entity;
 }
 
-pub fn addConversation(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
-    _ = standing_on;
-
+pub fn addConversation(region: *SimRegion) *Entity {
     const entity: *Entity = addEntity(region);
     const dimension: Vector3 = .new(0.5, 0.5, 0.5);
     entity.collision_volume =
@@ -255,29 +264,25 @@ pub fn addConversation(region: *SimRegion, position: Vector3, standing_on: Trave
     entity.camera_behavior = @intFromEnum(entities.CameraBehavior.Offset);
     _ = entity.camera_offset.setZ(room_gen.getCameraOffsetZForCloseup());
     _ = entity.camera_offset.setY(2);
-    entity.position = position;
 
     return entity;
 }
 
-fn addMonster(region: *SimRegion, position: Vector3, standing_on: TraversableReference) void {
+fn addMonster(region: *SimRegion) void {
     var entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
 
     entity.brain_slot = BrainSlot.forField(BrainMonster, "body");
     entity.brain_id = sim.addBrain(region);
-    entity.occupying = standing_on;
 
     initHitPoints(entity, 3);
 
     _ = addPiece(entity, .Shadow, 4.5, .zero(), .new(1, 1, 1, 0.5), null);
     _ = addPiece(entity, .Body, 4.5, .zero(), .white(), null);
-
-    entity.position = position;
 }
 
-pub fn addSnake(region: *SimRegion, position: Vector3, standing_on: TraversableReference) *Entity {
+pub fn addSnake(region: *SimRegion) *Entity {
     // TODO: Implement these again.
     const segment_index: u32 = 0;
     const brain_id = sim.addBrain(region);
@@ -289,7 +294,6 @@ pub fn addSnake(region: *SimRegion, position: Vector3, standing_on: TraversableR
 
     entity.brain_slot = BrainSlot.forIndexedField(BrainSnake, "segments", segment_index);
     entity.brain_id = brain_id;
-    entity.occupying = standing_on;
     entity.collision_volume = makeSimpleGroundedCollision(0.75, 0.75, 0.75, 0);
 
     const body = addPiece(entity, if (segment_index != 0) .Body else .Head, 1.5, .new(0, 0, 0.5), .white(), null);
@@ -298,8 +302,6 @@ pub fn addSnake(region: *SimRegion, position: Vector3, standing_on: TraversableR
     connectPieceToWorld(entity, body, .Default);
 
     initHitPoints(entity, 3);
-
-    entity.position = position;
 
     return entity;
 }
@@ -312,17 +314,14 @@ pub fn addLamp(region: *SimRegion, position: Vector3, color: Color3) void {
     entity.position = position;
 }
 
-fn addFamiliar(region: *SimRegion, position: Vector3, standing_on: TraversableReference) void {
+fn addFamiliar(region: *SimRegion) void {
     const entity = addEntity(region);
 
     entity.addFlags(EntityFlags.Collides.toInt());
 
     entity.brain_slot = BrainSlot.forField(BrainFamiliar, "head");
     entity.brain_id = sim.addBrain(region);
-    entity.occupying = standing_on;
 
     _ = addPiece(entity, .Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
     _ = addPiece(entity, .Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
-
-    entity.position = position;
 }

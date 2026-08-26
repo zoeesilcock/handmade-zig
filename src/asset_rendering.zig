@@ -288,11 +288,11 @@ pub fn pushLighting(
 ) *LightingTextures {
     std.debug.assert(group.light_box_count == 0);
 
-    var source: *LightingTextures = temp_arena.pushStruct(LightingTextures, null);
+    var source: *LightingTextures = temp_arena.pushStruct(LightingTextures, null, @src());
 
     group.lighting_enabled = true;
     group.light_bounds = lighting_bounds;
-    group.light_boxes = temp_arena.pushArray(LIGHT_DATA_WIDTH, LightingBox, null);
+    group.light_boxes = temp_arena.pushArray(LIGHT_DATA_WIDTH, LightingBox, null, @src());
     group.light_point_index = 1;
 
     if (group.pushRenderElement(RenderEntryLightingTransfer)) |dest| {

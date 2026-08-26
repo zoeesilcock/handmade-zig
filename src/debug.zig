@@ -285,6 +285,7 @@ pub const DebugState = struct {
                 result = self.per_frame_arena.pushStruct(
                     DebugStoredEvent,
                     ArenaPushParams.aligned(@alignOf(DebugStoredEvent), true),
+                    @src(),
                 );
             }
         }
@@ -322,6 +323,7 @@ pub const DebugState = struct {
             result = self.debug_arena.pushStruct(
                 OpenDebugBlock,
                 ArenaPushParams.aligned(@alignOf(OpenDebugBlock), true),
+                @src(),
             );
         }
 
@@ -354,9 +356,10 @@ pub const DebugState = struct {
         var result: *DebugElement = self.debug_arena.pushStruct(
             DebugElement,
             ArenaPushParams.aligned(@alignOf(DebugElement), true),
+            @src(),
         );
 
-        result.name = self.debug_arena.pushAndNullTerminateString(name_length, name);
+        result.name = self.debug_arena.pushAndNullTerminateString(name_length, name, @src());
         result.type = debug_type;
 
         return result;
@@ -443,6 +446,7 @@ pub const DebugState = struct {
         var link: *DebugVariableLink = self.debug_arena.pushStruct(
             DebugVariableLink,
             ArenaPushParams.aligned(@alignOf(DebugVariableLink), true),
+            @src(),
         );
         shared.dlistInit(link.getSentinel());
         link.next = null;
@@ -556,13 +560,14 @@ pub const DebugState = struct {
             result = self.debug_arena.pushStruct(
                 DebugElement,
                 ArenaPushParams.aligned(@alignOf(DebugElement), true),
+                @src(),
             );
 
-            result.?.guid = self.debug_arena.pushStringZ(event.guid);
+            result.?.guid = self.debug_arena.pushStringZ(event.guid, @src());
             result.?.file_name_count = parsed_name.file_name_count;
             result.?.line_number = parsed_name.line_number;
             result.?.next_in_hash = self.element_hash[index];
-            result.?.name = self.debug_arena.pushStringZ(event.name);
+            result.?.name = self.debug_arena.pushStringZ(event.name, @src());
             result.?.type = event.event_type;
             self.element_hash[index] = result;
 
@@ -756,7 +761,11 @@ pub const DebugState = struct {
             if (result != null) {
                 self.first_free_thread = result.?.next;
             } else {
-                result = self.debug_arena.pushStruct(DebugThread, ArenaPushParams.aligned(@alignOf(DebugThread), true));
+                result = self.debug_arena.pushStruct(
+                    DebugThread,
+                    ArenaPushParams.aligned(@alignOf(DebugThread), true),
+                    @src(),
+                );
             }
 
             result.?.id = thread_id;
@@ -772,7 +781,11 @@ pub const DebugState = struct {
     }
 
     fn addTree(self: *DebugState, group: ?*DebugVariableLink, position: Vector2) *DebugTree {
-        var tree: *DebugTree = self.debug_arena.pushStruct(DebugTree, ArenaPushParams.aligned(@alignOf(DebugTree), true));
+        var tree: *DebugTree = self.debug_arena.pushStruct(
+            DebugTree,
+            ArenaPushParams.aligned(@alignOf(DebugTree), true),
+            @src(),
+        );
         tree.group = group;
         tree.ui_position = position;
 
@@ -820,7 +833,7 @@ pub const DebugState = struct {
         }
 
         if (result == null) {
-            result = self.debug_arena.pushStruct(DebugView, ArenaPushParams.aligned(@alignOf(DebugView), true));
+            result = self.debug_arena.pushStruct(DebugView, ArenaPushParams.aligned(@alignOf(DebugView), true), @src());
             result.?.id = id;
             result.?.view_type = .Unknown;
             result.?.next_in_hash = hash_slot.*;
@@ -1557,9 +1570,12 @@ fn drawTopClocksList(
         link_count += 1;
     }
 
-    const entries: [*]ClockEntry = debug_state.debug_arena.pushArray(link_count, ClockEntry, ArenaPushParams.noClear());
-    const sort_a: [*]SortEntry = debug_state.debug_arena.pushArray(link_count, SortEntry, ArenaPushParams.noClear());
-    const sort_b: [*]SortEntry = debug_state.debug_arena.pushArray(link_count, SortEntry, ArenaPushParams.noClear());
+    const entries: [*]ClockEntry =
+        debug_state.debug_arena.pushArray(link_count, ClockEntry, ArenaPushParams.noClear(), @src());
+    const sort_a: [*]SortEntry =
+        debug_state.debug_arena.pushArray(link_count, SortEntry, ArenaPushParams.noClear(), @src());
+    const sort_b: [*]SortEntry =
+        debug_state.debug_arena.pushArray(link_count, SortEntry, ArenaPushParams.noClear(), @src());
 
     link = debug_state.profile_group.getSentinel().next;
     var index: u32 = 0;

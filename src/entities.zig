@@ -52,6 +52,7 @@ const EditableHitTest = in_game_editor.EditableHitTest;
 
 const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const ENTITY_MAX_PIECE_COUNT = 4;
+const ENTITY_MAX_GROUND_COVER = 64;
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
 pub const INTERNAL = @import("build_options").internal;
 var global_config = &@import("config.zig").global_config;
@@ -129,6 +130,13 @@ pub const CameraBehavior = enum(u32) {
     DirectionalVelocityConstraint = 0x20,
 };
 
+const GroundCover = extern struct {
+    bitmap: BitmapId,
+    position: Vector3,
+    color: Color3,
+    scale: f32,
+};
+
 pub const Entity = extern struct {
     id: EntityId = .{},
 
@@ -146,6 +154,7 @@ pub const Entity = extern struct {
     // This lighting data will get "cleaned" whenever a chunk isn't used for one frame.
     //
     lighting: [ENTITY_MAX_PIECE_COUNT][LIGHT_POINTS_PER_CHUNK]LightingPointState,
+    cover: [ENTITY_MAX_GROUND_COVER]GroundCover,
 
     //
     // Everything below here is not worked out yet.

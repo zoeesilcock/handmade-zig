@@ -87,6 +87,15 @@ fn getCameraOffsetZForDimension(dimension: GenVector3, camera_behaviour: *u32) f
     return result;
 }
 
+fn addTreeTags(gen: *WorldGenerator, entity: *Entity) void {
+    // entity.addTag(.Tree, 1);
+    entity.addTag(.Variant, gen.entropy.randomUnilateral());
+    entity.addTag(.DarkEnergy, 0); //gen.entropy.randomUnilateral());
+    entity.addTag(.Winter, gen.entropy.randomUnilateral());
+    entity.addTag(.Fall, 0); // gen.entropy.randomUnilateral());
+    entity.addTag(.Damaged, 0); // gen.entropy.randomUnilateral());
+}
+
 pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
     const spec: *GenRoomSpec = room.spec;
 
@@ -205,15 +214,12 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
             ground_position = ref.getSimSpaceTraversable().position;
 
             if (place_tree) {
-                const placed_entity: *Entity = entity_gen.addObstacle(grid.region, ground_position, ref);
-                // placed_entity.addTag(.Tree, 1);
-                placed_entity.addTag(.Variant, grid.series.randomUnilateral());
-                placed_entity.addTag(.DarkEnergy, grid.series.randomUnilateral());
-                placed_entity.addTag(.Winter, grid.series.randomUnilateral());
-                placed_entity.addTag(.Fall, grid.series.randomUnilateral());
-                placed_entity.addTag(.Damaged, grid.series.randomUnilateral());
+                const placed_entity: *Entity =
+                    entity_gen.genEntityAtTraversable(grid.region, &entity_gen.addObstacle, ref);
+                addTreeTags(gen, placed_entity);
             } else if (on_lamp) {
-                const placed_entity: *Entity = entity_gen.addObstacle(grid.region, ground_position, ref);
+                const placed_entity: *Entity =
+                    entity_gen.genEntityAtTraversable(grid.region, &entity_gen.addObstacle, ref);
                 placed_entity.addTag(.Lamp, 1);
 
                 const lamp_light: Color3 = .new(
@@ -237,16 +243,14 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
         while (opt_pending_entity) |pending_entity| : (opt_pending_entity = pending_entity.next) {
             const contents: *EditTileContents = grid.getTileFromV3(tile_position).?;
             var ref: TraversableReference = .init;
-            var ground_position: Vector3 = .zero();
             if (contents.structural) |structural| {
                 ref.entity.ptr = structural;
                 ref.entity.index = structural.id;
-                ground_position = ref.getSimSpaceTraversable().position;
             } else {
                 unreachable;
             }
 
-            const placed_entity: *Entity = pending_entity.creator(grid.region, ground_position, ref);
+            const placed_entity: *Entity = entity_gen.genEntityAtTraversable(grid.region, pending_entity.creator, ref);
             var tag_index: u32 = 0;
             while (tag_index < pending_entity.tag_count) : (tag_index += 1) {
                 const tag: *GenEntityTag = &pending_entity.tags[tag_index];
@@ -305,6 +309,13 @@ pub fn generateApron(gen: *WorldGenerator, apron: *GenApron) void {
 
             entity.addTag(.Floor, 1);
             entity.addTag(.Grass, 1);
+
+            const ground_position: Vector3 = position.plus(volume.getMaxZCenterPosition());
+            if (grid.series.randomChoice(3) != 0) {
+                const tree: *Entity =
+                    entity_gen.genEntityAtPosition(grid.region, &entity_gen.addInanimate, ground_position);
+                addTreeTags(gen, tree);
+            }
         }
     }
     grid.endGridEdit();

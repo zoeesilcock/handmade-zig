@@ -95,7 +95,7 @@ pub fn softwareRenderCommands(
     // const render_targets: [*]SoftwareTexture = temp_arena.pushArray(
     //     render_target_count,
     //     SoftwareTexture,
-    //     .alignedNoClear(@alignOf(SoftwareTexture)),
+    //     .alignedNoClear(@alignOf(SoftwareTexture)), @src(),
     // );
     // render_targets[0] = final_output_target.*;
     //
@@ -108,7 +108,7 @@ pub fn softwareRenderCommands(
     //     const buffer_size: memory.MemoryIndex =
     //         @as(memory.MemoryIndex, @intCast(target.pitch)) *
     //         @as(memory.MemoryIndex, @intCast(target.height));
-    //     target.memory = temp_arena.pushSize(buffer_size, .alignedNoClear(16));
+    //     target.memory = temp_arena.pushSize(buffer_size, .alignedNoClear(16), @src());
     // }
     //
     // const tile_count_x = 4;

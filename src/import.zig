@@ -210,9 +210,9 @@ pub fn writeModificationsToHHA(assets: *Assets, file_index: u32, temp_arena: *Me
     file.header.assets = file.header.tags + tag_array_size;
     file.header.annotations = file.header.assets + assets_array_size;
 
-    const tags: [*]HHATag = temp_arena.pushArray(tag_count, HHATag, null);
-    const hha_assets: [*]HHAAsset = temp_arena.pushArray(asset_count, HHAAsset, null);
-    const annotations: [*]HHAAnnotation = temp_arena.pushArray(asset_count, HHAAnnotation, null);
+    const tags: [*]HHATag = temp_arena.pushArray(tag_count, HHATag, null, @src());
+    const hha_assets: [*]HHAAsset = temp_arena.pushArray(asset_count, HHAAsset, null, @src());
+    const annotations: [*]HHAAnnotation = temp_arena.pushArray(asset_count, HHAAnnotation, null, @src());
 
     var tag_index_in_file: u32 = 1;
     var asset_index_in_file: u32 = 1;
@@ -960,7 +960,7 @@ pub fn readAssetString(
 ) String {
     const result: String = .{
         .count = count,
-        .data = arena.pushSize(count, null),
+        .data = arena.pushSize(count, null, @src()),
     };
     shared.platform.readDataFromFile(&file.handle, offset, result.count, result.data);
     return result;
@@ -979,7 +979,7 @@ pub fn parseHHT(
     var file_buffer: Buffer = .{
         .count = file_info.file_size,
     };
-    file_buffer.data = context.temp_arena.pushSize(file_buffer.count, null);
+    file_buffer.data = context.temp_arena.pushSize(file_buffer.count, null, @src());
     shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
     shared.platform.closeFile(&handle);
 
@@ -1059,7 +1059,7 @@ pub fn parseHHT(
     }
 
     if (save_changes_to_hhts and tokenizer.parsing()) {
-        const hht_content: Buffer = context.temp_arena.pushBuffer(context.hht_out.?.getTotalSize());
+        const hht_content: Buffer = context.temp_arena.pushBuffer(context.hht_out.?.getTotalSize(), @src());
         stream.copyStreamToBuffer(context.hht_out.?, hht_content);
         if (shared.buffersAreEqual(file_buffer, hht_content)) {
             _ = stream.outputWithSrc(
@@ -1293,7 +1293,7 @@ fn updateAssetVariants(
 
             const x_count: u32 = file.asset_indices[0].len;
             const y_count: u32 = file.asset_indices.len;
-            const variant_count: [*]u32 = temp_memory.pushArray(grid.variant_group_count, u32, null);
+            const variant_count: [*]u32 = temp_memory.pushArray(grid.variant_group_count, u32, null, @src());
 
             {
                 var y_index: u32 = 0;
@@ -1312,8 +1312,8 @@ fn updateAssetVariants(
                 }
             }
 
-            const bucket_size: [*]f32 = temp_memory.pushArray(grid.variant_group_count, f32, null);
-            const at_point: [*]f32 = temp_memory.pushArray(grid.variant_group_count, f32, null);
+            const bucket_size: [*]f32 = temp_memory.pushArray(grid.variant_group_count, f32, null, @src());
+            const at_point: [*]f32 = temp_memory.pushArray(grid.variant_group_count, f32, null, @src());
             {
                 var variant_group_index: u32 = 0;
                 while (variant_group_index < grid.variant_group_count) : (variant_group_index += 1) {
@@ -1490,7 +1490,7 @@ fn blocksDiffer(
 
     var result: bool = false;
 
-    const file_value: *anyopaque = temp_mem.pushSize(size, .noClear());
+    const file_value: *anyopaque = temp_mem.pushSize(size, .noClear(), @src());
     shared.platform.readDataFromFile(file_handle, offset, size, file_value);
     if (shared.platform.noFileErrors(file_handle)) {
         result = shared.memoryIsEqual(size, file_value, test_value);
@@ -1531,7 +1531,7 @@ fn updateAssetDataFromFile(
                 .count = match.file_info.?.file_size,
             };
 
-            file_buffer.data = temp_arena.pushSize(file_buffer.count, null);
+            file_buffer.data = temp_arena.pushSize(file_buffer.count, null, @src());
 
             shared.platform.readDataFromFile(&handle, 0, file_buffer.count, file_buffer.data);
             shared.platform.closeFile(&handle);
@@ -1657,8 +1657,8 @@ fn parseFontBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Toke
         const font_source_file: *SourceFile = .getOrCreateFromHashValueString(context.assets, font_name.text);
         const glyph_count: u32 = @intCast(glyph_count_token.i32);
 
-        var code_points: [*]HHAFontGlyph = context.temp_arena.pushArray(glyph_count, HHAFontGlyph, null);
-        var horizontal_advance: [*]f32 = context.temp_arena.pushArray(glyph_count * glyph_count, f32, null);
+        var code_points: [*]HHAFontGlyph = context.temp_arena.pushArray(glyph_count, HHAFontGlyph, null, @src());
+        var horizontal_advance: [*]f32 = context.temp_arena.pushArray(glyph_count * glyph_count, f32, null, @src());
 
         var ascender_height: f32 = 0;
         var descender_height: f32 = 0;

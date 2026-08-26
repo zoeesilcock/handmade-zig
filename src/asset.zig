@@ -146,8 +146,8 @@ pub const SourceFile = struct {
         }
 
         if (match == null) {
-            match = assets.non_restored_memory.pushStruct(SourceFile, .aligned(@alignOf(SourceFile), true));
-            match.?.base_name = assets.non_restored_memory.pushStringSized(base_name);
+            match = assets.non_restored_memory.pushStruct(SourceFile, .aligned(@alignOf(SourceFile), true), @src());
+            match.?.base_name = assets.non_restored_memory.pushStringSized(base_name, @src());
             match.?.next_in_hash = assets.source_file_hash[hash_value];
             assets.source_file_hash[hash_value] = match;
 
@@ -284,12 +284,12 @@ pub const Assets = struct {
             var file_group = shared.platform.getAllFilesOfTypeBegin(.AssetFile);
             defer shared.platform.getAllFilesOfTypeEnd(&file_group);
 
-            assets.max_file_count = file_group.file_count;
+            assets.max_file_count = file_group.file_count + 1;
             if (INTERNAL) {
                 assets.max_file_count += 256;
             }
 
-            assets.files = arena.pushArray(assets.max_file_count, AssetFile, null);
+            assets.files = arena.pushArray(assets.max_file_count, AssetFile, null, @src());
 
             var opt_file_info: ?*PlatformFileInfo = file_group.first_file_info;
             while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {
@@ -303,8 +303,13 @@ pub const Assets = struct {
             assets.max_asset_count += 65536;
             assets.max_tag_count += 65536;
         }
-        assets.assets = arena.pushArray(assets.max_asset_count, Asset, ArenaPushParams.aligned(@alignOf(Asset), true));
-        assets.tags = arena.pushArray(assets.max_tag_count, HHATag, null);
+        assets.assets = arena.pushArray(
+            assets.max_asset_count,
+            Asset,
+            ArenaPushParams.aligned(@alignOf(Asset), true),
+            @src(),
+        );
+        assets.tags = arena.pushArray(assets.max_tag_count, HHATag, null, @src());
 
         memory.zeroStruct(HHATag, @ptrCast(assets.tags));
 
@@ -336,9 +341,9 @@ pub const Assets = struct {
                     const temp_mem = game_state.frame_arena.beginTemporaryMemory();
                     defer game_state.frame_arena.endTemporaryMemory(temp_mem);
                     const hha_asset_array: [*]HHAAsset =
-                        game_state.frame_arena.pushArray(file_asset_count, HHAAsset, null);
+                        game_state.frame_arena.pushArray(file_asset_count, HHAAsset, null, @src());
                     var hha_annotation_array: ?[*]HHAAnnotation =
-                        game_state.frame_arena.pushArray(file_asset_count, HHAAnnotation, null);
+                        game_state.frame_arena.pushArray(file_asset_count, HHAAnnotation, null, @src());
 
                     shared.platform.readDataFromFile(
                         &file.handle,
@@ -393,7 +398,7 @@ pub const Assets = struct {
 
                             const source_file_name_count: u32 = hha_annotation.source_file_base_name_count;
                             const source_file_name: [*:0]u8 =
-                                @ptrCast(game_state.frame_arena.pushArray(source_file_name_count + 1, u8, null));
+                                @ptrCast(game_state.frame_arena.pushArray(source_file_name_count + 1, u8, null, @src()));
                             shared.platform.readDataFromFile(
                                 &file.handle,
                                 hha_annotation.source_file_base_name_offset,
@@ -489,7 +494,7 @@ pub const Assets = struct {
 
             const file_handle = shared.platform.openFile(file_group, file_info, open_flags);
             const stem: String = types.removePath(types.removeExtension(.wrapZ(file_info.base_name)));
-            file.stem = arena.pushStringSized(stem);
+            file.stem = arena.pushStringSized(stem, @src());
             file.tag_base = assets.tag_count;
             file.asset_base = assets.asset_count - 1;
             file.handle = file_handle;
@@ -740,6 +745,7 @@ pub const Assets = struct {
                             const work: *LoadAssetWork = task.arena.pushStruct(
                                 LoadAssetWork,
                                 ArenaPushParams.noClear(),
+                                @src(),
                             );
                             work.task = task;
                             work.asset = asset;
@@ -889,7 +895,7 @@ pub const Assets = struct {
         const sample_buffer_size: u32 = 256 * 1024 * 1024;
 
         self.sample_buffer_size = sample_buffer_size;
-        self.sample_buffer = arena.pushSize(sample_buffer_size, null);
+        self.sample_buffer = arena.pushSize(sample_buffer_size, null, @src());
 
         self.sample_buffer_mapping_mask = @as(u64, @intCast(sample_buffer_size)) - 1;
         self.sample_buffer_top_index = 2 * sample_buffer_size;
@@ -918,7 +924,7 @@ pub const Assets = struct {
                     const sound_memory: SoundBufferMemory = self.reserveSoundMemory(asset.hha.data_size);
                     asset.handle = .{ .loaded_at_sound_buffer_index = sound_memory.buffer_index };
 
-                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork, null);
+                    var work: *LoadAssetWork = task.arena.pushStruct(LoadAssetWork, null, @src());
                     work.task = task;
                     work.asset = asset;
                     work.handle = self.getFileHandleFor(asset.file_index);
@@ -1028,7 +1034,7 @@ pub const Assets = struct {
 
         const memory_point = self.non_restored_memory.beginTemporaryMemory();
 
-        const asset_memory: [*]u8 = self.non_restored_memory.pushSize(size_total, null);
+        const asset_memory: [*]u8 = self.non_restored_memory.pushSize(size_total, null, @src());
 
         if (asset.handle != .font) {
             asset.handle = .{ .font = .{} };

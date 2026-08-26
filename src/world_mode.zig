@@ -178,6 +178,7 @@ pub fn playWorld(state: *State) void {
     var world_mode: *GameModeWorld = state.mode_arena.pushStruct(
         GameModeWorld,
         ArenaPushParams.aligned(@alignOf(GameModeWorld), true),
+        @src(),
     );
     lighting.initLighting(&world_mode.test_lighting, &state.mode_arena);
     world_mode.updating_lighting = true;
@@ -189,7 +190,7 @@ pub fn playWorld(state: *State) void {
     world_mode.debug_camera_dolly = 10;
 
     world_mode.particle_cache =
-        state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false));
+        state.mode_arena.pushStruct(ParticleCache, ArenaPushParams.aligned(@alignOf(ParticleCache), false), @src());
     particles.initParticleCache(world_mode.particle_cache, state.assets);
 
     world_mode.effects_entropy = .seed(1234, null, null, null);
