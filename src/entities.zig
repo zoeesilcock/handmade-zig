@@ -720,9 +720,9 @@ pub fn updateAndRenderEntities(
                 drawHitPoints(entity, render_group, entity_ground_point);
                 TimedBlock.endBlock(@src(), .EntityRenderHitpoints);
 
-                TimedBlock.beginBlock(@src(), .EntityRenderVolume);
                 {
                     if (global_config.Simulation_VisualizeCollisionVolumes) {
+                        TimedBlock.beginBlock(@src(), .EntityRenderVolume);
                         if (entity.collision_volume.hasArea()) {
                             var color: Color = .new(0, 0.5, 1, 1);
 
@@ -736,6 +736,7 @@ pub fn updateAndRenderEntities(
                                 0.01,
                             );
                         }
+                        TimedBlock.endBlock(@src(), .EntityRenderVolume);
                     }
 
                     if (false) {
@@ -763,7 +764,6 @@ pub fn updateAndRenderEntities(
                         }
                     }
                 }
-                TimedBlock.endBlock(@src(), .EntityRenderVolume);
                 TimedBlock.endBlock(@src(), .EntityRender);
             }
         }

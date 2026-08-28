@@ -9,6 +9,8 @@ const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const PlatformMemoryBlockFlags = shared.PlatformMemoryBlockFlags;
 const String = types.String;
 const Buffer = types.Buffer;
+const DebugInterface = debug_interface.DebugInterface;
+const DebugEvent = debug_interface.DebugEvent;
 
 // Build options.
 pub const INTERNAL = @import("build_options").internal;
@@ -111,14 +113,22 @@ pub const MemoryArena = extern struct {
         const aligned_size = size + alignment_offset;
         return aligned_size;
     }
-
     pub fn pushSize(
         self: *MemoryArena,
         size: MemoryIndex,
         in_params: ?ArenaPushParams,
         comptime source: std.builtin.SourceLocation,
     ) [*]u8 {
-        _ = source;
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushSize") else "";
+        return pushSize_(self, size, in_params, guid);
+    }
+
+    pub fn pushSize_(
+        self: *MemoryArena,
+        size: MemoryIndex,
+        in_params: ?ArenaPushParams,
+        comptime guid: [*:0]const u8,
+    ) [*]u8 {
         var result: [*]u8 = undefined;
         const params = in_params orelse ArenaPushParams.default();
 
@@ -148,12 +158,15 @@ pub const MemoryArena = extern struct {
                 @ptrCast(shared.platform.allocateMemory(block_size, self.allocation_flags).?);
             new_block.arena_prev = self.current_block;
             self.current_block = new_block;
+
+            DebugInterface.blockAllocation(self.current_block, guid);
         }
 
         std.debug.assert((self.current_block.?.used + aligned_size) <= self.current_block.?.size);
 
         const alignment_offset = self.getAlignmentOffset(params.alignment);
-        result = @ptrCast(self.current_block.?.base + self.current_block.?.used + alignment_offset);
+        const offset_in_block: usize = self.current_block.?.used + alignment_offset;
+        result = @ptrCast(self.current_block.?.base + offset_in_block);
         self.current_block.?.used += aligned_size;
 
         std.debug.assert(aligned_size >= size);
@@ -166,6 +179,8 @@ pub const MemoryArena = extern struct {
             zeroSize(size, @ptrCast(result));
         }
 
+        DebugInterface.recordAllocation(self.current_block, guid, aligned_size, size, offset_in_block);
+
         return result;
     }
 
@@ -175,7 +190,8 @@ pub const MemoryArena = extern struct {
         params: ?ArenaPushParams,
         comptime source: std.builtin.SourceLocation,
     ) *T {
-        return @as(*T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T), params, source))));
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushStruct") else "";
+        return @as(*T, @ptrCast(@alignCast(pushSize_(self, @sizeOf(T), params, guid))));
     }
 
     pub fn pushArray(
@@ -185,7 +201,8 @@ pub const MemoryArena = extern struct {
         params: ?ArenaPushParams,
         comptime source: std.builtin.SourceLocation,
     ) [*]T {
-        return @as([*]T, @ptrCast(@alignCast(pushSize(self, @sizeOf(T) * count, params, source))));
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushArray") else "";
+        return @as([*]T, @ptrCast(@alignCast(pushSize_(self, @sizeOf(T) * count, params, guid))));
     }
 
     pub fn pushStringZ(
@@ -198,7 +215,8 @@ pub const MemoryArena = extern struct {
         // Include the sentinel.
         size += 1;
 
-        var dest = self.pushSize(size, ArenaPushParams.noClear(), source);
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushStringZ") else "";
+        var dest = self.pushSize_(size, ArenaPushParams.noClear(), guid);
 
         var char_index: u32 = 0;
         while (char_index < size) : (char_index += 1) {
@@ -214,7 +232,8 @@ pub const MemoryArena = extern struct {
         comptime source: std.builtin.SourceLocation,
     ) Buffer {
         var result: Buffer = .{ .count = size };
-        result.data = @ptrCast(self.pushSize(result.count, null, source));
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushBuffer") else "";
+        result.data = @ptrCast(self.pushSize_(result.count, null, guid));
         return result;
     }
 
@@ -226,7 +245,8 @@ pub const MemoryArena = extern struct {
         var result: String = .{
             .count = types.stringLength(source_string),
         };
-        result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source_string)), source));
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushString") else "";
+        result.data = @ptrCast(self.pushCopy_(result.count, @ptrCast(@constCast(source_string)), guid));
         return result;
     }
 
@@ -238,7 +258,8 @@ pub const MemoryArena = extern struct {
         var result: String = .{
             .count = source_string.count,
         };
-        result.data = @ptrCast(self.pushCopy(result.count, @ptrCast(@constCast(source_string.data)), source));
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushStringSized") else "";
+        result.data = @ptrCast(self.pushCopy_(result.count, @ptrCast(@constCast(source_string.data)), guid));
         return result;
     }
 
@@ -248,7 +269,8 @@ pub const MemoryArena = extern struct {
         source_string: [*:0]const u8,
         comptime source: std.builtin.SourceLocation,
     ) [*:0]const u8 {
-        var dest = self.pushSize(length + 1, ArenaPushParams.noClear(), source);
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushAndNullTerminateString") else "";
+        var dest = self.pushSize_(length + 1, ArenaPushParams.noClear(), guid);
 
         var char_index: u32 = 0;
         while (char_index < length) : (char_index += 1) {
@@ -265,7 +287,17 @@ pub const MemoryArena = extern struct {
         source_string: *const anyopaque,
         comptime source: std.builtin.SourceLocation,
     ) *anyopaque {
-        return shared.copy(size, source_string, @ptrCast(self.pushSize(size, null, source)));
+        const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "pushCopy") else "";
+        return self.pushCopy_(size, source_string, guid);
+    }
+
+    pub fn pushCopy_(
+        self: *MemoryArena,
+        size: MemoryIndex,
+        source_string: *const anyopaque,
+        comptime guid: [*:0]const u8,
+    ) *anyopaque {
+        return shared.copy(size, source_string, @ptrCast(self.pushSize_(size, null, guid)));
     }
 
     pub fn beginTemporaryMemory(self: *MemoryArena) TemporaryMemory {
@@ -285,6 +317,7 @@ pub const MemoryArena = extern struct {
 
     fn freeLastBlock(self: *MemoryArena) void {
         if (self.current_block) |current_block| {
+            DebugInterface.blockFree(current_block);
             self.current_block = current_block.arena_prev;
             shared.platform.deallocateMemory(current_block);
         }
@@ -300,6 +333,7 @@ pub const MemoryArena = extern struct {
         if (arena.current_block) |current_block| {
             std.debug.assert(current_block.used >= temp_memory.used);
             current_block.used = temp_memory.used;
+            DebugInterface.blockTruncate(current_block);
         }
 
         std.debug.assert(self.temp_count > 0);

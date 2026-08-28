@@ -1082,12 +1082,17 @@ fn RectangleShared(
 
         pub fn getBarycentricPosition(self: *const Self, position: VectorType) VectorType {
             var result = VectorType.zero();
+            var result_values: [dimension_count]ScalarType = result.values;
+            const position_values: [dimension_count]ScalarType = position.values;
+            const min_values: [dimension_count]ScalarType = self.min.values;
+            const max_values: [dimension_count]ScalarType = self.max.values;
 
             for (0..dimension_count) |axis_index| {
-                result.values[axis_index] = safeRatio0(
-                    position.values[axis_index] - self.min.values[axis_index],
-                    self.max.values[axis_index] - self.min.values[axis_index],
+                result_values[axis_index] = safeRatio0(
+                    position_values[axis_index] - min_values[axis_index],
+                    max_values[axis_index] - min_values[axis_index],
                 );
+                result.values = result_values;
             }
 
             return result;

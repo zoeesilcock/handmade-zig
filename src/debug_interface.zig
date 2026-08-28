@@ -20,6 +20,7 @@ const Assets = asset.Assets;
 const BitmapId = file_formats.BitmapId;
 const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
+const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 
 var global_config = &@import("config.zig").global_config;
 pub const hit = if (INTERNAL) debug.hit else debug.hitStub;
@@ -44,6 +45,18 @@ pub const DebugTable = extern struct {
     pub fn setEventRecording(self: *DebugTable, enabled: bool) void {
         self.record_increment = if (enabled) 1 else 0;
     }
+};
+
+pub const DebugMemoryBlockOp = extern struct {
+    arena_lookup_block: ?*PlatformMemoryBlock = null,
+    block: ?*PlatformMemoryBlock = null,
+    allocated_size: usize = 0,
+};
+
+pub const DebugMemoryOp = extern struct {
+    block: ?*PlatformMemoryBlock = null,
+    allocated_size: usize = 0,
+    offset_in_block: usize = 0,
 };
 
 pub const DebugType = if (INTERNAL) enum(u32) {
@@ -74,17 +87,24 @@ pub const DebugType = if (INTERNAL) enum(u32) {
     SoundId,
     FontId,
     Enum,
-    MemoryArena,
+    DebugMemoryOp,
 
     ThreadIntervalGraph,
     FrameBarGraph,
     LastFrameInfo,
     FunctionSummary,
-    DebugMemoryInfo,
     FrameSlider,
     TopClocksList,
-    ArenaOccupancy,
     SetHUD,
+    MemoryByArena,
+    MemoryByFrame,
+    MemoryBySize,
+
+    ArenaSetName,
+    ArenaBlockAllocate,
+    ArenaBlockFree,
+    ArenaBlockTruncate,
+    ArenaAllocate,
 } else enum(u32) {};
 
 pub const DebugEvent = if (INTERNAL) extern struct {
@@ -113,7 +133,8 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         SoundId: SoundId,
         FontId: FontId,
         Enum: u32,
-        MemoryArena: *MemoryArena,
+        DebugMemoryBlockOp: DebugMemoryBlockOp,
+        DebugMemoryOp: DebugMemoryOp,
     } = undefined,
 
     pub fn debugName(
@@ -123,8 +144,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
     ) [*:0]const u8 {
         const counter_name = if (counter != null) @tagName(counter.?) else "NOCOUNTER";
         const line_number = std.fmt.comptimePrint("{d}", .{source.line});
-        // return source.fn_name ++ "|" ++ line_number ++ "|" ++ counter_name ++ "|" ++ name;
-        return line_number ++ "|" ++ counter_name ++ "|" ++ name;
+        return source.file ++ "|" ++ line_number ++ "|" ++ counter_name ++ "|" ++ name;
     }
 
     pub fn record(
@@ -263,12 +283,12 @@ pub const DebugEvent = if (INTERNAL) extern struct {
                 self.event_type = .FontId;
                 self.data = .{ .FontId = dest.* };
             },
-            MemoryArena => {
+            DebugMemoryOp => {
                 if (guids_match) {
-                    dest.* = shared.global_debug_table.edit_event.data.MemoryArena.*;
+                    dest.* = shared.global_debug_table.edit_event.data.DebugMemoryOp.*;
                 }
-                self.event_type = .MemoryArena;
-                self.data = .{ .MemoryArena = dest };
+                self.event_type = .DebugMemoryOp;
+                self.data = .{ .DebugMemoryOp = dest };
             },
             else => {
                 switch (@typeInfo(@TypeOf(source))) {
@@ -444,7 +464,8 @@ pub const DebugInterface = if (INTERNAL) struct {
         comptime element_type: DebugType,
         comptime name: []const u8,
     ) void {
-        _ = DebugEvent.record(element_type, @ptrCast(name), source.fn_name);
+        _ = source;
+        _ = DebugEvent.record(element_type, @ptrCast(name), @ptrCast(name));
     }
 
     pub fn debugUIHUD(
@@ -463,6 +484,68 @@ pub const DebugInterface = if (INTERNAL) struct {
     }
 
     pub fn debugEndArray() void {}
+
+    pub fn arenaSuppress(comptime source: std.builtin.SourceLocation, arena: *MemoryArena, name: [:0]const u8) void {
+        const guid = DebugEvent.debugName(source, null, "ArenaSuppress");
+        var event = DebugEvent.record(.ArenaSetName, guid, name);
+        event.data.DebugMemoryOp = .{
+            .block = arena.current_block,
+            .allocated_size = 1,
+        };
+    }
+
+    pub fn arenaName(comptime source: std.builtin.SourceLocation, arena: *MemoryArena, name: [:0]const u8) void {
+        const guid = DebugEvent.debugName(source, null, "ArenaSetName");
+        var event = DebugEvent.record(.ArenaSetName, guid, name);
+        event.data.DebugMemoryOp = .{
+            .block = arena.current_block,
+            .allocated_size = 0,
+        };
+    }
+
+    pub fn recordAllocation(
+        block: ?*PlatformMemoryBlock,
+        comptime guid: [*:0]const u8,
+        allocated_size: usize,
+        used_size: usize,
+        offset_in_block: usize,
+    ) void {
+        _ = used_size;
+
+        var event = DebugEvent.record(.ArenaAllocate, guid, "Allocation");
+        event.data.DebugMemoryOp = .{
+            .block = block,
+            .allocated_size = allocated_size,
+            .offset_in_block = offset_in_block,
+        };
+    }
+
+    pub fn blockAllocation(block: ?*PlatformMemoryBlock, comptime guid: [*:0]const u8) void {
+        // const guid = DebugEvent.debugName(@src(), null, "ArenaBlockAllocate");
+        var event = DebugEvent.record(.ArenaBlockAllocate, guid, "BlockAllocation");
+        event.data.DebugMemoryBlockOp = .{
+            .arena_lookup_block = block.?.arena_prev,
+            .block = block,
+            .allocated_size = block.?.size,
+        };
+    }
+
+    pub fn blockFree(block: ?*PlatformMemoryBlock) void {
+        const guid = DebugEvent.debugName(@src(), null, "ArenaBlockFree");
+        var event = DebugEvent.record(.ArenaBlockFree, guid, "BlockFree");
+        event.data.DebugMemoryOp = .{
+            .block = block,
+        };
+    }
+
+    pub fn blockTruncate(block: ?*PlatformMemoryBlock) void {
+        const guid = DebugEvent.debugName(@src(), null, "ArenaBlockTruncate");
+        var event = DebugEvent.record(.ArenaBlockTruncate, guid, "BlockTruncation");
+        event.data.DebugMemoryOp = .{
+            .block = block,
+            .allocated_size = block.?.used,
+        };
+    }
 } else struct {
     pub fn debugBeginDataBlock(
         source: std.builtin.SourceLocation,
@@ -518,4 +601,42 @@ pub const DebugInterface = if (INTERNAL) struct {
     }
 
     pub fn debugEndArray() void {}
+
+    pub fn arenaSuppress(comptime source: std.builtin.SourceLocation, arena: *MemoryArena, name: [:0]const u8) void {
+        _ = source;
+        _ = arena;
+        _ = name;
+    }
+
+    pub fn arenaName(source: std.builtin.SourceLocation, arena: *anyopaque, name: [:0]const u8) void {
+        _ = source;
+        _ = arena;
+        _ = name;
+    }
+
+    pub fn recordAllocation(
+        block: ?*PlatformMemoryBlock,
+        source: std.builtin.SourceLocation,
+        allocated_size: usize,
+        used_size: usize,
+        offset_in_block: usize,
+    ) void {
+        _ = block;
+        _ = source;
+        _ = allocated_size;
+        _ = used_size;
+        _ = offset_in_block;
+    }
+
+    pub fn blockAllocation(block: ?*PlatformMemoryBlock) void {
+        _ = block;
+    }
+
+    pub fn blockFree(block: ?*PlatformMemoryBlock) void {
+        _ = block;
+    }
+
+    pub fn blockTruncate(block: ?*PlatformMemoryBlock) void {
+        _ = block;
+    }
 };

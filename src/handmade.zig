@@ -206,10 +206,15 @@ pub export fn updateAndRender(
         DebugInterface.debugBeginDataBlock(@src(), "Profile");
         {
             DebugInterface.debugUIHUD(@src(), .Profiling);
-            DebugInterface.debugUIElement(@src(), .LastFrameInfo, "LastFrameInfo");
-            DebugInterface.debugUIElement(@src(), .DebugMemoryInfo, "DebugMemoryInfo");
-            DebugInterface.debugUIElement(@src(), .TopClocksList, "updateAndRender");
             DebugInterface.debugUIElement(@src(), .FrameSlider, "FrameSlider");
+            DebugInterface.debugUIElement(@src(), .LastFrameInfo, "LastFrameInfo");
+            DebugInterface.debugUIElement(@src(), .TopClocksList, "updateAndRender");
+        }
+        DebugInterface.debugEndDataBlock(@src());
+        DebugInterface.debugBeginDataBlock(@src(), "Memory");
+        {
+            DebugInterface.debugUIHUD(@src(), .Memory);
+            DebugInterface.debugUIElement(@src(), .MemoryBySize, "MemoryBySize");
         }
         DebugInterface.debugEndDataBlock(@src());
     }
@@ -277,15 +282,10 @@ pub export fn updateAndRender(
         state.dev_mode = .Memory;
     }
 
-    DebugInterface.debugBeginDataBlock(@src(), "Memory");
-    {
-        DebugInterface.debugUIHUD(@src(), .Memory);
-        DebugInterface.debugValue(@src(), &state.mode_arena, "ModeArena");
-        DebugInterface.debugValue(@src(), &state.audio_arena, "AudioArena");
-        DebugInterface.debugValue(@src(), state.frame_arena, "FrameArena");
-        DebugInterface.debugValue(@src(), &state.assets.non_restored_memory, "AssetArena");
-    }
-    DebugInterface.debugEndDataBlock(@src());
+    DebugInterface.arenaName(@src(), &state.mode_arena, "Game Mode");
+    DebugInterface.arenaName(@src(), &state.audio_arena, "Audio Playback");
+    DebugInterface.arenaName(@src(), state.frame_arena, "FrameTemporary");
+    DebugInterface.arenaName(@src(), &state.assets.non_restored_memory, "Asset Storage");
 
     if (state.current_mode == .None) {
         cutscene.playIntroCutscene(state);

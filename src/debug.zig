@@ -20,6 +20,9 @@ const Assets = asset.Assets;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugType = debug_interface.DebugType;
 const DebugEvent = debug_interface.DebugEvent;
+const DebugMemoryOp = debug_interface.DebugMemoryOp;
+const DebugMemoryBlockOp = debug_interface.DebugMemoryBlockOp;
+const DebugInterface = debug_interface.DebugInterface;
 const DevUI = dev_ui.DevUI;
 const TooltipBuffer = dev_ui.TooltipBuffer;
 const DebugPlatformMemoryStats = shared.DebugPlatformMemoryStats;
@@ -36,6 +39,7 @@ const Rectangle3 = math.Rectangle3;
 const MemoryArena = memory.MemoryArena;
 const MemoryIndex = memory.MemoryIndex;
 const ArenaPushParams = memory.ArenaPushParams;
+const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const SortEntry = sort.SortEntry;
 const RendererTexture = renderer.RendererTexture;
 const RenderCommands = renderer.RenderCommands;
@@ -162,15 +166,37 @@ const ElementAddOp = enum(u32) {
     CreateHierarchy = 0x2,
 };
 
+const DebugArenaAllocation = struct {
+    next: ?*DebugArenaAllocation,
+    guid: [*:0]const u8,
+    offset_from_block: usize,
+    size_allocated: usize,
+};
+
+const DebugArenaBlock = struct {
+    next: ?*DebugArenaBlock,
+    first_allocation: ?*DebugArenaAllocation,
+    last_allocation: ?*DebugArenaAllocation,
+    memory_address: usize,
+    size_allocated: usize,
+};
+
+const DebugArena = struct {
+    next: ?*DebugArena,
+    name: [*:0]const u8,
+    first_block: ?*DebugArenaBlock,
+    suppress: bool,
+};
+
 pub const DebugState = struct {
     debug_arena: MemoryArena,
-    per_frame_arena: MemoryArena,
 
     element_hash: [1024]?*DebugElement = @splat(null),
     view_hash: [4096]*DebugView = @splat(undefined),
     root_group: *DebugVariableLink,
     function_group: *DebugVariableLink,
     profile_group: *DebugVariableLink,
+    memory_group: *DebugVariableLink,
 
     dev_mode_links: [DEV_MODE_COUNT]?*DebugVariableLink = @splat(null),
 
@@ -195,6 +221,11 @@ pub const DebugState = struct {
 
     // Per-frame storage management.
     first_free_stored_event: ?*DebugStoredEvent,
+
+    first_arena: ?*DebugArena,
+    first_free_arena: ?*DebugArena,
+    first_free_arena_block: ?*DebugArenaBlock,
+    first_free_arena_allocation: ?*DebugArenaAllocation,
 
     //
     //
@@ -282,7 +313,7 @@ pub const DebugState = struct {
             if (result != null) {
                 self.first_free_stored_event = result.?.next;
             } else {
-                result = self.per_frame_arena.pushStruct(
+                result = self.debug_arena.pushStruct(
                     DebugStoredEvent,
                     ArenaPushParams.aligned(@alignOf(DebugStoredEvent), true),
                     @src(),
@@ -593,6 +624,182 @@ pub const DebugState = struct {
         return result;
     }
 
+    pub fn getArenaCount(debug_state: *DebugState) u32 {
+        var result: u32 = 0;
+        var opt_arena: ?*DebugArena = debug_state.first_arena;
+        while (opt_arena) |arena| : (opt_arena = arena.next) {
+            result += 1;
+        }
+        return result;
+    }
+
+    fn getArenaByLookupBlock(
+        self: *DebugState,
+        arena_lookup_block: ?*PlatformMemoryBlock,
+        opt_allow_creation: ?bool,
+    ) *DebugArena {
+        const allow_creation: bool = opt_allow_creation orelse false;
+        var result: ?*DebugArena = null;
+        const lookup_address: usize = @intFromPtr(arena_lookup_block);
+
+        var opt_arena: ?*DebugArena = self.first_arena;
+        while (opt_arena) |debug_arena| : (opt_arena = debug_arena.next) {
+            std.debug.assert(debug_arena.first_block != null);
+            if (debug_arena.first_block.?.memory_address == lookup_address) {
+                result = debug_arena;
+                break;
+            }
+        }
+
+        if (result == null) {
+            std.debug.assert(allow_creation);
+            result = self.first_free_arena;
+            if (result != null) {
+                self.first_free_arena = result.?.next;
+            } else {
+                result = self.debug_arena.pushStruct(DebugArena, null, @src());
+            }
+
+            result.?.name = "(unnamed)";
+            result.?.first_block = null;
+
+            result.?.next = self.first_arena;
+            self.first_arena = result;
+        }
+
+        return result.?;
+    }
+
+    fn arenaSetName(self: *DebugState, event: *DebugEvent) void {
+        const op: *DebugMemoryOp = &event.data.DebugMemoryOp;
+        if (op.block != null) {
+            var arena: *DebugArena = self.getArenaByLookupBlock(op.block, false);
+            arena.name = event.name;
+            arena.suppress = op.allocated_size != 0;
+        }
+    }
+
+    fn moveToFreeList(self: *DebugState, first: ?*DebugArenaAllocation, last: ?*DebugArenaAllocation) void {
+        if (first) |first_alocation| {
+            std.debug.assert(last != null);
+            last.?.next = self.first_free_arena_allocation;
+            self.first_free_arena_allocation = first_alocation;
+        } else {
+            std.debug.assert(last == null);
+        }
+    }
+
+    fn removeArena(self: *DebugState, arena: *DebugArena) void {
+        if (self.first_arena == arena) {
+            self.first_arena = arena.next;
+        } else {
+            var scan: ?*DebugArena = self.first_arena;
+            while (scan != null) : (scan = scan.?.next) {
+                if (scan.?.next == arena) {
+                    scan.?.next = arena.next;
+                    break;
+                }
+            }
+        }
+
+        arena.next = self.first_free_arena;
+        self.first_free_arena = arena;
+    }
+
+    fn arenaBlockFree(self: *DebugState, event: *DebugEvent) void {
+        const op: *DebugMemoryOp = &event.data.DebugMemoryOp;
+        var arena: *DebugArena = self.getArenaByLookupBlock(op.block, false);
+        const free_block: *DebugArenaBlock = arena.first_block.?;
+        std.debug.assert(free_block.memory_address == @intFromPtr(op.block));
+
+        // Move all the block's allocations to the free list.
+        self.moveToFreeList(free_block.first_allocation, free_block.last_allocation);
+
+        // Remove the free block from the arena.
+        arena.first_block = free_block.next;
+
+        // Add the old block to the free list.
+        free_block.next = self.first_free_arena_block;
+        self.first_free_arena_block = free_block;
+
+        if (arena.first_block == null) {
+            self.removeArena(arena);
+        }
+    }
+
+    fn arenaBlockTruncate(self: *DebugState, event: *DebugEvent) void {
+        const op: *DebugMemoryOp = &event.data.DebugMemoryOp;
+        const arena: *DebugArena = self.getArenaByLookupBlock(op.block, false);
+        if (!arena.suppress) {
+            const block: *DebugArenaBlock = arena.first_block.?;
+            std.debug.assert(block.memory_address == @intFromPtr(op.block));
+
+            var last_free: ?*DebugArenaAllocation = null;
+            var opt_first_valid: ?*DebugArenaAllocation = block.first_allocation;
+            while (opt_first_valid) |first_valid| : (opt_first_valid = first_valid.next) {
+                if (first_valid.offset_from_block < op.allocated_size) {
+                    break;
+                }
+                last_free = first_valid;
+            }
+
+            if (block.first_allocation != opt_first_valid) {
+                self.moveToFreeList(block.first_allocation, last_free);
+                block.first_allocation = opt_first_valid;
+                if (block.last_allocation == last_free) {
+                    block.last_allocation = null;
+                }
+            }
+        }
+    }
+
+    fn arenaBlockAllocate(self: *DebugState, event: *DebugEvent) void {
+        const op: *DebugMemoryBlockOp = &event.data.DebugMemoryBlockOp;
+        const arena: *DebugArena = self.getArenaByLookupBlock(op.arena_lookup_block, true);
+        var block: ?*DebugArenaBlock = self.first_free_arena_block;
+
+        if (block != null) {
+            self.first_free_arena_block = block.?.next;
+        } else {
+            block = self.debug_arena.pushStruct(DebugArenaBlock, null, @src());
+        }
+
+        block.?.first_allocation = null;
+        block.?.last_allocation = null;
+
+        block.?.memory_address = @intFromPtr(op.block);
+        block.?.size_allocated = op.allocated_size;
+
+        block.?.next = arena.first_block;
+        arena.first_block = block;
+    }
+
+    fn arenaAllocate(self: *DebugState, event: *DebugEvent) void {
+        const op: *DebugMemoryOp = &event.data.DebugMemoryOp;
+        const arena: *DebugArena = self.getArenaByLookupBlock(op.block, false);
+        if (!arena.suppress) {
+            const block: *DebugArenaBlock = arena.first_block.?;
+            std.debug.assert(block.memory_address == @intFromPtr(op.block));
+
+            var allocation: ?*DebugArenaAllocation = self.first_free_arena_allocation;
+            if (allocation != null) {
+                self.first_free_arena_allocation = allocation.?.next;
+            } else {
+                allocation = self.debug_arena.pushStruct(DebugArenaAllocation, null, @src());
+            }
+
+            allocation.?.guid = event.guid;
+            allocation.?.offset_from_block = op.offset_in_block;
+            allocation.?.size_allocated = op.allocated_size;
+
+            allocation.?.next = block.first_allocation;
+            block.first_allocation = allocation;
+            if (block.last_allocation == null) {
+                block.last_allocation = allocation;
+            }
+        }
+    }
+
     pub fn collateDebugRecords(self: *DebugState, event_count: u32, event_array: [*]DebugEvent) void {
         var event_index: u32 = 0;
         while (event_index < event_count) : (event_index += 1) {
@@ -729,6 +936,21 @@ pub const DebugState = struct {
                         if (dev_mode < self.dev_mode_links.len) {
                             self.dev_mode_links[dev_mode] = default_parent_group;
                         }
+                    },
+                    .ArenaSetName => {
+                        self.arenaSetName(event);
+                    },
+                    .ArenaBlockAllocate => {
+                        self.arenaBlockAllocate(event);
+                    },
+                    .ArenaBlockFree => {
+                        self.arenaBlockFree(event);
+                    },
+                    .ArenaBlockTruncate => {
+                        self.arenaBlockTruncate(event);
+                    },
+                    .ArenaAllocate => {
+                        self.arenaAllocate(event);
                     },
                     else => {
                         if (self.getElementFromEvent(
@@ -1501,49 +1723,6 @@ fn drawFrameBars(
     }
 }
 
-fn drawArenaOccupancy(
-    debug_state: *DebugState,
-    graph_id: DevId,
-    frame_rect: Rectangle2,
-    mouse_position: Vector2,
-    root_element: *DebugElement,
-) void {
-    _ = debug_state;
-    _ = graph_id;
-    _ = frame_rect;
-    _ = mouse_position;
-    _ = root_element;
-
-    // const ui: *DevUI = &debug_state.dev_ui;
-    // const render_group: *RenderGroup = &debug_state.dev_ui.render_group;
-    // const root_frame: *DebugElementFrame = &root_element.frames[debug_state.viewing_frame_ordinal];
-    // if (root_frame.oldest_event) |event| {
-    //     const arena: *MemoryArena = event.data.event.data.MemoryArena;
-    //     const split_point: f32 = math.lerpf(
-    //         frame_rect.min.x(),
-    //         frame_rect.max.x(),
-    //         @floatCast(@as(f64, @floatFromInt(arena.used)) / @as(f64, @floatFromInt(arena.size))),
-    //     );
-    //     const used_rect = math.Rectangle2.new(
-    //         frame_rect.min.x(),
-    //         frame_rect.min.y(),
-    //         split_point,
-    //         frame_rect.max.y(),
-    //     );
-    //     const unused_rect = math.Rectangle2.new(
-    //         split_point,
-    //         frame_rect.min.y(),
-    //         frame_rect.max.x(),
-    //         frame_rect.max.y(),
-    //     );
-    //     render_group.pushRectangle2(&ui.ui_transform, used_rect, 0, Color.new(1, 0.5, 0, 1));
-    //     render_group.pushRectangle2Outline(&ui.ui_transform, used_rect, 0, Color.black(), 2);
-    //
-    //     render_group.pushRectangle2(&ui.ui_transform, unused_rect, 0, Color.new(0, 1, 0, 1));
-    //     render_group.pushRectangle2Outline(&ui.ui_transform, unused_rect, 0, Color.black(), 2);
-    // }
-}
-
 const ClockEntry = struct {
     element: *DebugElement,
     stats: DebugStatistic,
@@ -1653,6 +1832,192 @@ fn drawTopClocksList(
                 },
             );
         }
+
+        if (at.y() < profile_rect.min.y()) {
+            break;
+        } else {
+            _ = at.setY(at.y() - ui.getLineAdvance());
+        }
+    }
+}
+
+const MemoryEntry = struct {
+    arena: *DebugArena,
+    allocated: DebugStatistic,
+    used: DebugStatistic,
+};
+
+fn drawArenaInterval(
+    debug_state: *DebugState,
+    graph_id: DevId,
+    profile_rect: Rectangle2,
+    mouse_position: Vector2,
+) void {
+    _ = graph_id;
+
+    const ui: *DevUI = &debug_state.dev_ui;
+    const render_group: *RenderGroup = &ui.render_group;
+
+    var allocation_index: u32 = 0;
+    const block_dim: Vector2 = .new(profile_rect.getDimension().x() / 4, 20);
+
+    var block_index: u32 = 0;
+    var block_y: f32 = profile_rect.max.y() - block_dim.y();
+    var opt_arena: ?*DebugArena = debug_state.first_arena;
+    while (opt_arena) |arena| : (opt_arena = arena.next) {
+        if (!arena.suppress) {
+            var opt_block: ?*DebugArenaBlock = arena.first_block;
+            while (opt_block) |block| : (opt_block = block.next) {
+                const block_rect = math.Rectangle2.fromMinDimension(
+                    .new(profile_rect.min.x() + @as(f32, @floatFromInt(block_index)) * block_dim.x(), block_y),
+                    block_dim,
+                );
+                render_group.pushRectangle2(block_rect, ui.ui_transform, .new(0.5, 0.5, 0.5, 1));
+                render_group.pushRectangle2Outline(block_rect, ui.ui_transform, Color.black(), 2);
+
+                const inv_size_allocated: f32 = math.safeRatio1(1, @floatFromInt(block.size_allocated));
+
+                var opt_allocation: ?*DebugArenaAllocation = block.first_allocation;
+                while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
+                    const color = debug_color_table[allocation_index % debug_color_table.len];
+
+                    const t_min: f32 = inv_size_allocated * @as(f32, @floatFromInt(allocation.offset_from_block));
+                    const t_max: f32 = inv_size_allocated *
+                        @as(f32, @floatFromInt(allocation.offset_from_block + allocation.size_allocated));
+
+                    const min_position: Vector2 =
+                        .new(math.lerpf(block_rect.min.x(), block_rect.max.x(), t_min), block_rect.min.y());
+                    const max_position: Vector2 =
+                        .new(math.lerpf(block_rect.min.x(), block_rect.max.x(), t_max), block_rect.max.y());
+                    const region_rect: Rectangle2 = .fromMinMax(min_position, max_position);
+
+                    render_group.pushRectangle2(region_rect, ui.ui_transform, color.toColor(1));
+                    render_group.pushRectangle2Outline(region_rect, ui.ui_transform, Color.black(), 2);
+
+                    if (mouse_position.isInRectangle(region_rect)) {
+                        const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
+                        _ = shared.formatString(text_buffer.size, text_buffer.data, "%s|%s: %ub", .{
+                            arena.name,
+                            allocation.guid,
+                            allocation.size_allocated,
+                        });
+                    }
+                    allocation_index += 1;
+                }
+
+                block_index += 1;
+                if (block_index == 4) {
+                    block_index = 0;
+                    block_y -= block_dim.y();
+                }
+            }
+        }
+    }
+}
+
+fn drawTopMemList(
+    debug_state: *DebugState,
+    graph_id: DevId,
+    profile_rect: Rectangle2,
+    mouse_position: Vector2,
+) void {
+    _ = graph_id;
+
+    const ui: *DevUI = &debug_state.dev_ui;
+    const temp_memory = debug_state.debug_arena.beginTemporaryMemory();
+    defer debug_state.debug_arena.endTemporaryMemory(temp_memory);
+
+    const arena_count: u32 = debug_state.getArenaCount();
+
+    const entries: [*]MemoryEntry =
+        debug_state.debug_arena.pushArray(arena_count, MemoryEntry, ArenaPushParams.noClear(), @src());
+    const sort_a: [*]SortEntry =
+        debug_state.debug_arena.pushArray(arena_count, SortEntry, ArenaPushParams.noClear(), @src());
+    const sort_b: [*]SortEntry =
+        debug_state.debug_arena.pushArray(arena_count, SortEntry, ArenaPushParams.noClear(), @src());
+
+    var total_allocated: f64 = 0;
+    var total_used: f64 = 0;
+    var index: u32 = 0;
+    var opt_arena: ?*DebugArena = debug_state.first_arena;
+    while (opt_arena) |arena| : (opt_arena = arena.next) {
+        defer index += 1;
+
+        var entry: *MemoryEntry = &entries[index];
+        var sort_entry: *SortEntry = &sort_a[index];
+
+        entry.arena = arena;
+        entry.allocated = DebugStatistic.begin();
+        entry.used = DebugStatistic.begin();
+
+        var opt_block: ?*DebugArenaBlock = arena.first_block;
+        while (opt_block) |block| : (opt_block = block.next) {
+            var opt_allocation: ?*DebugArenaAllocation = block.first_allocation;
+            while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
+                entry.used.accumulate(@floatFromInt(allocation.size_allocated));
+            }
+            entry.allocated.accumulate(@floatFromInt(block.size_allocated));
+        }
+
+        entry.allocated.end();
+        entry.used.end();
+
+        total_allocated += entry.allocated.sum;
+        total_used += entry.used.sum;
+
+        sort_entry.sort_key = @floatCast(-entry.allocated.sum);
+        sort_entry.index = index;
+    }
+
+    sort.radixSort(arena_count, sort_a, sort_b);
+
+    var percent_coefficient: f64 = 0;
+    if (total_allocated > 0) {
+        percent_coefficient = 100 / total_allocated;
+    }
+
+    var running_sum: f64 = 0;
+
+    var at: Vector2 = Vector2.new(profile_rect.min.x(), profile_rect.max.y() - ui.getBaseline());
+    index = 0;
+    while (index < arena_count) : (index += 1) {
+        const entry: *MemoryEntry = &entries[sort_a[index].index];
+        const allocated: *DebugStatistic = &entry.allocated;
+        const used: *DebugStatistic = &entry.used;
+        const arena: *DebugArena = entry.arena;
+
+        running_sum += allocated.sum;
+
+        var buffer: [256]u8 = undefined;
+        _ = shared.formatString(buffer.len, &buffer, "%4umb %05.02f%% %4d %8d %s", .{
+            @as(u32, @intFromFloat(allocated.sum / @as(f64, @floatFromInt(types.megabytes(1))))),
+            percent_coefficient * allocated.sum,
+            allocated.count,
+            used.count,
+            arena.name,
+        });
+        dev_ui.textOutAt(
+            ui,
+            @ptrCast(&buffer),
+            at,
+            Color.white(),
+            null,
+        );
+
+        _ = mouse_position;
+        // const text_rect: Rectangle2 = dev_ui.getTextSizeAt(ui, @ptrCast(&buffer), at);
+        // if (mouse_position.isInRectangle(text_rect)) {
+        //     const tooltip_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
+        //     _ = shared.formatString(
+        //         tooltip_buffer.size,
+        //         tooltip_buffer.data,
+        //         "  %05.02fcy each; cumulative to this point: %05.02f%%",
+        //         .{
+        //             math.safeRatio0f64(stats.sum, @as(f64, @floatFromInt(stats.count))),
+        //             percent_coefficient * running_sum,
+        //         },
+        //     );
+        // }
 
         if (at.y() < profile_rect.min.y()) {
             break;
@@ -1784,60 +2149,6 @@ fn drawDebugElement(
                     null,
                     null,
                 );
-            }
-        },
-        .MemoryArena, .ArenaOccupancy => {
-            if (view.view_type != .ArenaGraph) {
-                view.view_type = .ArenaGraph;
-                const inline_block = view.data.inline_block;
-                view.data = .{ .arena_graph = .{ .block = inline_block } };
-            }
-
-            const graph: *DebugViewArenaGraph = &view.data.arena_graph;
-            if (graph.block.dimension.x() == 0 and graph.block.dimension.y() == 0) {
-                graph.block.dimension = Vector2.new(1400, 100);
-            }
-
-            layout.beginRow();
-            var temp: [256:0]u8 = undefined;
-            layout.label(.fromSlice(std.mem.span(element.getName(debug_state, temp.len, &temp))));
-            layout.booleanButton(
-                .fromSlice("Occupancy"),
-                element.type == .ArenaOccupancy,
-                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.ArenaOccupancy)),
-            );
-            layout.endRow();
-
-            var layout_element: dev_ui.LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
-            layout_element.makeSizable();
-            layout_element.end();
-
-            render_group.pushRectangle2(
-                layout_element.bounds,
-                ui.backing_transform,
-                Color.new(0, 0, 0, 0.75),
-            );
-
-            const transient_clip_rect: TransientClipRect = .initWith(
-                render_group,
-                render_group.getClipRectByRectangle(
-                    layout_element.bounds,
-                    ui.backing_transform.z(),
-                ),
-            );
-            defer transient_clip_rect.restore();
-
-            switch (element.type) {
-                .ArenaOccupancy => {
-                    drawArenaOccupancy(
-                        debug_state,
-                        debug_id,
-                        layout_element.bounds,
-                        layout.mouse_position,
-                        element,
-                    );
-                },
-                else => {},
             }
         },
         .ThreadIntervalGraph, .FrameBarGraph, .TopClocksList => {
@@ -1978,12 +2289,66 @@ fn drawDebugElement(
             _ = element.getName(debug_state, text.len, &text);
             _ = dev_ui.basicTextElement(.wrapZ(&text), layout, item_interaction, null, null, null, null);
         },
-        .DebugMemoryInfo => {
-            // var text: [128:0]u8 = undefined;
-            // _ = shared.formatString(text.len, &text, "Per-frame arena space remaining: %ukb", .{
-            //     debug_state.per_frame_arena.getRemainingSize(ArenaPushParams.alignedNoClear(1)) / 1024,
-            // });
-            // _ = dev_ui.basicTextElement(&text, layout, item_interaction, null, null, null, null);
+        .MemoryByArena, .MemoryByFrame, .MemoryBySize => {
+            if (view.view_type != .ArenaGraph) {
+                view.view_type = .ArenaGraph;
+                const inline_block = view.data.inline_block;
+                view.data = .{ .arena_graph = .{ .block = inline_block } };
+            }
+
+            const graph: *DebugViewArenaGraph = &view.data.arena_graph;
+            if (graph.block.dimension.x() == 0 and graph.block.dimension.y() == 0) {
+                graph.block.dimension = Vector2.new(1400, 280);
+            }
+
+            layout.beginRow();
+            // layout.actionButton(.fromSlice("Root"), dev_ui.Interaction.setPointer(debug_id, @ptrCast(&graph.guid), null));
+            layout.booleanButton(
+                .fromSlice("Arenas"),
+                element.type == .MemoryByArena,
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.MemoryByArena)),
+            );
+            layout.booleanButton(
+                .fromSlice("Frames"),
+                element.type == .MemoryByFrame,
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.MemoryByFrame)),
+            );
+            layout.booleanButton(
+                .fromSlice("Sizes"),
+                element.type == .MemoryBySize,
+                dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.MemoryBySize)),
+            );
+            layout.endRow();
+
+            var layout_element: dev_ui.LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
+            layout_element.makeSizable();
+            layout_element.end();
+
+            render_group.pushRectangle2(
+                layout_element.bounds,
+                ui.backing_transform,
+                Color.new(0, 0, 0, 0.75),
+            );
+
+            const transient_clip_rect: TransientClipRect = .initWith(
+                render_group,
+                render_group.getClipRectByRectangle(
+                    layout_element.bounds,
+                    ui.backing_transform.z(),
+                ),
+            );
+            defer transient_clip_rect.restore();
+
+            switch (element.type) {
+                .MemoryByArena => {
+                    drawArenaInterval(debug_state, debug_id, layout_element.bounds, layout.mouse_position);
+                },
+                .MemoryByFrame => {},
+                .MemoryBySize => {
+                    drawTopMemList(debug_state, debug_id, layout_element.bounds, layout.mouse_position);
+                },
+                else => {},
+            }
         },
         else => {
             const event: *DebugEvent = if (opt_oldest_event) |oldest_event| &oldest_event.data.event else &null_event;
@@ -2302,18 +2667,18 @@ fn debugInit(assets: *Assets, render_dim: Vector2u) *DebugState {
         null,
         ArenaPushParams.aligned(@alignOf(DebugState), true),
     );
+    DebugInterface.arenaSuppress(@src(), &debug_state.debug_arena, "DEBUG");
 
     debug_state.collation_frame_ordinal = 1;
 
     debug_state.tree_sentinel.next = &debug_state.tree_sentinel;
     debug_state.tree_sentinel.prev = &debug_state.tree_sentinel;
 
-    memory.zeroStruct(MemoryArena, &debug_state.per_frame_arena);
-
     debug_state.root_group = debug_state.createVariableLink(debug_state.createNameElement(4, "Root", null));
     debug_state.function_group = debug_state.createVariableLink(debug_state.createNameElement(9, "Functions", null));
 
     debug_state.profile_group = debug_state.createVariableLink(debug_state.createNameElement(7, "Profile", null));
+    debug_state.memory_group = debug_state.createVariableLink(debug_state.createNameElement(6, "Memory", null));
 
     var root_profile_event: DebugEvent = .{
         .guid = DebugEvent.debugName(@src(), .RootProfile, "RootProfile"),
@@ -2341,7 +2706,7 @@ fn debugInit(assets: *Assets, render_dim: Vector2u) *DebugState {
     debug_state.dev_mode_links[@intFromEnum(DevMode.Profiling)] = debug_state.profile_group;
     debug_state.dev_mode_links[@intFromEnum(DevMode.Rendering)] = null;
     debug_state.dev_mode_links[@intFromEnum(DevMode.Lighting)] = null;
-    debug_state.dev_mode_links[@intFromEnum(DevMode.Memory)] = null;
+    debug_state.dev_mode_links[@intFromEnum(DevMode.Memory)] = debug_state.memory_group;
     debug_state.dev_mode_links[@intFromEnum(DevMode.Dump)] = debug_state.root_group;
 
     return debug_state;
