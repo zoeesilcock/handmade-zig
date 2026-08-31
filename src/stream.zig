@@ -2,17 +2,22 @@ const std = @import("std");
 const memory = @import("memory.zig");
 const shared = @import("shared.zig");
 const types = @import("types.zig");
+const debug_interface = @import("debug_interface.zig");
 
 // Types.
 const Buffer = types.Buffer;
 const MemoryArena = memory.MemoryArena;
+const DebugEvent = debug_interface.DebugEvent;
 
-pub const Chunk = struct {
-    file_name: [:0]const u8,
-    line: u32,
+// Build options.
+pub const INTERNAL = @import("build_options").internal;
 
+pub const Chunk = if (INTERNAL) struct {
     contents: Buffer = .{},
-
+    next: ?*Chunk = null,
+    guid: [*:0]const u8,
+} else struct {
+    contents: Buffer = .{},
     next: ?*Chunk = null,
 };
 
@@ -137,15 +142,15 @@ pub fn outputWithSrc(
     comptime format: []const u8,
     args: anytype,
 ) usize {
-    return output(source.file, source.line, output_stream, format, args);
+    const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "output") else "";
+    return output(output_stream, format, args, guid);
 }
 
-pub fn output(
-    file_name: [:0]const u8,
-    line_number: u32,
+fn output(
     output_stream: ?*Stream,
     comptime format: []const u8,
     args: anytype,
+    comptime guid: [*:0]const u8,
 ) usize {
     var size: usize = 0;
 
@@ -153,10 +158,11 @@ pub fn output(
         var buffer: [1024]u8 = undefined;
         size = shared.formatString(buffer.len, @ptrCast(&buffer), @ptrCast(format), args);
 
-        const contents = stream.arena.?.pushCopy(size, &buffer, @src());
+        const contents = stream.arena.?.pushCopy_(size, &buffer, guid);
         var chunk = stream.appendChunk(size, @ptrCast(contents));
-        chunk.line = line_number;
-        chunk.file_name = file_name;
+        if (INTERNAL) {
+            chunk.guid = guid;
+        }
     }
 
     return size;

@@ -188,6 +188,19 @@ const DebugArena = struct {
     suppress: bool,
 };
 
+const MemoryEntry = struct {
+    arena: *DebugArena,
+    allocated: DebugStatistic,
+    used: DebugStatistic,
+};
+
+const MemoryCallSite = struct {
+    next_in_hash: ?*MemoryCallSite,
+    arena: *DebugArena,
+    guid: [*:0]const u8,
+    allocated: DebugStatistic,
+};
+
 pub const DebugState = struct {
     debug_arena: MemoryArena,
 
@@ -1164,6 +1177,8 @@ const DebugViewProfileGraph = struct {
 
 const DebugViewArenaGraph = struct {
     block: DebugViewInlineBlock,
+    show_suppressed: bool = false,
+    show_call_sites: bool = false,
 };
 
 const DebugProfileNode = extern struct {
@@ -1841,17 +1856,37 @@ fn drawTopClocksList(
     }
 }
 
-const MemoryEntry = struct {
-    arena: *DebugArena,
-    allocated: DebugStatistic,
-    used: DebugStatistic,
-};
+fn drawMemoryRange(
+    debug_state: *DebugState,
+    profile_rect: Rectangle2,
+    starting_address: usize,
+    one_past_last_address: usize,
+    block_color: Color,
+) void {
+    const ui: *DevUI = &debug_state.dev_ui;
+    const render_group: *RenderGroup = &ui.render_group;
+
+    const min_row_index: u32 = 0;
+    const max_row_index: u32 = 0;
+    var row_index: u32 = 0;
+    while (row_index < max_row_index) : (row_index += 1) {
+        const block_rect: Rectangle2 = .{};
+        render_group.pushRectangle2(block_rect, ui.ui_transform, block_color);
+        render_group.pushRectangle2Outline(block_rect, ui.ui_transform, Color.black(), 2);
+    }
+
+    _ = profile_rect;
+    _ = starting_address;
+    _ = one_past_last_address;
+    _ = min_row_index;
+}
 
 fn drawArenaInterval(
     debug_state: *DebugState,
     graph_id: DevId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
+    graph: *DebugViewArenaGraph,
 ) void {
     _ = graph_id;
 
@@ -1865,44 +1900,47 @@ fn drawArenaInterval(
     var block_y: f32 = profile_rect.max.y() - block_dim.y();
     var opt_arena: ?*DebugArena = debug_state.first_arena;
     while (opt_arena) |arena| : (opt_arena = arena.next) {
-        if (!arena.suppress) {
+        if (!arena.suppress or graph.show_suppressed) {
             var opt_block: ?*DebugArenaBlock = arena.first_block;
             while (opt_block) |block| : (opt_block = block.next) {
+                const block_color: Color = if (arena.suppress) .new(0.15, 0.15, 0.15, 1) else .new(0.5, 0.5, 0.5, 1);
                 const block_rect = math.Rectangle2.fromMinDimension(
                     .new(profile_rect.min.x() + @as(f32, @floatFromInt(block_index)) * block_dim.x(), block_y),
                     block_dim,
                 );
-                render_group.pushRectangle2(block_rect, ui.ui_transform, .new(0.5, 0.5, 0.5, 1));
+                render_group.pushRectangle2(block_rect, ui.ui_transform, block_color);
                 render_group.pushRectangle2Outline(block_rect, ui.ui_transform, Color.black(), 2);
 
-                const inv_size_allocated: f32 = math.safeRatio1(1, @floatFromInt(block.size_allocated));
+                if (!arena.suppress) {
+                    const inv_size_allocated: f32 = math.safeRatio1(1, @floatFromInt(block.size_allocated));
 
-                var opt_allocation: ?*DebugArenaAllocation = block.first_allocation;
-                while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
-                    const color = debug_color_table[allocation_index % debug_color_table.len];
+                    var opt_allocation: ?*DebugArenaAllocation = block.first_allocation;
+                    while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
+                        const color = debug_color_table[allocation_index % debug_color_table.len];
 
-                    const t_min: f32 = inv_size_allocated * @as(f32, @floatFromInt(allocation.offset_from_block));
-                    const t_max: f32 = inv_size_allocated *
-                        @as(f32, @floatFromInt(allocation.offset_from_block + allocation.size_allocated));
+                        const t_min: f32 = inv_size_allocated * @as(f32, @floatFromInt(allocation.offset_from_block));
+                        const t_max: f32 = inv_size_allocated *
+                            @as(f32, @floatFromInt(allocation.offset_from_block + allocation.size_allocated));
 
-                    const min_position: Vector2 =
-                        .new(math.lerpf(block_rect.min.x(), block_rect.max.x(), t_min), block_rect.min.y());
-                    const max_position: Vector2 =
-                        .new(math.lerpf(block_rect.min.x(), block_rect.max.x(), t_max), block_rect.max.y());
-                    const region_rect: Rectangle2 = .fromMinMax(min_position, max_position);
+                        const min_position: Vector2 =
+                            .new(math.lerpf(block_rect.min.x(), block_rect.max.x(), t_min), block_rect.min.y());
+                        const max_position: Vector2 =
+                            .new(math.lerpf(block_rect.min.x(), block_rect.max.x(), t_max), block_rect.max.y());
+                        const region_rect: Rectangle2 = .fromMinMax(min_position, max_position);
 
-                    render_group.pushRectangle2(region_rect, ui.ui_transform, color.toColor(1));
-                    render_group.pushRectangle2Outline(region_rect, ui.ui_transform, Color.black(), 2);
+                        render_group.pushRectangle2(region_rect, ui.ui_transform, color.toColor(1));
+                        render_group.pushRectangle2Outline(region_rect, ui.ui_transform, Color.black(), 2);
 
-                    if (mouse_position.isInRectangle(region_rect)) {
-                        const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
-                        _ = shared.formatString(text_buffer.size, text_buffer.data, "%s|%s: %ub", .{
-                            arena.name,
-                            allocation.guid,
-                            allocation.size_allocated,
-                        });
+                        if (mouse_position.isInRectangle(region_rect)) {
+                            const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
+                            _ = shared.formatString(text_buffer.size, text_buffer.data, "%s|%s: %ub", .{
+                                arena.name,
+                                allocation.guid,
+                                allocation.size_allocated,
+                            });
+                        }
+                        allocation_index += 1;
                     }
-                    allocation_index += 1;
                 }
 
                 block_index += 1;
@@ -1920,6 +1958,7 @@ fn drawTopMemList(
     graph_id: DevId,
     profile_rect: Rectangle2,
     mouse_position: Vector2,
+    graph: *DebugViewArenaGraph,
 ) void {
     _ = graph_id;
 
@@ -1927,7 +1966,15 @@ fn drawTopMemList(
     const temp_memory = debug_state.debug_arena.beginTemporaryMemory();
     defer debug_state.debug_arena.endTemporaryMemory(temp_memory);
 
-    const arena_count: u32 = debug_state.getArenaCount();
+    var arena_count: u32 = debug_state.getArenaCount();
+
+    const CALL_SITE_HASH_SIZE = 128;
+    const call_site_hash: [*]*MemoryCallSite = debug_state.debug_arena.pushArray(
+        CALL_SITE_HASH_SIZE,
+        *MemoryCallSite,
+        null,
+        @src(),
+    );
 
     const entries: [*]MemoryEntry =
         debug_state.debug_arena.pushArray(arena_count, MemoryEntry, ArenaPushParams.noClear(), @src());
@@ -1941,33 +1988,56 @@ fn drawTopMemList(
     var index: u32 = 0;
     var opt_arena: ?*DebugArena = debug_state.first_arena;
     while (opt_arena) |arena| : (opt_arena = arena.next) {
-        defer index += 1;
+        if (!arena.suppress or graph.show_suppressed) {
+            var entry: *MemoryEntry = &entries[index];
+            var sort_entry: *SortEntry = &sort_a[index];
 
-        var entry: *MemoryEntry = &entries[index];
-        var sort_entry: *SortEntry = &sort_a[index];
+            entry.arena = arena;
+            entry.allocated = DebugStatistic.begin();
+            entry.used = DebugStatistic.begin();
 
-        entry.arena = arena;
-        entry.allocated = DebugStatistic.begin();
-        entry.used = DebugStatistic.begin();
+            var opt_block: ?*DebugArenaBlock = arena.first_block;
+            while (opt_block) |block| : (opt_block = block.next) {
+                var opt_allocation: ?*DebugArenaAllocation = block.first_allocation;
+                while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
+                    const hash_slot_index: u32 = @mod(shared.stringHashOfZ(allocation.guid), CALL_SITE_HASH_SIZE);
+                    var site: ?*MemoryCallSite = null;
+                    var opt_site: ?*MemoryCallSite = call_site_hash[hash_slot_index];
+                    while (opt_site) |test_site| : (opt_site = test_site.next_in_hash) {
+                        if (test_site.arena == arena and test_site.guid == allocation.guid) {
+                            site = test_site;
+                            break;
+                        }
+                    }
 
-        var opt_block: ?*DebugArenaBlock = arena.first_block;
-        while (opt_block) |block| : (opt_block = block.next) {
-            var opt_allocation: ?*DebugArenaAllocation = block.first_allocation;
-            while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
-                entry.used.accumulate(@floatFromInt(allocation.size_allocated));
+                    if (site == null) {
+                        site = debug_state.debug_arena.pushStruct(MemoryCallSite, null, @src());
+                        site.?.next_in_hash = call_site_hash[hash_slot_index];
+                        site.?.arena = arena;
+                        site.?.guid = allocation.guid;
+
+                        call_site_hash[hash_slot_index] = site.?;
+                    }
+
+                    site.?.allocated.accumulate(@floatFromInt(allocation.size_allocated));
+                    entry.used.accumulate(@floatFromInt(allocation.size_allocated));
+                }
+                entry.allocated.accumulate(@floatFromInt(block.size_allocated));
             }
-            entry.allocated.accumulate(@floatFromInt(block.size_allocated));
+
+            entry.allocated.end();
+            entry.used.end();
+
+            total_allocated += entry.allocated.sum;
+            total_used += entry.used.sum;
+
+            sort_entry.sort_key = @floatCast(-entry.allocated.sum);
+            sort_entry.index = index;
+
+            index += 1;
         }
-
-        entry.allocated.end();
-        entry.used.end();
-
-        total_allocated += entry.allocated.sum;
-        total_used += entry.used.sum;
-
-        sort_entry.sort_key = @floatCast(-entry.allocated.sum);
-        sort_entry.index = index;
     }
+    arena_count = index;
 
     sort.radixSort(arena_count, sort_a, sort_b);
 
@@ -1979,6 +2049,12 @@ fn drawTopMemList(
     var running_sum: f64 = 0;
 
     var at: Vector2 = Vector2.new(profile_rect.min.x(), profile_rect.max.y() - ui.getBaseline());
+
+    var buffer: [256]u8 = undefined;
+    _ = shared.formatString(buffer.len, &buffer, "               blck    allc", .{});
+    dev_ui.textOutAt(ui, @ptrCast(&buffer), at, Color.white(), null);
+    _ = at.setY(at.y() - ui.getLineAdvance());
+
     index = 0;
     while (index < arena_count) : (index += 1) {
         const entry: *MemoryEntry = &entries[sort_a[index].index];
@@ -1988,7 +2064,6 @@ fn drawTopMemList(
 
         running_sum += allocated.sum;
 
-        var buffer: [256]u8 = undefined;
         _ = shared.formatString(buffer.len, &buffer, "%4umb %05.02f%% %4d %8d %s", .{
             @as(u32, @intFromFloat(allocated.sum / @as(f64, @floatFromInt(types.megabytes(1))))),
             percent_coefficient * allocated.sum,
@@ -1996,13 +2071,7 @@ fn drawTopMemList(
             used.count,
             arena.name,
         });
-        dev_ui.textOutAt(
-            ui,
-            @ptrCast(&buffer),
-            at,
-            Color.white(),
-            null,
-        );
+        dev_ui.textOutAt(ui, @ptrCast(&buffer), at, Color.white(), null);
 
         _ = mouse_position;
         // const text_rect: Rectangle2 = dev_ui.getTextSizeAt(ui, @ptrCast(&buffer), at);
@@ -2023,6 +2092,30 @@ fn drawTopMemList(
             break;
         } else {
             _ = at.setY(at.y() - ui.getLineAdvance());
+        }
+
+        if (graph.show_call_sites) {
+            var slot_index: u32 = 0;
+            while (slot_index < CALL_SITE_HASH_SIZE) : (slot_index += 1) {
+                var opt_site: ?*MemoryCallSite = call_site_hash[slot_index];
+                while (opt_site) |site| : (opt_site = site.next_in_hash) {
+                    if (site.arena == arena) {
+                        _ = shared.formatString(buffer.len, &buffer, "%4umb %05.02f%%      %8d    %s", .{
+                            @as(u32, @intFromFloat(site.allocated.sum / @as(f64, @floatFromInt(types.megabytes(1))))),
+                            percent_coefficient * site.allocated.sum,
+                            site.allocated.count,
+                            site.guid,
+                        });
+                        dev_ui.textOutAt(ui, @ptrCast(&buffer), at, Color.white(), null);
+
+                        if (at.y() < profile_rect.min.y()) {
+                            break;
+                        } else {
+                            _ = at.setY(at.y() - ui.getLineAdvance());
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -2318,6 +2411,16 @@ fn drawDebugElement(
                 element.type == .MemoryBySize,
                 dev_ui.Interaction.setUInt32(debug_id, &element.type, @intFromEnum(DebugType.MemoryBySize)),
             );
+            layout.booleanButton(
+                .fromSlice("Debug"),
+                graph.show_suppressed,
+                dev_ui.Interaction.setBool(debug_id, &graph.show_suppressed, !graph.show_suppressed),
+            );
+            layout.booleanButton(
+                .fromSlice("Call sites"),
+                graph.show_call_sites,
+                dev_ui.Interaction.setBool(debug_id, &graph.show_call_sites, !graph.show_call_sites),
+            );
             layout.endRow();
 
             var layout_element: dev_ui.LayoutElement = layout.beginElementRectangle(&graph.block.dimension);
@@ -2341,11 +2444,11 @@ fn drawDebugElement(
 
             switch (element.type) {
                 .MemoryByArena => {
-                    drawArenaInterval(debug_state, debug_id, layout_element.bounds, layout.mouse_position);
+                    drawArenaInterval(debug_state, debug_id, layout_element.bounds, layout.mouse_position, graph);
                 },
                 .MemoryByFrame => {},
                 .MemoryBySize => {
-                    drawTopMemList(debug_state, debug_id, layout_element.bounds, layout.mouse_position);
+                    drawTopMemList(debug_state, debug_id, layout_element.bounds, layout.mouse_position, graph);
                 },
                 else => {},
             }
@@ -2666,6 +2769,7 @@ fn debugInit(assets: *Assets, render_dim: Vector2u) *DebugState {
         "debug_arena",
         null,
         ArenaPushParams.aligned(@alignOf(DebugState), true),
+        @src(),
     );
     DebugInterface.arenaSuppress(@src(), &debug_state.debug_arena, "DEBUG");
 

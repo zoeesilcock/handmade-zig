@@ -33,15 +33,15 @@ pub const PARTICLE_CEL_DIM = 32;
 const MAX_PARTICLE_COUNT = 1024;
 const MAX_PARTICLE_COUNT_4 = MAX_PARTICLE_COUNT / 4;
 
-pub const ParticleCache = struct {
+pub const ParticleCache = extern struct {
     particle_entropy: RandomSeries, // Not for gameplay, ever!
     fire_system: ParticleSystem,
 };
 
-pub const ParticleSystem = struct {
+pub const ParticleSystem = extern struct {
     particles: [MAX_PARTICLE_COUNT_4]Particle4x,
     next_particle_4: u32,
-    bitmap_id: ?BitmapId,
+    bitmap_id: BitmapId,
 };
 
 const Particle4x = extern struct {
@@ -65,7 +65,7 @@ pub fn initParticleCache(cache: *ParticleCache, assets: *Assets) void {
     weight_vector.e[AssetTagId.Particle.toInt()] = 1;
     weight_vector.e[AssetTagId.Smoke.toInt()] = 1;
 
-    cache.fire_system.bitmap_id = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector);
+    cache.fire_system.bitmap_id = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector).?;
 }
 
 pub fn updateAndRenderParticleSystem(

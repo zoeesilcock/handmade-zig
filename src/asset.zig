@@ -26,6 +26,7 @@ const ArenaBootstrapParams = memory.ArenaBootstrapParams;
 const HHAHeader = file_formats.HHAHeader;
 const HHATag = file_formats.HHATag;
 const HHAAsset = file_formats.HHAAsset;
+const HHAAssetType = file_formats.HHAAssetType;
 const HHAAnnotation = file_formats.HHAAnnotation;
 const HHABitmap = file_formats.HHABitmap;
 const HHASound = file_formats.HHASound;
@@ -252,6 +253,7 @@ pub const Assets = struct {
             "non_restored_memory",
             ArenaBootstrapParams.nonRestored(),
             ArenaPushParams.aligned(@alignOf(Assets), true),
+            @src(),
         );
         var arena: *MemoryArena = &assets.non_restored_memory;
 
@@ -422,18 +424,24 @@ pub const Assets = struct {
                                 grid_asset_index.* = global_asset_index;
                             } else {
                                 const conflict: *Asset = &assets.assets[grid_asset_index.*];
-                                _ = stream.outputWithSrc(
-                                    &source_file.errors,
-                                    @src(),
-                                    "%s(%u,%u): Asset %u and %u occupy same slot in spritesheet and cannot be edited properly.\n",
-                                    .{
-                                        source_file_name[0..source_file_name_count],
-                                        grid_x,
-                                        grid_y,
-                                        asset.asset_index_in_file,
-                                        conflict.asset_index_in_file,
-                                    },
-                                );
+                                if (conflict.hha.type == .Sound) {
+                                    if (grid_asset_index.* > global_asset_index) {
+                                        grid_asset_index.* = global_asset_index;
+                                    }
+                                } else {
+                                    _ = stream.outputWithSrc(
+                                        &source_file.errors,
+                                        @src(),
+                                        "%s(%u,%u): Asset %u and %u occupy same slot in spritesheet and cannot be edited properly.\n",
+                                        .{
+                                            source_file_name[0..source_file_name_count],
+                                            grid_x,
+                                            grid_y,
+                                            asset.asset_index_in_file,
+                                            conflict.asset_index_in_file,
+                                        },
+                                    );
+                                }
                             }
                         }
 

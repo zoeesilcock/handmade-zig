@@ -616,20 +616,21 @@ pub const DebugInterface = if (INTERNAL) struct {
 
     pub fn recordAllocation(
         block: ?*PlatformMemoryBlock,
-        source: std.builtin.SourceLocation,
+        comptime guid: [*:0]const u8,
         allocated_size: usize,
         used_size: usize,
         offset_in_block: usize,
     ) void {
         _ = block;
-        _ = source;
+        _ = guid;
         _ = allocated_size;
         _ = used_size;
         _ = offset_in_block;
     }
 
-    pub fn blockAllocation(block: ?*PlatformMemoryBlock) void {
+    pub fn blockAllocation(block: ?*PlatformMemoryBlock, comptime guid: [*:0]const u8) void {
         _ = block;
+        _ = guid;
     }
 
     pub fn blockFree(block: ?*PlatformMemoryBlock) void {

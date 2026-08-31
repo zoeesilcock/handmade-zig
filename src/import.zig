@@ -9,6 +9,7 @@ const file_formats = shared.file_formats;
 const png = @import("png.zig");
 const wav = @import("wav.zig");
 const tokenizer_mod = @import("tokenizer.zig");
+const debug_interface = @import("debug_interface.zig");
 
 // Build options.
 const INTERNAL = shared.INTERNAL;
@@ -50,6 +51,7 @@ const ImageU32 = png.ImageU32;
 const SoundI16 = wav.SoundI16;
 const Token = tokenizer_mod.Token;
 const Tokenizer = tokenizer_mod.Tokenizer;
+const DebugInterface = debug_interface.DebugInterface;
 
 pub const ASSET_IMPORT_GRID_MAX = 8;
 const ASSET_MAX_SPRITE_DIM = file_formats.ASSET_MAX_SPRITE_DIM;
@@ -1645,6 +1647,7 @@ fn parseFontBlock(tokenizer: *Tokenizer, context: *HHTContext, block_token: Toke
 
     var fields: HHTFields = context.default_fields;
     var template_tags: ImportGridTags = .{};
+    template_tags.tags[0][0].type_id = .FontGlyph;
     var append_tags: ImportTagArray = .{};
     var align_points: [ASSET_IMPORT_GRID_MAX][ASSET_IMPORT_GRID_MAX][HHA_ALIGN_POINT_TYPE_COUNT]HHAAlignPoint =
         @splat(@splat(@splat(.{})));
@@ -2171,6 +2174,8 @@ pub fn synchronizeAssetFileChanges(assets: *Assets, save_changes_to_hhts: bool) 
             assets.save_number,
         });
         assets.save_number += 1;
+
+        DebugInterface.arenaName(@src(), assets.error_stream.arena.?, "synchronizeAssetFileChanges stdout");
 
         var opt_file_info: ?*PlatformFileInfo = context.file_group.first_file_info;
         while (opt_file_info) |file_info| : (opt_file_info = file_info.next) {

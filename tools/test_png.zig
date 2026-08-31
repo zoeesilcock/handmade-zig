@@ -18,6 +18,9 @@ const MemoryArena = memory.MemoryArena;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const Rectangle2i = math.Rectangle2i;
 
+// Build options.
+pub const INTERNAL = shared.INTERNAL;
+
 const BitmapHeader = packed struct {
     file_type: u16,
     file_size: u32,
@@ -188,7 +191,9 @@ fn writeBMPImageTopDownRGBA(
 fn dumpStreamToWriter(source: *Stream, dest: *std.Io.Writer) !void {
     var opt_chunk: ?*StreamChunk = source.first;
     while (opt_chunk) |chunk| : (opt_chunk = chunk.next) {
-        try dest.print("{s} ({d}): ", .{ chunk.file_name, chunk.line });
+        if (INTERNAL) {
+            try dest.print("{s}: ", .{chunk.guid});
+        }
         try dest.writeAll(chunk.contents.data[0..chunk.contents.count]);
         try dest.flush();
     }

@@ -116,6 +116,7 @@ const AssetFontType = file_formats.AssetFontType;
 const LoadedFont = asset.LoadedFont;
 const TimedBlock = debug_interface.TimedBlock;
 const DebugInterface = debug_interface.DebugInterface;
+const DebugEvent = debug_interface.DebugEvent;
 const EditableHitTest = in_game_editor.EditableHitTest;
 
 pub const debug_color_table = [_]Color3{
@@ -237,11 +238,23 @@ pub export fn updateAndRender(
             "total_arena",
             null,
             ArenaPushParams.aligned(@alignOf(State), true),
+            @src(),
         );
         game_memory.game_state = state;
 
-        state.frame_arena =
-            @ptrCast(@alignCast(memory.bootsrapPushSize(@sizeOf(MemoryArena), 0, .nonRestored(), null)));
+        if (INTERNAL) {
+            state.frame_arena =
+                @ptrCast(@alignCast(memory.bootsrapPushSize_(
+                    @sizeOf(MemoryArena),
+                    0,
+                    .nonRestored(),
+                    null,
+                    DebugEvent.debugName(@src(), null, "FrameArena"),
+                )));
+        } else {
+            state.frame_arena =
+                @ptrCast(@alignCast(memory.bootsrapPushSize_(@sizeOf(MemoryArena), 0, .nonRestored(), null, "")));
+        }
         state.frame_arena_temp = state.frame_arena.beginTemporaryMemory();
 
         state.audio_state.initialize(&state.audio_arena);
@@ -282,6 +295,7 @@ pub export fn updateAndRender(
         state.dev_mode = .Memory;
     }
 
+    DebugInterface.arenaName(@src(), &state.total_arena, "Game");
     DebugInterface.arenaName(@src(), &state.mode_arena, "Game Mode");
     DebugInterface.arenaName(@src(), &state.audio_arena, "Audio Playback");
     DebugInterface.arenaName(@src(), state.frame_arena, "FrameTemporary");

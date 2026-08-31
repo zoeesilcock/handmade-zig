@@ -75,7 +75,7 @@ const BrainSlot = brains.BrainSlot;
 const BrainHero = brains.BrainHero;
 const ReservedBrainId = brains.ReservedBrainId;
 
-pub const GameCamera = struct {
+pub const GameCamera = extern struct {
     following_entity_index: EntityId = .{},
 
     simulation_center: WorldPosition,
@@ -95,7 +95,7 @@ pub const GameCamera = struct {
     time_in_special: f32,
 };
 
-pub const GameModeWorld = struct {
+pub const GameModeWorld = extern struct {
     world: *world.World = undefined,
     camera: GameCamera,
 
@@ -145,12 +145,12 @@ const WorldSimWork = struct {
     delta_time: f32,
 };
 
-pub const ParticleCel = struct {
+pub const ParticleCel = extern struct {
     density: f32 = 0,
     velocity_times_density: Vector3 = Vector3.zero(),
 };
 
-pub const Particle = struct {
+pub const Particle = extern struct {
     position: Vector3 = Vector3.zero(),
     velocity: Vector3 = Vector3.zero(),
     acceleration: Vector3 = Vector3.zero(),

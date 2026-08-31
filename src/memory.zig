@@ -385,15 +385,27 @@ pub fn bootstrapPushStruct(
     comptime arena_member: []const u8,
     bootstrap_params: ?ArenaBootstrapParams,
     params: ?ArenaPushParams,
+    comptime source: std.builtin.SourceLocation,
 ) *T {
-    return @as(*T, @ptrCast(@alignCast(bootsrapPushSize(@sizeOf(T), @offsetOf(T, arena_member), bootstrap_params, params))));
+    const guid = comptime if (INTERNAL) DebugEvent.debugName(source, null, "bootstrapPushStruct") else "";
+    return @as(
+        *T,
+        @ptrCast(@alignCast(bootsrapPushSize_(
+            @sizeOf(T),
+            @offsetOf(T, arena_member),
+            bootstrap_params,
+            params,
+            guid,
+        ))),
+    );
 }
 
-pub fn bootsrapPushSize(
+pub fn bootsrapPushSize_(
     struct_size: MemoryIndex,
     offset_to_arena: MemoryIndex,
     in_bootstrap_params: ?ArenaBootstrapParams,
     params: ?ArenaPushParams,
+    comptime guid: [*:0]const u8,
 ) *anyopaque {
     const bootstrap_params = in_bootstrap_params orelse ArenaBootstrapParams.default();
 
@@ -401,7 +413,7 @@ pub fn bootsrapPushSize(
     bootstrap.allocation_flags = bootstrap_params.allocation_flags;
     bootstrap.minimum_block_size = bootstrap_params.minimum_block_size;
 
-    const struct_ptr: *anyopaque = bootstrap.pushSize(struct_size, params, @src());
+    const struct_ptr: *anyopaque = bootstrap.pushSize_(struct_size, params, guid);
     const arena_ptr: *MemoryArena = @ptrFromInt(@intFromPtr(struct_ptr) + offset_to_arena);
     arena_ptr.* = bootstrap;
 

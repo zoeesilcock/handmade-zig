@@ -374,7 +374,7 @@ fn addOption(gen: *WorldGenerator, room: *GenRoom, option_type: GenOptionType) *
 }
 
 fn beginWorldGen(world: *World) *WorldGenerator {
-    const gen: *WorldGenerator = memory.bootstrapPushStruct(WorldGenerator, "memory", null, null);
+    const gen: *WorldGenerator = memory.bootstrapPushStruct(WorldGenerator, "memory", null, null, @src());
     gen.world = world;
 
     const tile_side_in_meters: f32 = 1.4;

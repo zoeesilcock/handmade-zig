@@ -235,6 +235,7 @@ fn getAllFilesOfTypeBegin(file_type: shared.PlatformFileTypes) callconv(.c) shar
         "arena",
         null,
         null,
+        @src(),
     );
     result.platform = win32_file_group;
 
