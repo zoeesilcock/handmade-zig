@@ -136,6 +136,22 @@ pub const debug_color_table = [_]Color3{
     Color3.new(0.75, 1, 0.5),
     Color3.new(0.5, 1, 0.75),
     Color3.new(0.5, 0.75, 1),
+    Color3.new(1, 0.25, 0.25),
+    Color3.new(0.25, 1, 0.25),
+    Color3.new(0.25, 0.25, 1),
+    Color3.new(1, 1, 0.25),
+    Color3.new(0.25, 1, 1),
+    Color3.new(1, 0.25, 1),
+    Color3.new(1, 0.5, 0.25),
+    Color3.new(1, 0.25, 0.5),
+    Color3.new(0.5, 1, 0.25),
+    Color3.new(0.25, 1, 0.5),
+    Color3.new(0.5, 0.25, 1),
+    Color3.new(1, 0.75, 0.5),
+    Color3.new(1, 0.5, 0.75),
+    Color3.new(0.75, 1, 0.5),
+    Color3.new(0.5, 1, 0.75),
+    Color3.new(0.5, 0.75, 1),
 };
 
 pub fn getDebugColor3(value: u32) Color3 {

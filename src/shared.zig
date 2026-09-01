@@ -693,6 +693,23 @@ pub fn formatString(dest_size: usize, dest_init: [*]u8, comptime format: [*]cons
                         const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
                         u64ToASCII(&temp_dest, @intCast(value), 10, dec_chars);
                     },
+                    'm' => {
+                        var value: u64 = readVarArgUnsignedInteger(args, &arg_index);
+                        var suffix: [2]u8 = .{ 'b', ' ' };
+                        if (value >= types.gigabytes(1)) {
+                            suffix = .{ 'g', 'b' };
+                            value = (value + types.gigabytes(1) - 1) / types.gigabytes(1);
+                        } else if (value >= types.megabytes(1)) {
+                            suffix = .{ 'm', 'b' };
+                            value = (value + types.megabytes(1) - 1) / types.megabytes(1);
+                        } else if (value >= types.kilobytes(1)) {
+                            suffix = .{ 'k', 'b' };
+                            value = (value + types.kilobytes(1) - 1) / types.kilobytes(1);
+                        }
+                        u64ToASCII(&temp_dest, @intCast(value), 10, dec_chars);
+                        outChar(&temp_dest, suffix[0]);
+                        outChar(&temp_dest, suffix[1]);
+                    },
                     'o' => {
                         const value: u64 = readVarArgUnsignedInteger(args, &arg_index);
                         u64ToASCII(&temp_dest, @intCast(value), 8, dec_chars);

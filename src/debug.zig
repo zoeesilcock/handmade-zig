@@ -168,9 +168,9 @@ const ElementAddOp = enum(u32) {
 
 const DebugArenaAllocation = struct {
     next: ?*DebugArenaAllocation,
-    guid: [*:0]const u8,
     offset_from_block: usize,
     size_allocated: usize,
+    call_site_index: u32,
 };
 
 const DebugArenaBlock = struct {
@@ -186,6 +186,16 @@ const DebugArena = struct {
     name: [*:0]const u8,
     first_block: ?*DebugArenaBlock,
     suppress: bool,
+
+    current_total_allocated: usize,
+    peak_total_allocated: usize,
+};
+
+const DebugArenaCallSite = struct {
+    arena: *DebugArena,
+    guid: [*:0]const u8,
+    peak_total_allocated: usize,
+    index: u32,
 };
 
 const MemoryEntry = struct {
@@ -194,8 +204,7 @@ const MemoryEntry = struct {
     used: DebugStatistic,
 };
 
-const MemoryCallSite = struct {
-    next_in_hash: ?*MemoryCallSite,
+const MemoryCallSiteStats = struct {
     arena: *DebugArena,
     guid: [*:0]const u8,
     allocated: DebugStatistic,
@@ -239,6 +248,11 @@ pub const DebugState = struct {
     first_free_arena: ?*DebugArena,
     first_free_arena_block: ?*DebugArenaBlock,
     first_free_arena_allocation: ?*DebugArenaAllocation,
+
+    arena_call_site_count: u32,
+    arena_call_sites: [256]DebugArenaCallSite,
+
+    hud_tree: DebugTree,
 
     //
     //
@@ -694,6 +708,16 @@ pub const DebugState = struct {
 
     fn moveToFreeList(self: *DebugState, first: ?*DebugArenaAllocation, last: ?*DebugArenaAllocation) void {
         if (first) |first_alocation| {
+            var opt_allocation: ?*DebugArenaAllocation = first_alocation;
+            while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
+                var site: *DebugArenaCallSite = self.getCallSiteFromIndex(allocation.call_site_index);
+                site.peak_total_allocated -= allocation.size_allocated;
+
+                if (allocation == last) {
+                    break;
+                }
+            }
+
             std.debug.assert(last != null);
             last.?.next = self.first_free_arena_allocation;
             self.first_free_arena_allocation = first_alocation;
@@ -734,6 +758,8 @@ pub const DebugState = struct {
         // Add the old block to the free list.
         free_block.next = self.first_free_arena_block;
         self.first_free_arena_block = free_block;
+
+        arena.current_total_allocated -= free_block.size_allocated;
 
         if (arena.first_block == null) {
             self.removeArena(arena);
@@ -785,6 +811,50 @@ pub const DebugState = struct {
 
         block.?.next = arena.first_block;
         arena.first_block = block;
+
+        arena.current_total_allocated += block.?.size_allocated;
+        if (arena.peak_total_allocated < arena.current_total_allocated) {
+            arena.peak_total_allocated = arena.current_total_allocated;
+        }
+    }
+
+    pub fn getCallSiteFromIndex(self: *DebugState, index: u32) *DebugArenaCallSite {
+        std.debug.assert(index < self.arena_call_site_count);
+        return &self.arena_call_sites[index];
+    }
+
+    pub fn getCallSiteFromAllocation(
+        self: *DebugState,
+        allocation: *DebugArenaAllocation,
+    ) *DebugArenaCallSite {
+        return self.getCallSiteFromIndex(allocation.call_site_index);
+    }
+
+    pub fn getCalLSiteFromGuid(self: *DebugState, arena: *DebugArena, guid: [*:0]const u8) u32 {
+        var result: ?*DebugArenaCallSite = null;
+
+        // TODO: We probably do need a hash table, sadly.
+        var site_index: u32 = 0;
+        while (site_index < self.arena_call_site_count) : (site_index += 1) {
+            const test_site: *DebugArenaCallSite = &self.arena_call_sites[site_index];
+            if (test_site.arena == arena and shared.stringsAreEqual(test_site.guid, guid)) {
+                result = test_site;
+                break;
+            }
+        }
+
+        if (result == null) {
+            std.debug.assert(self.arena_call_site_count < self.arena_call_sites.len);
+            const index: u32 = self.arena_call_site_count;
+            self.arena_call_site_count += 1;
+
+            result = &self.arena_call_sites[index];
+            result.?.arena = arena;
+            result.?.guid = guid;
+            result.?.index = index;
+        }
+
+        return result.?.index;
     }
 
     fn arenaAllocate(self: *DebugState, event: *DebugEvent) void {
@@ -801,7 +871,7 @@ pub const DebugState = struct {
                 allocation = self.debug_arena.pushStruct(DebugArenaAllocation, null, @src());
             }
 
-            allocation.?.guid = event.guid;
+            allocation.?.call_site_index = self.getCalLSiteFromGuid(arena, event.guid);
             allocation.?.offset_from_block = op.offset_in_block;
             allocation.?.size_allocated = op.allocated_size;
 
@@ -810,6 +880,9 @@ pub const DebugState = struct {
             if (block.last_allocation == null) {
                 block.last_allocation = allocation;
             }
+
+            var site: *DebugArenaCallSite = self.getCallSiteFromIndex(allocation.?.call_site_index);
+            site.peak_total_allocated += allocation.?.size_allocated;
         }
     }
 
@@ -948,6 +1021,7 @@ pub const DebugState = struct {
                         const dev_mode: u32 = event.data.u32;
                         if (dev_mode < self.dev_mode_links.len) {
                             self.dev_mode_links[dev_mode] = default_parent_group;
+                            self.setExpand(devIdFromLink(&self.hud_tree, default_parent_group), true);
                         }
                     },
                     .ArenaSetName => {
@@ -1027,6 +1101,17 @@ pub const DebugState = struct {
         shared.dlistInsert(&self.tree_sentinel, tree);
 
         return tree;
+    }
+
+    fn setExpand(self: *DebugState, dev_id: DevId, expanded: bool) void {
+        const view: *DebugView = self.getOrCreateDebugView(dev_id);
+        view.view_type = .Collapsible;
+        if (view.data != .collapsible) {
+            view.data = .{
+                .collapsible = .{ .expanded_always = false, .expanded_alt_view = false },
+            };
+        }
+        view.data.collapsible.expanded_always = expanded;
     }
 
     pub fn isSelected(self: *DebugState, id: DevId) bool {
@@ -1862,23 +1947,52 @@ fn drawMemoryRange(
     starting_address: usize,
     one_past_last_address: usize,
     block_color: Color,
-) void {
-    const ui: *DevUI = &debug_state.dev_ui;
-    const render_group: *RenderGroup = &ui.render_group;
+    mouse_position: Vector2,
+) bool {
+    var result: bool = false;
 
-    const min_row_index: u32 = 0;
-    const max_row_index: u32 = 0;
-    var row_index: u32 = 0;
-    while (row_index < max_row_index) : (row_index += 1) {
-        const block_rect: Rectangle2 = .{};
-        render_group.pushRectangle2(block_rect, ui.ui_transform, block_color);
-        render_group.pushRectangle2Outline(block_rect, ui.ui_transform, Color.black(), 2);
+    if (starting_address != one_past_last_address) {
+        const ui: *DevUI = &debug_state.dev_ui;
+        const render_group: *RenderGroup = &ui.render_group;
+
+        const bytes_per_row: usize = types.megabytes(8);
+        const min_row_index: usize = starting_address / bytes_per_row;
+        const max_row_index: usize = (one_past_last_address - 1) / bytes_per_row;
+        const row_height: f32 = 15;
+
+        var row_index: usize = min_row_index;
+        while (row_index <= max_row_index) : (row_index += 1) {
+            var rect: Rectangle2 = .{ .min = .zero(), .max = .zero() };
+
+            const row_start_index_address: usize = row_index * bytes_per_row;
+
+            _ = rect.max.setY(profile_rect.max.y() - @as(f32, @floatFromInt(row_index)) * row_height);
+            _ = rect.min.setY(rect.max.y() - row_height);
+
+            const t_min: f32 = if (row_index == min_row_index)
+                (@as(f32, @floatFromInt(starting_address)) - @as(f32, @floatFromInt(row_start_index_address))) /
+                    @as(f32, @floatFromInt(bytes_per_row))
+            else
+                0;
+            _ = rect.min.setX(math.lerpf(profile_rect.min.x(), profile_rect.max.x(), t_min));
+
+            const t_max: f32 = if (row_index == max_row_index)
+                (@as(f32, @floatFromInt(one_past_last_address)) - @as(f32, @floatFromInt(row_start_index_address))) /
+                    @as(f32, @floatFromInt(bytes_per_row))
+            else
+                1;
+            _ = rect.max.setX(math.lerpf(profile_rect.min.x(), profile_rect.max.x(), t_max));
+
+            render_group.pushRectangle2(rect, ui.ui_transform, block_color);
+            render_group.pushRectangle2Outline(rect, ui.ui_transform, Color.black(), 2);
+
+            if (mouse_position.isInRectangle(rect)) {
+                result = true;
+            }
+        }
     }
 
-    _ = profile_rect;
-    _ = starting_address;
-    _ = one_past_last_address;
-    _ = min_row_index;
+    return result;
 }
 
 fn drawArenaInterval(
@@ -1891,63 +2005,58 @@ fn drawArenaInterval(
     _ = graph_id;
 
     const ui: *DevUI = &debug_state.dev_ui;
-    const render_group: *RenderGroup = &ui.render_group;
 
     var allocation_index: u32 = 0;
-    const block_dim: Vector2 = .new(profile_rect.getDimension().x() / 4, 20);
 
-    var block_index: u32 = 0;
-    var block_y: f32 = profile_rect.max.y() - block_dim.y();
+    var block_start_address: usize = 0;
     var opt_arena: ?*DebugArena = debug_state.first_arena;
     while (opt_arena) |arena| : (opt_arena = arena.next) {
         if (!arena.suppress or graph.show_suppressed) {
             var opt_block: ?*DebugArenaBlock = arena.first_block;
             while (opt_block) |block| : (opt_block = block.next) {
+                const block_end_address: usize = block_start_address + block.size_allocated;
                 const block_color: Color = if (arena.suppress) .new(0.15, 0.15, 0.15, 1) else .new(0.5, 0.5, 0.5, 1);
-                const block_rect = math.Rectangle2.fromMinDimension(
-                    .new(profile_rect.min.x() + @as(f32, @floatFromInt(block_index)) * block_dim.x(), block_y),
-                    block_dim,
+
+                _ = drawMemoryRange(
+                    debug_state,
+                    profile_rect,
+                    block_start_address,
+                    block_end_address,
+                    block_color,
+                    mouse_position,
                 );
-                render_group.pushRectangle2(block_rect, ui.ui_transform, block_color);
-                render_group.pushRectangle2Outline(block_rect, ui.ui_transform, Color.black(), 2);
 
                 if (!arena.suppress) {
-                    const inv_size_allocated: f32 = math.safeRatio1(1, @floatFromInt(block.size_allocated));
-
                     var opt_allocation: ?*DebugArenaAllocation = block.first_allocation;
                     while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
-                        const color = debug_color_table[allocation_index % debug_color_table.len];
+                        // TODO: Maybe instead of coloring things differently based on allocation index, we could
+                        // color them based on the line of code that caused the allocation?
+                        const allocation_color = debug_color_table[allocation.call_site_index % debug_color_table.len];
+                        const allocation_start_address: usize = block_start_address + allocation.offset_from_block;
+                        const allocation_end_address: usize = allocation_start_address + allocation.size_allocated;
 
-                        const t_min: f32 = inv_size_allocated * @as(f32, @floatFromInt(allocation.offset_from_block));
-                        const t_max: f32 = inv_size_allocated *
-                            @as(f32, @floatFromInt(allocation.offset_from_block + allocation.size_allocated));
-
-                        const min_position: Vector2 =
-                            .new(math.lerpf(block_rect.min.x(), block_rect.max.x(), t_min), block_rect.min.y());
-                        const max_position: Vector2 =
-                            .new(math.lerpf(block_rect.min.x(), block_rect.max.x(), t_max), block_rect.max.y());
-                        const region_rect: Rectangle2 = .fromMinMax(min_position, max_position);
-
-                        render_group.pushRectangle2(region_rect, ui.ui_transform, color.toColor(1));
-                        render_group.pushRectangle2Outline(region_rect, ui.ui_transform, Color.black(), 2);
-
-                        if (mouse_position.isInRectangle(region_rect)) {
+                        if (drawMemoryRange(
+                            debug_state,
+                            profile_rect,
+                            allocation_start_address,
+                            allocation_end_address,
+                            allocation_color.toColor(1),
+                            mouse_position,
+                        )) {
+                            const site: *DebugArenaCallSite = debug_state.getCallSiteFromAllocation(allocation);
                             const text_buffer: TooltipBuffer = dev_ui.addLine(&ui.tooltips);
                             _ = shared.formatString(text_buffer.size, text_buffer.data, "%s|%s: %ub", .{
                                 arena.name,
-                                allocation.guid,
+                                site.guid,
                                 allocation.size_allocated,
                             });
                         }
+
                         allocation_index += 1;
                     }
                 }
 
-                block_index += 1;
-                if (block_index == 4) {
-                    block_index = 0;
-                    block_y -= block_dim.y();
-                }
+                block_start_address = block_end_address;
             }
         }
     }
@@ -1968,10 +2077,9 @@ fn drawTopMemList(
 
     var arena_count: u32 = debug_state.getArenaCount();
 
-    const CALL_SITE_HASH_SIZE = 128;
-    const call_site_hash: [*]*MemoryCallSite = debug_state.debug_arena.pushArray(
-        CALL_SITE_HASH_SIZE,
-        *MemoryCallSite,
+    const call_site_stats: [*]DebugStatistic = debug_state.debug_arena.pushArray(
+        debug_state.arena_call_site_count,
+        DebugStatistic,
         null,
         @src(),
     );
@@ -2000,26 +2108,7 @@ fn drawTopMemList(
             while (opt_block) |block| : (opt_block = block.next) {
                 var opt_allocation: ?*DebugArenaAllocation = block.first_allocation;
                 while (opt_allocation) |allocation| : (opt_allocation = allocation.next) {
-                    const hash_slot_index: u32 = @mod(shared.stringHashOfZ(allocation.guid), CALL_SITE_HASH_SIZE);
-                    var site: ?*MemoryCallSite = null;
-                    var opt_site: ?*MemoryCallSite = call_site_hash[hash_slot_index];
-                    while (opt_site) |test_site| : (opt_site = test_site.next_in_hash) {
-                        if (test_site.arena == arena and test_site.guid == allocation.guid) {
-                            site = test_site;
-                            break;
-                        }
-                    }
-
-                    if (site == null) {
-                        site = debug_state.debug_arena.pushStruct(MemoryCallSite, null, @src());
-                        site.?.next_in_hash = call_site_hash[hash_slot_index];
-                        site.?.arena = arena;
-                        site.?.guid = allocation.guid;
-
-                        call_site_hash[hash_slot_index] = site.?;
-                    }
-
-                    site.?.allocated.accumulate(@floatFromInt(allocation.size_allocated));
+                    call_site_stats[allocation.call_site_index].accumulate(@floatFromInt(allocation.size_allocated));
                     entry.used.accumulate(@floatFromInt(allocation.size_allocated));
                 }
                 entry.allocated.accumulate(@floatFromInt(block.size_allocated));
@@ -2051,7 +2140,7 @@ fn drawTopMemList(
     var at: Vector2 = Vector2.new(profile_rect.min.x(), profile_rect.max.y() - ui.getBaseline());
 
     var buffer: [256]u8 = undefined;
-    _ = shared.formatString(buffer.len, &buffer, "               blck    allc", .{});
+    _ = shared.formatString(buffer.len, &buffer, "   cur   peak        blck     allc", .{});
     dev_ui.textOutAt(ui, @ptrCast(&buffer), at, Color.white(), null);
     _ = at.setY(at.y() - ui.getLineAdvance());
 
@@ -2064,8 +2153,9 @@ fn drawTopMemList(
 
         running_sum += allocated.sum;
 
-        _ = shared.formatString(buffer.len, &buffer, "%4umb %05.02f%% %4d %8d %s", .{
-            @as(u32, @intFromFloat(allocated.sum / @as(f64, @floatFromInt(types.megabytes(1))))),
+        _ = shared.formatString(buffer.len, &buffer, "%6m %6m %05.02f%% %4d %8d %s", .{
+            @as(usize, @intFromFloat(allocated.sum)),
+            arena.peak_total_allocated,
             percent_coefficient * allocated.sum,
             allocated.count,
             used.count,
@@ -2096,23 +2186,24 @@ fn drawTopMemList(
 
         if (graph.show_call_sites) {
             var slot_index: u32 = 0;
-            while (slot_index < CALL_SITE_HASH_SIZE) : (slot_index += 1) {
-                var opt_site: ?*MemoryCallSite = call_site_hash[slot_index];
-                while (opt_site) |site| : (opt_site = site.next_in_hash) {
-                    if (site.arena == arena) {
-                        _ = shared.formatString(buffer.len, &buffer, "%4umb %05.02f%%      %8d    %s", .{
-                            @as(u32, @intFromFloat(site.allocated.sum / @as(f64, @floatFromInt(types.megabytes(1))))),
-                            percent_coefficient * site.allocated.sum,
-                            site.allocated.count,
-                            site.guid,
-                        });
-                        dev_ui.textOutAt(ui, @ptrCast(&buffer), at, Color.white(), null);
+            while (slot_index < debug_state.arena_call_site_count) : (slot_index += 1) {
+                const stats: *DebugStatistic = &call_site_stats[slot_index];
+                const site: *DebugArenaCallSite = debug_state.getCallSiteFromIndex(slot_index);
 
-                        if (at.y() < profile_rect.min.y()) {
-                            break;
-                        } else {
-                            _ = at.setY(at.y() - ui.getLineAdvance());
-                        }
+                if (site.arena == arena) {
+                    _ = shared.formatString(buffer.len, &buffer, "%6m %6m %05.02f%%      %8d    %s", .{
+                        @as(usize, @intFromFloat(stats.sum)),
+                        site.peak_total_allocated,
+                        percent_coefficient * stats.sum,
+                        stats.count,
+                        site.guid,
+                    });
+                    dev_ui.textOutAt(ui, @ptrCast(&buffer), at, Color.white(), null);
+
+                    if (at.y() < profile_rect.min.y()) {
+                        break;
+                    } else {
+                        _ = at.setY(at.y() - ui.getLineAdvance());
                     }
                 }
             }
@@ -2847,10 +2938,9 @@ fn debugEnd(
     if (game_memory.game_state) |state| {
         const dev_mode_index: u32 = @intFromEnum(state.dev_mode);
         if (dev_mode_index < debug_state.dev_mode_links.len) {
-            var ignored: DebugTree = .empty;
             drawTree(
                 debug_state,
-                &ignored,
+                &debug_state.hud_tree,
                 .new(ui.ui_space.min.x(), ui.ui_space.max.y()),
                 debug_state.dev_mode_links[dev_mode_index],
             );
