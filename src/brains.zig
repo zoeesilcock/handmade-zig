@@ -5,6 +5,7 @@ const random = @import("random.zig");
 const entities = @import("entities.zig");
 const sim = @import("sim.zig");
 const math = @import("math.zig");
+const world = @import("world.zig");
 const intrinsics = @import("intrinsics.zig");
 const debug_interface = @import("debug_interface.zig");
 const renderer = @import("renderer.zig");
@@ -22,6 +23,7 @@ const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const RenderGroup = renderer.RenderGroup;
 const DebugInterface = debug_interface.DebugInterface;
+const EntityIterator = sim.EntityIterator;
 
 //
 // Brain types
@@ -217,9 +219,8 @@ fn executeBrainHero(
                     var opt_closest_hero: ?*Entity = null;
                     var closest_hero_squared: f32 = math.square(10.0);
 
-                    var hero_entity_index: u32 = 0;
-                    while (hero_entity_index < sim_region.entity_count) : (hero_entity_index += 1) {
-                        var test_entity = &sim_region.entities[hero_entity_index];
+                    var iterator: EntityIterator = .iterateAllEntities(sim_region);
+                    while (iterator.entity) |test_entity| : (iterator.advance()) {
                         if (test_entity.brain_id.value != 0 and test_entity.brain_id.value != brain.id.value) {
                             const distance = test_entity.position.minus(head.position).lengthSquared();
 

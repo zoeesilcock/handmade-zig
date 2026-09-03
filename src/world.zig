@@ -22,6 +22,7 @@ const ArenaPushParams = memory.ArenaPushParams;
 const BitmapId = file_formats.BitmapId;
 const PlayingSound = audio.PlayingSound;
 const Entity = entities.Entity;
+const EntityFlags = entities.EntityFlags;
 const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
@@ -29,10 +30,14 @@ const TicketMutex = types.TicketMutex;
 const BrainId = brains.BrainId;
 const ReservedBrainId = brains.ReservedBrainId;
 const EntityId = entities.EntityId;
+const TimedBlock = debug_interface.TimedBlock;
+const DebugInterface = debug_interface.DebugInterface;
 
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
 const TILES_PER_CHUNK = 16;
+pub const MAX_SIM_REGION_ENTITY_COUNT = 4 * 8192;
+const WORLD_BLOCK_SIZE = 1 << 16;
 
 pub const World = extern struct {
     change_ticket: TicketMutex,
@@ -54,16 +59,26 @@ pub const World = extern struct {
 
     first_free_chunk: ?*WorldChunk,
     first_free_block: ?*WorldEntityBlock,
+
+    unpack_is_open: bool,
+    unpack_origin: WorldPosition,
+    max_unpacked_entity_count: u32,
+    unpacked_entity_count: u32 = 0,
+    unpacked_entities: [*]Entity,
+
+    total_entity_packs_minus_unpacks: i32,
+
+    null_entity: *Entity,
 };
 
 pub const WorldChunk = extern struct {
+    next_in_hash: ?*WorldChunk = null,
+    first_block: ?*WorldEntityBlock,
+
     x: i32,
     y: i32,
     z: i32,
-
-    first_block: ?*WorldEntityBlock,
-
-    next_in_hash: ?*WorldChunk = null,
+    // unpacked: bool,
 };
 
 pub const WorldRoom = extern struct {
@@ -72,12 +87,10 @@ pub const WorldRoom = extern struct {
 };
 
 pub const WorldEntityBlock = extern struct {
-    entity_count: u32,
-    low_entity_indices: [TILES_PER_CHUNK]u32,
     next: ?*WorldEntityBlock,
-
+    entity_count: u32,
     entity_data_size: u32,
-    entity_data: [1 << 16]u8,
+    entity_data: [WORLD_BLOCK_SIZE - 16]u8,
 
     pub fn clear(self: *WorldEntityBlock) void {
         self.entity_count = 0;
@@ -129,6 +142,12 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
     world.arena = parent_arena;
     world.game_entropy = .seed(1233, null, null, null);
     world.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
+
+    world.max_unpacked_entity_count = MAX_SIM_REGION_ENTITY_COUNT;
+    world.unpacked_entity_count = 0;
+    world.unpacked_entities = world.arena.pushArray(world.max_unpacked_entity_count, Entity, null, @src());
+
+    world.null_entity = world.arena.pushStruct(Entity, null, @src());
 
     return world;
 }
@@ -275,8 +294,16 @@ fn getWorldChunk(
     if (result == null) {
         if (opt_memory_arena) |memory_arena| {
             if (world.first_free_chunk == null) {
-                world.first_free_chunk = memory_arena.pushStruct(WorldChunk, ArenaPushParams.noClear(), @src());
-                world.first_free_chunk.?.next_in_hash = null;
+                const chunk_count_per_block: u32 = WORLD_BLOCK_SIZE / @sizeOf(WorldChunk);
+                const chunk_array: [*]WorldChunk =
+                    memory_arena.pushArray(chunk_count_per_block, WorldChunk, .noClear(), @src());
+
+                var chunk_index: u32 = 0;
+                while (chunk_index < chunk_count_per_block) : (chunk_index += 1) {
+                    const new_chunk: *WorldChunk = &chunk_array[chunk_index];
+                    new_chunk.next_in_hash = world.first_free_chunk;
+                    world.first_free_chunk = new_chunk;
+                }
             }
 
             result = world.first_free_chunk;
@@ -379,4 +406,148 @@ pub fn subtractPositions(world: *World, a: *const WorldPosition, b: *const World
     );
 
     return tile_diff.hadamardProduct(world.chunk_dimension_in_meters).plus(a.offset.minus(b.offset));
+}
+
+pub fn createEntity(world: *World) *Entity {
+    var result: *Entity = world.null_entity;
+
+    if (world.unpacked_entity_count < world.max_unpacked_entity_count) {
+        result = &world.unpacked_entities[world.unpacked_entity_count];
+        world.unpacked_entity_count += 1;
+    } else {
+        unreachable;
+    }
+
+    memory.zeroStruct(Entity, result);
+
+    return result;
+}
+
+pub fn ensureRegionIsUnpacked(
+    world: *World,
+    min_chunk_position: WorldPosition,
+    max_chunk_position: WorldPosition,
+    sim_region: *SimRegion,
+) void {
+    TimedBlock.beginFunction(@src(), .EnsureRegionIsUnpacked);
+    defer TimedBlock.endFunction(@src(), .EnsureRegionIsUnpacked);
+
+    std.debug.assert(!world.unpack_is_open);
+    world.unpack_is_open = true;
+
+    const unpack_origin_delta: Vector3 =
+        subtractPositions(world, &sim_region.origin, &world.unpack_origin);
+    world.unpack_origin = sim_region.origin;
+
+    // TODO: Since we're making this pass here, it does seem like we would want to just keep an updateable hash table,
+    // perhaps, and not have to do so many passes over all the entities?
+    {
+        var entity_index: u32 = 0;
+        while (entity_index < world.unpacked_entity_count) : (entity_index += 1) {
+            const entity: *Entity = &world.unpacked_entities[entity_index];
+            entity.position = entity.position.plus(unpack_origin_delta);
+            sim.registerEntity(sim_region, entity);
+        }
+    }
+
+    var chunk_z = min_chunk_position.chunk_z;
+    while (chunk_z <= max_chunk_position.chunk_z) : (chunk_z += 1) {
+        var chunk_y = min_chunk_position.chunk_y;
+        while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
+            var chunk_x = min_chunk_position.chunk_x;
+            while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
+                const opt_chunk = removeWorldChunk(sim_region.world, chunk_x, chunk_y, chunk_z);
+
+                if (opt_chunk) |chunk| {
+                    std.debug.assert(chunk.x == chunk_x);
+                    std.debug.assert(chunk.y == chunk_y);
+                    std.debug.assert(chunk.z == chunk_z);
+                    const chunk_position: WorldPosition = .{
+                        .chunk_x = chunk_x,
+                        .chunk_y = chunk_y,
+                        .chunk_z = chunk_z,
+                        .offset = .zero(),
+                    };
+                    const chunk_delta: Vector3 =
+                        subtractPositions(world, &chunk_position, &world.unpack_origin);
+                    const first_block: ?*WorldEntityBlock = chunk.first_block;
+                    var last_block: ?*WorldEntityBlock = first_block;
+                    var opt_block: ?*WorldEntityBlock = first_block;
+                    while (opt_block) |block| : (opt_block = block.next) {
+                        last_block = block;
+
+                        var entity_index: u32 = 0;
+                        while (entity_index < block.entity_count) : (entity_index += 1) {
+                            if (world.unpacked_entity_count < world.max_unpacked_entity_count) {
+                                const entities_ptr: [*]align(1) Entity = @ptrCast(&block.entity_data);
+                                const source: ?[*]align(1) Entity = entities_ptr + entity_index;
+                                const id: EntityId = source.?[0].id;
+                                const dest: *Entity =
+                                    @ptrCast(world.unpacked_entities + world.unpacked_entity_count);
+                                world.unpacked_entity_count += 1;
+
+                                std.debug.assert(source != null);
+
+                                dest.* = source.?[0];
+                                dest.position = dest.position.plus(chunk_delta);
+                                dest.id = id;
+
+                                sim.registerEntity(sim_region, dest);
+
+                                world.total_entity_packs_minus_unpacks -= 1;
+                            } else {
+                                unreachable;
+                            }
+                        }
+                    }
+
+                    addToFreeList(sim_region.world, chunk, first_block, last_block);
+                }
+            }
+        }
+    }
+
+    DebugInterface.debugValue(@src(), &world.unpacked_entity_count, "UnpackedEntityCount");
+}
+
+pub fn repackEntitiesAsNecessary(
+    world: *World,
+    sim_region: *SimRegion,
+) void {
+    TimedBlock.beginFunction(@src(), .RepackEntitiesAsNecessary);
+    defer TimedBlock.endFunction(@src(), .RepackEntitiesAsNecessary);
+
+    std.debug.assert(world.unpack_is_open);
+
+    var entity_index: u32 = 0;
+    var entity: [*]Entity = world.unpacked_entities;
+    while (entity_index < world.unpacked_entity_count) : (entity_index += 1) {
+        if (!entity[0].hasFlag(EntityFlags.Deleted.toInt())) {
+            const entity_position: WorldPosition =
+                mapIntoChunkSpace(world, world.unpack_origin, entity[0].position);
+            var chunk_position: WorldPosition = entity_position;
+            chunk_position.offset = .zero();
+
+            const chunk_delta: Vector3 = entity_position.offset.minus(entity[0].position);
+
+            entity[0].position = entity[0].position.plus(chunk_delta);
+            var dest_e: *align(1) Entity =
+                @ptrCast(useChunkSpaceAt(sim_region.world, @sizeOf(Entity), chunk_position));
+
+            dest_e.* = entity[0];
+            sim.packTraversableReference(sim_region, &dest_e.occupying);
+            sim.packTraversableReference(sim_region, &dest_e.came_from);
+            sim.packTraversableReference(sim_region, &dest_e.auto_boost_to);
+
+            dest_e.acceleration = .zero();
+            dest_e.bob_acceleration = 0;
+
+            world.total_entity_packs_minus_unpacks += 1;
+        }
+
+        entity += 1;
+    }
+
+    world.unpacked_entity_count = 0;
+    world.unpack_is_open = false;
 }

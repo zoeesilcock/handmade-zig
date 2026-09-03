@@ -598,8 +598,10 @@ pub fn updateAndRenderWorld(
     _ = light_bounds.min.setY(light_bounds.min.y() + 2);
     _ = light_bounds.max.setY(light_bounds.max.y() + 2);
 
-    const light_textures: *LightingTextures =
-        asset_rendering.pushLighting(&render_group, state.frame_arena, light_bounds);
+    var light_textures: ?*LightingTextures = null;
+    if (world_mode.updating_lighting) {
+        light_textures = asset_rendering.pushLighting(&render_group, state.frame_arena, light_bounds);
+    }
 
     if (false) {
         var sim_work: [16]WorldSimWork = undefined;
@@ -768,7 +770,7 @@ pub fn updateAndRenderWorld(
     if (world_mode.updating_lighting) {
         lighting.lightingTest(&render_group, &world_mode.test_lighting, state.high_priority_queue);
         if (!world_mode.show_lighting) {
-            lighting.outputLightingTextures(&render_group, &world_mode.test_lighting, light_textures);
+            lighting.outputLightingTextures(&render_group, &world_mode.test_lighting, light_textures.?);
         }
     }
 
@@ -782,7 +784,7 @@ pub fn updateAndRenderWorld(
             .new(0.5, 0.5, 0.5, 0),
         );
 
-        lighting.outputLightingPoints(&render_group, &world_mode.test_lighting, light_textures);
+        lighting.outputLightingPoints(&render_group, &world_mode.test_lighting, light_textures.?);
         render_group.end();
     }
 

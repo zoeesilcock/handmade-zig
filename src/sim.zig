@@ -41,6 +41,8 @@ const DebugInterface = debug_interface.DebugInterface;
 const ParticleSystem = particles.ParticleSystem;
 const ParticleCache = particles.ParticleCache;
 
+const MAX_SIM_REGION_ENTITY_COUNT = world.MAX_SIM_REGION_ENTITY_COUNT;
+
 // introspect(SimRegion)
 pub const SimRegion = extern struct {
     world: *World,
@@ -49,21 +51,15 @@ pub const SimRegion = extern struct {
     bounds: Rectangle3,
     updatable_bounds: Rectangle3,
 
-    max_entity_count: u32,
-    entity_count: u32 = 0,
-    entities: [*]Entity,
-
     max_brain_count: u32,
     brain_count: u32 = 0,
     brains: [*]Brain,
 
-    entity_hash: [8192]EntityHash = @splat(undefined),
+    entity_hash: [MAX_SIM_REGION_ENTITY_COUNT]EntityHash = @splat(undefined),
     brain_hash: [256]BrainHash = @splat(undefined),
 
-    entity_hash_occupancy: [8192 / 64]u64,
+    entity_hash_occupancy: [MAX_SIM_REGION_ENTITY_COUNT / 64]u64,
     brain_hash_occupancy: [256 / 64]u64,
-
-    null_entity: Entity,
 };
 
 pub const EntityHash = extern struct {
@@ -72,6 +68,37 @@ pub const EntityHash = extern struct {
 
 pub const BrainHash = extern struct {
     ptr: ?*Brain = null,
+};
+
+pub const EntityIterator = struct {
+    entity: ?*Entity = null,
+    sim_region: *SimRegion,
+    hash_index: u32 = 0,
+
+    pub fn iterateAllEntities(sim_region: *SimRegion) EntityIterator {
+        var result: EntityIterator = .{ .sim_region = sim_region };
+        result.findNextEntity();
+        return result;
+    }
+
+    pub fn findNextEntity(self: *EntityIterator) void {
+        self.entity = null;
+
+        while (self.hash_index < self.sim_region.entity_hash.len) : (self.hash_index += 1) {
+            if (!isEmpty(&self.sim_region.entity_hash_occupancy, self.hash_index)) {
+                self.entity = self.sim_region.entity_hash[self.hash_index].ptr;
+                std.debug.assert(self.entity != null);
+                break;
+            }
+        }
+    }
+
+    pub fn advance(self: *EntityIterator) void {
+        std.debug.assert(self.entity != null);
+
+        self.hash_index += 1;
+        self.findNextEntity();
+    }
 };
 
 pub const MoveSpec = extern struct {
@@ -245,16 +272,7 @@ fn getOrAddBrain(sim_region: *SimRegion, brain_id: BrainId, brain_type: BrainTyp
 }
 
 pub fn createEntity(sim_region: *SimRegion, id: EntityId) *Entity {
-    var result: *Entity = &sim_region.null_entity;
-
-    if (sim_region.entity_count < sim_region.max_entity_count) {
-        result = &sim_region.entities[sim_region.entity_count];
-        sim_region.entity_count += 1;
-    } else {
-        unreachable;
-    }
-
-    memory.zeroStruct(Entity, result);
+    var result: *Entity = world.createEntity(sim_region.world);
 
     result.id = id;
     addEntityToHash(sim_region, result);
@@ -266,21 +284,6 @@ pub fn deleteEntity(sim_region: *SimRegion, opt_entity: ?*Entity) void {
     _ = sim_region;
     if (opt_entity) |entity| {
         entity.addFlags(EntityFlags.Deleted.toInt());
-    }
-}
-
-fn connectEntityPointers(sim_region: *SimRegion) void {
-    var entity_index: u32 = 0;
-    while (entity_index < sim_region.entity_count) : (entity_index += 1) {
-        const entity: *Entity = &sim_region.entities[entity_index];
-
-        loadTraversableReference(sim_region, &entity.occupying);
-        if (entity.occupying.entity.ptr) |occupying_entity| {
-            occupying_entity.traversables[entity.occupying.index].occupier = entity;
-        }
-
-        loadTraversableReference(sim_region, &entity.came_from);
-        loadTraversableReference(sim_region, &entity.auto_boost_to);
     }
 }
 
@@ -298,7 +301,7 @@ fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *align(1) EntityR
     }
 }
 
-fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *align(1) TraversableReference) void {
+pub fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *align(1) TraversableReference) void {
     packEntityReference(opt_sim_region, &reference.entity);
 }
 
@@ -314,6 +317,32 @@ fn addEntityToHash(sim_region: *SimRegion, entity: *Entity) void {
 
 pub fn mapIntoSimSpace(sim_region: *SimRegion, position: WorldPosition) Vector3 {
     return world.subtractPositions(sim_region.world, &position, &sim_region.origin);
+}
+
+pub fn registerEntity(sim_region: *SimRegion, entity: *Entity) void {
+    addEntityToHash(sim_region, entity);
+
+    if (entityOverlapsRectangle(
+        entity.position,
+        entity.collision_volume,
+        sim_region.updatable_bounds,
+    )) {
+        entity.flags |= EntityFlags.Active.toInt();
+    } else {
+        entity.flags &= ~EntityFlags.Active.toInt();
+    }
+
+    if (entity.brain_id.value != 0) {
+        const brain: *Brain = getOrAddBrain(
+            sim_region,
+            entity.brain_id,
+            @enumFromInt(entity.brain_slot.type),
+        );
+        var ptr = @intFromPtr(&brain.parts.array);
+        ptr += @sizeOf(*Entity) * entity.brain_slot.index;
+        std.debug.assert(ptr <= @intFromPtr(brain) + @sizeOf(Brain) - @sizeOf(*Entity));
+        @as(**Entity, @ptrFromInt(ptr)).* = entity;
+    }
 }
 
 pub fn beginWorldChange(
@@ -335,7 +364,6 @@ pub fn beginWorldChange(
     TimedBlock.beginBlock(@src(), .SimArenaClear);
     memory.zeroStruct(@TypeOf(sim_region.entity_hash_occupancy), &sim_region.entity_hash_occupancy);
     memory.zeroStruct(@TypeOf(sim_region.brain_hash_occupancy), &sim_region.brain_hash_occupancy);
-    memory.zeroStruct(@TypeOf(sim_region.null_entity), &sim_region.null_entity);
     TimedBlock.endBlock(@src(), .SimArenaClear);
 
     sim_region.world = game_world;
@@ -343,9 +371,6 @@ pub fn beginWorldChange(
     sim_region.origin = origin;
     sim_region.bounds = bounds;
     sim_region.updatable_bounds = sim_region.bounds;
-    sim_region.max_entity_count = 8192;
-    sim_region.entity_count = 0;
-    sim_region.entities = sim_arena.pushArray(sim_region.max_entity_count, Entity, ArenaPushParams.noClear(), @src());
 
     sim_region.max_brain_count = 512;
     sim_region.brain_count = 0;
@@ -366,122 +391,27 @@ pub fn beginWorldChange(
     DebugInterface.debugStruct(@src(), &sim_region.origin);
     DebugInterface.debugEndDataBlock(@src());
 
-    var chunk_z = min_chunk_position.chunk_z;
-    while (chunk_z <= max_chunk_position.chunk_z) : (chunk_z += 1) {
-        var chunk_y = min_chunk_position.chunk_y;
-        while (chunk_y <= max_chunk_position.chunk_y) : (chunk_y += 1) {
-            var chunk_x = min_chunk_position.chunk_x;
-            while (chunk_x <= max_chunk_position.chunk_x) : (chunk_x += 1) {
-                const opt_chunk = world.removeWorldChunk(sim_region.world, chunk_x, chunk_y, chunk_z);
+    world.ensureRegionIsUnpacked(game_world, min_chunk_position, max_chunk_position, sim_region);
 
-                if (opt_chunk) |chunk| {
-                    std.debug.assert(chunk.x == chunk_x);
-                    std.debug.assert(chunk.y == chunk_y);
-                    std.debug.assert(chunk.z == chunk_z);
-                    const chunk_position: WorldPosition = .{
-                        .chunk_x = chunk_x,
-                        .chunk_y = chunk_y,
-                        .chunk_z = chunk_z,
-                        .offset = .zero(),
-                    };
-                    const chunk_delta: Vector3 = mapIntoSimSpace(sim_region, chunk_position);
-                    const first_block: ?*world.WorldEntityBlock = chunk.first_block;
-                    var last_block: ?*world.WorldEntityBlock = first_block;
-                    var opt_block: ?*world.WorldEntityBlock = first_block;
-                    while (opt_block) |block| : (opt_block = block.next) {
-                        last_block = block;
-
-                        var entity_index: u32 = 0;
-                        while (entity_index < block.entity_count) : (entity_index += 1) {
-                            if (sim_region.entity_count < sim_region.max_entity_count) {
-                                const entities_ptr: [*]align(1) Entity = @ptrCast(&block.entity_data);
-                                const source: [*]align(1) Entity = entities_ptr + entity_index;
-                                const id: EntityId = source[0].id;
-                                const dest: *Entity = @ptrCast(sim_region.entities + sim_region.entity_count);
-                                sim_region.entity_count += 1;
-
-                                dest.* = source[0];
-
-                                dest.id = id;
-
-                                addEntityToHash(sim_region, dest);
-                                dest.position = dest.position.plus(chunk_delta);
-
-                                if (entityOverlapsRectangle(
-                                    dest.position,
-                                    dest.collision_volume,
-                                    sim_region.updatable_bounds,
-                                )) {
-                                    dest.flags |= EntityFlags.Active.toInt();
-                                } else {
-                                    dest.flags &= ~EntityFlags.Active.toInt();
-                                }
-
-                                if (dest.brain_id.value != 0) {
-                                    const brain: *Brain = getOrAddBrain(
-                                        sim_region,
-                                        dest.brain_id,
-                                        @enumFromInt(dest.brain_slot.type),
-                                    );
-                                    var ptr = @intFromPtr(&brain.parts.array);
-                                    ptr += @sizeOf(*Entity) * dest.brain_slot.index;
-                                    std.debug.assert(ptr <= @intFromPtr(brain) + @sizeOf(Brain) - @sizeOf(*Entity));
-                                    @as(**Entity, @ptrFromInt(ptr)).* = dest;
-                                }
-                            } else {
-                                unreachable;
-                            }
-                        }
-                    }
-
-                    world.addToFreeList(sim_region.world, chunk, first_block, last_block);
-                }
-            }
+    // TODO: Having to do two passes over this is pretty bad - but it's unclear how we do something about that due to
+    // the fact tha traversable connections need the hash table. Perhaps we should just get rid of the pointer-ness,
+    // and have everyone use the hash table when using traversables?
+    var iterator: EntityIterator = .iterateAllEntities(sim_region);
+    while (iterator.entity) |entity| : (iterator.advance()) {
+        loadTraversableReference(sim_region, &entity.occupying);
+        if (entity.occupying.entity.ptr) |occupying_entity| {
+            occupying_entity.traversables[entity.occupying.index].occupier = entity;
         }
+
+        loadTraversableReference(sim_region, &entity.came_from);
+        loadTraversableReference(sim_region, &entity.auto_boost_to);
     }
-
-    connectEntityPointers(sim_region);
-
-    DebugInterface.debugValue(@src(), &sim_region.entity_count, "EntityCount");
 
     return sim_region;
 }
 
 pub fn endWorldChange(sim_region: *SimRegion) void {
-    TimedBlock.beginFunction(@src(), .EndWorldChange);
-    defer TimedBlock.endFunction(@src(), .EndWorldChange);
-
-    var sim_entity_index: u32 = 0;
-    var entity: [*]Entity = sim_region.entities;
-    while (sim_entity_index < sim_region.entity_count) : (sim_entity_index += 1) {
-        if (!entity[0].hasFlag(EntityFlags.Deleted.toInt())) {
-            const entity_position: WorldPosition =
-                world.mapIntoChunkSpace(sim_region.world, sim_region.origin, entity[0].position);
-            var chunk_position: WorldPosition = entity_position;
-            chunk_position.offset = .zero();
-
-            const chunk_delta: Vector3 = entity_position.offset.minus(entity[0].position);
-
-            entity[0].position = entity[0].position.plus(chunk_delta);
-            var dest_e: *align(1) Entity =
-                @ptrCast(world.useChunkSpaceAt(sim_region.world, @sizeOf(Entity), chunk_position));
-
-            dest_e.* = entity[0];
-            packTraversableReference(sim_region, &dest_e.occupying);
-            packTraversableReference(sim_region, &dest_e.came_from);
-            packTraversableReference(sim_region, &dest_e.auto_boost_to);
-
-            dest_e.acceleration = .zero();
-            dest_e.bob_acceleration = 0;
-
-            // const reverse_chunk_delta: Vector3 =
-            //     world.subtractPositions(sim_region.world, &chunk_position, &sim_region.origin);
-            // const test_position: Vector3 = entity.position.plus(reverse_chunk_delta);
-            // std.debug.assert(old_entity_position.z() == test_position.z());
-        }
-
-        entity += 1;
-    }
+    world.repackEntitiesAsNecessary(sim_region.world, sim_region);
 }
 
 fn speculativeCollide(mover: *Entity, region: *Entity, test_position: Vector3) bool {
@@ -602,10 +532,8 @@ pub fn moveEntity(
 
             const desired_position = entity.position.plus(entity_delta);
 
-            var test_entity_index: u32 = 0;
-            while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
-                const test_entity = &sim_region.entities[test_entity_index];
-
+            var iterator: EntityIterator = .iterateAllEntities(sim_region);
+            while (iterator.entity) |test_entity| : (iterator.advance()) {
                 if (canCollide(entity, test_entity)) {
                     const volume_dimension: Vector3 = entity.collision_volume.getDimension();
                     const volume_position: Vector3 = entity.collision_volume.getCenter();
@@ -757,10 +685,8 @@ pub fn updateCameraForEntityMovement(
 
     var opt_in_room: ?*Entity = null;
     var opt_special_camera: ?*Entity = null;
-    var test_index: u32 = 0;
-    while (test_index < sim_region.entity_count) : (test_index += 1) {
-        const test_entity: *Entity = &sim_region.entities[test_index];
-
+    var iterator: EntityIterator = .iterateAllEntities(sim_region);
+    while (iterator.entity) |test_entity| : (iterator.advance()) {
         if (isRoom(test_entity)) {
             if (entityOverlapsEntity(entity, test_entity)) {
                 opt_in_room = test_entity;
@@ -930,10 +856,8 @@ pub fn updateCameraForEntityMovement(
 
 pub fn overlappingEntitiesExist(sim_region: *SimRegion, bounds: Rectangle3) bool {
     var result: bool = false;
-    var test_entity_index: u32 = 0;
-    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
-        const test_entity = &sim_region.entities[test_entity_index];
-
+    var iterator: EntityIterator = .iterateAllEntities(sim_region);
+    while (iterator.entity) |test_entity| : (iterator.advance()) {
         if (entityOverlapsRectangle(test_entity.position, test_entity.collision_volume, bounds)) {
             result = true;
             break;
@@ -959,9 +883,8 @@ pub fn getClosestTraversable(
 
     var found: bool = false;
     var closest_distance_squared: f32 = math.square(1000);
-    var test_entity_index: u32 = 0;
-    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
-        const test_entity = &sim_region.entities[test_entity_index];
+    var iterator: EntityIterator = .iterateAllEntities(sim_region);
+    while (iterator.entity) |test_entity| : (iterator.advance()) {
         var point_index: u32 = 0;
         while (point_index < test_entity.traversable_count) : (point_index += 1) {
             const point: EntityTraversablePoint = test_entity.getSimSpaceTraversable(point_index);
@@ -1039,9 +962,8 @@ pub fn getClosestEntityWithBrain(
     var result: ClosestEntity = .{};
     result.distance_squared = math.square(opt_max_radius orelse 20);
 
-    var test_entity_index: u32 = 0;
-    while (test_entity_index < sim_region.entity_count) : (test_entity_index += 1) {
-        var test_entity = &sim_region.entities[test_entity_index];
+    var iterator: EntityIterator = .iterateAllEntities(sim_region);
+    while (iterator.entity) |test_entity| : (iterator.advance()) {
         if (test_entity.brain_slot.isType(brain_type)) {
             const test_delta = test_entity.position.minus(position);
             const test_distance = test_delta.lengthSquared();

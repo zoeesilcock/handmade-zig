@@ -27,11 +27,10 @@ const BrainId = brains.BrainId;
 const BrainType = brains.BrainType;
 const BrainSlot = brains.BrainSlot;
 const Assets = asset.Assets;
-const AssetTypeId = asset.AssetTypeId;
 const SpriteValues = renderer_geometry.SpriteValues;
-const TransientState = shared.TransientState;
 const SimRegion = sim.SimRegion;
 const WorldPosition = world.WorldPosition;
+const EntityIterator = sim.EntityIterator;
 const RendererTexture = renderer.RendererTexture;
 const ManualSortKey = renderer.ManualSortKey;
 const ParticleCache = particles.ParticleCache;
@@ -359,10 +358,8 @@ pub fn updateAndRenderEntities(
         }
     }
 
-    var entity_index: u32 = 0;
-    while (entity_index < sim_region.entity_count) : (entity_index += 1) {
-        const entity = &sim_region.entities[entity_index];
-
+    var iterator: EntityIterator = .iterateAllEntities(sim_region);
+    while (iterator.entity) |entity| : (iterator.advance()) {
         if (entity.hasFlag(EntityFlags.Active.toInt())) {
             TimedBlock.beginBlock(@src(), .EntityBoost);
 
