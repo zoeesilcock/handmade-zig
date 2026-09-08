@@ -23,7 +23,6 @@ const BitmapId = file_formats.BitmapId;
 const PlayingSound = audio.PlayingSound;
 const Entity = entities.Entity;
 const EntityFlags = entities.EntityFlags;
-const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const SimRegion = sim.SimRegion;
 const TicketMutex = types.TicketMutex;
@@ -36,7 +35,7 @@ const DebugInterface = debug_interface.DebugInterface;
 const TILE_CHUNK_SAFE_MARGIN = std.math.maxInt(i32) / 64;
 const TILE_CHUNK_UNINITIALIZED = std.math.maxInt(i32);
 const TILES_PER_CHUNK = 16;
-pub const MAX_SIM_REGION_ENTITY_COUNT = 4 * 8192;
+pub const MAX_SIM_REGION_ENTITY_COUNT = 2 * 8192;
 const WORLD_BLOCK_SIZE = 1 << 16;
 
 pub const World = extern struct {
@@ -61,14 +60,14 @@ pub const World = extern struct {
     first_free_block: ?*WorldEntityBlock,
 
     unpack_is_open: bool,
+
     unpack_origin: WorldPosition,
     max_unpacked_entity_count: u32,
-    unpacked_entity_count: u32 = 0,
+    unpacked_entity_count: u32,
     unpacked_entities: [*]Entity,
-
-    total_entity_packs_minus_unpacks: i32,
-
     null_entity: *Entity,
+
+    unpacked_entity_threshold: u32 = 0,
 };
 
 pub const WorldChunk = extern struct {
@@ -78,7 +77,6 @@ pub const WorldChunk = extern struct {
     x: i32,
     y: i32,
     z: i32,
-    // unpacked: bool,
 };
 
 pub const WorldRoom = extern struct {
@@ -132,6 +130,18 @@ pub const WorldPosition = extern struct {
     pub fn isValid(self: *const WorldPosition) bool {
         return self.chunk_x != TILE_CHUNK_UNINITIALIZED;
     }
+
+    pub fn isContainedInChunkVolume(self: WorldPosition, min: WorldPosition, max: WorldPosition) bool {
+        const result: bool =
+            self.chunk_x >= min.chunk_x and
+            self.chunk_y >= min.chunk_y and
+            self.chunk_z >= min.chunk_z and
+            self.chunk_x <= max.chunk_x and
+            self.chunk_y <= max.chunk_y and
+            self.chunk_z <= max.chunk_z;
+
+        return result;
+    }
 };
 
 pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryArena) *World {
@@ -143,9 +153,11 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
     world.game_entropy = .seed(1233, null, null, null);
     world.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
 
-    world.max_unpacked_entity_count = MAX_SIM_REGION_ENTITY_COUNT;
-    world.unpacked_entity_count = 0;
+    world.max_unpacked_entity_count = 4 * MAX_SIM_REGION_ENTITY_COUNT;
+    world.unpacked_entity_threshold = world.max_unpacked_entity_count - MAX_SIM_REGION_ENTITY_COUNT;
+
     world.unpacked_entities = world.arena.pushArray(world.max_unpacked_entity_count, Entity, null, @src());
+    world.unpacked_entity_count = 0;
 
     world.null_entity = world.arena.pushStruct(Entity, null, @src());
 
@@ -408,19 +420,17 @@ pub fn subtractPositions(world: *World, a: *const WorldPosition, b: *const World
     return tile_diff.hadamardProduct(world.chunk_dimension_in_meters).plus(a.offset.minus(b.offset));
 }
 
-pub fn createEntity(world: *World) *Entity {
-    var result: *Entity = world.null_entity;
+pub fn acquireUnpackedEntitySlot(world: *World) *Entity {
+    var result: ?*Entity = null;
 
     if (world.unpacked_entity_count < world.max_unpacked_entity_count) {
         result = &world.unpacked_entities[world.unpacked_entity_count];
         world.unpacked_entity_count += 1;
     } else {
-        unreachable;
+        result = world.null_entity;
     }
 
-    memory.zeroStruct(Entity, result);
-
-    return result;
+    return result.?;
 }
 
 pub fn ensureRegionIsUnpacked(
@@ -435,20 +445,62 @@ pub fn ensureRegionIsUnpacked(
     std.debug.assert(!world.unpack_is_open);
     world.unpack_is_open = true;
 
-    const unpack_origin_delta: Vector3 =
-        subtractPositions(world, &sim_region.origin, &world.unpack_origin);
-    world.unpack_origin = sim_region.origin;
-
-    // TODO: Since we're making this pass here, it does seem like we would want to just keep an updateable hash table,
-    // perhaps, and not have to do so many passes over all the entities?
     {
+        const unpack_origin_delta: Vector3 =
+            subtractPositions(world, &world.unpack_origin, &sim_region.origin);
+
         var entity_index: u32 = 0;
-        while (entity_index < world.unpacked_entity_count) : (entity_index += 1) {
-            const entity: *Entity = &world.unpacked_entities[entity_index];
-            entity.position = entity.position.plus(unpack_origin_delta);
-            sim.registerEntity(sim_region, entity);
+        while (entity_index < world.unpacked_entity_count) {
+            var entity: *Entity = &world.unpacked_entities[entity_index];
+            var removed_from_unpacked: bool = false;
+
+            if (entity.hasFlag(EntityFlags.Deleted.toInt())) {
+                removed_from_unpacked = true;
+            } else {
+
+                // TODO: Think about what we actually are OK with this value being.
+                const max_allowed_distance_squared: f32 = math.square(1000);
+                const distance_from_origin: f32 = entity.position.lengthSquared();
+                const too_far_for_precision: bool = distance_from_origin > max_allowed_distance_squared;
+
+                const entity_position: WorldPosition =
+                    mapIntoChunkSpace(world, world.unpack_origin, entity.position);
+                const is_outside_volume: bool =
+                    !entity_position.isContainedInChunkVolume(min_chunk_position, max_chunk_position);
+                const count_exceeded: bool = world.unpacked_entity_count > world.unpacked_entity_threshold;
+
+                if (too_far_for_precision or (count_exceeded and is_outside_volume)) {
+                    std.debug.assert(is_outside_volume);
+
+                    var chunk_position: WorldPosition = entity_position;
+                    chunk_position.offset = .zero();
+                    const chunk_delta: Vector3 = entity_position.offset.minus(entity.position);
+                    entity.position = entity.position.plus(chunk_delta);
+
+                    var dest_e: *align(1) Entity =
+                        @ptrCast(useChunkSpaceAt(world, @sizeOf(Entity), chunk_position));
+                    dest_e.* = entity.*;
+
+                    dest_e.acceleration = .zero();
+                    dest_e.bob_acceleration = 0;
+
+                    removed_from_unpacked = true;
+                } else {
+                    entity.position = entity.position.plus(unpack_origin_delta);
+                    sim.registerEntity(sim_region, @ptrCast(entity));
+                }
+            }
+
+            if (removed_from_unpacked) {
+                world.unpacked_entity_count -= 1;
+                entity.* = world.unpacked_entities[world.unpacked_entity_count];
+            } else {
+                entity_index += 1;
+            }
         }
     }
+
+    world.unpack_origin = sim_region.origin;
 
     var chunk_z = min_chunk_position.chunk_z;
     while (chunk_z <= max_chunk_position.chunk_z) : (chunk_z += 1) {
@@ -478,26 +530,13 @@ pub fn ensureRegionIsUnpacked(
 
                         var entity_index: u32 = 0;
                         while (entity_index < block.entity_count) : (entity_index += 1) {
-                            if (world.unpacked_entity_count < world.max_unpacked_entity_count) {
-                                const entities_ptr: [*]align(1) Entity = @ptrCast(&block.entity_data);
-                                const source: ?[*]align(1) Entity = entities_ptr + entity_index;
-                                const id: EntityId = source.?[0].id;
-                                const dest: *Entity =
-                                    @ptrCast(world.unpacked_entities + world.unpacked_entity_count);
-                                world.unpacked_entity_count += 1;
+                            const entities_ptr: [*]align(1) Entity = @ptrCast(&block.entity_data);
+                            const source: ?[*]align(1) Entity = entities_ptr + entity_index;
+                            const dest: *Entity = acquireUnpackedEntitySlot(world);
+                            dest.* = source.?[0];
+                            dest.position = dest.position.plus(chunk_delta);
 
-                                std.debug.assert(source != null);
-
-                                dest.* = source.?[0];
-                                dest.position = dest.position.plus(chunk_delta);
-                                dest.id = id;
-
-                                sim.registerEntity(sim_region, dest);
-
-                                world.total_entity_packs_minus_unpacks -= 1;
-                            } else {
-                                unreachable;
-                            }
+                            sim.registerEntity(sim_region, dest);
                         }
                     }
 
@@ -512,42 +551,16 @@ pub fn ensureRegionIsUnpacked(
 
 pub fn repackEntitiesAsNecessary(
     world: *World,
-    sim_region: *SimRegion,
+    expected_min_chunk_position: WorldPosition,
+    expected_max_chunk_position: WorldPosition,
 ) void {
     TimedBlock.beginFunction(@src(), .RepackEntitiesAsNecessary);
     defer TimedBlock.endFunction(@src(), .RepackEntitiesAsNecessary);
 
     std.debug.assert(world.unpack_is_open);
 
-    var entity_index: u32 = 0;
-    var entity: [*]Entity = world.unpacked_entities;
-    while (entity_index < world.unpacked_entity_count) : (entity_index += 1) {
-        if (!entity[0].hasFlag(EntityFlags.Deleted.toInt())) {
-            const entity_position: WorldPosition =
-                mapIntoChunkSpace(world, world.unpack_origin, entity[0].position);
-            var chunk_position: WorldPosition = entity_position;
-            chunk_position.offset = .zero();
+    _ = expected_min_chunk_position;
+    _ = expected_max_chunk_position;
 
-            const chunk_delta: Vector3 = entity_position.offset.minus(entity[0].position);
-
-            entity[0].position = entity[0].position.plus(chunk_delta);
-            var dest_e: *align(1) Entity =
-                @ptrCast(useChunkSpaceAt(sim_region.world, @sizeOf(Entity), chunk_position));
-
-            dest_e.* = entity[0];
-            sim.packTraversableReference(sim_region, &dest_e.occupying);
-            sim.packTraversableReference(sim_region, &dest_e.came_from);
-            sim.packTraversableReference(sim_region, &dest_e.auto_boost_to);
-
-            dest_e.acceleration = .zero();
-            dest_e.bob_acceleration = 0;
-
-            world.total_entity_packs_minus_unpacks += 1;
-        }
-
-        entity += 1;
-    }
-
-    world.unpacked_entity_count = 0;
     world.unpack_is_open = false;
 }

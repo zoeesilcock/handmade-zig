@@ -80,7 +80,7 @@ pub fn genEntityAtTraversable(
     standing_on: TraversableReference,
 ) *Entity {
     var result: *Entity = creator(region);
-    result.position = standing_on.getSimSpaceTraversable().position;
+    result.position = standing_on.getSimSpaceTraversable(region).position;
     result.occupying = standing_on;
     return result;
 }

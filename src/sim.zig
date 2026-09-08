@@ -210,27 +210,15 @@ pub fn getBrainHashFromId(sim_region: *SimRegion, id: BrainId) ?*BrainHash {
     return result;
 }
 
-pub fn getEntityByStorageIndex(sim_region: *SimRegion, id: EntityId) ?*Entity {
-    const entry = getEntityHashFromId(sim_region, id);
-    const result: ?*Entity = if (entry != null) entry.?.ptr else null;
-    return result;
-}
+pub fn getEntityById(sim_region: *SimRegion, id: EntityId) ?*Entity {
+    var result: ?*Entity = null;
 
-pub fn loadEntityReference(sim_region: *SimRegion, reference: *EntityReference) void {
-    if (reference.index.value != 0) {
-        reference.* = EntityReference{
-            .ptr = getEntityByStorageIndex(sim_region, reference.index),
-        };
-
-        // TODO: Why is this needed in our version, but not in Casey's?
-        if (reference.ptr) |entity| {
-            reference.index = entity.id;
-        }
+    if (id.value != 0) {
+        const entry = getEntityHashFromId(sim_region, id);
+        result = if (entry != null) entry.?.ptr else null;
     }
-}
 
-pub fn loadTraversableReference(sim_region: *SimRegion, reference: *TraversableReference) void {
-    loadEntityReference(sim_region, &reference.entity);
+    return result;
 }
 
 pub fn entityOverlapsRectangle(position: Vector3, entity_volume: Rectangle3, rectangle: Rectangle3) bool {
@@ -272,7 +260,8 @@ fn getOrAddBrain(sim_region: *SimRegion, brain_id: BrainId, brain_type: BrainTyp
 }
 
 pub fn createEntity(sim_region: *SimRegion, id: EntityId) *Entity {
-    var result: *Entity = world.createEntity(sim_region.world);
+    var result: *Entity = world.acquireUnpackedEntitySlot(sim_region.world);
+    memory.zeroStruct(Entity, result);
 
     result.id = id;
     addEntityToHash(sim_region, result);
@@ -285,24 +274,6 @@ pub fn deleteEntity(sim_region: *SimRegion, opt_entity: ?*Entity) void {
     if (opt_entity) |entity| {
         entity.addFlags(EntityFlags.Deleted.toInt());
     }
-}
-
-fn packEntityReference(opt_sim_region: ?*SimRegion, reference: *align(1) EntityReference) void {
-    if (reference.ptr) |ptr| {
-        if (ptr.isDeleted()) {
-            reference.index.value = 0;
-        } else {
-            reference.index = ptr.id;
-        }
-    } else if (reference.index.value != 0) {
-        if (opt_sim_region != null and getEntityHashFromId(opt_sim_region.?, reference.index) != null) {
-            reference.index.value = 0;
-        }
-    }
-}
-
-pub fn packTraversableReference(opt_sim_region: ?*SimRegion, reference: *align(1) TraversableReference) void {
-    packEntityReference(opt_sim_region, &reference.entity);
 }
 
 fn addEntityToHash(sim_region: *SimRegion, entity: *Entity) void {
@@ -320,28 +291,34 @@ pub fn mapIntoSimSpace(sim_region: *SimRegion, position: WorldPosition) Vector3 
 }
 
 pub fn registerEntity(sim_region: *SimRegion, entity: *Entity) void {
-    addEntityToHash(sim_region, entity);
-
     if (entityOverlapsRectangle(
         entity.position,
         entity.collision_volume,
-        sim_region.updatable_bounds,
+        sim_region.bounds,
     )) {
-        entity.flags |= EntityFlags.Active.toInt();
-    } else {
-        entity.flags &= ~EntityFlags.Active.toInt();
-    }
+        addEntityToHash(sim_region, entity);
 
-    if (entity.brain_id.value != 0) {
-        const brain: *Brain = getOrAddBrain(
-            sim_region,
-            entity.brain_id,
-            @enumFromInt(entity.brain_slot.type),
-        );
-        var ptr = @intFromPtr(&brain.parts.array);
-        ptr += @sizeOf(*Entity) * entity.brain_slot.index;
-        std.debug.assert(ptr <= @intFromPtr(brain) + @sizeOf(Brain) - @sizeOf(*Entity));
-        @as(**Entity, @ptrFromInt(ptr)).* = entity;
+        if (entityOverlapsRectangle(
+            entity.position,
+            entity.collision_volume,
+            sim_region.updatable_bounds,
+        )) {
+            entity.flags |= EntityFlags.Active.toInt();
+        } else {
+            entity.flags &= ~EntityFlags.Active.toInt();
+        }
+
+        if (entity.brain_id.value != 0) {
+            const brain: *Brain = getOrAddBrain(
+                sim_region,
+                entity.brain_id,
+                @enumFromInt(entity.brain_slot.type),
+            );
+            var ptr = @intFromPtr(&brain.parts.array);
+            ptr += @sizeOf(*Entity) * entity.brain_slot.index;
+            std.debug.assert(ptr <= @intFromPtr(brain) + @sizeOf(Brain) - @sizeOf(*Entity));
+            @as(**Entity, @ptrFromInt(ptr)).* = entity;
+        }
     }
 }
 
@@ -393,25 +370,22 @@ pub fn beginWorldChange(
 
     world.ensureRegionIsUnpacked(game_world, min_chunk_position, max_chunk_position, sim_region);
 
-    // TODO: Having to do two passes over this is pretty bad - but it's unclear how we do something about that due to
-    // the fact tha traversable connections need the hash table. Perhaps we should just get rid of the pointer-ness,
-    // and have everyone use the hash table when using traversables?
-    var iterator: EntityIterator = .iterateAllEntities(sim_region);
-    while (iterator.entity) |entity| : (iterator.advance()) {
-        loadTraversableReference(sim_region, &entity.occupying);
-        if (entity.occupying.entity.ptr) |occupying_entity| {
-            occupying_entity.traversables[entity.occupying.index].occupier = entity;
-        }
-
-        loadTraversableReference(sim_region, &entity.came_from);
-        loadTraversableReference(sim_region, &entity.auto_boost_to);
-    }
-
     return sim_region;
 }
 
 pub fn endWorldChange(sim_region: *SimRegion) void {
-    world.repackEntitiesAsNecessary(sim_region.world, sim_region);
+    // TODO: Maybe use the new expected camera position here instead?
+    const min_chunk_position = world.mapIntoChunkSpace(
+        sim_region.world,
+        sim_region.origin,
+        sim_region.bounds.getMinCorner(),
+    );
+    const max_chunk_position = world.mapIntoChunkSpace(
+        sim_region.world,
+        sim_region.origin,
+        sim_region.bounds.getMaxCorner(),
+    );
+    world.repackEntitiesAsNecessary(sim_region.world, min_chunk_position, max_chunk_position);
 }
 
 fn speculativeCollide(mover: *Entity, region: *Entity, test_position: Vector3) bool {
@@ -475,12 +449,17 @@ pub fn handleCollision(entity: *Entity, hit_entity: *Entity) bool {
     return stops_on_collision;
 }
 
-pub fn transactionalOccupy(entity: *Entity, dest_ref: *TraversableReference, desired_ref: TraversableReference) bool {
+pub fn transactionalOccupy(
+    sim_region: *SimRegion,
+    entity: *Entity,
+    dest_ref: *TraversableReference,
+    desired_ref: TraversableReference,
+) bool {
     var result = false;
 
-    if (desired_ref.getTraversable()) |desired| {
+    if (desired_ref.getTraversable(sim_region)) |desired| {
         if (desired.occupier == null) {
-            if (dest_ref.getTraversable()) |dest| {
+            if (dest_ref.getTraversable(sim_region)) |dest| {
                 dest.occupier = null;
             }
             dest_ref.* = desired_ref;
@@ -900,8 +879,7 @@ pub fn getClosestTraversable(
 
                     const test_distance_squared = to_point.lengthSquared();
                     if (closest_distance_squared > test_distance_squared) {
-                        result.entity.ptr = test_entity;
-                        result.entity.index = test_entity.id;
+                        result.entity = test_entity.id;
                         result.index = point_index;
                         closest_distance_squared = test_distance_squared;
                         found = true;

@@ -313,7 +313,7 @@ fn executeBrainHero(
                 )) {
                     if (!traversable.equals(body.occupying)) {
                         body.came_from = body.occupying;
-                        if (sim.transactionalOccupy(body, &body.occupying, traversable)) {
+                        if (sim.transactionalOccupy(sim_region, body, &body.occupying, traversable)) {
                             body.movement_time = 0;
                             body.movement_mode = .Hopping;
                         }
@@ -407,13 +407,13 @@ pub fn executeBrain(
                     if (traversable.equals(head.occupying)) {
                         blocked = false;
                     } else {
-                        if (sim.transactionalOccupy(head, &head.occupying, traversable)) {
+                        if (sim.transactionalOccupy(sim_region, head, &head.occupying, traversable)) {
                             blocked = false;
                         }
                     }
                 }
 
-                var target_position: Vector3 = head.occupying.getSimSpaceTraversable().position;
+                var target_position: Vector3 = head.occupying.getSimSpaceTraversable(sim_region).position;
                 if (!blocked and global_config.AI_Familiar_FollowsHero) {
                     const closest: ClosestEntity =
                         sim.getClosestEntityWithBrain(sim_region, head.position, .BrainHero, null);
@@ -429,7 +429,7 @@ pub fn executeBrain(
                             &target_traversable,
                             0,
                         )) {
-                            if (!target_traversable.isOccupied()) {
+                            if (!target_traversable.isOccupied(sim_region)) {
                                 target_position = hero.position;
                             }
                         }
@@ -459,7 +459,7 @@ pub fn executeBrain(
                     if (body.movement_mode == .Planted) {
                         if (!traversable.equals(body.occupying)) {
                             body.came_from = body.occupying;
-                            if (sim.transactionalOccupy(body, &body.occupying, traversable)) {
+                            if (sim.transactionalOccupy(sim_region, body, &body.occupying, traversable)) {
                                 body.movement_time = 0;
                                 body.movement_mode = .Hopping;
                             }
@@ -493,7 +493,7 @@ pub fn executeBrain(
                         if (!traversable.equals(head.occupying)) {
                             var last_occupying: TraversableReference = head.occupying;
                             head.came_from = head.occupying;
-                            if (sim.transactionalOccupy(head, &head.occupying, traversable)) {
+                            if (sim.transactionalOccupy(sim_region, head, &head.occupying, traversable)) {
                                 head.facing_direction = intrinsics.atan2(delta.y(), delta.x());
                                 head.movement_time = 0;
                                 head.movement_mode = .Hopping;
@@ -502,7 +502,12 @@ pub fn executeBrain(
                                 while (segment_index < parts.segments.len) : (segment_index += 1) {
                                     if (parts.segments[segment_index]) |segment| {
                                         segment.came_from = segment.occupying;
-                                        _ = sim.transactionalOccupy(segment, &segment.occupying, last_occupying);
+                                        _ = sim.transactionalOccupy(
+                                            sim_region,
+                                            segment,
+                                            &segment.occupying,
+                                            last_occupying,
+                                        );
                                         last_occupying = segment.came_from;
 
                                         segment.movement_time = 0;

@@ -266,41 +266,31 @@ pub const Entity = extern struct {
     }
 };
 
-pub const EntityReference = extern struct {
-    ptr: ?*Entity = null,
-    index: EntityId = .{},
-
-    pub fn equals(self: *const EntityReference, other: EntityReference) bool {
-        return self.ptr == other.ptr and
-            self.index.value == other.index.value;
-    }
-};
-
 pub const TraversableReference = extern struct {
-    entity: EntityReference = .{},
+    entity: EntityId = .{},
     index: u32 = 0,
 
     pub const init: TraversableReference = .{
-        .entity = .{ .ptr = null },
+        .entity = .{},
         .index = 0,
     };
 
-    pub fn getTraversable(self: TraversableReference) ?*EntityTraversablePoint {
+    pub fn getTraversable(self: TraversableReference, sim_region: *SimRegion) ?*EntityTraversablePoint {
         var result: ?*EntityTraversablePoint = null;
-        if (self.entity.ptr) |entity_ptr| {
-            result = entity_ptr.getTraversable(self.index);
+        if (sim.getEntityById(sim_region, self.entity)) |entity| {
+            result = entity.getTraversable(self.index);
         }
         return result;
     }
 
-    pub fn getSimSpaceTraversable(self: TraversableReference) EntityTraversablePoint {
+    pub fn getSimSpaceTraversable(self: TraversableReference, sim_region: *SimRegion) EntityTraversablePoint {
         var result: EntityTraversablePoint = .{
             .position = .zero(),
             .occupier = null,
         };
 
-        if (self.entity.ptr) |entity_ptr| {
-            result = entity_ptr.getSimSpaceTraversable(self.index);
+        if (sim.getEntityById(sim_region, self.entity)) |entity| {
+            result = entity.getSimSpaceTraversable(self.index);
         }
 
         return result;
@@ -310,10 +300,10 @@ pub const TraversableReference = extern struct {
         return self.entity.equals(other.entity) and self.index == other.index;
     }
 
-    pub fn isOccupied(self: TraversableReference) bool {
+    pub fn isOccupied(self: TraversableReference, sim_region: *SimRegion) bool {
         var result: bool = true;
 
-        if (self.getTraversable()) |traversable| {
+        if (self.getTraversable(sim_region)) |traversable| {
             result = traversable.occupier != null;
         }
 
@@ -363,14 +353,19 @@ pub fn updateAndRenderEntities(
         if (entity.hasFlag(EntityFlags.Active.toInt())) {
             TimedBlock.beginBlock(@src(), .EntityBoost);
 
-            if (entity.auto_boost_to.getTraversable() != null) {
+            if (entity.auto_boost_to.getTraversable(sim_region) != null) {
                 var traversable_index: u32 = 0;
                 while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
                     const traversable = entity.traversables[traversable_index];
                     if (traversable.occupier) |occupier| {
                         if (occupier.movement_mode == .Planted) {
                             occupier.came_from = occupier.occupying;
-                            if (sim.transactionalOccupy(occupier, &occupier.occupying, entity.auto_boost_to)) {
+                            if (sim.transactionalOccupy(
+                                sim_region,
+                                occupier,
+                                &occupier.occupying,
+                                entity.auto_boost_to,
+                            )) {
                                 occupier.movement_time = 0;
                                 occupier.movement_mode = .Hopping;
                             }
@@ -387,8 +382,8 @@ pub fn updateAndRenderEntities(
             switch (entity.movement_mode) {
                 .Planted => {},
                 .Hopping => {
-                    const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable().position;
-                    const movement_from: Vector3 = entity.came_from.getSimSpaceTraversable().position;
+                    const movement_to: Vector3 = entity.occupying.getSimSpaceTraversable(sim_region).position;
+                    const movement_from: Vector3 = entity.came_from.getSimSpaceTraversable(sim_region).position;
                     const t_jump: f32 = 0.1;
                     const t_thrust: f32 = 0.2;
                     const t_land: f32 = 0.9;
@@ -741,7 +736,7 @@ pub fn updateAndRenderEntities(
                         while (traversable_index < entity.traversable_count) : (traversable_index += 1) {
                             const traversable = entity.traversables[traversable_index];
                             var color: Color = .new(0.05, 0.25, 0.05, 1);
-                            if (entity.auto_boost_to.getTraversable() != null) {
+                            if (entity.auto_boost_to.getTraversable(sim_region) != null) {
                                 color = .new(1, 0, 1, 1);
                             }
                             if (traversable.occupier != null) {

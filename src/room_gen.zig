@@ -209,9 +209,8 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
         if (contents.open) {
             var ref: TraversableReference = .init;
             var ground_position: Vector3 = .zero();
-            ref.entity.ptr = contents.structural;
-            ref.entity.index = contents.structural.?.id;
-            ground_position = ref.getSimSpaceTraversable().position;
+            ref.entity = contents.structural.?.id;
+            ground_position = ref.getSimSpaceTraversable(grid.region).position;
 
             if (place_tree) {
                 const placed_entity: *Entity =
@@ -244,8 +243,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
             const contents: *EditTileContents = grid.getTileFromV3(tile_position).?;
             var ref: TraversableReference = .init;
             if (contents.structural) |structural| {
-                ref.entity.ptr = structural;
-                ref.entity.index = structural.id;
+                ref.entity = structural.id;
             } else {
                 unreachable;
             }

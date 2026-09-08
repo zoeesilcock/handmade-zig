@@ -84,7 +84,7 @@ pub const ArenaBootstrapParams = extern struct {
 };
 
 pub const MemoryArena = extern struct {
-    current_block: ?*PlatformMemoryBlock = undefined,
+    current_block: ?*PlatformMemoryBlock = null,
     minimum_block_size: MemoryIndex = 0,
     allocation_flags: u64 = 0,
     temp_count: i32 = 0,

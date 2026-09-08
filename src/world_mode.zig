@@ -243,7 +243,7 @@ fn addPlayer(
     standing_on: TraversableReference,
     brain_id: BrainId,
 ) void {
-    const position: Vector3 = standing_on.getSimSpaceTraversable().position;
+    const position: Vector3 = standing_on.getSimSpaceTraversable(sim_region).position;
     var body = entity_gen.addEntity(sim_region);
     const head = entity_gen.addEntity(sim_region);
     head.collision_volume = entity_gen.makeSimpleGroundedCollision(1, 0.5, 0.6, 0.7);
@@ -656,7 +656,7 @@ pub fn updateAndRenderWorld(
         // Can we merge the camera update down into the simulation so that we correctly update the camera for the current frame?
 
         const last_camera_position: WorldPosition = world_mode.camera.simulation_center;
-        if (sim.getEntityByStorageIndex(
+        if (sim.getEntityById(
             world_sim.sim_region,
             world_mode.camera.following_entity_index,
         )) |camera_following_entity| {
