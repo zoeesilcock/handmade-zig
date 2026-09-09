@@ -147,6 +147,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
         const on_lamp: bool = !spec.outdoors and
             (tile.relative_index[X] == grid.tile_count[X] - 2 and tile.relative_index[Y] == 1);
         var randomize_top: bool = false;
+        var traversable: bool = false;
         if (on_boundary and !on_connection) {
             wall_height = 2;
             color = .newFromSRGB(0.5, 0.2, 0.2, 1);
@@ -157,13 +158,20 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
             entity.addTag(.Floor, 1);
             if (spec.outdoors) {
                 entity.addTag(.Grass, 1);
+                entity.ground_cover_specs[0].cover_type = .ThickGrass;
+                entity.ground_cover_specs[0].density = 64;
             } else {
                 entity.addTag(if (spec.stone_floor) .Stone else .Wood, 1);
             }
             randomize_top = true;
+            traversable = true;
+        }
 
+        const volume: Rectangle3 = tile.getVolumeFromMinZ(wall_height).makeRelative(position);
+
+        if (traversable) {
             entity.traversable_count = 1;
-            entity.traversables[0].position = Vector3.zero();
+            entity.traversables[0].position = volume.getMaxZCenterPosition();
             entity.traversables[0].occupier = null;
         }
 
@@ -173,7 +181,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
 
         _ = position.setX(position.x() + 0);
         _ = position.setY(position.y() + 0);
-        _ = position.setZ(position.z() + wall_height + 0.5 * grid.series.randomUnilateral());
+        _ = position.setZ(position.z() + 0.5 * grid.series.randomUnilateral());
 
         if (stairwell) {
             _ = position.setZ(position.z() - (t_stair * grid.tile_dimension.z()));
@@ -183,8 +191,8 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
         var piece: *EntityVisiblePiece = entity_gen.addPieceV3(
             entity,
             .Block,
-            .new(0.7, 0.7, 0.5 * wall_height),
-            .new(0, 0, -0.5 * wall_height),
+            volume.getRadius(),
+            volume.getCenter(),
             color,
             @intFromEnum(EntityVisiblePieceFlag.Cube),
         );
@@ -203,14 +211,14 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
         }
 
         entity.position = position;
+        entity.collision_volume = volume;
         contents.structural = entity;
         contents.open = (!stairwell and !on_connection and entity.traversable_count == 1);
 
         if (contents.open) {
             var ref: TraversableReference = .init;
-            var ground_position: Vector3 = .zero();
             ref.entity = contents.structural.?.id;
-            ground_position = ref.getSimSpaceTraversable(grid.region).position;
+            // const ground_position = ref.getSimSpaceTraversable(grid.region).position;
 
             if (place_tree) {
                 const placed_entity: *Entity =
@@ -307,6 +315,9 @@ pub fn generateApron(gen: *WorldGenerator, apron: *GenApron) void {
 
             entity.addTag(.Floor, 1);
             entity.addTag(.Grass, 1);
+
+            entity.ground_cover_specs[0].cover_type = .ThickGrass;
+            entity.ground_cover_specs[0].density = 64;
 
             const ground_position: Vector3 = position.plus(volume.getMaxZCenterPosition());
             if (grid.series.randomChoice(3) != 0) {

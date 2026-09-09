@@ -86,12 +86,10 @@ pub const WorldRoom = extern struct {
 
 pub const WorldEntityBlock = extern struct {
     next: ?*WorldEntityBlock,
-    entity_count: u32,
-    entity_data_size: u32,
-    entity_data: [WORLD_BLOCK_SIZE - 16]u8,
+    entity_data_size: u16,
+    entity_data: [WORLD_BLOCK_SIZE - 10]u8,
 
     pub fn clear(self: *WorldEntityBlock) void {
-        self.entity_count = 0;
         self.next = null;
         self.entity_data_size = 0;
     }
@@ -153,7 +151,7 @@ pub fn createWorld(chunk_dimension_in_meters: Vector3, parent_arena: *MemoryAren
     world.game_entropy = .seed(1233, null, null, null);
     world.last_used_entity_storage_index = @intFromEnum(ReservedBrainId.FirstFree);
 
-    world.max_unpacked_entity_count = 4 * MAX_SIM_REGION_ENTITY_COUNT;
+    world.max_unpacked_entity_count = MAX_SIM_REGION_ENTITY_COUNT; // 4 * MAX_SIM_REGION_ENTITY_COUNT;
     world.unpacked_entity_threshold = world.max_unpacked_entity_count - MAX_SIM_REGION_ENTITY_COUNT;
 
     world.unpacked_entities = world.arena.pushArray(world.max_unpacked_entity_count, Entity, null, @src());
@@ -223,7 +221,6 @@ fn useChunkSpace(
 
     const dest_address = @intFromPtr(&block.entity_data) + block.entity_data_size;
     block.entity_data_size += @intCast(size);
-    block.entity_count += 1;
 
     return @ptrFromInt(dest_address);
 }
@@ -433,17 +430,33 @@ pub fn acquireUnpackedEntitySlot(world: *World) *Entity {
     return result.?;
 }
 
+fn packEntity(world: *World, entity_position: WorldPosition, entity: *Entity) void {
+    const packed_entity_size: u16 = @offsetOf(Entity, "discard_everything_after");
+
+    var chunk_position: WorldPosition = entity_position;
+    chunk_position.offset = .zero();
+    const chunk_delta: Vector3 = entity_position.offset.minus(entity.position);
+    entity.position = entity.position.plus(chunk_delta);
+
+    const dest_e: *align(1) anyopaque =
+        @ptrCast(useChunkSpaceAt(world, packed_entity_size, chunk_position));
+    _ = shared.copy(packed_entity_size, entity, dest_e);
+}
+
 pub fn ensureRegionIsUnpacked(
     world: *World,
     min_chunk_position: WorldPosition,
     max_chunk_position: WorldPosition,
     sim_region: *SimRegion,
+    assets: *asset.Assets,
 ) void {
     TimedBlock.beginFunction(@src(), .EnsureRegionIsUnpacked);
     defer TimedBlock.endFunction(@src(), .EnsureRegionIsUnpacked);
 
     std.debug.assert(!world.unpack_is_open);
     world.unpack_is_open = true;
+
+    const packed_entity_size: u16 = @offsetOf(Entity, "discard_everything_after");
 
     {
         const unpack_origin_delta: Vector3 =
@@ -472,17 +485,7 @@ pub fn ensureRegionIsUnpacked(
                 if (too_far_for_precision or (count_exceeded and is_outside_volume)) {
                     std.debug.assert(is_outside_volume);
 
-                    var chunk_position: WorldPosition = entity_position;
-                    chunk_position.offset = .zero();
-                    const chunk_delta: Vector3 = entity_position.offset.minus(entity.position);
-                    entity.position = entity.position.plus(chunk_delta);
-
-                    var dest_e: *align(1) Entity =
-                        @ptrCast(useChunkSpaceAt(world, @sizeOf(Entity), chunk_position));
-                    dest_e.* = entity.*;
-
-                    dest_e.acceleration = .zero();
-                    dest_e.bob_acceleration = 0;
+                    packEntity(world, entity_position, entity);
 
                     removed_from_unpacked = true;
                 } else {
@@ -520,21 +523,22 @@ pub fn ensureRegionIsUnpacked(
                         .chunk_z = chunk_z,
                         .offset = .zero(),
                     };
-                    const chunk_delta: Vector3 =
-                        subtractPositions(world, &chunk_position, &world.unpack_origin);
+                    const chunk_delta: Vector3 = subtractPositions(world, &chunk_position, &world.unpack_origin);
                     const first_block: ?*WorldEntityBlock = chunk.first_block;
                     var last_block: ?*WorldEntityBlock = first_block;
                     var opt_block: ?*WorldEntityBlock = first_block;
                     while (opt_block) |block| : (opt_block = block.next) {
                         last_block = block;
 
-                        var entity_index: u32 = 0;
-                        while (entity_index < block.entity_count) : (entity_index += 1) {
-                            const entities_ptr: [*]align(1) Entity = @ptrCast(&block.entity_data);
-                            const source: ?[*]align(1) Entity = entities_ptr + entity_index;
+                        var at: u32 = 0;
+                        while (at < block.entity_data_size) {
                             const dest: *Entity = acquireUnpackedEntitySlot(world);
-                            dest.* = source.?[0];
+                            _ = shared.copy(packed_entity_size, &block.entity_data[at], dest);
+                            at += packed_entity_size;
+
                             dest.position = dest.position.plus(chunk_delta);
+
+                            entities.fillUnpackedEntity(dest, sim_region, assets);
 
                             sim.registerEntity(sim_region, dest);
                         }
@@ -563,4 +567,14 @@ pub fn repackEntitiesAsNecessary(
     _ = expected_max_chunk_position;
 
     world.unpack_is_open = false;
+}
+
+pub fn clearUnpackedEntityCache(world: *World) void {
+    var entity_index: u32 = 0;
+    while (entity_index < world.unpacked_entity_count) : (entity_index += 1) {
+        const entity: *Entity = &world.unpacked_entities[entity_index];
+        const entity_position: WorldPosition = mapIntoChunkSpace(world, world.unpack_origin, entity.position);
+        packEntity(world, entity_position, entity);
+    }
+    world.unpacked_entity_count = 0;
 }

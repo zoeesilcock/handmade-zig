@@ -60,7 +60,6 @@ const ArenaPushParams = memory.ArenaPushParams;
 const TemporaryMemory = memory.TemporaryMemory;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
-const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const EntityFlags = entities.EntityFlags;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
@@ -69,6 +68,7 @@ const EntityVisiblePieceFlag = entities.EntityVisiblePieceFlag;
 const CameraBehavior = entities.CameraBehavior;
 const SimRegion = sim.SimRegion;
 const TraversableSearchFlag = sim.TraversableSearchFlag;
+const Assets = asset.Assets;
 const Brain = brains.Brain;
 const BrainId = brains.BrainId;
 const BrainSlot = brains.BrainSlot;
@@ -143,6 +143,7 @@ const WorldSimWork = struct {
     sim_bounds: Rectangle3,
     world_mode: *GameModeWorld,
     delta_time: f32,
+    game_state: *State,
 };
 
 pub const ParticleCel = extern struct {
@@ -203,7 +204,7 @@ pub fn playWorld(state: *State) void {
     world_mode.world = world.createWorld(chunk_dimension_in_meters, &state.mode_arena);
     state.mode = .{ .world = world_mode };
 
-    world_gen.createWorld(world_mode);
+    world_gen.createWorld(world_mode, state.assets);
 }
 
 fn checkForJoiningPlayers(
@@ -311,6 +312,7 @@ fn addPlayer(
 fn beginSim(
     temp_arena: *MemoryArena,
     world_ptr: *world.World,
+    assets: *Assets,
     sim_center_position: WorldPosition,
     sim_bounds: Rectangle3,
     delta_time: f32,
@@ -321,6 +323,7 @@ fn beginSim(
     const sim_region = sim.beginWorldChange(
         temp_arena,
         world_ptr,
+        assets,
         sim_center_position,
         sim_bounds,
         delta_time,
@@ -394,6 +397,7 @@ pub fn doWorldSim(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv
     var world_sim: WorldSim = beginSim(
         &arena,
         work.world_mode.world,
+        work.game_state.assets,
         work.sim_center_position,
         work.sim_bounds,
         work.delta_time,
@@ -619,6 +623,7 @@ pub fn updateAndRenderWorld(
                 work.sim_bounds = sim_bounds;
                 work.world_mode = world_mode;
                 work.delta_time = input.frame_delta_time;
+                work.game_state = state;
 
                 if (true) {
                     shared.platform.addQueueEntry(state.high_priority_queue, &doWorldSim, work);
@@ -634,6 +639,7 @@ pub fn updateAndRenderWorld(
     var world_sim: WorldSim = beginSim(
         state.frame_arena,
         world_mode.world,
+        state.assets,
         world_mode.camera.simulation_center,
         sim_bounds,
         input.frame_delta_time,

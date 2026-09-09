@@ -915,6 +915,7 @@ fn Rectangle2Type(comptime ScalarType: type) type {
         pub const getWidth = Shared.getWidth;
         pub const getHeight = Shared.getHeight;
         pub const getBarycentricPosition = Shared.getBarycentricPosition;
+        pub const pointFromUVW = Shared.pointFromUVW;
         pub const addRadius = Shared.addRadius;
         pub const offsetBy = Shared.offsetBy;
         pub const intersects = Shared.intersects;
@@ -994,6 +995,7 @@ fn Rectangle3Type(comptime ScalarType: type) type {
         pub const getWidth = Shared.getWidth;
         pub const getHeight = Shared.getHeight;
         pub const getBarycentricPosition = Shared.getBarycentricPosition;
+        pub const pointFromUVW = Shared.pointFromUVW;
         pub const addRadius = Shared.addRadius;
         pub const offsetBy = Shared.offsetBy;
         pub const intersects = Shared.intersects;
@@ -1092,8 +1094,23 @@ fn RectangleShared(
                     position_values[axis_index] - min_values[axis_index],
                     max_values[axis_index] - min_values[axis_index],
                 );
-                result.values = result_values;
             }
+            result.values = result_values;
+
+            return result;
+        }
+
+        pub fn pointFromUVW(self: *const Self, uvw: VectorType) VectorType {
+            var result = VectorType.zero();
+            var result_values: [dimension_count]ScalarType = result.values;
+            const uvw_values: [dimension_count]ScalarType = uvw.values;
+            const min_values: [dimension_count]ScalarType = self.min.values;
+            const max_values: [dimension_count]ScalarType = self.max.values;
+
+            for (0..dimension_count) |axis_index| {
+                result_values[axis_index] = lerpf(min_values[axis_index], max_values[axis_index], uvw_values[axis_index]);
+            }
+            result.values = result_values;
 
             return result;
         }

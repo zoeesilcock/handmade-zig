@@ -8,6 +8,7 @@ const entities = @import("entities.zig");
 const brains = @import("brains.zig");
 const particles = @import("particles.zig");
 const config = @import("config.zig");
+const asset = @import("asset.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
@@ -28,7 +29,6 @@ const World = world.World;
 const WorldPosition = world.WorldPosition;
 const Entity = entities.Entity;
 const EntityId = entities.EntityId;
-const EntityReference = entities.EntityReference;
 const TraversableReference = entities.TraversableReference;
 const EntityTraversablePoint = entities.EntityTraversablePoint;
 const EntityFlags = entities.EntityFlags;
@@ -325,6 +325,7 @@ pub fn registerEntity(sim_region: *SimRegion, entity: *Entity) void {
 pub fn beginWorldChange(
     sim_arena: *MemoryArena,
     game_world: *World,
+    assets: *asset.Assets,
     origin: WorldPosition,
     bounds: Rectangle3,
     delta_time: f32,
@@ -368,7 +369,7 @@ pub fn beginWorldChange(
     DebugInterface.debugStruct(@src(), &sim_region.origin);
     DebugInterface.debugEndDataBlock(@src());
 
-    world.ensureRegionIsUnpacked(game_world, min_chunk_position, max_chunk_position, sim_region);
+    world.ensureRegionIsUnpacked(game_world, min_chunk_position, max_chunk_position, sim_region, assets);
 
     return sim_region;
 }

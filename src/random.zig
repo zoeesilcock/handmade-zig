@@ -14,6 +14,14 @@ pub const Series = extern struct {
         return Series{ .state = .{ seed1, seed2, seed3, seed4 } };
     }
 
+    pub fn seedOffset(offset: u32) Series {
+        const seed1 = offset + 78953890;
+        const seed2 = offset + 235498;
+        const seed3 = offset + 893456;
+        const seed4 = offset + 93453080;
+        return Series{ .state = .{ seed1, seed2, seed3, seed4 } };
+    }
+
     pub fn randomInt_4x(self: *Series) simd.U32_4x {
         var result = self.state;
         result ^= result << @as(simd.U32_4x, @splat(13));

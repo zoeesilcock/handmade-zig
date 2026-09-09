@@ -12,6 +12,7 @@ const renderer = @import("renderer.zig");
 const lighting = @import("lighting.zig");
 const file_formats = shared.file_formats;
 const handmade = @import("handmade.zig");
+const random = @import("random.zig");
 const debug_interface = @import("debug_interface.zig");
 const in_game_editor = @import("in_game_editor.zig");
 const std = @import("std");
@@ -51,7 +52,7 @@ const EditableHitTest = in_game_editor.EditableHitTest;
 
 const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const ENTITY_MAX_PIECE_COUNT = 4;
-const ENTITY_MAX_GROUND_COVER = 64;
+const ENTITY_MAX_GROUND_COVER = 128;
 const MAX_CONTROLLER_COUNT = shared.MAX_CONTROLLER_COUNT;
 pub const INTERNAL = @import("build_options").internal;
 var global_config = &@import("config.zig").global_config;
@@ -136,6 +137,21 @@ const GroundCover = extern struct {
     scale: f32,
 };
 
+const GroundCoverSpec = extern struct {
+    cover_type: GroundCoverType = .None,
+    density: u8 = 0,
+    reserved_a: u8 = 0,
+    reserved_b: u8 = 0,
+};
+
+const GroundCoverType = enum(u8) {
+    None,
+    Rocks,
+    Flowers,
+    ThickGrass,
+    GrassSplotch,
+};
+
 pub const Entity = extern struct {
     id: EntityId = .{},
 
@@ -150,12 +166,6 @@ pub const Entity = extern struct {
     camera_velocity_direction: Vector3,
 
     //
-    // This lighting data will get "cleaned" whenever a chunk isn't used for one frame.
-    //
-    lighting: [ENTITY_MAX_PIECE_COUNT][LIGHT_POINTS_PER_CHUNK]LightingPointState,
-    cover: [ENTITY_MAX_GROUND_COVER]GroundCover,
-
-    //
     // Everything below here is not worked out yet.
     //
     tag_count: u32 = 0,
@@ -165,7 +175,6 @@ pub const Entity = extern struct {
 
     position: Vector3 = Vector3.zero(),
     velocity: Vector3 = Vector3.zero(),
-    acceleration: Vector3 = Vector3.zero(), // Do not pack this.
 
     distance_limit: f32 = 0,
 
@@ -174,7 +183,6 @@ pub const Entity = extern struct {
     facing_direction: f32 = 0,
     bob_time: f32 = 0,
     bob_delta_time: f32 = 0,
-    bob_acceleration: f32 = 0, // Do not pack this.
 
     abs_tile_z_delta: i32 = 0,
 
@@ -209,6 +217,21 @@ pub const Entity = extern struct {
     pieces: [ENTITY_MAX_PIECE_COUNT]EntityVisiblePiece,
 
     auto_boost_to: TraversableReference,
+
+    ground_cover_specs: [4]GroundCoverSpec,
+
+    //
+    // Everything below this line isn't actually stored in long-term storage.
+    //
+    discard_everything_after: u64,
+
+    acceleration: Vector3 = Vector3.zero(),
+    bob_acceleration: f32 = 0,
+
+    lighting: [ENTITY_MAX_PIECE_COUNT][LIGHT_POINTS_PER_CHUNK]LightingPointState,
+
+    ground_cover_count: u32,
+    ground_cover: [ENTITY_MAX_GROUND_COVER]GroundCover,
 
     pub fn isDeleted(self: *const Entity) bool {
         return self.hasFlag(EntityFlags.Deleted.toInt());
@@ -405,7 +428,9 @@ pub fn updateAndRenderEntities(
                         entity.movement_mode = .Planted;
                         entity.bob_delta_time = -2;
 
-                        particles.spawnFire(particle_cache, entity.position);
+                        if (opt_assets) |assets| {
+                            stompOnEntity(assets, sim_region, particle_cache, entity, entity.occupying.entity);
+                        }
                     }
 
                     entity.movement_time += 4 * delta_time;
@@ -708,6 +733,10 @@ pub fn updateAndRenderEntities(
                 }
                 TimedBlock.endBlock(@src(), .EntityRenderPieces);
 
+                TimedBlock.beginBlock(@src(), .EntityRenderGroundCover);
+                drawGroundCover(entity, render_group);
+                TimedBlock.endBlock(@src(), .EntityRenderGroundCover);
+
                 TimedBlock.beginBlock(@src(), .EntityRenderHitpoints);
                 drawHitPoints(entity, render_group, entity_ground_point);
                 TimedBlock.endBlock(@src(), .EntityRenderHitpoints);
@@ -762,6 +791,64 @@ pub fn updateAndRenderEntities(
     }
 }
 
+fn stompOnEntity(
+    assets: *Assets,
+    sim_region: *SimRegion,
+    particle_cache: ?*ParticleCache,
+    stomper: *Entity,
+    stompee_id: EntityId,
+) void {
+    if (sim.getEntityById(sim_region, stompee_id)) |stompee| {
+        if (false) {
+            stompee.ground_cover_specs[1].cover_type = .Flowers;
+            stompee.ground_cover_specs[1].density += 8;
+            fillUnpackedEntity(stompee, sim_region, assets);
+        }
+    }
+
+    particles.spawnFire(particle_cache, stomper.position);
+}
+
+fn drawGroundCover(entity: *Entity, render_group: *RenderGroup) void {
+    const assets: *Assets = render_group.assets;
+
+    var cover_index: u32 = 0;
+    while (cover_index < entity.ground_cover_count) : (cover_index += 1) {
+        const cover: *GroundCover = &entity.ground_cover[cover_index];
+
+        const texture_handle: RendererTexture = assets.getBitmap(cover.bitmap);
+        if (texture_handle.isValid()) {
+            const bitmap_info: *HHABitmap = assets.getBitmapInfo(cover.bitmap);
+            const world_dim: Vector2 = renderer_geometry.worldDimFromWorldHeight(bitmap_info, cover.scale);
+            const x_axis: Vector2 = .new(1, 0);
+            const y_axis: Vector2 = .new(0, 1);
+            const align_percentage: Vector2 = .new(0.5, 0);
+
+            const sprite: SpriteValues = .forUpright(
+                render_group,
+                world_dim,
+                align_percentage,
+                x_axis,
+                y_axis,
+                null,
+            );
+
+            render_group.pushSprite(
+                texture_handle,
+                sprite.min_position.plus(entity.position).plus(cover.position),
+                sprite.scaled_x_axis,
+                sprite.scaled_y_axis,
+                cover.color.toColor(1),
+                null,
+                null,
+            );
+        } else {
+            assets.loadBitmap(cover.bitmap);
+            render_group.missing_resource_count += 1;
+        }
+    }
+}
+
 fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, ground_point: Vector3) void {
     if (entity.hit_point_max >= 1) {
         const hit_point_dimension = Vector2.new(0.2, 0.2);
@@ -786,4 +873,76 @@ fn drawHitPoints(entity: *Entity, render_group: *RenderGroup, ground_point: Vect
             hit_position = hit_position.plus(hit_position_delta);
         }
     }
+}
+
+pub fn fillUnpackedEntity(entity: *Entity, sim_region: *SimRegion, assets: *Assets) void {
+    TimedBlock.beginFunction(@src(), .FillPackedEntity);
+    defer TimedBlock.endFunction(@src(), .FillPackedEntity);
+
+    _ = sim_region;
+
+    var cover_series: random.Series = .seedOffset(entity.id.value);
+
+    var cover_index: u32 = 0;
+    var cover_spec_index: u32 = 0;
+    while (cover_spec_index < entity.ground_cover_specs.len) : (cover_spec_index += 1) {
+        const spec: *align(1) GroundCoverSpec = &entity.ground_cover_specs[cover_spec_index];
+
+        if (spec.cover_type != .None) {
+            var match_vector = asset.AssetVector{};
+            var weight_vector = asset.AssetVector{};
+
+            switch (spec.cover_type) {
+                .Rocks => {
+                    weight_vector.e[AssetTagId.Stone.toInt()] = 1;
+                    weight_vector.e[AssetTagId.Cover.toInt()] = 1;
+                    match_vector.e[AssetTagId.Stone.toInt()] = 1;
+                    match_vector.e[AssetTagId.Cover.toInt()] = 1;
+                },
+                .Flowers => {
+                    weight_vector.e[AssetTagId.Flowers.toInt()] = 1;
+                    match_vector.e[AssetTagId.Flowers.toInt()] = 1;
+                },
+                .ThickGrass => {
+                    weight_vector.e[AssetTagId.Cover.toInt()] = 1;
+                    weight_vector.e[AssetTagId.Size.toInt()] = 1;
+                    match_vector.e[AssetTagId.Cover.toInt()] = 1;
+                    match_vector.e[AssetTagId.Size.toInt()] = 1;
+                },
+                .GrassSplotch => {
+                    weight_vector.e[AssetTagId.Cover.toInt()] = 1;
+                    weight_vector.e[AssetTagId.Size.toInt()] = 1;
+                    match_vector.e[AssetTagId.Stone.toInt()] = 1;
+                    match_vector.e[AssetTagId.Size.toInt()] = 0.5;
+                },
+                else => {},
+            }
+            weight_vector.e[AssetTagId.Variant.toInt()] = 1;
+
+            var density_count: u32 = ENTITY_MAX_GROUND_COVER - cover_index;
+            if (density_count > spec.density) {
+                density_count = spec.density;
+            }
+
+            var density_index: u32 = 0;
+            while (density_index < density_count) : (density_index += 1) {
+                var cover: *GroundCover = &entity.ground_cover[cover_index];
+                const random_uvw: Vector3 = .new(
+                    cover_series.randomUnilateral(),
+                    cover_series.randomUnilateral(),
+                    1,
+                );
+
+                match_vector.e[AssetTagId.Variant.toInt()] = cover_series.randomUnilateral();
+                cover.bitmap = assets.getBestMatchBitmap(.Particle, &match_vector, &weight_vector).?;
+                cover.position = entity.collision_volume.pointFromUVW(random_uvw);
+                cover.color = .new(1, 1, 1);
+                cover.scale = 0.3;
+
+                cover_index += 1;
+            }
+        }
+    }
+
+    entity.ground_cover_count = cover_index;
 }

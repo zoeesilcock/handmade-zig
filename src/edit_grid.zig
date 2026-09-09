@@ -84,7 +84,7 @@ pub const EditGrid = struct {
         self.base_position = chunkPositionFromTilePositionV3(gen, self.min_tile, null);
 
         const change_rect: Rectangle3 = self.room_dim.addRadius(self.tile_dimension.scaledTo(1));
-        self.region = sim.beginWorldChange(arena, gen.world, self.base_position, change_rect, 0);
+        self.region = sim.beginWorldChange(arena, gen.world, gen.assets, self.base_position, change_rect, 0);
 
         self.tiles = arena.pushArray(
             @intCast(gen_math.getTotalVolume(self.tile_count)),
