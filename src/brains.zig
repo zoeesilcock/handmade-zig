@@ -356,8 +356,10 @@ fn executeBrainHero(
                     if (opt_state) |state| {
                         var match_vector = asset.AssetVector{};
                         match_vector.e[asset.AssetTagId.Bloop.toInt()] = 1;
+                        match_vector.e[asset.AssetTagId.ChannelIndex.toInt()] = 0;
                         var weight_vector = asset.AssetVector{};
                         weight_vector.e[asset.AssetTagId.Bloop.toInt()] = 1;
+                        weight_vector.e[asset.AssetTagId.ChannelIndex.toInt()] = 1;
 
                         if (state.assets.getBestMatchSound(.Audio, &match_vector, &weight_vector)) |bloop_id| {
                             _ = state.audio_state.playSound(bloop_id);

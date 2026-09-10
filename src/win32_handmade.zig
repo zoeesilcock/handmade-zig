@@ -2110,8 +2110,34 @@ pub export fn wWinMain(
                 .safety_bytes = 0,
             };
 
-            sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
-            sound_output.safety_bytes = @intFromFloat(@as(f32, @floatFromInt(sound_output.secondary_buffer_size)) / game_update_hz / 3.0);
+            sound_output.secondary_buffer_size =
+                sound_output.samples_per_second *
+                sound_output.bytes_per_sample;
+
+            const expected_sound_bytes_per_frame: u32 =
+                (sound_output.samples_per_second *
+                    sound_output.bytes_per_sample) /
+                @as(u32, @intFromFloat(game_update_hz));
+
+            const original_safety_bytes: u32 = @intFromFloat(
+                @as(f32, @floatFromInt(sound_output.secondary_buffer_size)) /
+                    game_update_hz /
+                    3.0,
+            );
+
+            // Keep at least 40 ms of audio queued ahead of DirectSound. In debug builds this is increased to 150ms
+            // since the current version of the game runs pretty slow in debug builds due to lighting.
+            const minimum_audio_latency_seconds: f32 = if (DEBUG) 0.15 else 0.040;
+            const minimum_audio_latency_bytes: u32 = @intFromFloat(
+                @as(f32, @floatFromInt(sound_output.secondary_buffer_size)) *
+                    minimum_audio_latency_seconds,
+            );
+
+            sound_output.safety_bytes = @max(
+                original_safety_bytes,
+                minimum_audio_latency_bytes -| expected_sound_bytes_per_frame,
+            );
+
             var sound_output_info = SoundOutputInfo{ .output_buffer = undefined };
 
             const max_possible_overrun = 2 * 8 * @sizeOf(u16);
@@ -2297,9 +2323,6 @@ pub export fn wWinMain(
                                 }
 
                                 sound_output_info.byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
-
-                                const expected_sound_bytes_per_frame =
-                                    (sound_output.samples_per_second * sound_output.bytes_per_sample) / @as(u32, @intFromFloat(game_update_hz));
 
                                 const seconds_left_until_flip = target_seconds_per_frame - from_begin_to_audio_seconds;
                                 var expected_bytes_until_flip: std.os.windows.DWORD = expected_sound_bytes_per_frame;

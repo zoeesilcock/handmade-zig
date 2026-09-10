@@ -17,8 +17,12 @@ pub const SoundI16 = struct {
     channel_count: u32,
     samples: []i16,
 
+    pub fn getTotalSampleCount(self: SoundI16) u32 {
+        return self.channel_count * self.sample_count;
+    }
+
     pub fn getTotalSoundSize(self: SoundI16) u32 {
-        return self.channel_count * self.sample_count * @sizeOf(i16);
+        return self.getTotalSampleCount() * @sizeOf(i16);
     }
 
     pub fn pushSound(arena: *MemoryArena, sample_count: u32, channel_count: u32) SoundI16 {
@@ -27,8 +31,8 @@ pub const SoundI16 = struct {
             .channel_count = channel_count,
             .samples = undefined,
         };
-        const size: u32 = result.getTotalSoundSize();
-        result.samples = arena.pushArray(size, i16, null, @src())[0..size];
+        const count: u32 = result.getTotalSampleCount();
+        result.samples = arena.pushArray(count, i16, null, @src())[0..count];
         return result;
     }
 

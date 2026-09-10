@@ -354,7 +354,12 @@ pub const AudioState = struct {
                 const r: I32_4x = @intFromFloat(source1[sample_index]);
                 const lr0: I32_4x = @shuffle(i32, l, r, I32_4x{ 0, -1, 1, -2 });
                 const lr1: I32_4x = @shuffle(i32, l, r, I32_4x{ 2, -3, 3, -4 });
-                const s01: @Vector(8, i16) = @truncate(std.simd.join(lr0, lr1));
+                const values = std.simd.join(lr0, lr1);
+                const clamped = @min(
+                    @max(values, @as(@Vector(8, i32), @splat(std.math.minInt(i16)))),
+                    @as(@Vector(8, i32), @splat(std.math.maxInt(i16))),
+                );
+                const s01: @Vector(8, i16) = @intCast(clamped);
 
                 sample_out[sample_index] = s01;
             }
