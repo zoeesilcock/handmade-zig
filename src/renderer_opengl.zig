@@ -9,6 +9,7 @@ const math = @import("math.zig");
 const sort = @import("sort.zig");
 const debug_interface = @import("debug_interface.zig");
 const handmade = @import("handmade.zig");
+const image = @import("image.zig");
 const std = @import("std");
 
 pub const GL_NUM_EXTENSIONS = 0x821D;
@@ -207,6 +208,7 @@ const INTERNAL = shared.INTERNAL;
 
 const ALLOW_GPU_SRGB = false;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
+const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
 
 const PlatformRenderer = renderer.PlatformRenderer;
 const RenderCommands = renderer.RenderCommands;
@@ -232,6 +234,7 @@ const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
 const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
+const MipIterator = image.MipIterator;
 
 const debug_color_table = handmade.debug_color_table;
 var global_config = &@import("config.zig").global_config;
@@ -575,20 +578,23 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
     gl.glGenTextures(1, &open_gl.texture_array);
     gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
 
-    platform.optGLTexImage3D.?(
-        GL_TEXTURE_2D_ARRAY,
-        0,
-        open_gl.default_sprite_texture_format,
-        512,
-        512,
-        open_gl.max_texture_count,
-        0,
-        gl.GL_BGRA_EXT,
-        gl.GL_UNSIGNED_BYTE,
-        null,
-    );
+    var mip: MipIterator = .iterateMips(TEXTURE_ARRAY_DIM, TEXTURE_ARRAY_DIM, null);
+    while (mip.isValid()) : (mip.advance()) {
+        platform.optGLTexImage3D.?(
+            GL_TEXTURE_2D_ARRAY,
+            @intCast(mip.level),
+            open_gl.default_sprite_texture_format,
+            mip.image.width,
+            mip.image.height,
+            open_gl.max_texture_count,
+            0,
+            gl.GL_BGRA_EXT,
+            gl.GL_UNSIGNED_BYTE,
+            null,
+        );
+    }
 
-    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR_MIPMAP_NEAREST);
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR);
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1665,6 +1671,22 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(gl.GL_TEXTURE_1D, gl.GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+    gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
+    var min_filter: i32 = gl.GL_LINEAR_MIPMAP_NEAREST;
+    var mag_filter: i32 = gl.GL_LINEAR;
+    if (settings.nearest_texel_filtering) {
+        mag_filter = gl.GL_NEAREST;
+        if (settings.no_mip_maps) {
+            min_filter = gl.GL_NEAREST;
+        } else {
+            min_filter = gl.GL_NEAREST_MIPMAP_NEAREST;
+        }
+    } else if (settings.no_mip_maps) {
+        min_filter = gl.GL_LINEAR;
+    }
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, min_filter);
+    gl.glTexParameteri(GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, mag_filter);
+
     gl.glBindTexture(gl.GL_TEXTURE_1D, 0);
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0);
     gl.glBindTexture(GL_TEXTURE_3D, 0);
@@ -1755,19 +1777,22 @@ pub fn manageTextures(open_gl: *OpenGL, queue: *TextureQueue) void {
                 std.debug.assert(texture_index < open_gl.max_texture_count);
 
                 gl.glBindTexture(GL_TEXTURE_2D_ARRAY, open_gl.texture_array);
-                platform.optGLTexSubImage3D.?(
-                    GL_TEXTURE_2D_ARRAY,
-                    0,
-                    0,
-                    0,
-                    @intCast(texture_index),
-                    texture.values.width,
-                    texture.values.height,
-                    1,
-                    gl.GL_BGRA_EXT,
-                    gl.GL_UNSIGNED_BYTE,
-                    data,
-                );
+                var mip: MipIterator = .iterateMips(texture.values.width, texture.values.height, op.data);
+                while (mip.isValid()) : (mip.advance()) {
+                    platform.optGLTexSubImage3D.?(
+                        GL_TEXTURE_2D_ARRAY,
+                        @intCast(mip.level),
+                        0,
+                        0,
+                        @intCast(texture_index),
+                        mip.image.width,
+                        mip.image.height,
+                        1,
+                        gl.GL_BGRA_EXT,
+                        gl.GL_UNSIGNED_BYTE,
+                        @ptrCast(mip.image.pixels),
+                    );
+                }
             }
 
             gl.glBindTexture(gl.GL_TEXTURE_2D, 0);

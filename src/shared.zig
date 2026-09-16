@@ -22,6 +22,7 @@ const renderer = @import("renderer.zig");
 pub const file_formats = @import("file_formats.zig");
 pub const file_formats_v0 = @import("file_formats_v0.zig");
 pub const asset = @import("asset.zig");
+pub const image = @import("image.zig");
 const audio = @import("audio.zig");
 const cutscene = @import("cutscene.zig");
 const debug = @import("debug.zig");

@@ -520,8 +520,9 @@ fn loadBMP(
         const green_shift_down = @as(u5, @intCast(green_scan.index));
         const blue_shift_down = @as(u5, @intCast(blue_scan.index));
         const alpha_shift_down = @as(u5, @intCast(alpha_scan.index));
+        const size_requested: u32 = @as(u32, @intCast(header.width)) * @as(u32, @intCast(header.height)) * 4;
 
-        if (renderer.beginTextureOp(texture_queue, @intCast(header.width), @intCast(header.height))) |op| {
+        if (renderer.beginTextureOp(texture_queue, size_requested)) |op| {
             texture = renderer.referToTexture(texture_index, @intCast(header.width), @intCast(header.height));
             op.texture = texture;
 

@@ -8,6 +8,7 @@ const renderer = @import("renderer.zig");
 const import = @import("import.zig");
 const handmade = @import("handmade.zig");
 const intrinsics = @import("intrinsics.zig");
+const image = @import("image.zig");
 const file_formats = shared.file_formats;
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
@@ -43,6 +44,8 @@ const TimedBlock = debug_interface.TimedBlock;
 const TextureOp = renderer.TextureOp;
 const RendererTexture = renderer.RendererTexture;
 const ImportGridTags = import.ImportGridTags;
+const ImageU32 = image.ImageU32;
+const MipIterator = image.MipIterator;
 
 pub const AssetTagId = file_formats.AssetTagId;
 pub const ASSET_CATEGORY_COUNT = file_formats.ASSET_CATEGORY_COUNT;
@@ -267,7 +270,7 @@ pub const Assets = struct {
         shared.dlistInit(&assets.special_texture_lru_sentinel);
         shared.dlistInit(&assets.regular_texture_lru_sentinel);
 
-        const op = renderer.beginTextureOp(texture_queue, 1, 1);
+        const op = renderer.beginTextureOp(texture_queue, 4);
         std.debug.assert(op != null);
         op.?.texture = renderer.referToTexture(0, 1, 1);
         @as(*u32, @ptrCast(@alignCast(op.?.data))).* = 0xffffffff;
@@ -684,10 +687,10 @@ pub const Assets = struct {
         }
     }
 
-    fn acquireTextureHandle(self: *Assets, dimension: Vector2u) u32 {
+    fn acquireTextureHandle(self: *Assets, is_special: bool) u32 {
         var opt_replace_sentinel: ?*AssetLRULink = null;
         var result: u32 = 0;
-        if (self.dimensionsRequireSpecialTexture(@intCast(dimension.x()), @intCast(dimension.y()))) {
+        if (is_special) {
             if (self.next_special_texture_handle < self.special_texture_handle_count) {
                 result = renderer.specialTextureIndexFrom(self.next_special_texture_handle);
                 self.next_special_texture_handle += 1;
@@ -737,18 +740,24 @@ pub const Assets = struct {
                     const width = types.safeTruncateUInt32ToUInt16(info.dim[0]);
                     const height = types.safeTruncateUInt32ToUInt16(info.dim[1]);
 
-                    if (renderer.beginTextureOp(self.texture_queue, width, height)) |texture_op| {
+                    const is_special: bool = self.dimensionsRequireSpecialTexture(width, height);
+                    const generate_mip_maps: bool = !is_special;
+                    const top_level_size: u32 = @as(u32, @intCast(width)) * @as(u32, @intCast(height)) * 4;
+                    var size_requested: u32 = top_level_size;
+                    if (generate_mip_maps) {
+                        size_requested = image.getTotalSizeForMIPs(width, height);
+                    }
+
+                    if (renderer.beginTextureOp(self.texture_queue, size_requested)) |texture_op| {
                         const opt_task: ?*shared.TaskWithMemory = handmade.beginTaskWithMemory(self.game_state, false);
 
                         if (opt_task) |task| {
-                            const bitmap_width: u32 = width;
-                            const bitmap_height: u32 = height;
-
-                            const texture_handle: u32 = self.acquireTextureHandle(.new(info.dim[0], info.dim[1]));
+                            const texture_handle: u32 = self.acquireTextureHandle(is_special);
                             asset.handle = .{
-                                .texture_handle = renderer.referToTexture(texture_handle, bitmap_width, bitmap_height),
+                                .texture_handle = renderer.referToTexture(texture_handle, width, height),
                             };
                             texture_op.texture = asset.handle.texture_handle;
+                            texture_op.generate_mip_maps = true;
 
                             const work: *LoadAssetWork = task.arena.pushStruct(
                                 LoadAssetWork,
@@ -759,7 +768,7 @@ pub const Assets = struct {
                             work.asset = asset;
                             work.handle = self.getFileHandleFor(asset.file_index);
                             work.offset = asset.hha.data_offset;
-                            work.size = bitmap_width * bitmap_height * 4;
+                            work.size = top_level_size;
                             work.destination = @ptrCast(texture_op.data);
                             work.final_state = AssetState.Loaded.toInt();
                             work.texture_op = texture_op;
@@ -1202,6 +1211,14 @@ fn doLoadAssetWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callcon
         resulting_state = .Loaded;
     } else {
         memory.zeroSize(work.size, @ptrCast(work.destination));
+    }
+
+    if (work.texture_op != null and work.texture_op.?.generate_mip_maps) {
+        image.generateSequentialMIPs(
+            work.texture_op.?.texture.values.width,
+            work.texture_op.?.texture.values.height,
+            work.texture_op.?.data,
+        );
     }
 
     if (work.texture_op) |texture_op| {

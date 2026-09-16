@@ -7,6 +7,7 @@ const stream = @import("stream.zig");
 const memory = @import("memory.zig");
 const file_formats = shared.file_formats;
 const png = @import("png.zig");
+const image_mod = @import("image.zig");
 const wav = @import("wav.zig");
 const tokenizer_mod = @import("tokenizer.zig");
 const debug_interface = @import("debug_interface.zig");
@@ -47,7 +48,7 @@ const SoundId = file_formats.SoundId;
 const FontId = file_formats.FontId;
 const HHASoundChain = file_formats.HHASoundChain;
 const AssetTagId = file_formats.AssetTagId;
-const ImageU32 = png.ImageU32;
+const ImageU32 = image_mod.ImageU32;
 const SoundI16 = wav.SoundI16;
 const Token = tokenizer_mod.Token;
 const Tokenizer = tokenizer_mod.Tokenizer;
@@ -278,49 +279,14 @@ fn getDownsampleCountForFit(source: ImageU32, max_width: u32, max_height: u32) u
     return result;
 }
 
-fn downsample(source: ImageU32, downsample_count: u32) ImageU32 {
+pub fn downsample(source: ImageU32, downsample_count: u32) ImageU32 {
     var result: ImageU32 = source;
     var downsample_index: u32 = 0;
     while (downsample_index < downsample_count) : (downsample_index += 1) {
-        const width: u32 = result.width / 2;
-        const height: u32 = result.height / 2;
-
-        var dest_pixel: [*]u32 = @ptrCast(result.pixels);
-        var source_row: [*]u32 = @ptrCast(result.pixels);
-
-        var y: u32 = 0;
-        while (y < height) : (y += 1) {
-            var source_pixel0: [*]u32 = source_row;
-            var source_pixel1: [*]u32 = source_row + result.width;
-            var x: u32 = 0;
-            while (x < width) : (x += 1) {
-                var pixel_00: Color = .unpackColorBGRA(source_pixel0[0]);
-                source_pixel0 += 1;
-                var pixel_10: Color = .unpackColorBGRA(source_pixel0[0]);
-                source_pixel0 += 1;
-                var pixel_01: Color = .unpackColorBGRA(source_pixel1[0]);
-                source_pixel1 += 1;
-                var pixel_11: Color = .unpackColorBGRA(source_pixel1[0]);
-                source_pixel1 += 1;
-
-                pixel_00 = math.sRGB255ToLinear1(pixel_00);
-                pixel_10 = math.sRGB255ToLinear1(pixel_10);
-                pixel_01 = math.sRGB255ToLinear1(pixel_01);
-                pixel_11 = math.sRGB255ToLinear1(pixel_11);
-
-                var color: Color = pixel_00.plus(pixel_10).plus(pixel_01).plus(pixel_11).scaledTo(0.25);
-
-                color = math.linear1ToSRGB255(color);
-
-                dest_pixel[0] = Color.packColorBGRA(color);
-                dest_pixel += 1;
-            }
-
-            source_row += result.width * 2;
-        }
-
-        result.width = width;
-        result.height = height;
+        const prev: ImageU32 = result;
+        result.width /= 2;
+        result.height /= 2;
+        image_mod.downsample2x(prev, &result);
     }
 
     return result;
@@ -397,7 +363,7 @@ fn extractImage(
     const result: ImageU32 = .pushImage(temp_arena, one_past_max_x - min_x, one_past_max_y - min_y);
     var dest_pixel: [*]u32 = @ptrCast(result.pixels);
     const one: u32 = if (one_past_max_y > 0) 1 else 0;
-    var source_row: [*]u32 = source_image.pixels.ptr + ((one_past_max_y - one) * source_image.width + min_x);
+    var source_row: [*]u32 = source_image.pixels.? + ((one_past_max_y - one) * source_image.width + min_x);
 
     var y: u32 = 0;
     while (y < result.height) : (y += 1) {
@@ -484,7 +450,7 @@ fn processMultiTileImport(
             var valid_pixel_count: u32 = 0;
             var solid_pixel_count: u32 = 0;
             {
-                var source_row: [*]u32 = image.pixels.ptr +
+                var source_row: [*]u32 = image.pixels.? +
                     (y_index * tile_dimension * image.width + x_index * tile_dimension);
 
                 var y: u32 = 0;

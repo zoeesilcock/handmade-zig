@@ -63,6 +63,7 @@ const TextureOpState = enum(u32) {
 pub const TextureOp = extern struct {
     texture: RendererTexture,
     data: *anyopaque,
+    generate_mip_maps: bool,
     transfer_memory_last_used: u32,
     state: TextureOpState,
 };
@@ -124,6 +125,9 @@ pub const RenderSettings = extern struct {
     multisample_debug: bool = false,
     lighting_disabled: bool = false,
     request_vsync: bool = true,
+
+    nearest_texel_filtering: bool = false,
+    no_mip_maps: bool = false,
 
     pub fn equals(self: *RenderSettings, b: *RenderSettings) bool {
         const type_info = @typeInfo(@TypeOf(self.*));
@@ -1521,11 +1525,10 @@ fn unscaleAndBiasNormal(normal: Vector4) Vector4 {
     );
 }
 
-pub fn beginTextureOp(queue: *TextureQueue, width: u32, height: u32) ?*TextureOp {
+pub fn beginTextureOp(queue: *TextureQueue, size_requested: u32) ?*TextureOp {
     var result: ?*TextureOp = null;
 
     if (queue.op_count < queue.ops.len) {
-        const size_requested: u32 = width * height * 4;
         var size_available: u32 = 0;
 
         var memory_at: u32 = queue.transfer_memory_last_used;

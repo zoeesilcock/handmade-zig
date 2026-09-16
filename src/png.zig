@@ -1,4 +1,5 @@
 const std = @import("std");
+const image = @import("image.zig");
 pub const shared = @import("shared.zig");
 pub const memory = @import("memory.zig");
 pub const stream = @import("stream.zig");
@@ -8,30 +9,10 @@ const Stream = stream.Stream;
 const StreamChunk = stream.Chunk;
 const MemoryArena = memory.MemoryArena;
 const Adler32 = shared.Adler32;
+const ImageU32 = image.ImageU32;
 
 const PNG_HUFFMAN_MAX_BIT_COUNT = 16;
 pub const Signature: [8]u8 = .{ 137, 80, 78, 71, 13, 10, 26, 10 };
-
-pub const ImageU32 = struct {
-    width: u32,
-    height: u32,
-    pixels: []u32,
-
-    pub fn getTotalImageSize(self: ImageU32) u32 {
-        return self.width * self.height * 4;
-    }
-
-    pub fn pushImage(arena: *MemoryArena, width: u32, height: u32) ImageU32 {
-        var result: ImageU32 = .{
-            .width = width,
-            .height = height,
-            .pixels = undefined,
-        };
-        const size: u32 = result.getTotalImageSize();
-        result.pixels = arena.pushArray(size, u32, null, @src())[0..size];
-        return result;
-    }
-};
 
 pub const Header = extern struct {
     signature: [8]u8 align(1),

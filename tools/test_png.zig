@@ -5,6 +5,7 @@ const stream = png.stream;
 const memory = png.memory;
 const math = shared.math;
 const types = shared.types;
+const image_mod = shared.image;
 const c = @cImport({
     @cInclude("stdlib.h");
 });
@@ -13,7 +14,7 @@ const c = @cImport({
 const Buffer = types.Buffer;
 const Stream = stream.Stream;
 const StreamChunk = stream.Chunk;
-const ImageU32 = png.ImageU32;
+const ImageU32 = image_mod.ImageU32;
 const MemoryArena = memory.MemoryArena;
 const PlatformMemoryBlock = shared.PlatformMemoryBlock;
 const Rectangle2i = math.Rectangle2i;
@@ -86,7 +87,7 @@ pub fn thresholdAlpha(color: u32) u32 {
 fn writeBMPImageTopDownRGBA(
     width: u32,
     height: u32,
-    pixels: []u32,
+    pixels: [*]u32,
     output_file_name: []const u8,
     pixel_ops: u32,
     errors: *Stream,
@@ -103,7 +104,7 @@ fn writeBMPImageTopDownRGBA(
     const header_size: u32 = @sizeOf(BitmapHeader) - 10;
     const header: BitmapHeader = .{
         .file_type = 0x4d42,
-        .file_size = header_size + @as(u32, @intCast(pixels.len)),
+        .file_size = header_size + output_pixel_size,
         .reserved1 = 0,
         .reserved2 = 0,
         .bitmap_offset = header_size,
@@ -121,7 +122,7 @@ fn writeBMPImageTopDownRGBA(
     };
 
     const mid_point_y: u32 = @divFloor(@as(u32, @intCast(header.height + 1)), 2);
-    var row0: [*]u32 = pixels.ptr;
+    var row0: [*]u32 = pixels;
     var row1: [*]u32 = row0 + (height - 1) * width;
     var y: u32 = 0;
     while (y < mid_point_y) : (y += 1) {
@@ -175,7 +176,7 @@ fn writeBMPImageTopDownRGBA(
         const writer = &file_writer.interface;
 
         try writer.writeAll(std.mem.asBytes(&header)[0..header_size]);
-        try writer.writeAll(std.mem.sliceAsBytes(pixels));
+        try writer.writeAll(std.mem.sliceAsBytes(pixels[0..output_pixel_size]));
 
         try writer.flush();
     } else |err| {
@@ -443,7 +444,7 @@ pub fn main(init: std.process.Init) !void {
         try writeBMPImageTopDownRGBA(
             image.width,
             image.height,
-            image.pixels,
+            image.pixels.?,
             out_file_name_rgb,
             @intFromEnum(PixelOp.SwapRedAndBlue) | @intFromEnum(PixelOp.Invert), // | @intFromEnum(PixelOp.MultiplyAlpha),
             &error_stream,
@@ -453,7 +454,7 @@ pub fn main(init: std.process.Init) !void {
         try writeBMPImageTopDownRGBA(
             image.width,
             image.height,
-            image.pixels,
+            image.pixels.?,
             out_file_name_alpha,
             @intFromEnum(PixelOp.ReplaceAlpha), // | @intFromEnum(PixelOp.ThresholdAlpha),
             &error_stream,
