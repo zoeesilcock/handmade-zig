@@ -4,7 +4,6 @@ pub const Config = struct {
     Renderer_Camera_UseDebug: bool = false,
     Renderer_Camera_DebugDistance: f32 = 30,
     Renderer_Camera_RoomBased: bool = true,
-    Renderer_Lighting_ShowReflectors: bool = true,
     AI_Familiar_FollowsHero: bool = false,
     Particles_Test: bool = false,
     Particles_ShowGrid: bool = false,
@@ -15,4 +14,6 @@ pub const Config = struct {
     // renderer_opengl.zig.
     Simulation_VisualizeCollisionVolumes: bool = false,
     Simulation_InspectSelectedEntity: bool = true,
+
+    Lighting_ShowProbes: bool = true,
 };

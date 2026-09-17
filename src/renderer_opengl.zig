@@ -656,6 +656,7 @@ const shader_header_code =
 ;
 
 fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: bool, lighting_disabled: bool) void {
+    _ = lighting_disabled;
     var defines: [1024]u8 = undefined;
     const defines_length = shared.formatString(
         defines.len,
@@ -671,7 +672,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_read_srgb))),
             @as(i32, @intCast(@intFromBool(open_gl.shader_sim_tex_write_srgb))),
             @as(i32, @intCast(@intFromBool(depth_peel))),
-            @as(u32, @intCast(@intFromBool(lighting_disabled))),
+            @as(u32, @intCast(@intFromBool(true))), //@as(u32, @intCast(@intFromBool(lighting_disabled))),
         },
     );
     const vertex_code =

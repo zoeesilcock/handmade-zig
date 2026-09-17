@@ -87,6 +87,7 @@ pub const BrainType = enum(u16) {
     // These are special types which are used to mark special entities,
     // but these entities do not get actual brains (the brain ID value is set to 0).
     BrainRoom,
+    BrainLightProbe,
 };
 
 pub const ReservedBrainId = enum(u32) {
@@ -397,6 +398,7 @@ pub fn executeBrain(
             executeBrainHero(opt_state, opt_input, sim_region, brain, delta_time);
         },
         .BrainRoom => {},
+        .BrainLightProbe => {},
         .BrainFamiliar => {
             const parts: *BrainFamiliar = &brain.parts.familiar;
             const opt_head: ?*Entity = parts.head;

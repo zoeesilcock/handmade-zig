@@ -191,13 +191,6 @@ pub export fn updateAndRender(
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_DebugDistance, "Renderer_Camera_DebugDistance");
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_RoomBased, "Renderer_Camera_RoomBased");
             }
-            DebugInterface.debugEndDataBlock(@src());
-            DebugInterface.debugBeginDataBlock(@src(), "Lighting");
-            {
-                DebugInterface.debugUIHUD(@src(), .Lighting);
-                DebugInterface.debugValue(@src(), &global_config.Renderer_Lighting_ShowReflectors, "Renderer_Lighting_ShowReflectors");
-            }
-            DebugInterface.debugEndDataBlock(@src());
         }
         DebugInterface.debugEndDataBlock(@src());
 

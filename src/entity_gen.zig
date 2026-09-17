@@ -325,3 +325,9 @@ fn addFamiliar(region: *SimRegion) void {
     _ = addPiece(entity, .Shadow, 2.5, .zero(), .new(1, 1, 1, shadow_alpha), null);
     _ = addPiece(entity, .Head, 2.5, .zero(), .white(), @intFromEnum(EntityVisiblePieceFlag.BobOffset));
 }
+
+pub fn addLightProbe(region: *SimRegion, position: Vector3) void {
+    var entity = addEntity(region);
+    entity.brain_slot = .forSpecialBrain(.BrainLightProbe);
+    entity.position = position;
+}

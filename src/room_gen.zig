@@ -148,7 +148,8 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
             (tile.relative_index[X] == grid.tile_count[X] - 2 and tile.relative_index[Y] == 1);
         var randomize_top: bool = false;
         var traversable: bool = false;
-        if (on_boundary and !on_connection) {
+        const on_wall: bool = on_boundary and !on_connection;
+        if (on_wall) {
             wall_height = 2;
             color = .newFromSRGB(0.5, 0.2, 0.2, 1);
 
@@ -179,13 +180,14 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
             entity.addTag(.Manmade, 1);
         }
 
-        _ = position.setX(position.x() + 0);
-        _ = position.setY(position.y() + 0);
-        _ = position.setZ(position.z() + 0.5 * grid.series.randomUnilateral());
-
         if (stairwell) {
             _ = position.setZ(position.z() - (t_stair * grid.tile_dimension.z()));
         }
+
+        const basis_position: Vector3 = position;
+        _ = position.setX(position.x() + 0);
+        _ = position.setY(position.y() + 0);
+        _ = position.setZ(position.z() + 0.5 * grid.series.randomUnilateral());
 
         color = .newFromSRGB(0.8, 0.8, 0.8, 1);
         var piece: *EntityVisiblePiece = entity_gen.addPieceV3(
@@ -236,6 +238,11 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
                 );
                 entity_gen.addLamp(grid.region, position, lamp_light);
             }
+        }
+
+        if (!on_wall) {
+            _ = entity_gen.addLightProbe(grid.region, basis_position.plus(.new(0, 0, 0.25 * grid.tile_dimension.z())));
+            _ = entity_gen.addLightProbe(grid.region, basis_position.plus(.new(0, 0, 0.5 * grid.tile_dimension.z())));
         }
     }
 

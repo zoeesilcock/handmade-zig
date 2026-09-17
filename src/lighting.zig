@@ -17,6 +17,7 @@ var global_config = &@import("config.zig").global_config;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
+const Vector3u = math.Vector3u;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const Color3 = math.Color3;
@@ -37,6 +38,7 @@ const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 pub const LIGHT_TEST_ACCUMULATION_COUNT = 1024;
 pub const MAX_LIGHT_EMISSION = 25.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
+pub const LIGHT_LOOKUP_VOXEL_DIM = 128;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
 const SLOW = shared.SLOW;
 
@@ -47,6 +49,58 @@ pub const LightingTextures = extern struct {
     // TODO: Encode this way eventually:
     // light_data0: [LIGHT_DATA_WIDTH]Vector3, // Dx, Dy, Dz
     // light_data1: [LIGHT_DATA_WIDTH]Vector3, // Cr, Cg, Cb
+};
+
+const LightProbeSpatialIndex = extern struct {
+    min_corner: Vector3,
+    inverse_cell_dimension: Vector3,
+    dimension_power_of_1: u32,
+    total_light_count: u32,
+    light_index: [*]u16,
+
+    fn mapIntoGrid(self: *LightProbeSpatialIndex, position: Vector3) Vector3u {
+        _ = self;
+        _ = position;
+        return .zero();
+    }
+
+    fn getCornerLightIndex(self: *LightProbeSpatialIndex, index: Vector3u) *u16 {
+        _ = self;
+        _ = index;
+        return undefined;
+    }
+
+    pub fn addProbeToSpacialIndex(
+        self: *LightProbeSpatialIndex,
+        probe_index: u16,
+        probe_min_position: Vector3,
+        probe_max_position: Vector3,
+    ) void {
+        const min_index: Vector3u = self.mapIntoGrid(probe_min_position);
+        const max_index: Vector3u = self.mapIntoGrid(probe_max_position);
+
+        var z: u32 = min_index.z();
+        while (z <= max_index.z) : (z += 1) {
+            var y: u32 = min_index.y();
+            while (y <= max_index.y) : (y += 1) {
+                var x: u32 = min_index.x();
+                while (x <= max_index.x) : (x += 1) {
+                    // Find out what light is in there to begin with.
+                    const existing_index: *u16 = self.getCornerLightIndex(.new(x, y, z));
+
+                    // If we're the more appropriate lookup, use us instead of it.
+                    if (existing_index.* == 0) {
+                        existing_index.* = probe_index;
+                    } else {
+                        // const probe: *LightProbe = getProbe(solution, existing_index.*);
+                        // if (probe) {
+                        //     existing_index.* = probe_index;
+                        // }
+                    }
+                }
+            }
+        }
+    }
 };
 
 pub const LightingSolution = extern struct {
@@ -90,6 +144,8 @@ pub const LightingSolution = extern struct {
 
     sample_points: [16][16]V3_4x = undefined,
     pattern_name: [*]const u8,
+
+    spatial_probe_index: LightProbeSpatialIndex,
 };
 
 const LightingWork = extern struct {
@@ -703,11 +759,6 @@ fn computeAllLightPropagation(
         total_leaves_tested += work.total_leaves_tested;
     }
 
-    DebugInterface.debugValue(@src(), &total_casts_initiated, "TotalCastsInitiated");
-    DebugInterface.debugValue(@src(), &total_partitions_tested, "TotalPartitionsTested");
-    DebugInterface.debugValue(@src(), &total_partition_leaves_used, "TotalPartitionLeavesUsed");
-    DebugInterface.debugValue(@src(), &total_leaves_tested, "TotalLeavesTested");
-
     var partitions_per_cast: f32 =
         @floatCast(@as(f64, @floatFromInt(total_partitions_tested)) / @as(f64, @floatFromInt(total_casts_initiated)));
     var leaves_per_cast: f32 =
@@ -715,9 +766,23 @@ fn computeAllLightPropagation(
     var partitions_per_leaf: f32 =
         @floatCast(@as(f64, @floatFromInt(total_partitions_tested)) / @as(f64, @floatFromInt(total_leaves_tested)));
 
-    DebugInterface.debugValue(@src(), &partitions_per_cast, "PartitionsPerCast");
-    DebugInterface.debugValue(@src(), &leaves_per_cast, "LeavesPerCast");
-    DebugInterface.debugValue(@src(), &partitions_per_leaf, "PartitionsPerLeaf");
+    DebugInterface.debugBeginDataBlock(@src(), "Lighting");
+    {
+        DebugInterface.debugUIHUD(@src(), .Lighting);
+        DebugInterface.debugValue(@src(), &global_config.Lighting_ShowProbes, "Lighting_ShowProbes");
+
+        DebugInterface.debugValue(@src(), &solution.box_count, "BoxCount");
+        DebugInterface.debugValue(@src(), &solution.point_count, "PointCount");
+
+        DebugInterface.debugValue(@src(), &total_casts_initiated, "TotalCastsInitiated");
+        DebugInterface.debugValue(@src(), &total_partitions_tested, "TotalPartitionsTested");
+        DebugInterface.debugValue(@src(), &total_partition_leaves_used, "TotalPartitionLeavesUsed");
+        DebugInterface.debugValue(@src(), &total_leaves_tested, "TotalLeavesTested");
+        DebugInterface.debugValue(@src(), &partitions_per_cast, "PartitionsPerCast");
+        DebugInterface.debugValue(@src(), &leaves_per_cast, "LeavesPerCast");
+        DebugInterface.debugValue(@src(), &partitions_per_leaf, "PartitionsPerLeaf");
+    }
+    DebugInterface.debugEndDataBlock(@src());
 }
 
 fn splitBox(
@@ -995,10 +1060,6 @@ pub fn lightingTest(
     }
 
     buildSpatialPartitionForLighting(solution);
-
-    DebugInterface.debugValue(@src(), &group.light_box_count, "LightBoxCount");
-    DebugInterface.debugValue(@src(), &solution.box_count, "BoxCount");
-    DebugInterface.debugValue(@src(), &solution.point_count, "PointCount");
 
     computeAllLightPropagation(solution, lighting_queue);
 

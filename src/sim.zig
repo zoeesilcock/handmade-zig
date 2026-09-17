@@ -653,6 +653,10 @@ pub fn isRoom(entity: *Entity) bool {
     return entity.brain_slot.type == @intFromEnum(BrainType.BrainRoom);
 }
 
+pub fn isLightProbe(entity: *Entity) bool {
+    return entity.brain_slot.type == @intFromEnum(BrainType.BrainLightProbe);
+}
+
 pub fn updateCameraForEntityMovement(
     world_ptr: *World,
     sim_region: *SimRegion,

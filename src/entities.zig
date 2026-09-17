@@ -371,6 +371,8 @@ pub fn updateAndRenderEntities(
         }
     }
 
+    var light_probe_count: u32 = 0;
+
     var iterator: EntityIterator = .iterateAllEntities(sim_region);
     while (iterator.entity) |entity| : (iterator.advance()) {
         if (entity.hasFlag(EntityFlags.Active.toInt())) {
@@ -784,11 +786,34 @@ pub fn updateAndRenderEntities(
                             );
                         }
                     }
+
+                    if (sim.isLightProbe(entity)) {
+                        if (global_config.Lighting_ShowProbes) {
+                            //
+                            render_group.pushCube(
+                                render_group.white_texture,
+                                entity.position,
+                                .splat(0.04),
+                                .new(1, 0, 1, 1),
+                                null,
+                                null,
+                                null,
+                                0,
+                            );
+                        }
+                        light_probe_count += 1;
+                    }
                 }
                 TimedBlock.endBlock(@src(), .EntityRender);
             }
         }
     }
+
+    // DebugInterface.debugBeginDataBlock(@src(), "Lighting");
+    // {
+    //     DebugInterface.debugValue(@src(), &light_probe_count, "LightProbeCount");
+    // }
+    // DebugInterface.debugEndDataBlock(@src());
 }
 
 fn stompOnEntity(

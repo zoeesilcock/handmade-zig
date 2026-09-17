@@ -10,6 +10,7 @@ pub const Vector2 = Vector2Type(f32);
 pub const Vector2i = Vector2Type(i32);
 pub const Vector2u = Vector2Type(u32);
 pub const Vector3 = Vector3Type(f32);
+pub const Vector3u = Vector3Type(u32);
 pub const Vector4 = Vector4Type(f32);
 pub const Color3 = Color3Type(f32);
 pub const Color = Color4Type(f32);
