@@ -17,7 +17,7 @@ var global_config = &@import("config.zig").global_config;
 const Vector2 = math.Vector2;
 const Vector3 = math.Vector3;
 const Vector4 = math.Vector4;
-const Vector3u = math.Vector3u;
+const Vector3i = math.Vector3i;
 const Rectangle3 = math.Rectangle3;
 const Color = math.Color;
 const Color3 = math.Color3;
@@ -51,55 +51,85 @@ pub const LightingTextures = extern struct {
     // light_data1: [LIGHT_DATA_WIDTH]Vector3, // Cr, Cg, Cb
 };
 
+const LightProbe = extern struct {
+    position: Vector3,
+    colors: [6]Color3,
+
+    pub fn getLight(self: *LightProbe, normal: Vector3) Vector3 {
+        // TODO: As we try to optimize the lighting, we can definitely make this routine a lot faster. We can probably
+        // just do a 6-way blend and use min/max in SSE to zero out the contribution of the values which are facing in
+        // the opposite direction.
+
+        var uvw: Vector3 = .new(
+            @abs(normal.x()),
+            @abs(normal.y()),
+            @abs(normal.z()),
+        );
+
+        const inverse_normal: f32 = 1 / (uvw.x() + uvw.y() + uvw.z());
+        uvw = uvw.scaledTo(inverse_normal);
+
+        const x_color: Vector3 = if (normal.x() < 0) self.colors[0] else self.colors[1];
+        const y_color: Vector3 = if (normal.y() < 0) self.colors[2] else self.colors[3];
+        const z_color: Vector3 = if (normal.z() < 0) self.colors[4] else self.colors[5];
+
+        const result = x_color.scaledTo(uvw.x()).plus(y_color.scaledTo(uvw.y())).plus(z_color.scaledTo(uvw.z));
+        return result;
+    }
+
+    pub fn accumulate(self: *LightProbe, contribution: f32, source: *LightProbe) void {
+        self.colors[0] += contribution * source.colors[0];
+        self.colors[1] += contribution * source.colors[1];
+        self.colors[2] += contribution * source.colors[2];
+        self.colors[3] += contribution * source.colors[3];
+        self.colors[4] += contribution * source.colors[4];
+        self.colors[5] += contribution * source.colors[5];
+    }
+};
+
+const SpatialIndexMapping = extern struct {
+    cell_coord: Vector3i = .zero(),
+    uvw: Vector3 = .zero(),
+};
+
 const LightProbeSpatialIndex = extern struct {
     min_corner: Vector3,
+    cell_dimension: Vector3,
     inverse_cell_dimension: Vector3,
-    dimension_power_of_1: u32,
+    dimension_power_of_2: Vector3i,
     total_light_count: u32,
     light_index: [*]u16,
 
-    fn mapIntoGrid(self: *LightProbeSpatialIndex, position: Vector3) Vector3u {
-        _ = self;
-        _ = position;
-        return .zero();
+    fn mapIntoGrid(self: *LightProbeSpatialIndex, position: Vector3) SpatialIndexMapping {
+        var result: SpatialIndexMapping = .{};
+        const f_coord: Vector3 = self.inverse_cell_dimension.hadamardProduct(position.minus(self.min_corner));
+        result.cell_coord = f_coord.f32ToI32();
+        result.uvw = f_coord.minus(result.cell_coord.i32ToF32());
+        return result;
     }
 
-    fn getCornerLightIndex(self: *LightProbeSpatialIndex, index: Vector3u) *u16 {
-        _ = self;
-        _ = index;
-        return undefined;
+    fn getSpatialIndexAddress(self: *LightProbeSpatialIndex, cell_coord: Vector3i) u32 {
+        const index: i32 =
+            ((((cell_coord.z() << self.dimension_power_of_2.y()) | self.dimension_power_of_2.y()) | cell_coord.y()) <<
+                self.dimension_power_of_2.x()) | cell_coord.x();
+        return index;
     }
 
-    pub fn addProbeToSpacialIndex(
-        self: *LightProbeSpatialIndex,
-        probe_index: u16,
-        probe_min_position: Vector3,
-        probe_max_position: Vector3,
-    ) void {
-        const min_index: Vector3u = self.mapIntoGrid(probe_min_position);
-        const max_index: Vector3u = self.mapIntoGrid(probe_max_position);
+    fn getCornerLightIndex(self: *LightProbeSpatialIndex, cell_coord: Vector3i) *u16 {
+        const index: i32 = self.getSpatialIndexAddress(cell_coord);
+        std.debug.assert(index < (1 << (self.dimension_power_of_2.x() + self.dimension_power_of_2.y() + self.dimension_power_of_2.z())));
+        const result: *u16 = &self.light_index[index];
+        return result;
+    }
 
-        var z: u32 = min_index.z();
-        while (z <= max_index.z) : (z += 1) {
-            var y: u32 = min_index.y();
-            while (y <= max_index.y) : (y += 1) {
-                var x: u32 = min_index.x();
-                while (x <= max_index.x) : (x += 1) {
-                    // Find out what light is in there to begin with.
-                    const existing_index: *u16 = self.getCornerLightIndex(.new(x, y, z));
+    fn getMinCorner(self: *LightProbeSpatialIndex, cell_coord: Vector3i) Vector3 {
+        return self.min_corner.plus(cell_coord.i32ToF32().hadamardProduct(self.cell_dimension));
+    }
 
-                    // If we're the more appropriate lookup, use us instead of it.
-                    if (existing_index.* == 0) {
-                        existing_index.* = probe_index;
-                    } else {
-                        // const probe: *LightProbe = getProbe(solution, existing_index.*);
-                        // if (probe) {
-                        //     existing_index.* = probe_index;
-                        // }
-                    }
-                }
-            }
-        }
+    fn getCenter(self: *LightProbeSpatialIndex, cell_coord: Vector3i) Vector3 {
+        return self.min_corner.plus(
+            cell_coord.i32ToF32().plus(.new(0.5, 0.5, 0.5)).hadamardProduct(self.cell_dimension),
+        );
     }
 };
 
@@ -146,6 +176,92 @@ pub const LightingSolution = extern struct {
     pattern_name: [*]const u8,
 
     spatial_probe_index: LightProbeSpatialIndex,
+    light_probes: [*]LightProbe,
+
+    pub fn addProbeToSpacialIndex(
+        self: *LightingSolution,
+        spatial_index: *LightProbeSpatialIndex,
+        probe_index: u16,
+        probe_min_position: Vector3,
+        probe_max_position: Vector3,
+    ) void {
+        const this_probe: *LightProbe = self.getProbe(probe_index);
+        const min_index: Vector3i = spatial_index.mapIntoGrid(probe_min_position).cell_coord;
+        const max_index: Vector3i = spatial_index.mapIntoGrid(probe_max_position).cell_coord;
+
+        var z: i32 = min_index.z();
+        while (z <= max_index.z) : (z += 1) {
+            var y: i32 = min_index.y();
+            while (y <= max_index.y) : (y += 1) {
+                var x: i32 = min_index.x();
+                while (x <= max_index.x) : (x += 1) {
+                    const cell_coord: Vector3i = .new(x, y, z);
+                    const cell_center: Vector3 = spatial_index.getCenter(cell_coord);
+
+                    // Find out what light is in there to begin with.
+                    const existing_index: *u16 = spatial_index.getCornerLightIndex(cell_coord);
+
+                    // If we're the more appropriate lookup, use us instead of it.
+                    if (existing_index.* == 0) {
+                        existing_index.* = probe_index;
+                    } else {
+                        const existing_probe: *LightProbe = self.getProbe(existing_index.*);
+                        const distance_to_this_sq: f32 = this_probe.position.minus(cell_center).lengthSquared();
+                        const distance_to_existing_sq: f32 = existing_probe.position.minus(cell_center).lengthSquared();
+                        if (distance_to_existing_sq > distance_to_this_sq) {
+                            existing_index.* = probe_index;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn getProbe(self: *LightingSolution, index: u16) *LightProbe {
+        const result: *LightProbe = &self.light_probes[index];
+        return result;
+    }
+
+    pub fn getProbeFromCell(self: *LightingSolution, cell_position: Vector3i) *LightProbe {
+        const result: *LightProbe = self.getProbe(self.spatial_probe_index.getCornerLightIndex(cell_position));
+        return result;
+    }
+
+    pub fn getProbeLightingForCell(
+        self: *LightingSolution,
+        position: Vector3i,
+        uvw: Vector3,
+    ) LightProbe {
+        const p0: *LightProbe = self.getProbeFromCell(position);
+        const p1: *LightProbe = self.getProbeFromCell(position.plus(.new(1, 0, 0)));
+        const p2: *LightProbe = self.getProbeFromCell(position.plus(.new(0, 1, 0)));
+        const p3: *LightProbe = self.getProbeFromCell(position.plus(.new(0, 0, 1)));
+        const p4: *LightProbe = self.getProbeFromCell(position.plus(.new(0, 1, 1)));
+        const p5: *LightProbe = self.getProbeFromCell(position.plus(.new(1, 1, 0)));
+        const p6: *LightProbe = self.getProbeFromCell(position.plus(.new(1, 0, 1)));
+        const p7: *LightProbe = self.getProbeFromCell(position.plus(.new(1, 1, 1)));
+
+        var c: LightProbe = .{};
+        c.accumulate((1 - uvw.x()) * (1 - uvw.y()) * (1 - uvw.z()), p0);
+        c.accumulate((uvw.x()) * (1 - uvw.y()) * (1 - uvw.z()), p1);
+        c.accumulate((1 - uvw.x()) * (uvw.y()) * (1 - uvw.z()), p2);
+        c.accumulate((1 - uvw.x()) * (1 - uvw.y()) * (uvw.z()), p3);
+        c.accumulate((1 - uvw.x()) * (uvw.y()) * (uvw.z()), p4);
+        c.accumulate((uvw.x()) * (uvw.y()) * (1 - uvw.z()), p5);
+        c.accumulate((uvw.x()) * (1 - uvw.y()) * (uvw.z()), p6);
+        c.accumulate((uvw.x()) * (uvw.y()) * (uvw.z()), p7);
+
+        return c;
+    }
+
+    pub fn getProbeLightingForWorldPosition(
+        self: *LightingSolution,
+        spatial_index: *LightProbeSpatialIndex,
+        position: Vector3,
+    ) LightProbe {
+        const mapping = spatial_index.mapIntoGrid(position);
+        return self.getProbeLightingForCell(mapping.cell_coord, mapping.uvw);
+    }
 };
 
 const LightingWork = extern struct {

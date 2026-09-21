@@ -31,13 +31,10 @@ const SimRegion = sim.SimRegion;
 const BoxSurfaceMask = box_mod.BoxSurfaceMask;
 const BoxSurfaceIndex = box_mod.BoxSurfaceIndex;
 const GenVolume = gen_math.GenVolume;
-const GenVector3 = gen_math.GenVector3;
+const Vector3i = math.Vector3i;
 const AssetTagId = file_formats.AssetTagId;
 const Assets = asset.Assets;
 
-const X = 0;
-const Y = 1;
-const Z = 2;
 pub const INTERNAL = @import("build_options").internal;
 
 pub const WorldGenerator = struct {
@@ -102,7 +99,7 @@ const GenOptionType = enum(u32) {
 };
 
 pub const GenRoomSpec = struct {
-    required_dimension: GenVector3,
+    required_dimension: Vector3i,
     stone_floor: bool,
     outdoors: bool,
     apron: ?*GenApronSpec,
@@ -353,7 +350,7 @@ fn setSize(gen: *WorldGenerator, spec: *GenRoomSpec, dim_x: i32, dim_y: i32, opt
     _ = gen;
     const dim_z: i32 = opt_dim_z orelse 1;
 
-    spec.required_dimension = .{ dim_x, dim_y, dim_z };
+    spec.required_dimension = .new(dim_x, dim_y, dim_z);
 }
 
 fn addOption(gen: *WorldGenerator, room: *GenRoom, option_type: GenOptionType) *GenOption {
@@ -553,7 +550,7 @@ fn placeRoomAlongEdge(
 ) bool {
     std.debug.assert(connection.couldGoDirectionByMask(base_room, box_mod.getSurfaceMaskFromSurface(surface_index)));
 
-    var add_radius: GenVector3 = .{ 0, 0, 0 };
+    var add_radius: Vector3i = .zero();
     var relative_x_axis: u32 = 0;
     var relative_y_axis: u32 = 0;
     var relative_z_axis: u32 = 0;
@@ -588,14 +585,14 @@ fn placeRoomAlongEdge(
             relative_y_axis = 1;
             relative_z_axis = 2;
             relative_z_axis_min = true;
-            add_radius = .{ 1, 1, 0 };
+            add_radius = .new(1, 1, 0);
         },
         .Up => {
             relative_x_axis = 0;
             relative_y_axis = 1;
             relative_z_axis = 2;
             relative_z_axis_min = false;
-            add_radius = .{ 1, 1, 0 };
+            add_radius = .new(1, 1, 0);
         },
     }
 
@@ -606,30 +603,37 @@ fn placeRoomAlongEdge(
     var test_volume: GenVolume = .zero();
 
     if (relative_z_axis_min) {
-        test_volume.max[relative_z_axis] = base_room.volume.min[relative_z_axis] - 1;
-        test_volume.min[relative_z_axis] =
-            test_volume.max[relative_z_axis] - spec.required_dimension[relative_z_axis] + 1;
+        test_volume.max.setValueAt(relative_z_axis, base_room.volume.min.valueAt(relative_z_axis) - 1);
+        test_volume.min.setValueAt(
+            relative_z_axis,
+            test_volume.max.valueAt(relative_z_axis) - spec.required_dimension.valueAt(relative_z_axis) + 1,
+        );
     } else {
-        test_volume.min[relative_z_axis] = base_room.volume.max[relative_z_axis] + 1;
-        test_volume.max[relative_z_axis] =
-            test_volume.min[relative_z_axis] + spec.required_dimension[relative_z_axis] - 1;
+        test_volume.min.setValueAt(relative_z_axis, base_room.volume.max.valueAt(relative_z_axis) + 1);
+        test_volume.max.setValueAt(
+            relative_z_axis,
+            test_volume.min.valueAt(relative_z_axis) + spec.required_dimension.valueAt(relative_z_axis) - 1,
+        );
     }
 
-    const min_relative_x: i32 = base_room.volume.min[relative_x_axis];
-    const max_relative_x: i32 = base_room.volume.max[relative_x_axis];
+    const min_relative_x: i32 = base_room.volume.min.valueAt(relative_x_axis);
+    const max_relative_x: i32 = base_room.volume.max.valueAt(relative_x_axis);
 
-    const min_relative_y: i32 = base_room.volume.min[relative_y_axis];
-    const max_relative_y: i32 = base_room.volume.max[relative_y_axis];
+    const min_relative_y: i32 = base_room.volume.min.valueAt(relative_y_axis);
+    const max_relative_y: i32 = base_room.volume.max.valueAt(relative_y_axis);
 
     var relative_y: i32 = min_relative_y;
     while (room.generation_index != generation_index and relative_y <= max_relative_y) {
-        test_volume.min[relative_y_axis] = relative_y;
-        test_volume.max[relative_y_axis] = relative_y + spec.required_dimension[relative_y_axis] - 1;
+        test_volume.min.setValueAt(relative_y_axis, relative_y);
+        test_volume.max.setValueAt(relative_y_axis, relative_y + spec.required_dimension.valueAt(relative_y_axis) - 1);
 
         var relative_x: i32 = min_relative_x;
         while (relative_x < max_relative_x) {
-            test_volume.min[relative_x_axis] = relative_x;
-            test_volume.max[relative_x_axis] = relative_x + spec.required_dimension[relative_x_axis] - 1;
+            test_volume.min.setValueAt(relative_x_axis, relative_x);
+            test_volume.max.setValueAt(
+                relative_x_axis,
+                relative_x + spec.required_dimension.valueAt(relative_x_axis) - 1,
+            );
 
             const delta_x: i32 = getDeltaLongAxisForClearPlacement(
                 gen,
@@ -643,18 +647,24 @@ fn placeRoomAlongEdge(
                 room.volume = test_volume;
 
                 var door: GenVolume = base_room.volume.getIntersectionWith(&room.volume);
-                const door_edge_x: i32 = @divFloor(door.min[relative_x_axis] + door.max[relative_x_axis], 2);
-                door.min[relative_x_axis] = door_edge_x;
-                door.max[relative_x_axis] = door_edge_x;
+                const door_edge_x: i32 = @divFloor(
+                    door.min.valueAt(relative_x_axis) + door.max.valueAt(relative_x_axis),
+                    2,
+                );
+                door.min.setValueAt(relative_x_axis, door_edge_x);
+                door.max.setValueAt(relative_x_axis, door_edge_x);
 
-                const door_edge_y: i32 = @divFloor(door.min[relative_y_axis] + door.max[relative_y_axis], 2);
-                door.min[relative_y_axis] = door_edge_y;
-                door.max[relative_y_axis] = door_edge_y;
+                const door_edge_y: i32 = @divFloor(
+                    door.min.valueAt(relative_y_axis) + door.max.valueAt(relative_y_axis),
+                    2,
+                );
+                door.min.setValueAt(relative_y_axis, door_edge_y);
+                door.max.setValueAt(relative_y_axis, door_edge_y);
 
-                const min_door: i32 = door.min[relative_z_axis];
-                const max_door: i32 = door.max[relative_z_axis];
-                door.min[relative_z_axis] = max_door;
-                door.max[relative_z_axis] = min_door;
+                const min_door: i32 = door.min.valueAt(relative_z_axis);
+                const max_door: i32 = door.max.valueAt(relative_z_axis);
+                door.min.setValueAt(relative_z_axis, max_door);
+                door.max.setValueAt(relative_z_axis, min_door);
 
                 door = door.addRadius(add_radius);
 
@@ -707,13 +717,13 @@ fn layout(gen: *WorldGenerator, start_at_room: *GenRoom) void {
 
     const first_room: *GenRoom = start_at_room;
     var volume: GenVolume = .{
-        .min = .{ 0, 0, 0 },
-        .max = .{ 0, 0, 0 },
+        .min = .new(0, 0, 0),
+        .max = .new(0, 0, 0),
     };
 
-    volume.max[X] = volume.min[X] + first_room.spec.required_dimension[X] - 1;
-    volume.max[Y] = volume.min[Y] + first_room.spec.required_dimension[Y] - 1;
-    volume.max[Z] = volume.min[Z] + first_room.spec.required_dimension[Z] - 1;
+    _ = volume.max.setX(volume.min.x() + first_room.spec.required_dimension.x() - 1);
+    _ = volume.max.setY(volume.min.y() + first_room.spec.required_dimension.y() - 1);
+    _ = volume.max.setZ(volume.min.z() + first_room.spec.required_dimension.z() - 1);
     placeRoomInVolume(first_room, volume);
     first_room.generation_index = generation_index;
     stack.pushConnectedRooms(first_room, generation_index);
@@ -1072,9 +1082,9 @@ pub fn createWorldNew(world: *World, assets: *Assets) GenResult {
 
     result.initial_camera_position = edit_grid.chunkPositionFromTilePosition(
         gen,
-        @divFloor(hero_room.min[X] + hero_room.max[X], 2),
-        @divFloor(hero_room.min[Y] + hero_room.max[Y], 2) - 4,
-        @divFloor(hero_room.min[Z] + hero_room.max[Z], 2),
+        @divFloor(hero_room.min.x() + hero_room.max.x(), 2),
+        @divFloor(hero_room.min.y() + hero_room.max.y(), 2) - 4,
+        @divFloor(hero_room.min.z() + hero_room.max.z(), 2),
         null,
     );
 

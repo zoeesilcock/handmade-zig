@@ -28,7 +28,7 @@ const GenRoom = world_gen.GenRoom;
 const GenRoomSpec = world_gen.GenRoomSpec;
 const GenApron = world_gen.GenApron;
 const GenApronSpec = world_gen.GenApronSpec;
-const GenVector3 = gen_math.GenVector3;
+const Vector3i = math.Vector3i;
 const GenVolume = gen_math.GenVolume;
 const GenRoomConnection = world_gen.GenRoomConnection;
 const GenConnection = world_gen.GenConnection;
@@ -42,42 +42,38 @@ const EditTile = edit_grid.EditTile;
 const EditTileContents = edit_grid.EditTileContents;
 const GenRoomTileQuery = edit_grid.GenRoomTileQuery;
 
-const X = 0;
-const Y = 1;
-const Z = 2;
-
 const GenTileVolume = struct {
     base_position: WorldPosition,
-    tile_coord: GenVector3,
+    tile_coord: Vector3i,
 };
 
 pub fn getCameraOffsetZForCloseup() f32 {
     return 6;
 }
 
-fn getCameraOffsetZForDimension(dimension: GenVector3, camera_behaviour: *u32) f32 {
+fn getCameraOffsetZForDimension(dimension: Vector3i, camera_behaviour: *u32) f32 {
     var x_distance: f32 = 13;
-    if (dimension[X] == 12) {
+    if (dimension.x() == 12) {
         x_distance = 14;
-    } else if (dimension[X] == 13) {
+    } else if (dimension.x() == 13) {
         x_distance = 15;
-    } else if (dimension[X] == 14) {
+    } else if (dimension.x() == 14) {
         x_distance = 16;
         camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerX);
-    } else if (dimension[X] >= 15) {
+    } else if (dimension.x() >= 15) {
         x_distance = 17;
         camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerX);
     }
 
     var y_distance: f32 = 13;
-    if (dimension[Y] == 10) {
+    if (dimension.y() == 10) {
         y_distance = 15;
-    } else if (dimension[Y] == 11) {
+    } else if (dimension.y() == 11) {
         y_distance = 17;
-    } else if (dimension[Y] == 12) {
+    } else if (dimension.y() == 12) {
         y_distance = 19;
         camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerY);
-    } else if (dimension[Y] >= 13) {
+    } else if (dimension.y() >= 13) {
         y_distance = 21;
         camera_behaviour.* |= @intFromEnum(CameraBehavior.ViewPlayerY);
     }
@@ -103,7 +99,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
 
     var tile: EditTile = grid.iterateAsPlanarTiles();
     while (tile.isValid()) : (tile.advance()) {
-        const abs_index: GenVector3 = tile.getAbsoluteIndex();
+        const abs_index: Vector3i = tile.getAbsoluteIndex();
         var position: Vector3 = tile.getMinZCenterPosition();
 
         var contents: *EditTileContents = tile.getTile().?;
@@ -127,8 +123,8 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
                 {
                     stairwell = true;
                     t_stair =
-                        @as(f32, @floatFromInt(abs_index[Y] - connection.volume.min[Y] + 1)) /
-                        @as(f32, @floatFromInt(connection.volume.max[Y] - connection.volume.min[Y] + 2));
+                        @as(f32, @floatFromInt(abs_index.y() - connection.volume.min.y() + 1)) /
+                        @as(f32, @floatFromInt(connection.volume.max.y() - connection.volume.min.y() + 2));
                 }
                 on_connection = true;
             }
@@ -145,7 +141,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
 
         const place_tree: bool = spec.outdoors and !on_connection and on_edge;
         const on_lamp: bool = !spec.outdoors and
-            (tile.relative_index[X] == grid.tile_count[X] - 2 and tile.relative_index[Y] == 1);
+            (tile.relative_index.x() == grid.tile_count.x() - 2 and tile.relative_index.y() == 1);
         var randomize_top: bool = false;
         var traversable: bool = false;
         const on_wall: bool = on_boundary and !on_connection;
@@ -251,7 +247,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
         const query: GenRoomTileQuery = grid.findPlaceToPutEntityGroup(entity_group);
         std.debug.assert(query.found);
 
-        var tile_position: GenVector3 = query.volume.min;
+        var tile_position: Vector3i = query.volume.min;
 
         var opt_pending_entity: ?*GenEntity = entity_group.first_entity;
         while (opt_pending_entity) |pending_entity| : (opt_pending_entity = pending_entity.next) {
@@ -270,7 +266,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
                 placed_entity.addTag(tag.tag_id, tag.value);
             }
 
-            tile_position = gen_math.plusV3(tile_position, gen_math.getDirection(pending_entity.next_direction_used));
+            tile_position = tile_position.plus(gen_math.getDirection(pending_entity.next_direction_used));
         }
     }
 
@@ -289,7 +285,7 @@ pub fn generateRoom(gen: *WorldGenerator, room: *GenRoom) void {
 
     if (spec.apron) |apron_spec| {
         const apron: *GenApron = world_gen.genApron(gen, apron_spec);
-        apron.volume = room.volume.addRadius(.{ 8, 8, 0 });
+        apron.volume = room.volume.addRadius(.new(8, 8, 0));
     }
 }
 

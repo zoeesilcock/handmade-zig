@@ -1,79 +1,67 @@
 const std = @import("std");
 const box = @import("box.zig");
+const math = @import("math.zig");
 
-const X = 0;
-const Y = 1;
-const Z = 2;
+pub const Vector3i = math.Vector3i;
 
-pub const GenVector3 = [3]i32;
-
-pub fn plusV3(a: GenVector3, b: GenVector3) GenVector3 {
-    const result: GenVector3 = .{
-        a[X] + b[X],
-        a[Y] + b[Y],
-        a[Z] + b[Z],
-    };
-    return result;
-}
-
-pub fn getDirection(direction: box.BoxSurfaceIndex) GenVector3 {
-    var result: GenVector3 = .{ 0, 0, 0 };
+pub fn getDirection(direction: box.BoxSurfaceIndex) Vector3i {
+    var result: Vector3i = .zero();
     const params: box.BoxSurfaceParams = box.getBoxSurfaceParams(@intFromEnum(direction));
-    result[params.axis_index] = if (params.positive > 0) 1 else -1;
+    result.setValueAt(params.axis_index, if (params.positive > 0) 1 else -1);
     return result;
 }
 
-pub fn getTotalVolume(dimension: GenVector3) i32 {
-    return dimension[X] * dimension[Y] * dimension[Z];
+pub fn getTotalVolume(dimension: Vector3i) i32 {
+    return dimension.x() * dimension.y() * dimension.z();
 }
 
-pub fn isInArrayBounds(bounds: GenVector3, position: GenVector3) bool {
+pub fn isInArrayBounds(bounds: Vector3i, position: Vector3i) bool {
     const result: bool =
-        (position[X] >= 0 and position[X] < bounds[X]) and
-        (position[Y] >= 0 and position[Y] < bounds[Y]) and
-        (position[Z] >= 0 and position[Z] < bounds[Z]);
+        (position.x() >= 0 and position.x() < bounds.x()) and
+        (position.y() >= 0 and position.y() < bounds.y()) and
+        (position.z() >= 0 and position.z() < bounds.z());
     return result;
 }
 
 /// Volumes include their min and their max. They are inclusive on both ends of the interval.
 pub const GenVolume = struct {
-    min: GenVector3,
-    max: GenVector3,
+    min: Vector3i,
+    max: Vector3i,
 
     pub fn zero() GenVolume {
         return .{
-            .min = .{ 0, 0, 0 },
-            .max = .{ 0, 0, 0 },
+            .min = .zero(),
+            .max = .zero(),
         };
     }
 
     pub fn infinityVolume() GenVolume {
         return .{
-            .min = .{
+            .min = .new(
                 std.math.minInt(i32) / 4,
                 std.math.minInt(i32) / 4,
                 std.math.minInt(i32) / 4,
-            },
-            .max = .{
+            ),
+            .max = .new(
                 std.math.maxInt(i32) / 4,
                 std.math.maxInt(i32) / 4,
                 std.math.maxInt(i32) / 4,
-            },
+            ),
         };
     }
 
     pub fn invalidInfinityVolume() GenVolume {
         return .{
-            .min = .{
+            .min = .new(
                 std.math.maxInt(i32) / 4,
                 std.math.maxInt(i32) / 4,
                 std.math.maxInt(i32) / 4,
-            },
-            .max = .{
+            ),
+            .max = .new(
                 std.math.minInt(i32) / 4,
                 std.math.minInt(i32) / 4,
                 std.math.minInt(i32) / 4,
-            },
+            ),
         };
     }
 
@@ -91,12 +79,12 @@ pub const GenVolume = struct {
         };
     }
 
-    pub fn getDimension(self: GenVolume) GenVector3 {
-        return .{
-            self.max[X] - self.min[X] + 1,
-            self.max[Y] - self.min[Y] + 1,
-            self.max[Z] - self.min[Z] + 1,
-        };
+    pub fn getDimension(self: GenVolume) Vector3i {
+        return .new(
+            self.max.x() - self.min.x() + 1,
+            self.max.y() - self.min.y() + 1,
+            self.max.z() - self.min.z() + 1,
+        );
     }
 
     pub fn getMaxVolumeFor(min: GenVolume, max: GenVolume) GenVolume {
@@ -123,31 +111,31 @@ pub const GenVolume = struct {
 
         var dimension: u32 = 0;
         while (dimension < 3) : (dimension += 1) {
-            result.min[dimension] = @max(self.min[dimension], other.min[dimension]);
-            result.max[dimension] = @min(self.max[dimension], other.max[dimension]);
+            result.min.setValueAt(dimension, @max(self.min.valueAt(dimension), other.min.valueAt(dimension)));
+            result.max.setValueAt(dimension, @min(self.max.valueAt(dimension), other.max.valueAt(dimension)));
         }
 
         return result;
     }
 
     pub fn isMinimumDimensionsForRoom(self: GenVolume) bool {
-        const dimension: GenVector3 = self.getDimension();
+        const dimension: Vector3i = self.getDimension();
 
         const result =
-            dimension[X] >= 4 and
-            dimension[Y] >= 4 and
-            dimension[Z] >= 1;
+            dimension.x() >= 4 and
+            dimension.y() >= 4 and
+            dimension.z() >= 1;
 
         return result;
     }
 
     pub fn hasVolume(self: GenVolume) bool {
-        const dimension: GenVector3 = self.getDimension();
+        const dimension: Vector3i = self.getDimension();
 
         const result =
-            dimension[X] > 0 and
-            dimension[Y] > 0 and
-            dimension[Z] > 0;
+            dimension.x() > 0 and
+            dimension.y() > 0 and
+            dimension.z() > 0;
 
         return result;
     }
@@ -166,27 +154,27 @@ pub const GenVolume = struct {
 
     pub fn isInVolume(self: *GenVolume, x: i32, y: i32, z: i32) bool {
         const result: bool =
-            (x >= self.min[X] and x <= self.max[X]) and
-            (y >= self.min[Y] and y <= self.max[Y]) and
-            (z >= self.min[Z] and z <= self.max[Z]);
+            (x >= self.min.x() and x <= self.max.x()) and
+            (y >= self.min.y() and y <= self.max.y()) and
+            (z >= self.min.z() and z <= self.max.z());
 
         return result;
     }
 
-    pub fn isInVolumeV3(self: *GenVolume, position: GenVector3) bool {
-        return self.isInVolume(position[X], position[Y], position[Z]);
+    pub fn isInVolumeV3(self: *GenVolume, position: Vector3i) bool {
+        return self.isInVolume(position.x(), position.y(), position.z());
     }
 
-    pub fn addRadius(self: *GenVolume, radius: GenVector3) GenVolume {
+    pub fn addRadius(self: *GenVolume, radius: Vector3i) GenVolume {
         var result = self.*;
 
-        result.min[0] -= radius[0];
-        result.min[1] -= radius[1];
-        result.min[2] -= radius[2];
+        _ = result.min.setX(result.min.x() - radius.x());
+        _ = result.min.setY(result.min.y() - radius.y());
+        _ = result.min.setZ(result.min.z() - radius.z());
 
-        result.max[0] += radius[0];
-        result.max[1] += radius[1];
-        result.max[2] += radius[2];
+        _ = result.max.setX(result.max.x() + radius.x());
+        _ = result.max.setY(result.max.y() + radius.y());
+        _ = result.max.setZ(result.max.z() + radius.z());
 
         return result;
     }

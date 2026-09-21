@@ -13,7 +13,7 @@ const std = @import("std");
 // Types.
 const Vector3 = math.Vector3;
 const Rectangle3 = math.Rectangle3;
-const GenVector3 = gen_math.GenVector3;
+const Vector3i = math.Vector3i;
 const GenVolume = gen_math.GenVolume;
 const Entity = entities.Entity;
 const GenEntity = entity_gen.GenEntity;
@@ -26,9 +26,6 @@ const MemoryArena = memory.MemoryArena;
 const TemporaryMemory = memory.TemporaryMemory;
 const BoxSurfaceIndex = box.BoxSurfaceIndex;
 
-const X = 0;
-const Y = 1;
-const Z = 2;
 const BOX_SURFACE_INDEX_COUNT = box.BOX_SURFACE_INDEX_COUNT;
 
 pub const GenRoomTileQuery = struct {
@@ -45,8 +42,8 @@ pub const EditGrid = struct {
     temp_memory: TemporaryMemory,
     arena: *MemoryArena,
 
-    tile_count: GenVector3,
-    min_tile: GenVector3,
+    tile_count: Vector3i,
+    min_tile: Vector3i,
     tile_dimension: Vector3,
     base_position: WorldPosition,
 
@@ -72,9 +69,9 @@ pub const EditGrid = struct {
         self.series = &gen.world.game_entropy;
 
         const room_dimensions: Vector3 = .new(
-            @as(f32, @floatFromInt(self.tile_count[X])) * self.tile_dimension.x(),
-            @as(f32, @floatFromInt(self.tile_count[Y])) * self.tile_dimension.y(),
-            @as(f32, @floatFromInt(self.tile_count[Z])) * self.tile_dimension.z(),
+            @as(f32, @floatFromInt(self.tile_count.x())) * self.tile_dimension.x(),
+            @as(f32, @floatFromInt(self.tile_count.y())) * self.tile_dimension.y(),
+            @as(f32, @floatFromInt(self.tile_count.z())) * self.tile_dimension.z(),
         );
 
         const min_room_position: Vector3 = .zero();
@@ -111,12 +108,12 @@ pub const EditGrid = struct {
         var result: GenRoomTileQuery = .{};
 
         var z: i32 = 0;
-        while (z < self.tile_count[2]) : (z += 1) {
+        while (z < self.tile_count.z()) : (z += 1) {
             var y: i32 = 0;
-            while (y < self.tile_count[1]) : (y += 1) {
+            while (y < self.tile_count.y()) : (y += 1) {
                 var x: i32 = 0;
-                while (x < self.tile_count[0]) : (x += 1) {
-                    const tile_position: GenVector3 = .{ x, y, z };
+                while (x < self.tile_count.x()) : (x += 1) {
+                    const tile_position: Vector3i = .new(x, y, z);
                     if (self.recursiveOpenTileSearch(tile_position, entity_group.first_entity.?)) {
                         result.found = true;
                         result.volume.min = tile_position;
@@ -133,7 +130,7 @@ pub const EditGrid = struct {
 
     pub fn recursiveOpenTileSearch(
         self: *EditGrid,
-        tile_position: GenVector3,
+        tile_position: Vector3i,
         entity: *GenEntity,
     ) bool {
         var result: bool = false;
@@ -149,9 +146,9 @@ pub const EditGrid = struct {
                         const direction_index: BoxSurfaceIndex = @enumFromInt(direction);
                         const mask: u32 = box.getSurfaceMaskFromSurface(direction_index);
                         if ((entity.allowed_directions_for_next & mask) != 0) {
-                            const next_tile_delta: GenVector3 = gen_math.getDirection(direction_index);
+                            const next_tile_delta: Vector3i = gen_math.getDirection(direction_index);
                             if (self.recursiveOpenTileSearch(
-                                gen_math.plusV3(tile_position, next_tile_delta),
+                                tile_position.plus(next_tile_delta),
                                 next_entity,
                             )) {
                                 entity.next_direction_used = direction_index;
@@ -173,23 +170,23 @@ pub const EditGrid = struct {
         return result;
     }
 
-    pub fn getTileFromV3(self: *EditGrid, position: GenVector3) ?*EditTileContents {
-        return self.getTile(position[X], position[Y], position[Z]);
+    pub fn getTileFromV3(self: *EditGrid, position: Vector3i) ?*EditTileContents {
+        return self.getTile(position.x(), position.y(), position.z());
     }
 
     pub fn getTile(self: *EditGrid, x_index: i32, y_index: i32, z_index: i32) ?*EditTileContents {
         var result: ?*EditTileContents = null;
-        const dimension: GenVector3 = self.tile_count;
+        const dimension: Vector3i = self.tile_count;
 
         if (x_index >= 0 and
             y_index >= 0 and
             z_index >= 0 and
-            x_index < dimension[X] and
-            y_index < dimension[Y] and
-            z_index < dimension[Z])
+            x_index < dimension.x() and
+            y_index < dimension.y() and
+            z_index < dimension.z())
         {
             result = @ptrCast(self.tiles +
-                @as(usize, @intCast((dimension[0] * dimension[1] * z_index) + (dimension[0] * y_index) + x_index)));
+                @as(usize, @intCast((dimension.x() * dimension.y() * z_index) + (dimension.x() * y_index) + x_index)));
         }
 
         return result;
@@ -210,17 +207,17 @@ pub const EditGrid = struct {
 
 pub const EditTile = struct {
     grid: *EditGrid,
-    relative_index: GenVector3 = .{ 0, 0, 0 },
+    relative_index: Vector3i = .zero(),
 
     pub fn isValid(self: *EditTile) bool {
         return gen_math.isInArrayBounds(self.grid.tile_count, self.relative_index);
     }
 
     pub fn advance(self: *EditTile) void {
-        self.relative_index[X] += 1;
-        if (self.relative_index[X] >= self.grid.tile_count[X]) {
-            self.relative_index[X] = 0;
-            self.relative_index[Y] += 1;
+        _ = self.relative_index.setX(self.relative_index.x() + 1);
+        if (self.relative_index.x() >= self.grid.tile_count.x()) {
+            _ = self.relative_index.setX(0);
+            _ = self.relative_index.setY(self.relative_index.y() + 1);
         }
     }
 
@@ -234,9 +231,9 @@ pub const EditTile = struct {
 
     pub fn getTotalVolume(self: *EditTile) Rectangle3 {
         var min_position: Vector3 = .new(
-            @floatFromInt(self.relative_index[X]),
-            @floatFromInt(self.relative_index[Y]),
-            @floatFromInt(self.relative_index[Z]),
+            @floatFromInt(self.relative_index.x()),
+            @floatFromInt(self.relative_index.y()),
+            @floatFromInt(self.relative_index.z()),
         );
         var max_position: Vector3 = min_position.plus(.new(1, 1, 1));
 
@@ -256,16 +253,16 @@ pub const EditTile = struct {
         return self.grid.getTileFromV3(self.relative_index);
     }
 
-    pub fn getAbsoluteIndex(self: *EditTile) GenVector3 {
-        return gen_math.plusV3(self.grid.min_tile, self.relative_index);
+    pub fn getAbsoluteIndex(self: *EditTile) Vector3i {
+        return self.grid.min_tile.plus(self.relative_index);
     }
 
     pub fn isOnEdge(self: *EditTile) bool {
-        const position: GenVector3 = self.relative_index;
-        return position[X] == 0 or
-            position[X] == (self.grid.tile_count[X] - 1) or
-            position[Y] == 0 or
-            position[Y] == (self.grid.tile_count[Y] - 1);
+        const position: Vector3i = self.relative_index;
+        return position.x() == 0 or
+            position.x() == (self.grid.tile_count.x() - 1) or
+            position.y() == 0 or
+            position.y() == (self.grid.tile_count.y() - 1);
     }
 };
 
@@ -293,8 +290,8 @@ pub fn chunkPositionFromTilePosition(
 
 pub fn chunkPositionFromTilePositionV3(
     gen: *WorldGenerator,
-    abs_tile: GenVector3,
+    abs_tile: Vector3i,
     opt_additional_offset: ?Vector3,
 ) WorldPosition {
-    return chunkPositionFromTilePosition(gen, abs_tile[X], abs_tile[Y], abs_tile[Z], opt_additional_offset);
+    return chunkPositionFromTilePosition(gen, abs_tile.x(), abs_tile.y(), abs_tile.z(), opt_additional_offset);
 }

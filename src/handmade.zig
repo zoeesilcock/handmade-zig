@@ -191,6 +191,7 @@ pub export fn updateAndRender(
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_DebugDistance, "Renderer_Camera_DebugDistance");
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_RoomBased, "Renderer_Camera_RoomBased");
             }
+            DebugInterface.debugEndDataBlock(@src());
         }
         DebugInterface.debugEndDataBlock(@src());
 

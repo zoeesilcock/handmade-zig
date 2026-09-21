@@ -11,6 +11,7 @@ pub const Vector2i = Vector2Type(i32);
 pub const Vector2u = Vector2Type(u32);
 pub const Vector3 = Vector3Type(f32);
 pub const Vector3u = Vector3Type(u32);
+pub const Vector3i = Vector3Type(i32);
 pub const Vector4 = Vector4Type(f32);
 pub const Color3 = Color3Type(f32);
 pub const Color = Color4Type(f32);
@@ -219,6 +220,38 @@ fn Vector3Type(comptime ScalarType: type) type {
             self.values[1] = value.values[0];
             self.values[2] = value.values[1];
             return self;
+        }
+
+        pub fn u32ToF32(self: *Vector3u) Vector3 {
+            return .new(
+                @floatFromInt(self.x()),
+                @floatFromInt(self.y()),
+                @floatFromInt(self.z()),
+            );
+        }
+
+        pub fn f32ToU32(self: *Vector3) Vector3u {
+            return .new(
+                @floor(self.x()),
+                @floor(self.y()),
+                @floor(self.z()),
+            );
+        }
+
+        pub fn i32ToF32(self: *Vector3i) Vector3 {
+            return .new(
+                @floatFromInt(self.x()),
+                @floatFromInt(self.y()),
+                @floatFromInt(self.z()),
+            );
+        }
+
+        pub fn f32ToI32(self: *Vector3) Vector3i {
+            return .new(
+                @floor(self.x()),
+                @floor(self.y()),
+                @floor(self.z()),
+            );
         }
 
         pub fn toVector4(vector3: Vector3, in_w: ScalarType) Vector4 {

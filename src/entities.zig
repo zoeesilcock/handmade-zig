@@ -809,11 +809,11 @@ pub fn updateAndRenderEntities(
         }
     }
 
-    // DebugInterface.debugBeginDataBlock(@src(), "Lighting");
-    // {
-    //     DebugInterface.debugValue(@src(), &light_probe_count, "LightProbeCount");
-    // }
-    // DebugInterface.debugEndDataBlock(@src());
+    DebugInterface.debugBeginDataBlock(@src(), "Lighting");
+    {
+        DebugInterface.debugValue(@src(), &light_probe_count, "LightProbeCount");
+    }
+    DebugInterface.debugEndDataBlock(@src());
 }
 
 fn stompOnEntity(
