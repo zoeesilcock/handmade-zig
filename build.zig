@@ -6,6 +6,7 @@ const FORCE_RELEASE_MODE = true;
 const PACKAGE_DEFAULT = .Game;
 const INTERNAL_DEFAULT = true;
 const SLOW_DEFAULT = true;
+const EMIT_ASM = false;
 
 const Package = enum {
     All,
@@ -48,15 +49,15 @@ pub fn build(b: *std.Build) void {
 
     // Add the packages.
     if (package == .All or package == .Game or package == .Executable) {
-        addExecutable(b, build_options, target, optimize, package, internal);
+        addExecutable(b, build_options, target, optimize, internal);
     }
 
     if (package == .All or package == .Game or package == .Library) {
-        addLibrary(b, build_options, target, optimize, package);
+        addLibrary(b, build_options, target, optimize);
     }
 
     if (package == .All or package == .Game or package == .RendererLibrary or package == .RendererTest) {
-        addRendererLibrary(b, build_options, target, optimize, package);
+        addRendererLibrary(b, build_options, target, optimize);
     }
 
     if (package == .All or package == .AssetBuilder) {
@@ -98,7 +99,6 @@ fn addExecutable(
     build_options: *std.Build.Step.Options,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    package: Package,
     internal: bool,
 ) void {
     const exe = b.addExecutable(.{
@@ -121,7 +121,7 @@ fn addExecutable(
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     exe.root_module.addImport("win32", zigwin32);
 
-    if (package == .All) {
+    if (EMIT_ASM) {
         // Emit generated assembly of the main executable.
         const assembly_file = b.addInstallFile(exe.getEmittedAsm(), "bin/handmade.asm");
         b.getInstallStep().dependOn(&assembly_file.step);
@@ -141,7 +141,6 @@ fn addLibrary(
     build_options: *std.Build.Step.Options,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    package: Package,
 ) void {
     const lib_handmade = b.addLibrary(.{
         .name = "handmade",
@@ -173,7 +172,7 @@ fn addLibrary(
     const check = b.step("check", "Check if lib compiles");
     check.dependOn(&lib_check.step);
 
-    if (package == .All) {
+    if (EMIT_ASM) {
         // Emit generated assembly of the library.
         const lib_assembly_file = b.addInstallFile(lib_handmade.getEmittedAsm(), "bin/handmade-dll.asm");
         b.getInstallStep().dependOn(&lib_assembly_file.step);
@@ -187,7 +186,6 @@ fn addRendererLibrary(
     build_options: *std.Build.Step.Options,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    package: Package,
 ) void {
     const lib_renderer = b.addLibrary(.{
         .name = "win32-handmade-opengl",
@@ -207,7 +205,7 @@ fn addRendererLibrary(
     const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
     lib_renderer.root_module.addImport("win32", zigwin32);
 
-    if (package == .All) {
+    if (EMIT_ASM) {
         // Emit generated assembly of the library.
         const lib_assembly_file = b.addInstallFile(lib_renderer.getEmittedAsm(), "bin/win32-handmade-opengl-dll.asm");
         b.getInstallStep().dependOn(&lib_assembly_file.step);

@@ -20,9 +20,8 @@ const RendererTexture = renderer.RendererTexture;
 const RenderEntryLightingTransfer = renderer.RenderEntryLightingTransfer;
 const LoadedFont = asset.LoadedFont;
 const LightingTextures = lighting.LightingTextures;
-const LightingPointState = renderer.LightingPointState;
 const LightingBox = renderer.LightingBox;
-const LIGHT_DATA_WIDTH = lighting.LIGHT_DATA_WIDTH;
+const MAX_LIGHT_BOX_COUNT = lighting.MAX_LIGHT_BOX_COUNT;
 
 pub const UsedBitmapDim = struct {
     size: Vector2 = undefined,
@@ -138,8 +137,6 @@ pub fn pushBitmapWithDim(
             .new(min_uv.x(), max_uv.y()),
             vertex_color,
             null,
-            null,
-            null,
         );
     }
 }
@@ -239,7 +236,6 @@ pub fn pushCubeBitmapId(
     color: Color,
     opt_uv_layout: ?renderer.CubeUVLayout,
     opt_emission: ?f32,
-    opt_light_store_in: ?*LightingPointState,
 ) void {
     if (opt_id) |id| {
         const texture_handle: RendererTexture = group.assets.getBitmap(id);
@@ -251,7 +247,6 @@ pub fn pushCubeBitmapId(
                 color,
                 opt_uv_layout,
                 opt_emission,
-                opt_light_store_in,
                 null,
             );
         } else {
@@ -267,7 +262,6 @@ pub fn pushCubeLight(
     radius: Vector3,
     color: Color3,
     emission: f32,
-    opt_light_store: ?*LightingPointState,
 ) void {
     group.pushCube(
         group.white_texture,
@@ -276,7 +270,6 @@ pub fn pushCubeLight(
         color.toColor(0),
         null,
         emission,
-        opt_light_store,
         null,
     );
 }
@@ -292,7 +285,7 @@ pub fn pushLighting(
 
     group.lighting_enabled = true;
     group.light_bounds = lighting_bounds;
-    group.light_boxes = temp_arena.pushArray(LIGHT_DATA_WIDTH, LightingBox, null, @src());
+    group.light_boxes = temp_arena.pushArray(MAX_LIGHT_BOX_COUNT, LightingBox, null, @src());
     group.light_point_index = 1;
 
     if (group.pushRenderElement(RenderEntryLightingTransfer)) |dest| {

@@ -185,6 +185,7 @@ pub export fn updateAndRender(
             DebugInterface.debugValue(@src(), &render_commands.settings.lighting_disabled, "Renderer_LightingDisabled");
             DebugInterface.debugValue(@src(), &render_commands.settings.nearest_texel_filtering, "Renderer_NearestTexelFiltering");
             DebugInterface.debugValue(@src(), &render_commands.settings.no_mip_maps, "Renderer_NoMipMaps");
+            DebugInterface.debugValue(@src(), &render_commands.settings.request_vsync, "Renderer_RequestVSync");
             DebugInterface.debugBeginDataBlock(@src(), "Camera");
             {
                 DebugInterface.debugValue(@src(), &global_config.Renderer_Camera_UseDebug, "Renderer_Camera_UseDebug");

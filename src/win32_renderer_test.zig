@@ -221,7 +221,6 @@ fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
                 null,
                 null,
                 null,
-                null,
             );
 
             const ground_position: Vector3 = position.plus(.new(0, 0, z_radius));
@@ -244,7 +243,6 @@ fn pushSimpleScene(group: *RenderGroup, scene: *TestScene) void {
                     .new(0.5, 0.5, wall_radius),
                     color,
                     element.cube_uv_layout,
-                    null,
                     null,
                     null,
                 );

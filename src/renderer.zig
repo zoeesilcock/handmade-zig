@@ -49,6 +49,7 @@ const LIGHT_LOOKUP_X = shared.LIGHT_LOOKUP_X;
 const LIGHT_LOOKUP_Y = shared.LIGHT_LOOKUP_Y;
 const LIGHT_LOOKUP_Z = shared.LIGHT_LOOKUP_Z;
 const MAX_LIGHT_POWER = shared.MAX_LIGHT_POWER;
+const MAX_LIGHT_BOX_COUNT = lighting.MAX_LIGHT_BOX_COUNT;
 
 pub const LIGHT_POINTS_PER_CHUNK = 24;
 pub const TEXTURE_ARRAY_DIM = 512.0;
@@ -107,14 +108,12 @@ pub const PlatformRenderer = extern struct {
 
 pub const TexturedVertex = extern struct {
     position: Vector4,
-    light_uv: Vector2,
+    normal: Vector3,
     uv: Vector2, // TODO: Convert this down to 8-bit?
     color: u32, // Packed RGBA in memory order (ABGR in little endian).
-
-    // TODO: Doesn't need to be per-vertex - move this into its own per-primitive buffer.
-    normal: Vector3,
-    light_index: u16 = 0,
     texture_index: u16 = 0,
+    emission: u8 = 0,
+    reserved: u8 = 0,
 };
 
 pub const RenderSettings = extern struct {
@@ -177,20 +176,15 @@ pub const RendererTexture = extern union {
 };
 
 pub const LightingBox = extern struct {
-    storage: [*]LightingPointState,
     position: Vector3,
     radius: Vector3,
     reflection_color: Color3,
-    transparency: f32,
     emission: f32,
-    light_index: [7]u16 = @splat(0),
+    texture_index: u32,
+
+    // TODO: Do we really want in-line spatial hierarchy like this? It seems like it could just be out-of-band.
     child_count: u16 = 0,
     first_child_index: u16,
-};
-
-pub const LightingPointState = extern struct {
-    last_pps: Color3,
-    last_direction: Vector3,
 };
 
 pub const RenderCommands = extern struct {
@@ -632,16 +626,11 @@ pub const RenderGroup = extern struct {
         uv3_in: Vector2,
         c3: u32,
         opt_emission: ?f32,
-        opt_light_count: ?u16,
-        opt_light_index: ?u16,
     ) void {
-        _ = opt_light_count;
-
         const emission = opt_emission orelse 0;
         std.debug.assert(emission >= 0);
         std.debug.assert(emission <= 1);
 
-        const light_index = opt_light_index orelse 0;
         const commands: *RenderCommands = self.commands;
         const entry: ?*RenderEntryTexturedQuads = self.current_quads;
         std.debug.assert(entry != null);
@@ -697,28 +686,24 @@ pub const RenderGroup = extern struct {
         vert[0].normal = n3;
         vert[0].uv = uv3;
         vert[0].color = c3;
-        vert[0].light_index = light_index;
         vert[0].texture_index = texture_index;
 
         vert[1].position = p0;
         vert[1].normal = n0;
         vert[1].uv = uv0;
         vert[1].color = c0;
-        vert[1].light_index = light_index;
         vert[1].texture_index = texture_index;
 
         vert[2].position = p2;
         vert[2].normal = n2;
         vert[2].uv = uv2;
         vert[2].color = c2;
-        vert[2].light_index = light_index;
         vert[2].texture_index = texture_index;
 
         vert[3].position = p1;
         vert[3].normal = n1;
         vert[3].uv = uv1;
         vert[3].color = c1;
-        vert[3].light_index = light_index;
         vert[3].texture_index = texture_index;
 
         const base_index: u32 = vertex_index - entry.?.vertex_array_offset;
@@ -749,8 +734,6 @@ pub const RenderGroup = extern struct {
         uv3: Vector2,
         c3: Color,
         opt_emission: ?f32,
-        opt_light_count: ?u16,
-        opt_light_index: ?u16,
     ) void {
         self.pushQuad(
             texture,
@@ -767,8 +750,6 @@ pub const RenderGroup = extern struct {
             uv3,
             c3.scaledTo(255).packColorRGBA(),
             opt_emission,
-            opt_light_count,
-            opt_light_index,
         );
     }
 
@@ -847,8 +828,6 @@ pub const RenderGroup = extern struct {
             uv3,
             c3,
             null,
-            null,
-            null,
         );
     }
 
@@ -869,7 +848,6 @@ pub const RenderGroup = extern struct {
                     null,
                     null,
                     null,
-                    null,
                 );
             } else {
                 self.assets.loadBitmap(id);
@@ -886,20 +864,29 @@ pub const RenderGroup = extern struct {
         color: Color,
         opt_uv_layout: ?CubeUVLayout,
         opt_emission: ?f32,
-        opt_light_store_in: ?*LightingPointState,
         opt_z_bias: ?f32,
     ) void {
         const uv_layout: CubeUVLayout = opt_uv_layout orelse .default;
         const emission = opt_emission orelse 0;
-        var opt_light_store: ?*LightingPointState = opt_light_store_in;
         const z_bias: f32 = opt_z_bias orelse 0;
 
         std.debug.assert(emission >= 0);
         std.debug.assert(emission <= 1);
 
         if (self.getCurrentQuads(6, texture) != null) {
-            if (!self.lighting_enabled) {
-                opt_light_store = null;
+            // TODO: Do we want lighting boxes to work with the entity cache, too?
+            if (self.lighting_enabled) {
+                std.debug.assert(self.light_box_count < MAX_LIGHT_BOX_COUNT);
+                const box: *LightingBox = &self.light_boxes[self.light_box_count];
+                self.light_box_count += 1;
+
+                box.position = position;
+                box.radius = radius;
+                box.reflection_color = color.rgb();
+                box.emission = emission;
+                box.texture_index = texture.values.index;
+                box.child_count = 0;
+                box.first_child_index = 0;
             }
 
             const nx: f32 = position.x() - radius.x();
@@ -927,42 +914,6 @@ pub const RenderGroup = extern struct {
             const bottom_color = top_color;
             const ct = top_color;
             const cb = top_color;
-
-            var light_count: u16 = 0;
-            var light_index: u16 = 0;
-            if (opt_light_store) |light_store| {
-                const min_corner: Vector3 = .new(nx, ny, nz);
-                const max_corner: Vector3 = .new(px, py, pz);
-                const cube_bounds: Rectangle3 = .fromMinMax(min_corner, max_corner);
-
-                if (cube_bounds.intersects(&self.light_bounds)) {
-                    light_count = LIGHT_POINTS_PER_CHUNK / 6;
-                    light_index = self.light_point_index;
-                    std.debug.assert(light_index != 0);
-                    self.light_point_index += LIGHT_POINTS_PER_CHUNK;
-
-                    std.debug.assert(self.light_point_index <= LIGHT_DATA_WIDTH);
-
-                    var light_box: [*]LightingBox = self.light_boxes + self.light_box_count;
-                    self.light_box_count += 1;
-                    std.debug.assert(self.light_box_count <= LIGHT_DATA_WIDTH);
-
-                    light_box[0].position = max_corner.plus(min_corner).scaledTo(0.5);
-                    light_box[0].radius = max_corner.minus(min_corner).scaledTo(0.5);
-                    light_box[0].transparency = 0;
-                    light_box[0].emission = emission;
-                    light_box[0].reflection_color = color.rgb();
-                    light_box[0].storage = @ptrCast(light_store);
-                    light_box[0].light_index[0] = light_index;
-                    light_box[0].light_index[1] = light_index + 4;
-                    light_box[0].light_index[2] = light_index + 8;
-                    light_box[0].light_index[3] = light_index + 12;
-                    light_box[0].light_index[4] = light_index + 16;
-                    light_box[0].light_index[5] = light_index + 20;
-                    light_box[0].light_index[6] = light_index + 24;
-                    light_box[0].child_count = 0;
-                }
-            }
 
             const bot_face: u32 = ((uv_layout.encoding >> 2) & 0x3);
             const top_face: u32 = ((uv_layout.encoding >> 14) & 0x3);
@@ -1020,10 +971,7 @@ pub const RenderGroup = extern struct {
                 mid_t3_2,
                 ct,
                 opt_emission,
-                light_count,
-                light_index,
             );
-            light_index += light_count;
 
             // Positive X.
             self.pushQuadUnpackedColors(
@@ -1041,10 +989,7 @@ pub const RenderGroup = extern struct {
                 mid_t2_0,
                 ct,
                 opt_emission,
-                light_count,
-                light_index,
             );
-            light_index += light_count;
 
             // Negative Y.
             self.pushQuadUnpackedColors(
@@ -1062,10 +1007,7 @@ pub const RenderGroup = extern struct {
                 mid_t3_3,
                 ct,
                 opt_emission,
-                light_count,
-                light_index,
             );
-            light_index += light_count;
 
             // Positive Y.
             self.pushQuadUnpackedColors(
@@ -1083,10 +1025,7 @@ pub const RenderGroup = extern struct {
                 mid_t2_1,
                 ct,
                 opt_emission,
-                light_count,
-                light_index,
             );
-            light_index += light_count;
 
             // Negative Z.
             self.pushQuadUnpackedColors(
@@ -1104,10 +1043,7 @@ pub const RenderGroup = extern struct {
                 bot_t3,
                 bottom_color,
                 opt_emission,
-                light_count,
-                light_index,
             );
-            light_index += light_count;
 
             // Positive Z.
             self.pushQuadUnpackedColors(
@@ -1125,10 +1061,7 @@ pub const RenderGroup = extern struct {
                 top_t3,
                 top_color,
                 opt_emission,
-                light_count,
-                light_index,
             );
-            light_index += light_count;
         }
     }
 
@@ -1165,8 +1098,6 @@ pub const RenderGroup = extern struct {
                 .new(min_position.x(), max_position.y(), z, 0),
                 .new(min_uv.x(), max_uv.y()),
                 packed_color,
-                null,
-                null,
                 null,
             );
         }
@@ -1329,8 +1260,6 @@ pub const RenderGroup = extern struct {
                 .new(min_uv.x(), max_uv.y()),
                 vertex_color,
                 null,
-                null,
-                null,
             );
         }
     }
@@ -1374,8 +1303,6 @@ pub const RenderGroup = extern struct {
                 min_x_max_y,
                 .new(min_uv.x(), max_uv.y()),
                 vertex_color,
-                null,
-                null,
                 null,
             );
         }

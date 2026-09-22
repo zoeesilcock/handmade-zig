@@ -275,7 +275,6 @@ const OpenGLProgramCommon = extern struct {
     vert_normal_id: i32 = 0,
     vert_uv_id: i32 = 0,
     vert_color_id: i32 = 0,
-    vert_light_index_id: i32 = 0,
     vert_texture_index_id: i32 = 0,
 
     sampler_count: u32,
@@ -562,10 +561,10 @@ pub fn init(open_gl: *OpenGL, info: Info, framebuffer_supports_sRGB: bool) void 
         platform.optGLGenBuffers.?(1, &open_gl.screen_fill_vertex_buffer);
         platform.optGLBindBuffer.?(GL_ARRAY_BUFFER, open_gl.screen_fill_vertex_buffer);
         var vertices: [4]TexturedVertex = [_]TexturedVertex{
-            .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .light_uv = .zero(), .color = 0xffffffff },
-            .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .light_uv = .zero(), .color = 0xffffffff },
-            .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .light_uv = .zero(), .color = 0xffffffff },
-            .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .light_uv = .zero(), .color = 0xffffffff },
+            .{ .position = .new(-1, 1, 0, 1), .normal = .zero(), .uv = .new(0, 1), .color = 0xffffffff },
+            .{ .position = .new(-1, -1, 0, 1), .normal = .zero(), .uv = .new(0, 0), .color = 0xffffffff },
+            .{ .position = .new(1, 1, 0, 1), .normal = .zero(), .uv = .new(1, 1), .color = 0xffffffff },
+            .{ .position = .new(1, -1, 0, 1), .normal = .zero(), .uv = .new(1, 0), .color = 0xffffffff },
         };
         platform.optGLBufferData.?(
             GL_ARRAY_BUFFER,
@@ -687,7 +686,6 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\in vec2 VertUV;
         \\in vec4 VertColor;
         \\
-        \\in int VertLightIndex;
         \\in int VertTextureIndex;
         \\
         \\smooth out vec2 FragUV;
@@ -696,7 +694,6 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\smooth out vec3 WorldPosition;
         \\smooth out vec3 WorldNormal;
         \\
-        \\flat out int FragLightIndex;
         \\flat out int FragTextureIndex;
         \\
         \\void main(void)
@@ -721,7 +718,6 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\  WorldPosition = ZVertex.xyz;
         \\  WorldNormal = VertN;
         \\
-        \\  FragLightIndex = VertLightIndex;
         \\  FragTextureIndex = VertTextureIndex;
         \\}
     ;
@@ -780,11 +776,12 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\smooth in vec3 WorldPosition;
         \\smooth in vec3 WorldNormal;
         \\
-        \\flat in int FragLightIndex;
         \\flat in int FragTextureIndex;
         \\
         \\out vec4 BlendUnitColor;
         \\
+        \\#if LIGHTING_DISABLED
+        \\#else
         \\vec4 RunningSum;
         \\void FetchAndSum(int LightIndex)
         \\{
@@ -829,6 +826,7 @@ fn compileZBiasProgram(open_gl: *OpenGL, program: *ZBiasProgram, depth_peel: boo
         \\
         \\  return(Result.rgb);
         \\}
+        \\#endif
         \\
         \\void main(void)
         \\{
@@ -1220,7 +1218,6 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
     const normal_array_index: i32 = program.vert_normal_id;
     const uv_array_index: i32 = program.vert_uv_id;
     const color_array_index: i32 = program.vert_color_id;
-    const light_index_index: i32 = program.vert_light_index_id;
     const texture_index_index: i32 = program.vert_texture_index_id;
 
     if (isValidArray(position_array_index)) {
@@ -1267,17 +1264,6 @@ fn useProgramBegin(program: *OpenGLProgramCommon) void {
             @ptrFromInt(@offsetOf(TexturedVertex, "uv")),
         );
     }
-    // TODO: Can you send down a "vector of 2 unsigned shorts"?
-    if (isValidArray(light_index_index)) {
-        platform.optGLEnableVertexAttribArray.?(@intCast(light_index_index));
-        platform.optGLVertexAttribIPointer.?(
-            @intCast(light_index_index),
-            1,
-            gl.GL_UNSIGNED_SHORT,
-            @sizeOf(TexturedVertex),
-            @ptrFromInt(@offsetOf(TexturedVertex, "light_index")),
-        );
-    }
     if (isValidArray(texture_index_index)) {
         platform.optGLEnableVertexAttribArray.?(@intCast(texture_index_index));
         platform.optGLVertexAttribIPointer.?(
@@ -1302,7 +1288,6 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     const normal_array_index: i32 = program.vert_normal_id;
     const color_array_index: i32 = program.vert_color_id;
     const uv_array_index: i32 = program.vert_uv_id;
-    const light_index_index: i32 = program.vert_light_index_id;
     const texture_index_index: i32 = program.vert_texture_index_id;
 
     if (isValidArray(position_array_index)) {
@@ -1316,9 +1301,6 @@ fn useProgramEnd(program: *OpenGLProgramCommon) void {
     }
     if (isValidArray(uv_array_index)) {
         platform.optGLDisableVertexAttribArray.?(@intCast(uv_array_index));
-    }
-    if (isValidArray(light_index_index)) {
-        platform.optGLDisableVertexAttribArray.?(@intCast(light_index_index));
     }
     if (isValidArray(texture_index_index)) {
         platform.optGLDisableVertexAttribArray.?(@intCast(texture_index_index));
@@ -2400,8 +2382,8 @@ fn createProgram(
     program.vert_normal_id = platform.optGLGetAttribLocation.?(program_id, "VertN");
     program.vert_uv_id = platform.optGLGetAttribLocation.?(program_id, "VertUV");
     program.vert_color_id = platform.optGLGetAttribLocation.?(program_id, "VertColor");
-    program.vert_light_index_id = platform.optGLGetAttribLocation.?(program_id, "VertLightIndex");
     program.vert_texture_index_id = platform.optGLGetAttribLocation.?(program_id, "VertTextureIndex");
+
     program.sampler_count = 0;
 
     return program_id;

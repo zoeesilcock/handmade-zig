@@ -28,7 +28,6 @@ const Bool_4x = simd.Bool_4x;
 const RenderGroup = renderer.RenderGroup;
 const RenderCommands = renderer.RenderCommands;
 const RendererTexture = renderer.RendererTexture;
-const LightingPointState = renderer.LightingPointState;
 const LightingBox = renderer.LightingBox;
 const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
@@ -38,6 +37,7 @@ const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 pub const LIGHT_TEST_ACCUMULATION_COUNT = 1024;
 pub const MAX_LIGHT_EMISSION = 25.0;
 pub const LIGHT_DATA_WIDTH = 2 * 8192;
+pub const MAX_LIGHT_BOX_COUNT = 2 * 8192;
 pub const LIGHT_LOOKUP_VOXEL_DIM = 128;
 pub const LIGHT_CHUNK_COUNT = LIGHT_DATA_WIDTH / LIGHT_POINTS_PER_CHUNK;
 const SLOW = shared.SLOW;
@@ -293,9 +293,10 @@ pub const LightingPoint = extern struct {
 
 const RaycastResult = struct {
     hit: Bool_4x = @splat(false),
-    box_index: U32_4x = @splat(0),
-    box_surface_index: U32_4x = @splat(0),
+    // box_index: U32_4x = @splat(0),
+    // box_surface_index: U32_4x = @splat(0),
     t_ray: F32_4x = @splat(0),
+    normal: V3_4x = @splat(0),
 };
 
 const LightingPattern = struct {
@@ -565,6 +566,8 @@ fn raycast(
     box_stack[depth] = getBox(solution, solution.root_box_index);
     depth += 1;
 
+    const one: F32_4x = @splat(1);
+    const negative_one: F32_4x = @splat(-1);
     const t_close_enough: F32_4x = @splat(10);
 
     const inverse_ray_direction: V3_4x = @as(V3_4x, .splat(@splat(1))).dividedBy(ray_direction);
@@ -609,38 +612,52 @@ fn raycast(
                     box_stack[depth] = box;
                     depth += 1;
                 } else if (simd.anyTrue(t_valid)) {
-                    var box_surface_index: U32_4x = @splat(0);
-                    var running_mask: U32_4x = @intFromBool(t_box_min.x == t_min);
+                    if (false) {
+                        var box_surface_index: U32_4x = @splat(0);
+                        var running_mask: U32_4x = @intFromBool(t_box_min.x == t_min);
 
-                    var this_mask: U32_4x = @intFromBool(t_box_max.x == t_min);
-                    box_surface_index |= @as(U32_4x, @splat(1)) & (this_mask & ~running_mask);
-                    running_mask |= this_mask;
+                        var this_mask: U32_4x = @intFromBool(t_box_max.x == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(1)) & (this_mask & ~running_mask);
+                        running_mask |= this_mask;
 
-                    this_mask = @intFromBool(t_box_min.y == t_min);
-                    box_surface_index |= @as(U32_4x, @splat(2)) & (this_mask & ~running_mask);
-                    running_mask |= this_mask;
+                        this_mask = @intFromBool(t_box_min.y == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(2)) & (this_mask & ~running_mask);
+                        running_mask |= this_mask;
 
-                    this_mask = @intFromBool(t_box_max.y == t_min);
-                    box_surface_index |= @as(U32_4x, @splat(3)) & (this_mask & ~running_mask);
-                    running_mask |= this_mask;
+                        this_mask = @intFromBool(t_box_max.y == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(3)) & (this_mask & ~running_mask);
+                        running_mask |= this_mask;
 
-                    this_mask = @intFromBool(t_box_min.z == t_min);
-                    box_surface_index |= @as(U32_4x, @splat(4)) & (this_mask & ~running_mask);
-                    running_mask |= this_mask;
+                        this_mask = @intFromBool(t_box_min.z == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(4)) & (this_mask & ~running_mask);
+                        running_mask |= this_mask;
 
-                    this_mask = @intFromBool(t_box_max.z == t_min);
-                    box_surface_index |= @as(U32_4x, @splat(5)) & (this_mask & ~running_mask);
+                        this_mask = @intFromBool(t_box_max.z == t_min);
+                        box_surface_index |= @as(U32_4x, @splat(5)) & (this_mask & ~running_mask);
+
+                        result.box_surface_index =
+                            @select(u32, mask, box_surface_index, result.box_surface_index);
+                    }
 
                     result.t_ray = @select(f32, mask, t_min, result.t_ray);
                     result.hit |= mask;
-                    result.box_index =
-                        @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
-                    result.box_surface_index =
-                        @select(u32, mask, box_surface_index, result.box_surface_index);
+                    // result.box_index =
+                    //     @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
+                    if (false) {
+                        const normal_sign: F32_4x = @select(f32, t_box_min < t_box_max, one, negative_one);
+                        result.normal.x = @select(f32, mask, result.normal.x, (t_min == t_min.x) & normal_sign);
+                        result.normal.y = @select(f32, mask, result.normal.y, (t_min == t_min.y) & normal_sign);
+                        result.normal.z = @select(f32, mask, result.normal.z, (t_min == t_min.z) & normal_sign);
+                    }
 
-                    if (simd.allTrue(@bitCast(mask))) {
+                    // TODO: I think this was just a straight-up bug in our original implementation.
+                    if (false) {
+                        if (simd.allTrue(@bitCast(mask))) {
+                            work.total_partition_leaves_used += 1;
+                            break;
+                        }
+                    } else {
                         work.total_partition_leaves_used += 1;
-                        break;
                     }
                 }
             }
@@ -669,135 +686,138 @@ fn computeLightPropagation(
     // TimedBlock.beginFunction(@src(), .ComputeLightPropagation);
     // defer TimedBlock.endFunction(@src(), .ComputeLightPropagation);
 
-    const ray_count: u32 = 16;
     const solution: *LightingSolution = work.solution;
-    const first_sample_index: u32 = work.first_sample_index;
-    const one_past_last_sample_index: u32 = work.one_past_last_sample_index;
-    var series: random.Series = solution.series;
 
-    const sample_point_entropy: u32 = series.randomInt();
+    if (false) {
+        const ray_count: u32 = 16;
+        const first_sample_index: u32 = work.first_sample_index;
+        const one_past_last_sample_index: u32 = work.one_past_last_sample_index;
+        var series: random.Series = solution.series;
 
-    // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
-    const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.4);
-    // const ground_color: Color3 = .new(0.3, 0.2, 0.1);
-    // const sun_direction: Vector3 = Vector3.new(1, 1, 1).normalizeOrZero();
+        const sample_point_entropy: u32 = series.randomInt();
 
-    var sample_point_index: u32 = first_sample_index; // Light point index 0 is never used.
-    while (sample_point_index < one_past_last_sample_index) : (sample_point_index += 1) {
-        const sample_point: *LightingPoint = &solution.points[sample_point_index];
-        const ray_origin: V3_4x = .fromVector3(sample_point.position);
-        const sample_point_x_axis: V3_4x = .fromVector3(sample_point.x_axis);
-        const sample_point_y_axis: V3_4x = .fromVector3(sample_point.y_axis);
-        const sample_point_normal: V3_4x = .fromVector3(sample_point.normal);
+        // const sky_color: Color3 = .new(0.2, 0.2, 0.95);
+        const moon_color: Color3 = Color3.new(0.1, 0.8, 1.0).scaledTo(0.4);
+        // const ground_color: Color3 = .new(0.3, 0.2, 0.1);
+        // const sun_direction: Vector3 = Vector3.new(1, 1, 1).normalizeOrZero();
 
-        if (sample_point_index == solution.debug_point_index) {
-            pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.x_axis), .new(1, 0, 0, 1));
-            pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.y_axis), .new(0, 1, 0, 1));
-            pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.normal), .new(0, 0, 1, 1));
-        }
+        var sample_point_index: u32 = first_sample_index; // Light point index 0 is never used.
+        while (sample_point_index < one_past_last_sample_index) : (sample_point_index += 1) {
+            const sample_point: *LightingPoint = &solution.points[sample_point_index];
+            const ray_origin: V3_4x = .fromVector3(sample_point.position);
+            const sample_point_x_axis: V3_4x = .fromVector3(sample_point.x_axis);
+            const sample_point_y_axis: V3_4x = .fromVector3(sample_point.y_axis);
+            const sample_point_normal: V3_4x = .fromVector3(sample_point.normal);
 
-        const sample_pattern_mask: u32 = 15;
+            if (sample_point_index == solution.debug_point_index) {
+                pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.x_axis), .new(1, 0, 0, 1));
+                pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.y_axis), .new(0, 1, 0, 1));
+                pushDebugLine(solution, sample_point.position, sample_point.position.plus(sample_point.normal), .new(0, 0, 1, 1));
+            }
 
-        var ray_index: u32 = 0;
-        while (ray_index < ray_count) : (ray_index += 1) {
-            var sample_direction_4x: V3_4x =
-                solution.sample_points[sample_point_index + sample_point_entropy & sample_pattern_mask][ray_index];
-            sample_direction_4x =
-                sample_point_x_axis.scaledToV(sample_direction_4x.x)
-                    .plus(sample_point_y_axis.scaledToV(sample_direction_4x.y)
-                    .plus(sample_point_normal.scaledToV(sample_direction_4x.z)));
+            const sample_pattern_mask: u32 = 15;
 
-            const ray: RaycastResult = raycast(work, ray_origin, sample_direction_4x);
-            const ray_hit: [4]bool = ray.hit;
-            const ray_t_ray: [4]f32 = ray.t_ray;
-            const ray_box_index: [4]u32 = ray.box_index;
-            const ray_box_surface_index: [4]u32 = ray.box_surface_index;
+            var ray_index: u32 = 0;
+            while (ray_index < ray_count) : (ray_index += 1) {
+                var sample_direction_4x: V3_4x =
+                    solution.sample_points[sample_point_index + sample_point_entropy & sample_pattern_mask][ray_index];
+                sample_direction_4x =
+                    sample_point_x_axis.scaledToV(sample_direction_4x.x)
+                        .plus(sample_point_y_axis.scaledToV(sample_direction_4x.y)
+                        .plus(sample_point_normal.scaledToV(sample_direction_4x.z)));
 
-            const ray_position_4x: V3_4x = ray_origin.plus(sample_direction_4x.scaledToV(ray.t_ray));
+                const ray: RaycastResult = raycast(work, ray_origin, sample_direction_4x);
+                const ray_hit: [4]bool = ray.hit;
+                const ray_t_ray: [4]f32 = ray.t_ray;
+                const ray_box_index: [4]u32 = ray.box_index;
+                const ray_box_surface_index: [4]u32 = ray.box_surface_index;
 
-            var sub_ray: u32 = 0;
-            while (sub_ray < 4) : (sub_ray += 1) {
-                if (true) {
-                    if (sample_point_index == solution.debug_point_index) {
-                        const sample_direction: Vector3 = sample_direction_4x.getComponent(sub_ray);
-                        const hit: bool = ray_hit[sub_ray];
-                        const t_ray: f32 = ray_t_ray[sub_ray];
-                        const draw_length: f32 = 0.25;
-                        const end_point: Vector3 = sample_point.position.plus(sample_direction.scaledTo(
-                            if (hit) t_ray else draw_length,
-                        ));
+                const ray_position_4x: V3_4x = ray_origin.plus(sample_direction_4x.scaledToV(ray.t_ray));
 
-                        pushDebugLine(
-                            solution,
-                            sample_point.position,
-                            end_point,
-                            if (hit) .new(0, 1, 1, 1) else .new(1, 1, 0, 1),
+                var sub_ray: u32 = 0;
+                while (sub_ray < 4) : (sub_ray += 1) {
+                    if (true) {
+                        if (sample_point_index == solution.debug_point_index) {
+                            const sample_direction: Vector3 = sample_direction_4x.getComponent(sub_ray);
+                            const hit: bool = ray_hit[sub_ray];
+                            const t_ray: f32 = ray_t_ray[sub_ray];
+                            const draw_length: f32 = 0.25;
+                            const end_point: Vector3 = sample_point.position.plus(sample_direction.scaledTo(
+                                if (hit) t_ray else draw_length,
+                            ));
+
+                            pushDebugLine(
+                                solution,
+                                sample_point.position,
+                                end_point,
+                                if (hit) .new(0, 1, 1, 1) else .new(1, 1, 0, 1),
+                            );
+                        }
+                    }
+
+                    var transfer_pps: Color3 = .zero();
+                    if (ray_hit[sub_ray]) {
+                        const hit_box: *LightingBox = getBox(solution, ray_box_index[sub_ray]);
+                        const box_surface_index: u32 = ray_box_surface_index[sub_ray];
+                        const ray_position: Vector3 = ray_position_4x.getComponent(sub_ray);
+
+                        // TODO: Update this transfer to be bidirectional.
+                        // TODO: Stratified sampling?
+
+                        const hit_index: u32 = hit_box.light_index[box_surface_index];
+                        const hit_point_count: u32 =
+                            hit_box.light_index[box_surface_index + 1] - hit_index;
+
+                        var total_weight: f32 = 0;
+                        var surface_point_index: u32 = 0;
+                        while (surface_point_index < hit_point_count) : (surface_point_index += 1) {
+                            const hit_point_index: u32 = hit_index + surface_point_index;
+                            const hit_point: *LightingPoint = &solution.points[hit_point_index];
+                            const distance_sq: f32 =
+                                ray_position.minus(hit_point.position).lengthSquared();
+                            const inverse_distance_sq: f32 = 1.0 / (1.0 + distance_sq);
+
+                            transfer_pps = transfer_pps.plus(
+                                hit_point.reflection_color.hadamardProduct(solution.initial_pps[hit_point_index])
+                                    .scaledTo(inverse_distance_sq),
+                            );
+                            total_weight += inverse_distance_sq;
+                        }
+
+                        var inverse_total_weight: f32 = 1;
+                        if (total_weight > 0) {
+                            inverse_total_weight = 1.0 / total_weight;
+                            transfer_pps = transfer_pps.scaledTo(inverse_total_weight);
+                        }
+                    } else {
+                        transfer_pps = moon_color.scaledTo(sample_direction_4x.getComponent(sub_ray).clamp01().z());
+                    }
+
+                    // Accumulate sample.
+                    const normal_to_light: Vector3 = sample_direction_4x.getComponent(sub_ray);
+                    // const surface_normal: Vector3 = solution.points[sample_point_index].normal;
+                    // const angular_falloff: f32 = math.clampf01(surface_normal.dotProduct(normal_to_light));
+
+                    const sample_color: Color3 = transfer_pps; //.scaledTo(angular_falloff);
+                    const weight: f32 = sample_color.length();
+
+                    solution.accumulated_weight[sample_point_index] += 1;
+                    solution.accumulated_pps[sample_point_index] =
+                        solution.accumulated_pps[sample_point_index].plus(
+                            sample_color,
                         );
-                    }
-                }
-
-                var transfer_pps: Color3 = .zero();
-                if (ray_hit[sub_ray]) {
-                    const hit_box: *LightingBox = getBox(solution, ray_box_index[sub_ray]);
-                    const box_surface_index: u32 = ray_box_surface_index[sub_ray];
-                    const ray_position: Vector3 = ray_position_4x.getComponent(sub_ray);
-
-                    // TODO: Update this transfer to be bidirectional.
-                    // TODO: Stratified sampling?
-
-                    const hit_index: u32 = hit_box.light_index[box_surface_index];
-                    const hit_point_count: u32 =
-                        hit_box.light_index[box_surface_index + 1] - hit_index;
-
-                    var total_weight: f32 = 0;
-                    var surface_point_index: u32 = 0;
-                    while (surface_point_index < hit_point_count) : (surface_point_index += 1) {
-                        const hit_point_index: u32 = hit_index + surface_point_index;
-                        const hit_point: *LightingPoint = &solution.points[hit_point_index];
-                        const distance_sq: f32 =
-                            ray_position.minus(hit_point.position).lengthSquared();
-                        const inverse_distance_sq: f32 = 1.0 / (1.0 + distance_sq);
-
-                        transfer_pps = transfer_pps.plus(
-                            hit_point.reflection_color.hadamardProduct(solution.initial_pps[hit_point_index])
-                                .scaledTo(inverse_distance_sq),
+                    solution.average_direction_to_light[sample_point_index] =
+                        solution.average_direction_to_light[sample_point_index].plus(
+                            normal_to_light.scaledTo(weight),
                         );
-                        total_weight += inverse_distance_sq;
-                    }
-
-                    var inverse_total_weight: f32 = 1;
-                    if (total_weight > 0) {
-                        inverse_total_weight = 1.0 / total_weight;
-                        transfer_pps = transfer_pps.scaledTo(inverse_total_weight);
-                    }
-                } else {
-                    transfer_pps = moon_color.scaledTo(sample_direction_4x.getComponent(sub_ray).clamp01().z());
                 }
-
-                // Accumulate sample.
-                const normal_to_light: Vector3 = sample_direction_4x.getComponent(sub_ray);
-                // const surface_normal: Vector3 = solution.points[sample_point_index].normal;
-                // const angular_falloff: f32 = math.clampf01(surface_normal.dotProduct(normal_to_light));
-
-                const sample_color: Color3 = transfer_pps; //.scaledTo(angular_falloff);
-                const weight: f32 = sample_color.length();
-
-                solution.accumulated_weight[sample_point_index] += 1;
-                solution.accumulated_pps[sample_point_index] =
-                    solution.accumulated_pps[sample_point_index].plus(
-                        sample_color,
-                    );
-                solution.average_direction_to_light[sample_point_index] =
-                    solution.average_direction_to_light[sample_point_index].plus(
-                        normal_to_light.scaledTo(weight),
-                    );
             }
         }
+
+        solution.series = series;
     }
 
-    solution.series = series;
-
-    DebugInterface.debugValue(@src(), &solution.pattern_name, "PatternName");
+    // DebugInterface.debugValue(@src(), &solution.pattern_name, "PatternName");
 }
 
 pub fn doLightingWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
@@ -975,65 +995,6 @@ fn splitBox(
 
     parent_box.child_count = source_count;
     parent_box.first_child_index = addBoxReferences(solution, source_count, source);
-
-    var assign_light_index: u16 = solution.extended_point_count;
-    parent_box.light_index[0] = assign_light_index;
-    assign_light_index += 1;
-    parent_box.light_index[1] = assign_light_index;
-    assign_light_index += 1;
-    parent_box.light_index[2] = assign_light_index;
-    assign_light_index += 1;
-    parent_box.light_index[3] = assign_light_index;
-    assign_light_index += 1;
-    parent_box.light_index[4] = assign_light_index;
-    assign_light_index += 1;
-    parent_box.light_index[5] = assign_light_index;
-    assign_light_index += 1;
-    parent_box.light_index[6] = assign_light_index;
-    solution.extended_point_count = assign_light_index;
-
-    var surface_index: u32 = 0;
-    while (surface_index < 6) : (surface_index += 1) {
-        const light_index: u16 = parent_box.light_index[surface_index];
-        var point: *LightingPoint = &solution.points[light_index];
-        const surface: box_mod.LightBoxSurface =
-            box_mod.getBoxSurface(parent_box.position, parent_box.radius, surface_index);
-
-        point.normal = surface.normal;
-        point.position = surface.position;
-        solution.average_direction_to_light[light_index] = .zero();
-        solution.accumulated_weight[light_index] = 0;
-
-        var reflection_color: Color3 = .zero();
-        var emission_pps: Color3 = .zero();
-        var initial_pps: Color3 = .zero();
-        var total_weight: f32 = 0;
-
-        var child_index: u16 = parent_box.first_child_index;
-        while (child_index < (parent_box.first_child_index + parent_box.child_count)) : (child_index += 1) {
-            const child_box: *LightingBox = getBox(solution, child_index);
-            var child_point_index: u32 = child_box.light_index[surface_index];
-            while (child_point_index < child_box.light_index[surface_index + 1]) : (child_point_index += 1) {
-                const child_point: *LightingPoint = &solution.points[child_point_index];
-                const weight: f32 = 1.0 / (1.0 + point.position.minus(child_point.position).lengthSquared());
-
-                reflection_color = reflection_color.plus(child_point.reflection_color.scaledTo(weight));
-                emission_pps = emission_pps.plus(solution.emission_pps[child_point_index].scaledTo(weight));
-                initial_pps = initial_pps.plus(solution.initial_pps[child_point_index].scaledTo(weight));
-                total_weight += weight;
-            }
-        }
-
-        var inverse_weight: f32 = 1;
-        if (total_weight > 0) {
-            inverse_weight = 1.0 / total_weight;
-        }
-
-        point.reflection_color = reflection_color.scaledTo(inverse_weight);
-        solution.emission_pps[light_index] = emission_pps.scaledTo(inverse_weight);
-        solution.initial_pps[light_index] = initial_pps.scaledTo(inverse_weight);
-        solution.accumulated_pps[light_index] = solution.initial_pps[light_index];
-    }
 }
 
 fn buildSpatialPartitionForLighting(solution: *LightingSolution) void {
@@ -1121,60 +1082,6 @@ pub fn lightingTest(
         }
     }
 
-    const debug_location: Vector3 = .new(0, 3, -1);
-    var debug_point_distance: f32 = std.math.floatMax(f32);
-
-    var box_index: u32 = 0;
-    while (box_index < original_box_count) : (box_index += 1) {
-        const box: *LightingBox = @ptrCast(solution.boxes + box_index);
-
-        var light_index: u32 = box.light_index[0];
-        var surface_index: u32 = 0;
-        while (surface_index < 6) : (surface_index += 1) {
-            const surface: box_mod.LightBoxSurface = box_mod.getBoxSurface(box.position, box.radius, surface_index);
-            const y_subdivision_count = 2;
-            const x_subdivision_count = 2;
-            std.debug.assert((x_subdivision_count * y_subdivision_count) == 4);
-            for (0..y_subdivision_count) |y_sub| {
-                const y_sub_ratio: f32 = -0.5 + @as(f32, @floatFromInt(y_sub));
-                for (0..x_subdivision_count) |x_sub| {
-                    const x_sub_ratio: f32 = -0.5 + @as(f32, @floatFromInt(x_sub));
-                    var point: *LightingPoint = &solution.points[light_index];
-
-                    point.normal = surface.normal;
-                    point.x_axis = surface.x_axis;
-                    point.y_axis = surface.y_axis;
-                    point.position = surface.position
-                        .plus(surface.x_axis.scaledTo(x_sub_ratio * surface.half_width))
-                        .plus(surface.y_axis.scaledTo(y_sub_ratio * surface.half_height));
-
-                    point.reflection_color = box.reflection_color.scaledTo(0.95);
-                    point.pack_index = light_index;
-
-                    const local_index: u32 = light_index - box.light_index[0];
-                    solution.emission_pps[light_index] =
-                        Color3.new(1, 1, 1).scaledTo(box.emission * MAX_LIGHT_EMISSION);
-                    solution.initial_pps[light_index] = solution.emission_pps[light_index].plus(
-                        box.storage[local_index].last_pps.scaledTo(accumulation_coefficient),
-                    );
-                    solution.average_direction_to_light[light_index] = .zero();
-                    solution.accumulated_pps[light_index] = .zero();
-                    solution.accumulated_weight[light_index] = 0;
-
-                    const this_distance: f32 = point.position.minus(debug_location).lengthSquared();
-                    if (debug_point_distance > this_distance) {
-                        solution.debug_point_index = light_index;
-                        debug_point_distance = this_distance;
-                    }
-
-                    light_index += 1;
-                    std.debug.assert(light_index < LIGHT_DATA_WIDTH);
-                }
-            }
-            std.debug.assert(light_index == box.light_index[surface_index + 1]);
-        }
-    }
-
     buildSpatialPartitionForLighting(solution);
 
     computeAllLightPropagation(solution, lighting_queue);
@@ -1186,51 +1093,53 @@ pub fn lightingTest(
         accumulation_coefficient = 1.0 / solution.accumulation_count;
     }
 
-    box_index = 0;
-    while (box_index < original_box_count) : (box_index += 1) {
-        const box: *LightingBox = @ptrCast(solution.boxes + box_index);
-        const local_count: u32 = box.light_index[6] - box.light_index[0];
-        var local_index: u32 = 0;
-        while (local_index < local_count) : (local_index += 1) {
-            const point_index: u32 = local_index + box.light_index[0];
+    if (false) {
+        var box_index: u32 = 0;
+        while (box_index < original_box_count) : (box_index += 1) {
+            const box: *LightingBox = @ptrCast(solution.boxes + box_index);
+            const local_count: u32 = box.light_index[6] - box.light_index[0];
+            var local_index: u32 = 0;
+            while (local_index < local_count) : (local_index += 1) {
+                const point_index: u32 = local_index + box.light_index[0];
 
-            // Can probably remove the accumulated weight check if we always guarantee at least
-            // one positively weighted sample per point?
-            const accumulated_weight: f32 = solution.accumulated_weight[point_index];
-            var inverse_weight: f32 = 0;
-            if (accumulated_weight > 0) {
-                inverse_weight = 1.0 / accumulated_weight;
-            }
-            const accumulated_pps: Color3 = solution.accumulated_pps[point_index].scaledTo(inverse_weight);
-            const direction: Vector3 = solution.average_direction_to_light[point_index].normalizeOrZero();
-
-            var last_pps: Color3 = accumulated_pps;
-            var last_direction: Vector3 = direction;
-
-            const box_store_direction: Vector3 = box.storage[local_index].last_direction;
-            const valid: bool =
-                box_store_direction.x() != 0 or
-                box_store_direction.y() != 0 or
-                box_store_direction.z() != 0;
-            if (valid) {
-                last_pps = box.storage[local_index].last_pps;
-                last_direction = box_store_direction;
-            }
-
-            if (solution.accumulating) {
-                if (should_accumulate) {
-                    box.storage[local_index].last_pps = last_pps.plus(accumulated_pps);
+                // Can probably remove the accumulated weight check if we always guarantee at least
+                // one positively weighted sample per point?
+                const accumulated_weight: f32 = solution.accumulated_weight[point_index];
+                var inverse_weight: f32 = 0;
+                if (accumulated_weight > 0) {
+                    inverse_weight = 1.0 / accumulated_weight;
                 }
-                solution.accumulated_pps[point_index] =
-                    box.storage[local_index].last_pps.scaledTo(accumulation_coefficient);
-            } else {
-                box.storage[local_index].last_pps = last_pps.lerp(accumulated_pps, t_update);
-                solution.accumulated_pps[point_index] = box.storage[local_index].last_pps;
-            }
+                const accumulated_pps: Color3 = solution.accumulated_pps[point_index].scaledTo(inverse_weight);
+                const direction: Vector3 = solution.average_direction_to_light[point_index].normalizeOrZero();
 
-            box.storage[local_index].last_direction =
-                last_direction.lerp(direction, t_update).normalizeOrZero();
-            solution.average_direction_to_light[point_index] = box.storage[local_index].last_direction;
+                var last_pps: Color3 = accumulated_pps;
+                var last_direction: Vector3 = direction;
+
+                const box_store_direction: Vector3 = box.storage[local_index].last_direction;
+                const valid: bool =
+                    box_store_direction.x() != 0 or
+                    box_store_direction.y() != 0 or
+                    box_store_direction.z() != 0;
+                if (valid) {
+                    last_pps = box.storage[local_index].last_pps;
+                    last_direction = box_store_direction;
+                }
+
+                if (solution.accumulating) {
+                    if (should_accumulate) {
+                        box.storage[local_index].last_pps = last_pps.plus(accumulated_pps);
+                    }
+                    solution.accumulated_pps[point_index] =
+                        box.storage[local_index].last_pps.scaledTo(accumulation_coefficient);
+                } else {
+                    box.storage[local_index].last_pps = last_pps.lerp(accumulated_pps, t_update);
+                    solution.accumulated_pps[point_index] = box.storage[local_index].last_pps;
+                }
+
+                box.storage[local_index].last_direction =
+                    last_direction.lerp(direction, t_update).normalizeOrZero();
+                solution.average_direction_to_light[point_index] = box.storage[local_index].last_direction;
+            }
         }
     }
 
@@ -1306,7 +1215,6 @@ pub fn lightingTest(
                             .new(1, 1, 0, 1),
                             null,
                             null,
-                            null,
                         );
                         break;
                     }
@@ -1331,7 +1239,6 @@ pub fn lightingTest(
                             .new(1, 1, 0, 1),
                             null,
                             null,
-                            null,
                         );
                         break;
                     }
@@ -1354,7 +1261,6 @@ pub fn lightingTest(
                     0.01,
                     0.02,
                     color,
-                    null,
                     null,
                     null,
                 );
@@ -1408,85 +1314,86 @@ fn outputLightingPointsRecurse(
     if (depth == 0 or box.child_count == 0) {
         const white_texture: RendererTexture = group.white_texture;
 
-        var box_surface_index: u32 = 0;
-        while (box_surface_index < 6) : (box_surface_index += 1) {
-            const box_surface: box_mod.LightBoxSurface =
-                box_mod.getBoxSurface(box.position, box.radius, box_surface_index);
+        if (false) {
+            var box_surface_index: u32 = 0;
+            while (box_surface_index < 6) : (box_surface_index += 1) {
+                const box_surface: box_mod.LightBoxSurface =
+                    box_mod.getBoxSurface(box.position, box.radius, box_surface_index);
 
-            const point_count: u32 = box.light_index[box_surface_index + 1] - box.light_index[box_surface_index];
-            var size_ratio: f32 = 1.8;
-            if (point_count > 1) {
-                size_ratio /= @floatFromInt(point_count);
-            }
-            const element_width: f32 = size_ratio * box_surface.half_width;
-            const element_height: f32 = size_ratio * box_surface.half_height;
-
-            var point_index: u32 = box.light_index[box_surface_index];
-            while (point_index < box.light_index[box_surface_index + 1]) : (point_index += 1) {
-                const point: *LightingPoint = &solution.points[point_index];
-
-                const position: Vector3 = point.position;
-                const x_axis: Vector3 = box_surface.x_axis;
-                const y_axis: Vector3 = box_surface.y_axis;
-
-                var emission_color: Color3 = solution.accumulated_pps[point_index];
-                if (box.child_count == 0) {
-                    emission_color = emission_color.plus(solution.emission_pps[point_index]);
+                const point_count: u32 = box.light_index[box_surface_index + 1] - box.light_index[box_surface_index];
+                var size_ratio: f32 = 1.8;
+                if (point_count > 1) {
+                    size_ratio /= @floatFromInt(point_count);
                 }
+                const element_width: f32 = size_ratio * box_surface.half_width;
+                const element_height: f32 = size_ratio * box_surface.half_height;
 
-                var front_emission_color: Color = emission_color.clamp01().toColor(1);
+                var point_index: u32 = box.light_index[box_surface_index];
+                while (point_index < box.light_index[box_surface_index + 1]) : (point_index += 1) {
+                    const point: *LightingPoint = &solution.points[point_index];
 
-                var position0: Vector4 = .zero();
-                var position1: Vector4 = .zero();
-                var position2: Vector4 = .zero();
-                var position3: Vector4 = .zero();
+                    const position: Vector3 = point.position;
+                    const x_axis: Vector3 = box_surface.x_axis;
+                    const y_axis: Vector3 = box_surface.y_axis;
 
-                var color0: u32 = 0;
-                var color1: u32 = 0;
-                var color2: u32 = 0;
-                var color3: u32 = 0;
+                    var emission_color: Color3 = solution.accumulated_pps[point_index];
+                    if (box.child_count == 0) {
+                        emission_color = emission_color.plus(solution.emission_pps[point_index]);
+                    }
 
-                const x: Vector3 = x_axis.scaledTo(0.5 * element_width);
-                const y: Vector3 = y_axis.scaledTo(0.5 * element_height);
+                    var front_emission_color: Color = emission_color.clamp01().toColor(1);
 
-                _ = position0.setXYZ(position.minus(x).minus(y));
-                _ = position1.setXYZ(position.plus(x).minus(y));
-                _ = position2.setXYZ(position.plus(x).plus(y));
-                _ = position3.setXYZ(position.minus(x).plus(y));
+                    var position0: Vector4 = .zero();
+                    var position1: Vector4 = .zero();
+                    var position2: Vector4 = .zero();
+                    var position3: Vector4 = .zero();
 
-                _ = position0.setW(0);
-                _ = position1.setW(0);
-                _ = position2.setW(0);
-                _ = position3.setW(0);
+                    var color0: u32 = 0;
+                    var color1: u32 = 0;
+                    var color2: u32 = 0;
+                    var color3: u32 = 0;
 
-                const front_emission_color32 = front_emission_color.scaledTo(255.0).packColorRGBA();
-                color0 = front_emission_color32;
-                color1 = front_emission_color32;
-                color2 = front_emission_color32;
-                color3 = front_emission_color32;
+                    const x: Vector3 = x_axis.scaledTo(0.5 * element_width);
+                    const y: Vector3 = y_axis.scaledTo(0.5 * element_height);
 
-                const uv: Vector2 = .zero();
-                group.pushQuad(
-                    white_texture,
-                    position0,
-                    uv,
-                    color0,
-                    position1,
-                    uv,
-                    color1,
-                    position2,
-                    uv,
-                    color2,
-                    position3,
-                    uv,
-                    color3,
-                    null,
-                    null,
-                    null,
-                );
+                    _ = position0.setXYZ(position.minus(x).minus(y));
+                    _ = position1.setXYZ(position.plus(x).minus(y));
+                    _ = position2.setXYZ(position.plus(x).plus(y));
+                    _ = position3.setXYZ(position.minus(x).plus(y));
+
+                    _ = position0.setW(0);
+                    _ = position1.setW(0);
+                    _ = position2.setW(0);
+                    _ = position3.setW(0);
+
+                    const front_emission_color32 = front_emission_color.scaledTo(255.0).packColorRGBA();
+                    color0 = front_emission_color32;
+                    color1 = front_emission_color32;
+                    color2 = front_emission_color32;
+                    color3 = front_emission_color32;
+
+                    const uv: Vector2 = .zero();
+                    group.pushQuad(
+                        white_texture,
+                        position0,
+                        uv,
+                        color0,
+                        position1,
+                        uv,
+                        color1,
+                        position2,
+                        uv,
+                        color2,
+                        position3,
+                        uv,
+                        color3,
+                        null,
+                    );
+                }
             }
-        }
-    } else {
+        } //else {
+    }
+    {
         var child_index: u32 = 0;
         while (child_index < box.child_count) : (child_index += 1) {
             outputLightingPointsRecurse(

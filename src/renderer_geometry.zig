@@ -104,7 +104,6 @@ pub fn writeQuad(
     n3: Vector3,
     uv3: Vector2,
     c3: u32,
-    light_index: u16,
     texture_index: u16,
 ) void {
     const vert: [*]TexturedVertex = out.vertices;
@@ -114,28 +113,24 @@ pub fn writeQuad(
     vert[0].normal = n3;
     vert[0].uv = uv3;
     vert[0].color = c3;
-    vert[0].light_index = light_index;
     vert[0].texture_index = texture_index;
 
     vert[1].position = p0;
     vert[1].normal = n0;
     vert[1].uv = uv0;
     vert[1].color = c0;
-    vert[1].light_index = light_index;
     vert[1].texture_index = texture_index;
 
     vert[2].position = p2;
     vert[2].normal = n2;
     vert[2].uv = uv2;
     vert[2].color = c2;
-    vert[2].light_index = light_index;
     vert[2].texture_index = texture_index;
 
     vert[3].position = p1;
     vert[3].normal = n1;
     vert[3].uv = uv1;
     vert[3].color = c1;
-    vert[3].light_index = light_index;
     vert[3].texture_index = texture_index;
 
     const vi: u16 = out.base_index;

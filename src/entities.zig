@@ -47,7 +47,6 @@ const HHAAlignPointType = file_formats.HHAAlignPointType;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
 const LightingPoint = lighting.LightingPoint;
-const LightingPointState = renderer.LightingPointState;
 const EditableHitTest = in_game_editor.EditableHitTest;
 
 const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
@@ -227,8 +226,6 @@ pub const Entity = extern struct {
 
     acceleration: Vector3 = Vector3.zero(),
     bob_acceleration: f32 = 0,
-
-    lighting: [ENTITY_MAX_PIECE_COUNT][LIGHT_POINTS_PER_CHUNK]LightingPointState,
 
     ground_cover_count: u32,
     ground_cover: [ENTITY_MAX_GROUND_COVER]GroundCover,
@@ -576,7 +573,6 @@ pub fn updateAndRenderEntities(
                             piece.dimension,
                             color.rgb(),
                             color.a(),
-                            @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else if (piece.flags & @intFromEnum(EntityVisiblePieceFlag.Cube) != 0) {
                         asset_rendering.pushCubeBitmapId(
@@ -587,7 +583,6 @@ pub fn updateAndRenderEntities(
                             color,
                             piece.extra.cube_uv_layout,
                             null,
-                            @ptrCast(&entity.lighting[piece_index]),
                         );
                     } else {
                         if (opt_assets) |assets| {
@@ -688,7 +683,6 @@ pub fn updateAndRenderEntities(
                                                         handmade.getDebugColor4(ap_index, null),
                                                         null,
                                                         null,
-                                                        null,
                                                         3,
                                                     );
                                                 }
@@ -725,7 +719,6 @@ pub fn updateAndRenderEntities(
                                 entity.position,
                                 .splat(0.06),
                                 .new(1, 1, 1, 1),
-                                null,
                                 null,
                                 null,
                                 3,
@@ -781,7 +774,6 @@ pub fn updateAndRenderEntities(
                                 .new(1, 0, 1, 1),
                                 null,
                                 null,
-                                null,
                                 3,
                             );
                         }
@@ -795,7 +787,6 @@ pub fn updateAndRenderEntities(
                                 entity.position,
                                 .splat(0.04),
                                 .new(1, 0, 1, 1),
-                                null,
                                 null,
                                 null,
                                 0,

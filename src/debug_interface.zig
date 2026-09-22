@@ -109,11 +109,11 @@ pub const DebugType = if (INTERNAL) enum(u32) {
 
 pub const DebugEvent = if (INTERNAL) extern struct {
     clock: u64 = 0,
-    guid: [*:0]const u8 = undefined,
-    name: [*:0]const u8 = undefined,
+    guid: [*:0]const u8 = "",
+    name: [*:0]const u8 = "",
     thread_id: u16 = undefined,
     core_index: u16 = undefined,
-    event_type: DebugType = undefined,
+    event_type: DebugType = .Unknown,
     data: extern union {
         value_debug_event: *DebugEvent,
         debug_id: DevId,

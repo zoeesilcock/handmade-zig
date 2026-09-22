@@ -47,8 +47,6 @@ const RenderGroupFlags = renderer.RenderGroupFlags;
 const TransientClipRect = renderer.TransientClipRect;
 const LightingSolution = lighting.LightingSolution;
 const LightingTextures = lighting.LightingTextures;
-const LightingPointState = renderer.LightingPointState;
-const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const Camera = cam.Camera;
 const ParticleCache = particles.ParticleCache;
 const DebugInterface = debug_interface.DebugInterface;
@@ -116,7 +114,6 @@ pub const GameModeWorld = extern struct {
     debug_camera_dolly: f32,
     debug_camera_pan: Vector3,
     debug_light_position: Vector3,
-    debug_light_store: [LIGHT_POINTS_PER_CHUNK]LightingPointState,
 
     camera_pitch: f32,
     camera_orbit: f32,
@@ -684,7 +681,6 @@ pub fn updateAndRenderWorld(
                 .splat(0.5),
                 .new(1, 1, 1),
                 1,
-                @ptrCast(&world_mode.debug_light_store),
             );
         }
 
