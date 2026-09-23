@@ -43,6 +43,11 @@ fn approxInvSquareRoot(input: F32_4x) F32_4x {
     return @as(F32_4x, @splat(1)) / @sqrt(input);
 }
 
+pub fn signBitFrom(self: F32_4x) U32_4x {
+    const mask: U32_4x = @splat(@as(u32, 1 << 31));
+    return @as(U32_4x, @bitCast(self)) & mask;
+}
+
 pub const V3_4x = extern struct {
     x: F32_4x,
     y: F32_4x,
@@ -239,7 +244,7 @@ pub const V3_4x = extern struct {
         return result;
     }
 
-    pub fn times(self: V3_4x, b: V3_4x) V3_4x {
+    pub fn hadamardProduct(self: V3_4x, b: V3_4x) V3_4x {
         var result = self;
         result.x *= b.x;
         result.y *= b.y;

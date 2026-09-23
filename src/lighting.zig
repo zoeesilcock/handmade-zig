@@ -293,10 +293,9 @@ pub const LightingPoint = extern struct {
 
 const RaycastResult = struct {
     hit: Bool_4x = @splat(false),
-    // box_index: U32_4x = @splat(0),
-    // box_surface_index: U32_4x = @splat(0),
-    t_ray: F32_4x = @splat(0),
-    normal: V3_4x = @splat(0),
+    position: V3_4x = .splat(@splat(0)),
+    normal: V3_4x = .splat(@splat(0)),
+    reflection_color: V3_4x = .splat(@splat(0)),
 };
 
 const LightingPattern = struct {
@@ -558,19 +557,22 @@ fn raycast(
     const solution: *LightingSolution = work.solution;
     work.total_casts_initiated += 1;
 
-    var result: RaycastResult = .{};
-    result.t_ray = @splat(std.math.floatMax(f32));
-
     var depth: u32 = 0;
     var box_stack: [64]*LightingBox = undefined;
     box_stack[depth] = getBox(solution, solution.root_box_index);
     depth += 1;
 
+    var t_ray: F32_4x = @splat(std.math.floatMax(f32));
+    const zero: F32_4x = @splat(0);
     const one: F32_4x = @splat(1);
-    const negative_one: F32_4x = @splat(-1);
+    const one_u: U32_4x = @splat(1);
     const t_close_enough: F32_4x = @splat(10);
 
-    const inverse_ray_direction: V3_4x = @as(V3_4x, .splat(@splat(1))).dividedBy(ray_direction);
+    const inverse_ray_direction: V3_4x = @as(V3_4x, .splat(one)).dividedBy(ray_direction);
+
+    var hit_box_center: V3_4x = .splat(zero);
+    var hit_box_radius: V3_4x = .splat(zero);
+    var hit_reflection_color: V3_4x = .splat(zero);
 
     while (depth > 0) {
         depth -= 1;
@@ -591,8 +593,8 @@ fn raycast(
             const box_min: V3_4x = box_position.minus(box_radius);
             const box_max: V3_4x = box_position.plus(box_radius);
 
-            const t_box_min: V3_4x = box_min.minus(ray_origin).times(inverse_ray_direction);
-            const t_box_max: V3_4x = box_max.minus(ray_origin).times(inverse_ray_direction);
+            const t_box_min: V3_4x = box_min.minus(ray_origin).hadamardProduct(inverse_ray_direction);
+            const t_box_max: V3_4x = box_max.minus(ray_origin).hadamardProduct(inverse_ray_direction);
 
             const t_min3: V3_4x = t_box_min.min(t_box_max);
             const t_max3: V3_4x = t_box_min.max(t_box_max);
@@ -600,11 +602,12 @@ fn raycast(
             const t_min: F32_4x = @max(t_min3.x, @max(t_min3.y, t_min3.z));
             const t_max: F32_4x = @min(t_max3.x, @min(t_max3.y, t_max3.z));
 
-            const max_pass: Bool_4x = t_max > @as(F32_4x, @splat(0));
+            const max_pass: Bool_4x = t_max > @as(F32_4x, zero);
+
             if (simd.anyTrue(max_pass)) {
-                const t_inside: Bool_4x = max_pass & (t_min < @as(F32_4x, @splat(0)));
-                const t_valid: Bool_4x = (t_min > @as(F32_4x, @splat(0))) & (t_min < t_max);
-                const mask: Bool_4x = t_valid & (t_min < result.t_ray);
+                const t_inside: Bool_4x = max_pass & (t_min < @as(F32_4x, zero));
+                const t_valid: Bool_4x = (t_min > @as(F32_4x, zero)) & (t_min < t_max);
+                const mask: Bool_4x = t_valid & (t_min < t_ray);
                 const close_enough: Bool_4x = mask & (t_min < t_close_enough);
 
                 if (box.child_count > 0 and (simd.anyTrue(t_inside) or simd.anyTrue(close_enough))) {
@@ -612,43 +615,11 @@ fn raycast(
                     box_stack[depth] = box;
                     depth += 1;
                 } else if (simd.anyTrue(t_valid)) {
-                    if (false) {
-                        var box_surface_index: U32_4x = @splat(0);
-                        var running_mask: U32_4x = @intFromBool(t_box_min.x == t_min);
-
-                        var this_mask: U32_4x = @intFromBool(t_box_max.x == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(1)) & (this_mask & ~running_mask);
-                        running_mask |= this_mask;
-
-                        this_mask = @intFromBool(t_box_min.y == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(2)) & (this_mask & ~running_mask);
-                        running_mask |= this_mask;
-
-                        this_mask = @intFromBool(t_box_max.y == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(3)) & (this_mask & ~running_mask);
-                        running_mask |= this_mask;
-
-                        this_mask = @intFromBool(t_box_min.z == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(4)) & (this_mask & ~running_mask);
-                        running_mask |= this_mask;
-
-                        this_mask = @intFromBool(t_box_max.z == t_min);
-                        box_surface_index |= @as(U32_4x, @splat(5)) & (this_mask & ~running_mask);
-
-                        result.box_surface_index =
-                            @select(u32, mask, box_surface_index, result.box_surface_index);
-                    }
-
-                    result.t_ray = @select(f32, mask, t_min, result.t_ray);
-                    result.hit |= mask;
-                    // result.box_index =
-                    //     @select(u32, mask, @as(U32_4x, @splat(source_index)), result.box_index);
-                    if (false) {
-                        const normal_sign: F32_4x = @select(f32, t_box_min < t_box_max, one, negative_one);
-                        result.normal.x = @select(f32, mask, result.normal.x, (t_min == t_min.x) & normal_sign);
-                        result.normal.y = @select(f32, mask, result.normal.y, (t_min == t_min.y) & normal_sign);
-                        result.normal.z = @select(f32, mask, result.normal.z, (t_min == t_min.z) & normal_sign);
-                    }
+                    t_ray = @select(f32, mask, t_min, t_ray);
+                    hit_box_center = hit_box_center.select(mask, box_position);
+                    hit_box_radius = hit_box_radius.select(mask, box_radius);
+                    hit_reflection_color =
+                        hit_reflection_color.select(mask, .fromVector3(box.reflection_color.toVector3()));
 
                     // TODO: I think this was just a straight-up bug in our original implementation.
                     if (false) {
@@ -663,6 +634,29 @@ fn raycast(
             }
         }
     }
+
+    const hit_box_inv_radius: V3_4x = @as(V3_4x, .splat(one)).dividedBy(hit_box_radius);
+    const hit_position: V3_4x = ray_origin.plus(ray_direction.scaledToV(t_ray));
+    const unscaled_direction: V3_4x = hit_position.minus(hit_box_center);
+    const scaled_direction: V3_4x = hit_box_inv_radius.hadamardProduct(unscaled_direction);
+
+    const x_mask: U32_4x =
+        @intFromBool((scaled_direction.x < scaled_direction.y) & (scaled_direction.x < scaled_direction.z));
+    const y_mask: U32_4x =
+        @intFromBool((scaled_direction.y < scaled_direction.x) & (scaled_direction.y < scaled_direction.z));
+    const z_mask: U32_4x =
+        @intFromBool((scaled_direction.z < scaled_direction.x) & (scaled_direction.z < scaled_direction.y));
+    const hit_normal: V3_4x = .fromAxes(
+        @floatFromInt(x_mask & (one_u | simd.signBitFrom(scaled_direction.x))),
+        @floatFromInt(y_mask & (one_u | simd.signBitFrom(scaled_direction.y))),
+        @floatFromInt(z_mask & (one_u | simd.signBitFrom(scaled_direction.z))),
+    );
+
+    var result: RaycastResult = .{};
+    result.hit = @as(F32_4x, @splat(std.math.floatMax(f32))) != t_ray;
+    result.normal = hit_normal;
+    result.position = hit_position;
+    result.reflection_color = hit_reflection_color;
 
     return result;
 }
