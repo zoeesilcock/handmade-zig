@@ -66,6 +66,11 @@ zig build hha-edit -Dpackage=RendererTest run-renderer-test
 zig build run-raytracer -Dpackage=Raytracer
 ```
 
+### Generate sampling spheres
+```
+zig build -Dpackage=GenerateSamplingSpheres -Doptimize=ReleaseSafe generate-sampling-spheres -- 16 18 src/sampling_spheres_generated.zig
+```
+
 
 ## Hot reloading
 The game is split up into an executable for the runtime and a DLL that contains the actual game. This allows hot reloading for most of the game code. When the DLL is rebuilt, the game will automatically reload it.

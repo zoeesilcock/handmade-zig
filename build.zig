@@ -22,6 +22,7 @@ const Package = enum {
     Raytracer,
     TestPNG,
     RendererTest,
+    GenerateSamplingSpheres,
 };
 
 pub fn build(b: *std.Build) void {
@@ -91,6 +92,10 @@ pub fn build(b: *std.Build) void {
 
     if (package == .All or package == .RendererTest) {
         addRendererTest(b, build_options, target, optimize, internal);
+    }
+
+    if (package == .All or package == .GenerateSamplingSpheres) {
+        addGenerateSamplingSpheres(b, build_options, target, optimize);
     }
 }
 
@@ -522,4 +527,43 @@ fn addRendererTest(
     const run_step = b.step("run-renderer-test", "Run the renderer test");
     run_exe.setCwd(b.path("./data/renderer_test"));
     run_step.dependOn(&run_exe.step);
+}
+
+fn addGenerateSamplingSpheres(
+    b: *std.Build,
+    build_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const shared_module = b.addModule("shared", .{
+        .root_source_file = b.path("src/shared.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const generate_sampling_spheres_exe = b.addExecutable(.{
+        .name = "generate-sampling-spheres",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/generate_sampling_spheres.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    generate_sampling_spheres_exe.stack_size = 0x100000; // 1MB.
+    generate_sampling_spheres_exe.root_module.addOptions("build_options", build_options);
+    generate_sampling_spheres_exe.root_module.addImport("shared", shared_module);
+
+    const zigwin32 = b.dependency("zigwin32", .{}).module("win32");
+    generate_sampling_spheres_exe.root_module.addImport("win32", zigwin32);
+
+    b.installArtifact(generate_sampling_spheres_exe);
+
+    // Allow running asset builder from build command.
+    const run_generate_sampling_spheres = b.addRunArtifact(generate_sampling_spheres_exe);
+    if (b.args) |args| {
+        run_generate_sampling_spheres.addArgs(args);
+    }
+    const generate_sampling_spheres_run_step = b.step("generate-sampling-spheres", "Run the generate sampling spheres tool");
+    run_generate_sampling_spheres.setCwd(b.path("data/"));
+    generate_sampling_spheres_run_step.dependOn(&run_generate_sampling_spheres.step);
 }

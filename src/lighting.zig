@@ -8,6 +8,8 @@ const memory = @import("memory.zig");
 const asset = @import("asset.zig");
 const intrinsics = @import("intrinsics.zig");
 const random = @import("random.zig");
+const handmade = @import("handmade.zig");
+const sampling_spheres = @import("sampling_spheres_generated.zig");
 const debug_interface = @import("debug_interface.zig");
 const std = @import("std");
 
@@ -32,7 +34,12 @@ const LightingBox = renderer.LightingBox;
 const MemoryArena = memory.MemoryArena;
 const DebugInterface = debug_interface.DebugInterface;
 const TimedBlock = debug_interface.TimedBlock;
+const LightSamplingSphere = sampling_spheres.LightSamplingSphere;
 
+const LIGHT_SAMPLING_SPHERE_COUNT = sampling_spheres.LIGHT_SAMPLING_SPHERE_COUNT;
+const LIGHT_SAMPLING_SPHERE_MASK = sampling_spheres.LIGHT_SAMPLING_SPHERE_MASK;
+const LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE = sampling_spheres.LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE;
+const LIGHT_SAMPLING_TOTAL_RAYS_PER_SPHERE = sampling_spheres.LIGHT_SAMPLING_TOTAL_RAYS_PER_SPHERE;
 const LIGHT_POINTS_PER_CHUNK = renderer.LIGHT_POINTS_PER_CHUNK;
 const INTERNAL = shared.INTERNAL;
 pub const LIGHT_TEST_ACCUMULATION_COUNT = 1024;
@@ -163,9 +170,7 @@ pub const LightingSolution = extern struct {
     accumulation_count: f32 = 0,
     accumulating: bool = false,
 
-    sample_points: [16][18]V3_4x = undefined,
-    sample_point_direction_index: [18]u8,
-    pattern_name: [*]const u8,
+    sampling_spheres: [*]LightSamplingSphere,
 
     light_probe_count: u16,
     spatial_probe_index: LightProbeSpatialIndex,
@@ -292,213 +297,8 @@ const RaycastResult = struct {
     emission: F32_4x = @splat(0),
 };
 
-const LightingPattern = struct {
-    name: [*]const u8,
-    generator: *const lightingPatternGenerator,
-
-    pub fn new(name: [*]const u8, generator: *const lightingPatternGenerator) LightingPattern {
-        return .{
-            .name = name,
-            .generator = generator,
-        };
-    }
-};
-
-const lightingPatternGenerator = fn (series: *random.Series, dest: [*]Vector3) void;
-
-var lighting_pattern_generators = [_]LightingPattern{
-    .new("Poisson", &generatePoissonSamples),
-    .new("White noise", &generateWhiteNoiseSamples),
-    .new("Polar", &generatePolarSamples),
-    .new("Spiral", &generateSpiralSamples),
-};
-
 fn testFunc(dir: Vector3) f32 {
     return 3.0 * dir.x() + 2.0 * dir.y() - 0.5 * dir.z() * dir.z();
-}
-
-pub fn generateLightingPattern(solution: *LightingSolution, pattern_index: u32) void {
-    const pattern: *LightingPattern =
-        &lighting_pattern_generators[@mod(pattern_index, lighting_pattern_generators.len)];
-    var series: random.Series = solution.series;
-
-    // var min_test_avg: f32 = std.math.floatMax(f32);
-    // var max_test_avg: f32 = -std.math.floatMax(f32);
-    // const sample_count: u32 = 65536;
-    // var test_index: u32 = 0;
-    // while (test_index <= 256) : (test_index += 1) {
-    //     var test_sum: f32 = 0;
-    //     var dir_index: u32 = 0;
-    //     while (dir_index < sample_count) : (dir_index += 1) {
-    //         while (true) {
-    //             var dir: Vector3 = Vector3.new(
-    //                 series.randomBilateral(),
-    //                 series.randomBilateral(),
-    //                 series.randomBilateral(),
-    //             );
-    //
-    //             if (dir.z() < 0) {
-    //                 _ = dir.setZ(-dir.z());
-    //             }
-    //
-    //             if (dir.lengthSquared() <= 1.0) {
-    //                 dir = dir.normalizeOrZero();
-    //                 test_sum += testFunc(dir) * dir.z();
-    //
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //
-    //     const test_avg: f32 = test_sum / @as(f32, @floatFromInt(sample_count));
-    //     min_test_avg = @min(min_test_avg, test_avg);
-    //     max_test_avg = @max(max_test_avg, test_avg);
-    // }
-    //
-    // var min_avg: f32 = std.math.floatMax(f32);
-    // var max_avg: f32 = -std.math.floatMax(f32);
-    var version_index: u32 = 0;
-    while (version_index < solution.sample_points.len) : (version_index += 1) {
-        var temp: [72]Vector3 = undefined;
-        pattern.generator(&series, &temp);
-
-        // var sum: f32 = 0;
-        // var dir_index: u32 = 0;
-        // while (dir_index < temp.len) : (dir_index += 1) {
-        //     sum += testFunc(temp[dir_index]);
-        // }
-        // const avg: f32 = sum / @as(f32, @floatFromInt(sample_count));
-        // min_avg = @min(min_avg, avg);
-        // max_avg = @max(max_avg, avg);
-
-        var dest = &solution.sample_points[version_index];
-        var dir_index: u32 = 0;
-        while (dir_index < dest.len) : (dir_index += 1) {
-            dest[dir_index] = .new(
-                temp[4 * dir_index + 0],
-                temp[4 * dir_index + 1],
-                temp[4 * dir_index + 2],
-                temp[4 * dir_index + 3],
-            );
-        }
-    }
-
-    solution.pattern_name = pattern.name;
-}
-
-fn generateWhiteNoiseSamples(series: *random.Series, dest: [*]Vector3) void {
-    var dest_index: u32 = 0;
-    while (dest_index < 64) : (dest_index += 1) {
-        while (true) {
-            var p: Vector3 = Vector3.new(
-                series.randomBilateral(),
-                series.randomBilateral(),
-                0,
-            );
-
-            const length: f32 = p.lengthSquared();
-            if (length < 1.0) {
-                _ = p.setZ(@sqrt(1.0 - length));
-                dest[dest_index] = p;
-                break;
-            }
-        }
-    }
-}
-
-fn generatePolarSamples(series: *random.Series, dest: [*]Vector3) void {
-    const spoke_table = [_]u32{
-        4,
-        16,
-        16,
-        16,
-        12,
-    };
-
-    var point_count: u32 = 0;
-    const slice_count: u32 = spoke_table.len;
-    var slice: u32 = 0;
-    while (slice < slice_count) : (slice += 1) {
-        const spoke_count: u32 = spoke_table[slice];
-        var spoke: u32 = 0;
-        while (spoke < spoke_count) : (spoke += 1) {
-            const jitter: f32 = series.randomUnilateral();
-            const ratio: f32 = (@as(f32, @floatFromInt(slice)) + jitter) / @as(f32, @floatFromInt(slice_count));
-            const z: f32 = @cos(0.5 * math.PI32 * ratio + 0.2);
-            const radius: f32 = @sqrt(1.0 - z * z);
-
-            const theta: f32 = math.TAU32 * @as(f32, @floatFromInt(spoke)) / @as(f32, @floatFromInt(spoke_count));
-
-            const x: f32 = radius * @sin(theta);
-            const y: f32 = radius * @cos(theta);
-
-            dest[point_count] = .new(x, y, z);
-            point_count += 1;
-        }
-    }
-}
-
-fn generateSpiralSamples(series: *random.Series, dest: [*]Vector3) void {
-    const sphere_amount: f32 = 2.0 + 2.0 * series.randomUnilateral();
-    const rho_offset: f32 = math.TAU32 * series.randomUnilateral();
-    const theta: f32 = math.PI32 * (3.0 - @sqrt(5.0));
-    const n: u32 = 64;
-    const n2: f32 = sphere_amount * @as(f32, @floatFromInt(n));
-
-    var index: u32 = 0;
-    while (index < n) : (index += 1) {
-        const i: f32 = @as(f32, @floatFromInt(index));
-        const rho: f32 = rho_offset + theta * i;
-        const z: f32 =
-            (1.0 - (1.0 / @as(f32, n2))) *
-            (1.0 - ((2.0 * i) / (n2 - 1)));
-        const tau: f32 = @sqrt(1.0 - z * z);
-
-        const normal: Vector3 = Vector3.new(
-            tau * @cos(rho),
-            tau * @sin(rho),
-            z,
-        );
-
-        dest[index] = normal;
-    }
-}
-
-fn generatePoissonSamples(series: *random.Series, dest: [*]Vector3) void {
-    const min_dist_sq: f32 = math.square(0.17);
-    var point_count: u32 = 0;
-    while (point_count < 64) {
-        const p: Vector3 = Vector3.new(
-            series.randomBilateral(),
-            series.randomBilateral(),
-            0,
-        );
-
-        // const max_cos: f32 = @cos((0.120 * math.PI32) - (0.07 * math.PI32 * p.z()));
-
-        var test_index: u32 = 0;
-        var valid: bool = p.lengthSquared() <= 1.0;
-        while (test_index < point_count) : (test_index += 1) {
-            if (dest[test_index].minus(p).lengthSquared() < min_dist_sq) {
-                valid = false;
-                break;
-            }
-        }
-
-        if (valid) {
-            dest[point_count] = p;
-            point_count += 1;
-        }
-    }
-
-    var dest_index: u32 = 0;
-    while (dest_index < 64) : (dest_index += 1) {
-        var p: Vector3 = dest[dest_index];
-
-        _ = p.setZ(@sqrt(1.0 - p.lengthSquared()));
-
-        dest[dest_index] = p;
-    }
 }
 
 fn getBox(solution: *LightingSolution, box_index: u32) *LightingBox {
@@ -682,9 +482,6 @@ fn computeLightPropagation(
     const first_light_probe_index: u32 = work.first_light_probe_index;
     const one_past_last_light_probe_index: u32 = work.one_past_last_light_probe_index;
 
-    const ray_count: u32 = solution.sample_point_direction_index.len;
-    const ray_weight: f32 = 6 / @as(f32, @floatFromInt(ray_count));
-
     var series: random.Series = solution.series;
     const sample_point_entropy: u32 = series.randomInt();
 
@@ -704,13 +501,14 @@ fn computeLightPropagation(
             }
         }
 
-        const sample_pattern_mask: u32 = 15;
+        const direction_sample_index: u32 = light_probe_index + sample_point_entropy & LIGHT_SAMPLING_SPHERE_MASK;
+        const sampling_sphere: *LightSamplingSphere = &solution.sampling_spheres[direction_sample_index];
+        const ray_count: u32 = sampling_sphere.sample_direction.len;
+        const ray_weight: f32 = 6 / @as(f32, @floatFromInt(ray_count));
 
         var ray_index: u32 = 0;
         while (ray_index < ray_count) : (ray_index += 1) {
-            const direction_sample_index: u32 = light_probe_index + sample_point_entropy & sample_pattern_mask;
-            const ray_direction: V3_4x = solution.sample_points[direction_sample_index][ray_index];
-            const sample_point_direction_index = solution.sample_point_direction_index[ray_index];
+            const ray_direction: V3_4x = sampling_sphere.sample_direction[ray_index];
 
             const ray: RaycastResult = raycast(work, ray_origin, ray_direction);
 
@@ -754,15 +552,22 @@ fn computeLightPropagation(
                     transfer_pps = moon_color.scaledTo(math.clampf01(emission_direction.z()));
                 }
 
-                solution.accumulated_pps[6 * light_probe_index + sample_point_direction_index] =
-                    solution.accumulated_pps[light_probe_index].plus(transfer_pps.scaledTo(ray_weight));
+                var pps: [*]Vector3 = @ptrCast(&solution.accumulated_pps[6 * light_probe_index]);
+                const cube_side_weight: [*]f32 = &sampling_sphere.cube_side_weight[4 * ray_index + sub_ray];
+
+                // TODO: Does it make sense to accumulate the weighting here or can it safely be skipped because it
+                // should average out over time if your sampling is reasonably distributed?
+                pps[0] = pps[0].plus(transfer_pps.toVector3().scaledTo(ray_weight * cube_side_weight[0]));
+                pps[1] = pps[1].plus(transfer_pps.toVector3().scaledTo(ray_weight * cube_side_weight[1]));
+                pps[2] = pps[2].plus(transfer_pps.toVector3().scaledTo(ray_weight * cube_side_weight[2]));
+                pps[3] = pps[3].plus(transfer_pps.toVector3().scaledTo(ray_weight * cube_side_weight[3]));
+                pps[4] = pps[4].plus(transfer_pps.toVector3().scaledTo(ray_weight * cube_side_weight[4]));
+                pps[5] = pps[5].plus(transfer_pps.toVector3().scaledTo(ray_weight * cube_side_weight[5]));
             }
         }
     }
 
     solution.series = series;
-
-    // DebugInterface.debugValue(@src(), &solution.pattern_name, "PatternName");
 }
 
 pub fn doLightingWork(queue: shared.PlatformWorkQueuePtr, data: *anyopaque) callconv(.c) void {
@@ -970,8 +775,7 @@ pub fn initLighting(solution: *LightingSolution, arena: *MemoryArena) void {
     solution.max_work_count = 256;
     solution.works = arena.pushArray(solution.max_work_count, LightingWork, .aligned(64, true), @src());
     solution.accumulated_pps = arena.pushArray(6 * LIGHT_DATA_WIDTH, Color3, .aligned(64, true), @src());
-
-    generateLightingPattern(solution, 0);
+    solution.sampling_spheres = &sampling_spheres.light_sampling_sphere_table;
 }
 
 pub fn lightingTest(
@@ -1094,7 +898,7 @@ pub fn lightingTest(
         group.pushLineSegment(white_texture, line.from_position, line.color, line.to_position, line.color, 0.01);
     }
 
-    const start_point: Vector3 = .new(0, 0, 1.05);
+    const start_point: Vector3 = .new(0, 0, 10.05);
 
     const color_table = [_]Color{
         .new(0, 0, 0, 1),
@@ -1189,23 +993,27 @@ pub fn lightingTest(
         }
     }
 
-    if (false) {
-        var point_index: u32 = 0;
-        while (point_index < solution.sample_points[0].len) : (point_index += 1) {
-            var component_index: u32 = 0;
-            while (component_index < 4) : (component_index += 1) {
-                const color: Color = color_table[@mod(4 * point_index + component_index, color_table.len)];
-                const normal: Vector3 = solution.sample_points[0][point_index].getComponent(component_index);
+    if (true) {
+        var sphere_index: u32 = 0;
+        while (sphere_index < LIGHT_SAMPLING_SPHERE_COUNT) : (sphere_index += 1) {
+            const sphere: *LightSamplingSphere = &solution.sampling_spheres[sphere_index];
+            var point_index: u32 = 0;
+            while (point_index < LIGHT_SAMPLING_RAY_BUNDLES_PER_SPHERE) : (point_index += 1) {
+                var component_index: u32 = 0;
+                while (component_index < 4) : (component_index += 1) {
+                    const color: Color = handmade.getDebugColor4(sphere_index, null);
+                    const normal: Vector3 = sphere.sample_direction[point_index].getComponent(component_index);
 
-                group.pushCube(
-                    white_texture,
-                    start_point.plus(normal),
-                    0.01,
-                    0.02,
-                    color,
-                    null,
-                    null,
-                );
+                    group.pushCube(
+                        white_texture,
+                        start_point.plus(normal),
+                        .splat(0.01),
+                        color,
+                        null,
+                        null,
+                        null,
+                    );
+                }
             }
         }
     }
@@ -1220,26 +1028,6 @@ pub fn lightingTest(
                 start_point.plus(normal),
                 color,
                 start_point.plus(normal.scaledTo(1.06)),
-                color,
-                0.01,
-            );
-        }
-    }
-
-    if (false) {
-        _ = group.getCurrentQuads(solution.sample_points.len * 6, group.white_texture);
-        var point_index: u32 = 0;
-        while (point_index < solution.sample_points.len) : (point_index += 1) {
-            const position: Vector3 = start_point;
-            const normal_a: Vector3 = solution.sample_points[point_index - 1];
-            const normal_b: Vector3 = solution.sample_points[point_index];
-
-            const color: Color = .new(1, 1, 0, 1);
-            group.pushLineSegment(
-                white_texture,
-                position.plus(normal_a),
-                color,
-                position.plus(normal_b),
                 color,
                 0.01,
             );
