@@ -62,10 +62,14 @@ pub fn generateLightingPattern(
 ) !void {
     var series: random.Series = .seed(1234, null, null, null);
 
+    std.log.info("\n", .{});
+
     const total_direction_count: u32 = light_sampling_sphere_count * ray_bundles_per_sphere * 4;
     var directions: []Vector3 = try allocator.alloc(Vector3, total_direction_count);
+    var displacements: []Vector3 = try allocator.alloc(Vector3, total_direction_count);
     // const used: []bool = try allocator.alloc(bool, total_direction_count);
 
+    // Place points onto the sphere poorly (white noise cube projected to sphere surface).
     var dir_index: u32 = 0;
     while (dir_index < total_direction_count) {
         var direction: Vector3 = .new(
@@ -82,10 +86,82 @@ pub fn generateLightingPattern(
         }
     }
 
+    var last_min_max_separation: f32 = std.math.floatMax(f32);
+    while (true) {
+        var min_closest_point_distance: f32 = std.math.floatMax(f32);
+        var max_closest_point_distance: f32 = std.math.floatMin(f32);
+
+        dir_index = 0;
+        while (dir_index < total_direction_count) : (dir_index += 1) {
+            var displacement: Vector3 = .zero();
+            const direction: *Vector3 = &directions[dir_index];
+            var closest_point_distance: f32 = std.math.floatMax(f32);
+
+            var repulsor_index: u32 = 0;
+            while (repulsor_index < total_direction_count) : (repulsor_index += 1) {
+                if (dir_index != repulsor_index) {
+                    const repulsor: *Vector3 = &directions[repulsor_index];
+
+                    const falloff: f32 = direction.dotProduct(repulsor.*);
+                    if (falloff > 0) {
+                        var force_line: Vector3 = direction.minus(repulsor.*);
+                        const force_line_length: f32 = force_line.length();
+
+                        force_line = force_line.crossProduct(direction.*);
+                        force_line = direction.crossProduct(force_line);
+
+                        force_line = force_line.normalizeOrZero();
+                        displacement = displacement.plus(force_line.scaledTo(falloff));
+
+                        if (closest_point_distance > force_line_length) {
+                            closest_point_distance = force_line_length;
+                        }
+                    }
+                }
+            }
+
+            displacements[dir_index] = displacement;
+            min_closest_point_distance = @min(min_closest_point_distance, closest_point_distance);
+            max_closest_point_distance = @max(max_closest_point_distance, closest_point_distance);
+        }
+
+        const min_max_separation: f32 = max_closest_point_distance - min_closest_point_distance;
+        if (min_max_separation < 0.025) {
+            break;
+        }
+
+        std.log.info(
+            "\nGenerating directions... ({d} - {d} = {d} +{d}",
+            .{
+                max_closest_point_distance,
+                min_closest_point_distance,
+                min_max_separation,
+                last_min_max_separation - min_max_separation,
+            },
+        );
+
+        last_min_max_separation = min_max_separation;
+
+        const max_displacement_per_step: f32 = 0.01 * max_closest_point_distance;
+        dir_index = 0;
+        while (dir_index < total_direction_count) : (dir_index += 1) {
+            const displacement: Vector3 = displacements[dir_index];
+            const direction: *Vector3 = &directions[dir_index];
+
+            const disp: Vector3 = displacement;
+            var dir: Vector3 = direction.*;
+
+            dir = dir.plus(disp.scaledTo(max_displacement_per_step));
+            dir = dir.normalizeOrZero();
+
+            direction.* = dir;
+        }
+    }
+
+    var direction_from: []Vector3 = directions;
     var sphere_index: u32 = 0;
     while (sphere_index < light_sampling_sphere_count) : (sphere_index += 1) {
         const sphere: *SphereStore = &spheres[sphere_index];
-        var direction_from: [*]Vector3 = @ptrCast(&directions[sphere_index]);
         var bundle_index: u32 = 0;
         while (bundle_index < ray_bundles_per_sphere) : (bundle_index += 1) {
             sphere.sample_direction[bundle_index] = .new(
@@ -94,7 +170,7 @@ pub fn generateLightingPattern(
                 direction_from[2],
                 direction_from[3],
             );
-            direction_from += 4;
+            direction_from.ptr += 4;
 
             var bundle_component: u32 = 0;
             while (bundle_component < 4) : (bundle_component += 1) {
@@ -109,6 +185,7 @@ pub fn generateLightingPattern(
             }
         }
     }
+    std.log.info("\n", .{});
 }
 
 fn outputSpheres(
