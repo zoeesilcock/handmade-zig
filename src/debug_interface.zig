@@ -78,6 +78,7 @@ pub const DebugType = if (INTERNAL) enum(u32) {
     u16,
     u32,
     i32,
+    usize,
     Vector2,
     Vector3,
     Vector4,
@@ -124,6 +125,7 @@ pub const DebugEvent = if (INTERNAL) extern struct {
         u32: u32,
         i32: i32,
         f32: f32,
+        usize: usize,
         Vector2: Vector2,
         Vector3: Vector3,
         Vector4: Vector4,
@@ -226,6 +228,13 @@ pub const DebugEvent = if (INTERNAL) extern struct {
                 }
                 self.event_type = .f32;
                 self.data = .{ .f32 = dest.* };
+            },
+            usize => {
+                if (guids_match) {
+                    dest.* = shared.global_debug_table.edit_event.data.usize;
+                }
+                self.event_type = .usize;
+                self.data = .{ .usize = dest.* };
             },
             Vector2 => {
                 if (guids_match) {

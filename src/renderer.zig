@@ -101,6 +101,10 @@ pub const PlatformRenderer = extern struct {
     beginFrame: *const beginFrameType = undefined,
     endFrame: *const endFrameType = undefined,
 
+    total_texture_memory: usize = 0,
+    total_framebuffer_memory: usize = 0,
+    used_multisample_count: u32 = 0,
+
     // This is currently unused by us, but we've added it for other platform maintainers so they can put some context
     // pointers in there for their own use.
     platform: *anyopaque = undefined,

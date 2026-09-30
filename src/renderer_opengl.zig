@@ -208,6 +208,7 @@ const INTERNAL = shared.INTERNAL;
 
 const ALLOW_GPU_SRGB = false;
 const DEPTH_COMPONENT_TYPE = GL_DEPTH_COMPONENT32F;
+const DEPTH_COMPONENT_BYTES_PER_SAMPLE = 4;
 const TEXTURE_ARRAY_DIM = renderer.TEXTURE_ARRAY_DIM;
 
 const PlatformRenderer = renderer.PlatformRenderer;
@@ -233,6 +234,7 @@ const Rectangle2 = math.Rectangle2;
 const Rectangle2i = math.Rectangle2i;
 const Matrix4x4 = math.Matrix4x4;
 const TimedBlock = debug_interface.TimedBlock;
+const DebugInterface = debug_interface.DebugInterface;
 const TextureOp = renderer.TextureOp;
 const MipIterator = image.MipIterator;
 
@@ -319,6 +321,7 @@ const Framebuffer = extern struct {
     framebuffer_handle: u32 = 0,
     color_handle: [COLOR_HANDLE_COUNT]u32 = undefined,
     depth_handle: u32 = 0,
+    gpu_memory_used: usize = 0,
 };
 
 const FramebufferFlags = enum(u32) {
@@ -385,7 +388,7 @@ pub const OpenGL = extern struct {
 
     // Dynamic resources that get recreated when settings change.
     resolve_frame_buffer: Framebuffer = .{},
-    depth_peel_buffers: [16]Framebuffer = @splat(.{}),
+    depth_peel_buffer: Framebuffer = .{},
     depth_peel_resolve_buffers: [16]Framebuffer = @splat(.{}),
     z_bias_no_depth_peel: ZBiasProgram = undefined, // Pass 0.
     z_bias_depth_peel: ZBiasProgram = undefined, // Passes 1 through n.
@@ -396,8 +399,8 @@ pub const OpenGL = extern struct {
     light_data0: u32 = 0,
     light_data1: u32 = 0,
 
-    light_buffer_count: u32 = 0,
-    light_buffers: [12]LightBuffer = undefined,
+    // light_buffer_count: u32 = 0,
+    // light_buffers: [12]LightBuffer = undefined,
 
     render_commands: RenderCommands,
 };
@@ -1351,19 +1354,23 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     const multisampled: bool = (flags & @intFromEnum(FramebufferFlags.Multisampled)) != 0;
     const filtered: bool = (flags & @intFromEnum(FramebufferFlags.Filtered)) != 0;
     const has_depth: bool = (flags & @intFromEnum(FramebufferFlags.Depth)) != 0;
-    // const is_float: bool = (flags & @intFromEnum(FramebufferFlags.Float)) != 0;
+    const is_float: bool = (flags & @intFromEnum(FramebufferFlags.Float)) != 0;
 
     platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&result.framebuffer_handle));
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, result.framebuffer_handle);
 
     const slot = if (multisampled) GL_TEXTURE_2D_MULTISAMPLE else gl.GL_TEXTURE_2D;
     const filter_type: i32 = if (filtered) gl.GL_LINEAR else gl.GL_NEAREST;
+    const sample_count: i32 = if (multisampled) open_gl.max_multi_sample_count else 1;
 
     std.debug.assert(color_buffer_count <= ALL_COLOR_ATTACHMENTS.len);
     std.debug.assert(color_buffer_count <= result.color_handle.len);
 
     var color_index: u32 = 0;
     while (color_index < color_buffer_count) : (color_index += 1) {
+        result.gpu_memory_used +=
+            @intCast(width * height * @as(i32, (if (is_float) 4 * 4 else 4)) * sample_count);
+
         result.color_handle[color_index] = framebufferTexImage(
             open_gl,
             slot,
@@ -1384,6 +1391,9 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     std.debug.assert(gl.glGetError() == gl.GL_NO_ERROR);
 
     if (has_depth) {
+        result.gpu_memory_used +=
+            @intCast(width * height * DEPTH_COMPONENT_BYTES_PER_SAMPLE * sample_count);
+
         result.depth_handle = framebufferTexImage(open_gl, slot, DEPTH_COMPONENT_TYPE, filter_type, width, height);
         platform.optGLFrameBufferTexture2DEXT.?(
             GL_FRAMEBUFFER,
@@ -1401,6 +1411,8 @@ fn createFrameBuffer(open_gl: *OpenGL, width: i32, height: i32, flags: u32, colo
     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, 0);
     gl.glBindTexture(slot, 0);
 
+    open_gl.header.total_framebuffer_memory += result.gpu_memory_used;
+
     return result;
 }
 
@@ -1415,14 +1427,13 @@ fn bindFrameBuffer(framebuffer: ?*Framebuffer, render_width: i32, render_height:
 }
 
 fn getDepthPeelReadBuffer(open_gl: *OpenGL, index: u32) *Framebuffer {
-    var peel_buffer: *Framebuffer = &open_gl.depth_peel_buffers[index];
-    if (open_gl.multisampling) {
-        peel_buffer = &open_gl.depth_peel_resolve_buffers[index];
-    }
+    const peel_buffer: *Framebuffer = &open_gl.depth_peel_resolve_buffers[index];
     return peel_buffer;
 }
 
-fn freeFramebuffer(framebuffer: *Framebuffer) void {
+fn freeFramebuffer(open_gl: *OpenGL, framebuffer: *Framebuffer) void {
+    open_gl.header.total_framebuffer_memory -= framebuffer.gpu_memory_used;
+
     if (framebuffer.framebuffer_handle != 0) {
         platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&framebuffer.framebuffer_handle));
         framebuffer.framebuffer_handle = 0;
@@ -1449,23 +1460,25 @@ fn freeProgram(program: *OpenGLProgramCommon) void {
 
 fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     // Free all dynamic resources.
-    freeFramebuffer(&open_gl.resolve_frame_buffer);
+    freeFramebuffer(open_gl, &open_gl.resolve_frame_buffer);
+    freeFramebuffer(open_gl, &open_gl.depth_peel_buffer);
     var depth_peel_index: u32 = 0;
     while (depth_peel_index < open_gl.depth_peel_count) : (depth_peel_index += 1) {
-        freeFramebuffer(&open_gl.depth_peel_buffers[depth_peel_index]);
-        freeFramebuffer(&open_gl.depth_peel_resolve_buffers[depth_peel_index]);
+        freeFramebuffer(open_gl, &open_gl.depth_peel_resolve_buffers[depth_peel_index]);
     }
-    var light_index: u32 = 0;
-    while (light_index < open_gl.light_buffer_count) : (light_index += 1) {
-        const light_buffer: *LightBuffer = &open_gl.light_buffers[light_index];
-        platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
-        platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
-        gl.glDeleteTextures(1, &light_buffer.front_emission_texture);
-        gl.glDeleteTextures(1, &light_buffer.back_emission_texture);
-        gl.glDeleteTextures(1, &light_buffer.surface_color_texture);
-        gl.glDeleteTextures(1, &light_buffer.normal_position_texture);
-        light_buffer.* = .{};
-    }
+
+    // var light_index: u32 = 0;
+    // while (light_index < open_gl.light_buffer_count) : (light_index += 1) {
+    //     const light_buffer: *LightBuffer = &open_gl.light_buffers[light_index];
+    //     platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
+    //     platform.optGLDeleteFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
+    //     gl.glDeleteTextures(1, &light_buffer.front_emission_texture);
+    //     gl.glDeleteTextures(1, &light_buffer.back_emission_texture);
+    //     gl.glDeleteTextures(1, &light_buffer.surface_color_texture);
+    //     gl.glDeleteTextures(1, &light_buffer.normal_position_texture);
+    //     light_buffer.* = .{};
+    // }
+
     freeProgram(&open_gl.z_bias_no_depth_peel.common);
     freeProgram(&open_gl.z_bias_depth_peel.common);
     freeProgram(&open_gl.peel_composite);
@@ -1491,11 +1504,14 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
     const multisampled_resolve_flags = depth_peel_flags;
     if (open_gl.multisampling) {
         depth_peel_flags |= @intFromEnum(FramebufferFlags.Multisampled);
+        open_gl.header.used_multisample_count = @intCast(open_gl.max_multi_sample_count);
+    } else {
+        open_gl.header.used_multisample_count = 1;
     }
 
     open_gl.depth_peel_count = settings.depth_peel_count_hint;
-    if (open_gl.depth_peel_count > open_gl.depth_peel_buffers.len) {
-        open_gl.depth_peel_count = open_gl.depth_peel_buffers.len;
+    if (open_gl.depth_peel_count > open_gl.depth_peel_resolve_buffers.len) {
+        open_gl.depth_peel_count = open_gl.depth_peel_resolve_buffers.len;
     }
 
     compileZBiasProgram(open_gl, &open_gl.z_bias_no_depth_peel, false, open_gl.current_settings.lighting_disabled);
@@ -1506,16 +1522,16 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
 
     open_gl.resolve_frame_buffer = createFrameBuffer(open_gl, render_width, render_height, resolve_flags, 1);
 
+    open_gl.depth_peel_buffer = createFrameBuffer(
+        open_gl,
+        render_width,
+        render_height,
+        depth_peel_flags,
+        COLOR_HANDLE_COUNT,
+    );
+
     depth_peel_index = 0;
     while (depth_peel_index < open_gl.depth_peel_count) : (depth_peel_index += 1) {
-        open_gl.depth_peel_buffers[depth_peel_index] = createFrameBuffer(
-            open_gl,
-            render_width,
-            render_height,
-            depth_peel_flags,
-            COLOR_HANDLE_COUNT,
-        );
-
         if (open_gl.multisampling) {
             open_gl.depth_peel_resolve_buffers[depth_peel_index] = createFrameBuffer(
                 open_gl,
@@ -1527,116 +1543,116 @@ fn changeToSettings(open_gl: *OpenGL, settings: *RenderSettings) void {
         }
     }
 
-    var texture_width: i32 =
-        (@as(i32, 1) << @as(u5, @intCast(intrinsics.findMostSignificantSetBit(@intCast(render_width)).index)));
-    var texture_height: i32 =
-        (@as(i32, 1) << @as(u5, @intCast(intrinsics.findMostSignificantSetBit(@intCast(render_height)).index)));
+    // var texture_width: i32 =
+    //     (@as(i32, 1) << @as(u5, @intCast(intrinsics.findMostSignificantSetBit(@intCast(render_width)).index)));
+    // var texture_height: i32 =
+    //     (@as(i32, 1) << @as(u5, @intCast(intrinsics.findMostSignificantSetBit(@intCast(render_height)).index)));
 
-    open_gl.light_buffer_count = 0;
-    light_index = 0;
-    while (texture_width > 1 and texture_height > 1) : (light_index += 1) {
-        const light_buffer: *LightBuffer = &open_gl.light_buffers[open_gl.light_buffer_count];
-        open_gl.light_buffer_count += 1;
-        const filter_type: i32 = gl.GL_LINEAR;
-
-        light_buffer.width = texture_width;
-        light_buffer.height = texture_height;
-
-        light_buffer.front_emission_texture = framebufferTexImage(
-            open_gl,
-            gl.GL_TEXTURE_2D,
-            GL_RGB32F,
-            filter_type,
-            texture_width,
-            texture_height,
-        );
-        light_buffer.back_emission_texture = framebufferTexImage(
-            open_gl,
-            gl.GL_TEXTURE_2D,
-            GL_RGB32F,
-            filter_type,
-            texture_width,
-            texture_height,
-        );
-        light_buffer.surface_color_texture = framebufferTexImage(
-            open_gl,
-            gl.GL_TEXTURE_2D,
-            GL_RGB32F,
-            filter_type,
-            texture_width,
-            texture_height,
-        );
-        light_buffer.normal_position_texture = framebufferTexImage(
-            open_gl,
-            gl.GL_TEXTURE_2D,
-            GL_RGB32F,
-            filter_type,
-            texture_width,
-            texture_height,
-        );
-
-        // Up framebuffer.
-        platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
-        platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_all_framebuffer);
-        platform.optGLFrameBufferTexture2DEXT.?(
-            GL_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT0,
-            gl.GL_TEXTURE_2D,
-            light_buffer.front_emission_texture,
-            0,
-        );
-        platform.optGLFrameBufferTexture2DEXT.?(
-            GL_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT1,
-            gl.GL_TEXTURE_2D,
-            light_buffer.back_emission_texture,
-            0,
-        );
-        platform.optGLFrameBufferTexture2DEXT.?(
-            GL_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT2,
-            gl.GL_TEXTURE_2D,
-            light_buffer.surface_color_texture,
-            0,
-        );
-        platform.optGLFrameBufferTexture2DEXT.?(
-            GL_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT3,
-            gl.GL_TEXTURE_2D,
-            light_buffer.normal_position_texture,
-            0,
-        );
-        platform.optGLDrawBuffers.?(4, @ptrCast(&ALL_COLOR_ATTACHMENTS));
-
-        // Down framebuffer.
-        platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
-        platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_emission_framebuffer);
-        platform.optGLFrameBufferTexture2DEXT.?(
-            GL_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT0,
-            gl.GL_TEXTURE_2D,
-            light_buffer.front_emission_texture,
-            0,
-        );
-        platform.optGLFrameBufferTexture2DEXT.?(
-            GL_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT1,
-            gl.GL_TEXTURE_2D,
-            light_buffer.back_emission_texture,
-            0,
-        );
-        platform.optGLDrawBuffers.?(2, @ptrCast(&ALL_COLOR_ATTACHMENTS));
-
-        texture_width = @divFloor(texture_width + 1, 2);
-        texture_height = @divFloor(texture_height + 1, 2);
-
-        if (texture_width < 1) {
-            texture_width = 1;
-        }
-        if (texture_height < 1) {
-            texture_height = 1;
-        }
-    }
+    // open_gl.light_buffer_count = 0;
+    // light_index = 0;
+    // while (texture_width > 1 and texture_height > 1) : (light_index += 1) {
+    //     const light_buffer: *LightBuffer = &open_gl.light_buffers[open_gl.light_buffer_count];
+    //     open_gl.light_buffer_count += 1;
+    //     const filter_type: i32 = gl.GL_LINEAR;
+    //
+    //     light_buffer.width = texture_width;
+    //     light_buffer.height = texture_height;
+    //
+    //     light_buffer.front_emission_texture = framebufferTexImage(
+    //         open_gl,
+    //         gl.GL_TEXTURE_2D,
+    //         GL_RGB32F,
+    //         filter_type,
+    //         texture_width,
+    //         texture_height,
+    //     );
+    //     light_buffer.back_emission_texture = framebufferTexImage(
+    //         open_gl,
+    //         gl.GL_TEXTURE_2D,
+    //         GL_RGB32F,
+    //         filter_type,
+    //         texture_width,
+    //         texture_height,
+    //     );
+    //     light_buffer.surface_color_texture = framebufferTexImage(
+    //         open_gl,
+    //         gl.GL_TEXTURE_2D,
+    //         GL_RGB32F,
+    //         filter_type,
+    //         texture_width,
+    //         texture_height,
+    //     );
+    //     light_buffer.normal_position_texture = framebufferTexImage(
+    //         open_gl,
+    //         gl.GL_TEXTURE_2D,
+    //         GL_RGB32F,
+    //         filter_type,
+    //         texture_width,
+    //         texture_height,
+    //     );
+    //
+    //     // Up framebuffer.
+    //     platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_all_framebuffer));
+    //     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_all_framebuffer);
+    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //         GL_FRAMEBUFFER,
+    //         GL_COLOR_ATTACHMENT0,
+    //         gl.GL_TEXTURE_2D,
+    //         light_buffer.front_emission_texture,
+    //         0,
+    //     );
+    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //         GL_FRAMEBUFFER,
+    //         GL_COLOR_ATTACHMENT1,
+    //         gl.GL_TEXTURE_2D,
+    //         light_buffer.back_emission_texture,
+    //         0,
+    //     );
+    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //         GL_FRAMEBUFFER,
+    //         GL_COLOR_ATTACHMENT2,
+    //         gl.GL_TEXTURE_2D,
+    //         light_buffer.surface_color_texture,
+    //         0,
+    //     );
+    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //         GL_FRAMEBUFFER,
+    //         GL_COLOR_ATTACHMENT3,
+    //         gl.GL_TEXTURE_2D,
+    //         light_buffer.normal_position_texture,
+    //         0,
+    //     );
+    //     platform.optGLDrawBuffers.?(4, @ptrCast(&ALL_COLOR_ATTACHMENTS));
+    //
+    //     // Down framebuffer.
+    //     platform.optGLGenFramebuffersEXT.?(1, @ptrCast(&light_buffer.write_emission_framebuffer));
+    //     platform.optGLBindFramebufferEXT.?(GL_FRAMEBUFFER, light_buffer.write_emission_framebuffer);
+    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //         GL_FRAMEBUFFER,
+    //         GL_COLOR_ATTACHMENT0,
+    //         gl.GL_TEXTURE_2D,
+    //         light_buffer.front_emission_texture,
+    //         0,
+    //     );
+    //     platform.optGLFrameBufferTexture2DEXT.?(
+    //         GL_FRAMEBUFFER,
+    //         GL_COLOR_ATTACHMENT1,
+    //         gl.GL_TEXTURE_2D,
+    //         light_buffer.back_emission_texture,
+    //         0,
+    //     );
+    //     platform.optGLDrawBuffers.?(2, @ptrCast(&ALL_COLOR_ATTACHMENTS));
+    //
+    //     texture_width = @divFloor(texture_width + 1, 2);
+    //     texture_height = @divFloor(texture_height + 1, 2);
+    //
+    //     if (texture_width < 1) {
+    //         texture_width = 1;
+    //     }
+    //     if (texture_height < 1) {
+    //         texture_height = 1;
+    //     }
+    // }
 
     gl.glGenTextures(1, &open_gl.light_data0);
     gl.glBindTexture(gl.GL_TEXTURE_1D, open_gl.light_data0);
@@ -1928,7 +1944,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                 header_at += @sizeOf(RenderEntryBeginPeels);
 
                 peel_header_restore = @ptrCast(header);
-                bindFrameBuffer(&open_gl.depth_peel_buffers[on_peel_index], render_width, render_height);
+                bindFrameBuffer(&open_gl.depth_peel_buffer, render_width, render_height);
 
                 gl.glScissor(0, 0, render_width, render_height);
                 if (on_peel_index == max_render_target_index) {
@@ -1945,7 +1961,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
             },
             .RenderEntryEndPeels => {
                 if (open_gl.multisampling) {
-                    const from: *Framebuffer = &open_gl.depth_peel_buffers[on_peel_index];
+                    const from: *Framebuffer = &open_gl.depth_peel_buffer;
                     const to: *Framebuffer = &open_gl.depth_peel_resolve_buffers[on_peel_index];
 
                     if (true) {
@@ -1973,7 +1989,7 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
                     header_at = peel_header_restore;
                     on_peel_index += 1;
 
-                    bindFrameBuffer(&open_gl.depth_peel_buffers[on_peel_index], render_width, render_height);
+                    bindFrameBuffer(&open_gl.depth_peel_buffer, render_width, render_height);
                 } else {
                     std.debug.assert(on_peel_index == max_render_target_index);
 
@@ -2094,12 +2110,12 @@ pub fn endFrame(open_gl: *OpenGL, commands: *RenderCommands) callconv(.c) void {
         texture_bind_index += 1;
         gl.glBindTexture(gl.GL_TEXTURE_2D, peel_buffer.color_handle[@intFromEnum(ColorHandleType.SurfaceReflection)]);
     }
-    platform.optGLActiveTexture.?(texture_bind_index);
-    texture_bind_index += 1;
-    gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.light_buffers[0].front_emission_texture);
-    platform.optGLActiveTexture.?(texture_bind_index);
-    texture_bind_index += 1;
-    gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.light_buffers[0].normal_position_texture);
+    // platform.optGLActiveTexture.?(texture_bind_index);
+    // texture_bind_index += 1;
+    // gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.light_buffers[0].front_emission_texture);
+    // platform.optGLActiveTexture.?(texture_bind_index);
+    // texture_bind_index += 1;
+    // gl.glBindTexture(gl.GL_TEXTURE_2D, open_gl.light_buffers[0].normal_position_texture);
 
     platform.optGLDrawArrays.?(gl.GL_TRIANGLE_STRIP, 0, 4);
     platform.optGLActiveTexture.?(GL_TEXTURE0);

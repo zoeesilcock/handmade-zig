@@ -1494,6 +1494,9 @@ fn debugEventToText(buffer: [*]u8, end: [*]u8, element: *DebugElement, event: *D
             .i32 => {
                 at += shared.formatString(end - at, at, "%i", .{event.data.i32});
             },
+            .usize => {
+                at += shared.formatString(end - at, at, "%m", .{event.data.usize});
+            },
             .f32 => {
                 at += shared.formatString(end - at, at, "%f", .{event.data.f32});
             },

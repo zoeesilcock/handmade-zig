@@ -2394,6 +2394,12 @@ pub export fn wWinMain(
                     //
                     //
 
+                    DebugInterface.debugBeginDataBlock(@src(), "Renderer");
+                    DebugInterface.debugValue(@src(), &platform_renderer.total_framebuffer_memory, "TotalFramebufferMemory");
+                    DebugInterface.debugValue(@src(), &platform_renderer.total_texture_memory, "TotalTextureMemory");
+                    DebugInterface.debugValue(@src(), &platform_renderer.used_multisample_count, "UsedMultisampleCount");
+                    DebugInterface.debugEndDataBlock(@src());
+
                     if (INTERNAL) {
                         TimedBlock.beginBlock(@src(), .DebugCollation);
                         defer TimedBlock.endBlock(@src(), .DebugCollation);
